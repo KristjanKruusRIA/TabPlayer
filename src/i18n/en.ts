@@ -1676,6 +1676,7 @@ export const en = {
   'staff_groups.state_notShown': "Not drawn in this view: fewer than two of its tracks are shown.",
   'staff_groups.remove': "Remove group",
   'staff_groups.remove_all': "Remove all groups",
+  'staff_groups.choose_legend': "Tracks to group",
   'staff_groups.gap_track': "Space below",
   'staff_groups.gap_field': "Staff gap (%)",
   'staff_groups.gap_reset': "Reset",

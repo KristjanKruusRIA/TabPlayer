@@ -23,7 +23,8 @@ const percent=(scale:number)=>String(Math.round(scale*10000)/100);
 /** Groups neighbouring tracks under a bracket or brace and sets the space below a track. Saved with the document and printed. */
 export function StaffGroupsPanel({value,score,trackIds,rendered,pageLayout,busy,locked=false,onEdit}:StaffGroupsPanelProps) {
   const {t}=useI18n();
-  const send=(engraving:EngravingOverrides)=>{if(engraving!==value)onEdit({type:'setEngraving',engraving});};
+  /** The edit's own outcome (false when refused), or undefined when nothing was recorded. */
+  const send=(engraving:EngravingOverrides):unknown=>engraving===value?undefined:onEdit({type:'setEngraving',engraving});
   const nameOf=(id:string)=>{const index=trackIds.indexOf(id);return index>=0?score.tracks[index]?.name??t('staff_groups.removed_track'):t('staff_groups.removed_track');};
 
   const [chosen,setChosen]=useState<ReadonlySet<string>>(()=>new Set()),[kind,setKind]=useState<StaffGroupKind>('bracket');
@@ -40,7 +41,7 @@ export function StaffGroupsPanel({value,score,trackIds,rendered,pageLayout,busy,
   const editable=trackId!==null&&!last&&!busy&&!locked;
   const [draft,setDraft]=useState(shown),[invalid,setInvalid]=useState(false);
   const edited=useRef<string|null>(null);
-  const ids=useId(),alertId=ids+'-alert';
+  const ids=useId(),alertId=ids+'-alert',lastId=ids+'-last',layoutId=ids+'-layout';
   useEffect(()=>{setDraft(shown);setInvalid(false);edited.current=null;},[shown,trackId,busy,last]);
   const min=STAFF_GAP_RANGE.min*100,max=STAFF_GAP_RANGE.max*100;
   /** true: handled (committed or nothing to do); false: the text is invalid. */
@@ -65,7 +66,7 @@ export function StaffGroupsPanel({value,score,trackIds,rendered,pageLayout,busy,
   return <details><summary>{t('staff_groups.title')}</summary>
     <p className="muted">{t('staff_groups.help')}</p>
     {locked&&<p role="status" className="muted">{t('staff_groups.status_locked')}</p>}
-    <fieldset>
+    <fieldset><legend>{t('staff_groups.choose_legend')}</legend>
       {score.tracks.map((track,index)=>{
         const id=trackIds[index];
         return <label key={id}><input type="checkbox" checked={chosen.has(id)} aria-disabled={busy?'true':undefined} onChange={()=>toggle(id)}/>{t('staff_groups.choose_track',{name:track.name})}</label>;
@@ -75,26 +76,26 @@ export function StaffGroupsPanel({value,score,trackIds,rendered,pageLayout,busy,
       <option value="bracket">{t('staff_groups.kind_bracket')}</option><option value="brace">{t('staff_groups.kind_brace')}</option>
     </select></label>
     {problemKey&&<p className="muted">{t(problemKey)}</p>}
-    <button type="button" {...busyGuard({busy,unavailable:problem!==null,onClick:()=>{send(addStaffGroup(value,trackIds,members,kind));setChosen(new Set());}})}>{t('staff_groups.create')}</button>
+    <button type="button" {...busyGuard({busy,unavailable:problem!==null,onClick:()=>{void Promise.resolve(send(addStaffGroup(value,trackIds,members,kind))).then(accepted=>{if(accepted!==false)setChosen(new Set());},()=>{});}})}>{t('staff_groups.create')}</button>
     {groups.map((group,index)=>{
       const label=t('staff_groups.group_label',{names:group.trackIds.map(nameOf).join(', ')});
       const state=states[index];
       return <div key={index} className="staff-group">
-        <p>{label}</p>
+        <p id={`${ids}-group-${index}`}>{label}</p>
         <select aria-label={`${t('staff_groups.kind')}: ${label}`} value={group.kind} {...busySelect(busy)} onChange={event=>{if(!busy)send(setStaffGroupKind(value,index,event.target.value as StaffGroupKind));}}>
           <option value="bracket">{t('staff_groups.kind_bracket')}</option><option value="brace">{t('staff_groups.kind_brace')}</option>
         </select>
         <p className="muted">{t(`staff_groups.state_${state}` as const)}</p>
-        <button type="button" {...busyGuard({busy,onClick:()=>send(removeStaffGroup(value,index))})}>{t('staff_groups.remove')}</button>
+        <button type="button" aria-describedby={`${ids}-group-${index}`} {...busyGuard({busy,onClick:()=>{send(removeStaffGroup(value,index));}})}>{t('staff_groups.remove')}</button>
       </div>;
     })}
     <button type="button" {...busyGuard({busy,unavailable:!groups.length,onClick:()=>send(removeAllStaffGroups(value))})}>{t('staff_groups.remove_all')}</button>
-    {!pageLayout&&<p className="muted">{t('staff_groups.gap_layout')}</p>}
+    {!pageLayout&&<p id={layoutId} className="muted">{t('staff_groups.gap_layout')}</p>}
     <label>{t('staff_groups.gap_track')}<select value={trackId??''} {...busySelect(busy)} onChange={event=>{if(!busy)setPicked(event.target.value);}}>
       {shownIds.map(id=><option key={id} value={id}>{nameOf(id)}</option>)}
     </select></label>
-    {last&&<p className="muted">{t('staff_groups.gap_last')}</p>}
-    <label>{t('staff_groups.gap_field')}<input type="number" min={min} max={max} step="any" value={draft} readOnly={!editable} aria-disabled={!editable?'true':undefined} aria-invalid={invalid||undefined} aria-describedby={invalid?alertId:undefined}
+    {last&&<p id={lastId} className="muted">{t('staff_groups.gap_last')}</p>}
+    <label>{t('staff_groups.gap_field')}<input type="number" min={min} max={max} step="any" value={draft} readOnly={!editable} aria-disabled={!editable?'true':undefined} aria-invalid={invalid||undefined} aria-describedby={[invalid&&alertId,last&&lastId,!pageLayout&&layoutId].filter(Boolean).join(' ')||undefined}
       onChange={event=>{if(!editable||trackId===null)return;edited.current=trackId;setDraft(event.target.value);setInvalid(false);}}
       onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();commit(event.currentTarget.value);}}}
       onBlur={event=>{if(!commit(event.currentTarget.value)){edited.current=null;setDraft(shown);setInvalid(false);}}}/></label>

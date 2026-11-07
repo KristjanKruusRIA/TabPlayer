@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
-import { cleanup,render,screen } from '@testing-library/react';
+import { cleanup,render,screen,waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import { StaffGroupsPanel,type StaffGroupsPanelProps } from './StaffGroupsPanel';
@@ -94,4 +94,25 @@ it('busy keeps focus: controls are aria-disabled, never disabled, and record not
 });
 it('locked documents say so',()=>{
   setup(defaultEngraving(),{busy:true,locked:true});expect(screen.getByText('This document is locked.')).toBeInTheDocument();
+});
+it('the gap field points at the visible last-track and layout notes',()=>{
+  const described=(field:HTMLElement)=>(field.getAttribute('aria-describedby')??'').split(' ').filter(Boolean).map(id=>document.getElementById(id)?.textContent);
+  setup(defaultEngraving(),{pageLayout:false});
+  expect(described(screen.getByLabelText('Staff gap (%)'))).toContain('Staff gaps show only in the page layouts and in export.');
+  setup(defaultEngraving(),{rendered:[0]});
+  expect(described(screen.getByLabelText('Staff gap (%)'))).toContain('This is the last shown track, so there is no space below it to change in this view.');
+});
+it('each remove button is described by its group and the tracks sit in a labelled fieldset',()=>{
+  setup(withStaffGroups(defaultEngraving(),[{trackIds:['base/0','base/1'],kind:'bracket'},{trackIds:['base/2','gone'],kind:'brace'}]));
+  const buttons=screen.getAllByRole('button',{name:'Remove group'});
+  expect(buttons.map(button=>button.getAttribute('aria-describedby')&&document.getElementById(button.getAttribute('aria-describedby')!)?.textContent)).toEqual(['Group: Guitar6, Grand Piano','Group: Drums, removed track']);
+  expect(screen.getByRole('group',{name:'Tracks to group'})).toBeInTheDocument();
+});
+it('ticked tracks are cleared only when the edit was accepted',async()=>{
+  const choose=async()=>{await user.click(screen.getByLabelText('Include Guitar6'));await user.click(screen.getByLabelText('Include Grand Piano'));await user.click(screen.getByRole('button',{name:'Group chosen tracks'}));};
+  onEdit.mockResolvedValueOnce(false);setup();await choose();
+  expect(onEdit).toHaveBeenCalledTimes(1);await new Promise(resolve=>setTimeout(resolve,0));
+  expect(screen.getByLabelText('Include Guitar6')).toBeChecked();
+  onEdit.mockResolvedValueOnce(true);await user.click(screen.getByRole('button',{name:'Group chosen tracks'}));
+  await waitFor(()=>expect(screen.getByLabelText('Include Guitar6')).not.toBeChecked());
 });

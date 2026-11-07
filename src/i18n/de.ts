@@ -1678,8 +1678,9 @@ export const de: MessageCatalog = {
   'staff_groups.state_notShown': "In dieser Ansicht nicht gezeichnet: Weniger als zwei ihrer Spuren werden angezeigt.",
   'staff_groups.remove': "Gruppe entfernen",
   'staff_groups.remove_all': "Alle Gruppen entfernen",
+  'staff_groups.choose_legend': "Zu gruppierende Spuren",
   'staff_groups.gap_track': "Abstand darunter",
-  'staff_groups.gap_field': "Systemabstand der Spur (%)",
+  'staff_groups.gap_field': "Spurabstand (%)",
   'staff_groups.gap_reset': "Zurücksetzen",
   'staff_groups.gap_reset_all': "Alle Spurabstände zurücksetzen",
   'staff_groups.gap_last': "Dies ist die letzte angezeigte Spur, daher gibt es in dieser Ansicht keinen Abstand darunter, den du ändern könntest.",
@@ -1688,5 +1689,5 @@ export const de: MessageCatalog = {
   'staff_groups.status_locked': "Dieses Dokument ist gesperrt.",
   'staff_groups.names_long_first': "Lange Namen zuerst, kurze danach",
   'staff_groups.names_long_first_help': "Volle Spurnamen im ersten System, kurze Namen in jedem weiteren System.",
-  'staff_groups.names_already': "Die Namen zeigen bereits zuerst lang und danach kurz.",
+  'staff_groups.names_already': "Die Namen erscheinen bereits zuerst lang und danach kurz.",
 };

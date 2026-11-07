@@ -1,7 +1,7 @@
 import type { PrintLayout,SvgPage,SvgSystem } from '../export/types';
 import type { PageLayout } from './types';
 import {measurePageText,pageTitleFontSize} from '../export/page-title';
-import {fillHeaderField,validateHeaderFooter,type HeaderFields,type PageBand} from './header-footer';
+import {fillHeaderField,validateHeaderFooter,type HeaderFields,type PageBand,type PageBands} from './header-footer';
 
 export interface PageGeometry {
   widthMm:number;heightMm:number;width:number;height:number;
@@ -62,26 +62,42 @@ function fit(text:string,width:number,base:number):{text:string;size:number;widt
   const shortened=characters.join('')+'…';
   return {text:shortened,size,width:measurePageText(shortened,size)??width};
 }
+export interface PageTextItem {text:string;x:number;y:number;size:number;anchor:'start'|'middle'|'end'}
 /** One header or footer line: left and right slots run from the margins toward a centered slot, never into it. */
-function band(texts:PageBand,fields:HeaderFields,page:number,pages:number,d:PageGeometry,y:number,base:number):string {
+function band(texts:PageBand,fields:HeaderFields,page:number,pages:number,d:PageGeometry,y:number,base:number):PageTextItem[] {
   const value=(slot:keyof PageBand)=>printable(fillHeaderField(texts[slot],fields,page,pages));
   const left=value('left'),center=value('center'),right=value('right'),start=d.left,end=d.width-d.right,middle=d.width/2;
-  const line=(x:number,anchor:string,fitted:{text:string;size:number})=>`<text x="${x}" y="${y}"${anchor} ${font} font-size="${fitted.size}">${escaped(fitted.text)}</text>`;
-  let half=0,centered='';
+  const line=(x:number,anchor:PageTextItem['anchor'],fitted:{text:string;size:number}):PageTextItem=>({text:fitted.text,x,y,size:fitted.size,anchor});
+  let half=0,centered:PageTextItem[]=[];
   if(center){
     // The centered slot keeps a third of the line when side slots share it, and never crosses a margin.
     const room=2*Math.min(middle-start,end-middle),fitted=fit(center,left||right?Math.min(room,d.usableWidth/3):room,base);
-    half=fitted.width/2;centered=line(middle,' text-anchor="middle"',fitted);
+    half=fitted.width/2;centered=[line(middle,'middle',fitted)];
   }
   const sides=left&&right&&!center?(d.usableWidth-gap)/2:null;
-  const leftLine=left?line(start,'',fit(left,sides??(center?middle-half-gap-start:d.usableWidth),base)):'';
-  const rightLine=right?line(end,' text-anchor="end"',fit(right,sides??(center?end-(middle+half+gap):d.usableWidth),base)):'';
-  return leftLine+centered+rightLine;
+  const leftLine=left?[line(start,'start',fit(left,sides??(center?middle-half-gap-start:d.usableWidth),base))]:[];
+  const rightLine=right?[line(end,'end',fit(right,sides??(center?end-(middle+half+gap):d.usableWidth),base))]:[];
+  return [...leftLine,...centered,...rightLine];
+}
+/** The header and footer lines of one page; `bands:null` is the default title and "page / pages" footer. Baselines come from the caller. */
+export function pageTextItems(input:{geometry:PageGeometry;bands:PageBands|null;title:string;fields:HeaderFields;page:number;pages:number;titleScale:number;headerY:number;footerY:number}):{header:PageTextItem[];footer:PageTextItem[]} {
+  const {geometry:d,bands,title,fields,page,pages,titleScale,headerY,footerY}=input;
+  if(bands)return {header:band(bands.header,fields,page,pages,d,headerY,18*titleScale),footer:band(bands.footer,fields,page,pages,d,footerY,11)};
+  return {header:[{text:title,x:d.left,y:headerY,size:pageTitleFontSize(title,d.usableWidth,titleScale),anchor:'start'}],footer:[{text:`${page} / ${pages}`,x:d.width/2,y:footerY,size:11,anchor:'middle'}]};
+}
+const anchorAttribute={start:'',middle:' text-anchor="middle"',end:' text-anchor="end"'} as const;
+/** Renders text items as the SVG `<text>` elements export prints. */
+export function pageTextSvg(items:PageTextItem[]):string {
+  return items.map(i=>`<text x="${i.x}" y="${i.y}"${anchorAttribute[i.anchor]} ${font} font-size="${i.size}">${escaped(i.text)}</text>`).join('');
+}
+/** Screen baselines sit inside the page margins, since the screen keeps no 64 px reservation for the lines. */
+export function screenPageBaselines(d:PageGeometry,titleScale:number):{headerY:number;footerY:number} {
+  return {headerY:Math.max(18*titleScale*.8,d.top-8),footerY:Math.min(d.height-4,d.height-d.bottom+15)};
 }
 
 /** `titleScale` enlarges the header line (base 18px) and still shrinks it to fit the page width; the footer keeps its size. */
 export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields,titleScale=1):SvgPage[] {
-  const d=pageGeometry(layout),titleSize=pageTitleFontSize(title,d.usableWidth,titleScale),headerBase=18*titleScale,headerY=d.top+Math.min(31,Math.max(22,headerBase*.8)),groups:SvgSystem[][]=[[]];let height=0;
+  const d=pageGeometry(layout),headerBase=18*titleScale,headerY=d.top+Math.min(31,Math.max(22,headerBase*.8)),footerY=d.height-d.bottom,groups:SvgSystem[][]=[[]];let height=0;
   for(const system of systems) {
     // alphaTab may round the reported system width by one pixel, as in legacy export.
     if(!finite(system.height)||system.height<=0||system.height>d.usableHeight||!finite(system.width)||system.width<=0||system.width>d.usableWidth+1)throw new Error('A notation system does not fit this page. Reduce print scale, use landscape, or export fewer staves.');
@@ -93,8 +109,7 @@ export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:
     let y=d.top+40;
     const content=group.map(system=>{const at=y;y+=system.height;return `<g transform="translate(${d.left} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
     const bands=custom&&(index?custom.other:custom.first);
-    const header=bands?band(bands.header,values,index+1,groups.length,d,headerY,headerBase):`<text x="${d.left}" y="${headerY}" ${font} font-size="${titleSize}">${escaped(title)}</text>`;
-    const footer=bands?band(bands.footer,values,index+1,groups.length,d,d.height-d.bottom,11):`<text x="${d.width/2}" y="${d.height-d.bottom}" text-anchor="middle" ${font} font-size="11">${index+1} / ${groups.length}</text>`;
+    const text=pageTextItems({geometry:d,bands:bands??null,title,fields:values,page:index+1,pages:groups.length,titleScale,headerY,footerY}),header=pageTextSvg(text.header),footer=pageTextSvg(text.footer);
     return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style>${header}${content}${footer}</svg>`};
   });
 }

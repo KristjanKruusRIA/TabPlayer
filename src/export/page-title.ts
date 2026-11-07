@@ -8,7 +8,8 @@ export function fitFontSize(title:string,availableWidth:number,base:number):numb
 /** Width of page text at a font size, or null where no canvas measures text (export runs in the webview). */
 export function measurePageText(text:string,size:number):number|null {
   if(typeof document==='undefined')return null;
-  const context=document.createElement('canvas').getContext('2d')!;
+  const context=document.createElement('canvas').getContext('2d');
+  if(context===null)return null;
   context.font=`${size}px "Noto Sans", "Noto Sans CJK JP", "Noto Emoji"`;
   return context.measureText(text).width;
 }

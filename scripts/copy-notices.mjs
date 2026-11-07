@@ -45,3 +45,5 @@ await copyFile(new URL('../legal/Apache-2.0.txt',import.meta.url),new URL('Apach
 await copyFile(new URL('../legal/integrated-notices.txt',import.meta.url),new URL('integrated-notices.txt',output));
 // The vorbis-rs crates publish no licence file, so their upstream BSD-3-Clause text is kept in the repository.
 await copyFile(new URL('../legal/vorbis-rs-BSD-3-Clause.txt',import.meta.url),new URL('vorbis-rs-BSD-3-Clause.txt',output));
+// The LGPL-3.0 of mp3lame-sys asks for the GNU GPL 3.0 text to travel with it.
+await copyFile(new URL('../legal/GPL-3.0.txt',import.meta.url),new URL('GPL-3.0.txt',output));

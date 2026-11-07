@@ -15,6 +15,8 @@ import {threeTrackScore} from './engraving/staff-fixtures';
 import {engravingRenderKey,withSystemGaps} from './engraving/system-gaps';
 const state=vi.hoisted(()=>({fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn(),chunkTops:[] as number[]}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
+const boom=vi.hoisted(()=>({plan:false}));
+vi.mock('./engraving/accolades',async original=>{const real=await original<typeof import('./engraving/accolades')>();return {...real,planAccolades:(...args:Parameters<typeof real.planAccolades>)=>{if(boom.plan)throw new Error('plan failed');return real.planAccolades(...args);}};});
 vi.mock('./export/pdf',async original=>({...await original<typeof import('./export/pdf')>(),loadExportFonts:()=>state.fonts()}));
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
  settings=new Settings();score:model.Score|null=null;tracks:number[]=[0];constructor(){state.api=this;}
@@ -286,4 +288,24 @@ it('draws no overlay and leaves the paged DOM alone without groups or gaps',()=>
  cleanup();
  const paged=mountPaged(defaultEngraving()),boxes=[...paged.container.querySelectorAll<HTMLElement>('.score-svg-chunk')];
  expect(boxes.map(box=>box.style.height)).toEqual(['400px','400px','400px']);expect(boxes.every(box=>!box.innerHTML.includes('<defs>')&&!box.innerHTML.includes('data-tp-accolade'))).toBe(true);
+});
+it('a staff gap is not drawn without a projection, as the prop says',()=>{
+ const {container}=mountPaged(withStaffGaps(defaultEngraving(),[{trackId:'base/0',scale:2}]),{projection:undefined});
+ const boxes=[...container.querySelectorAll<HTMLElement>('.score-svg-chunk')];
+ expect(boxes.map(box=>box.style.height)).toEqual(['400px','400px','400px']);
+});
+it('a throw while planning accolades falls back to no plan and draws no overlay',()=>{
+ boom.plan=true;
+ try{
+  const {container,view,projection}=mountContinuous(withStaffGroups(defaultEngraving(),[{trackIds:['base/0','base/1'],kind:'bracket'}]));
+  expect(container.querySelector('svg[data-tp-accolades]')).toBeNull();
+  expect(view().settings.display.systemLabelPaddingRight).toBe(3);
+  expect(projection().score.stylesheet.bracketExtendMode).toBe(projection().bracketMode);
+ }finally{boom.plan=false;}
+});
+it('the continuous overlay disappears once the last group is removed',()=>{
+ const {container,rerender}=mountContinuous(withStaffGroups(defaultEngraving(),[{trackIds:['base/0','base/1'],kind:'bracket'}]));
+ expect(container.querySelector('svg[data-tp-accolades]')).not.toBeNull();
+ rerender(defaultEngraving());
+ expect(container.querySelector('svg[data-tp-accolades]')).toBeNull();
 });

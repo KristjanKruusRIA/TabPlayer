@@ -100,7 +100,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // Staff gaps recompose the held chunks in the paged memo below, so editing them does not render the notation again either.
   const staffGapKey=JSON.stringify(engravingProp?.staffGaps??null),idsKey=JSON.stringify(trackIds??null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const staffGaps=useMemo(()=>resolveStaffGaps(engravingProp?.staffGaps,trackIds??[]),[staffGapKey,idsKey]);
+  const staffGaps=useMemo(()=>projection?resolveStaffGaps(engravingProp?.staffGaps,trackIds??[]):new Map<number,number>(),[staffGapKey,idsKey,!!projection]);
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score,trackKey=tracks.join(',');
   // Headers and footers only print, so editing them keeps the on-screen pages as they are.
@@ -401,8 +401,14 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     // Groups switch alphaTab's brackets off and reserve room beside the staves; written as absolute values after padding and scale, on every pass.
     let plan:AccoladePlan|null=null;
     if(projection&&trackIds){
-      if(engraving)plan=planAccolades({engraving,trackIds,rendered:tracks,score:projection.score,nativeMode:projection.bracketMode,settings:view.settings});
-      configureAccolades(view.settings,projection.score,plan,projection.bracketMode);
+      // A failure while planning or configuring falls back to alphaTab's own brackets and no overlay, rather than crashing the subtree.
+      try{
+        if(engraving)plan=planAccolades({engraving,trackIds,rendered:tracks,score:projection.score,nativeMode:projection.bracketMode,settings:view.settings});
+        configureAccolades(view.settings,projection.score,plan,projection.bracketMode);
+      }catch{
+        plan=null;
+        try{configureAccolades(view.settings,projection.score,null,projection.bracketMode);}catch{/* nothing more can be undone */}
+      }
     }
     view.renderer.width=sourceWidth;view.updateSettings();
     accolade.current={plan,metrics:accoladeMetrics(view.settings)};

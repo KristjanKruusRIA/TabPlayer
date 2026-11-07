@@ -3,6 +3,8 @@ use serde_json::{Value, json};
 
 const WAVENET_FIXTURE: &[u8] = include_bytes!("../../../tests/fixtures/nam/wavenet.nam");
 const LSTM_FIXTURE: &[u8] = include_bytes!("../../../tests/fixtures/nam/lstm.nam");
+const TRAINER_STANDARD: &[u8] = include_bytes!("../../../tests/fixtures/nam/wavenet_standard.nam");
+const TRAINER_MINIMAL: &[u8] = include_bytes!("../../../tests/fixtures/nam/wavenet_minimal.nam");
 
 /// One array: channels 2, input 1, kernel 2, one layer, head 1, no head bias.
 /// Weights: rechannel 2 + conv 10 + mixin 2 + layer1x1 6 + head 2 + scale 1.
@@ -53,6 +55,7 @@ fn parses_core_wavenet_fixture() {
     assert_eq!(spec.arrays[0].activation, Activation::Tanh);
     assert!(!spec.arrays[0].head_bias && spec.arrays[1].head_bias);
     assert!((spec.head_scale - 0.02).abs() < 1e-9);
+    assert_eq!(spec.head_scale, *file.weights.last().unwrap());
     let span: usize = spec
         .arrays
         .iter()
@@ -120,7 +123,7 @@ fn refuses_each_cap() {
     );
 
     // not JSON
-    assert_eq!(parse_nam(b"nope"), Err(NamError::NotJson));
+    assert_eq!(parse_nam(b"{nope"), Err(NamError::NotJson));
 
     // 5 layer arrays
     let mut v = minimal();
@@ -246,7 +249,6 @@ fn refuses_a2_and_unknown_features() {
         ("head1x1", json!({"active": true})),
         ("kernel_sizes", json!([2])),
         ("activation", json!("SiLU")),
-        ("activation", json!({"name": "Tanh"})),
         ("film_pre", json!({})),
     ];
     for (key, value) in cases {
@@ -342,7 +344,7 @@ fn refuses_inconsistent_array_chains() {
 }
 
 #[test]
-fn huge_dilation_does_not_allocate() {
+fn huge_dilation_refused_before_sizing() {
     let mut v = minimal();
     layer(&mut v)["dilations"] = json!([1_000_000_000]);
     assert_eq!(parse(&v), Err(NamError::Invalid("dilation out of range")));
@@ -408,4 +410,232 @@ fn missing_sample_rate_means_48000() {
 
     v["sample_rate"] = json!(1.0e9);
     assert_eq!(parse(&v).unwrap().model_rate, 48_000);
+}
+#[test]
+fn escaped_quote_does_not_end_a_string_in_the_depth_scan() {
+    // The brackets sit in a string that holds an escaped quote first.
+    let text = format!(r#"{{"a":"\"{}"}}"#, "[".repeat(40));
+    assert_eq!(
+        parse_nam(text.as_bytes()),
+        Err(NamError::Invalid("version is missing"))
+    );
+    // A real nesting after a closed string is still counted.
+    let text = format!(r#"{{"a":"x"}}{}"#, "[".repeat(40));
+    assert_eq!(parse_nam(text.as_bytes()), Err(NamError::TooDeep));
+}
+
+#[test]
+fn config_needing_more_than_the_weight_cap_is_refused() {
+    let array = |input: u64, channels: u64, head: u64| {
+        json!({
+            "input_size": input, "condition_size": 1, "head_size": head,
+            "channels": channels, "kernel_size": 8, "dilations": vec![1; 32],
+            "activation": "Tanh", "gated": false, "head_bias": false
+        })
+    };
+    let v = json!({
+        "version": "0.5.4", "architecture": "WaveNet",
+        "config": {
+            "layers": [array(1, 64, 64), array(64, 64, 64), array(64, 64, 64), array(64, 64, 1)],
+            "head_scale": 0.02
+        },
+        "weights": [0.0]
+    });
+    assert_eq!(parse(&v), Err(NamError::Invalid("too many weights")));
+}
+
+#[test]
+fn non_finite_head_scale_in_config_is_refused() {
+    let mut v = minimal();
+    v["config"]["head_scale"] = json!(1e39); // finite as f64, infinite as f32
+    assert_eq!(parse(&v), Err(NamError::NonFinite));
+    v["config"]["head_scale"] = json!("x");
+    assert_eq!(
+        parse(&v),
+        Err(NamError::Invalid("head_scale is not a number"))
+    );
+}
+
+#[test]
+fn head_scale_comes_from_the_last_weight() {
+    let mut v = minimal();
+    v["config"]["head_scale"] = json!(0.5);
+    v["weights"][MINIMAL_WEIGHTS - 1] = json!(0.25);
+    let NamSpec::WaveNet(spec) = parse(&v).unwrap().spec else {
+        panic!()
+    };
+    assert_eq!(spec.head_scale, 0.25);
+    // Absent from the config is fine too.
+    v["config"].as_object_mut().unwrap().remove("head_scale");
+    assert!(parse(&v).is_ok());
+}
+
+#[test]
+fn version_edge_cases() {
+    let mut v = minimal();
+    v["version"] = json!("0.5.4.9.9");
+    assert!(matches!(parse(&v), Err(NamError::UnsupportedVersion(_))));
+
+    v["version"] = json!(format!("0.5.{}", "9".repeat(5000)));
+    let Err(NamError::UnsupportedVersion(shown)) = parse(&v) else {
+        panic!()
+    };
+    assert!(shown.len() <= 32);
+
+    for odd in [json!(5), json!(null), json!(["0.5.4"]), json!({"a": 1})] {
+        v["version"] = odd.clone();
+        assert!(
+            matches!(parse(&v), Err(NamError::UnsupportedVersion(_))),
+            "{odd}"
+        );
+    }
+
+    v.as_object_mut().unwrap().remove("version");
+    assert_eq!(parse(&v), Err(NamError::Invalid("version is missing")));
+}
+
+#[test]
+fn parses_trainer_exports() {
+    let file = parse_nam(TRAINER_STANDARD).unwrap();
+    let NamSpec::WaveNet(spec) = &file.spec else {
+        panic!("expected WaveNet");
+    };
+    assert_eq!(file.weights.len(), 13_802);
+    assert_eq!(file.receptive_field, 4093);
+    assert_eq!(spec.arrays.len(), 2);
+    assert_eq!((spec.arrays[0].channels, spec.arrays[0].head_size), (16, 8));
+    assert_eq!((spec.arrays[1].channels, spec.arrays[1].head_size), (8, 1));
+    assert!(!spec.arrays[0].head_bias && spec.arrays[1].head_bias);
+    assert_eq!(spec.arrays[0].activation, Activation::ReLU);
+    assert_eq!(spec.head_scale, *file.weights.last().unwrap());
+
+    let file = parse_nam(TRAINER_MINIMAL).unwrap();
+    assert_eq!(file.weights.len(), 9);
+    assert_eq!(file.receptive_field, 1);
+}
+
+#[test]
+fn activation_object_form_names_a_supported_activation() {
+    let mut v = minimal();
+    layer(&mut v)["activation"] = json!({"name": "ReLU"});
+    let NamSpec::WaveNet(spec) = parse(&v).unwrap().spec else {
+        panic!()
+    };
+    assert_eq!(spec.arrays[0].activation, Activation::ReLU);
+
+    for bad in [
+        json!({"name": "LeakyReLU", "negative_slope": 0.01}),
+        json!({"name": "Tanh", "negative_slope": 0.01}),
+        json!({"name": "PReLU"}),
+        json!({}),
+    ] {
+        layer(&mut v)["activation"] = bad.clone();
+        assert!(
+            matches!(parse(&v), Err(NamError::UnsupportedArchitecture(_))),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn nested_layer_head_maps_to_head_size_and_bias() {
+    let mut v = minimal();
+    {
+        let l = layer(&mut v).as_object_mut().unwrap();
+        l.remove("head_size");
+        l.remove("head_bias");
+        l.insert(
+            "head".into(),
+            json!({"out_channels": 1, "kernel_size": 1, "bias": true}),
+        );
+    }
+    v["weights"] = json!(vec![0.1; MINIMAL_WEIGHTS + 1]); // head bias adds one
+    let NamSpec::WaveNet(spec) = parse(&v).unwrap().spec else {
+        panic!()
+    };
+    assert_eq!(spec.arrays[0].head_size, 1);
+    assert!(spec.arrays[0].head_bias);
+
+    // Both forms present: they must agree.
+    layer(&mut v)["head_size"] = json!(1);
+    layer(&mut v)["head_bias"] = json!(true);
+    assert!(parse(&v).is_ok());
+    layer(&mut v)["head_bias"] = json!(false);
+    assert_eq!(
+        parse(&v),
+        Err(NamError::Invalid("head and head_size/head_bias disagree"))
+    );
+
+    // A head with a wider kernel changes the weight layout: refused.
+    let mut v = minimal();
+    {
+        let l = layer(&mut v).as_object_mut().unwrap();
+        l.remove("head_size");
+        l.remove("head_bias");
+        l.insert(
+            "head".into(),
+            json!({"out_channels": 1, "kernel_size": 3, "bias": true}),
+        );
+    }
+    assert!(matches!(
+        parse(&v),
+        Err(NamError::UnsupportedArchitecture(_))
+    ));
+}
+
+#[test]
+fn unknown_keys_are_tolerated_only_when_null() {
+    let mut v = minimal();
+    v["config"]["future_thing"] = json!(null);
+    layer(&mut v)["some_new_option"] = json!(null);
+    layer(&mut v)["kernel_sizes"] = json!(null);
+    assert!(parse(&v).is_ok());
+
+    layer(&mut v)["some_new_option"] = json!(0);
+    assert!(matches!(
+        parse(&v),
+        Err(NamError::UnsupportedArchitecture(_))
+    ));
+    layer(&mut v)["some_new_option"] = json!(null);
+    v["config"]["future_thing"] = json!(1);
+    assert!(matches!(
+        parse(&v),
+        Err(NamError::UnsupportedArchitecture(_))
+    ));
+
+    let lstm = json!({
+        "version": "0.5.4", "architecture": "LSTM",
+        "config": {"num_layers": 1, "input_size": 1, "hidden_size": 1, "extra": null},
+        "weights": vec![0.0; 4 * 2 + 4 + 2 + 2]
+    });
+    assert!(parse(&lstm).is_ok());
+}
+
+#[test]
+fn root_must_be_an_object_and_big_config_is_refused() {
+    assert_eq!(
+        parse_nam(b"[1,2]"),
+        Err(NamError::Invalid("root is not an object"))
+    );
+    assert_eq!(parse_nam(b"{} x"), Err(NamError::NotJson));
+
+    // 5000 nodes in config exceed the node budget without nesting deeply.
+    let mut v = minimal();
+    v["config"]["pad"] = json!(vec![0; 5000]);
+    assert_eq!(parse(&v), Err(NamError::Invalid("config is too large")));
+}
+
+#[test]
+fn metadata_and_unknown_root_keys_are_skipped() {
+    let mut v = minimal();
+    v["metadata"] = json!({"loudness": -20.0, "name": "x", "deep": [[1, 2], {"a": []}]});
+    v["something_else"] = json!(vec![1; 10_000]);
+    assert!(parse(&v).is_ok());
+
+    // Duplicate known keys are refused rather than silently last-wins.
+    let text = r#"{"version":"0.5.4","version":"0.5.4"}"#;
+    assert_eq!(
+        parse_nam(text.as_bytes()),
+        Err(NamError::Invalid("a key appears twice"))
+    );
 }

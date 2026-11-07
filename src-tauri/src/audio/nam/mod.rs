@@ -4,6 +4,7 @@
 //! before anything is sized from the file's own numbers.
 
 mod file;
+mod raw;
 
 pub use file::*;
 

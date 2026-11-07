@@ -5,6 +5,7 @@
 //! computed from the config, and must equal what the forward pass consumes,
 //! before the `weights` array is converted.
 
+use super::raw::{Scalar, read_root};
 use serde_json::{Map, Value};
 
 /// Largest file accepted, in bytes.
@@ -52,6 +53,9 @@ pub struct LayerArraySpec {
 #[derive(Debug, Clone, PartialEq)]
 pub struct WaveNetSpec {
     pub arrays: Vec<LayerArraySpec>,
+    /// NAM Core multiplies the final output by the LAST WEIGHT in the file,
+    /// not by the `head_scale` in the config. This holds `weights.last()`.
+    /// The weight itself stays at the end of `NamFile::weights`.
     pub head_scale: f32,
 }
 
@@ -119,34 +123,25 @@ pub fn parse_nam(bytes: &[u8]) -> Result<NamFile, NamError> {
     if depth_exceeds_cap(bytes) {
         return Err(NamError::TooDeep);
     }
-    let root: Value = serde_json::from_slice(bytes).map_err(|e| {
-        // serde_json refuses numbers that overflow f64 (such as 1e999).
-        if e.is_syntax() && e.to_string().starts_with("number out of range") {
-            NamError::NonFinite
-        } else {
-            NamError::NotJson
-        }
-    })?;
-    let root = root
-        .as_object()
-        .ok_or(NamError::Invalid("root is not an object"))?;
+    let raw = read_root(bytes)?;
 
-    check_version(root.get("version"))?;
-    let architecture = root
-        .get("architecture")
-        .and_then(Value::as_str)
-        .ok_or(NamError::Invalid("architecture is missing"))?;
-    let config = root
-        .get("config")
+    check_version(raw.version.as_ref())?;
+    let architecture = match &raw.architecture {
+        Some(Scalar::Str(name)) => name.as_str(),
+        _ => return Err(NamError::Invalid("architecture is missing")),
+    };
+    let config = raw
+        .config
+        .as_ref()
         .and_then(Value::as_object)
         .ok_or(NamError::Invalid("config is missing"))?;
-    let weights_json = root
-        .get("weights")
-        .and_then(Value::as_array)
+    let weights = raw
+        .weights
+        .as_ref()
         .ok_or(NamError::Invalid("weights is missing"))?;
-    let model_rate = model_rate(root.get("sample_rate"));
+    let model_rate = model_rate(raw.sample_rate.as_ref());
 
-    let (spec, expected, receptive_field) = match architecture {
+    let (mut spec, expected, receptive_field) = match architecture {
         "WaveNet" => {
             let (spec, expected, rf) = parse_wavenet(config)?;
             (NamSpec::WaveNet(spec), expected, rf)
@@ -162,25 +157,18 @@ pub fn parse_nam(bytes: &[u8]) -> Result<NamFile, NamError> {
         }
     };
 
-    if weights_json.len() > MAX_WEIGHTS || expected > MAX_WEIGHTS {
+    if expected > MAX_WEIGHTS {
         return Err(NamError::Invalid("too many weights"));
     }
-    if weights_json.len() != expected {
+    if weights.len() != expected {
         return Err(NamError::WeightCount {
             expected,
-            found: weights_json.len(),
+            found: weights.len(),
         });
     }
-    let mut weights = Vec::with_capacity(expected);
-    for w in weights_json {
-        let x = w
-            .as_f64()
-            .ok_or(NamError::Invalid("a weight is not a number"))?;
-        let x = x as f32;
-        if !x.is_finite() {
-            return Err(NamError::NonFinite);
-        }
-        weights.push(x);
+    let weights = raw.weights.unwrap_or_default();
+    if let NamSpec::WaveNet(wavenet) = &mut spec {
+        wavenet.head_scale = weights.last().copied().unwrap_or(0.0);
     }
 
     Ok(NamFile {
@@ -222,11 +210,17 @@ fn depth_exceeds_cap(bytes: &[u8]) -> bool {
 }
 
 /// Core supports 0.5.0 up to and including 0.7.x.
-fn check_version(version: Option<&Value>) -> Result<(), NamError> {
-    let text = version
-        .and_then(Value::as_str)
-        .ok_or(NamError::Invalid("version is missing"))?;
-    let parts: Vec<&str> = text.split('.').collect();
+fn check_version(version: Option<&Scalar>) -> Result<(), NamError> {
+    let text = match version {
+        None => return Err(NamError::Invalid("version is missing")),
+        Some(Scalar::Str(text)) => text,
+        Some(_) => return Err(NamError::UnsupportedVersion("(not a string)".into())),
+    };
+    let shown = || text.chars().take(32).collect::<String>();
+    if text.len() > 32 {
+        return Err(NamError::UnsupportedVersion(shown()));
+    }
+    let parts: Vec<&str> = text.splitn(4, '.').collect();
     let numbers: Option<Vec<u32>> = if parts.len() == 3 {
         parts
             .iter()
@@ -243,15 +237,13 @@ fn check_version(version: Option<&Value>) -> Result<(), NamError> {
     };
     match numbers.as_deref() {
         Some([0, minor, _]) if (5..=7).contains(minor) => Ok(()),
-        _ => Err(NamError::UnsupportedVersion(
-            text.chars().take(32).collect(),
-        )),
+        _ => Err(NamError::UnsupportedVersion(shown())),
     }
 }
 
-fn model_rate(value: Option<&Value>) -> u32 {
-    match value.and_then(Value::as_f64) {
-        Some(r) if r.is_finite() && (MIN_MODEL_RATE..=MAX_MODEL_RATE).contains(&r) => {
+fn model_rate(value: Option<&Scalar>) -> u32 {
+    match value {
+        Some(Scalar::Num(r)) if r.is_finite() && (MIN_MODEL_RATE..=MAX_MODEL_RATE).contains(r) => {
             r.round() as u32
         }
         _ => DEFAULT_MODEL_RATE,
@@ -274,9 +266,12 @@ fn req_usize(
 }
 
 fn parse_wavenet(config: &Map<String, Value>) -> Result<(WaveNetSpec, usize, usize), NamError> {
-    for key in config.keys() {
+    for (key, value) in config {
+        if value.is_null() {
+            continue;
+        }
         match key.as_str() {
-            "layers" | "head" | "head_scale" | "condition_dsp" => {}
+            "layers" | "head_scale" | "head" | "condition_dsp" => {}
             other => {
                 return Err(unsupported(format!(
                     "unknown WaveNet config key {}",
@@ -291,12 +286,17 @@ fn parse_wavenet(config: &Map<String, Value>) -> Result<(WaveNetSpec, usize, usi
     if config.get("condition_dsp").is_some_and(|v| !v.is_null()) {
         return Err(unsupported("condition_dsp".into()));
     }
-    let head_scale = config
-        .get("head_scale")
-        .and_then(Value::as_f64)
-        .ok_or(NamError::Invalid("head_scale is missing"))? as f32;
-    if !head_scale.is_finite() {
-        return Err(NamError::NonFinite);
+    // The value that counts is the last weight; the config copy must still be sane.
+    match config.get("head_scale") {
+        None | Some(Value::Null) => {}
+        Some(v) => {
+            let scale = v
+                .as_f64()
+                .ok_or(NamError::Invalid("head_scale is not a number"))?;
+            if !(scale as f32).is_finite() {
+                return Err(NamError::NonFinite);
+            }
+        }
     }
     let layers = config
         .get("layers")
@@ -357,13 +357,24 @@ fn parse_wavenet(config: &Map<String, Value>) -> Result<(WaveNetSpec, usize, usi
     }
     expected += 1; // head_scale
 
-    Ok((WaveNetSpec { arrays, head_scale }, expected, 1 + span))
+    // head_scale is filled from the last weight once the weights are known.
+    Ok((
+        WaveNetSpec {
+            arrays,
+            head_scale: 0.0,
+        },
+        expected,
+        1 + span,
+    ))
 }
 
 fn parse_layer_array(obj: &Map<String, Value>) -> Result<LayerArraySpec, NamError> {
-    for key in obj.keys() {
+    for (key, value) in obj {
+        if value.is_null() {
+            continue;
+        }
         match key.as_str() {
-            "input_size" | "condition_size" | "channels" | "head_size" | "kernel_size"
+            "input_size" | "condition_size" | "channels" | "head_size" | "kernel_size" | "head"
             | "dilations" | "activation" | "gated" | "head_bias" | "bottleneck"
             | "groups_input" | "groups_input_mixin" | "layer1x1" | "head1x1" | "gating_mode" => {}
             "kernel_sizes" => return Err(unsupported("per-layer kernel_sizes".into())),
@@ -377,7 +388,7 @@ fn parse_layer_array(obj: &Map<String, Value>) -> Result<LayerArraySpec, NamErro
     }
 
     let channels = req_usize(obj, "channels", "channels is missing")?;
-    let head_size = req_usize(obj, "head_size", "head_size is missing")?;
+    let (head_size, head_bias) = parse_layer_head(obj)?;
     let input_size = req_usize(obj, "input_size", "input_size is missing")?;
     let condition_size = req_usize(obj, "condition_size", "condition_size is missing")?;
     let kernel_size = req_usize(obj, "kernel_size", "kernel_size is missing")?;
@@ -450,10 +461,6 @@ fn parse_layer_array(obj: &Map<String, Value>) -> Result<LayerArraySpec, NamErro
         (None, None) => false,
     };
 
-    let head_bias = obj
-        .get("head_bias")
-        .and_then(Value::as_bool)
-        .ok_or(NamError::Invalid("head_bias is missing"))?;
     let activation = parse_activation(obj.get("activation"))?;
 
     let dilations_json = obj
@@ -483,6 +490,73 @@ fn parse_layer_array(obj: &Map<String, Value>) -> Result<LayerArraySpec, NamErro
         head_bias,
         activation,
     })
+}
+
+/// The head of a layer array: legacy `head_size` and `head_bias`, or the nested
+/// `head` {out_channels, kernel_size, bias} that current trainer exports write.
+/// Only a kernel of 1 maps onto the A1 layout; if both forms are present they
+/// must agree.
+fn parse_layer_head(obj: &Map<String, Value>) -> Result<(usize, bool), NamError> {
+    let present = |key: &str| obj.get(key).filter(|v| !v.is_null());
+    let legacy_size = match present("head_size") {
+        None => None,
+        Some(v) => Some(
+            v.as_u64()
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or(NamError::Invalid("head_size is not a whole number"))?,
+        ),
+    };
+    let legacy_bias = match present("head_bias") {
+        None => None,
+        Some(v) => Some(
+            v.as_bool()
+                .ok_or(NamError::Invalid("head_bias is not a boolean"))?,
+        ),
+    };
+    let nested = match present("head") {
+        None => None,
+        Some(head) => {
+            let head = head
+                .as_object()
+                .ok_or_else(|| unsupported("head is not an object".into()))?;
+            for (key, value) in head {
+                if value.is_null() {
+                    continue;
+                }
+                match key.as_str() {
+                    "out_channels" | "bias" => {}
+                    "kernel_size" | "dilation" if value.as_u64() == Some(1) => {}
+                    other => {
+                        return Err(unsupported(format!(
+                            "layer head key {}",
+                            other.chars().take(32).collect::<String>()
+                        )));
+                    }
+                }
+            }
+            let size = head
+                .get("out_channels")
+                .and_then(Value::as_u64)
+                .and_then(|n| usize::try_from(n).ok())
+                .ok_or(NamError::Invalid("head out_channels is missing"))?;
+            let bias = head
+                .get("bias")
+                .and_then(Value::as_bool)
+                .ok_or(NamError::Invalid("head bias is missing"))?;
+            Some((size, bias))
+        }
+    };
+    match (nested, legacy_size, legacy_bias) {
+        (Some((size, bias)), ls, lb) => {
+            if ls.is_some_and(|s| s != size) || lb.is_some_and(|b| b != bias) {
+                return Err(NamError::Invalid("head and head_size/head_bias disagree"));
+            }
+            Ok((size, bias))
+        }
+        (None, Some(size), Some(bias)) => Ok((size, bias)),
+        (None, None, _) => Err(NamError::Invalid("head_size is missing")),
+        (None, Some(_), None) => Err(NamError::Invalid("head_bias is missing")),
+    }
 }
 
 /// A string, or an array of identical strings, naming "none" or "gated".
@@ -515,7 +589,15 @@ fn parse_gating_mode(value: &Value) -> Result<bool, NamError> {
 }
 
 fn parse_activation(value: Option<&Value>) -> Result<Activation, NamError> {
-    match value.and_then(Value::as_str) {
+    // Current exports may write {"name": "Tanh"}; extra keys would be parameters
+    // that the five supported activations do not have.
+    let name = match value {
+        Some(Value::Object(o)) if o.keys().all(|k| k == "name") => {
+            o.get("name").and_then(Value::as_str)
+        }
+        other => other.and_then(Value::as_str),
+    };
+    match name {
         Some("Tanh") => Ok(Activation::Tanh),
         Some("Hardtanh") => Ok(Activation::Hardtanh),
         Some("Fasttanh") => Ok(Activation::Fasttanh),
@@ -530,7 +612,10 @@ fn parse_activation(value: Option<&Value>) -> Result<Activation, NamError> {
 }
 
 fn parse_lstm(config: &Map<String, Value>) -> Result<(LstmSpec, usize), NamError> {
-    for key in config.keys() {
+    for (key, value) in config {
+        if value.is_null() {
+            continue;
+        }
         match key.as_str() {
             "num_layers" | "input_size" | "hidden_size" => {}
             other => {

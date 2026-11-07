@@ -24,16 +24,17 @@ it('needed_faces_only_for_chosen_roles',async()=>{
   expect(neededFaces(undefined)).toEqual([]);expect(neededFaces({})).toEqual([]);expect(neededFaces({music:'petaluma'})).toEqual([]);
   // A size-only role needs no face.
   expect(neededFaces({roles:{lyrics:{size:1.5}}})).toEqual([]);
-  // Lyrics are italic by default, so Serif asks for its Italic face; Noto Sans Regular always comes along (P17).
-  expect(files(neededFaces(lyricsSerif))).toEqual(['NotoSans-Regular.ttf','NotoSerif-Italic.ttf']);
+  // Lyrics are italic by default, so Serif asks for its Italic face; Noto Sans Regular always comes along (P17), and so does
+  // the font's own upright regular face, which alphaTab's width table is measured from.
+  expect(files(neededFaces(lyricsSerif))).toEqual(['NotoSans-Regular.ttf','NotoSerif-Italic.ttf','NotoSerif-Regular.ttf']);
   // Explicit flags choose the face; false is a choice.
-  expect(files(neededFaces({roles:{lyrics:{font:'notoSerif',italic:false,bold:true}}}))).toEqual(['NotoSans-Regular.ttf','NotoSerif-Bold.ttf']);
+  expect(files(neededFaces({roles:{lyrics:{font:'notoSerif',italic:false,bold:true}}}))).toEqual(['NotoSans-Regular.ttf','NotoSerif-Bold.ttf','NotoSerif-Regular.ttf']);
   // Markers are bold by default and Mono has Bold; staff text is italic by default and Mono has no italic, so it falls to Regular.
   expect(files(neededFaces({roles:{markers:{font:'notoSansMono'},staffText:{font:'notoSansMono'}}}))).toEqual(['NotoSans-Regular.ttf','NotoSansMono-Bold.ttf','NotoSansMono-Regular.ttf']);
   // A role asking for several default styles needs each once: tab numbers are regular only, chord names italic (and regular for fretboard numbers).
   const chords=files(neededFaces({roles:{chordNames:{font:'notoSansMono'}}}));
   expect(chords).toEqual(['NotoSans-Regular.ttf','NotoSansMono-Regular.ttf']);
-  expect(files(neededFaces({roles:{pageHeader:{font:'notoSerif',bold:true,italic:true}}}))).toEqual(['NotoSans-Regular.ttf','NotoSerif-BoldItalic.ttf']);
+  expect(files(neededFaces({roles:{pageHeader:{font:'notoSerif',bold:true,italic:true}}}))).toEqual(['NotoSans-Regular.ttf','NotoSerif-BoldItalic.ttf','NotoSerif-Regular.ttf']);
   expect(files(neededFaces({roles:{pageFooter:{font:'notoSans'}}}))).toEqual(['NotoSans-Regular.ttf']);
   // Never a face the font does not have.
   const mono=neededFaces({roles:{lyrics:{font:'notoSansMono',italic:true}}});
@@ -48,17 +49,31 @@ it('loads_each_needed_face_once_under_its_alias_and_adds_noto_sans',async()=>{
   expect(made.map(face=>[face.family,face.source,face.descriptors.weight,face.descriptors.style]).sort()).toEqual([
     ['Noto Sans','url(/export-fonts/NotoSans-Regular.ttf)','400','normal'],
     ['TabPlayer Serif','url(/export-fonts/NotoSerif-Italic.ttf)','400','italic'],
+    ['TabPlayer Serif','url(/export-fonts/NotoSerif-Regular.ttf)','400','normal'],
   ]);
-  expect(added).toHaveLength(2);expect(roleFacesPending(lyricsSerif)).toBe(false);
+  expect(added).toHaveLength(3);expect(roleFacesPending(lyricsSerif)).toBe(false);
   // The same file under a second alias is a separate registration.
   await loadRoleFaces({roles:{lyrics:{font:'notoSans',italic:false}}});
-  expect(made.map(face=>face.family).sort()).toEqual(['Noto Sans','TabPlayer Sans','TabPlayer Serif']);
+  expect(made.map(face=>face.family).sort()).toEqual(['Noto Sans','TabPlayer Sans','TabPlayer Serif','TabPlayer Serif']);
+});
+
+it('every_alias_gets_its_regular_upright_face',async()=>{
+  const {neededFaces,loadRoleFaces}=await load();
+  // alphaTab builds one width table per family from the plain `11px <alias>` face, so an italic- or bold-only role must still register Regular.
+  for(const [font,regular,styled] of [['notoSerif','NotoSerif-Regular.ttf','NotoSerif-BoldItalic.ttf'],['notoSans','NotoSans-Regular.ttf','NotoSans-BoldItalic.ttf'],['notoSansMono','NotoSansMono-Regular.ttf','NotoSansMono-Bold.ttf']] as const){
+    const chosen:EngravingFonts={roles:{lyrics:{font,bold:true,italic:font!=='notoSansMono'}}};
+    expect(files(neededFaces(chosen))).toContain(regular);expect(files(neededFaces(chosen))).toContain(styled);
+  }
+  made.length=0;
+  await loadRoleFaces({roles:{lyrics:{font:'notoSerif',bold:true,italic:true}}});
+  const alias=made.filter(face=>face.family==='TabPlayer Serif').map(face=>[face.source,face.descriptors.weight,face.descriptors.style]).sort();
+  expect(alias).toEqual([['url(/export-fonts/NotoSerif-BoldItalic.ttf)','700','italic'],['url(/export-fonts/NotoSerif-Regular.ttf)','400','normal']]);
 });
 
 it('bold_faces_register_with_weight_700',async()=>{
   const {loadRoleFaces}=await load();
   await loadRoleFaces({roles:{markers:{font:'notoSerif',bold:true,italic:true}}});
-  const bold=made.find(face=>face.family==='TabPlayer Serif')!;
+  const bold=made.find(face=>face.family==='TabPlayer Serif'&&face.source.includes('BoldItalic'))!;
   expect([bold.source,bold.descriptors.weight,bold.descriptors.style]).toEqual(['url(/export-fonts/NotoSerif-BoldItalic.ttf)','700','italic']);
 });
 
@@ -68,7 +83,7 @@ it('load_failure_reported_and_retried',async()=>{
   const first=await loadRoleFaces(lyricsSerif);
   expect(first.failed).toEqual(['NotoSerif-Italic.ttf']);
   // The face that loaded is added; the failed one is not, and nothing throws.
-  expect(added.map(face=>face.family)).toEqual(['Noto Sans']);
+  expect(added.map(face=>face.family).sort()).toEqual(['Noto Sans','TabPlayer Serif']);
   expect(roleFacesPending(lyricsSerif)).toBe(true);
   const before=made.length;failFile='';
   const second=await loadRoleFaces(lyricsSerif);
@@ -81,7 +96,7 @@ it('load_failure_reported_and_retried',async()=>{
 it('concurrent_loads_share_one_face',async()=>{
   const {loadRoleFaces}=await load();
   await Promise.all([loadRoleFaces(lyricsSerif),loadRoleFaces(lyricsSerif)]);
-  expect(made).toHaveLength(2);expect(added).toHaveLength(2);
+  expect(made).toHaveLength(3);expect(added).toHaveLength(3);
 });
 
 it('resolves_without_loading_where_FontFace_is_missing',async()=>{

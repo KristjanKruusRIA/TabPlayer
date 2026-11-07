@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import {afterEach,expect,it,vi} from 'vitest';
-import {StrictMode} from 'react';
+import {Component,StrictMode,type ReactElement,type ReactNode} from 'react';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import {LayoutMode,NotationElement,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
 import {ScoreView} from './ScoreView';
@@ -32,13 +32,14 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
  }this.postRenderFinished.emit();}
 }}));
 const page:PageLayout={widthMm:210,heightMm:210,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
-function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void;onFontStatus?:(status:{failed:string[];substituted:string[]})=>void}={}){
+function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void;onFontStatus?:(status:{failed:string[];substituted:string[]})=>void;wrap?:(node:ReactNode)=>ReactNode}={}){
+ const {wrap=(node:ReactNode)=>node,...rest}=extra;
  vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.width:0;});
  vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.height:0;});
  vi.stubGlobal('ResizeObserver',class {constructor(fn:()=>void){state.resize=fn;}observe(){}disconnect(){}});
- const props={score:music(),track:0,zoom,profile:'ScoreTab',playback:null,onSelect:vi.fn(),page,display:{layout,zoomMode:'manual' as const},onDisplayStatus:vi.fn(),...extra};
+ const props={score:music(),track:0,zoom,profile:'ScoreTab',playback:null,onSelect:vi.fn(),page,display:{layout,zoomMode:'manual' as const},onDisplayStatus:vi.fn(),...rest};
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
- const result=render(tree());return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
+ const result=render(wrap(tree()) as ReactElement);return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});});
 it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'] as const)('renders %s without a playback controller',layout=>{
@@ -295,4 +296,64 @@ it('page_overlay_keeps_the_default_stack_without_role_fonts',()=>{
  const [header,footer]=[...screen.getAllByLabelText('Score page 1')[0].querySelectorAll('.score-page-text text')];
  for(const text of [header,footer]){expect(text.getAttribute('font-family')).toBe('Noto Sans, Noto Sans CJK JP, Noto Emoji');expect(text.getAttribute('font-weight')).toBeNull();expect(text.getAttribute('font-style')).toBeNull();}
  expect(header.getAttribute('font-size')).toBe('18');expect(footer.getAttribute('font-size')).toBe('11');
+});
+
+// ---- fix round 1: overlay-only header fonts, gated draw errors, StrictMode ----
+it('a_header_or_footer_font_change_does_not_render_the_notation',async()=>{
+ const seen:unknown[]=[];state.roles=fonts=>{seen.push(fonts);return Promise.resolve({failed:[]});};
+ const {props,tree,rerender}=setup('verticalPage',100,{engraving:withFonts(serif)});
+ await act(async()=>{await Promise.resolve();});
+ const renders=state.renders.mock.calls.length,loads=state.loads.mock.calls.length;seen.length=0;
+ rerender(tree({...props,engraving:withFonts({roles:{...serif.roles,pageHeader:{font:'notoSerif',bold:true,size:1.5},pageFooter:{font:'notoSansMono'}}})}));
+ await act(async()=>{await Promise.resolve();});
+ expect(state.renders).toHaveBeenCalledTimes(renders);expect(state.loads).toHaveBeenCalledTimes(loads);
+ // Only the page roles' faces were requested, and the overlay now uses them.
+ expect(seen).toEqual([{roles:{pageHeader:{font:'notoSerif',bold:true,size:1.5},pageFooter:{font:'notoSansMono'}}}]);
+ const [header,footer]=[...screen.getAllByLabelText('Score page 1')[0].querySelectorAll('.score-page-text text')];
+ expect(header.getAttribute('font-family')).toBe('TabPlayer Serif, Noto Sans, Noto Sans CJK JP, Noto Emoji');expect(header.getAttribute('font-size')).toBe('27');
+ expect(footer.getAttribute('font-family')).toBe('TabPlayer Mono, Noto Sans, Noto Sans CJK JP, Noto Emoji');
+ // Changing a screen role still renders.
+ rerender(tree({...props,engraving:withFonts({roles:{lyrics:{font:'notoSansMono'},pageHeader:{font:'notoSerif',bold:true,size:1.5},pageFooter:{font:'notoSansMono'}}})}));
+ await act(async()=>{await Promise.resolve();});
+ expect(state.renders).toHaveBeenCalledTimes(renders+1);
+});
+it('an_overlay_font_load_that_ends_after_a_newer_choice_paints_nothing',async()=>{
+ const first=deferred(),second=deferred(),queue=[first,second];state.roles=()=>queue.shift()!.promise;
+ const {props,tree,rerender}=setup('verticalPage',100,{engraving:defaultEngraving()});
+ rerender(tree({...props,engraving:withFonts({roles:{pageHeader:{font:'notoSerif'}}})}));
+ rerender(tree({...props,engraving:withFonts({roles:{pageHeader:{font:'notoSansMono'}}})}));
+ await act(async()=>{second.resolve({failed:[]});await second.promise;});
+ const header=()=>screen.getAllByLabelText('Score page 1')[0].querySelector('.score-page-text text')!;
+ expect(header().getAttribute('font-family')).toMatch(/^TabPlayer Mono/);
+ await act(async()=>{first.resolve({failed:[]});await first.promise;});
+ expect(header().getAttribute('font-family')).toMatch(/^TabPlayer Mono/);
+});
+class Catch extends Component<{children:ReactNode},{error:Error|null}>{
+ state={error:null as Error|null};static getDerivedStateFromError(error:Error){return {error};}
+ render(){return this.state.error?<p role="alert">{this.state.error.message}</p>:this.props.children;}
+}
+it('a_draw_error_after_the_faces_load_reaches_the_error_boundary_like_a_synchronous_one',async()=>{
+ vi.spyOn(console,'error').mockImplementation(()=>{});
+ // Without role fonts the effect throws during commit: the boundary shows it.
+ state.loads.mockImplementationOnce(()=>{throw new Error('draw failed now');});
+ setup('verticalPage',100,{engraving:defaultEngraving(),wrap:node=><Catch>{node}</Catch>});
+ expect(screen.getByRole('alert').textContent).toBe('draw failed now');
+ cleanup();
+ // With role fonts the same throw happens after the load: it must not become an unhandled rejection.
+ const unhandled=vi.fn();process.on('unhandledRejection',unhandled);
+ const gate=deferred();state.roles=()=>gate.promise;
+ state.loads.mockImplementationOnce(()=>{throw new Error('draw failed later');});
+ setup('verticalPage',100,{engraving:withFonts(serif),wrap:node=><Catch>{node}</Catch>});
+ expect(screen.queryByRole('alert')).toBeNull();
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ await new Promise(resolve=>setTimeout(resolve,0));
+ process.off('unhandledRejection',unhandled);
+ expect(screen.getByRole('alert').textContent).toBe('draw failed later');expect(unhandled).not.toHaveBeenCalled();
+});
+it('strict_mode_loads_once_and_renders_once_after_the_faces_arrive',async()=>{
+ const gate=deferred();state.roles=()=>gate.promise;
+ setup('verticalPage',100,{engraving:withFonts(serif),wrap:node=><StrictMode>{node}</StrictMode>});
+ expect(state.loads).not.toHaveBeenCalled();expect(state.renders).not.toHaveBeenCalled();
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);expect(state.renders).toHaveBeenCalledTimes(1);
 });

@@ -85,6 +85,14 @@ function normalizeFonts(fonts:EngravingFonts|undefined):EngravingFonts|undefined
 
 export const isDefaultFonts=(fonts:EngravingFonts|undefined)=>normalizeFonts(fonts)===undefined;
 
+/** `engraving` without the Page header and footer roles, which only style the page overlay and never change the notation (a render key must not see them). */
+export function withoutPageFonts(engraving:EngravingOverrides):EngravingOverrides {
+  const roles=engraving.fonts?.roles;
+  if(!roles||(roles.pageHeader===undefined&&roles.pageFooter===undefined))return engraving;
+  const {pageHeader:_header,pageFooter:_footer,...rest}=roles;void _header;void _footer;
+  return withFonts(engraving,{...engraving.fonts,roles:rest});
+}
+
 /** `engraving` carrying `fonts`, leaving the field out while it is the default so older documents and unchanged choices stay identical. */
 export function withFonts(engraving:EngravingOverrides,fonts:EngravingFonts):EngravingOverrides {
   const {fonts:_dropped,...rest}=structuredClone(engraving);void _dropped;

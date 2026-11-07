@@ -8,7 +8,7 @@ interface Registration {family:string;face:TextFace}
 const key=({family,face}:Registration)=>`${family}|${face.file}`;
 
 /**
- * Every face the chosen roles draw with: one per distinct weight and slant among the role's elements, under the font's alias,
+ * Every face the chosen roles draw with: one per distinct weight and slant among the role's elements, plus the font's regular upright face, under the font's alias,
  * plus Noto Sans Regular under its real family, which the fallback chain starts with (P17). A role with no chosen font needs
  * nothing, and a face the font does not have (Noto Sans Mono italic) is never asked for.
  */
@@ -16,10 +16,15 @@ function registrations(fonts:EngravingFonts|undefined):Registration[] {
   const list=new Map<string,Registration>();
   for(const role of FONT_ROLES){
     const entry=fonts?.roles?.[role];if(!entry||entry.font===undefined)continue;
+    const family=textFonts[entry.font].alias;
     for(const style of roleDefaultStyles(role)){
       const {bold,italic}=effectiveStyle({...entry,font:entry.font},style.bold,style.italic),face=faceFor(entry.font,bold,italic);
-      if(face){const registration={family:textFonts[entry.font].alias,face};list.set(key(registration),registration);}
+      if(face){const registration={family,face};list.set(key(registration),registration);}
     }
+    // alphaTab measures `11px <alias>` at normal weight and slant, once per family for the session: the plain face must be there
+    // even when every element of the role is bold or italic, or the width table would hold bold or italic widths.
+    const upright=faceFor(entry.font,false,false);
+    if(upright){const registration={family,face:upright};list.set(key(registration),registration);}
   }
   const regular=faceFor('notoSans',false,false);
   if(list.size&&regular){const registration={family:textFonts.notoSans.family,face:regular};list.set(key(registration),registration);}

@@ -2,7 +2,8 @@ import { expect,it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { defaultEngraving,validateEngraving } from './projection';
 import type { EngravingFonts } from './fonts';
-import { FONT_ROLES,fontsOf,isDefaultFonts,sizeRange,validateFonts,withFonts } from './fonts';
+import { FONT_ROLES,fontsOf,isDefaultFonts,sizeRange,validateFonts,withFonts,withoutPageFonts } from './fonts';
+import { engravingRenderKey } from './system-gaps';
 import { defaultTypography,validateTypography } from './typography';
 
 // Read with JSON.parse (not a module import): a bundled object literal would turn a `__proto__` key into a prototype, not an own key.
@@ -87,4 +88,17 @@ it('typography_exact_keys_unchanged',()=>{
   expect(()=>validateTypography({...defaultTypography(),fonts:{}})).toThrow();
   expect(()=>validateTypography({...defaultTypography(),music:'bravura'})).toThrow();
   expect(()=>validateEngraving({...base(),typography:{...defaultTypography(),fonts:{}}})).toThrow();
+});
+
+it('render_key_ignores_page_header_and_footer_fonts',()=>{
+  const lyrics={font:'notoSerif' as const};
+  const plain=withFonts(base(),{roles:{lyrics}}),paged=withFonts(base(),{roles:{lyrics,pageHeader:{font:'notoSansMono',size:1.5},pageFooter:{bold:true,font:'notoSerif'}}});
+  expect(engravingRenderKey(paged)).toBe(engravingRenderKey(plain));
+  expect(withoutPageFonts(paged)).toEqual(plain);expect(paged.fonts?.roles?.pageHeader).toBeDefined();
+  // Page roles alone leave no fonts at all; an engraving without page roles comes back as it is.
+  expect(withoutPageFonts(withFonts(base(),{roles:{pageHeader:{size:2}}}))).toEqual(base());
+  expect(withoutPageFonts(plain)).toBe(plain);
+  // Screen roles and the music font still change the key.
+  expect(engravingRenderKey(withFonts(base(),{roles:{lyrics:{font:'notoSansMono'}}}))).not.toBe(engravingRenderKey(plain));
+  expect(engravingRenderKey(withFonts(base(),{music:'leland',roles:{lyrics}}))).not.toBe(engravingRenderKey(plain));
 });

@@ -10,7 +10,7 @@ import type { EngravingOverrides,PageLayout } from './engraving/types';
 import {engravingRenderKey,withoutSystemGaps,type SystemSpan} from './engraving/system-gaps';
 import {headerScaleOf,pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
 import {fontStack} from './engraving/font-catalog';
-import {pageRoleFont} from './engraving/fonts';
+import {pageRoleFont,withoutPageFonts,type EngravingFonts} from './engraving/fonts';
 import {loadRoleFaces,roleFacesPending} from './engraving/font-loading';
 import {headerFieldsOf} from './engraving/header-footer';
 import {typographyOf} from './engraving/typography';
@@ -92,7 +92,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // System gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
   const renderKey=engravingRenderKey(engravingProp),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const engraving=useMemo(()=>engravingProp&&withoutSystemGaps(engravingProp),[renderKey]);
+  const engraving=useMemo(()=>engravingProp&&withoutPageFonts(withoutSystemGaps(engravingProp)),[renderKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const gaps=useMemo(()=>engravingProp?.systemGaps,[gapKey]);
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
@@ -136,10 +136,21 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // Read from the unmemoized prop: header edits must not re-render the notation, but must redraw this text.
   const bandSet=pageInput.headerFooter,fields=useMemo(()=>headerFieldsOf(score),[score,score.title,score.subTitle,score.artist,score.album,score.words,score.music,score.copyright,score.tab,score.instructions,score.notices]),title=score.title;
   const titleScale=engraving?typographyOf(engraving).titleScale??1:1,pageCount=pagination?.pageCount??0;
-  // The Page header and footer roles draw the overlay; the key keeps the memo from changing on every render of an equal choice.
-  const fontsKey=JSON.stringify(engraving?.fonts??null);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const headerFont=useMemo(()=>pageRoleFont(engraving?.fonts,'pageHeader'),[fontsKey]),footerFont=useMemo(()=>pageRoleFont(engraving?.fonts,'pageFooter'),[fontsKey]);
+  // The Page header and footer roles only draw the overlay, so they come from the prop (the render path never sees them) and
+  // load their own faces; the key keeps the memos from changing on every render of an equal choice.
+  const pageRoles=engravingProp?.fonts?.roles,pageFontsKey=JSON.stringify([pageRoles?.pageHeader??null,pageRoles?.pageFooter??null]);
+  const pageFonts=useMemo<EngravingFonts|undefined>(()=>{
+    const roles={...pageRoles?.pageHeader?{pageHeader:pageRoles.pageHeader}:{},...pageRoles?.pageFooter?{pageFooter:pageRoles.pageFooter}:{}};
+    return Object.keys(roles).length?{roles}:undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[pageFontsKey]);
+  const headerFont=useMemo(()=>pageRoleFont(pageFonts,'pageHeader'),[pageFonts]),footerFont=useMemo(()=>pageRoleFont(pageFonts,'pageFooter'),[pageFonts]);
+  useEffect(()=>{
+    if(!roleFacesPending(pageFonts))return;
+    let live=true;
+    void loadRoleFaces(pageFonts).then(()=>{if(live)setFontsReady(count=>count+1);});
+    return()=>{live=false;};
+  },[pageFonts]);
   const pageTexts=useMemo(()=>{
     if(!pageCount)return [];
     const {headerY,footerY}=screenPageBaselines(geometry,headerScaleOf(titleScale,headerFont));
@@ -383,6 +394,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
   const loaded=useRef<{score:model.Score;tracks:string}|null>(null);
   // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
+  const [drawFailure,setDrawFailure]=useState<{error:unknown}|null>(null);
   const renderGeneration=useRef(0),fontStatusKey=useRef(JSON.stringify({failed:[],substituted:[]})),fontStatusHandler=useRef(onFontStatus);fontStatusHandler.current=onFontStatus;
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0)return;
@@ -405,7 +417,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const generation=renderGeneration.current;
     void loadRoleFaces(fonts).then(({failed})=>{
       if(generation!==renderGeneration.current)return;
-      setFontsReady(count=>count+1);reportFonts(failed);draw();
+      setFontsReady(count=>count+1);reportFonts(failed);
+      // A synchronous draw that throws reaches the error boundary from the effect; here it is kept and thrown while rendering instead of becoming an unhandled rejection.
+      try{draw();}catch(error){setDrawFailure({error});}
     });
     return()=>{renderGeneration.current++;};
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page]);
@@ -567,6 +581,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(!symbols||event.target!==event.currentTarget||!(event.key==='ContextMenu'||(event.key==='F10'&&event.shiftKey)))return;
     event.preventDefault();event.stopPropagation();if(editTarget)openTargetMenu();
   };
+  if(drawFailure)throw drawFailure.error;
   return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} data-note-entry={noteEntry?'on':undefined} onMouseDownCapture={capture} onMouseMove={noteEntry?previewEntry:undefined} onMouseLeave={()=>setGhost(null)} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
     {pageError&&<p className="score-page-error" role="alert">{pageError} Continuous view is shown at {zoom}%.</p>}
     <div className={sourcePhysical?'score-source-staging':'score-live-paper'} style={{width:sourceWidth||undefined}} aria-hidden={sourcePhysical||undefined} inert={sourcePhysical||undefined}>

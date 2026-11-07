@@ -100,6 +100,14 @@ import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
 import './workstation/workstation-shell.css';
 import './workstation/gp-shell.css';
 const noPlaybackSubscribe=()=>()=>{};
+/** A keyboard entry key that waits for the edit before it. Keys are kept as typed and read the preferences and the pending accidental when their turn comes. */
+type EntryItem=
+  |{kind:'keypad';keypad:NonNullable<ReturnType<typeof numpadKey>>}
+  |{kind:'entry';key:ScoreEntryKey;shift:boolean}
+  |{kind:'digit';digit:string}
+  |{kind:'enter'};
+interface QueuedEntryKey{item:EntryItem;at:number;documentId:string}
+const ENTRY_QUEUE_MAX=8,ENTRY_QUEUE_STALE_MS=2000;
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)&&!(target instanceof HTMLInputElement&&target.type==='range')||target.isContentEditable);
 
 export interface AppProps {
@@ -135,6 +143,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [noteEntryOn,setNoteEntryOn]=useState(false),entryNear=useRef(64);
   // The accidental a Ctrl+7/8/9 chord set for the next note typed or clicked; cleared by use, Escape, entry off, a selection change and a document switch.
   const [pendingAccidental,setPendingAccidental]=useState<AccidentalChord|null>(null);
+  // Keys typed while this app's own edit is still being recorded wait here, in order, and run one at a time (see `drainEntry`).
+  // `ownEdits` counts the edits `edit` has started and not yet finished following up (selection moved); `settled` is bumped right after each one,
+  // so the drain never plans a key against a cursor the previous edit has not moved yet. `entryFailure` records that the previous key was refused or did not land.
+  const entryQueue=useRef<QueuedEntryKey[]>([]),ownEdits=useRef(0),draining=useRef(false),entryFailure=useRef<{text:string|null}|null>(null),[settled,setSettled]=useState(0);
+  const clearEntryQueue=()=>{entryQueue.current=[];};
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]),sections=useMemo(()=>listSections(state.score),[state.score]);
   const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
@@ -237,12 +250,14 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setFret(kept&&kept.score===state.score&&kept.string===string?kept.fret:location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';
   },[state.score,target.track,target.staff,target.bar,target.voice,target.beat,string]);
   const act=(job: Promise<unknown>)=>{void job.catch(()=>{});};
-  const change=(job:Promise<unknown>)=>{const before=state.score;setClipboardError(null);act(job.then(()=>{const score=controller.getState().score;setSelection(old=>repairSelection(score,followSelectedTrack(before,score,old)));editorSelection(null);}));};
+  const change=(job:Promise<unknown>)=>{const before=state.score;setClipboardError(null);clearEntryQueue();act(job.then(()=>{const score=controller.getState().score;setSelection(old=>repairSelection(score,followSelectedTrack(before,score,old)));editorSelection(null);}));};
   const edit=(command:EditCommand,after?:(score:model.Score)=>void)=>{
     setClipboardError(null);
     const oldCount=state.score.masterBars.length;
     const wasPlaying=player?.getState().playing??false;
+    ownEdits.current++;let recorded=false;
     const landed=controller.edit(command),done=landed.then(()=>{
+      recorded=true;
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
       if(command.type==='pasteMusic')setNoteIndex(null);
@@ -251,6 +266,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       // Hearing an entered note is a courtesy: only note-setting edits, and only while nothing is playing.
       if(auditionEditsNow.current&&player&&!wasPlaying&&!player.getState().playing){const heard=editAudition(score,command);if(heard){const current=controller.getState();player.audition({trackId:trackIdentity(score.tracks[heard.track])},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});}}
     });
+    // The edit is finished only once its follow-up has moved the selection: that, not the controller going idle, is when the next queued key may run.
+    const settle=()=>{ownEdits.current--;if(!recorded)entryFailure.current={text:null};setSettled(count=>count+1);};
+    done.then(settle,settle);
     // The outcome is the edit's own: a failing follow-up (selection, audition) does not make a landed edit a refusal.
     act(done);return landed.then(()=>true,()=>false);
   };
@@ -434,7 +452,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const reference:ReferenceSyncControls={ready:referenceReady,timing:referenceTiming,edit:referenceEdit,onModeChange:referenceAction,onFromScore:referenceAction,onWriteScore:()=>referenceAction('write')};
   const sourceMetadataStatus=sourceAssetId&&sourceDurationMs===null?<div className="backing-waveform-state">{currentMetadata?.error?<><p role="alert">{currentMetadata.error}</p><button onClick={()=>setSourceRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading backing timing…</p>}</div>:null;
   const [symbolRequest,setSymbolRequest]=useState(0);
-  const select=(next:BeatTarget,s=string,index?:number)=>{
+  const moveTo=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
     entryFret.current=null;setPendingAccidental(null);const fixed=repairSelection(state.score,next);setSelection(fixed);
     setNoteIndex(index!==undefined&&Number.isInteger(index)&&index>=0?index:null);
@@ -443,23 +461,27 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const chosen=Math.max(1,Math.min(s,count));setString(chosen);
     setFret(beat?.notes.find(n=>n.string===chosen)?.fret ?? 0);digits.current.text='';
   };
+  /** A selection the user made: it also drops any keys still waiting, which were typed for the old cursor. Entry itself moves the cursor with `moveTo`. */
+  const select=(next:BeatTarget,s=string,index?:number)=>{clearEntryQueue();moveTo(next,s,index);};
+  /** Shows why a key did nothing; for a queued key it also records that the rest of the queue was typed for a result that did not happen. */
+  const refuse=(text:string,at:string)=>{setInputNotice({text,at});if(draining.current)entryFailure.current={text};};
   /** Records a planned entry as one edit, then moves the cursor where the plan says; a refusal keeps the cursor on the beat and says why. */
   const runEntryPlan=(point:BeatTarget,plan:EntryPlan|EntryRefusal,pitch?:number)=>{
-    select(point);
-    if('refused' in plan){setInputNotice({text:t(`score_entry.${plan.refused}` as MessageKey,{name:plan.name}),at:JSON.stringify(point)});return;}
+    moveTo(point);
+    if('refused' in plan){refuse(t(`score_entry.${plan.refused}` as MessageKey,{name:plan.name}),JSON.stringify(point));return;}
     setInputNotice(plan.notice?{text:plan.notice,at:JSON.stringify(plan.next)}:null);
     void edit(plan.command,score=>{setSelection(repairSelection(score,plan.next));setNoteIndex(null);if(plan.entry)entryDuration.current=plan.entry;if(pitch!==undefined&&!plan.removes)entryNear.current=pitch;})
-      .then(landed=>{if(!landed)setInputNotice({text:t('score_entry.refused',{name:plan.name}),at:JSON.stringify(point)});});
+      .then(landed=>{if(!landed){const text=t('score_entry.refused',{name:plan.name});setInputNotice({text,at:JSON.stringify(point)});if(entryFailure.current)entryFailure.current.text=text;}});
   };
   const entryBlocked=(point:BeatTarget)=>{
-    if(editLocked){setInputNotice({text:lockedMessage,at:JSON.stringify(point)});return true;}
-    if(editBusy){setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(point)});return true;}
+    if(editLocked){refuse(lockedMessage,JSON.stringify(point));return true;}
+    if(editBusy){refuse(t('editor.entry_busy'),JSON.stringify(point));return true;}
     return false;
   };
   const writeEntry=(point:BeatTarget,entered:ReturnType<typeof stepEntryPitch>,chord:boolean)=>{
     if(entryBlocked(point))return;
     setPendingAccidental(null);
-    if(!entered){select(point);setInputNotice({text:t('editor.entry_out_of_range'),at:JSON.stringify(point)});return;}
+    if(!entered){moveTo(point);refuse(t('editor.entry_out_of_range'),JSON.stringify(point));return;}
     const current=controller.getState();
     runEntryPlan(point,planScoreEntry({project:current.snapshot.project,score:current.score,target:point,entered,preferences:inputPrefs,entry:entryDuration.current,chord}),entered.pitch);
   };
@@ -478,53 +500,122 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
    * at the cursor's string or line they set the accidental of the next note; otherwise they re-spell the selected note
    * (spelling only, one edit, nothing recorded for the spelling it already has).
    */
-  const accidentalKeys=(key:Extract<ScoreEntryKey,{kind:'accidental'|'respell'}>,event:KeyboardEvent)=>{
-    event.preventDefault();if(event.repeat)return;
+  const accidentalKeys=(key:Extract<ScoreEntryKey,{kind:'accidental'|'respell'}>)=>{
     const beat=location.beat,at=JSON.stringify(target);
     const slot=beat?(indexed?selectedNote(beat,null,noteIndex):beat.notes.find(item=>item.string===string)):null;
     if(noteEntryOn&&key.kind==='accidental'&&!slot){setInputNotice(null);setPendingAccidental(old=>old===key.value?null:key.value);return;}
     if(entryBlocked(target))return;
-    if(!beat){setInputNotice({text:t('score_entry.no_beat'),at});return;}
-    if(location.staff.isPercussion){setInputNotice({text:t('score_entry.percussion_respell'),at});return;}
+    if(!beat){refuse(t('score_entry.no_beat'),at);return;}
+    if(location.staff.isPercussion){refuse(t('score_entry.percussion_respell'),at);return;}
     const note=selectedNote(beat,indexed?null:string,noteIndex);
-    if(!note){setInputNotice({text:t('score_entry.select_note_respell'),at});return;}
+    if(!note){refuse(t('score_entry.select_note_respell'),at);return;}
     const result=respellNote(location.staff,location.bar,beat,note,key.kind==='respell'?'cycle':key.value);
     if(!result||'same' in result){setInputNotice(null);return;}
-    if('refused' in result){setInputNotice({text:result.refused==='no_spelling'?t('editor.entry_no_spelling',{name:result.name}):t('score_entry.one_spelling',{name:result.name}),at});return;}
+    if('refused' in result){refuse(result.refused==='no_spelling'?t('editor.entry_no_spelling',{name:result.name}):t('score_entry.one_spelling',{name:result.name}),at);return;}
     setInputNotice(null);void edit({type:'setNoteSpelling',target,noteIndex:note.index,accidentalMode:result.mode});
   };
-  /** Note-entry keys on the focused score; true when the key was one of them. */
-  const entryKeys=(event:KeyboardEvent):boolean=>{
-    const key=scoreEntryKey(event,inputPrefs.swapPlusMinus);if(!key)return false;
-    event.preventDefault();if(event.repeat)return true;
+  /** What one note-entry key does at the cursor. */
+  const entryKey=(key:ScoreEntryKey,shift:boolean)=>{
     const beat=location.beat;
-    if(key.kind==='letter'){writeEntry(target,letterPitch(key.letter,entryNear.current,location.bar.keySignature as number,pendingAccidental??'key'),event.shiftKey);return true;}
-    if(entryBlocked(target))return true;
-    if(!beat){setInputNotice({text:t('score_entry.no_beat'),at:JSON.stringify(target)});return true;}
+    if(key.kind==='letter'){writeEntry(target,letterPitch(key.letter,entryNear.current,location.bar.keySignature as number,pendingAccidental??'key'),shift);return;}
+    if(entryBlocked(target))return;
+    if(!beat){refuse(t('score_entry.no_beat'),JSON.stringify(target));return;}
     if(key.kind==='rest'){
       if(!beat.isRest)void edit({type:'setRest',target},score=>{const voice=score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice];if(inputPrefs.advance&&target.beat<voice.beats.length-1)setSelection(repairSelection(score,{...target,beat:target.beat+1}));});
-      return true;
+      return;
     }
     if(key.kind==='step'||key.kind==='semitone'||key.kind==='octave'){
       const note=selectedNote(beat,indexed?null:string,noteIndex);
-      if(!note){setInputNotice({text:t('score_entry.select_note'),at:JSON.stringify(target)});return true;}
+      if(!note){refuse(t('score_entry.select_note'),JSON.stringify(target));return;}
       const entered=movedPitch(location.staff,location.bar,beat,note,key);
-      if(!entered){setInputNotice({text:t('editor.entry_out_of_range'),at:JSON.stringify(target)});return true;}
-      const current=controller.getState();runEntryPlan(target,planNoteMove(current.snapshot.project,current.score,target,note,entered),entered.pitch);return true;
+      if(!entered){refuse(t('editor.entry_out_of_range'),JSON.stringify(target));return;}
+      const current=controller.getState();runEntryPlan(target,planNoteMove(current.snapshot.project,current.score,target,note,entered),entered.pitch);return;
     }
     const change=durationKeyEdit(key,target,beat);
     if(change)void edit(change.command).then(accepted=>{if(accepted)entryDuration.current=change.entry;});
-    return true;
   };
+  /** Digits then Enter: writes the typed fret on the cursor string, with the automatic duration when that is on. */
+  const enterFret=()=>{
+    if(!location.beat||indexed)return;
+    if(editBusy){entryBlocked(target);return;}
+    const beat=location.beat,lead=autoDurationEdit(inputPrefs,target,beat,entryDuration.current),note:EditCommand={type:'setNote',target,string,fret},project=state.snapshot.project;
+    // The pair is checked before either edit, so a refused note never leaves a changed rhythm behind; an unfit duration falls back to a plain write.
+    const pair=lead!==null&&applyInOrder(project,[lead,note]),why=pair?null:lead&&applyInOrder(project,[note])?AUTO_DURATION_UNFIT:autoDurationSkip(inputPrefs,beat,entryDuration.current);
+    setInputNotice(why?{text:why,at:JSON.stringify(target)}:null);
+    // The rhythm and the note are one edit, so one undo takes back the whole entry.
+    if(pair)void edit({type:'sequence',commands:[lead as SequenceStep,note as SequenceStep]});
+    else void edit(note).then(accepted=>{if(accepted)entryDuration.current=entryAfterWrite(beat,entryDuration.current);});
+  };
+  /** One keyboard entry key, live or from the queue: both run this, so a queued key reads the preferences and the pending accidental when its turn comes. */
+  const performItem=(item:EntryItem,at:number)=>{
+    if(item.kind==='keypad'){
+      if(!location.beat||entryBlocked(target))return;
+      const change=numpadDurationEdit(item.keypad,target,location.beat);
+      if(change)void edit(change.command).then(accepted=>{if(accepted)entryDuration.current=change.entry;});
+    }else if(item.kind==='entry'){
+      if(item.key.kind==='accidental'||item.key.kind==='respell')accidentalKeys(item.key);else entryKey(item.key,item.shift);
+    }else if(item.kind==='digit'){
+      digits.current.text=((at-digits.current.time<1000?digits.current.text:'')+item.digit).slice(-2);digits.current.time=at;setFret(Number(digits.current.text));
+    }else enterFret();
+  };
+  /** The key as an entry key, or null when it is anything else (navigation, the N toggle, other shortcuts). */
+  const entryItem=(event:KeyboardEvent):EntryItem|null=>{
+    const keypad=numpadKey(event,inputPrefs);if(keypad)return {kind:'keypad',keypad};
+    if(view==='score'){
+      const chord=scoreEntryKey(event);if(chord&&(chord.kind==='accidental'||chord.kind==='respell'))return {kind:'entry',key:chord,shift:false};
+      if((event.key==='n'||event.key==='N')&&!event.ctrlKey&&!event.metaKey&&!event.altKey)return null;
+      if(noteEntryOn){const key=scoreEntryKey(event,inputPrefs.swapPlusMinus);if(key)return {kind:'entry',key,shift:event.shiftKey};}
+    }
+    if(/^\d$/.test(event.key)&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!indexed)return {kind:'digit',digit:event.key};
+    if(event.key==='Enter'&&!indexed)return {kind:'enter'};
+    return null;
+  };
+  /** A key waits only behind this app's own edit (or behind keys already waiting). A lock, a workspace transition or any other busy work still refuses it. */
+  const entryQueueing=()=>!workspaceBusy&&!editLocked&&(ownEdits.current>0||entryQueue.current.length>0&&!controlsBusy);
+  const enqueueEntry=(item:EntryItem)=>{
+    const queue=entryQueue.current;
+    if(queue.length>=ENTRY_QUEUE_MAX){setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return;}
+    if(!queue.length)entryFailure.current=null;
+    queue.push({item,at:Date.now(),documentId:state.documentId});
+  };
+  const discardEntryQueue=(reason:string|null,why:'discarded'|'stale')=>{
+    const count=entryQueue.current.length;clearEntryQueue();
+    const message=t(`editor.entry_queue_${why}_${count===1?'one':'other'}` as MessageKey,{count});
+    setInputNotice({text:reason?`${reason} ${message}`:message,at:JSON.stringify(target)});
+  };
+  /**
+   * Runs the first waiting key once the previous one is finished: none of our edits in flight (`ownEdits` drops only after its follow-up moved the
+   * selection, so the cursor is where the key before left it), nothing else busy, and this render shows that cursor. A key that makes no edit bumps
+   * `settled`, so the next one runs on the following render. A refused or unlanded key, a stale one, or one for another document discards the rest.
+   */
+  const drainEntry=()=>{
+    if(ownEdits.current>0||controlsBusy)return;
+    const queue=entryQueue.current,failure=entryFailure.current;entryFailure.current=null;
+    if(!queue.length)return;
+    if(editLocked||workspaceBusy||queue[0].documentId!==state.documentId){clearEntryQueue();return;}
+    if(failure){discardEntryQueue(failure.text,'discarded');return;}
+    if(Date.now()-queue[0].at>ENTRY_QUEUE_STALE_MS){discardEntryQueue(null,'stale');return;}
+    const next=queue.shift()!,before=ownEdits.current;
+    draining.current=true;
+    try{performItem(next.item,next.at);}finally{draining.current=false;}
+    if(ownEdits.current===before)setSettled(count=>count+1);
+  };
+  const drainNow=useRef(drainEntry);drainNow.current=drainEntry;
+  useEffect(()=>{clearEntryQueue();},[noteEntryOn,view,editLocked,state.documentEpoch,state.documentId]);
+  useEffect(()=>{drainNow.current();},[settled,controlsBusy,workspaceBusy,editLocked,state.documentEpoch,state.documentId]);
   function keys(event:KeyboardEvent) {
     if (textEntry(event.target)||(event.target as HTMLElement).tagName==='BUTTON') return;
     // The Menu key and Shift+F10 open the score-symbol menu at the edit target, as a right-click does on the score.
     if ((event.key==='ContextMenu'||(event.key==='F10'&&event.shiftKey))&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&view==='score') {event.preventDefault();setSymbolRequest(count=>count+1);return;}
-    const keypad=numpadKey(event,inputPrefs);
-    if(keypad){event.preventDefault();const change=location.beat&&!editBusy?numpadDurationEdit(keypad,target,location.beat):null;if(change)void edit(change.command).then(accepted=>{if(accepted)entryDuration.current=change.entry;});return;}
-    if(view==='score'){const chord=scoreEntryKey(event);if(chord&&(chord.kind==='accidental'||chord.kind==='respell')){accidentalKeys(chord,event);return;}}
+    const item=entryItem(event);
+    if(item){
+      event.preventDefault();
+      // Held letters and chords never repeat, and a key that has to wait is queued once, never from key repeat.
+      if(event.repeat&&(item.kind==='entry'||entryQueueing()))return;
+      if(entryQueueing())enqueueEntry(item);else performItem(item,Date.now());
+      return;
+    }
     if(view==='score'&&(event.key==='n'||event.key==='N')&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();if(!event.repeat)setNoteEntryOn(on=>!on);return;}
-    if(noteEntryOn&&view==='score'&&entryKeys(event))return;
     let next={...target};
     if(event.key==='ArrowRight') {
       if(next.beat<location.voice.beats.length-1) next.beat++;
@@ -533,22 +624,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if(next.beat>0) next.beat--;
       else if(next.bar>0) {next.bar--;next.beat=state.score.tracks[next.track].staves[next.staff].bars[next.bar].voices[next.voice].beats.length-1;}
     } else if(event.key==='ArrowDown'||event.key==='ArrowUp') {
-      setPendingAccidental(null);
+      setPendingAccidental(null);clearEntryQueue();
       if(indexed)setNoteIndex(Math.max(0,Math.min((location.beat?.notes.length??1)-1,(noteIndex??0)+(event.key==='ArrowUp'?1:-1))));
       else select(next,string+(event.key==='ArrowUp'?1:-1));event.preventDefault();return;
     }
-    else if(/^\d$/.test(event.key)&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!indexed) {
-      const now=Date.now();digits.current.text=(now-digits.current.time<1000?digits.current.text:'')+event.key;
-      digits.current.text=digits.current.text.slice(-2);digits.current.time=now;setFret(Number(digits.current.text));event.preventDefault();return;
-    } else if(event.key==='Enter' && location.beat && !editBusy&&!indexed) {
-      const beat=location.beat,lead=autoDurationEdit(inputPrefs,target,beat,entryDuration.current),note:EditCommand={type:'setNote',target,string,fret},project=state.snapshot.project;
-      // The pair is checked before either edit, so a refused note never leaves a changed rhythm behind; an unfit duration falls back to a plain write.
-      const pair=lead!==null&&applyInOrder(project,[lead,note]),why=pair?null:lead&&applyInOrder(project,[note])?AUTO_DURATION_UNFIT:autoDurationSkip(inputPrefs,beat,entryDuration.current);
-      setInputNotice(why?{text:why,at:JSON.stringify(target)}:null);
-      // The rhythm and the note are one edit, so one undo takes back the whole entry.
-      if(pair)void edit({type:'sequence',commands:[lead as SequenceStep,note as SequenceStep]});
-      else void edit(note).then(accepted=>{if(accepted)entryDuration.current=entryAfterWrite(beat,entryDuration.current);});
-      event.preventDefault();return;}
     else return;
     if(event.shiftKey&&(event.key==='ArrowLeft'||event.key==='ArrowRight')){
       const anchor=rangeAnchor.current??target;
@@ -561,7 +640,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
     if((event.ctrlKey||event.metaKey)&&!event.altKey&&['n','o','s','z','y'].includes(key)){
-      event.preventDefault();if(controlsBusy||event.repeat)return;
+      event.preventDefault();if(key==='z'||key==='y')clearEntryQueue();
+      if(controlsBusy||event.repeat)return;
       if(key==='n')documentAction(onNew());
       else if(key==='o')documentAction(onOpen());
       else if(key==='s')act(controller.save(event.shiftKey));
@@ -591,7 +671,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       // The Practice popover's body is a portal, so its keys reach here rather than the popover's own handler.
       const menu=practiceMenu.current;
       if(menu?.open&&event.target instanceof Node&&menu.querySelector('.gp-practice-body')?.contains(event.target)){menu.open=false;menu.querySelector('summary')?.focus();event.preventDefault();return;}
-      editorSelection(null);setPendingAccidental(null);event.preventDefault();
+      editorSelection(null);setPendingAccidental(null);clearEntryQueue();event.preventDefault();
     }
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
@@ -694,7 +774,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
-      <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>
+      <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
         <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} track={target.track} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
         {inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t('score_entry.on')}</div>}
       </section>

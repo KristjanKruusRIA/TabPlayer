@@ -93,6 +93,14 @@ export function withoutPageFonts(engraving:EngravingOverrides):EngravingOverride
   return withFonts(engraving,{...engraving.fonts,roles:rest});
 }
 
+/** `engraving` drawn with Bravura: the music font choice dropped, every role choice kept. It is what the screen falls back to when the chosen music font cannot be loaded. */
+export function withoutMusicFont(engraving:EngravingOverrides):EngravingOverrides {
+  const fonts=engraving.fonts;
+  if(!fonts||fonts.music===undefined)return engraving;
+  const {music:_music,...rest}=fonts;void _music;
+  return withFonts(engraving,rest);
+}
+
 /** `engraving` carrying `fonts`, leaving the field out while it is the default so older documents and unchanged choices stay identical. */
 export function withFonts(engraving:EngravingOverrides,fonts:EngravingFonts):EngravingOverrides {
   const {fonts:_dropped,...rest}=structuredClone(engraving);void _dropped;

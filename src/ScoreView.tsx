@@ -10,8 +10,9 @@ import type { EngravingOverrides,PageLayout } from './engraving/types';
 import {engravingRenderKey,withoutSystemGaps,type SystemSpan} from './engraving/system-gaps';
 import {headerScaleOf,pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
 import {fontStack} from './engraving/font-catalog';
-import {pageRoleFont,withoutPageFonts,type EngravingFonts} from './engraving/fonts';
-import {loadRoleFaces,roleFacesPending} from './engraving/font-loading';
+import {pageRoleFont,withoutMusicFont,withoutPageFonts,type EngravingFonts} from './engraving/fonts';
+import {loadedMusicFont,loadMusicFont,loadRoleFaces,roleFacesPending,type MusicFontData} from './engraving/font-loading';
+import {musicFonts,type MusicFontId} from './engraving/font-catalog';
 import {headerFieldsOf} from './engraving/header-footer';
 import {typographyOf} from './engraving/typography';
 import {loadExportFonts} from './export/pdf';
@@ -147,8 +148,10 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const headerFont=useMemo(()=>pageRoleFont(pageFonts,'pageHeader'),[pageFonts]),footerFont=useMemo(()=>pageRoleFont(pageFonts,'pageFooter'),[pageFonts]);
   // Faces that failed to load, kept per source so the notation's and the overlay's loads report independently; the status is their union.
   const fontStatusKey=useRef(JSON.stringify({failed:[],substituted:[]})),fontStatusHandler=useRef(onFontStatus);fontStatusHandler.current=onFontStatus;
-  const notationFailed=useRef<string[]>([]),overlayFailed=useRef<string[]>([]);
-  const reportFonts=useCallback(()=>{const status={failed:[...new Set([...notationFailed.current,...overlayFailed.current])],substituted:[] as string[]},key=JSON.stringify(status);if(key===fontStatusKey.current)return;fontStatusKey.current=key;fontStatusHandler.current?.(status);},[]);
+  // Notation failures cover the role faces and the music font; `substituted` is what the music font in use draws from Bravura.
+  const notationFailed=useRef<string[]>([]),overlayFailed=useRef<string[]>([]),musicSubstituted=useRef<string[]>([]);
+  const [musicShown,setMusicShown]=useState<MusicFontId>('bravura');
+  const reportFonts=useCallback(()=>{const status={failed:[...new Set([...notationFailed.current,...overlayFailed.current])],substituted:[...musicSubstituted.current]},key=JSON.stringify(status);if(key===fontStatusKey.current)return;fontStatusKey.current=key;fontStatusHandler.current?.(status);},[]);
   useEffect(()=>{
     if(!roleFacesPending(pageFonts)){overlayFailed.current=[];reportFonts();return;}
     let live=true;
@@ -402,9 +405,11 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const renderGeneration=useRef(0);
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0)return;
-    const draw=()=>{
+    // `music` is the font the layout is drawn with: the chosen font's loaded data, or Bravura's (also when the chosen font failed to load).
+    const draw=(music:MusicFontData,drawn=engraving)=>{
       view.settings.display.scale=sourceScale;
-      if(engraving)configureEngraving(view.settings,engraving);else view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
+      setMusicShown(music.id);musicSubstituted.current=music.substituted;
+      if(drawn)configureEngraving(view.settings,drawn,music);else view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
       view.settings.display.layoutMode=display.layout==='horizontalScreen'?LayoutMode.Horizontal:display.layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment;
       view.settings.display.systemsLayoutMode=display.layout==='verticalScreen'?SystemsLayoutMode.Automatic:SystemsLayoutMode.UseModelLayout;
       view.settings.display.padding=sourcePhysical||screenLayout?[0,0,0,0]:[geometry.left*factor,geometry.top*factor,geometry.right*factor,geometry.bottom*factor];
@@ -413,16 +418,22 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
       else view.render();
     };
-    // alphaTab caches a text width table per font family, so a role face has to be in before the first render that uses it.
-    // Nothing to load (every document without role fonts) keeps the render synchronous.
-    const fonts=engraving?.fonts;
-    if(!roleFacesPending(fonts)){draw();notationFailed.current=[];reportFonts();return;}
+    // alphaTab caches a text width table per font family, so a role face has to be in before the first render that uses it, and the music font's
+    // metadata before the layout that uses it. One gate covers both. Nothing to load (every Bravura document without role fonts, and a music font
+    // that is already loaded) keeps the render synchronous.
+    const fonts=engraving?.fonts,musicId=fonts?.music??'bravura',loadedMusic=loadedMusicFont(musicId);
+    if(!roleFacesPending(fonts)&&loadedMusic){draw(loadedMusic);notationFailed.current=[];reportFonts();return;}
     const generation=renderGeneration.current;
-    void loadRoleFaces(fonts).then(({failed})=>{
+    const roles=roleFacesPending(fonts)?loadRoleFaces(fonts):Promise.resolve({failed:[] as string[]});
+    // A music font that cannot be loaded is not fatal: the score is drawn with Bravura and the failure is reported; the next change tries again.
+    const music=loadedMusic?Promise.resolve({data:loadedMusic}):loadMusicFont(musicId).then(data=>({data}),()=>({data:null}));
+    void Promise.all([roles,music]).then(([{failed},{data}])=>{
       if(generation!==renderGeneration.current)return;
-      notationFailed.current=failed;setFontsReady(count=>count+1);reportFonts();
+      notationFailed.current=data?failed:[...failed,musicFonts[musicId].file];
+      setFontsReady(count=>count+1);
       // A synchronous draw that throws reaches the error boundary from the effect; here it is kept and thrown while rendering instead of becoming an unhandled rejection.
-      try{draw();}catch(error){setDrawFailure({error});}
+      try{if(data)draw(data);else draw(loadedMusicFont('bravura')!,engraving&&withoutMusicFont(engraving));}catch(error){setDrawFailure({error});}
+      reportFonts();
     });
     return()=>{renderGeneration.current++;};
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page]);
@@ -585,7 +596,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     event.preventDefault();event.stopPropagation();if(editTarget)openTargetMenu();
   };
   if(drawFailure)throw drawFailure.error;
-  return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} data-note-entry={noteEntry?'on':undefined} onMouseDownCapture={capture} onMouseMove={noteEntry?previewEntry:undefined} onMouseLeave={()=>setGhost(null)} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
+  return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} data-music-font={musicShown==='bravura'?undefined:musicShown} data-note-entry={noteEntry?'on':undefined} onMouseDownCapture={capture} onMouseMove={noteEntry?previewEntry:undefined} onMouseLeave={()=>setGhost(null)} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
     {pageError&&<p className="score-page-error" role="alert">{pageError} Continuous view is shown at {zoom}%.</p>}
     <div className={sourcePhysical?'score-source-staging':'score-live-paper'} style={{width:sourceWidth||undefined}} aria-hidden={sourcePhysical||undefined} inert={sourcePhysical||undefined}>
       <div ref={container} data-testid="score-source" aria-hidden={sourcePhysical||undefined} aria-label="Music notation"/>

@@ -2,7 +2,7 @@ import { expect,it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { defaultEngraving,validateEngraving } from './projection';
 import type { EngravingFonts } from './fonts';
-import { FONT_ROLES,fontsOf,isDefaultFonts,sizeRange,validateFonts,withFonts,withoutPageFonts } from './fonts';
+import { FONT_ROLES,fontsOf,isDefaultFonts,sizeRange,validateFonts,withFonts,withoutMusicFont,withoutPageFonts } from './fonts';
 import { engravingRenderKey } from './system-gaps';
 import { defaultTypography,validateTypography } from './typography';
 
@@ -101,4 +101,15 @@ it('render_key_ignores_page_header_and_footer_fonts',()=>{
   // Screen roles and the music font still change the key.
   expect(engravingRenderKey(withFonts(base(),{roles:{lyrics:{font:'notoSansMono'}}}))).not.toBe(engravingRenderKey(plain));
   expect(engravingRenderKey(withFonts(base(),{music:'leland',roles:{lyrics}}))).not.toBe(engravingRenderKey(plain));
+});
+
+it('without_music_font_keeps_role_choices_and_drops_the_music_choice',()=>{
+  const both=withFonts(base(),{music:'petaluma',roles:{lyrics:{font:'notoSerif'}}});
+  expect(withoutMusicFont(both)).toEqual(withFonts(base(),{roles:{lyrics:{font:'notoSerif'}}}));
+  // Music alone leaves no fonts field at all, and an engraving with no music choice comes back as it is.
+  expect(withoutMusicFont(withFonts(base(),{music:'leland'}))).toEqual(base());
+  expect(withoutMusicFont(withFonts(base(),{music:'leland'})).fonts).toBeUndefined();
+  const plain=withFonts(base(),{roles:{lyrics:{size:1.5}}});
+  expect(withoutMusicFont(plain)).toBe(plain);
+  expect(both.fonts?.music).toBe('petaluma');
 });

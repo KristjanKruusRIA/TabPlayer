@@ -45,6 +45,10 @@
 .score-svg-chunk { position: absolute; transform-origin: top left; }
 .score-svg-chunk svg { overflow: visible; display: block; }
 .score-svg-chunk .at { font-style: normal; font-weight: normal; font-variant: normal; text-transform: none; line-height: 1; -webkit-font-smoothing: antialiased; overflow: visible; }
+/* The music font: alphaTab styles its glyph group as `.at-surface.at<N> .at` (0,3,0) with its own Bravura face. This (0,4,0) rule wins without !important
+   inside the live surface and the copied page chunks alike (both sit under the root and carry the surface classes) and leaves alphaTab's font size. */
+.score-presentation[data-music-font="petaluma"] .at-surface .at { font-family: Petaluma, 'TabPlayer Bravura'; }
+.score-presentation[data-music-font="leland"] .at-surface .at { font-family: Leland, 'TabPlayer Bravura'; }
 .score-page-error { margin: 0 0 12px; padding: 8px 12px; color: var(--ws-text,#edf1f5); background: var(--ws-panel,#1d2530); }
 .score-playback-bar,.score-playback-beat,.score-range-block { position: absolute; pointer-events: none; }
 .score-playback-bar { background: #437ec226; }

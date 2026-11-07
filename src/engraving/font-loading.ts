@@ -1,5 +1,8 @@
-import { faceFor,textFonts } from './font-catalog';
-import type { TextFace } from './font-catalog';
+import { EngravingSettings } from '@coderline/alphatab';
+import type { SmuflMetadata } from '@coderline/alphatab';
+import { faceFor,musicFonts,textFonts } from './font-catalog';
+import type { MusicFontId,TextFace } from './font-catalog';
+import { mergeSmuflMetadata } from './smufl';
 import { effectiveStyle,FONT_ROLES,roleDefaultStyles } from './fonts';
 import type { EngravingFonts } from './fonts';
 
@@ -70,4 +73,57 @@ export async function loadRoleFaces(fonts:EngravingFonts|undefined):Promise<{fai
   const failed=new Set<string>();
   await Promise.all(wanted.map(registration=>loadFace(registration).catch(()=>{failed.add(registration.face.file);})));
   return {failed:[...failed]};
+}
+
+/** A music font ready for the screen: the CSS family stack, the merged SMuFL metadata (null for Bravura, alphaTab's own) and the symbols drawn from Bravura. */
+export interface MusicFontData {id:MusicFontId;families:readonly string[];metadata:SmuflMetadata|null;substituted:string[]}
+
+/** The app-owned alias the screen draws Bravura glyphs with when the chosen font lacks them (no digit token, unlike alphaTab's own `alphaTab<N>`). */
+const BRAVURA_ALIAS='TabPlayer Bravura';
+const bravuraData:MusicFontData={id:'bravura',families:[musicFonts.bravura.family],metadata:null,substituted:[]};
+const musicMemo=new Map<MusicFontId,Promise<MusicFontData>>(),musicLoaded=new Map<MusicFontId,MusicFontData>();
+let bravuraAlias:Promise<void>|undefined;
+
+async function registerFace(family:string,file:string):Promise<void> {
+  if(typeof document==='undefined'||typeof FontFace==='undefined')throw new Error('Fonts cannot be loaded here.');
+  const font=new FontFace(family,`url(/export-fonts/${file})`);
+  await font.load();document.fonts.add(font);
+}
+function loadBravuraAlias():Promise<void> {
+  if(!bravuraAlias)bravuraAlias=registerFace(BRAVURA_ALIAS,musicFonts.bravura.file).catch(error=>{bravuraAlias=undefined;throw error;});
+  return bravuraAlias;
+}
+async function readMetadata(file:string):Promise<SmuflMetadata> {
+  const response=await fetch(`/export-fonts/${file}`);
+  if(!response.ok)throw new Error(`Music font metadata ${file} could not be loaded.`);
+  const value=await response.json() as Partial<SmuflMetadata>|null;
+  if(!value||typeof value!=='object'||!value.engravingDefaults||typeof value.glyphsWithAnchors!=='object'||!value.glyphsWithAnchors)throw new Error(`Music font metadata ${file} is not SMuFL metadata.`);
+  return value as SmuflMetadata;
+}
+
+/** The music font as already loaded, or null while it still has to be fetched. Bravura is always available. */
+export function loadedMusicFont(id:MusicFontId):MusicFontData|null {
+  return id==='bravura'?bravuraData:musicLoaded.get(id)??null;
+}
+/** Whether choosing this music font still needs a load: false for Bravura and for a font already loaded, so those renders stay synchronous. */
+export function musicFontPending(id:MusicFontId):boolean {return loadedMusicFont(id)===null;}
+
+/**
+ * Loads a music font once: its SMuFL metadata, its face, and the Bravura alias face the screen falls back to for symbols the font lacks,
+ * then merges the metadata against Bravura's so alphaTab never skips a glyph. A failure clears the memo so the next call retries.
+ */
+export function loadMusicFont(id:MusicFontId):Promise<MusicFontData> {
+  if(id==='bravura')return Promise.resolve(bravuraData);
+  let pending=musicMemo.get(id);
+  if(!pending){
+    const font=musicFonts[id];
+    pending=(async()=>{
+      const [chosen]=await Promise.all([readMetadata(font.metadata!),registerFace(font.family,font.file),loadBravuraAlias()]);
+      const {metadata,substituted}=mergeSmuflMetadata(chosen,EngravingSettings.bravuraMetadata);
+      const data:MusicFontData={id,families:[font.family,BRAVURA_ALIAS],metadata,substituted};
+      musicLoaded.set(id,data);return data;
+    })().catch(error=>{musicMemo.delete(id);throw error;});
+    musicMemo.set(id,pending);
+  }
+  return pending;
 }

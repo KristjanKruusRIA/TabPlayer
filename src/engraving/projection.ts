@@ -1,4 +1,4 @@
-import { model,Settings,StaveProfile,SystemsLayoutMode } from '@coderline/alphatab';
+import { EngravingSettings,model,Settings,StaveProfile,SystemsLayoutMode } from '@coderline/alphatab';
 import type { EngravingOverrides } from './types';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
@@ -7,6 +7,7 @@ import { configureTypography,typographyOf,validateTypography } from './typograph
 import { validateBarWidths } from './bar-widths';
 import { validateSystemGaps } from './system-gaps';
 import { configureRoleFonts,validateFonts } from './fonts';
+import type { MusicFontData } from './font-loading';
 
 export interface EngravingProjection {
   score:model.Score;
@@ -82,8 +83,16 @@ export function projectEngraving(source:model.Score,ids:readonly string[],value:
   for(const {bar,scale} of value.barWidths??[]){const master=score.masterBars[bar];if(!master)continue;master.displayScale=scale;for(const track of score.tracks)for(const staff of track.staves){const copy=staff.bars[bar];if(copy)copy.displayScale=scale;}}
   return {score,beats,notes};
 }
-export function configureEngraving(settings:Settings,value:EngravingOverrides):void {
-  validateEngraving(value);const defaults=new Settings();
+/**
+ * Applies `value` to `settings`. The engraving settings always restart from Bravura's, so switching back from another music font leaves none of its
+ * metrics behind; a non-Bravura font then refills them from its merged SMuFL metadata, which has to be passed already loaded.
+ */
+export function configureEngraving(settings:Settings,value:EngravingOverrides,music?:MusicFontData|null):void {
+  validateEngraving(value);const defaults=new Settings(),musicId=value.fonts?.music??'bravura';
+  if(musicId!=='bravura'&&(music?.id!==musicId||!music.metadata))throw new Error('Music font is not loaded.');
+  const engravingSettings=EngravingSettings.bravuraDefaults;
+  if(musicId!=='bravura')engravingSettings.fillFromSmufl(music!.metadata!,engravingSettings.musicFontSize);
+  settings.display.resources.engravingSettings=engravingSettings;
   for(const [key,field]of Object.entries(notationBooleans)){const override=value.notation[key as keyof typeof notationBooleans];settings.notation[field as typeof notationBooleans[keyof typeof notationBooleans]]=override??defaults.notation[field as typeof notationBooleans[keyof typeof notationBooleans]];}
   for(const [key,mapping]of Object.entries(notationEnums)){const override=value.notation[key as keyof typeof notationEnums];Object.assign(settings.notation,{[mapping.field]:override==='inherit'?defaults.notation[mapping.field]:(mapping.values as Record<string,number>)[override]});}
   for(const [key,element]of Object.entries(elementKeys)){const override=value.notation[key as keyof typeof elementKeys];if(override!==null)settings.notation.elements.set(element,override);else if(defaults.notation.elements.has(element))settings.notation.elements.set(element,defaults.notation.elements.get(element)!);else settings.notation.elements.delete(element);}

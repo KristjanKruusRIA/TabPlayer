@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import {afterEach,expect,it,vi} from 'vitest';
 import {Component,StrictMode,type ReactElement,type ReactNode} from 'react';
+import {readFileSync} from 'node:fs';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
-import {LayoutMode,NotationElement,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
+import {EngravingSettings,LayoutMode,NotationElement,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
 import {ScoreView} from './ScoreView';
 import {music} from './editor/fixtures';
 import type {EngravingOverrides,PageLayout} from './engraving/types';
@@ -10,10 +11,14 @@ import type {EngravingFonts} from './engraving/fonts';
 import type {SystemSpan} from './engraving/system-gaps';
 import type {ScoreLayoutMode} from './engraving/screen-view';
 import {defaultEngraving} from './engraving/projection';
+import {mergeSmuflMetadata} from './engraving/smufl';
+import type {MusicFontData} from './engraving/font-loading';
 import {withSystemGaps} from './engraving/system-gaps';
-const state=vi.hoisted(()=>({roles:((_fonts?:unknown)=>new Promise<{failed:string[]}>(()=>{})) as (fonts?:unknown)=>Promise<{failed:string[]}>,fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
+const state=vi.hoisted(()=>({music:((_id:string)=>new Promise<unknown>(()=>{})) as (id:string)=>Promise<unknown>,loadedMusic:new Map<string,unknown>(),roles:((_fonts?:unknown)=>new Promise<{failed:string[]}>(()=>{})) as (fonts?:unknown)=>Promise<{failed:string[]}>,fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
-vi.mock('./engraving/font-loading',async original=>({...await original<typeof import('./engraving/font-loading')>(),loadRoleFaces:(fonts?:unknown)=>state.roles(fonts)}));
+vi.mock('./engraving/font-loading',async original=>({...await original<typeof import('./engraving/font-loading')>(),loadRoleFaces:(fonts?:unknown)=>state.roles(fonts),
+ loadMusicFont:(id:string)=>state.music(id).then(data=>{state.loadedMusic.set(id,data);return data;}),
+ loadedMusicFont:(id:string)=>id==='bravura'?{id,families:['Bravura'],metadata:null,substituted:[]}:state.loadedMusic.get(id)??null}));
 vi.mock('./export/pdf',async original=>({...await original<typeof import('./export/pdf')>(),loadExportFonts:()=>state.fonts()}));
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
  settings=new Settings();score:model.Score|null=null;constructor(){state.api=this;}
@@ -41,7 +46,7 @@ function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageL
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
  const result=render(wrap(tree()) as ReactElement);return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});state.music=()=>new Promise<unknown>(()=>{});state.loadedMusic.clear();});
 it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'] as const)('renders %s without a playback controller',layout=>{
  const {api}=setup(layout);expect(state.loads).toHaveBeenCalledTimes(1);
  expect(api.settings.display.layoutMode).toBe(layout==='horizontalScreen'?LayoutMode.Horizontal:layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment);
@@ -378,4 +383,108 @@ it('notation_and_page_font_failures_are_reported_together_and_independently',asy
  expect(status).toHaveBeenLastCalledWith({failed:['NotoSansMono-Regular.ttf'],substituted:[]});
  await act(async()=>{notation.resolve({failed:['NotoSerif-Italic.ttf']});await notation.promise;});
  expect(status).toHaveBeenLastCalledWith({failed:['NotoSerif-Italic.ttf','NotoSansMono-Regular.ttf'],substituted:[]});
+});
+
+// ---- Task 6: the music font on screen ----
+const withMusic=(music:'bravura'|'petaluma'|'leland',extra:Partial<EngravingOverrides>={}):EngravingOverrides=>({...defaultEngraving(),...extra,fonts:{music}});
+const petalumaData=():MusicFontData=>{
+ const {metadata,substituted}=mergeSmuflMetadata(JSON.parse(readFileSync('assets/fonts/petaluma_metadata.json','utf8')),EngravingSettings.bravuraMetadata);
+ return {id:'petaluma',families:['Petaluma','TabPlayer Bravura'],metadata,substituted};
+};
+const musicRoot=(container:HTMLElement)=>container.querySelector('.score-presentation')!;
+function deferredMusic(){let resolve!:(value:MusicFontData)=>void,reject!:(error:Error)=>void;const promise=new Promise<MusicFontData>((done,fail)=>{resolve=done;reject=fail;});return {promise,resolve,reject};}
+const noteheadWidth=(api:{settings:Settings})=>api.settings.display.resources.engravingSettings.glyphWidths.get(0xE0A4 as never) /* MusicFontSymbol.NoteheadBlack, which alphaTab does not export */;
+
+const musicRules=()=>{
+ const css=readFileSync('src/ScoreView.css','utf8').replace(/\/\*[\s\S]*?\*\//g,''),rules=new Map<string,{selector:string;body:string}>();
+ for(const match of css.matchAll(/([^{}]*\[data-music-font="(\w+)"\][^{}]*)\{([^}]*)\}/g))rules.set(match[2],{selector:match[1].trim(),body:match[3]});
+ return rules;
+};
+/** (ids, classes and attributes, elements) of a selector made of compound selectors and descendant combinators, enough for these rules. */
+const specificity=(selector:string)=>[(selector.match(/#/g)??[]).length,(selector.match(/\.[\w-]+|\[[^\]]+\]/g)??[]).length,(selector.replace(/\[[^\]]*\]/g,'').match(/(^|[\s>+~])[a-z][\w-]*/gi)??[]).length];
+it('music_font_css_rule_targets_surface_and_chunks',()=>{
+ const rules=musicRules();
+ expect([...rules.keys()].sort()).toEqual(['leland','petaluma']);
+ for(const [id,{selector,body}] of rules){
+  expect(body).toMatch(new RegExp(`font-family:\\s*${id[0].toUpperCase()+id.slice(1)},\\s*'TabPlayer Bravura'\\s*;`));
+  // alphaTab registers `.at-surface.at<N> .at` (0,3,0), once per API instance; the app rule has to win without !important.
+  const alphaTab=specificity('.at-surface.at3 .at'),mine=specificity(selector);
+  expect(alphaTab).toEqual([0,3,0]);
+  expect(mine[0]).toBe(0);expect(mine[1]).toBeGreaterThan(alphaTab[1]);
+  expect(selector).toBe(`.score-presentation[data-music-font="${id}"] .at-surface .at`);
+  expect(body).not.toMatch(/!important|font-size/);
+  // The same rule applies inside the live surface and inside the page chunks, which sit under the root with alphaTab's surface classes.
+  document.body.innerHTML=`<div class="score-presentation" data-music-font="${id}"><div class="at-surface at"><svg><g class="at"></g></svg></div><div class="score-pages at-surface at"><div class="score-svg-chunk at-surface-svg"><svg><g class="at"></g></svg></div></div></div>`;
+  const hits=[...document.querySelectorAll(selector)];
+  expect(hits).toHaveLength(2);expect(hits.every(node=>node.classList.contains('at')&&node.tagName.toLowerCase()==='g')).toBe(true);
+  // Another font id, and no choice at all, do not match.
+  document.body.innerHTML=`<div class="score-presentation" data-music-font="other"><div class="at-surface at"><g class="at"></g></div></div><div class="score-presentation"><div class="at-surface at"><g class="at"></g></div></div>`;
+  expect(document.querySelectorAll(selector)).toHaveLength(0);
+ }
+ document.body.innerHTML='';
+});
+it('the_root_names_the_music_font_only_after_it_is_drawn',async()=>{
+ const gate=deferredMusic();state.music=()=>gate.promise;
+ const {container}=setup('verticalPage',100,{engraving:withMusic('petaluma')});
+ // Nothing is drawn, and nothing claims Petaluma, until the metadata the layout needs is in.
+ expect(state.renders).not.toHaveBeenCalled();expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+ await act(async()=>{gate.resolve(petalumaData());await gate.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
+});
+it('bravura_documents_render_without_waiting_or_loading_music',()=>{
+ const music=vi.fn(()=>new Promise<unknown>(()=>{}));state.music=music;
+ const {container}=setup('verticalPage',100,{engraving:withMusic('bravura')});
+ expect(music).not.toHaveBeenCalled();expect(state.loads).toHaveBeenCalledTimes(1);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+});
+it('music_change_rerenders_after_load',async()=>{
+ const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:defaultEngraving()});
+ const renders=state.renders.mock.calls.length,gate=deferredMusic(),loadMusic=vi.fn(()=>gate.promise);state.music=loadMusic;
+ const bravuraWidth=noteheadWidth(api);
+ rerender(tree({...props,engraving:withMusic('petaluma')}));
+ expect(loadMusic).toHaveBeenCalledWith('petaluma');expect(state.renders).toHaveBeenCalledTimes(renders);
+ const data=petalumaData();
+ await act(async()=>{gate.resolve(data);await gate.promise;});
+ expect(state.renders).toHaveBeenCalledTimes(renders+1);expect(state.loads).toHaveBeenCalledTimes(1);
+ // Layout uses the merged metadata: the notehead is Petaluma's width, not Bravura's.
+ expect(noteheadWidth(api)).not.toBe(bravuraWidth);expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
+ // Back to Bravura renders at once and restores Bravura's metrics.
+ rerender(tree({...props,engraving:defaultEngraving()}));
+ expect(state.renders).toHaveBeenCalledTimes(renders+2);expect(noteheadWidth(api)).toBe(bravuraWidth);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+ expect(api.settings.display.resources.engravingSettings).toEqual(EngravingSettings.bravuraDefaults);
+ // A font that is already loaded is drawn without waiting or loading it again.
+ rerender(tree({...props,engraving:withMusic('petaluma')}));
+ expect(loadMusic).toHaveBeenCalledTimes(1);expect(state.renders).toHaveBeenCalledTimes(renders+3);expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
+});
+it('a_slow_music_load_never_paints_an_older_choice',async()=>{
+ const slow=deferredMusic(),loads=[slow];state.music=()=>loads.shift()!.promise;
+ const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:withMusic('petaluma')});
+ rerender(tree({...props,engraving:withMusic('bravura',{systemSpacing:1.5})}));
+ expect(state.loads).toHaveBeenCalledTimes(1);
+ const renders=state.renders.mock.calls.length;
+ await act(async()=>{slow.resolve(petalumaData());await slow.promise;});
+ expect(state.renders).toHaveBeenCalledTimes(renders);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+ expect(api.settings.display.resources.engravingSettings).toEqual(EngravingSettings.bravuraDefaults);
+});
+it('music_substitutions_are_reported_with_the_font_status',async()=>{
+ const gate=deferredMusic(),status=vi.fn();state.music=()=>gate.promise;
+ setup('verticalPage',100,{engraving:withMusic('petaluma'),onFontStatus:status});
+ const data=petalumaData();
+ await act(async()=>{gate.resolve(data);await gate.promise;});
+ expect(data.substituted.length).toBeGreaterThan(0);expect(status).toHaveBeenLastCalledWith({failed:[],substituted:data.substituted});
+});
+it('music_load_failure_falls_back_to_bravura_and_is_reported',async()=>{
+ const status=vi.fn(),failing=deferredMusic();state.music=()=>failing.promise;
+ const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:withMusic('petaluma'),onFontStatus:status});
+ await act(async()=>{failing.reject(new Error('metadata missing'));await failing.promise.catch(()=>{});});
+ // The score still renders, with Bravura's metrics and no Petaluma claim, and the panel hears about it.
+ expect(state.loads).toHaveBeenCalledTimes(1);
+ expect(api.settings.display.resources.engravingSettings).toEqual(EngravingSettings.bravuraDefaults);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+ expect(status).toHaveBeenLastCalledWith({failed:['Petaluma.otf'],substituted:[]});
+ // The next change tries again, and a load that works clears the failure.
+ const retry=deferredMusic(),loadMusic=vi.fn(()=>retry.promise);state.music=loadMusic;
+ rerender(tree({...props,engraving:withMusic('petaluma',{systemSpacing:1.5})}));
+ expect(loadMusic).toHaveBeenCalledWith('petaluma');
+ const data=petalumaData();
+ await act(async()=>{retry.resolve(data);await retry.promise;});
+ expect(status).toHaveBeenLastCalledWith({failed:[],substituted:data.substituted});expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
 });

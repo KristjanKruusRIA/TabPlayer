@@ -55,13 +55,15 @@ try{
   const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const waitStatus=async predicate=>{const deadline=Date.now()+15000;while(Date.now()<deadline){const value=await status();if(predicate(value))return value;await page.waitForTimeout(25);}throw new Error(`Audio status timeout: ${JSON.stringify(await status())}`);};
-  // The chunks on screen, in page order. The last five are the systems; anything before them (title block) is not.
-  const readScreen=()=>page.evaluate(()=>[...document.querySelectorAll('.score-sheet')].flatMap((sheet,index)=>[...sheet.querySelectorAll('.score-svg-chunk')].map(chunk=>({sheet:index,top:parseFloat(chunk.style.top),factor:Number(/scale\(([^)]+)\)/.exec(chunk.style.transform)?.[1])}))));
+  // alphaTab ends the score with a credit chunk ("rendered by alphaTab"). It stacks like a system but is not one, so it never counts as a system.
+  const CREDIT='rendered by alphaTab';
+  // The chunks on screen, in page order. Before the systems come the title, tuning and chord chunks; after them, the credit.
+  const readScreen=()=>page.evaluate(credit=>[...document.querySelectorAll('.score-sheet')].flatMap((sheet,index)=>[...sheet.querySelectorAll('.score-svg-chunk')].map(chunk=>({sheet:index,top:parseFloat(chunk.style.top),factor:Number(/scale\(([^)]+)\)/.exec(chunk.style.transform)?.[1]),credit:chunk.textContent.includes(credit)}))),CREDIT);
   // Repagination is synchronous with the edit, but wait for two equal reads so a pending frame cannot give a stale top.
   const screen=async()=>{
     let previous=null;
     for(let attempt=0;attempt<60;attempt++){
-      const chunks=await readScreen(),key=JSON.stringify(chunks);
+      const chunks=(await readScreen()).filter(chunk=>!chunk.credit).map(({sheet,top,factor})=>({sheet,top,factor})),key=JSON.stringify(chunks);
       if(chunks.length>=SYSTEM_COUNT&&key===previous)return chunks.slice(-SYSTEM_COUNT);
       previous=key;await page.waitForTimeout(100);
     }
@@ -72,9 +74,9 @@ try{
     await dialog.getByRole('button',{name:'Export',exact:true}).click();
     await Promise.race([dialog.waitFor({state:'hidden',timeout:30000}),dialog.getByRole('alert').waitFor({timeout:30000}).then(async()=>{throw new Error(await dialog.getByRole('alert').textContent());})]);await dialog.waitFor({state:'hidden',timeout:30000});await idle();
     assert.equal(readFileSync(pdf).subarray(0,5).toString(),'%PDF-');
-    // Each page's top-level system groups: translate(left top) is the system's position on that page.
-    const pages=await page.evaluate(()=>window.__tabplayerTestExportPages.at(-1).map(sheet=>[...new DOMParser().parseFromString(sheet.svg,'image/svg+xml').querySelectorAll('svg > g[transform^="translate("]')].map(group=>Number(/translate\(\s*[-\d.e+]+[ ,]+([-\d.e+]+)\s*\)/.exec(group.getAttribute('transform'))[1]))));
-    const systems=pages.flatMap((tops,index)=>tops.map(top=>({sheet:index,top})));
+    // Each page's top-level chunk groups: translate(left top) is the chunk's position on that page. The title, tuning and chord chunks come before the systems and the credit chunk after them.
+    const pages=await page.evaluate(credit=>window.__tabplayerTestExportPages.at(-1).map(sheet=>[...new DOMParser().parseFromString(sheet.svg,'image/svg+xml').querySelectorAll('svg > g[transform^="translate("]')].map(group=>({top:Number(/translate\(\s*[-\d.e+]+[ ,]+([-\d.e+]+)\s*\)/.exec(group.getAttribute('transform'))[1]),credit:group.textContent.includes(credit)}))),CREDIT);
+    const systems=pages.flatMap((groups,index)=>groups.filter(group=>!group.credit).map(({top})=>({sheet:index,top})));
     assert.ok(systems.length>=SYSTEM_COUNT,`expected at least ${SYSTEM_COUNT} exported systems, got ${systems.length}`);
     return systems.slice(-SYSTEM_COUNT);
   };
@@ -177,7 +179,10 @@ try{
   });
   await check('the reset buttons are unavailable once nothing is left to reset',async()=>{
     await details('Design: system gaps');
-    for(const name of ['Reset selected system','Reset all system gaps']){const target=page.getByRole('button',{name,exact:true});assert.equal(await target.getAttribute('aria-disabled'),'true',`${name} is aria-disabled`);assert.equal(await target.isDisabled(),false,`${name} keeps focusability (never disabled)`);}
+    for(const name of ['Reset selected system','Reset all system gaps']){const target=page.getByRole('button',{name,exact:true});assert.equal(await target.getAttribute('aria-disabled'),'true',`${name} is aria-disabled`);
+      // Not isDisabled(): Playwright counts aria-disabled="true" as disabled. The rule is that the attribute is absent, so the button can hold focus.
+      assert.equal(await target.getAttribute('disabled'),null,`${name} has no disabled attribute (never disabled)`);
+      await target.focus();assert.equal(await target.evaluate(node=>node===document.activeElement),true,`${name} keeps focus`);}
   });
 
   // Undo each step, then redo each step.

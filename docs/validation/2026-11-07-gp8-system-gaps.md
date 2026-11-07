@@ -32,5 +32,6 @@
 - Gaps are not written to Guitar Pro files.
 - Gaps are not part of saved styles.
 - Screen and export page breaks differ (export reserves 64 px for the header and footer). "Same" means the same extra offset above the same system within a page, not the same page.
+- At A4 in the desktop test the export puts the fourth system (bars 9-10) at the top of its own page, so its 150% gap is dropped there by design. The test asserts that; the second gap's offset is therefore only measured on screen.
 - The desktop test does not play audio during the edits: it checks the generation while idle.
 - No per-staff gaps and no original-GP8 comparison.

@@ -13,6 +13,8 @@ import { nativeFileLibraryBridge } from './library/bridge';
 import { createMetadataRunner } from './library/metadata-runner';
 import { WorkspaceLibrary } from './workspace/WorkspaceLibrary';
 import type { FileLibraryChangedEvent,ScoreFilesDroppedEvent } from './library/types';
+import { settleLaunchFiles,takeLaunchFiles } from './workspace/launch-files';
+import { getMessage,getResolvedLanguage } from './i18n';
 
 const root=createRoot(document.getElementById('root')!);
 let workspace:WorkspaceController|null=null,preview:RecoveryPreview|null=null;
@@ -24,6 +26,40 @@ let library:WorkspaceLibrary|undefined,closing=false,destroyed=false;
 const libraryUnlisteners:(()=>void)[]=[];
 let issues:RecoveryIssue[]=[];
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
+let launchWaiting=false,launchRunning=false,launchTimer:ReturnType<typeof setTimeout>|null=null,libraryFailed=false;
+/**
+ * Opens the score files the operating system asked for, one batch at a time, once the workspace can take them. Until
+ * then they wait natively and this tries again shortly, so a file opened during startup, a dialog or an export is
+ * opened when that ends rather than lost. A batch taken just as something else started is given back to wait again.
+ */
+async function openLaunchFiles() {
+  launchWaiting=true;
+  if(launchRunning||destroyed)return;
+  launchRunning=true;
+  try {
+    while(launchWaiting&&!destroyed) {
+      if(!workspace||pending||closing||resumeFailure!==null||(!library&&!libraryFailed)||library?.launchBlocked()){retryLaunchFiles();return;}
+      launchWaiting=false;
+      const taken=await takeLaunchFiles();
+      if(taken.dropped>0){sessionError=getMessage(getResolvedLanguage(navigator.language),'launch.too_many',{count:String(taken.dropped)});renderWorkspace();}
+      if(taken.waiting){launchWaiting=true;retryLaunchFiles();return;}
+      if(!taken.event||destroyed)continue;
+      // The Library cannot open them; say so, as they were waiting, and let them go.
+      if(libraryFailed||!library){launchWaiting=true;await settleLaunchFiles(taken.event.dropToken,false);sessionError=getMessage(getResolvedLanguage(navigator.language),'launch.no_library');renderWorkspace();continue;}
+      await library.openLaunched(taken.event);
+      // Settle it whatever happened. A file the intake never received (refused as something started, or its drop
+      // replaced first) waits again; others may wait behind it, so keep going. A failed settle is retried too: the
+      // next take puts an unsettled file back first.
+      launchWaiting=true;
+      if(await settleLaunchFiles(taken.event.dropToken)){retryLaunchFiles();return;}
+    }
+  } catch(error){
+    sessionError=getMessage(getResolvedLanguage(navigator.language),'launch.failed',{error:message(error)});renderWorkspace();
+    if(launchWaiting)retryLaunchFiles();
+  }
+  finally{launchRunning=false;}
+}
+function retryLaunchFiles(){if(launchTimer===null&&!destroyed)launchTimer=setTimeout(()=>{launchTimer=null;void openLaunchFiles();},500);}
 function retainLibraryListener(unlisten:()=>void){if(destroyed)void Promise.resolve().then(unlisten).catch(()=>{});else libraryUnlisteners.push(unlisten);}
 
 function renderWorkspace() {
@@ -54,8 +90,9 @@ async function resolve(restore:boolean,attach=false) {
     try {
       const created=await WorkspaceLibrary.create(workspace,nativeFileLibraryBridge,createMetadataRunner(),{restoredWorkingDocument,blocked:()=>pending?'Wait for the current session operation to finish.':closing||resumeFailure!==null?'Wait until the workspace is ready before using the Library.':null});
       if(destroyed)created.dispose();else library=created;
-    }catch(error){sessionError=`Library unavailable: ${message(error)}`;}
+    }catch(error){libraryFailed=true;sessionError=`Library unavailable: ${message(error)}`;}
     if(!destroyed)renderWorkspace();
+    await openLaunchFiles();
   } catch(error) {
     pending=false;
     // A reload during an in-flight resolve shows a prompt for a startup that has since completed; reattach instead of dead-ending.
@@ -113,6 +150,7 @@ async function retry() {
       if(!workspace||!library||pending||closing||resumeFailure!==null){sessionError='Dropped scores were not opened. Finish startup or the current workspace operation, then drop them again.';if(workspace)renderWorkspace();else renderPreview();return;}
       void library.drop(event.payload);
     }));
+    retainLibraryListener(await listen('launch-files',()=>{void openLaunchFiles();}));
   }catch(error){sessionError=`Library events unavailable: ${message(error)}`;}
   const startup=await nativeSessionBridge.startup();preferences=startup.preferences;preview=startup.preview?{...startup.preview,issues:[...startup.preview.issues]}:null;startupToken=preview?.token ?? null;
   if(startup.resumed&&!preview){await resolve(false,true);return;}

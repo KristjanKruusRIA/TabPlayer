@@ -3,7 +3,9 @@ $taskRoot=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $testDirectory=Join-Path $taskRoot '.analysis/desktop-smoke'
 New-Item -ItemType Directory -Force -Path $testDirectory | Out-Null
 $testConfiguration=Join-Path $testDirectory 'tauri-test.json'
-@{app=@{windows=@(@{label='main';title='TabPlayer Test';width=1440;height=900;minWidth=960;minHeight=600;additionalBrowserArgs='--remote-debugging-port=9223';dataDirectory=(Join-Path $testDirectory 'webview-profile')})}} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $testConfiguration
+# Its own identifier keeps the test app apart from an installed or `tauri dev` TabPlayer: a shared one would hand the
+# test launch to that app as a second instance, and share its app data.
+@{identifier='dev.tabplayer.desktop-test';app=@{windows=@(@{label='main';title='TabPlayer Test';width=1440;height=900;minWidth=960;minHeight=600;additionalBrowserArgs='--remote-debugging-port=9223';dataDirectory=(Join-Path $testDirectory 'webview-profile')})}} | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $testConfiguration
 $previousTestFlag=$env:VITE_DESKTOP_TEST
 try {
     $env:VITE_DESKTOP_TEST='1'

@@ -78,28 +78,28 @@
     },
     "current_dispositions": {
       "implemented": 101,
-      "partial": 137,
-      "missing": 13,
+      "partial": 139,
+      "missing": 11,
       "unverified": 7
     },
-    "evidence_reviewed_total": 189,
+    "evidence_reviewed_total": 191,
     "evidence_reviewed": {
       "implemented": 59,
-      "partial": 127,
+      "partial": 129,
       "missing": 0,
       "unverified": 3
     },
-    "baseline_not_reaudited_total": 69,
+    "baseline_not_reaudited_total": 67,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 10,
-      "missing": 13,
+      "missing": 11,
       "unverified": 4
     },
-    "status_changed_total": 144,
+    "status_changed_total": 146,
     "transition_counts": {
       "missing -> implemented": 40,
-      "missing -> partial": 93,
+      "missing -> partial": 95,
       "partial -> implemented": 10,
       "unverified -> partial": 1
     }
@@ -2996,17 +2996,23 @@
         "nativeio",
         "app"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/launch.rs",
+        "src/workspace/WorkspaceApp.test.tsx",
+        "tests/desktop/parity-file-association.mjs"
+      ],
       "current_behavior_or_gap": "Open picker works; no reviewed argv/second-instance association flow or installer receipt for score types.",
       "acceptance_required": "Double-click associated file with app closed and already open.",
       "runtime_rechecked": false,
       "historical_status": "unverified",
-      "current_status": "unverified",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Open picker works; no reviewed argv/second-instance association flow or installer receipt for score types.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Windows installer associates .tabplayer and .gp/.gpx/.gp5/.gp4/.gp3 with TabPlayer. A file on the command line opens once the workspace is ready, and a second launch hands its file to the running app through tauri-plugin-single-instance and exits. Files wait natively through startup, dialogs, exports and busy Library work, then go through the dropped-file intake's checks. A Windows desktop-test launch with a file and a second launch both opened their scores, and the built NSIS installer registers each extension.",
+      "remaining_gap": "The installer was not installed, so no Explorer double-click was observed; it takes over .gp* defaults where the user made no choice; macOS open events and Linux associations are untested (THE-73); a launched file opens beside the startup blank.",
+      "current_evidence": [
+        "2026-11-06-gp8-file-association.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -7433,17 +7439,24 @@
         "settings",
         "player"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/audio/line_in.rs",
+        "src-tauri/tests/audio_line_in.rs",
+        "src/audio/LineInPanel.test.tsx",
+        "tests/desktop/parity-line-in.mjs"
+      ],
       "current_behavior_or_gap": "No audio input capture/monitor path or level meter.",
       "acceptance_required": "Monitor authorized live input through effects while score plays.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No audio input capture/monitor path or level meter.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Practice has a Line-In section: choose an input, a sound (factory preset, factory sound or My sounds) and a level, then Start monitoring. Native cpal capture goes through a lock-free ring and a drift-corrected resampler into the output callback, through its own amp and effects chain, and plays with the score whether it is playing, paused or stopped; the score is never changed. The panel shows the input level and the estimated latency. A Windows desktop-test build with a synthesized 48 kHz tone on a 192 kHz output heard it at -10.8 dBFS at 80% and -23.1 dBFS at 20%, about 35 ms estimated latency, with no underruns or skips across play, closing the tools and a new document.",
+      "remaining_gap": "Only a synthetic input was measured; no real interface or guitar, no loopback latency measurement, no ear check, and macOS and Linux are unrun. The latency shown is an estimate and grows with the device buffer. Input is mono from the loudest channel, with no channel choice or trim. The Line-In is monitoring only: it is not recorded, exported or sent through the master bus. On a loud score a limiter turns the guitar down rather than the score. No feedback protection beyond a headphones note.",
+      "current_evidence": [
+        "2026-11-07-gp8-line-in.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -7460,17 +7473,24 @@
       "source_evidence": [
         "settings"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/audio/line_in.rs",
+        "src-tauri/tests/audio_line_in.rs",
+        "src/audio/LineInPanel.test.tsx",
+        "tests/desktop/parity-line-in.mjs"
+      ],
       "current_behavior_or_gap": "No Line-In state or independent preset lock.",
       "acceptance_required": "Keep input sound fixed while current score track/sound changes.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No Line-In state or independent preset lock.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "The Line-In sound and level belong to the app, not to a score: they are remembered between sessions and never change with the selected track, its sound, the score or the document. Monitoring carries on while the Practice tools are closed and when another document is opened or created, and the Practice button shows a dot and says Line-In on. Native tests show a score install, a mix change, a loud master and a device rebuild leave the Line-In sound and level unchanged; the desktop driver kept the level and sound through play and a New document.",
+      "remaining_gap": "There is no explicit lock control as in GP8: the Line-In is always independent. Editing a saved sound does not reach a running Line-In until the sound is chosen again, and a deleted sound keeps playing as \"Last used sound\". Monitoring always starts off at launch.",
+      "current_evidence": [
+        "2026-11-07-gp8-line-in.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -10302,17 +10322,24 @@
         "player",
         "settings"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/tuner/mod.rs",
+        "src-tauri/src/tuner/detect.rs",
+        "src/audio/TunerPanel.test.tsx",
+        "tests/desktop/parity-tuner.mjs"
+      ],
       "current_behavior_or_gap": "No audio input/pitch detector/tuner display.",
       "acceptance_required": "Measure known single/chord pitches and cents using authorized audio input.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No audio input/pitch detector/tuner display.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Practice has a Tuner section: chromatic (nearest note and cents against a 415–466 Hz reference) and all strings of the selected track at once. Native cpal capture feeds YIN for single notes and an FFT peak search with harmonic rejection for strings; listening stops on Stop, collapse, unmount and quit. A Windows desktop-test build with a synthesized A2 nine cents sharp read +9.0 cents in both modes and heard only the A string.",
+      "remaining_gap": "Only synthetic signals were measured; no real instrument, input device or microphone permission prompt was observed, and macOS is unrun. Higher strings share partials with lower ones: a quiet E4 is heard in only 21 of 50 phase sets, and a B3 or E4 4 cents off can read as in tune (the panel says to finish them in chromatic mode); no strobe display; line-in monitoring (A28/A29) is separate.",
+      "current_evidence": [
+        "2026-11-06-gp8-tuner.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

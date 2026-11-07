@@ -18,6 +18,11 @@ import { WorkspaceLibrary } from './WorkspaceLibrary';
 import { initialDocumentView } from './view-state';
 import type { NativeSessionBridge } from './recovery-types';
 
+// Tests that import main get no launch files unless one asks for them.
+const launchTake=vi.hoisted(()=>vi.fn(async():Promise<{event:{dropToken:string,count:number}|null,waiting:boolean,dropped:number}>=>({event:null,waiting:false,dropped:0})));
+const launchSettle=vi.hoisted(()=>vi.fn(async(_dropToken:string,_keep?:boolean)=>false));
+vi.mock('./launch-files',()=>({takeLaunchFiles:launchTake,settleLaunchFiles:launchSettle}));
+
 const mocks=vi.hoisted(()=>({bridges:new Map<string,NativeBridge>(),audio:new Map<string,NativeAudioBridge>(),exports:new Map<string,ExportNativeBridge>(),props:[] as AppProps[],mounted:0,mounts:0,unmounts:0}));
 vi.mock('../bridge',()=>({createDocumentBridge:(id:string)=>{const bridge=mocks.bridges.get(id);if(!bridge)throw new Error('Missing addressed bridge');return bridge;}}));
 vi.mock('../audio/bridge',()=>({createDocumentAudioBridge:vi.fn((owner:{documentId:string;activationId:string})=>{const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};mocks.audio.set(owner.activationId,bridge);return bridge;})}));
@@ -244,21 +249,58 @@ it.each([false,true])('welcome suppression uses the actual restored-working-docu
   const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge();bridge.snapshot=vi.fn(async()=>({...librarySnapshot(),welcomeSeen:false}));const library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument});
   expect(library.getState().open).toBe(!restoredWorkingDocument);expect(bridge.change).not.toHaveBeenCalled();if(!restoredWorkingDocument){render(<WorkspaceApp workspace={w} library={library}/>);await waitFor(()=>expect(bridge.change).toHaveBeenCalledExactlyOnceWith(0,{kind:'welcomeSeen'}));act(()=>library.close());}library.dispose();
 });
+it('opens launch files over the idle first-run Library, closing it first',async()=>{
+  const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge();bridge.snapshot=vi.fn(async()=>({...librarySnapshot(),welcomeSeen:false}));const library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:false});
+  expect(library.getState()).toMatchObject({open:true,welcome:true});
+  const openDrop=vi.spyOn(w,'openDrop').mockResolvedValue({opened:1,issues:[]});
+  await act(async()=>{await library.openLaunched({dropToken:'launch',count:1});});
+  expect(library.getState()).toMatchObject({open:false,error:null});expect(openDrop).toHaveBeenCalledExactlyOnceWith('launch',1,bridge);
+  // Opening a document is not possible during another editor operation, so the files wait and nothing is consumed.
+  const release=w.beginEditorOperation(w.getState().active.documentId);expect(library.launchBlocked()).toBe(true);
+  let opened:boolean|undefined;await act(async()=>{opened=await library.openLaunched({dropToken:'later',count:1});});expect(opened).toBe(false);expect(openDrop).toHaveBeenCalledOnce();release();expect(library.launchBlocked()).toBe(false);
+  // A plain drop still refuses while the Library is open.
+  act(()=>library.show());await act(async()=>{await library.drop({dropToken:'drop',count:1});});expect(openDrop).toHaveBeenCalledOnce();expect(library.getState().error).toMatch(/Library operation/);
+  // Over an open Library, a pending document action still makes the files wait.
+  expect(library.launchBlocked()).toBe(false);vi.spyOn(w,'hasPendingDocumentActions').mockReturnValueOnce(true);expect(library.launchBlocked()).toBe(true);
+  library.dispose();
+});
 it('unavailable Library never prevents an existing workspace from rendering or using ordinary New',async()=>{
   const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge();bridge.snapshot=vi.fn(async()=>{throw new Error('Catalog corrupt.');});const library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:false});render(<WorkspaceApp workspace={w} library={library}/>);
   expect(screen.getByTestId('active-editor')).toBeInTheDocument();act(()=>library.show());expect(screen.getByRole('dialog')).toHaveTextContent('Catalog corrupt.');act(()=>library.close());await act(async()=>{await w.newDocument();});expect(w.getState().documents).toHaveLength(2);library.dispose();
 });
 
-it('main installs one Library/drop listener after session resolution, rejects startup drops and keeps its Library through failed destruction',async()=>{
+it('main installs one Library/drop listener after session resolution, rejects startup drops, opens launch files once ready and keeps its Library through failed destruction',async()=>{
   const f=fixture(),session=closeSession(f),workspace=await WorkspaceController.create(f.bridge),resolved=deferred<Awaited<ReturnType<NativeSessionBridge['resolve']>>>(),events=new Map<string,(event:{payload:unknown})=>void>(),unlisteners=new Map<string,ReturnType<typeof vi.fn>>();workspace.setSessionBridge(session);vi.mocked(session.resolve).mockReturnValueOnce(resolved.promise);
-  let close!:(event:{preventDefault():void})=>Promise<void>;const destroy=vi.fn().mockRejectedValueOnce(new Error('Destroy rejected.')).mockResolvedValue(undefined),rootRender=vi.fn(),library={refresh:vi.fn(async()=>{}),drop:vi.fn(async()=>{}),dispose:vi.fn()},create=vi.fn(async(..._args:unknown[])=>library);
+  let close!:(event:{preventDefault():void})=>Promise<void>;const destroy=vi.fn().mockRejectedValueOnce(new Error('Destroy rejected.')).mockResolvedValue(undefined),rootRender=vi.fn(),library={refresh:vi.fn(async()=>{}),drop:vi.fn(async()=>{}),openLaunched:vi.fn(async(_event:{dropToken:string,count:number})=>true),launchBlocked:vi.fn(()=>false),getState:()=>({open:false}),dispose:vi.fn()},create=vi.fn(async(..._args:unknown[])=>library),take=launchTake;take.mockClear();
   vi.resetModules();vi.doMock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:vi.fn(async(callback:typeof close)=>{close=callback;}),destroy})}));vi.doMock('@tauri-apps/api/event',()=>({listen:vi.fn(async(name:string,callback:(event:{payload:unknown})=>void)=>{expect(events.has(name)).toBe(false);events.set(name,callback);const unlisten=vi.fn();unlisteners.set(name,unlisten);return unlisten;})}));vi.doMock('react-dom/client',()=>({createRoot:()=>({render:rootRender})}));vi.doMock('./WorkspaceController',()=>({WorkspaceController:{create:vi.fn(async()=>workspace)}}));vi.doMock('./WorkspaceLibrary',()=>({WorkspaceLibrary:{create}}));vi.doMock('../bridge',()=>({nativeWorkspaceBridge:f.bridge,createDocumentBridge:(id:string)=>mocks.bridges.get(id)!}));
   const root=document.createElement('div');root.id='root';document.body.append(root);
   try{
     await import('../main');await waitFor(()=>expect(events.has('score-files-dropped')).toBe(true));events.get('score-files-dropped')!({payload:{dropToken:'startup',count:1}});expect(library.drop).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();expect(rootRender.mock.calls.at(-1)?.[0].props.children[1].props.children).toMatch(/not opened/i);
+    // Launch files wait natively until the workspace and Library are ready.
+    events.get('launch-files')!({payload:null});expect(take).not.toHaveBeenCalled();
     resolved.resolve({workspace:f.snapshot(),views:{},issues:[]});await waitFor(()=>expect(create).toHaveBeenCalledOnce());await waitFor(()=>expect(rootRender.mock.calls.at(-1)?.[0].props.library).toBe(library));expect(create.mock.calls[0][3]).toMatchObject({restoredWorkingDocument:false});
+    await waitFor(()=>expect(take).toHaveBeenCalledOnce());expect(library.openLaunched).not.toHaveBeenCalled();
     events.get('file-library-changed')!({payload:{revision:3,warning:null}});await waitFor(()=>expect(library.refresh).toHaveBeenCalledOnce());events.get('score-files-dropped')!({payload:{dropToken:'ready',count:2}});expect(library.drop).toHaveBeenCalledExactlyOnceWith({dropToken:'ready',count:2});
-    await close({preventDefault:vi.fn()});expect(library.dispose).not.toHaveBeenCalled();expect(session.resume).toHaveBeenCalledOnce();expect(unlisteners.get('score-files-dropped')).not.toHaveBeenCalled();expect(unlisteners.get('file-library-changed')).not.toHaveBeenCalled();events.get('score-files-dropped')!({payload:{dropToken:'resumed',count:1}});expect(library.drop).toHaveBeenLastCalledWith({dropToken:'resumed',count:1});expect(events.size).toBe(3);expect(create).toHaveBeenCalledOnce();
+    take.mockResolvedValueOnce({event:{dropToken:'launch',count:1},waiting:false,dropped:0});library.launchBlocked.mockReturnValueOnce(true);events.get('launch-files')!({payload:null});await Promise.resolve();expect(take).toHaveBeenCalledOnce();
+    // A busy Library leaves the files waiting natively; they are taken on the retry.
+    await waitFor(()=>expect(library.openLaunched).toHaveBeenCalledExactlyOnceWith({dropToken:'launch',count:1}));await waitFor(()=>expect(take).toHaveBeenCalledTimes(3));
+    // Every opened file is settled. One the intake never received waits again natively, and the next take waits until
+    // the settle has finished.
+    expect(launchSettle).toHaveBeenLastCalledWith('launch');
+    const settled=deferred<boolean>();launchSettle.mockClear();launchSettle.mockReturnValueOnce(settled.promise);take.mockClear();take.mockResolvedValueOnce({event:{dropToken:'refused',count:1},waiting:false,dropped:0}).mockResolvedValueOnce({event:{dropToken:'again',count:1},waiting:false,dropped:0});library.openLaunched.mockResolvedValueOnce(false);
+    events.get('launch-files')!({payload:null});await waitFor(()=>expect(launchSettle).toHaveBeenCalledExactlyOnceWith('refused'));
+    await new Promise(done=>setTimeout(done,700));expect(take).toHaveBeenCalledOnce();settled.resolve(true);
+    await waitFor(()=>expect(library.openLaunched).toHaveBeenLastCalledWith({dropToken:'again',count:1}));await waitFor(()=>expect(launchSettle).toHaveBeenLastCalledWith('again'));
+    expect(library.openLaunched.mock.calls.map(call=>call[0].dropToken)).toEqual(['launch','refused','again']);
+    // After an opened file the loop takes the next one until none waits.
+    await waitFor(()=>expect(take).toHaveBeenCalledTimes(3));
+    // A failed settle is reported and tried again; files refused for a full queue are reported.
+    take.mockClear();launchSettle.mockRejectedValueOnce(new Error('Settle failed.'));take.mockResolvedValueOnce({event:{dropToken:'lost',count:1},waiting:false,dropped:3});
+    events.get('launch-files')!({payload:null});await waitFor(()=>expect(launchSettle).toHaveBeenLastCalledWith('lost'));
+    await waitFor(()=>expect(rootRender.mock.calls.some(call=>String(call[0].props.session?.error??'').includes('Settle failed'))).toBe(true));
+    expect(rootRender.mock.calls.some(call=>String(call[0].props.session?.error??'').includes('3 scores'))).toBe(true);
+    await waitFor(()=>expect(take).toHaveBeenCalledTimes(2));
+    await close({preventDefault:vi.fn()});expect(library.dispose).not.toHaveBeenCalled();expect(session.resume).toHaveBeenCalledOnce();expect(unlisteners.get('score-files-dropped')).not.toHaveBeenCalled();expect(unlisteners.get('file-library-changed')).not.toHaveBeenCalled();events.get('score-files-dropped')!({payload:{dropToken:'resumed',count:1}});expect(library.drop).toHaveBeenLastCalledWith({dropToken:'resumed',count:1});expect(events.size).toBe(4);expect(create).toHaveBeenCalledOnce();
     await close({preventDefault:vi.fn()});expect(library.dispose).toHaveBeenCalledOnce();expect(unlisteners.get('score-files-dropped')).toHaveBeenCalledOnce();expect(unlisteners.get('file-library-changed')).toHaveBeenCalledOnce();
   }finally{resolved.resolve({workspace:f.snapshot(),views:{},issues:[]});root.remove();for(const path of ['./session-bridge','@tauri-apps/api/event','@tauri-apps/api/window','react-dom/client','./WorkspaceController','./WorkspaceLibrary','../bridge'])vi.doUnmock(path);vi.resetModules();}
 });

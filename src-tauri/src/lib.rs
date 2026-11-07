@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod audio;
+pub mod audio_input;
 pub mod backing_waveform;
 pub mod batch_convert;
 pub mod edit_types;
@@ -12,6 +13,8 @@ pub mod fs_identity;
 pub mod harmony;
 pub mod harmony_library;
 pub mod intake;
+pub mod launch;
+pub mod line_in;
 pub mod password_crypto;
 pub mod password_lock;
 pub mod project;
@@ -21,6 +24,7 @@ mod runtime;
 mod session;
 pub mod settings;
 pub mod style_library;
+pub mod tuner;
 pub mod tuning_library;
 pub mod workspace;
 
@@ -942,13 +946,130 @@ mod desktop_test_response_tests {
     }
 }
 
+/// Queues score files the operating system asked TabPlayer to open and tells the frontend, which takes them when its
+/// workspace is ready.
+fn queue_launch_files(app: &AppHandle, paths: Vec<PathBuf>) {
+    if paths.is_empty() {
+        return;
+    }
+    app.state::<launch::LaunchFiles>().push(paths);
+    let _ = app.emit("launch-files", ());
+}
+
+/// The answer to [`launch_files_take`]: a drop of one file the Library can open, or `waiting` while an export runs,
+/// the Library cannot admit work or a drag-and-drop is being opened, when the file is kept for later. `dropped` counts
+/// files refused since the last take because too many were waiting.
+#[derive(serde::Serialize)]
+struct LaunchTake {
+    event: Option<file_library::types::ScoreFilesDroppedEvent>,
+    waiting: bool,
+    dropped: usize,
+}
+
+/// Hands the next waiting launch file to the same checked intake as dropped files, as a drop batch of its own. The
+/// frontend asks only once its workspace and Library can open it, and settles it with [`launch_files_settle`].
+#[tauri::command]
+async fn launch_files_take(app: AppHandle) -> Result<LaunchTake, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let files = app.state::<launch::LaunchFiles>();
+        let (next, dropped) = files.take();
+        let Some(path) = next else {
+            return Ok(LaunchTake {
+                event: None,
+                waiting: false,
+                dropped,
+            });
+        };
+        let exporting = app
+            .state::<export::jobs::ExportJobs>()
+            .has_running()
+            .unwrap_or(true);
+        let captured = if exporting {
+            Err(vec![path.clone()])
+        } else {
+            app.state::<FileLibrary>()
+                .capture_launch(vec![path.clone()])
+        };
+        Ok(match captured {
+            Ok(event) => {
+                files.lend(event.drop_token.clone(), path);
+                LaunchTake {
+                    event: Some(event),
+                    waiting: false,
+                    dropped,
+                }
+            }
+            Err(_) => {
+                files.put_back(path);
+                LaunchTake {
+                    event: None,
+                    waiting: true,
+                    dropped,
+                }
+            }
+        })
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Settles launch batch `drop_token` once the frontend's open of it has finished, whatever the outcome. A file never
+/// handed to the intake (the open was refused, or its drop batch expired, was retired or was replaced first) waits
+/// again at the front, and its drop batch is ended if it is still the current one. Returns whether it went back.
+/// With `keep` false the file is let go instead, as when the Library is unavailable and says so.
+#[tauri::command]
+async fn launch_files_settle(
+    drop_token: String,
+    keep: bool,
+    app: AppHandle,
+) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let files = app.state::<launch::LaunchFiles>();
+        if !keep {
+            files.staged(&drop_token);
+        }
+        let returned = files.settle(&drop_token);
+        // A file let go or given back ends its drop batch, so the next file need not wait for it to expire.
+        if returned || !keep {
+            app.state::<FileLibrary>().drop_end(&drop_token);
+        }
+        returned
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
 pub fn run() {
     let builder = tauri::Builder::default()
+        // Must be the first plugin: a second launch hands its files to the running app and exits before anything else.
+        .plugin(tauri_plugin_single_instance::init(
+            |app, arguments, directory| {
+                let paths = launch::file_arguments(
+                    arguments.into_iter().skip(1).map(std::ffi::OsString::from),
+                    std::path::Path::new(&directory),
+                );
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+                queue_launch_files(app, paths);
+            },
+        ))
         .plugin(tauri_plugin_dialog::init())
+        .manage(launch::LaunchFiles::default())
         .manage(export::jobs::ExportJobs::default())
         .manage(batch_convert::BatchState::default())
         .manage(backing_waveform::BackingWaveformService::default())
+        .manage(tuner::TunerState::default())
+        .manage(line_in::LineInState::default())
         .setup(|app| {
+            // Files named on the command line, as an associated file's double-click passes them.
+            if let Ok(directory) = std::env::current_dir() {
+                queue_launch_files(
+                    app.handle(),
+                    launch::file_arguments(std::env::args_os().skip(1), &directory),
+                );
+            }
             // Every track resolves the user's cabinet responses from here, so it must be set before any plays.
             // A library that cannot be placed leaves the built-in cabinets playing, and is tried again when a command
             // first asks for it. It never stops the app starting.
@@ -1105,11 +1226,22 @@ pub fn run() {
         file_library_search,
         file_library_reveal,
         workspace_drop_stage,
+        launch_files_take,
+        launch_files_settle,
         batch_convert::batch_pick_folder,
         batch_convert::batch_scan,
         batch_convert::batch_read,
         batch_convert::batch_write,
-        batch_convert::batch_reset
+        batch_convert::batch_reset,
+        tuner::tuner_inputs,
+        tuner::tuner_start,
+        tuner::tuner_stop,
+        tuner::tuner_read,
+        line_in::line_in_inputs,
+        line_in::line_in_start,
+        line_in::line_in_stop,
+        line_in::line_in_set,
+        line_in::line_in_status
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1193,19 +1325,49 @@ pub fn run() {
         file_library_search,
         file_library_reveal,
         workspace_drop_stage,
+        launch_files_take,
+        launch_files_settle,
         batch_convert::batch_pick_folder,
         batch_convert::batch_scan,
         batch_convert::batch_read,
         batch_convert::batch_write,
         batch_convert::batch_reset,
+        tuner::tuner_inputs,
+        tuner::tuner_start,
+        tuner::tuner_stop,
+        tuner::tuner_read,
+        line_in::line_in_inputs,
+        line_in::line_in_start,
+        line_in::line_in_stop,
+        line_in::line_in_set,
+        line_in::line_in_status,
         desktop_test_io
     ]);
     builder
         .build(tauri::generate_context!())
         .expect("Could not start TabPlayer")
         .run(|app, event| {
+            // macOS opens an associated file with an event rather than a command-line argument.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Opened { urls } = &event {
+                queue_launch_files(
+                    app,
+                    urls.iter()
+                        .filter_map(|url| url.to_file_path().ok())
+                        .collect(),
+                );
+            }
             if matches!(event, tauri::RunEvent::Exit) {
                 clear_print_cache(app);
+                if let Some(tuner) = app.try_state::<tuner::TunerState>() {
+                    tuner.stop();
+                }
+                if let (Some(line_in), Some(audio)) = (
+                    app.try_state::<line_in::LineInState>(),
+                    app.try_state::<runtime::NativeAudio>(),
+                ) {
+                    line_in.stop(&audio.service);
+                }
             }
         });
 }

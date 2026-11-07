@@ -77,6 +77,8 @@ import { editAudition,readAuditionWhileEditing,tuningAudition,writeAuditionWhile
 import { musicClipSelection,scoreFromMusicClip } from './editor/clipboard-source';
 import type { ClipboardMode,PasteOptions } from './editor/clipboard-types';
 import { PracticePanel } from './audio/PracticePanel';
+import { TunerPanel } from './audio/TunerPanel';
+import { LineInPanel,useLineInRunning } from './audio/LineInPanel';
 import { EngravingPanel } from './engraving/EngravingPanel';
 import { PageLayoutPanel } from './engraving/PageLayoutPanel';
 import { BarWidthsPanel } from './engraving/BarWidthsPanel';
@@ -158,6 +160,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [dockMode,setDockMode]=useState<'overview'|'mixer'|'backing'>('overview'),[dockForced,setDockForced]=useState(false),[waveformOpened,setWaveformOpened]=useState(false);
   const shell=useRef<HTMLDivElement>(null),workspace=useRef<HTMLDivElement>(null),scorePane=useRef<HTMLElement>(null),commandBar=useRef<HTMLElement>(null);
   const inspectorPane=useRef<HTMLDivElement>(null),viewMenu=useRef<HTMLDetailsElement>(null),practiceMenu=useRef<HTMLDetailsElement>(null);
+  const lineInOn=useLineInRunning();
   const paneFocusIntent=useRef<InspectorTab|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
   const [workspaceHeight,setWorkspaceHeight]=useState(Infinity),[workspaceWidth,setWorkspaceWidth]=useState(Infinity),[clipboardFocus,setClipboardFocus]=useState(0);
   const narrow=viewport.width<1180,inspectorShown=inspectorVisible;
@@ -201,6 +204,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   },[harmonyOpen]);
   const digits=useRef({text:'',time:0});
   const target=repairSelection(state.score,selection);
+  const tunerStaff=state.score.tracks[target.track]?.staves[target.staff],tunerTuning=useMemo(()=>tunerStaff&&!tunerStaff.isPercussion?[...tunerStaff.tuning]:[],[tunerStaff]);
   useEffect(()=>{onViewChange({target,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,...(scoreDisplay?{scoreDisplay}:{})});},[target.track,target.staff,target.bar,target.voice,target.beat,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,scoreDisplay,onViewChange]);
   const trackIds=useMemo(()=>state.score.tracks.map(trackIdentity),[state.score]);
   const trackNames=useMemo(()=>Object.fromEntries(state.score.tracks.map(track=>[trackIdentity(track),track.name||`Track ${track.index+1}`])),[state.score]);
@@ -555,7 +559,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       else copyMusic(event.shiftKey?'multiTrack':'singleTrack',key==='x');
     }
     else if((event.ctrlKey||event.metaKey)&&key==='a'){editorSelection(selectionForTrack(state.score,target.track));event.preventDefault();}
-    else if(event.key==='Escape'){editorSelection(null);event.preventDefault();}
+    else if(event.key==='Escape'){
+      // The Practice popover's body is a portal, so its keys reach here rather than the popover's own handler.
+      const menu=practiceMenu.current;
+      if(menu?.open&&event.target instanceof Node&&menu.querySelector('.gp-practice-body')?.contains(event.target)){menu.open=false;menu.querySelector('summary')?.focus();event.preventDefault();return;}
+      editorSelection(null);event.preventDefault();
+    }
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
     <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><nav className="gp-menus" aria-label="File and history"><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
@@ -645,7 +654,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <div className="gp-toolbar-display"><TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={display} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError}/></div>
       {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection} display={transportDisplay}/>}
       <div className="gp-toolbar-right">
-        <details ref={practiceMenu} className="gp-practice" onToggle={event=>{if(event.currentTarget.open)event.currentTarget.querySelectorAll<HTMLDetailsElement>('.gp-practice-body details:not([open])').forEach(inner=>{inner.open=true;});}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={t('toolbar.practice')} aria-label={t('toolbar.practice')}><PracticeGlyph/></summary><div ref={setPracticeHost} className="gp-practice-body"/></details>
+        <details ref={practiceMenu} className="gp-practice" onToggle={event=>{if(event.currentTarget.open)event.currentTarget.querySelectorAll<HTMLDetailsElement>('.gp-practice-body details:not([open])').forEach(inner=>{inner.open=true;});}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} aria-label={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} data-line-in={lineInOn||undefined}><PracticeGlyph/>{lineInOn&&<span className="line-in-badge" aria-hidden="true"/>}</summary><div ref={setPracticeHost} className="gp-practice-body"/></details>
         <Segmented className="view-switch" label={t('view.view_label')} value={view} onChange={setView} options={[{value:'score',label:<><ScoreGlyph/><span className="tp-sr">{t('view.score')}</span></>,title:t('view.score')},{value:'sound',label:<><AmpGlyph/><span className="tp-sr">{t('view.sound')}</span></>,title:t('view.sound')},{value:'mixer',label:<><MixerGlyph/><span className="tp-sr">{t('view.mixer')}</span></>,title:t('view.mixer')}]}/>
         <button type="button" className="gp-instrument" aria-pressed={instrumentShown} title={t('toolbar.instrument')} aria-label={instrumentShown?t('toolbar.hide_instrument'):t('toolbar.show_instrument')} onClick={()=>instrumentShown?setInstrumentVisible(false):chooseDock('instrument')}><FretboardGlyph/></button>
       </div>
@@ -675,7 +684,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-selection" aria-labelledby="inspector-tab-selection" hidden={inspectorTab!=='selection'}>
       <EditorPanel documentEpoch={state.documentEpoch} songHost={songHost} practiceHost={practiceHost} paletteHost={paletteVisible&&view==='score'?paletteHost:null} measureRequest={measureRequest} lyricsRequest={lyricsRequest} onOpenLyrics={()=>{setContextScope('staff');setInspectorVisible(true);setInspectorTab('selection');setLyricsRequest(tick=>tick+1);}} onOpenMeasure={bar=>displayActions.current.measure(bar)} contextScope={contextScope} onContextScopeChange={setContextScope} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
-        practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
+        practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>} tunerTool={<><TunerPanel tuning={tunerTuning}/><LineInPanel/></>}
         presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit}/><BarWidthsPanel value={state.settings.engraving} design={barDesign} onDesign={setBarDesign} busy={editBusy} honoured={barWidthsHonoured} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>} presentationViewTools={<ViewDefaultsPanel current={{zoom,trackView,scoreDisplay}} load={currentViewDefaults} onSave={writeViewDefaults}/>}>
         <NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} preview={command=>previewEdit(controller.getState().snapshot.project,command).score}/>
         <div ref={clipboardSection}><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={controlsBusy} locked={editLocked} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic} diagramsDefault={inputPrefs.pasteDiagrams}/></div>

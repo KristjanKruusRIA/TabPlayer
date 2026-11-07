@@ -534,6 +534,186 @@ fn engraving_system_gaps_survive_history_undo_redo_save_and_reopen_beside_an_old
     assert_eq!(reopened_old.snapshot().project, old);
 }
 
+fn with_field(field: &str, entries: Value) -> Value {
+    let mut value = engraving_command();
+    value["engraving"][field] = entries;
+    value
+}
+
+#[test]
+fn engraving_staff_groups_are_optional_flat_bounded_and_round_trip_only_when_set() {
+    let plain = engraving_command();
+    assert!(plain["engraving"].get("staffGroups").is_none());
+    assert_eq!(serde_json::to_value(accepted(&plain)).unwrap(), plain);
+    let groups = |entries: Value| with_field("staffGroups", entries);
+    let one = groups(json!([{"trackIds": ["a", "b"], "kind": "brace"}]));
+    assert_eq!(serde_json::to_value(accepted(&one)).unwrap(), one);
+    let two = groups(json!([
+        {"trackIds": ["a", "b", "c"], "kind": "bracket"},
+        {"trackIds": ["d", "e"], "kind": "brace"}
+    ]));
+    assert_eq!(serde_json::to_value(accepted(&two)).unwrap(), two);
+    // Ids are never trimmed, so a blank one is a valid identity.
+    accepted(&groups(
+        json!([{"trackIds": [" ", "b"], "kind": "bracket"}]),
+    ));
+    // An explicit empty list is accepted (as the TypeScript validator does) and written back without the field.
+    assert_eq!(
+        serde_json::to_value(accepted(&groups(json!([])))).unwrap(),
+        plain
+    );
+    let ids = |count: usize| -> Vec<String> { (0..count).map(|i| format!("t{i}")).collect() };
+    let pairs = |count: usize| {
+        Value::Array(
+            (0..count)
+                .map(|i| json!({"trackIds": [format!("a{i}"), format!("b{i}")], "kind": "brace"}))
+                .collect(),
+        )
+    };
+    accepted(&groups(json!([{"trackIds": ids(64), "kind": "bracket"}])));
+    accepted(&groups(pairs(64)));
+    accepted(&groups(
+        json!([{"trackIds": ["a".repeat(65_536), "b"], "kind": "brace"}]),
+    ));
+    for invalid in [
+        json!([{"trackIds": ["a"], "kind": "brace"}]),
+        json!([{"trackIds": [], "kind": "brace"}]),
+        json!([{"trackIds": ["a", "a"], "kind": "brace"}]),
+        json!([{"trackIds": ["a", "b"], "kind": "brace"}, {"trackIds": ["b", "c"], "kind": "bracket"}]),
+        json!([{"trackIds": ["", "b"], "kind": "brace"}]),
+        json!([{"trackIds": ["a".repeat(65_537), "b"], "kind": "brace"}]),
+        // 32,769 two-byte characters are 65,538 bytes but only 32,769 characters.
+        json!([{"trackIds": ["\u{e9}".repeat(32_769), "b"], "kind": "brace"}]),
+        pairs(65),
+        json!([{"trackIds": ids(65), "kind": "bracket"}]),
+        json!([{"trackIds": ["a", "b"], "kind": "curly"}]),
+        json!([{"trackIds": ["a", "b"]}]),
+        json!([{"kind": "brace"}]),
+        json!([{"trackIds": ["a", "b"], "kind": "brace", "extra": true}]),
+        json!({"trackIds": ["a", "b"], "kind": "brace"}),
+        json!([{"trackIds": [1, 2], "kind": "brace"}]),
+        json!(null),
+    ] {
+        rejected(&groups(invalid));
+    }
+}
+
+#[test]
+fn engraving_staff_gaps_are_optional_distinct_bounded_and_round_trip_only_when_set() {
+    let plain = engraving_command();
+    assert!(plain["engraving"].get("staffGaps").is_none());
+    let gaps = |entries: Value| with_field("staffGaps", entries);
+    let set = gaps(json!([
+        {"trackId": "a", "scale": 1.5},
+        {"trackId": "b", "scale": 0.25},
+        {"trackId": "c", "scale": 4.0},
+        {"trackId": " ", "scale": 1.0}
+    ]));
+    assert_eq!(serde_json::to_value(accepted(&set)).unwrap(), set);
+    // An explicit empty list is accepted and written back without the field.
+    assert_eq!(
+        serde_json::to_value(accepted(&gaps(json!([])))).unwrap(),
+        plain
+    );
+    for invalid in [
+        json!([{"trackId": "a", "scale": 0.24}]),
+        json!([{"trackId": "a", "scale": 4.01}]),
+        json!([{"trackId": "a", "scale": 0.0}]),
+        json!([{"trackId": "a", "scale": "2"}]),
+        json!([{"trackId": "a", "scale": null}]),
+        json!([{"trackId": "a", "scale": 2.0}, {"trackId": "a", "scale": 1.5}]),
+        json!([{"trackId": "", "scale": 2.0}]),
+        json!([{"trackId": "a".repeat(65_537), "scale": 2.0}]),
+        json!([{"trackId": "a"}]),
+        json!([{"scale": 2.0}]),
+        json!([{"trackId": "a", "scale": 2.0, "extra": true}]),
+        json!({"trackId": "a", "scale": 2.0}),
+        json!(null),
+    ] {
+        rejected(&gaps(invalid));
+    }
+    accepted(&gaps(
+        json!([{"trackId": "a".repeat(65_536), "scale": 2.0}]),
+    ));
+    let many = |count: usize| {
+        Value::Array(
+            (0..count)
+                .map(|i| json!({"trackId": format!("t{i}"), "scale": 2.0}))
+                .collect(),
+        )
+    };
+    accepted(&gaps(many(256)));
+    rejected(&gaps(many(257)));
+    let mut non_finite = EngravingOverrides::default();
+    for scale in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        non_finite.staff_gaps = vec![tabplayer_lib::engraving::StaffGap {
+            track_id: "a".into(),
+            scale,
+        }];
+        assert!(non_finite.validate().is_err());
+    }
+}
+
+#[test]
+fn engraving_staff_layout_survives_history_undo_redo_save_and_reopen_beside_an_old_log() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let last_layout = |project: Value| {
+        project["edits"]
+            .as_array()
+            .and_then(|edits| edits.last().cloned())
+            .map(|edit| {
+                (
+                    edit["engraving"].get("staffGroups").cloned(),
+                    edit["engraving"].get("staffGaps").cloned(),
+                )
+            })
+    };
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    let old = session.snapshot().project;
+    let old_stored = serde_json::to_value(session.stored_project()).unwrap();
+    assert_eq!(
+        last_layout(serde_json::to_value(&old).unwrap()),
+        Some((None, None))
+    );
+    let mut layout = engraving_command();
+    layout["engraving"]["staffGroups"] = json!([{"trackIds": ["a", "b"], "kind": "brace"}]);
+    layout["engraving"]["staffGaps"] = json!([{"trackId": "a", "scale": 1.7}]);
+    session.apply_edit(accepted(&layout)).unwrap();
+    let laid_out = session.snapshot().project;
+    assert_eq!(laid_out.edits.len(), 2);
+    let expected = Some((
+        Some(json!([{"trackIds": ["a", "b"], "kind": "brace"}])),
+        Some(json!([{"trackId": "a", "scale": 1.7}])),
+    ));
+    assert_eq!(
+        last_layout(serde_json::to_value(&laid_out).unwrap()),
+        expected
+    );
+    // Resetting is one more edit that leaves both fields out.
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    assert_eq!(session.snapshot().project.edits.len(), 3);
+    assert_eq!(
+        last_layout(serde_json::to_value(&session.snapshot().project).unwrap()),
+        Some((None, None))
+    );
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project, laid_out);
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project, old);
+    session.redo().unwrap();
+    assert_eq!(session.snapshot().project, laid_out);
+    let stored = serde_json::to_value(session.stored_project()).unwrap();
+    let reopened = ProjectSession::new(serde_json::from_value(stored).unwrap(), None).unwrap();
+    assert_eq!(reopened.snapshot().project, laid_out);
+    assert_eq!(
+        last_layout(serde_json::to_value(&reopened.snapshot().project).unwrap()),
+        expected
+    );
+    // The old log alone still opens.
+    let reopened_old =
+        ProjectSession::new(serde_json::from_value(old_stored).unwrap(), None).unwrap();
+    assert_eq!(reopened_old.snapshot().project, old);
+}
 #[test]
 fn engraving_system_spacing_requires_null_or_a_bounded_factor() {
     for valid in [json!(null), json!(0.25), json!(4.0)] {

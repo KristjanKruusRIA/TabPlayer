@@ -154,6 +154,16 @@ mod tests {
         std::fs::write(path, bytes).unwrap();
     }
     #[test]
+    fn converts_composed_systems_with_defs_use_and_clip_paths() {
+        let mut p = page();
+        p.svg = "<svg xmlns='http://www.w3.org/2000/svg' width='210mm' height='297mm' viewBox='0 0 794 1123'><defs><g id=\"export-s0-content\"><rect x=\"30\" y=\"120\" width=\"20\" height=\"20\"/><text x=\"100\" y=\"250\" font-family=\"Bravura\" font-size=\"34\">&#57424;</text></g><clipPath id=\"export-s0-c0\"><rect x=\"0\" y=\"-1\" width=\"794\" height=\"181\"/></clipPath><clipPath id=\"export-s0-c1\"><rect x=\"0\" y=\"180\" width=\"794\" height=\"1000\"/></clipPath></defs><g transform=\"translate(0 0)\"><use href=\"#export-s0-content\" clip-path=\"url(#export-s0-c0)\"/></g><g transform=\"translate(0 40)\"><use href=\"#export-s0-content\" clip-path=\"url(#export-s0-c1)\"/></g><g data-tp-accolade=\"group-brace\" transform=\"translate(10 260)\" class=\"at\" ><text style=\"font-size: 300%; stroke:none\">&#57344;</text></g></svg>".into();
+        notation_tree(&p, &export_options(), "PDF").unwrap();
+        let bytes = convert_pages(&[p], &AtomicBool::new(false)).unwrap();
+        let content = String::from_utf8_lossy(&bytes);
+        assert!(content.starts_with("%PDF-"));
+        assert!(content.contains("/FontFile"));
+    }
+    #[test]
     fn exports_exact_mixed_unicode_title_with_vector_notation() {
         let mut p = page();
         p.svg = p.svg.replace(

@@ -2,8 +2,9 @@
 import { describe,expect,it } from 'vitest';
 import { Settings } from '@coderline/alphatab';
 import { accoladeMetrics,accoladeSvg,BRACE_MAX_X_SCALE,systemAccoladeMarks,type AccoladePlan } from './accolades';
-import { composeSystem,composeSystemSvg,shiftTotal,shiftY,staffLeftOf,staffShift,systemTrackBands,TRACK_STAFF_PADDING,unshiftY } from './staff-layout';
-import type { ScreenSystem } from './screen-pages';
+import { composeEngravedSystems,composeSystem,composeSystemSvg,shiftTotal,shiftY,staffLeftOf,staffShift,systemTrackBands,TRACK_STAFF_PADDING,unshiftY } from './staff-layout';
+import type { ScreenBounds,ScreenSystem } from './screen-pages';
+import type { SvgSystem } from '../export/types';
 
 type Row={track:number;staff:number;y:number;h:number};
 /** One master bar whose BarBounds carry the staff and track indices; the staff's left edge is x = 60. */
@@ -215,5 +216,34 @@ describe('accolade marks',()=>{
     const svg='<svg width="500" height="400"><text>x</text></svg>';
     const out=composeSystem({svg,id:'s',left:0,top:0,width:500,height:400,system,plan:null,gaps:new Map(),metrics});
     expect(out.svg).toBe(svg);expect(out.shift).toBeNull();expect(out.height).toBe(400);
+  });
+});
+
+describe('composeEngravedSystems',()=>{
+  const indexed=(index:number,rows:Row[])=>{const sys=fakeSystem(rows) as unknown as {bars:Array<{index:number}>};sys.bars[0].index=index;return sys as unknown as ScreenSystem;};
+  const rows:Row[]=[{track:0,staff:0,y:100,h:60},{track:1,staff:0,y:200,h:40}];
+  const bounds={staffSystems:[indexed(0,rows),indexed(4,rows)]} as unknown as ScreenBounds;
+  const chunk=(firstBar:number|undefined):SvgSystem=>({svg:'<svg width="500" height="400"><text>x</text></svg>',width:500,height:400,...firstBar===undefined?{}:{firstBar,lastBar:firstBar,top:0,left:0}});
+  it('ids systems by first bar and leaves title chunks alone',()=>{
+    const title=chunk(undefined),input=[title,chunk(0),chunk(4)];
+    const out=composeEngravedSystems(input,bounds,{plan:null,gaps:new Map([[0,2]]),metrics,idPrefix:'export'});
+    expect(out).not.toBe(input);expect(out[0]).toBe(title);
+    expect(out[1].svg).toContain('id="export-s0-content"');expect(out[2].svg).toContain('id="export-s4-content"');
+    expect(out[1].svg).not.toContain('export-s4');expect(out[2].svg).not.toContain('export-s0');
+    expect(out[1].height).toBeGreaterThan(400);expect(out[2].height).toBe(out[1].height);
+    expect(input[1].height).toBe(400);expect(input[1].svg).not.toContain('<defs>'); // the input chunks are not changed
+  });
+  it('returns the input array when there is no plan and no gap, or a gap that moves nothing',()=>{
+    const input=[chunk(undefined),chunk(0),chunk(4)];
+    expect(composeEngravedSystems(input,bounds,{plan:null,gaps:new Map(),metrics,idPrefix:'export'})).toBe(input);
+    expect(composeEngravedSystems(input,bounds,{plan:null,gaps:new Map([[1,3],[7,2]]),metrics,idPrefix:'export'})).toBe(input); // last track and absent track
+  });
+  it('draws the marks of a plan in chunk coordinates and keeps the height without a gap',()=>{
+    const plan:AccoladePlan={groups:[{index:0,kind:'bracket',tracks:[0,1]}],nativeMode:1,singleStaffBrackets:false,braceTracks:new Set<number>(),inner:0,outer:metrics.bracketThickness/metrics.scale,reserve:0};
+    const [out]=composeEngravedSystems([chunk(0)],bounds,{plan,gaps:new Map(),metrics,idPrefix:'export'});
+    expect(out.svg).toContain('data-tp-accolade="group-bracket"');expect(out.svg).not.toContain('<defs>');expect(out.height).toBe(400);
+  });
+  it('refuses a system chunk that has no staff bounds',()=>{
+    expect(()=>composeEngravedSystems([chunk(8)],bounds,{plan:null,gaps:new Map([[0,2]]),metrics,idPrefix:'export'})).toThrow(/staff bounds/);
   });
 });

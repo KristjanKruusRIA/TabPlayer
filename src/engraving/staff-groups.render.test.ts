@@ -107,8 +107,9 @@ const multiRestScore=()=>{
 const multiRests=()=>{const e=defaultEngraving();e.stylesheet.multiRests='on';return e;};
 it('composes staff gaps and groups when a multi-bar rest ends a system',()=>{
   const {score,ids}=multiRestScore(),plain=exportWithBounds({engraving:multiRests(),score,ids});
-  // Bars 6 and 7 close the third system as one rest, so that system's chunk ends past the bar its bounds end on.
-  expect(plain.systemHeights.length).toBeGreaterThan(2);
+  // Bars 6 to 11 are one rest and the third system covers bars 4 to 11, so its chunk ends past the bar its bounds end on. Without multi-rests the same score has five systems.
+  expect(plain.systemHeights).toHaveLength(3);
+  expect(exportWithBounds({engraving:defaultEngraving(),score,ids}).systemHeights).toHaveLength(5);
   const gapped=exportWithBounds({engraving:withStaffGaps(multiRests(),[{trackId:'base/0',scale:2}]),score,ids});
   const measured=plain.bounds.map(b=>b.pianoTop-b.guitarBottom);
   gapped.systemHeights.forEach((height,i)=>expect(height-plain.systemHeights[i]).toBeCloseTo(measured[i],0));

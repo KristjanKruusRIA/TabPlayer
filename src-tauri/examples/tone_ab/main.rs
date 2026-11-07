@@ -6,6 +6,7 @@
 //!   cargo run --release --example tone_ab -- clean <directory>  writes every clean sound's raw PCM, to compare bytes
 //!   cargo run --release --example tone_ab -- bench              times a heavy sound on one track
 //!   cargo run --release --example tone_ab -- ir-bench           the cost of loaded cabinet responses; synthesizes its own
+//!   cargo run --release --example tone_ab -- nam-bench <file>   the cost of one NAM capture, in microseconds per sample
 //!   cargo run --release --example tone_ab -- input              reports the levels the samples reach the chain at
 //!   cargo run --release --example tone_ab -- measure            the bench figures of each driven sound
 //!   cargo run --release --example tone_ab -- levels             every factory sound's loudness on the riff
@@ -811,6 +812,34 @@ fn ir_bench() {
         );
     }
 }
+/// Cost of one NAM capture through the inference engine alone, after prewarm, on a quiet riff-like tone.
+fn nam_bench(path: &str) {
+    use tabplayer_lib::audio::nam::{NamModel, NamState, parse_nam};
+    let bytes = std::fs::read(path).unwrap();
+    let file = parse_nam(&bytes).unwrap();
+    let model = NamModel::build(&file);
+    let mut state = NamState::new(&model);
+    state.prewarm(&model);
+    let samples = RATE as usize * 10;
+    let input: Vec<f32> = (0..samples)
+        .map(|i| 0.3 * (i as f32 * 0.0287).sin() * (i as f32 * 0.00031).sin())
+        .collect();
+    let mut best = f64::INFINITY;
+    let mut guard = 0.0f32;
+    for _ in 0..5 {
+        let started = Instant::now();
+        for &x in &input {
+            guard += state.process(&model, x);
+        }
+        best = best.min(started.elapsed().as_secs_f64());
+    }
+    let per_sample = best / samples as f64 * 1e6;
+    println!(
+        "{path}: {per_sample:.3} us/sample, {:.1}x real time at {} Hz (check {guard:.3})",
+        samples as f64 / RATE as f64 / best,
+        model.model_rate()
+    );
+}
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.iter().map(String::as_str).collect::<Vec<_>>()[..] {
@@ -821,11 +850,12 @@ fn main() {
         ["bench"] => bench(),
         ["mix-bench"] => mix_bench(),
         ["ir-bench"] => ir_bench(),
+        ["nam-bench", path] => nam_bench(path),
         ["input"] => input(),
         ["measure"] => measure_all(),
         ["levels"] => levels(),
         _ => eprintln!(
-            "usage: tone_ab render <tag> | ir | clean <folder> | dry <folder> | bench | mix-bench | ir-bench | input | measure | levels"
+            "usage: tone_ab render <tag> | ir | clean <folder> | dry <folder> | bench | mix-bench | ir-bench | nam-bench <file> | input | measure | levels"
         ),
     }
 }

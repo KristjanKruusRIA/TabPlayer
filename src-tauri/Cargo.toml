@@ -52,6 +52,7 @@ tauri-build = { version = "2", features = [] }
 tempfile = "3"
 midly = "=0.5.3"
 hound = "=3.5.1"
+nam-rs = "=0.4.0"
 
 [patch.crates-io]
 usvg = { path = "../vendor/usvg" }

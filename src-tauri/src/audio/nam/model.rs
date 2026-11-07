@@ -9,6 +9,7 @@
 use super::file::{Activation, NamFile, NamSpec};
 use super::lstm::{LstmModel, LstmState};
 use super::wavenet::{WaveNetModel, WaveNetState};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 enum Kind {
     WaveNet(WaveNetModel),
@@ -16,7 +17,11 @@ enum Kind {
 }
 
 /// Weights laid out per layer for the inner loops. Share it as `Arc<NamModel>`.
+static NEXT_MODEL_ID: AtomicU64 = AtomicU64::new(1);
+
 pub struct NamModel {
+    /// Unique per `build`, so a state can tell which model made it.
+    id: u64,
     kind: Kind,
     model_rate: u32,
     receptive_field: usize,
@@ -39,6 +44,7 @@ impl NamModel {
             ),
         };
         NamModel {
+            id: NEXT_MODEL_ID.fetch_add(1, Ordering::Relaxed),
             kind,
             model_rate: file.model_rate,
             receptive_field: file.receptive_field,
@@ -68,6 +74,7 @@ enum StateKind {
 
 /// Ring buffers and scratch for one stream through one [`NamModel`].
 pub struct NamState {
+    model_id: u64,
     kind: StateKind,
 }
 
@@ -77,30 +84,36 @@ impl NamState {
             Kind::WaveNet(m) => StateKind::WaveNet(WaveNetState::new(m)),
             Kind::Lstm(m) => StateKind::Lstm(LstmState::new(m)),
         };
-        NamState { kind }
+        NamState {
+            model_id: model.id,
+            kind,
+        }
     }
 
-    /// One sample in, one sample out. A state made for a different model
-    /// returns silence (and trips a debug assertion).
+    /// One sample in, one sample out. A state made by a different `build`
+    /// (even of the same file) returns silence and is otherwise untouched.
     #[inline]
     pub fn process(&mut self, model: &NamModel, x: f32) -> f32 {
+        if self.model_id != model.id {
+            return 0.0;
+        }
         match (&model.kind, &mut self.kind) {
             (Kind::WaveNet(m), StateKind::WaveNet(s)) => s.process(m, x),
             (Kind::Lstm(m), StateKind::Lstm(s)) => s.process(m, x),
-            _ => {
-                debug_assert!(false, "NamState used with a different NamModel");
-                0.0
-            }
+            _ => 0.0,
         }
     }
 
     /// Copies another state of the same model into this one, without
-    /// allocating. A state of a different shape is left unchanged.
+    /// allocating. A state made for a different model is left unchanged.
     pub fn snapshot_from(&mut self, other: &NamState) {
+        if self.model_id != other.model_id {
+            return;
+        }
         match (&mut self.kind, &other.kind) {
             (StateKind::WaveNet(a), StateKind::WaveNet(b)) => a.copy_from(b),
             (StateKind::Lstm(a), StateKind::Lstm(b)) => a.copy_from(b),
-            _ => debug_assert!(false, "snapshot_from between different model kinds"),
+            _ => {}
         }
     }
 

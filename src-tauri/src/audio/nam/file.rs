@@ -74,13 +74,27 @@ pub enum NamSpec {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamFile {
-    pub spec: NamSpec,
-    pub weights: Vec<f32>,
-    pub model_rate: u32,
+    pub(crate) spec: NamSpec,
+    pub(crate) weights: Vec<f32>,
+    pub(crate) model_rate: u32,
     /// WaveNet: `1 + sum(dilation * (kernel_size - 1))` over every layer.
     /// LSTM: 0 (the state is carried, so there is no fixed window; the
     /// engine prewarms for half a second of the model rate instead).
-    pub receptive_field: usize,
+    pub(crate) receptive_field: usize,
+}
+
+impl NamFile {
+    pub fn spec(&self) -> &NamSpec {
+        &self.spec
+    }
+
+    pub fn model_rate(&self) -> u32 {
+        self.model_rate
+    }
+
+    pub fn receptive_field(&self) -> usize {
+        self.receptive_field
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

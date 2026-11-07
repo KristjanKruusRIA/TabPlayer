@@ -1,4 +1,4 @@
-//! Inference engine tests. Included from `tests.rs`, so they share its fixtures.
+//! Inference engine tests. Declared in `mod.rs` beside `tests.rs`; it carries its own copies of the fixtures.
 
 use super::*;
 use serde_json::json;
@@ -237,6 +237,19 @@ fn parse_expected_count(v: &serde_json::Value) -> usize {
     }
 }
 
+fn random_lstm_json(num_layers: usize, hidden: usize) -> serde_json::Value {
+    let mut v = json!({
+        "version": "0.5.4",
+        "architecture": "LSTM",
+        "config": {"num_layers": num_layers, "input_size": 1, "hidden_size": hidden},
+        "weights": [],
+        "sample_rate": 48000
+    });
+    let count = parse_expected_count(&v);
+    v["weights"] = json!(lcg_weights(count, 11));
+    v
+}
+
 #[test]
 fn random_weight_models_match_reference() {
     let cases = [
@@ -254,6 +267,10 @@ fn random_weight_models_match_reference() {
         // Gated layers, sigmoid on the bottom half.
         random_model_json([6, 4], 4, [&[1, 3, 9], &[2, 6]], true, "Tanh"),
         random_model_json([5, 3], 3, [&[1, 5], &[4, 1, 2]], false, "ReLU"),
+        random_model_json([4, 3], 3, [&[1, 2, 4], &[8, 1]], false, "Sigmoid"),
+        // Several LSTM layers, so the layer-to-layer handoff is compared.
+        random_lstm_json(3, 8),
+        random_lstm_json(1, 5),
     ];
     for (n, v) in cases.iter().enumerate() {
         let bytes = serde_json::to_vec(v).unwrap();
@@ -281,4 +298,51 @@ fn random_weight_models_match_reference() {
         );
         assert!(worst <= 1e-5, "case {n}: {worst}");
     }
+}
+
+fn built(v: &serde_json::Value) -> NamModel {
+    NamModel::build(&parse_nam(&serde_json::to_vec(v).unwrap()).unwrap())
+}
+
+#[test]
+fn a_state_from_another_model_is_inert() {
+    let small = built(&random_model_json([2, 2], 2, [&[1], &[1]], false, "Tanh"));
+    let big = built(&random_model_json(
+        [6, 4],
+        4,
+        [&[1, 3, 9], &[2, 6]],
+        true,
+        "Tanh",
+    ));
+    let lstm_a = built(&random_lstm_json(1, 4));
+    let lstm_b = built(&random_lstm_json(3, 8));
+    for (a, b) in [
+        (&small, &big),
+        (&big, &small),
+        (&lstm_a, &lstm_b),
+        (&lstm_b, &lstm_a),
+    ] {
+        let mut wrong = NamState::new(a);
+        let mut own = NamState::new(b);
+        // Run both so the states are not all zeros.
+        for x in chirp(50) {
+            own.process(b, x);
+        }
+        assert_eq!(wrong.process(b, 0.3), 0.0);
+        // A snapshot from a state of another model changes nothing.
+        let mut fresh = NamState::new(a);
+        let mut reference = NamState::new(a);
+        fresh.snapshot_from(&own);
+        for x in chirp(50) {
+            assert_eq!(fresh.process(a, x), reference.process(a, x));
+        }
+    }
+}
+
+#[test]
+fn two_builds_of_one_file_do_not_share_an_identity() {
+    let v = random_lstm_json(1, 4);
+    let (a, b) = (built(&v), built(&v));
+    let mut state = NamState::new(&a);
+    assert_eq!(state.process(&b, 0.3), 0.0);
 }

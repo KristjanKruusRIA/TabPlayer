@@ -361,5 +361,6 @@ it('a protected file opens through a password dialog that survives a wrong passw
   fireEvent.change(field,{target:{value:'right password'}});fireEvent.click(screen.getByRole('button',{name:'Open'}));
   expect(await opening).toBe(true);
   await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
-  expect(workspace.getState().documents).toHaveLength(2);
+  expect(workspace.getState().documents).toHaveLength(1);
+  expect(workspace.getState().documents[0].id).not.toBe(f.first);
 });

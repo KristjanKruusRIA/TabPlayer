@@ -324,12 +324,12 @@ export const de: MessageCatalog = {
   'help.shortcut_select_track': 'Aktuelle Spur auswählen',
   'help.shortcut_clipboard': 'Musik kopieren / ausschneiden / einfügen. Shift wendet es auf alle ausgewählten Spuren an; Shift + Einfügen öffnet Einfügeoptionen.',
   'help.shortcut_clear': 'Musikauswahl aufheben',
-  'help.workflow_description': 'Der blaue Rahmen markiert Ihr Bearbeitungsziel. Grün folgt der Wiedergabe oder einer Auswahl. Verwenden Sie Bearbeiten, Üben und Darstellung im Inspektor; Änderungen werden erst mit Aktionsschaltflächen wirksam.',
+  'help.workflow_description': 'Der blaue Rahmen markiert Ihr Bearbeitungsziel. Grün folgt der Wiedergabe oder einer Auswahl. Werkzeuge finden Sie in den Reitern Song, Spur und Auswahl des Inspektors sowie unter Übungseinstellungen in der Werkzeugleiste; die meisten Änderungen werden erst mit Aktionsschaltflächen wirksam.',
 
   // Help Topics Content
   'help.topic.start.title': 'Erste Schritte',
   'help.topic.start.p1': 'Öffnen Sie eine Partitur über Datei → Öffnen, erstellen Sie eine neue über Datei → Neu oder wählen Sie ein Beispiel aus der Bibliothek.',
-  'help.topic.start.p2': 'Die Partitur liegt in der Mitte, darunter die Wiedergabeleiste. Spurwerkzeuge sind links, der Inspektor rechts und Mischpult sowie Instrumentenansicht im unteren Dock. Ansicht blendet jedes Fenster ein oder aus.',
+  'help.topic.start.p2': 'Die Partitur liegt in der Mitte, darunter die Wiedergabeleiste. Der Inspektor ist rechts: Der Reiter Song enthält die Einstellungen der Partitur, Spur die der ausgewählten Spur und Auswahl die Bearbeitungswerkzeuge. Mischpult, Instrumentenansicht und Begleitung liegen im unteren Dock. Ansicht blendet jedes Fenster ein oder aus.',
   'help.topic.start.p3': 'Drücken Sie F1 für Hilfe zum aktiven Bereich des Fensters. Schließen Sie andere Dialoge zuvor.',
 
   'help.topic.editing.title': 'Partitur bearbeiten',

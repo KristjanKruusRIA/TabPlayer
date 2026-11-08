@@ -322,12 +322,12 @@ export const en = {
   'help.shortcut_select_track': 'Select the current track',
   'help.shortcut_clipboard': 'Copy / Cut / Paste music. Add Shift to Copy/Cut for all selected tracks; Shift + Paste opens paste options.',
   'help.shortcut_clear': 'Clear the musical selection',
-  'help.workflow_description': 'The blue outline marks your edit target. Green follows playback or a selected passage. Use the inspector’s Edit, Practice and Presentation buttons to reach tools; changes apply only when you use their action buttons.',
+  'help.workflow_description': 'The blue outline marks your edit target. Green follows playback or a selected passage. Use the inspector’s Song, Track and Selection tabs and Practice settings on the toolbar to reach tools; most changes apply only when you use their action buttons.',
 
   // Help Topics Content
   'help.topic.start.title': 'Getting started',
   'help.topic.start.p1': 'Open a score with File → Open, start one with File → New, or pick an example or template from the Library.',
-  'help.topic.start.p2': 'The score sits in the middle, with the playback controls in a bar along the bottom. Track tools are on the left, the inspector is on the right, and mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
+  'help.topic.start.p2': 'The score sits in the middle, with the playback controls in a bar along the bottom. The inspector is on the right: Song holds the score’s settings, Track holds the settings of the selected track and Selection holds the editing tools. Mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
   'help.topic.start.p3': 'Press F1 for help about the part of the window you are using. Inside another dialog, close it first.',
 
   'help.topic.editing.title': 'Editing the score',

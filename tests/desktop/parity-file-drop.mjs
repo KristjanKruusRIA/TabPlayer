@@ -1,3 +1,17 @@
+// Native OLE file-drop acceptance driver.
+// Run: node tests/desktop/parity-file-drop.mjs --run --state=<absolute prepared fixture-state.json> [--replay-consumed]
+// Prepare the state first with: node tests/desktop/parity-file-library.mjs --prepare
+//
+// The OS-level drop needs the test window in the foreground. The driver asks for it with a bounded retry (a restore,
+// AllowSetForegroundWindow for the app's own process, SetForegroundWindow, and the AttachThreadInput pattern from
+// select-library-folder.ps1). It sends no key presses and never takes another process's input by force. If Windows still
+// refuses, that is an environment limit, not a failed assertion, and it is reported separately.
+//
+// Exit codes (the final stdout line is the verdict word):
+//   0  PASSED            every drop assertion held.
+//   1  FAILED            an assertion or the app failed, or the arguments were wrong. A real failure.
+//   3  NEEDS FOREGROUND  Windows would not give the test window the foreground after every retry. No drop was sent in
+//                        that step and no drop assertion was evaluated or relaxed. Rerun with nothing else holding focus.
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
@@ -18,12 +32,25 @@ const projectView=project=>({...structuredClone(project),assets:Object.fromEntri
 const ownedCheck='$p=Get-Process -Id $env:DROP_OWNED_PID -ErrorAction SilentlyContinue;if($null -ne $p){if(-not [string]::Equals($p.Path,$env:DROP_OWNED_EXE,[StringComparison]::OrdinalIgnoreCase) -or $p.StartTime.ToUniversalTime().Ticks.ToString() -cne $env:DROP_OWNED_START){throw "Captured drop process identity changed"}};';
 const windowSource=`using System;using System.Runtime.InteropServices;public static class OwnedDropWindow{
  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(int pid);
+ [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+ [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int command);
+ [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint from,uint to,bool attach);
+ [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h,uint flags);
  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h,out uint pid);
  [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h,out Rect r);
  [StructLayout(LayoutKind.Sequential)] public struct Rect{public int Left,Top,Right,Bottom;}
 }`;
+
+/** Windows would not give the owned window the foreground. An environment limit, not a failed drop assertion. */
+export class NeedsForegroundError extends Error{constructor(message,attempts){super(message);this.name='NeedsForegroundError';this.attempts=attempts;}}
+export const exitCodes={passed:0,failed:1,needsForeground:3};
+const foregroundAttempts=4,foregroundPauseMs=750;
+// One foreground request. Refusal is reported as foreground:false so the caller can retry; identity errors still throw.
+const foregroundScript=`${ownedCheck}if($null -eq $p){throw 'Owned app exited'};$p.Refresh();$h=$p.MainWindowHandle;if($h.ToInt64().ToString() -cne $env:DROP_OWNED_HWND){throw 'Owned HWND changed'};Add-Type -TypeDefinition '${windowSource}';[uint32]$owner=0;$null=[OwnedDropWindow]::GetWindowThreadProcessId($h,[ref]$owner);if($owner -ne $p.Id){throw 'HWND owner changed'};if([OwnedDropWindow]::IsIconic($h)){$null=[OwnedDropWindow]::ShowWindow($h,9)};$null=[OwnedDropWindow]::AllowSetForegroundWindow($p.Id);$asked=[OwnedDropWindow]::SetForegroundWindow($h);if([OwnedDropWindow]::GetAncestor([OwnedDropWindow]::GetForegroundWindow(),2) -ne $h){$holder=[OwnedDropWindow]::GetWindowThreadProcessId([OwnedDropWindow]::GetForegroundWindow(),[ref]$owner);$me=[OwnedDropWindow]::GetCurrentThreadId();$attached=($holder -ne 0 -and $holder -ne $me -and [OwnedDropWindow]::AttachThreadInput($me,$holder,$true));try{$null=[OwnedDropWindow]::BringWindowToTop($h);$asked=[OwnedDropWindow]::SetForegroundWindow($h)}finally{if($attached){$null=[OwnedDropWindow]::AttachThreadInput($me,$holder,$false)}}};Start-Sleep -Milliseconds 100;$front=([OwnedDropWindow]::GetAncestor([OwnedDropWindow]::GetForegroundWindow(),2) -eq $h);if(-not $front){@{foreground=$false;asked=[bool]$asked}|ConvertTo-Json -Compress}else{$r=New-Object OwnedDropWindow+Rect;if(-not [OwnedDropWindow]::GetClientRect($h,[ref]$r)){throw 'Client rectangle unavailable'};@{foreground=$true;hwnd=$h.ToInt64().ToString();width=$r.Right-$r.Left;height=$r.Bottom-$r.Top}|ConvertTo-Json -Compress}`;
 
 // Inert on import. Root alone runs this against its isolated diagnostic binary.
 export async function runFileDropAcceptance({execute=false,statePath,replayConsumed=false}={}){
@@ -40,7 +67,7 @@ export async function runFileDropAcceptance({execute=false,statePath,replayConsu
   const result={status:'running',actualOSDropAcceptance:false,statePath,stateSha256,authorCheckpoint:state.authorCheckpoint,executable,executableSha256:hash(readFileSync(executable)),helperSha256:helperHash,sourceHashes:Object.fromEntries(['src/main.tsx','src/workspace/WorkspaceLibrary.ts','src/workspace/WorkspaceController.ts','src-tauri/src/lib.rs','src-tauri/src/file_library/commands.rs'].map(path=>[path,hash(readFileSync(path))])),steps:[],groups:[],pending:['Real OS drops during export and a session transition.','macOS/Linux drop and reveal behavior.','No public observer exists for the native candidate registry; exact tab counts and optional one-time token rejection do not inspect that registry.'],limits:['Actual native OLE source and Tauri callback proof only; no Explorer/manual mouse drag claim.','No audio, long score, screenshot or recovery lifecycle acceptance.']};
   let identity=null,browser=null,page=null,listenerInstalled=false;
   const errors=[],step=(name,value)=>{result.steps.push({name,atUnixMs:Date.now(),value});return value;};
-  const ps=command=>execFileSync('powershell.exe',['-NoProfile','-Command',command],{encoding:'utf8',windowsHide:true,timeout:20000,env:{...process.env,DROP_OWNED_PID:identity?String(identity.pid):'',DROP_OWNED_EXE:executable,DROP_OWNED_START:identity?.startTicks??''}}).trim();
+  const ps=(command,extra={})=>execFileSync('powershell.exe',['-NoProfile','-Command',command],{encoding:'utf8',windowsHide:true,timeout:20000,env:{...process.env,...extra,DROP_OWNED_PID:identity?String(identity.pid):'',DROP_OWNED_EXE:executable,DROP_OWNED_START:identity?.startTicks??''}}).trim();
   const inspect=()=>JSON.parse(ps(`${ownedCheck}if($null -eq $p){'null'}else{@{pid=$p.Id;path=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString();hwnd=$p.MainWindowHandle.ToInt64().ToString()}|ConvertTo-Json -Compress}`));
   const owned=()=>{assert.ok(identity);const value=inspect();assert.ok(value,'Captured app is no longer live');assert.equal(value.hwnd,identity.hwnd);return value;};
   const invoke=(command,args={})=>page.evaluate(([command,args])=>window.__TAURI_INTERNALS__.invoke(command,args),[command,args]);
@@ -54,8 +81,9 @@ export async function runFileDropAcceptance({execute=false,statePath,replayConsu
   async function drop(paths,target){
     owned();assert.equal(hash(readFileSync(helper)),helperHash);for(const path of paths){assert.ok(isAbsolute(path));const child=relative(state.workDirectory,path);assert.ok(child&&!child.startsWith('..')&&!isAbsolute(child));}
     const point=await target.evaluate(node=>{const r=node.getBoundingClientRect();const left=Math.max(0,r.left),top=Math.max(0,r.top),right=Math.min(innerWidth,r.right),bottom=Math.min(innerHeight,r.bottom);if(right<=left||bottom<=top)throw Error('Drop target has no visible client area');return {x:(left+right)/2,y:(top+bottom)/2,width:innerWidth,height:innerHeight};});
-    // Exact owned HWND only. No key presses or focus-stealing workaround.
-    const native=JSON.parse(ps(`${ownedCheck}if($null -eq $p){throw 'Owned app exited'};$p.Refresh();$h=$p.MainWindowHandle;if($h.ToInt64().ToString() -cne '${identity.hwnd}'){throw 'Owned HWND changed'};Add-Type -TypeDefinition '${windowSource}';[uint32]$owner=0;$null=[OwnedDropWindow]::GetWindowThreadProcessId($h,[ref]$owner);if($owner -ne $p.Id){throw 'HWND owner changed'};if(-not [OwnedDropWindow]::SetForegroundWindow($h)){throw 'Windows refused owned foreground request'};if([OwnedDropWindow]::GetAncestor([OwnedDropWindow]::GetForegroundWindow(),2) -ne $h){throw 'Owned app is not foreground'};$r=New-Object OwnedDropWindow+Rect;if(-not [OwnedDropWindow]::GetClientRect($h,[ref]$r)){throw 'Client rectangle unavailable'};@{hwnd=$h.ToInt64().ToString();width=$r.Right-$r.Left;height=$r.Bottom-$r.Top}|ConvertTo-Json -Compress`));
+    // Exact owned HWND only, no key presses. A bounded retry; a persistent refusal is NeedsForegroundError, never a failed assertion.
+    let native=null;for(let attempt=1;attempt<=foregroundAttempts&&!native;attempt++){const reply=JSON.parse(ps(foregroundScript,{DROP_OWNED_HWND:identity.hwnd}));if(reply.foreground)native=reply;else{step('Foreground request refused',{attempt,asked:reply.asked});if(attempt<foregroundAttempts)await new Promise(accept=>setTimeout(accept,foregroundPauseMs));}}
+    if(!native)throw new NeedsForegroundError(`Windows refused the owned foreground request in ${foregroundAttempts} attempts; another window holds the foreground.`,foregroundAttempts);
     assert.ok(native.width>0&&native.height>0);const clientX=Math.floor(point.x*native.width/point.width),clientY=Math.floor(point.y*native.height/point.height);assert.ok(clientX>=0&&clientX<native.width&&clientY>=0&&clientY<native.height);
     const beforeEvents=await events();owned();const startedAtUnixMs=Date.now();
     const receipt=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-STA','-ExecutionPolicy','Bypass','-File',resolve(helper),'-AppProcessId',String(identity.pid),'-AppExecutable',executable,'-AppStartTicks',identity.startTicks,'-TargetWindowHandle',identity.hwnd,'-ClientX',String(clientX),'-ClientY',String(clientY),'-OwnedDirectory',state.workDirectory,'-FilePathsJson',JSON.stringify(paths)],{encoding:'utf8',windowsHide:true,timeout:20000}));
@@ -86,7 +114,7 @@ export async function runFileDropAcceptance({execute=false,statePath,replayConsu
     const held=await workspace(),heldRecords=await Promise.all(held.documents.map(item=>record(item.documentId)));const busy=await drop([state.folderOther],dialog());
     const rejected=page.locator('.session-error[role="alert"]').filter({hasText:'Finish the current Library operation before dropping scores.'});await rejected.waitFor({state:'visible',timeout:5000});assert.equal(await dialog().isVisible(),true);assert.deepEqual(await workspace(),held);for(const original of heldRecords)assert.deepEqual(await record(original.documentId),original);const rejectionText=await rejected.innerText();await closeLibrary();assert.deepEqual(await workspace(),held);assert.deepEqual(await record(sourceId),source);assert.deepEqual((await checkpoint(source)).document.session,acknowledged.document.session);assert.deepEqual(errors,[]);
     result.groups.push({name:'actual-OLE-drop-with-Library-lease',status:'passed',...busy,message:rejectionText,workspace:held,leaseReleased:true});assertLibraryFixtureHashes(state);assert.equal(hash(readFileSync(statePath)),stateSha256);result.status='passed';result.actualOSDropAcceptance=true;return result;
-  }catch(error){result.status='failed';step('Failure',{error:String(error),pageErrors:errors});error.fileDropResult=result;throw error;}
+  }catch(error){result.status=error instanceof NeedsForegroundError?'needs-foreground':'failed';step(result.status==='failed'?'Failure':'Needs foreground',{error:String(error),pageErrors:errors});error.fileDropResult=result;throw error;}
   finally{
     try{if(identity&&inspect()){owned();try{if(listenerInstalled&&page&&!page.isClosed()){await page.evaluate(async()=>{const probe=window.__ownedFileDropProbe;window.__TAURI_EVENT_PLUGIN_INTERNALS__.unregisterListener('score-files-dropped',probe.id);await window.__TAURI_INTERNALS__.invoke('plugin:event|unlisten',{event:'score-files-dropped',eventId:probe.id});delete window.__ownedFileDropProbe;});}}finally{owned();step('Exact owned diagnostic cleanup',ps(`${ownedCheck}if($null -eq $p){throw 'Owned app exited'};Stop-Process -Id $p.Id;$null=$p.WaitForExit(5000);'Captured drop instance terminated'`));}}}
     finally{if(browser)await browser.close();assertLibraryFixtureHashes(state);assert.equal(hash(readFileSync(statePath)),stateSha256);result.stateSha256After=hash(readFileSync(statePath));result.resultPath=resolve(state.workDirectory,'outputs',`native-ole-drop-${Date.now()}-result.json`);writeFileSync(result.resultPath,JSON.stringify(result,null,2),{flag:'wx'});}
@@ -95,5 +123,13 @@ export async function runFileDropAcceptance({execute=false,statePath,replayConsu
 
 if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
   const options={};for(const arg of process.argv.slice(2)){if(arg==='--run')options.execute=true;else if(arg.startsWith('--state='))options.statePath=arg.slice(8);else if(arg==='--replay-consumed')options.replayConsumed=true;else throw Error('Explicit --run --state=<absolute prepared fixture-state.json> [--replay-consumed] required');}
-  console.log(JSON.stringify(await runFileDropAcceptance(options),null,2));
+  try{
+    console.log(JSON.stringify(await runFileDropAcceptance(options),null,2));
+    console.log('PASSED');process.exitCode=exitCodes.passed;
+  }catch(error){
+    if(error instanceof NeedsForegroundError){
+      console.log(JSON.stringify({status:'needs-foreground',message:error.message,attempts:error.attempts,resultPath:error.fileDropResult?.resultPath},null,2));
+      console.log('NEEDS FOREGROUND');process.exitCode=exitCodes.needsForeground;
+    }else{console.error(error);console.log('FAILED');process.exitCode=exitCodes.failed;}
+  }
 }

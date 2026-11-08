@@ -94,7 +94,7 @@ export const helpTopics: readonly HelpTopic[] = [
   {
     id: 'start', title: 'Getting started', paragraphs: [
       'Open a score with File → Open, start one with File → New, or pick an example or template from the Library.',
-      'The score sits in the middle, with the playback controls in a bar along the bottom. Track tools are on the left, the inspector is on the right, and mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
+      'The score sits in the middle, with the playback controls in a bar along the bottom. The inspector is on the right: Song holds the score’s settings, Track holds the settings of the selected track and Selection holds the editing tools. Mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
       'Press F1 for help about the part of the window you are using. Inside another dialog, close it first.',
     ],
   },

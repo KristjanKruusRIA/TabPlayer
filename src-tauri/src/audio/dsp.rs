@@ -1835,9 +1835,9 @@ pub struct TrackDsp {
     fade_s: f32,
     leaving_part: [f32; 2],
     built_in_live: bool,
-    /// Whether the board has rendered since it was built or last reset: a plug-in added while it sounds starts its
-    /// stand-in on the undelayed signal the track plays; one added while stopped starts on `D` behind silence. A pause
-    /// renders silence and leaves it set, so a plug-in added while paused starts as one added mid-play.
+    /// Whether the board has rendered since it was built, reset or paused: a plug-in added while it sounds starts its
+    /// stand-in on the undelayed signal the track plays; one added while stopped or paused starts on `D` behind
+    /// silence. The device renders nothing while paused, so a resume is a play start (re-review R2-1).
     sounding: bool,
     /// Samples the board had to replace because its state produced a non-finite value.
     non_finite: u32,
@@ -2353,6 +2353,16 @@ impl TrackDsp {
     /// The attached plug-in, to read its fault.
     pub fn plugin(&self) -> Option<&PluginInsert> {
         self.plugin.as_deref()
+    }
+    /// Whether the board has rendered since it was built, reset or paused (see the field).
+    pub fn sounding(&self) -> bool {
+        self.sounding
+    }
+    /// The device stopped rendering this board without a stop or seek: the next frame it renders starts playback. A
+    /// plug-in added before then starts on `D` behind silence. Nothing else changes; an insert already running keeps
+    /// its history and stream.
+    pub fn pause(&mut self) {
+        self.sounding = false;
     }
     /// Whether a plug-in plays on this board, or is still fading out.
     pub fn has_plugin(&self) -> bool {

@@ -1285,6 +1285,9 @@ impl CallbackTransport {
                     self.resume_count = self.count.is_some();
                     self.playing = false;
                     self.phase = PracticePhase::Paused;
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.pause();
+                    }
                 }
             }
             TransportCommand::Stop { .. } => {
@@ -4189,6 +4192,49 @@ mod tests {
         assert_eq!(
             serde_json::to_value(callback.transport.status()).unwrap(),
             before_mix
+        );
+    }
+
+    #[test]
+    fn a_pause_leaves_no_board_sounding() {
+        // Re-review R2-1: the device renders nothing while paused, so a resume is a play start. A plug-in added during
+        // a pause must start on `D` behind silence, as after a stop; that needs every board to stop counting as
+        // sounding when the device pauses, the live mix's and one installed during the pause alike.
+        let document = counted_document();
+        let mut transport = CallbackTransport::headless(48_000);
+        // No count-in: the boards render from the first frame.
+        transport.install(AudioService::renderer(&document, 48_000).unwrap(), 1, false);
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        for _ in 0..20 {
+            transport.render_callback(&mut [[0.0; 2]; 480]);
+        }
+        let sounding = |t: &CallbackTransport| t.renderer.as_ref().unwrap().channels_sounding();
+        assert!(
+            sounding(&transport).iter().all(|s| *s),
+            "playing boards sound"
+        );
+        transport
+            .command(TransportCommand::Pause { generation: 1 })
+            .unwrap();
+        assert!(
+            sounding(&transport).iter().all(|s| !*s),
+            "a pause silences every board"
+        );
+        let mix = PreparedMix::prepare(&document.settings, &document.plan, 48_000).unwrap();
+        drop(transport.replace_mix(mix, 1));
+        assert!(
+            sounding(&transport).iter().all(|s| !*s),
+            "a mix installed during the pause is not sounding"
+        );
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        transport.render_callback(&mut [[0.0; 2]; 480]);
+        assert!(
+            sounding(&transport).iter().all(|s| *s),
+            "a resume sounds again"
         );
     }
 

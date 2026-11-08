@@ -557,7 +557,8 @@ fn hostile_indices_never_index_out_of_bounds() {
         let words = rig.base.cast::<AtomicU64>();
         for callback in 0..16 {
             // After the priming span, one callback in eight.
-            if callback > 3 && random() % 8 == 0 {
+            let scribbled = callback > 3 && random() % 8 == 0;
+            if scribbled {
                 for _ in 0..4 {
                     let word = match random() % 8 {
                         0 => output_write,
@@ -593,10 +594,17 @@ fn hostile_indices_never_index_out_of_bounds() {
                         && y[1].abs() <= 64.0
                 );
             }
-            // A scribbled count can make the fake helper look idle; give it a moment, without insisting.
-            let deadline = Instant::now() + Duration::from_millis(20);
-            while rig.link.ring().blocks_pending() && Instant::now() < deadline {
-                std::thread::yield_now();
+            if scribbled {
+                // A scribbled count can make the fake helper look idle or behind; give it a moment, without insisting.
+                let deadline = Instant::now() + Duration::from_millis(20);
+                while rig.link.ring().blocks_pending() && Instant::now() < deadline {
+                    std::thread::yield_now();
+                }
+            } else if track.plugin().unwrap().faulted().is_none() {
+                // Otherwise wait for the helper as a device would, however loaded the machine is (re-review R2-2). A
+                // live insert sent blocks this callback, and the helper's answers rewrite any scribbled count; a faulted
+                // one sends nothing, so a count scribbled earlier may never come right, and there is nothing to wait for.
+                rig.settle();
             }
         }
         if track.plugin().unwrap().faulted().is_some() {
@@ -1753,4 +1761,45 @@ fn attaching_while_stopped_plays_the_opening_once() {
         rms(&first) < 1e-6,
         "a fresh board's first D frames are silent"
     );
+}
+
+#[test]
+fn attaching_during_a_pause_plays_the_opening_once() {
+    // Re-review R2-1: the device renders nothing while paused, so a resume is a play start. A plug-in added during the
+    // pause starts on `D` behind silence, as after a stop. The board has no built-in stages on: a driven board resumes
+    // its cabinet's ring-out from before the pause, as it does without a plug-in, which is not what this test is about.
+    let rig = rig(0, 0.5);
+    let mut old = dsp(FxSettings::default());
+    let mut out = Vec::new();
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
+    old.pause();
+    assert!(!old.sounding());
+    let mut new = dsp(FxSettings::default());
+    new.attach_plugin(rig.insert(0, 0.0, 0.0));
+    new.transition_from(&mut old);
+    let mut resumed = Vec::new();
+    play(
+        &mut new,
+        &[&rig],
+        SWAP,
+        RATE as usize / 4,
+        &signal,
+        &mut resumed,
+    );
+    let d = new.plugin_delay();
+    assert!(
+        rms(&resumed[..d]) < 1e-6,
+        "the first D frames after the resume are silent: {}",
+        rms(&resumed[..d])
+    );
+    for (i, frame) in resumed.iter().enumerate().skip(d + RAMP) {
+        let x = signal(SWAP + i - d);
+        assert_close(
+            *frame,
+            [0.5 * x[0], 0.5 * x[1]],
+            1e-6,
+            &format!("frame {i}"),
+        );
+    }
+    assert!(new.sounding());
 }

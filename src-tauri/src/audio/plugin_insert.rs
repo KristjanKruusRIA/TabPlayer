@@ -421,7 +421,9 @@ impl PluginInsert {
     }
 
     /// Starts the built-in chain's input on the undelayed signal, for an insert added to a track that is sounding: it
-    /// glides to `D` once the history holds it (review C1). Call it before the insert's first frame.
+    /// glides to `D` once the history holds it (review C1). Call it before the insert's first frame. It does not check
+    /// the offline mode: an export plays the plug-in from its first frame (`g = 1`) and never consults the
+    /// stand-in, and exports use a fresh renderer, so no transition from a sounding board reaches one.
     pub fn start_undelayed(&mut self) {
         self.history = 0;
         self.timing_from = 0;

@@ -1752,6 +1752,25 @@ impl Renderer {
             channel.kit.remaining = 0;
         }
     }
+    /// The transport paused: nothing renders until it plays again, so no board counts as sounding, the parked mix's
+    /// included (re-review R2-1). Cheap; called on the audio thread.
+    pub fn pause(&mut self) {
+        let parked = self.parked_mix.iter_mut().flat_map(|mix| &mut mix.channels);
+        for channel in self.mix.channels.iter_mut().chain(parked) {
+            channel.dsp.pause();
+        }
+    }
+    /// Whether each channel of the live mix, then of the parked one, is sounding: for tests.
+    #[cfg(test)]
+    pub(crate) fn channels_sounding(&self) -> Vec<bool> {
+        let parked = self.parked_mix.iter().flat_map(|mix| &mix.channels);
+        self.mix
+            .channels
+            .iter()
+            .chain(parked)
+            .map(|channel| channel.dsp.sounding())
+            .collect()
+    }
     fn mix_ramping(&self) -> bool {
         self.mix.channels.iter().any(|c| c.dsp.ramping()) || self.mix.master.ramping()
     }

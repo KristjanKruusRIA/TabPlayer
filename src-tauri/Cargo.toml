@@ -7,7 +7,7 @@ license = "MIT"
 
 [workspace]
 # Members are added by the task that creates them. All of them share this directory's `target` folder and `Cargo.lock`.
-members = ["plugin-protocol", "test-plugin"]
+members = ["plugin-protocol", "test-plugin", "plugin-host"]
 
 [features]
 desktop-test = []

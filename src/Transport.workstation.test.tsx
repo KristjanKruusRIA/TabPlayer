@@ -9,7 +9,7 @@ import { DEFAULT_PRACTICE } from './audio/practice-types';
 const cursor={track:0,staff:0,bar:0,voice:0,beat:0};
 const choices=[{generation:7,occurrenceIndex:0,startTick:0},{generation:7,occurrenceIndex:1,startTick:3840}];
 const passage={generation:7,startOccurrence:0,endOccurrence:1,startTick:0,endTick:7680};
-function playback(patch:Partial<PlaybackState>={}):PlaybackState{return {ready:true,playing:false,time:1000,endTime:6000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'paused',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null,...patch};}
+function playback(patch:Partial<PlaybackState>={}):PlaybackState{return {ready:true,playing:false,time:1000,endTime:6000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'paused',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loopNotice:null,range:null,loop:null,error:null,...patch};}
 function fixture(initial=playback()){
   let state=initial;const listeners=new Set<()=>void>();
   const player={generation:7,getState:()=>state,subscribe:(listener:()=>void)=>{listeners.add(listener);return()=>{listeners.delete(listener);};},play:vi.fn(),pause:vi.fn(),stop:vi.fn(),setSpeed:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),seekToMeasure:vi.fn(),setPractice:vi.fn(),cursorPlaybackChoices:()=>choices,selectionPlaybackChoices:()=>[passage],playbackOccurrences:()=>[0,1].map(occurrence=>({bar:0,occurrence,startTick:occurrence*3840,endTick:(occurrence+1)*3840,startMs:occurrence*2000,endMs:(occurrence+1)*2000,meterNumerator:4,meterDenominator:4,clickTicks:[]})),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn()};
@@ -24,7 +24,7 @@ it('workstation More playback reveals the real seek loop and repeated-occurrence
   fireEvent.change(screen.getByLabelText('Loop start'),{target:{value:'2'}});fireEvent.change(screen.getByLabelText('Loop end'),{target:{value:'4'}});fireEvent.click(screen.getByRole('button',{name:'Loop'}));expect(player.setLoop).toHaveBeenCalledWith(1,3);fireEvent.click(screen.getByText('Selected playback',{selector:'summary'}));fireEvent.change(screen.getByLabelText('Cursor occurrence'),{target:{value:'1'}});fireEvent.click(screen.getByRole('button',{name:'Play from cursor'}));expect(player.playFromCursor).toHaveBeenCalledWith(cursor,choices[1]);fireEvent.click(screen.getByRole('button',{name:'Loop selection'}));expect(player.loopSelection).toHaveBeenCalledWith({kind:'bars',tracks:[0],firstBar:0,lastBar:0},passage);expect(player.play).not.toHaveBeenCalled();
 });
 it('workstation More playback retains acknowledged passage count-in and practice notices behind the disclosure',()=>{
-  const state=playback({playing:true,range:{startTick:0,endTick:7680},practiceNotice:'Progressive speed is capped.'});state.practice={...state.practice,phase:'countIn',countInRemaining:3};const {player}=fixture(state);render(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);const summary=more();expect(screen.getByLabelText('Selected playback range')).not.toBeVisible();expect(screen.getByLabelText('Count-in')).not.toBeVisible();fireEvent.click(summary);expect(screen.getByLabelText('Selected playback range')).toBeVisible();expect(screen.getByLabelText('Selected playback range')).toHaveAttribute('data-end-tick','7680');expect(screen.getByLabelText('Count-in')).toHaveTextContent('3 pulses remaining');expect(screen.getByText('Progressive speed is capped.')).toBeVisible();expect(player.getState()).toBe(state);
+  const state=playback({playing:true,range:{startTick:0,endTick:7680},practiceNotice:'fixed_tempo_disabled_backing'});state.practice={...state.practice,phase:'countIn',countInRemaining:3};const {player}=fixture(state);render(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);const summary=more();expect(screen.getByLabelText('Selected playback range')).not.toBeVisible();expect(screen.getByLabelText('Count-in')).not.toBeVisible();fireEvent.click(summary);expect(screen.getByLabelText('Selected playback range')).toBeVisible();expect(screen.getByLabelText('Selected playback range')).toHaveAttribute('data-end-tick','7680');expect(screen.getByLabelText('Count-in')).toHaveTextContent('3 pulses remaining');expect(screen.getByText('Fixed tempo disabled because this score has backing audio.')).toBeVisible();expect(player.getState()).toBe(state);
 });
 it('workstation More playback Escape restores summary focus and Space does not invoke playback',()=>{
   const {player}=fixture(),ancestor=vi.fn();render(<div onKeyDown={ancestor}><Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/></div>);const summary=more();fireEvent.click(summary);const seek=screen.getByLabelText('Seek measure');seek.focus();fireEvent.keyDown(seek,{key:'Escape'});expect(summary.closest('details')).not.toHaveAttribute('open');expect(summary).toHaveFocus();expect(ancestor).not.toHaveBeenCalled();fireEvent.keyDown(summary,{key:' '});expect(player.play).not.toHaveBeenCalled();expect(player.pause).not.toHaveBeenCalled();expect(player.stop).not.toHaveBeenCalled();
@@ -51,9 +51,9 @@ it('speed steps through the preset list and stops at its ends',()=>{
   const high=fixture(playback({speed:300}));render(<Transport player={high.player} measures={4} busy={false} cursor={cursor} selection={null}/>);
   expect(screen.getByRole('button',{name:'Faster'})).toHaveAttribute('aria-disabled','true');fireEvent.click(screen.getByRole('button',{name:'Faster'}));expect(high.player.setSpeed).not.toHaveBeenCalled();
 });
-it('a focused Loop, Slower or Metronome keeps focus when the document goes busy and refuses until it is idle',()=>{
+it('a focused Loop, Slower, Speed or Metronome keeps focus when the document goes busy and refuses until it is idle',()=>{
   const {player}=fixture(),view=render(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);
-  for(const control of [screen.getByRole('button',{name:'Loop'}),screen.getByRole('button',{name:'Slower'}),screen.getByLabelText('Metronome')]){
+  for(const control of [screen.getByRole('button',{name:'Loop'}),screen.getByRole('button',{name:'Slower'}),screen.getByLabelText('Metronome'),screen.getByLabelText('Speed percentage')]){
     control.focus();view.rerender(<Transport player={player} measures={4} busy cursor={cursor} selection={null}/>);
     expect(control).not.toBeDisabled();expect(control).toHaveFocus();fireEvent.click(control);
     view.rerender(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);
@@ -77,4 +77,12 @@ it('stylesheet rules that jsdom cannot apply: the bar stays one row, the popover
   expect(css).toMatch(/input\.transport-scrub\s*\{[^}]*height:10px[^}]*min-height:0/);
   expect(css).not.toMatch(/\.transport[^{}]*output\s*\{[^}]*min-width:135px/);
   expect(shell).toMatch(/\.toolbar\s*\{[^}]*grid-template-columns:minmax\(0,1fr\) auto minmax\(0,1fr\)/);
+});
+it('the toolbar feedback line reserves its height so the More playback panel opens below it (THE-187)',()=>{
+  const {player,update}=fixture(),height=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){return {height:this.classList.contains('transport-messages')?16.2:0} as DOMRect;});
+  const real=window.getComputedStyle.bind(window),style=vi.spyOn(window,'getComputedStyle').mockImplementation((node,pseudo)=>(node as HTMLElement).classList?.contains('transport-messages')?({position:'absolute'}) as CSSStyleDeclaration:real(node,pseudo));
+  try{render(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);const root=screen.getByRole('group',{name:'Transport'});expect(root.style.getPropertyValue('--transport-messages-h')).toBe('0px');
+    update(playback({error:'Loop end must follow its start.'}));expect(root.style.getPropertyValue('--transport-messages-h')).toBe('17px');
+    update(playback());expect(root.style.getPropertyValue('--transport-messages-h')).toBe('0px');}
+  finally{height.mockRestore();style.mockRestore();}
 });

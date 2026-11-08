@@ -15,7 +15,7 @@ afterEach(()=>{cleanup();contract.project.mockClear();});
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 const base=()=>previewEdit(blankProject(),{type:'setRest',target}).score;
 function livePlayer(score:model.Score){
-  let state:PlaybackState={ready:true,playing:true,time:0,endTime:1000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'playing',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
+  let state:PlaybackState={ready:true,playing:true,time:0,endTime:1000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'playing',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loopNotice:null,range:null,loop:null,error:null};
   const listeners=new Set<()=>void>(),remove=vi.fn();let mix={mute:false,solo:true,volume:.7,pan:-.2};
   const player={subscribe:vi.fn((fn:()=>void)=>{listeners.add(fn);return()=>{remove();listeners.delete(fn);};}),getState:()=>state,mix:vi.fn((_track:model.Track)=>mix),setMute:vi.fn(),setSolo:vi.fn(),setTrackVolume:vi.fn(),setPan:vi.fn(),focus:()=>null,setFocus:vi.fn(async()=>{})};
   return {player,remove,emit:(patch:Partial<PlaybackState>={},mixPatch:Partial<typeof mix>={})=>{state={...state,...patch};mix={...mix,...mixPatch};act(()=>{for(const fn of listeners)fn();});},score};

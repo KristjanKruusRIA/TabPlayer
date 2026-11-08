@@ -4,7 +4,7 @@ import { withTypography } from './typography';
 
 /**
  * Built-in notation styles. A preset is a starting point for the Engraving form: loading one replaces the
- * stylesheet, notation and typography choices, never the system spacing or the staff profiles, and nothing
+ * stylesheet, notation and typography choices, never the system spacing, the fonts or the staff profiles, and nothing
  * reaches the document until Apply engraving.
  */
 export interface NotationPreset {
@@ -25,5 +25,6 @@ export const notationPresets:readonly NotationPreset[]=[
 /** `current` with the preset's choices; everything the preset does not name goes back to Source/default. */
 export function presetApplied(preset:NotationPreset,current:EngravingOverrides):EngravingOverrides {
   const base=defaultEngraving();
-  return withTypography({stylesheet:{...base.stylesheet,...preset.stylesheet},notation:{...base.notation,...preset.notation},systemSpacing:current.systemSpacing,profiles:structuredClone(current.profiles)},preset.typography);
+  const loaded=withTypography({stylesheet:{...base.stylesheet,...preset.stylesheet},notation:{...base.notation,...preset.notation},systemSpacing:current.systemSpacing,profiles:structuredClone(current.profiles)},preset.typography);
+  return current.fonts?{...loaded,fonts:structuredClone(current.fonts)}:loaded;
 }

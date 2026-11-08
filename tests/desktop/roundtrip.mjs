@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkspaceCommand} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkspaceCommand,closeWelcomeLibrary,revealInspectorTab} from './workstation-commands.mjs';
 import { readActiveDocument,readDocumentRecord } from './document-context.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -14,8 +14,9 @@ let id=launch(environment);let browser=await connect();let page=browser.contexts
 const snapshot=()=>readActiveDocument(page);
 const idle=()=>waitForWorkspaceIdle(page);
 try {
+  await closeWelcomeLibrary(page);
   await clickWorkspaceCommand(page,'Open',{waitForIdle:false});await idle();
-  assert.equal((await snapshot()).project.base.sha256,hash);
+  assert.equal((await snapshot()).project.base.sha256,hash);await revealInspectorTab(page,'Selection');
   assert.equal((await snapshot()).project.base.bytesBase64,bytes.toString('base64'));
   if(await page.getByRole('button',{name:'Set note',exact:true}).isDisabled()){
     await page.getByRole('button',{name:'Insert beat',exact:true}).click();await idle();
@@ -29,6 +30,7 @@ try {
   await clickWorkspaceCommand(page,'Save',{waitForIdle:false});await idle();
   const before=await snapshot();assert.equal(before.dirty,false);assert.equal(JSON.parse(readFileSync(saved,'utf8')).base.bytesBase64,bytes.toString('base64'));
   await browser.close();stop(id);id=launch({...environment,TABPLAYER_TEST_OPEN:saved});browser=await connect();page=browser.contexts()[0].pages()[0];
+  await closeWelcomeLibrary(page);
   await clickWorkspaceCommand(page,'Open',{waitForIdle:false});await idle();
   assert.deepEqual((await snapshot()).project,before.project);assert.equal((await snapshot()).dirty,false);
   await clickWorkspaceCommand(page,'Export GP',{waitForIdle:false});await idle();

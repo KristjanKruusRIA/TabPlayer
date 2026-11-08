@@ -1,17 +1,19 @@
 import { readActiveDocument } from './document-context.mjs';
+import { closeWelcomeLibrary,clickWorkstationButton,revealInspectorTab,waitForWorkspaceIdle } from './workstation-commands.mjs';
 import { launch,connect,stop } from './harness.mjs';
 import assert from 'node:assert/strict';
 const id=launch();
 let browser,page;
-const idle=()=>page.waitForFunction(()=>!document.querySelector('nav button').disabled);
+const idle=()=>waitForWorkspaceIdle(page);
+const selection=()=>revealInspectorTab(page,'Selection');
 const snapshot=()=>readActiveDocument(page);
 try {
-  browser=await connect();page=browser.contexts()[0].pages()[0];
+  browser=await connect();page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);await idle();await selection();
   await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();await idle();
-  await page.getByRole('button',{name:'Add track',exact:true}).click();await idle();
-  await page.getByRole('button',{name:'Track 2: Bass',exact:true}).click();
+  await clickWorkstationButton(page,'Add track');
+  await clickWorkstationButton(page,'Track 2: Bass');await selection();
   await page.getByLabel('Fret',{exact:true}).fill('3');await page.getByRole('button',{name:'Set note',exact:true}).click();await idle();
-  await page.getByRole('button',{name:'Track 1: Guitar',exact:true}).click();
+  await clickWorkstationButton(page,'Track 1: Guitar');await selection();
   await page.getByLabel('Beat',{exact:true}).fill('2');
   const note=page.getByText('7',{exact:true});await note.waitFor();await note.click();
   assert.equal(await page.getByLabel('Beat',{exact:true}).inputValue(),'1');

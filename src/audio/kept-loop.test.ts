@@ -1,0 +1,144 @@
+import {describe,expect,it} from 'vitest';
+import type {BarIndexMap} from '../editor/measures-types';
+import {keptLoopOf,mapKeptLoop,resolveKeptLoop,type KeptLoop} from './kept-loop';
+import type {MeasureOccurrence} from './types';
+
+const occ=(bar:number,occurrence:number,startTick:number,endTick=startTick+3840):MeasureOccurrence=>({bar,occurrence,meterNumerator:4,meterDenominator:4,startTick,endTick,startMs:0,endMs:0});
+/** Four plain bars of 3840 ticks. */
+const plain=[occ(0,0,0),occ(1,0,3840),occ(2,0,7680),occ(3,0,11520)];
+/** Bars 0,1,2 then 1,2 again (a repeat of bars 1 and 2), then 3. */
+const repeated=[occ(0,0,0),occ(1,0,3840),occ(2,0,7680),occ(1,1,11520),occ(2,1,15360),occ(3,0,19200)];
+const insert=(count:number,beforeBar:number,at:number):BarIndexMap=>({oldToNew:Array.from({length:count},(_,bar)=>bar<beforeBar?bar:bar+at),inserted:Array.from({length:at},(_,i)=>beforeBar+i)});
+const remove=(count:number,first:number,last:number):BarIndexMap=>({oldToNew:Array.from({length:count},(_,bar)=>bar<first?bar:bar<=last?null:bar-(last-first+1)),inserted:[]});
+
+describe('keptLoopOf',()=>{
+  it('names whole bars by bar and occurrence, with the end at the far edge of its last bar',()=>{
+    expect(keptLoopOf({startTick:3840,endTick:11520},plain,4)).toEqual({start:{bar:1,occurrence:0,at:'start'},end:{bar:2,occurrence:0,at:'end'},barCount:4});
+  });
+  it('names a loop that begins and ends inside bars by the fraction of the bar',()=>{
+    expect(keptLoopOf({startTick:3840+960,endTick:7680+2880},plain,4)).toEqual({start:{bar:1,occurrence:0,at:960},end:{bar:2,occurrence:0,at:2880},barCount:4});
+  });
+  it('tells repeated passes of the same bar apart',()=>{
+    expect(keptLoopOf({startTick:11520,endTick:19200},repeated,4)).toEqual({start:{bar:1,occurrence:1,at:'start'},end:{bar:2,occurrence:1,at:'end'},barCount:4});
+  });
+  it('gives nothing for a loop that is not on the plan',()=>{
+    expect(keptLoopOf({startTick:99999,endTick:100000},plain,4)).toBeNull();
+    expect(keptLoopOf({startTick:5,endTick:5},plain,4)).toBeNull();
+  });
+});
+
+describe('resolveKeptLoop',()=>{
+  const kept=keptLoopOf({startTick:3840,endTick:11520},plain,4)!;
+  it('returns the same ticks for the same bars',()=>{
+    expect(resolveKeptLoop(kept,plain,4)).toEqual({startTick:3840,endTick:11520});
+  });
+  it('follows the bars when an edit moves their ticks',()=>{
+    const longer=[occ(0,0,0),occ(1,0,3840),occ(2,0,7680,7680+3840+960),occ(3,0,12480)];
+    expect(resolveKeptLoop(kept,longer,4)).toEqual({startTick:3840,endTick:12480});
+  });
+  it('keeps a partial bar edge on the same beat when the bar shrinks',()=>{
+    const partial=keptLoopOf({startTick:3840+960,endTick:7680+2880},plain,4)!;
+    const longer=[occ(0,0,0),occ(1,0,3840,3840+1920),occ(2,0,5760,5760+3840),occ(3,0,9600)];
+    // Bar 1 is shorter here but still has a beat 2; the end edge is unchanged.
+    expect(resolveKeptLoop(partial,longer,4)).toEqual({startTick:3840+960,endTick:5760+2880});
+  });
+  it('keeps a mid-bar edge on its beat when the bar changes from 4/4 to 3/4, and clears when the beat is gone',()=>{
+    const beat3=keptLoopOf({startTick:3840+1920,endTick:11520},plain,4)!;
+    const threeFour=[occ(0,0,0),occ(1,0,3840,3840+2880),occ(2,0,6720),occ(3,0,10560)];
+    expect(resolveKeptLoop(beat3,threeFour,4)).toEqual({startTick:3840+1920,endTick:6720+3840});
+    const beat4=keptLoopOf({startTick:3840+2880,endTick:11520},plain,4)!;
+    expect(resolveKeptLoop(beat4,threeFour,4)).toBeNull();
+    const endAtBeat4=keptLoopOf({startTick:3840,endTick:7680+2880},plain,4)!;
+    const bar2ThreeFour=[occ(0,0,0),occ(1,0,3840),occ(2,0,7680,7680+2880),occ(3,0,10560)];
+    // Ending after beat 3 of 4/4 is ending at the barline of 3/4: that boundary still exists.
+    expect(resolveKeptLoop(endAtBeat4,bar2ThreeFour,4)).toEqual({startTick:3840,endTick:7680+2880});
+    const endAtBeat3=keptLoopOf({startTick:3840,endTick:7680+1920},plain,4)!;
+    expect(resolveKeptLoop(endAtBeat3,bar2ThreeFour,4)).toEqual({startTick:3840,endTick:7680+1920});
+    const bar2TwoFour=[occ(0,0,0),occ(1,0,3840),occ(2,0,7680,7680+960),occ(3,0,8640)];
+    expect(resolveKeptLoop(endAtBeat3,bar2TwoFour,4)).toBeNull();
+  });
+  it('lets a whole-bar edge follow a bar whose length changed',()=>{
+    const whole=keptLoopOf({startTick:3840,endTick:7680},plain,4)!;
+    const threeFour=[occ(0,0,0),occ(1,0,3840,3840+2880),occ(2,0,6720),occ(3,0,10560)];
+    expect(resolveKeptLoop(whole,threeFour,4)).toEqual({startTick:3840,endTick:6720});
+  });
+  it('restores the pass of a repeated bar it was set on',()=>{
+    const second=keptLoopOf({startTick:11520,endTick:19200},repeated,4)!;
+    expect(resolveKeptLoop(second,repeated,4)).toEqual({startTick:11520,endTick:19200});
+  });
+  it('falls back to the only pass of a bar when the repeat is gone',()=>{
+    const second=keptLoopOf({startTick:11520,endTick:19200},repeated,4)!;
+    expect(resolveKeptLoop(second,plain,4)).toEqual({startTick:3840,endTick:11520});
+  });
+  it('keeps a loop across a repeat when removing the repeat leaves its passes unambiguous',()=>{
+    // Loop across the whole repeated section (bar 0 before repeat to bar 3 after repeat)
+    const acrossAll=keptLoopOf({startTick:0,endTick:23040},repeated,4)!;
+    expect(resolveKeptLoop(acrossAll,plain,4)).toEqual({startTick:0,endTick:15360});
+    // Loop from before repeat to the second pass of bar 2
+    const acrossToPass2=keptLoopOf({startTick:0,endTick:19200},repeated,4)!;
+    expect(resolveKeptLoop(acrossToPass2,plain,4)).toEqual({startTick:0,endTick:11520});
+    // Loop from the first pass of bar 1 across the repeat to bar 3
+    const fromPass1ToAfter=keptLoopOf({startTick:3840,endTick:23040},repeated,4)!;
+    expect(resolveKeptLoop(fromPass1ToAfter,plain,4)).toEqual({startTick:3840,endTick:15360});
+    // Loop spanning both passes of the repeated bars (bar 1 pass 0 to bar 2 pass 1)
+    const bothPasses=keptLoopOf({startTick:3840,endTick:19200},repeated,4)!;
+    expect(resolveKeptLoop(bothPasses,plain,4)).toEqual({startTick:3840,endTick:11520});
+  });
+  it('clears a loop across a repeat when removing the repeat inverts order or leaves passes ambiguous',()=>{
+    // Loop across the repeat turnaround (from pass 0 of bar 2 to pass 1 of bar 1)
+    const turnaround=keptLoopOf({startTick:7680,endTick:15360},repeated,4)!;
+    expect(resolveKeptLoop(turnaround,plain,4)).toBeNull();
+    // Partial-bar turnaround across the repeat jump
+    const partialTurnaround=keptLoopOf({startTick:7680+1920,endTick:11520+1920},repeated,4)!;
+    expect(resolveKeptLoop(partialTurnaround,plain,4)).toBeNull();
+    // A 3rd pass loop when repeat is reduced to 2 passes (still multiple passes, so pass is ambiguous)
+    const thrice=[occ(0,0,0),occ(1,0,3840),occ(2,0,7680),occ(1,1,11520),occ(2,1,15360),occ(1,2,19200),occ(2,2,23040),occ(3,0,26880)];
+    const thirdPass=keptLoopOf({startTick:19200,endTick:26880},thrice,4)!;
+    expect(resolveKeptLoop(thirdPass,repeated,4)).toBeNull();
+  });
+  it('refuses when a bar has several passes and the one it was set on is gone',()=>{
+    const third:KeptLoop={start:{bar:1,occurrence:2,at:'start'},end:{bar:2,occurrence:2,at:'end'},barCount:4};
+    expect(resolveKeptLoop(third,repeated,4)).toBeNull();
+  });
+  it('refuses when the number of bars changed without a map',()=>{
+    expect(resolveKeptLoop(kept,plain,5)).toBeNull();
+  });
+  it('refuses when a bar is gone or the range would be empty',()=>{
+    expect(resolveKeptLoop(kept,plain.slice(0,2),4)).toBeNull();
+    expect(resolveKeptLoop({...kept,end:{bar:1,occurrence:0,at:'start'}},plain,4)).toBeNull();
+  });
+});
+
+describe('mapKeptLoop',()=>{
+  const kept=keptLoopOf({startTick:3840,endTick:11520},plain,4)!;
+  it('moves the bars when bars are inserted before the loop',()=>{
+    expect(mapKeptLoop(kept,insert(4,0,2))).toEqual({start:{bar:3,occurrence:0,at:'start'},end:{bar:4,occurrence:0,at:'end'},barCount:6});
+  });
+  it('leaves the bars when bars are inserted after the loop',()=>{
+    expect(mapKeptLoop(kept,insert(4,3,2))).toEqual({...kept,barCount:6});
+  });
+  it('grows the loop when bars are inserted inside it',()=>{
+    expect(mapKeptLoop(kept,insert(4,2,1))).toEqual({start:{bar:1,occurrence:0,at:'start'},end:{bar:3,occurrence:0,at:'end'},barCount:5});
+  });
+  it('moves the bars back when earlier bars are removed',()=>{
+    expect(mapKeptLoop(kept,remove(4,0,0))).toEqual({start:{bar:0,occurrence:0,at:'start'},end:{bar:1,occurrence:0,at:'end'},barCount:3});
+  });
+  it('trims the loop to the bars that remain when an end bar is removed',()=>{
+    expect(mapKeptLoop(kept,remove(4,1,1))).toEqual({start:{bar:1,occurrence:null,at:'start'},end:{bar:1,occurrence:0,at:'end'},barCount:3});
+    expect(mapKeptLoop(kept,remove(4,2,2))).toEqual({start:{bar:1,occurrence:0,at:'start'},end:{bar:1,occurrence:null,at:'end'},barCount:3});
+  });
+  it('gives nothing when every bar of the loop is removed',()=>{
+    expect(mapKeptLoop(kept,remove(4,1,2))).toBeNull();
+  });
+  it('gives nothing when the map is for another number of bars',()=>{
+    expect(mapKeptLoop(kept,insert(5,0,1))).toBeNull();
+  });
+  it('resolves a trimmed edge only where its bar plays once',()=>{
+    const trimmed=mapKeptLoop(kept,remove(4,1,1))!;
+    // Old bars 0,2,3 are now 0,1,2: the loop starts at bar 1, which plays once here.
+    const after=[occ(0,0,0),occ(1,0,3840),occ(2,0,7680)];
+    expect(resolveKeptLoop(trimmed,after,3)).toEqual({startTick:3840,endTick:7680});
+    const twice=[occ(0,0,0),occ(1,0,3840),occ(1,1,7680),occ(2,0,11520)];
+    expect(resolveKeptLoop(trimmed,twice,3)).toBeNull();
+  });
+});

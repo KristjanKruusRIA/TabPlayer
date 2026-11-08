@@ -5,8 +5,9 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 import { DocumentTabs } from './DocumentTabs';
 import type { DocumentTab } from './types';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); setLanguagePreference('en'); });
 const tabs:DocumentTab[]=[
   {id:'first',title:'Untitled',path:null,dirty:true},
   {id:'second',title:'Untitled',path:'C:/scores/second.tabplayer',dirty:false},
@@ -93,4 +94,14 @@ it('marks a finalized tab with an accessible lock',()=>{
   const [locked,open]=screen.getAllByRole('tab');
   expect(locked.querySelector('svg[aria-label="Finalized"]')).not.toBeNull();expect(open.querySelector('svg[aria-label="Finalized"]')).toBeNull();
   expect(locked).toHaveAccessibleDescription('C:/scores/etude.tabplayer; Finalized');
+});
+
+it('translates document tabs when language preference changes', () => {
+  try {
+    setLanguagePreference('et');
+    render(<DocumentTabs tabs={tabs} activeId="first" disabled={false} onActivate={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByRole('tablist', { name: 'Avatud partituurid' })).toBeInTheDocument();
+  } finally {
+    setLanguagePreference('en');
+  }
 });

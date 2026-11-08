@@ -9,16 +9,17 @@ import { NativePlaybackController } from './audio/NativePlaybackController';
 import type { NativeAudioBridge,NativeAudioStatus } from './audio/bridge';
 import { buildDocument,previewEdit } from './engine';
 import { blankProject } from './project';
+import { setLanguagePreference } from './i18n';
 const cursor={track:0,staff:0,bar:0,voice:0,beat:0};
 const cursorChoices=[{generation:7,occurrenceIndex:0,startTick:0},{generation:7,occurrenceIndex:1,startTick:3840}];
 const passage={generation:7,startOccurrence:0,endOccurrence:0,startTick:480,endTick:1920};
 const occurrences=[0,1].map(occurrence=>({bar:0,occurrence,startTick:occurrence*3840,endTick:(occurrence+1)*3840,startMs:occurrence*2000,endMs:(occurrence+1)*2000,meterNumerator:4,meterDenominator:4,clickTicks:[]}));
-afterEach(()=>{cleanup();vi.useRealTimers();});
+afterEach(()=>{cleanup();vi.useRealTimers();setLanguagePreference('en');});
 function renderTransport(element:Parameters<typeof render>[0]) {
   const view=render(element),summary=screen.queryByText(/^More playback/,{selector:'summary'});
   if(summary&&!summary.closest('details')!.open)fireEvent.click(summary);return view;
 }
-function snapshot(patch:Partial<PlaybackState>={}):PlaybackState {return {ready:true,playing:false,time:1000,endTime:6000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'paused',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null,...patch};}
+function snapshot(patch:Partial<PlaybackState>={}):PlaybackState {return {ready:true,playing:false,time:1000,endTime:6000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'paused',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loopNotice:null,range:null,loop:null,error:null,...patch};}
 function playerFor(initial=snapshot()) {
   let state=initial;const listeners=new Set<()=>void>();
   const player={generation:7,getState:()=>state,subscribe:(listener:()=>void)=>{listeners.add(listener);return ()=>{listeners.delete(listener);};},play:vi.fn(),pause:vi.fn(),stop:vi.fn(),setSpeed:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),seekToMeasure:vi.fn(),setMetronome:vi.fn(),setPractice:vi.fn(),cursorPlaybackChoices:vi.fn(()=>cursorChoices),selectionPlaybackChoices:vi.fn(()=>[passage]),playbackOccurrences:()=>occurrences,playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn()};
@@ -95,6 +96,108 @@ it('loop_pressed_state_waits_for_native_acknowledgement_and_retains_failed_clear
   update(snapshot({loop:{startTick:0,endTick:3840},error:'Loop clear failed.'}));expect(screen.getByRole('alert')).toHaveTextContent('Loop clear failed.');expect(screen.getByRole('button',{name:'Clear loop'})).toHaveAttribute('aria-pressed','true');
   update(snapshot());expect(screen.getByRole('button',{name:'Loop'})).toHaveAttribute('aria-pressed','false');
 });
+const eightBars=Array.from({length:8},(_,bar)=>({bar,occurrence:0,startTick:bar*3840,endTick:(bar+1)*3840,startMs:bar*2000,endMs:(bar+1)*2000,meterNumerator:4,meterDenominator:4,clickTicks:[]}));
+it('the loop bar fields follow the selected bars, so Loop repeats the passage the player picked',()=>{
+  const {player}=playerFor();player.playbackOccurrences=()=>eightBars;
+  const fields=()=>[screen.getByLabelText('Loop start'),screen.getByLabelText('Loop end')];
+  const view=renderTransport(<Transport cursor={cursor} selection={{kind:'bars',tracks:[0],firstBar:4,lastBar:6}} player={player} measures={8} busy={false}/>);
+  expect(fields()).toEqual([expect.objectContaining({value:'5'}),expect.objectContaining({value:'7'})]);
+  fireEvent.click(screen.getByRole('button',{name:'Loop'}));expect(player.setLoop).toHaveBeenCalledWith(4,6);
+  expect(screen.getByRole('button',{name:'Loop'})).toHaveAttribute('title','Loop bars 5 to 7');
+  view.rerender(<Transport cursor={{...cursor,bar:2}} selection={null} player={player} measures={8} busy={false}/>);
+  expect(fields()).toEqual([expect.objectContaining({value:'3'}),expect.objectContaining({value:'3'})]);
+  view.rerender(<Transport cursor={{...cursor,bar:2}} selection={{kind:'range',range:{start:{bar:1,tick:0},end:{bar:3,tick:960},lanes:[]}}} player={player} measures={8} busy={false}/>);
+  expect(fields()).toEqual([expect.objectContaining({value:'2'}),expect.objectContaining({value:'4'})]);
+  expect(screen.getByLabelText('Loop start')).toHaveAttribute('title','Loop start');
+});
+it('the loop bar fields show the loop that is running, however it was set, and keep it while the selection moves',()=>{
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  const view=renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false}/>);
+  expect(screen.getByLabelText('Loop start')).toHaveValue(1);
+  update(snapshot({loop:{startTick:4*3840+480,endTick:7*3840}}));
+  expect(screen.getByLabelText('Loop start')).toHaveValue(5);expect(screen.getByLabelText('Loop end')).toHaveValue(7);
+  view.rerender(<Transport cursor={{...cursor,bar:0}} selection={{kind:'bars',tracks:[0],firstBar:1,lastBar:1}} player={player} measures={8} busy={false}/>);
+  expect(screen.getByLabelText('Loop start')).toHaveValue(5);expect(screen.getByLabelText('Loop end')).toHaveValue(7);
+  expect(screen.getByRole('button',{name:'Clear loop'})).toHaveAttribute('title','Clear loop');
+});
+it('the position display shows the bars a running loop plays and says so in text, then says when it is off',()=>{
+  vi.useFakeTimers();
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  const lcd=screen.getByRole('group',{name:'Song position'});
+  expect(lcd).not.toHaveAttribute('data-loop');expect(lcd).not.toHaveTextContent('Loop');
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(lcd).toHaveAttribute('data-loop','true');
+  expect(lcd).toHaveTextContent('Loop 5–7');
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  expect(lcd.style.getPropertyValue('--lcd-loop-from')).toBe('50%');expect(lcd.style.getPropertyValue('--lcd-loop-size')).toBe('37.5%');
+  update(snapshot({loop:{startTick:2*3840+960,endTick:3*3840}}));
+  expect(lcd).toHaveTextContent('Loop 3');expect(lcd).not.toHaveTextContent('Loop 3–');
+  expect(screen.getByText('Looping bar 3')).toBeInTheDocument();
+  update(snapshot());
+  expect(lcd).not.toHaveAttribute('data-loop');expect(lcd).not.toHaveTextContent('Loop');
+  act(()=>{vi.advanceTimersByTime(600);});
+  expect(screen.getByText('Loop off')).toBeInTheDocument();
+});
+it('says nothing about the loop while an edit rebuilds the plan, then says it is off only when it is cleared',()=>{
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  // The edit: not ready, no loop, no occurrences.
+  player.playbackOccurrences=()=>[];
+  update(snapshot({ready:false,loop:null}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+  // The plan is back with the loop restored on it: still the same words.
+  player.playbackOccurrences=()=>eightBars;
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+  // The loop could not be restored: the player is told once the plan is ready.
+  update(snapshot({loop:null,loopNotice:'cleared'}));
+  expect(screen.getByText('Loop off')).toBeInTheDocument();
+});
+it('does not say the loop is off in the moment between the plan being ready and the loop being sent again',()=>{
+  vi.useFakeTimers();
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  // The edit: rebuilt, then ready with no loop yet, then the loop is restored.
+  update(snapshot({ready:false,loop:null}));
+  update(snapshot({ready:true,loop:null}));
+  act(()=>{vi.advanceTimersByTime(300);});
+  expect(screen.queryByText('Loop off')).toBeNull();
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  act(()=>{vi.advanceTimersByTime(2000);});
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+});
+it('says the loop is off after a short delay when the player clears it, and at once when an edit ended it',()=>{
+  vi.useFakeTimers();
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  const view=renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  update(snapshot({loop:null}));
+  act(()=>{vi.advanceTimersByTime(300);});expect(screen.queryByText('Loop off')).toBeNull();
+  act(()=>{vi.advanceTimersByTime(300);});expect(screen.getByText('Loop off')).toBeInTheDocument();
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  update(snapshot({loop:null,loopNotice:'cleared'}));
+  expect(screen.getByText('Loop off')).toBeInTheDocument();
+  // A timer left over from a loop that went away is cancelled with the component.
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));update(snapshot({loop:null}));
+  view.unmount();
+  expect(()=>act(()=>{vi.advanceTimersByTime(1000);})).not.toThrow();
+});
+it('a loop across a repeat is named by its first and last bar, and a clock tick that hands over an equal loop changes nothing',()=>{
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  const lcd=screen.getByRole('group',{name:'Song position'});
+  update(snapshot({loop:{startTick:3840,endTick:3*3840}}));
+  const before=lcd.getAttribute('style');
+  update(snapshot({time:2000,loop:{startTick:3840,endTick:3*3840}}));
+  expect(lcd).toHaveTextContent('Loop 2–3');
+  expect(lcd.style.getPropertyValue('--lcd-loop-from')).toBe(before!.match(/--lcd-loop-from:\s*([^;]+)/)![1]);
+});
 it('custom_acknowledged_coefficients_and_full_relative_endpoints_are_displayed_without_dispatch',()=>{
   const state=snapshot({speed:123});state.practice.effectiveRatio=1.23;state.practice.currentBpm=147.6;state.practice.settings.tempo={kind:'relative',ratio:1.23};const {player,update}=playerFor(state);renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
   const speedGroup=()=>screen.getByRole('group',{name:'Speed'}),slower=()=>screen.getByRole('button',{name:'Slower'}),faster=()=>screen.getByRole('button',{name:'Faster'});expect(speedGroup()).toHaveTextContent('123%');expect(screen.getByRole('status',{name:'Practice playback'})).toHaveTextContent(/147.6 BPM.*123%/);expect(screen.getByLabelText('Practice passes')).toHaveTextContent('Completed passes 0');expect(screen.getByLabelText('Practice passes')).toBeVisible();
@@ -117,9 +220,23 @@ it('count_paused_count_and_pulses_render_only_acknowledged_native_state',()=>{
   update({...state,playing:false,practice:{...state.practice,phase:'paused'}});expect(screen.getByRole('status',{name:'Count-in'})).toHaveTextContent(/Count-in paused.*3.*remaining/);expect(screen.getByRole('button',{name:'Play'})).toBeEnabled();expect(screen.getByLabelText('Metronome pulse')).toHaveAttribute('data-pulse-serial','42');
   update(snapshot());expect(screen.queryByLabelText('Metronome pulse')).not.toBeInTheDocument();expect(screen.queryByRole('status',{name:'Count-in'})).not.toBeInTheDocument();
 });
+it('says so in the transport message line when an edit ended the loop',()=>{
+  const {player}=playerFor(snapshot({loopNotice:'cleared'}));renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  expect(screen.getByText('The loop was removed because your edit changed the bars it covered.')).toBeInTheDocument();
+});
 it('practice_notices_are_visible_and_control_errors_stay_inline',()=>{
-  const {player}=playerFor(snapshot({practiceNotice:'Fixed tempo disabled because this score has backing audio.'}));player.setSpeed.mockImplementation(()=>{throw new Error('Practice change rejected.');});renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const {player}=playerFor(snapshot({practiceNotice:'fixed_tempo_disabled_backing'}));player.setSpeed.mockImplementation(()=>{throw new Error('Practice change rejected.');});renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
   expect(screen.getByText('Fixed tempo disabled because this score has backing audio.')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Slower'}));expect(screen.getByRole('alert')).toHaveTextContent('Practice change rejected.');
+});
+it('translates practice notice when language preference changes',()=>{
+  const {player}=playerFor(snapshot({practiceNotice:'fixed_tempo_disabled_backing'}));
+  setLanguagePreference('et');
+  const {unmount}=renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  expect(screen.getByText('Fikseeritud tempo on välja lülitatud, sest sellel palal on taustheli.')).toBeInTheDocument();
+  unmount();
+  setLanguagePreference('de');
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  expect(screen.getByText('Festes Tempo deaktiviert, da diese Partitur über Begleitaudio verfügt.')).toBeInTheDocument();
 });
 it('steps bars from the toolbar and shows the selected track, bar, signature and tempo in the position display',()=>{
   const {player,update}=playerFor(snapshot({measure:1}));
@@ -154,4 +271,176 @@ it('lets the position display change track, go to a bar, open measure settings a
   view.rerender(<Transport cursor={cursor} selection={null} player={player} measures={4} busy display={{track:'1. Guitar',tracks:['1. Guitar','2. Bass'],trackIndex:0,onTrack,onGoTo,onMeasure,signatureAt:()=>'4/4'}}/>);
   fireEvent.change(screen.getByRole('combobox',{name:'Current track'}),{target:{value:'1'}});expect(onTrack).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button',{name:'Tempo 120 (click to change)'}));expect(onMeasure).toHaveBeenCalledTimes(2);
+});
+
+it('typed practice speed: sets on Enter or blur, restores on Escape, steps presets and updates the field',()=>{
+  const {player,update}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).toHaveValue('100');
+
+  // Typing a number from 10 to 300 and pressing Enter sets the speed
+  fireEvent.change(input,{target:{value:'60'}});
+  expect(input).toHaveValue('60');
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).toHaveBeenLastCalledWith(60);
+
+  // Leaving the field sets the speed
+  fireEvent.change(input,{target:{value:'85'}});
+  fireEvent.blur(input);
+  expect(player.setSpeed).toHaveBeenLastCalledWith(85);
+
+  // Boundary values 10 and 300
+  fireEvent.change(input,{target:{value:'10'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).toHaveBeenLastCalledWith(10);
+  fireEvent.change(input,{target:{value:'300'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).toHaveBeenLastCalledWith(300);
+
+  // Escape restores the shown value
+  update(snapshot({speed:300}));
+  expect(input).toHaveValue('300');
+  fireEvent.change(input,{target:{value:'140'}});
+  expect(input).toHaveValue('140');
+  fireEvent.keyDown(input,{key:'Escape'});
+  expect(input).toHaveValue('300');
+  expect(player.setSpeed).toHaveBeenCalledTimes(4);
+
+  // Preset steps of Slower and Faster update the field and step from custom speed
+  update(snapshot({speed:60}));
+  expect(input).toHaveValue('60');
+  fireEvent.click(screen.getByRole('button',{name:'Faster'}));
+  expect(player.setSpeed).toHaveBeenLastCalledWith(75);
+  fireEvent.click(screen.getByRole('button',{name:'Slower'}));
+  expect(player.setSpeed).toHaveBeenLastCalledWith(50);
+
+  // Choosing the current value does nothing
+  update(snapshot({speed:100}));
+  player.setSpeed.mockClear();
+  fireEvent.change(input,{target:{value:'100'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  fireEvent.blur(input);
+  expect(player.setSpeed).not.toHaveBeenCalled();
+});
+
+it('typed practice speed: refuses out of range or non-numeric values with an inline message, leaving speed unchanged',()=>{
+  const {player}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).toHaveValue('100');
+
+  // Below range (< 10) on Enter
+  fireEvent.change(input,{target:{value:'9'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Speed must be a number from 10% to 300%.');
+  expect(input).toHaveAttribute('aria-invalid','true');
+
+  // Above range (> 300) on blur
+  fireEvent.change(input,{target:{value:'301'}});
+  fireEvent.blur(input);
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Speed must be a number from 10% to 300%.');
+  expect(input).toHaveAttribute('aria-invalid','true');
+
+  // Not a number on Enter
+  fireEvent.change(input,{target:{value:'fast'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Speed must be a number from 10% to 300%.');
+  expect(input).toHaveAttribute('aria-invalid','true');
+
+  // Empty string on blur
+  fireEvent.change(input,{target:{value:''}});
+  fireEvent.blur(input);
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Speed must be a number from 10% to 300%.');
+
+  // Escape clears the inline message and restores shown value
+  fireEvent.keyDown(input,{key:'Escape'});
+  expect(input).toHaveValue('100');
+  expect(input).not.toHaveAttribute('aria-invalid');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+it('fixed-tempo practice setting restricts the speed field with aria-disabled, readOnly and title hint',()=>{
+  const fixed=snapshot({speed:75});
+  fixed.practice.settings.tempo={kind:'fixed',bpm:90};
+  fixed.practice.currentBpm=90;
+  fixed.practice.effectiveRatio=.75;
+  const {player}=playerFor(fixed);
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).toHaveAttribute('aria-disabled','true');
+  expect(input).toHaveAttribute('readonly');
+  expect(input).toHaveAttribute('title','Fixed tempo controls playback speed.');
+  expect(input).not.toBeDisabled();
+
+  // Changes are refused
+  fireEvent.change(input,{target:{value:'120'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  fireEvent.blur(input);
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(input).toHaveValue('75');
+});
+
+it('typed practice speed: the message describes the field and does not share the transport error',()=>{
+  const {player,update}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).not.toHaveAttribute('aria-describedby');
+  fireEvent.change(input,{target:{value:'fast'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(input).toHaveAttribute('aria-invalid','true');
+  expect(input).toHaveAccessibleDescription('Speed must be a number from 10% to 300%.');
+  // A typo is not a playback error: the More playback summary carries no error suffix.
+  expect(screen.getByText(/^More playback/,{selector:'summary'})).toHaveTextContent(/^More playback$/);
+  // A successful Slower clears it and drops the description.
+  fireEvent.click(screen.getByRole('button',{name:'Slower'}));
+  expect(player.setSpeed).toHaveBeenLastCalledWith(75);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(input).not.toHaveAttribute('aria-invalid');
+  expect(input).not.toHaveAttribute('aria-describedby');
+  // A valid entry clears it too.
+  fireEvent.change(input,{target:{value:'9'}});fireEvent.blur(input);
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+  fireEvent.change(input,{target:{value:'80'}});fireEvent.keyDown(input,{key:'Enter'});
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(input).not.toHaveAttribute('aria-invalid');
+  update(snapshot({speed:80}));
+});
+
+it('typed practice speed: tabbing through the field leaves an unrelated transport error in place',()=>{
+  const {player}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  player.play.mockImplementation(()=>{throw new Error('Play failed.');});
+  fireEvent.click(screen.getByRole('button',{name:'Play'}));
+  expect(screen.getByRole('alert')).toHaveTextContent('Play failed.');
+  fireEvent.focus(input);fireEvent.blur(input);
+  expect(screen.getByRole('alert')).toHaveTextContent('Play failed.');
+  // Retyping the shown value also leaves it alone.
+  fireEvent.change(input,{target:{value:'100'}});fireEvent.blur(input);
+  expect(screen.getByRole('alert')).toHaveTextContent('Play failed.');
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  // A typo adds its own message beside it and does not replace it.
+  fireEvent.change(input,{target:{value:'x'}});fireEvent.blur(input);
+  expect(screen.getAllByRole('alert').map(node=>node.textContent)).toEqual(['Speed must be a number from 10% to 300%.','Error: Play failed.']);
+});
+
+it('typed practice speed: accepts a decimal comma and refuses hex, exponent and signed forms',()=>{
+  const {player}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).toHaveAttribute('inputmode','decimal');
+  fireEvent.change(input,{target:{value:'62,5'}});fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).toHaveBeenLastCalledWith(62.5);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  player.setSpeed.mockClear();
+  for(const text of ['0x1F','1e2','+50','-50','5 0','1,2,3']){
+    fireEvent.change(input,{target:{value:text}});fireEvent.keyDown(input,{key:'Enter'});
+    expect(screen.getByRole('alert'),text).toHaveTextContent('Speed must be a number');
+  }
+  expect(player.setSpeed).not.toHaveBeenCalled();
 });

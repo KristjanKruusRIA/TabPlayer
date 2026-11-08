@@ -145,6 +145,18 @@ const fixed: Array<[string, RegExp]> = [
   ['src/audio/DrumKitPicker.tsx', /Every drum key|These notations play|is the reference kit|changes \$\{/],
   ['src/workstation/ScoreOverview.tsx', /Playback measure|, measure \$\{/],
   ['src/editor/NoteAudioControls.tsx', /must be a whole number|was not applied|A tied note continues|A bent, whammy/],
+  ['src/audio/practice.ts', /Fixed tempo disabled because this score has backing audio/],
+  ['src/audio/cabinet-ir.ts', /The impulse response “|is not in this computer's cabinet library/],
+  ['src/audio/CabinetResponse.tsx', /Import cabinet impulse response|>Import impulse response…<|>Remove from library<|>Built-in cabinet/],
+  ['src/audio/InterpretationPanel.tsx', /aria-label="Track interpretation"|<h3>Interpretation<\/h3>|'Playing style'|Automatic \(from the instrument\)|>Automatic let ring</],
+  ['src/protection/PasswordDialogs.tsx', /"Password required"|"Unlock editing"|"Password protection"|>Show passwords<|'Enter the current password\.'/],
+  ['src/workspace/ViewDefaultsPanel.tsx', /<summary>Default view<\/summary>|label="Default layout"|label="Default tracks"|>Save default view<\/button>/],
+  ['src/workspace/MidiImportDialog.tsx', /aria-label="MIDI file"|'No file chosen'|label="Quantization"|label="Voices per track"|>Guitar and bass as tablature</],
+  ['src/workspace/AsciiTabImportDialog.tsx', /<label>ASCII tab<textarea|'Reading the tab…'|'Nothing to import yet\.'/],
+  ['src/workspace/DocumentTabs.tsx', /aria-label="Open scores"|`Score \${index\+1} of|'Unsaved score'|aria-label="Finalized"/],
+  ['src/workspace/MidiImportDialog.tsx', /\$\{part\.voices\} voices|plural\(part\.notes/],
+  ['src/audio/SelectionPlaybackControls.tsx', />(Play from cursor|Play selection|Loop selection)<|<summary>Selected playback|`Measure \$\{/],
+  ['src/engraving/BarWidthsPanel.tsx', /<summary>Design: bar widths<\/summary>|Design mode: show bar width handles|>Restore default widths<\/button>/],
 ];
 
 describe('fixed English literals', () => {

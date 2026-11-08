@@ -144,7 +144,7 @@ export async function runSavedTuningsAcceptance({buildPath}={}){
     await openDialog();const group=dialog().getByRole('group',{name:'Guitar · 7 strings',exact:true});const seventh=group.getByRole('button').first();const presetName=await seventh.locator('.saved-tuning-row-name').textContent();
     assert.equal(await seventh.locator('.saved-tuning-row-pitches').textContent(),'E4 B3 G3 D3 A2 E2 B1');await seventh.click();await dialog().getByRole('button',{name:'Use tuning',exact:true}).click();await dialog().waitFor({state:'detached'});
     await page.getByRole('combobox',{name:/^Strings kept in place/}).selectOption('high');await page.getByRole('button',{name:'Change string count',exact:true}).click();await idle();await native();
-    const commandB={type:'setStringCount',track:0,tuning:seven,keep:'high',tuningName:presetName};current=await record();assert.deepEqual(current.snapshot.project.edits,[commandA,commandB]);
+    const commandB={type:'setStringCount',track:0,tuning:seven,keep:'high',tuningName:presetName,crossVoice:true};current=await record();assert.deepEqual(current.snapshot.project.edits,[commandA,commandB]);
     await exportCheck('seven-string',seven,presetName);step('Built-in seven-string tuning applied through the string-count route',{commandB});
 
     // Short window: the dialog body scrolls and Cancel / Use tuning stay reachable.

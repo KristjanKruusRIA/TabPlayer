@@ -141,3 +141,9 @@ it('disables unavailable page fit on a page error and guards busy layout and fit
   fireEvent.change(screen.getByLabelText('Display mode'),{target:{value:'verticalPage'}});
   expect(onDisplay).not.toHaveBeenCalled();expect(p.onView).not.toHaveBeenCalled();expect(p.onZoom).not.toHaveBeenCalled();
 });
+
+it('shows a fitted zoom rounded in the output and in the limit message',()=>{
+  render(<TrackDisplayControls {...props()} display={{layout:'parchment',zoomMode:'fitWidth'}} onDisplay={vi.fn()} actualZoom={87.81646825396825} fitLimited/>);
+  expect(screen.getByLabelText('Actual zoom')).toHaveTextContent('Actual zoom: 87.8%');
+  expect(screen.getByText('Fit is limited to 87.8%. Scroll to view the full score.')).toBeInTheDocument();
+});

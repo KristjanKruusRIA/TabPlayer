@@ -26,6 +26,7 @@ npm run typecheck
 cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml
 cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
 node scripts/prepare-audio.mjs --offline
+node scripts/font-coverage.mjs   # after changing a bundled font: rewrites src/engraving/font-coverage.json and scripts/music-substitutes.json
 node tests/desktop/parity-<name>.mjs   # from the checkout root, after the desktop test build
 ```
 

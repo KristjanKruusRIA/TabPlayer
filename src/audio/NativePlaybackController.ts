@@ -11,7 +11,7 @@ import type { AuditionSource } from './audition';
 import { preparePlan,preparePlanFromScore } from './plan';
 import { interpretationsOf } from './interpretation';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
-import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
+import { DEFAULT_PRACTICE,type PracticeLoop,type PracticeSettings,type PracticeStatus } from './practice-types';
 import { practiceForBacking,validatePractice } from './practice';
 import { cursorPlaybackChoices,selectionPlaybackChoices,requireCursorChoice,requirePassageChoice } from './selection-playback';
 import type { ScheduledNotes } from '../instruments/focus';
@@ -19,6 +19,8 @@ import type { CursorPlaybackChoice,PassagePlaybackChoice } from './selection-pla
 import type { BackingScoreSelection,BackingTimeline } from './backing-waveform-types';
 import {applyReferenceSyncPlan,referenceTimingKey} from './reference-sync';
 import { focusedSettings,type TrackFocus } from './focus';
+import { keptLoopOf,mapKeptLoop,resolveKeptLoop,type KeptLoop } from './kept-loop';
+import type { BarIndexMap } from '../editor/measures-types';
 
 let nextGeneration=0;
 function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.metronome.sound??"beep",settings.countIn.bars,settings.countIn.betweenLoops]);}
@@ -30,7 +32,7 @@ const mixKey=(mix:ChannelMix|undefined)=>{const m=mix??defaultMix();return JSON.
 const mixLanded=(heard:{track:string;mix:ChannelMix;landing:{key:string;project:ProjectView|null}|null},built:BuiltDocument|null,project:ProjectView|null)=>{if(heard.landing===null||!built)return false;if(project!==heard.landing.project)return true;const key=mixKey(built.settings.mixes[heard.track]);return key!==heard.landing.key||key===mixKey(heard.mix);};
 type Options={bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined;latestMaster?:()=>MasterSettings|undefined};
 export class NativePlaybackController {
-  private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,practice:idlePractice(DEFAULT_PRACTICE),practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
+  private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,practice:idlePractice(DEFAULT_PRACTICE),practicePending:false,practiceNotice:null,range:null,loop:null,loopNotice:null,error:null};
   private listeners=new Set<()=>void>();private view:AlphaTabApi|null=null;private cleanupView:()=>void=()=>{};
   private unlisten:()=>void=()=>{};private subscription:Promise<void>;private destroyed=false;private suppressHandler=false;private viewPlaying=false;
   // Focus is session-only: it changes what native audio plays, never the saved mix or the project.
@@ -38,6 +40,8 @@ export class NativePlaybackController {
   private trackFocus:TrackFocus|null=null;private preview:{track:string;sound:TrackSound}|null=null;private mixPreview:{track:string;mix:ChannelMix;landing:{key:string;project:ProjectView|null}|null}|null=null;private mixPending=false;private loaded:{project:ProjectView;documentEpoch:number;playbackResumeEpoch:number}|null=null;
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private planInterpretationKey='';private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private hasBacking=false;
+  /** The running loop by bars, so it can follow an edit that rebuilds the plan. `awaitingRestore` holds off reading the loop back from native while the rebuilt plan has none yet; `loopLost` is an edit that took the loop's bars with it. */
+  private keptLoop:KeptLoop|null=null;private loopLost=false;private awaitingRestore=false;private loopsSending=0;
   private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
   private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
   private bridge:NativeAudioBridge;private options:Options;generation=++nextGeneration;
@@ -69,6 +73,7 @@ export class NativePlaybackController {
   private receive(status:NativeAudioStatus){
     if(status.generation!==this.generation || this.destroyed)return;
     this.lastStatus=status;
+    if(!this.awaitingRestore&&this.loopsSending===0&&this.plan&&this.built&&status.ready&&!status.error)this.keptLoop=status.loop?keptLoopOf(status.loop,this.plan.occurrences,this.built.score.masterBars.length):null;
     if(!status.ready || status.error){this.noteMode='stopped';this.pendingNoteTick=undefined;}
     else if((this.noteMode==='waiting' && status.playing)
       || (this.noteMode==='seeking' && (status.playing || Math.abs(status.tick-this.pendingNoteTick!)<1e-6))
@@ -130,7 +135,7 @@ export class NativePlaybackController {
   }
   playFromCursor(cursor:BeatTarget,choice:CursorPlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requireCursorChoice(cursorPlaybackChoices(score,plan,cursor),choice);this.startRange(selected.startTick,null);}
   playSelection(selection:MusicSelection,choice:PassagePlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requirePassageChoice(selectionPlaybackChoices(score,plan,selection),choice);this.startRange(selected.startTick,selected.endTick);}
-  loopSelection(selection:MusicSelection,choice:PassagePlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requirePassageChoice(selectionPlaybackChoices(score,plan,selection),choice);this.send({type:'setLoop',generation:this.generation,startTick:selected.startTick,endTick:selected.endTick});}
+  loopSelection(selection:MusicSelection,choice:PassagePlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requirePassageChoice(selectionPlaybackChoices(score,plan,selection),choice);this.loopSet({startTick:selected.startTick,endTick:selected.endTick});this.sendLoop({type:'setLoop',generation:this.generation,startTick:selected.startTick,endTick:selected.endTick});}
   pause(){this.send({type:'pause',generation:this.generation});}stop(){this.noteMode='stopped';this.pendingNoteTick=undefined;this.update({});this.send({type:'stop',generation:this.generation});}
   private occurrence(bar:number){const found=this.plan?.occurrences.find(o=>o.bar===bar);if(!Number.isInteger(bar)||!found)throw new Error('Select a measure after playback is ready.');return found;}
   private seekToTick(tick:number){this.noteMode='seeking';this.pendingNoteTick=tick;this.operationError=null;this.update({error:this.lastStatus?.error??null});this.send({type:'seekTick',tick,generation:this.generation});}
@@ -144,8 +149,12 @@ export class NativePlaybackController {
   }
   exportPracticeRatio():number|null{return this.practice.tempo.kind==='fixed'?null:this.state.practice.effectiveRatio;}
   setSpeed(percent:number){this.setPractice({...this.practice,tempo:{kind:'relative',ratio:percent/100}});}
-  setLoop(start:number,end:number){if(end<start)throw new Error('Loop end must follow its start.');this.send({type:'setLoop',startTick:this.occurrence(start).startTick,endTick:this.occurrence(end).endTick,generation:this.generation});}
-  clearLoop(){this.send({type:'clearLoop',generation:this.generation});}
+  setLoop(start:number,end:number){if(end<start)throw new Error('Loop end must follow its start.');const startTick=this.occurrence(start).startTick,endTick=this.occurrence(end).endTick;this.loopSet({startTick,endTick});this.sendLoop({type:'setLoop',startTick,endTick,generation:this.generation});}
+  /** A loop the player asked for replaces whatever an edit left behind, and its notice. */
+  private loopSet(loop:PracticeLoop|null){this.loopLost=false;this.keptLoop=loop&&this.plan&&this.built?keptLoopOf(loop,this.plan.occurrences,this.built.score.masterBars.length):null;this.update({loopNotice:null});}
+  /** Native's own statuses are not read back as the kept loop while a loop command is on its way, since they can still describe the loop before it. */
+  private sendLoop(command:TransportCommand){this.loopsSending++;return this.send(command).finally(()=>{this.loopsSending--;});}
+  clearLoop(){this.loopSet(null);this.sendLoop({type:'clearLoop',generation:this.generation});}
   setMetronome(volume:number){this.setPractice({...this.practice,metronome:{...this.practice.metronome,enabled:volume>0,volume}});}
   selectDevice(deviceId:string|null){return this.send({type:'selectDevice',deviceId,generation:this.generation});}
   devices(){return this.bridge.devices();}
@@ -258,7 +267,8 @@ export class NativePlaybackController {
     } catch {/* An audition is a courtesy; a failure never reaches the editor. */}
   }
   resetMix(){for(const track of this.built?.score.tracks??[])this.editMix(track.index,defaultMix());}
-  beforeScoreChange(notifyNative=true){this.generation=++nextGeneration;this.plan=null;this.authoredPlan=null;this.planTimingKey=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.preparing=false;this.audioSettingsKey=null;this.desiredAudioSettingsKey=null;this.mixPending=false;this.mixQueue=Promise.resolve();this.lastStatus=null;this.pendingPractice=null;this.operationError=null;if(notifyNative)this.send({type:'invalidate',generation:this.generation});const practice=idlePractice(this.practice);this.update({ready:false,playing:false,practice,practicePending:false,range:null,loop:null,speed:practice.effectiveRatio*100,metronome:this.practice.metronome.enabled,error:null});}
+  /** `bars` says where an edit moved the bars, so a running loop follows them; without it the bars are taken to be where they were. */
+  beforeScoreChange(notifyNative=true,bars?:BarIndexMap){if(bars&&this.keptLoop){const mapped=mapKeptLoop(this.keptLoop,bars);if(!mapped)this.loopLost=true;this.keptLoop=mapped;}this.generation=++nextGeneration;this.plan=null;this.authoredPlan=null;this.planTimingKey=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.preparing=false;this.audioSettingsKey=null;this.desiredAudioSettingsKey=null;this.mixPending=false;this.mixQueue=Promise.resolve();this.lastStatus=null;this.pendingPractice=null;this.operationError=null;if(notifyNative)this.send({type:'invalidate',generation:this.generation});const practice=idlePractice(this.practice);this.update({ready:false,playing:false,practice,practicePending:false,range:null,loop:null,loopNotice:null,speed:practice.effectiveRatio*100,metronome:this.practice.metronome.enabled,error:null});}
   setRenderedScore(score:model.Score,tracks:number[]):void{if(this.destroyed)return;const prior=this.suppressHandler;this.suppressHandler=true;try{this.view?.renderScore(score,tracks);this.view?.player?.updateSyncPoints([]);}finally{this.suppressHandler=prior;this.viewPlaying=false;}}
   replaceScore(score:model.Score,track=0){this.setRenderedScore(score,[track]);}
   async loadDocument(project:ProjectView,built:BuiltDocument,_visibleTrack=0,documentEpoch=0,playbackResumeEpoch=0){
@@ -270,6 +280,7 @@ export class NativePlaybackController {
     while(playbackResumeEpoch>this.playbackResumeEpoch || this.floorReadyEpoch!==playbackResumeEpoch){
       if(playbackResumeEpoch>this.playbackResumeEpoch || !this.resumeRefresh){
         this.playbackResumeEpoch=playbackResumeEpoch;
+        this.keptLoop=null;this.loopLost=false;this.awaitingRestore=false;
         this.beforeScoreChange(false);this.update({time:0,endTime:0,measure:0});const generation=this.generation;
         const refresh=this.bridge.status().then(status=>{
           if(this.destroyed||generation!==this.generation||playbackResumeEpoch!==this.playbackResumeEpoch)return false;
@@ -289,7 +300,7 @@ export class NativePlaybackController {
     if(this.mixPreview&&mixLanded(this.mixPreview,built,project))this.mixPreview=null;
     const mixed=this.mixPreview;if(mixed&&!built.score.tracks.some(track=>trackIdentity(track)===mixed.track))this.mixPreview=null;
     const previewed=this.preview;if(previewed&&!built.score.tracks.some(track=>trackIdentity(track)===previewed.track)){this.preview=null;this.update({});}
-    if(documentChanged){this.trackFocus=null;this.preview=null;this.mixPreview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
+    if(documentChanged){this.keptLoop=null;this.loopLost=false;this.awaitingRestore=false;this.trackFocus=null;this.preview=null;this.mixPreview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
     const saved=effectiveAudioSettings(project,built),preview=this.preview,mixHeard=this.mixPreview;
     const heard={...saved,...(preview?{sounds:{...saved.sounds,[preview.track]:preview.sound}}:{}),...(mixHeard?{mixes:{...saved.mixes,[mixHeard.track]:mixHeard.mix}}:{})};
     const audioSettings=focusedSettings(preview||mixHeard?heard:saved,built.score.tracks.map(trackIdentity),this.trackFocus);this.hasBacking=audioSettings.backing!==null;
@@ -314,6 +325,7 @@ export class NativePlaybackController {
       }
     }
     const practice=structuredClone(this.practice);
+    this.awaitingRestore=this.keptLoop!==null||this.loopLost;
     this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.planTimingKey=timingKey;this.planInterpretationKey=interpretationKey;this.desiredAudioSettingsKey=audioSettingsKey;
     try {
       const authored=await (this.options.preparePlan?(interpreted?this.options.preparePlan(project,generation,interpretations):this.options.preparePlan(project,generation)):(interpreted?preparePlanFromScore(built.score,generation,interpretations):preparePlanFromScore(built.score,generation)));if(generation!==this.generation||this.destroyed)return;
@@ -322,8 +334,18 @@ export class NativePlaybackController {
       this.authoredPlan=authored;this.plan=plan;this.update({endTime:plan.playbackEndTick===undefined?plan.durationMs:this.millisecondsAtTick(plan.playbackEndTick,plan)});for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
       await this.bridge.prepare(plan,audioSettings,this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey,practice);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.audioSettingsKey=audioSettingsKey;this.operationError=null;
       const status=await this.bridge.status();if(generation!==this.generation||this.destroyed)return;if(status)this.receive(status);
-    } catch(error){if(generation===this.generation){this.prepared=false;this.fail(error);}}finally{if(generation===this.generation){this.preparing=false;this.update({});
+      await this.restoreLoop(generation);
+    } catch(error){if(generation===this.generation){this.prepared=false;this.keptLoop=null;this.loopLost=false;this.fail(error);}}finally{if(generation===this.generation){this.awaitingRestore=false;this.preparing=false;this.update({});
       if(this.prepared&&this.mixPending&&this.loaded&&this.built){this.mixPending=false;void this.reloadLatest().catch(error=>this.fail(error));}}}
+  }
+  /** Arms the loop again on the rebuilt plan, or says it could not be placed. Native playback still owns the loop; this only sends the same command a person would. */
+  private async restoreLoop(generation:number){
+    const kept=this.keptLoop,lost=this.loopLost;this.loopLost=false;
+    if(!kept&&!lost){this.awaitingRestore=false;return;}
+    const plan=this.plan,built=this.built,loop=kept&&plan&&built?resolveKeptLoop(kept,plan.occurrences,built.score.masterBars.length):null;
+    if(!loop){this.awaitingRestore=false;this.keptLoop=null;this.update({loopNotice:'cleared'});return;}
+    // Statuses stay unread until native has answered, so one that still shows no loop cannot drop the kept one.
+    try{await this.send({type:'setLoop',generation,startTick:loop.startTick,endTick:loop.endTick});if(generation===this.generation&&this.keptLoop===kept&&plan&&built)this.keptLoop=keptLoopOf(loop,plan.occurrences,built.score.masterBars.length)??kept;}finally{if(generation===this.generation)this.awaitingRestore=false;}
   }
   attachView(api:AlphaTabApi){
     this.cleanupView();this.view=api;this.viewPlaying=false;const controller=this;

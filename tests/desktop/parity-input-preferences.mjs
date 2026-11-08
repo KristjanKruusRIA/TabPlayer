@@ -68,7 +68,7 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
       if(!await region.isVisible())await page.locator('summary',{hasText:/^View$/}).click();
       await region.waitFor({state:'visible'});return region;
     };
-    const labels={preview:'Play notes while editing',auto:'Auto-duration: a note written on a rest takes the last duration',keypad:'Keypad sets duration (1-7, . for dot)',diagrams:'Paste includes chord diagrams'};
+    const labels={preview:'Play notes while editing',auto:'Auto-duration: a note written on a rest takes the last duration',keypad:'Keypad sets duration (1-7, . for dot)',diagrams:'Paste includes chord diagrams',advance:'Advance to the next beat after entering a note on the score'};
     const box=async name=>(await viewMenu()).getByRole('checkbox',{name:labels[name],exact:true});
     // Real key events carry the key a keyboard sends: Playwright's keyboard.press('Numpad2') reports ArrowDown, the NumLock-off shape.
     const press=(key,code)=>workspace$().dispatchEvent('keydown',{key,code,bubbles:true,cancelable:true});
@@ -87,7 +87,9 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     assert.equal(await (await box('keypad')).isChecked(),false,'Keypad defaults off');
     assert.equal(await (await box('auto')).isChecked(),false,'Auto-duration defaults off');
     await (await box('keypad')).check();await (await box('auto')).check();await (await box('diagrams')).uncheck();
-    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false});
+    // Advancing after a note is on by default; these walks assume the cursor stays on the beat it wrote.
+    assert.equal(await (await box('advance')).isChecked(),true,'Advance defaults on');await (await box('advance')).uncheck();
+    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false,advance:false,swapPlusMinus:false});
     assert.deepEqual(await record(),initial,'Preferences never edit the score');
 
     // Read path: after a reload the stored choices come back into the menu and the clipboard panel.
@@ -103,7 +105,7 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     assert.equal(await filter.isChecked(),false,'Clipboard diagram filter starts from the preference');
     await (await box('diagrams')).check();assert.equal(await filter.isChecked(),true,'Turning the preference on moves the filter');
     await (await box('diagrams')).uncheck();assert.equal(await filter.isChecked(),false);
-    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false});
+    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false,advance:false,swapPlusMinus:false});
     step('Preferences are saved, reloaded and drive the clipboard filter',{prefs:await prefs()});
 
     // NumLock off: the keypad reports navigation keys, which keep navigating and never edit.
@@ -123,9 +125,11 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     assert.equal(afterFirst[0].type,'setNote');assert.deepEqual(afterFirst[0].target,{track:0,bar:1,voice:0,beat:2,staff:0});
     await tap('ArrowRight',2);// bar 3 beat 2, a half rest
     await tap('Enter');
-    const afterSecond=await poll(edits,value=>value.length===3,'duration then note');
-    assert.deepEqual(afterSecond[1],{type:'setDuration',target:{track:0,bar:2,voice:0,beat:1,staff:0},duration:4,dots:0});
-    assert.equal(afterSecond[2].type,'setNote');assert.deepEqual(afterSecond[2].target,afterSecond[1].target);
+    // The remembered duration and the note are one gesture, so they are one undoable sequence edit.
+    const afterSecond=await poll(edits,value=>value.length===2,'duration then note');
+    assert.equal(afterSecond[1].type,'sequence');assert.equal(afterSecond[1].commands.length,2);
+    assert.deepEqual(afterSecond[1].commands[0],{type:'setDuration',target:{track:0,bar:2,voice:0,beat:1,staff:0},duration:4,dots:0});
+    assert.equal(afterSecond[1].commands[1].type,'setNote');assert.deepEqual(afterSecond[1].commands[1].target,afterSecond[1].commands[0].target);
     step('Auto-duration sets the remembered duration before writing on a differing rest',{edits:afterSecond.slice(1)});
     await tap('ArrowLeft',5);
 
@@ -151,7 +155,7 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     await (await box('preview')).setChecked(heard);step('Preview toggle is saved separately',{});
 
     // The saved score carries every change.
-    const final=await record();assert.equal(final.snapshot.project.edits.length,5);
+    const final=await record();assert.equal(final.snapshot.project.edits.length,4);
     const exportPath=`${exportBase}.gp`;assert.equal(existsSync(exportPath),false);await button('Export GP');
     const score=load(readFileSync(exportPath)),bars=score.tracks[0].staves[0].bars,beatAt=(bar,index)=>bars[bar].voices[0].beats[index];
     assert.equal(beatAt(0,0).duration,2);assert.equal(beatAt(0,0).dots,1);

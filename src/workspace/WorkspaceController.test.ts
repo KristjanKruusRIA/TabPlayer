@@ -5,6 +5,8 @@ import type { CloseDocument,DocumentSnapshot,NativeWorkspaceBridge,WorkspaceSnap
 import type { NativeSessionBridge } from './recovery-types';
 import type { SyncAnchor } from '../edit-types';
 import { WorkspaceController } from './WorkspaceController';
+import { WorkspaceLibrary } from './WorkspaceLibrary';
+import type { NativeFileLibraryBridge } from '../library/types';
 import { initialDocumentView } from './view-state';
 import { forgetSessionViewDefaults,writeViewDefaults } from './view-defaults';
 
@@ -349,7 +351,8 @@ it('a protected file asks for its password, keeps waiting after a wrong one and 
   expect(await w.openDocument()).toBe(true);
   expect(attempts).toEqual(['The password is incorrect, or this file is damaged.','opened']);
   expect(bridge.addDocument).toHaveBeenCalledWith(locked.token);expect(bridge.cancelDocument).not.toHaveBeenCalled();
-  expect(w.getState().documents).toHaveLength(before.length+1);
+  expect(w.getState().documents).toHaveLength(1);
+  expect(w.getState().documents[0].id).not.toBe(before[0]);
 });
 it.each([false,true])('giving up on a protected file opens nothing and stops it waiting: prompt answered %s',async answered=>{
   const {workspace:w,bridge}=await setup(),before=w.getState().documents.map(entry=>entry.id),unchanged=preserve(w);
@@ -379,4 +382,208 @@ it('the controller sends a protection request at the current revision and keeps 
   expect(bridge.applyEdit).not.toHaveBeenCalled();expect(controller.getState().snapshot.project.edits).toEqual([]);
   delete bridge.protect;
   await expect(controller.protect({kind:'lockEditing'})).rejects.toThrow('Password protection is unavailable.');
+});
+
+  async function validScoreProject(filename = 'song.gp') {
+  const { parseAsciiTab } = await import('../interchange/ascii-tab');
+  const { exportGpInterchange } = await import('../interchange/gp');
+  const { Settings } = await import('@coderline/alphatab');
+  const bytes = exportGpInterchange(parseAsciiTab(['e|--------|','B|--------|','G|--------|','D|--------|','A|--------|','E|0---3---|'].join('\n')).score, new Settings());
+  const bytesBase64 = btoa(String.fromCharCode(...bytes));
+  return { ...blankProject(), base: { kind: 'file' as const, filename, bytesBase64, sha256: '0'.repeat(64) } };
+}
+
+it('File -> Open replaces an untouched blank document and records no undo history', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  expect(w.getState().documents).toHaveLength(1);
+  expect(current(w).id).toBe(first);
+
+  const candidate = stage(await validScoreProject('song.gp'), 'opened-token');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents).toHaveLength(1);
+  expect(current(w).id).not.toBe(first);
+  expect(bridge.closeDocuments).toHaveBeenCalledWith([{ documentId: first, revision: 0, discard: false }]);
+
+  // Closing the replaced tab records nothing in any undo history
+  const state = current(w).controller.getState();
+  expect(state.snapshot.canUndo).toBe(false);
+  expect(state.snapshot.canRedo).toBe(false);
+  expect(state.snapshot.project.edits).toHaveLength(0);
+  expect(state.revision).toBe(0);
+  await current(w).controller.undo();
+  expect(current(w).controller.getState().snapshot.canUndo).toBe(false);
+});
+
+it('Library Open replaces an untouched blank document', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  const candidate = stage(await validScoreProject('library-score.gp'), 'library-token');
+  const library = { stage: vi.fn(async () => ({ kind: 'candidate' as const, candidate })) };
+
+  expect(await w.openSource({ kind: 'example', id: 'windowline' }, library)).toBe(true);
+  expect(w.getState().documents).toHaveLength(1);
+  expect(current(w).id).not.toBe(first);
+  expect(bridge.closeDocuments).toHaveBeenCalledWith([{ documentId: first, revision: 0, discard: false }]);
+});
+
+it('drag and drop replaces an untouched blank document with the first file and adds subsequent files', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  const cand1 = stage(await validScoreProject('drop1.gp'), 'drop-1');
+  const cand2 = stage(await validScoreProject('drop2.gp'), 'drop-2');
+  const library = {
+    dropStage: vi.fn()
+      .mockResolvedValueOnce({ kind: 'candidate', candidate: cand1 })
+      .mockResolvedValueOnce({ kind: 'candidate', candidate: cand2 }),
+  };
+
+  const result = await w.openDrop('drop-token', 2, library);
+  expect(result.opened).toBe(2);
+  expect(result.issues).toEqual([]);
+  // The untouched first tab was replaced, so we have 2 tabs total (drop1 and drop2)
+  expect(w.getState().documents).toHaveLength(2);
+  expect(w.getState().documents.some(d => d.id === first)).toBe(false);
+  expect(bridge.closeDocuments).toHaveBeenCalledWith([{ documentId: first, revision: 0, discard: false }]);
+});
+
+it('command line launch goes through the Library launch path and replaces an untouched blank document', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  const cand = stage(await validScoreProject('cli.gp'), 'cli-token');
+  const catalog = { version: 1 as const, revision: 1, welcomeSeen: true, recents: [], roots: [], templates: [], examples: [], warning: null };
+  const libraryBridge = {
+    snapshot: vi.fn(async () => catalog), ackMetadata: vi.fn(async () => catalog),
+    dropStage: vi.fn().mockResolvedValueOnce({ kind: 'candidate', candidate: cand }),
+  } as unknown as NativeFileLibraryBridge;
+  const library = await WorkspaceLibrary.create(w, libraryBridge, { run: vi.fn(), dispose: vi.fn() } as never, { blocked: () => null, restoredWorkingDocument: true });
+
+  expect(await library.openLaunched({ dropToken: 'cli-token', count: 1 } as never)).toBe(true);
+  expect(library.getState().error).toBeNull();
+  expect(w.getState().documents).toHaveLength(1);
+  expect(current(w).id).not.toBe(first);
+  expect(bridge.closeDocuments).toHaveBeenCalledWith([{ documentId: first, revision: 0, discard: false }]);
+  library.dispose();
+});
+
+it('an edited blank document is NEVER replaced when opening a score', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  await current(w).controller.edit(note);
+  expect(current(w).controller.getState().snapshot.dirty).toBe(true);
+
+  const candidate = stage(await validScoreProject('another.gp'), 'another-token');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents).toHaveLength(2);
+  expect(w.getState().documents.some(d => d.id === first)).toBe(true);
+  expect(bridge.closeDocuments).not.toHaveBeenCalled();
+});
+
+it('a blank document after undo back to empty is NEVER replaced (it has history, so it is kept)', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  await current(w).controller.edit(note);
+  await current(w).controller.undo();
+  const state = current(w).controller.getState();
+  expect(state.snapshot.canRedo).toBe(true);
+  expect(state.snapshot.canUndo).toBe(false);
+  expect(state.snapshot.project.edits).toHaveLength(0);
+
+  const candidate = stage(await validScoreProject('undo-test.gp'), 'undo-token');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents).toHaveLength(2);
+  expect(w.getState().documents.some(d => d.id === first)).toBe(true);
+  expect(bridge.closeDocuments).not.toHaveBeenCalled();
+});
+
+it('a document with a file path is NEVER replaced when opening a score, even untouched at revision 0', async () => {
+  const f = fixture();
+  f.records.get(f.first)!.snapshot.path = 'C:/scores/a.tabplayer';
+  const w = await WorkspaceController.create(f.bridge);
+  const state = current(w).controller.getState();
+  expect(state.snapshot.path).not.toBeNull();
+  expect(state.revision).toBe(0);
+  expect(state.snapshot.dirty).toBe(false);
+  expect(state.snapshot.project.base.kind).toBe('blank');
+
+  const candidate = f.stage(await validScoreProject('saved-test.gp'), 'saved-token');
+  vi.mocked(f.bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents).toHaveLength(2);
+  expect(w.getState().documents.some(d => d.id === f.first)).toBe(true);
+  expect(f.bridge.closeDocuments).not.toHaveBeenCalled();
+});
+
+it('a saved blank document is NEVER replaced when opening a score', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  await current(w).controller.save(true);
+  expect(current(w).controller.getState().revision).toBeGreaterThan(0);
+
+  const candidate = stage(await validScoreProject('saved-test-2.gp'), 'saved-token-2');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents).toHaveLength(2);
+  expect(w.getState().documents.some(d => d.id === first)).toBe(true);
+  expect(bridge.closeDocuments).not.toHaveBeenCalled();
+});
+
+it('if closing the blank tab fails, the opened score still appears and is active, and the blank tab is kept', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  const candidate = stage(await validScoreProject('close-fails.gp'), 'close-fails');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+  vi.mocked(bridge.closeDocuments).mockRejectedValueOnce(new Error('close rejected'));
+
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents).toHaveLength(2);
+  expect(w.getState().documents.some(d => d.id === first)).toBe(true);
+  expect(current(w).id).not.toBe(first);
+  expect(w.getState().active.documentId).toBe(current(w).id);
+  expect(w.getState().error).toBeNull();
+  expect(w.getState().busy).toBe(false);
+  expect(bridge.cancelDocument).not.toHaveBeenCalled();
+});
+
+it('a failed admission keeps the untouched blank tab and cancels the candidate', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  const candidate = stage(await validScoreProject('admit-fails.gp'), 'admit-fails');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+  vi.mocked(bridge.addDocument).mockRejectedValueOnce(new Error('native commit rejected'));
+
+  await expect(w.openDocument()).rejects.toThrow('native commit rejected');
+  expect(w.getState().documents.map(d => d.id)).toEqual([first]);
+  expect(w.getState().active.documentId).toBe(first);
+  expect(bridge.closeDocuments).not.toHaveBeenCalled();
+  expect(bridge.cancelDocument).toHaveBeenCalledWith('admit-fails');
+});
+
+it('opening a score that native only activates (already open) adds nothing and keeps the blank tab', async () => {
+  const { workspace: w, bridge, stage, first, snapshot } = await setup();
+  const candidate = stage(await validScoreProject('already-open.gp'), 'already-open');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+  // Native turns a candidate whose path is already open into an activation: no new document appears in the snapshot.
+  vi.mocked(bridge.addDocument).mockImplementationOnce(async () => snapshot());
+
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents.map(d => d.id)).toEqual([first]);
+  expect(bridge.closeDocuments).not.toHaveBeenCalled();
+});
+
+it('a document opened from a file is NEVER replaced when opening a score', async () => {
+  const { workspace: w, bridge, stage, first } = await setup();
+  const fileCand = stage(await validScoreProject('first-file.gp'), 'file-1');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate: fileCand });
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents).toHaveLength(1);
+  const fileDocId = current(w).id;
+
+  const fileCand2 = stage(await validScoreProject('second-file.gp'), 'file-2');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate: fileCand2 });
+  vi.mocked(bridge.closeDocuments).mockClear();
+
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents).toHaveLength(2);
+  expect(w.getState().documents.some(d => d.id === fileDocId)).toBe(true);
+  expect(bridge.closeDocuments).not.toHaveBeenCalled();
 });

@@ -79,7 +79,7 @@ export async function runNoteAuditionAcceptance({buildPath}={}){
     await page.screenshot({path:resolve(paths.results,'01-tuning-buttons.png')});result.screenshots.push('01-tuning-buttons.png');
 
     // E17: entering a note plays it; with the preference off it stays silent.
-    await ui.revealInspector(page);const fret=page.getByLabel('Fret',{exact:true}).first();
+    await ui.revealInspectorTab(page,'Selection');const fret=page.getByLabel('Fret',{exact:true}).first();
     await fret.fill('5');await heard('set note',async()=>{await page.getByRole('button',{name:'Set note',exact:true}).click();await idle();});
     let current=await record();assert.equal(current.snapshot.project.edits.length,1);assert.equal(current.snapshot.project.edits[0].type,'setNote');
     await silent('undo',()=>button('Undo'));

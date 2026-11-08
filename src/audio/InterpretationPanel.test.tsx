@@ -3,8 +3,12 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { InterpretationPanel } from './InterpretationPanel';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  setLanguagePreference('en');
+});
 const mix = { gain: .5, pan: 0, mute: false, solo: true };
 
 it('sends each choice as a mix edit that keeps the rest of the mix, and clearing the last one removes the key', () => {
@@ -33,4 +37,16 @@ it('is hidden for a track with no strings, disabled while busy, and shows a refu
   fireEvent.click(screen.getByRole('checkbox', { name: 'Automatic let ring' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Refused.');
   await waitFor(() => expect(screen.getByRole('checkbox', { name: 'Automatic let ring' })).not.toBeChecked());
+});
+
+it('translates interpretation labels when language preference changes', () => {
+  try {
+    setLanguagePreference('et');
+    render(<InterpretationPanel trackId="base/0" mix={mix} stringed onEdit={vi.fn()} />);
+    expect(screen.getByRole('region', { name: 'Raja esitustõlgendus' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Mängustiil' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Automaatne helisema jätmine' })).toBeInTheDocument();
+  } finally {
+    setLanguagePreference('en');
+  }
 });

@@ -43,6 +43,7 @@ export function getHelpTopics(t: (key: MessageKey, params?: Record<string, strin
       paragraphs: [
         t('help.topic.inspector.p1'),
         t('help.topic.inspector.p2'),
+        t('help.topic.inspector.p3'),
       ],
     },
     {
@@ -93,7 +94,7 @@ export const helpTopics: readonly HelpTopic[] = [
   {
     id: 'start', title: 'Getting started', paragraphs: [
       'Open a score with File → Open, start one with File → New, or pick an example or template from the Library.',
-      'The score sits in the middle, with the playback controls in a bar along the bottom. Track tools are on the left, the inspector is on the right, and mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
+      'The score sits in the middle, with the playback controls in a bar along the bottom. The inspector is on the right: Song holds the score’s settings, Track holds the settings of the selected track and Selection holds the editing tools. Mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
       'Press F1 for help about the part of the window you are using. Inside another dialog, close it first.',
     ],
   },
@@ -107,15 +108,16 @@ export const helpTopics: readonly HelpTopic[] = [
   },
   {
     id: 'tracks', title: 'Tracks and sounds', paragraphs: [
-      'The Track task lists the instruments. Select one to edit it, and use Selected instrument to change its name, tuning and other settings.',
-      'The Sound task chooses the instrument sound and effects; the Backing task aligns an audio recording with the score. Choosing Sound in View shows the full rig for the selected track.',
+      'The Track tab of the inspector holds the settings of the selected track. Select a track in the Tracks list in the bottom dock, or click it in the score. Information moves, duplicates or removes the track, changes its name, color, instrument and tuning, and adds an instrument; tick Keep pitch to retune without changing how the notes sound.',
+      'Sounds chooses the instrument sound, the effects and the audio output; Interpretation and MIDI output set how the track plays and where it is sent. Choosing Sound in View shows the full rig for the selected track, and the Backing view in the bottom dock aligns an audio recording with the score.',
       'Track changes are recorded in the score history, so Undo reverses them.',
     ],
   },
   {
     id: 'inspector', title: 'The inspector', paragraphs: [
-      'Edit holds note, beat, measure, staff and score tools for the edit target or selection, including the capo. Practice holds count-in, metronome and speed-trainer settings for rehearsing a looped passage. Presentation holds the layout, default zoom, notation and default view; the zoom above the score changes the view at once.',
+      'The inspector has three tabs. Song holds the score’s information, its musical notation (layout, default zoom, notation and default view; the zoom above the score changes the view at once) and sound mastering. Track holds the settings of the selected track, described under Tracks and sounds. Selection holds note, beat, measure, staff and score tools for the edit target or selection, including the capo.',
       'Most fields change nothing until you use the panel’s action button, such as Apply or Save.',
+      'Count-in, metronome and speed-trainer settings for rehearsing a looped passage are in Practice settings on the toolbar, not in the inspector.',
     ],
   },
   {
@@ -155,7 +157,7 @@ export const helpTopics: readonly HelpTopic[] = [
 
 /** Areas of the window and the topic that explains them; the first match from the focused element wins. */
 const contexts: readonly [string, HelpTopicId][] = [
-  ['.mixer-view', 'playback'], ['.sound-view', 'tracks'], ['.score-workspace', 'editing'], ['.workstation-left', 'tracks'], ['.workstation-inspector', 'inspector'], ['.workstation-dock', 'playback'], ['.transport', 'playback'], ['.toolbar', 'files'], ['.document-tabs', 'files'],
+  ['.mixer-view', 'playback'], ['.sound-view', 'tracks'], ['.score-workspace', 'editing'], ['#inspector-panel-track', 'tracks'], ['.workstation-inspector', 'inspector'], ['.workstation-dock', 'playback'], ['.transport', 'playback'], ['.toolbar', 'files'], ['.document-tabs', 'files'],
 ];
 
 /** Picks the help topic for the part of the window that had focus. */

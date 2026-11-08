@@ -1,4 +1,5 @@
 import type { EngravingOverrides,SystemGap } from './types';
+import { withoutPageFonts } from './fonts';
 
 /** The factors Rust enforces too. A system's gap is this factor of the standard gap (1 is the default). */
 export const SYSTEM_GAP_RANGE={min:.25,max:4} as const;
@@ -93,5 +94,5 @@ export function systemGapOffsets(stacking:GapStacking|undefined,systems:readonly
 
 /** `engraving` without its system gaps and staff gaps. Both only move stacked chunks, so everything that renders or projects the notation works from this and ignores a gap-only edit. */
 export function withoutStackingOffsets(engraving:EngravingOverrides):EngravingOverrides {const {systemGaps:_gaps,staffGaps:_staffGaps,...rest}=engraving;void _gaps;void _staffGaps;return rest;}
-/** A key that changes with every engraving field except the system gaps and staff gaps. Memoize notation work on it. */
-export const engravingRenderKey=(engraving:EngravingOverrides|undefined):string=>JSON.stringify(engraving&&withoutStackingOffsets(engraving));
+/** What a render depends on: system gaps, staff gaps and the Page header and footer fonts only move or restyle blocks around the notation, so they are left out. Memoize notation work on it. */
+export const engravingRenderKey=(engraving:EngravingOverrides|undefined):string=>JSON.stringify(engraving&&withoutPageFonts(withoutStackingOffsets(engraving)));

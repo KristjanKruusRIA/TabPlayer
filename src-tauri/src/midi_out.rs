@@ -2248,12 +2248,14 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         wait_for("the ten notes", || notes().len() >= 10);
+        // Never early, and never as late as the 400 ms open. The upper bound is not a timing budget: a shared CI runner
+        // wrote a note 21 ms after it was due, while the slow open still had more than 200 ms to run.
         for (n, (at, port, bytes)) in notes().iter().enumerate() {
             assert_eq!(port, "Fast");
             let due = Duration::from_millis(20 * n as u64);
             let took = at.duration_since(begin);
             assert!(
-                took + Duration::from_millis(2) >= due && took < due + Duration::from_millis(15),
+                took + Duration::from_millis(2) >= due && took < due + Duration::from_millis(100),
                 "note {n} ({bytes:?}) written {took:?} in, due {due:?}"
             );
         }

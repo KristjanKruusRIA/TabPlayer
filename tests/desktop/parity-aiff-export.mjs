@@ -35,7 +35,9 @@ print(json.dumps({'aiff': [a.getnchannels(), width * 8, a.getframerate(), a.getn
                   'wav': [w.getnchannels(), w.getsampwidth() * 8, w.getframerate(), w.getnframes()],
                   'same': swapped == wf, 'peak': peak / 2 ** (width * 8 - 1)}))
 `;
-const read=(aiff,wav)=>JSON.parse(execFileSync('python',['-W','ignore','-c',python,aiff,wav],{encoding:'utf8'}));
+// The aifc module was removed in Python 3.13, so use the first interpreter that still has it.
+const [interpreter,interpreterArguments]=(()=>{for(const [command,extra] of [['python',[]],['py',['-3.12']],['py',['-3.11']],['py',['-3.10']]]){try{execFileSync(command,[...extra,'-W','ignore','-c','import aifc'],{stdio:'ignore'});return [command,extra];}catch{}}throw new Error('Python with the aifc module (Python 3.12 or earlier) is required to read the exported AIFF.');})();
+const read=(aiff,wav)=>JSON.parse(execFileSync(interpreter,[...interpreterArguments,'-W','ignore','-c',python,aiff,wav],{encoding:'utf8'}));
 const folder=join(directory,`export-${Date.now()}-aiff`);await mkdir(folder,{recursive:true});
 const id=launch({TABPLAYER_TEST_OPEN:fixture,TABPLAYER_TEST_EXPORT_DIR:folder});let browser;
 try{

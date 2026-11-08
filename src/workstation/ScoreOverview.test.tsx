@@ -96,3 +96,37 @@ it.each([false,true])('bounds retained focus before rendering a smaller model wh
   expect(screen.getAllByRole('gridcell').filter(node=>node.tabIndex===0)).toEqual([remaining]);
   remaining.focus();fireEvent.keyDown(remaining,{key:'Enter'});expect(onSelect).toHaveBeenCalledExactlyOnceWith(0,1);
 });
+
+const passageOf=(...bars:number[])=>({first:bars[0],last:bars[bars.length-1],bars:bars.map(bar=>({bar,from:0,to:3840,length:3840}))});
+
+it('marks the loop on the ruler and as one bracket over its bars, without taking clicks from the cells',()=>{
+  const onSelect=vi.fn();
+  render(<ScoreOverview model={small} target={target} playbackBar={null} loop={passageOf(1,2)} onSelect={onSelect} onExit={()=>{}}/>);
+  const bracket=screen.getByRole('img',{name:'Loop: bars 2 to 3'});
+  expect(bracket).toHaveClass('score-overview-loop');
+  // 144px name column, 28px per bar, 28px ruler: two tracks sit under it.
+  expect(bracket).toHaveStyle({left:'172px',width:'56px',height:'56px'});
+  expect(screen.getByRole('columnheader',{name:'Measure 2'})).toHaveAttribute('data-loop','true');
+  expect(screen.getByRole('columnheader',{name:'Measure 3, Chorus'})).toHaveAttribute('data-loop','true');
+  expect(screen.getByRole('columnheader',{name:'Measure 1'})).not.toHaveAttribute('data-loop');
+  expect(screen.getByRole('columnheader',{name:'Measure 4'})).not.toHaveAttribute('data-loop');
+  fireEvent.click(cell('Guitar, measure 3, music'));expect(onSelect).toHaveBeenCalledWith(0,2);
+});
+
+it('draws a loop that skips bars as separate brackets, and names a single bar',()=>{
+  render(<ScoreOverview model={small} target={target} playbackBar={null} loop={passageOf(0,2,3)} onSelect={()=>{}} onExit={()=>{}}/>);
+  expect(screen.getByRole('img',{name:'Loop: bar 1'})).toHaveStyle({left:'144px',width:'28px'});
+  expect(screen.getByRole('img',{name:'Loop: bars 3 to 4'})).toHaveStyle({left:'200px',width:'56px'});
+});
+
+it('shows no loop mark without a loop, and keeps the playhead apart from it',()=>{
+  const view=render(<ScoreOverview model={small} target={target} playbackBar={1} onSelect={()=>{}} onExit={()=>{}}/>);
+  expect(view.container.querySelector('.score-overview-loop')).toBeNull();expect(view.container.querySelector('[data-loop]')).toBeNull();
+  view.rerender(<ScoreOverview model={small} target={target} playbackBar={1} loop={passageOf(1)} onSelect={()=>{}} onExit={()=>{}}/>);
+  expect(screen.getByRole('img',{name:'Playback measure 2'})).toBeInTheDocument();expect(screen.getByRole('img',{name:'Loop: bar 2'})).toBeInTheDocument();
+});
+
+it('clips a loop longer than the score to its last bar',()=>{
+  render(<ScoreOverview model={small} target={target} playbackBar={null} loop={passageOf(2,3,4,5)} onSelect={()=>{}} onExit={()=>{}}/>);
+  expect(screen.getByRole('img',{name:'Loop: bars 3 to 4'})).toHaveStyle({width:'56px'});
+});

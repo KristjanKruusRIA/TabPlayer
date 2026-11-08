@@ -18,6 +18,11 @@ import { WorkspaceLibrary } from './WorkspaceLibrary';
 import { initialDocumentView } from './view-state';
 import type { NativeSessionBridge } from './recovery-types';
 
+// The "mounted native window close" tests reset modules, import the real window bootstrap and mount the real App each time.
+// The limit is a hang guard, not a budget: the heaviest of them takes 4.1 s on an idle machine against the 5 s default, and 5.1 to
+// 5.6 s in a full run with 6 workers. A real hang still stops at 30 s.
+vi.setConfig({testTimeout:30000});
+
 // Tests that import main get no launch files unless one asks for them.
 const launchTake=vi.hoisted(()=>vi.fn(async():Promise<{event:{dropToken:string,count:number}|null,waiting:boolean,dropped:number}>=>({event:null,waiting:false,dropped:0})));
 const launchSettle=vi.hoisted(()=>vi.fn(async(_dropToken:string,_keep?:boolean)=>false));
@@ -356,5 +361,6 @@ it('a protected file opens through a password dialog that survives a wrong passw
   fireEvent.change(field,{target:{value:'right password'}});fireEvent.click(screen.getByRole('button',{name:'Open'}));
   expect(await opening).toBe(true);
   await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
-  expect(workspace.getState().documents).toHaveLength(2);
+  expect(workspace.getState().documents).toHaveLength(1);
+  expect(workspace.getState().documents[0].id).not.toBe(f.first);
 });

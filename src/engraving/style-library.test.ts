@@ -7,7 +7,7 @@ vi.mock('@tauri-apps/api/core',()=>({invoke}));
 const id='ca4af764-86e2-4ddd-9c26-a1be3368bdf7';
 const style=()=>{const engraving=defaultEngraving();engraving.stylesheet.hideDynamics=true;engraving.stylesheet.barNumbers='hidden';engraving.systemSpacing=1.5;return engraving;};
 const entry=(over:Partial<SavedStyle>={}):SavedStyle=>({id,name:'Clean',engraving:style(),...over});
-const library=(entries:SavedStyle[]=[]):StyleLibrary=>({format:'tabplayer-style-library',version:2,entries});
+const library=(entries:SavedStyle[]=[]):StyleLibrary=>({format:'tabplayer-style-library',version:3,entries});
 beforeEach(()=>invoke.mockReset());
 
 it('styleOf_drops_profiles_and_styleApplied_keeps_the_documents_own',()=>{
@@ -47,7 +47,7 @@ it('keeps_typography_in_a_style_and_validates_it_before_any_native_call',async()
 });
 it('rejects a damaged reply and publishes only successes',async()=>{
   const seen:StyleLibrary[]=[],stop=subscribeStyleLibrary(value=>seen.push(value));
-  invoke.mockResolvedValueOnce({format:'tabplayer-style-library',version:3,entries:[]});await expect(readStyleLibrary()).rejects.toThrow();
+  invoke.mockResolvedValueOnce({format:'tabplayer-style-library',version:2,entries:[]});await expect(readStyleLibrary()).rejects.toThrow();
   invoke.mockResolvedValueOnce(library([entry(),entry()]));await expect(readStyleLibrary()).rejects.toThrow();
   invoke.mockRejectedValueOnce('Invalid style library: broken');await expect(readStyleLibrary()).rejects.toBeTruthy();expect(seen).toEqual([]);
   invoke.mockResolvedValueOnce(library([entry()]));const result=await readStyleLibrary();expect(seen).toEqual([result]);stop();
@@ -56,6 +56,26 @@ it('names follow the same rules as the native store',()=>{
   expect(styleNameError('Öine 🎸')).toBeNull();
   for(const bad of ['',' ',' pad','pad ','﻿x','x\u0085','x'.repeat(81),'a\u0001b'])expect(styleNameError(bad)).not.toBeNull();
   expect(styleNameError('🎸'.repeat(80))).toBeNull();
+});
+it('client_accepts_only_version_3',async()=>{
+  for(const version of [0,1,2,4]){
+    invoke.mockResolvedValueOnce({format:'tabplayer-style-library',version,entries:[]});
+    await expect(readStyleLibrary()).rejects.toThrow('Unsupported');
+  }
+  invoke.mockResolvedValueOnce(library());await expect(readStyleLibrary()).resolves.toEqual(library());
+});
+it('style_of_keeps_fonts_and_applied_style_replaces_them',async()=>{
+  const document=defaultEngraving();document.fonts={music:'petaluma',roles:{lyrics:{font:'notoSerif'}}};document.profiles=[{trackId:'a',profile:'slash'}];
+  const saved=styleOf(document);expect(saved.fonts).toEqual(document.fonts);expect(saved.fonts).not.toBe(document.fonts);
+  const target=defaultEngraving();target.fonts={roles:{markers:{bold:true}}};
+  expect(styleApplied(saved,target).fonts).toEqual(document.fonts);
+  expect(styleApplied(defaultStyle(),target).fonts).toBeUndefined();
+  invoke.mockResolvedValueOnce(library([entry({engraving:saved})]));
+  await putStyleLibraryEntry(entry({engraving:saved}));expect(invoke).toHaveBeenCalledWith('style_library_put',{entry:entry({engraving:saved})});
+  invoke.mockResolvedValueOnce(library([entry({engraving:saved})]));
+  expect((await readStyleLibrary()).entries[0].engraving.fonts).toEqual(document.fonts);
+  const bad=style();bad.fonts={roles:{lyrics:{font:'comic'}}} as never;
+  await expect(putStyleLibraryEntry(entry({engraving:bad}))).rejects.toThrow();
 });
 
 it('a saved style neither carries nor clears staff groups and gaps',async()=>{

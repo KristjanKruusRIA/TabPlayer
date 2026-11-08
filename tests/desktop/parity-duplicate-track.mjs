@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealDock} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,revealLeftTask} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,rmSync } from 'node:fs';
@@ -18,10 +18,11 @@ try{
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const tracks=async()=>{await revealDock(page,'Mixer');return page.getByRole('button',{name:/^Track \d+: /}).evaluateAll(nodes=>nodes.map(node=>(node.getAttribute('aria-label')??node.textContent??'').trim()));};
   await button('Open');await button('Track 2: Bass6');
-  await page.locator('.track-settings').getByRole('button',{name:'Duplicate track',exact:true}).click();await waitForWorkspaceIdle(page);
+  await revealLeftTask(page,'Track');await page.locator('.track-settings').getByRole('button',{name:'Duplicate track',exact:true}).click();await waitForWorkspaceIdle(page);
   assert.deepEqual((await readActiveDocument(page)).project.edits.at(-1),{type:'duplicateTrack',track:1});
   assert.deepEqual((await tracks()).slice(0,5),['Track 1: Guitar9','Track 2: Bass6','Track 3: Bass6','Track 4: Drums','Track 5: Keys']);
   // The copy is selected: Move track up is enabled for it and the heading names it.
+  await revealLeftTask(page,'Track');
   assert.equal(await page.locator('.track-settings h2').innerText(),'Bass6');
   assert.equal(await page.locator('.track-settings').getByRole('button',{name:'Move track down',exact:true}).isDisabled(),false);
   await button('Export GP');

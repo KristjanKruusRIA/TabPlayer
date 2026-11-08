@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import {withSystemGaps} from './engraving/system-gaps';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act,cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { forgetSessionPanelSizes } from './workstation/panel-sizes';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
@@ -27,6 +27,15 @@ import type { BackingWaveform as WaveformReceipt,BackingWaveformProps,NativeBack
 import {getHarmonyChord} from './harmony/chord-source';
 import type {HarmonyLibrary,HarmonyLibraryEntry} from './editor/harmony-types';
 import type {ReferenceSyncControls} from './audio/reference-sync-types';
+// These are behaviour tests, not budgets: each mounts the whole workspace in jsdom, where one role query over it costs 0.1 to 0.25 s.
+// The limit is a hang guard. The heaviest test here takes 3.7 to 3.8 s on an otherwise idle machine, against the 5 s default, and
+// 4.4 to 7.4 s in full runs with 6 workers; before the worker cap, 12 of these tests timed out at 5.1 to 9.1 s in one run. A real
+// hang still stops at 30 s.
+vi.setConfig({testTimeout:30000});
+// For the same reason a `waitFor` or `findBy` here may wait up to 10 s, not Testing Library's 1 s. One render of the workspace takes about
+// 0.2 s alone and 0.37 s late in a full run of this file, so a refused entry key's notice, three renders after the refusal, showed after
+// 0.6 s alone but 1.1 s in the full file; CI's slower runners missed more such waits. No wait in this file expects to time out.
+configure({asyncUtilTimeout:10000});
 const engravingView=vi.hoisted(()=>vi.fn());
 const waveform=vi.hoisted(()=>({props:[] as BackingWaveformProps[],read:vi.fn(async(document:BackingWaveformProps['document'],source:WaveformSourceInput,buckets:number,owner:NativeBackingWaveformBridge['owner']):Promise<WaveformReceipt>=>({owner,document,source,durationMs:16000,sampleRate:1000,frameCount:16000,channels:1,bucketCount:buckets,peaks:Array.from({length:buckets},()=>({min:[0,0],max:[0,0]}))})),embedded:vi.fn(async(sourceKey:string,_bytes:Uint8Array):Promise<WaveformSourceInput>=>({kind:'embedded',sourceKey:sourceKey.toLowerCase(),sha256:'e'.repeat(64),bytesBase64:'UklGRg=='}))}));
 vi.mock('./audio/BackingWaveform',()=>({BackingWaveform:(props:BackingWaveformProps)=>{waveform.props.push(props);return <section aria-label="Backing waveform"><button onClick={()=>{}}>Waveform probe</button></section>;}}));
@@ -36,14 +45,14 @@ vi.mock('./bridge',async original=>({...await original<typeof import('./bridge')
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),setSpeed:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
 // No MIDI service in jsdom: the inspector's MIDI output panel finds no ports instead of showing a listing error.
 vi.mock('./audio/midi-out',async original=>({...await original<typeof import('./audio/midi-out')>(),nativeMidiOut:{ports:async()=>[],setDelay:async()=>{},status:async()=>({ports:[],sent:0,dropped:0,late:0,maxLateMs:0}),testLog:async()=>[]}}));
 vi.mock('./export/bridge',()=>({createDocumentExportBridge:vi.fn(()=>({exportPdf:vi.fn(async()=>null),exportMidi:vi.fn(async()=>false),exportMusicXml:vi.fn(async()=>false),exportAsciiTab:vi.fn(async()=>false),exportGp5:vi.fn(async()=>false),exportSvg:vi.fn(async()=>false),exportPng:vi.fn(async()=>false),exportTrackFiles:vi.fn(async()=>false),exportAudio:vi.fn(async()=>null),status:vi.fn(async()=>null),cancel:vi.fn(async()=>{})} satisfies ExportNativeBridge))}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
-  built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:integration.running,time:integration.running?1234:0,endTime:4000,measure:integration.running?1:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:integration.running?'playing':'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:integration.running?{startTick:0,endTick:3840}:null,error:null};
+  built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:integration.running,time:integration.running?1234:0,endTime:4000,measure:integration.running?1:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:integration.running?'playing':'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loopNotice:null,range:null,loop:integration.running?{startTick:0,endTick:3840}:null,error:null};
   constructor(private options:{bridge:NativeAudioBridge;onEdit:(command:EditCommand)=>void|Promise<void>}){integration.playerOptions(options);integration.players.push(this);}
   private listeners=new Set<()=>void>();subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>this.listeners.delete(listener);};getState=()=>this.state;
   publish=(patch:Partial<PlaybackState>)=>{this.state={...this.state,...patch};for(const listener of this.listeners)listener();};
@@ -58,7 +67,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   audition=integration.audition;
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
-  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=vi.fn();setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
+  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=integration.setSpeed;setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
   setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
   mix=(track:{index:number})=>{const value=this.built?.settings.mixes[this.identity(track.index)];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan,...(value.drumKit?{drumKit:value.drumKit}:{})}:undefined;};
@@ -406,6 +415,21 @@ it('applies engraving and custom page edits once while keeping canonical music t
   click('Redo');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));expect(c.getState().score).toBe(original);
 });
 
+it('applies font roles as one edit, shows the font status from the score view, and follows undo and redo',async()=>{
+  const c=await setup();
+  change('Lyrics font','notoSerif');change('Music font','leland');click('Apply engraving');
+  await waitFor(()=>expect(c.getState().settings.engraving.fonts).toEqual({music:'leland',roles:{lyrics:{font:'notoSerif'}}}));
+  expect(c.getState().snapshot.project.edits).toHaveLength(1);
+  act(()=>engravingView.mock.lastCall![0].onFontStatus({failed:['NotoSerif-Italic.ttf'],substituted:['a','b']}));
+  expect(screen.getByText(/A font could not be loaded: Noto Serif Italic./)).toBeInTheDocument();
+  expect(screen.getByText('2 music symbols are not in Leland and are drawn from Bravura.')).toBeInTheDocument();
+  click('Undo');await waitFor(()=>expect(c.getState().settings.engraving.fonts).toBeUndefined());
+  await waitFor(()=>expect(screen.getByLabelText('Lyrics font')).toHaveValue('inherit'));expect(screen.getByLabelText('Music font')).toHaveValue('bravura');
+  click('Redo');await waitFor(()=>expect(screen.getByLabelText('Lyrics font')).toHaveValue('notoSerif'));expect(screen.getByLabelText('Music font')).toHaveValue('leland');
+  // Applying the form again with nothing changed records nothing.
+  const edits=c.getState().snapshot.project.edits.length;click('Apply engraving');await new Promise(resolve=>setTimeout(resolve,20));expect(c.getState().snapshot.project.edits).toHaveLength(edits);
+});
+
 it('keeps copied music and paste drafts across unrelated renders and New, with one repeated paste command',async()=>{
   const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));click('Select bar');
   const workspace=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
@@ -494,6 +518,18 @@ it('edits song metadata and measure directions through the integrated inspector'
 it.each([25,50,100,200])('passes %i percent practice speed to export as a render ratio',async speed=>{
   integration.practiceSpeed=speed;await setup();
   await waitFor(()=>expect(integration.exportOptions).toHaveBeenLastCalledWith(expect.objectContaining({currentSpeed:speed/100})));
+});
+
+it('typing a practice speed in transport updates speed without adding undo history',async()=>{
+  const c=await setup();
+  const before=c.getState().snapshot.project.edits.length;
+  expect(c.getState().snapshot.canUndo).toBe(false);
+  const input=screen.getByLabelText('Speed percentage');
+  fireEvent.change(input,{target:{value:'60'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(integration.setSpeed).toHaveBeenLastCalledWith(60);
+  expect(c.getState().snapshot.project.edits.length).toBe(before);
+  expect(c.getState().snapshot.canUndo).toBe(false);
 });
 
 it('selects rendered notes and enters frets on empty strings to form chords',async()=>{
@@ -771,8 +807,11 @@ it('switching restores per-tab views, resets musical selection and drafts, and r
   expect(a.getState()).toBe(before);expect(b.getState()).toBe(bHistory);expect(integration.playerOptions).toHaveBeenCalledTimes(3);expect(integration.destroy).toHaveBeenCalledTimes(2);expect(screen.getAllByRole('region',{name:'Score workspace'})).toHaveLength(1);expect(integration.play).not.toHaveBeenCalled();expect(integration.playSelection).not.toHaveBeenCalled();expect(integration.playFromCursor).not.toHaveBeenCalled();
 });
 it.each([{ctrlKey:true},{metaKey:true}])('routes workspace New, Open, cycle and close shortcuts outside fields and dialogs: %j',async modifier=>{
-  const a=await setup(blankProject(),blankProject()),id=a.getState().documentId;let score=screen.getByRole('region',{name:'Score workspace'});
-  fireEvent.keyDown(score,{key:'n',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(2));const b=activeController();score=screen.getByRole('region',{name:'Score workspace'});
+  const a=await setup(blankProject(),blankProject()),id=a.getState().documentId;
+  // Edits keep both blank scores from being replaced when a score opens (THE-198), so Open adds a third tab.
+  change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(a).notes[0]?.fret).toBe(7));let score=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(score,{key:'n',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(2));const b=activeController();
+  change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(b).notes[0]?.fret).toBe(7));score=screen.getByRole('region',{name:'Score workspace'});
   fireEvent.keyDown(score,{key:'o',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(3));const c=activeController();
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Tab',...modifier});await waitFor(()=>expect(activeController()).toBe(a));
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Tab',shiftKey:true,...modifier});await waitFor(()=>expect(activeController()).toBe(c));

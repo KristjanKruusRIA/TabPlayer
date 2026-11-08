@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { AlphaTabApi, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
+import { AlphaTabApi, EngravingSettings, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
 import './tremolo-guard';
 import type { BeatTarget } from './project';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
@@ -8,12 +8,18 @@ import { rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selection
 import { configureEngraving, type EngravingProjection } from './engraving/projection';
 import type { EngravingOverrides,PageLayout } from './engraving/types';
 import {engravingRenderKey,withoutStackingOffsets,type SystemSpan} from './engraving/system-gaps';
-import {pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
+import {headerScaleOf,pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
+import {fontStack} from './engraving/font-catalog';
+import {pageRoleFont,withoutMusicFont,withoutPageFonts,type EngravingFonts} from './engraving/fonts';
+import {loadedMusicFont,loadMusicFont,loadRoleFaces,roleFacesPending,type MusicFontData} from './engraving/font-loading';
+import {musicFonts,type MusicFontId} from './engraving/font-catalog';
 import {headerFieldsOf} from './engraving/header-footer';
 import {typographyOf} from './engraving/typography';
 import {loadExportFonts} from './export/pdf';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
-import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenBounds,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
+import {passageBands,type PassageBar} from './engraving/passage-bands';
+import type {LoopBar,LoopPassage} from './audio/loop-passage';
+import {arrangeScreenPages,beatSpanOf,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenBounds,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
 import {accoladeMetrics,accoladeSvg,configureAccolades,planAccolades,systemAccoladeMarks,type AccoladeMetrics,type AccoladePlan} from './engraving/accolades';
 import {composeScreenChunks,shiftTotal,staffLeftOf,systemTrackBands} from './engraving/staff-layout';
@@ -38,6 +44,8 @@ const address=(beat:model.Beat):BeatTarget=>({track:beat.voice.bar.staff.track.i
 const sameLane=(a:VoiceAddress,b:VoiceAddress)=>a.track===b.track&&a.staff===b.staff&&a.voice===b.voice;
 const sameBeat=(a:BeatTarget,b:BeatTarget)=>sameLane(a,b)&&a.bar===b.bar&&a.beat===b.beat;
 type Marker={x:number;y:number;w:number;h:number};
+/** A band over a passage; `before` and `after` mark a side where the passage goes on across a line break, which is left open. */
+type Band=Marker&{before?:boolean;after?:boolean};
 const noErrors:readonly ScoreError[]=[];
 type Handles={start:Marker&{target:BeatTarget};end:Marker&{target:BeatTarget}};
 type Drag={anchor:BeatTarget;last:BeatTarget;lanes:VoiceAddress[];bars?:Extract<MusicSelection,{kind:'bars'}>};
@@ -71,10 +79,12 @@ const accoladeOverlay=(plan:AccoladePlan,metrics:AccoladeMetrics,systems:readonl
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
+  /** The bars a running loop plays, drawn as a bracket over them; none, none drawn. Redrawn when the loop or the layout changes, never per playback tick. */
+  loop?:LoopPassage|null;
   projection?:EngravingProjection;visibleTracks?:number[];engraving?:EngravingOverrides;
   /** The document's track identities, in track order. With `projection` they let staff groups and staff gaps be drawn; without either, neither is. */
   trackIds?:readonly string[];
@@ -90,11 +100,13 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   noteEntry?:ScoreNoteEntry|null;
   /** The rendered systems' bar intervals after each completed render in a physical page layout; null in other layouts or while no completed render exists. Not repeated for an equal value. */
   onSystems?:(systems:SystemSpan[]|null)=>void;
+  /** The role fonts that could not be loaded (by file name) and the music symbols drawn from Bravura, after each render that waited for fonts. Not repeated for an equal value. */
+  onFontStatus?:(status:{failed:string[];substituted:string[]})=>void;
 }) {
   // System gaps and staff gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
   const renderKey=engravingRenderKey(engravingProp),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const engraving=useMemo(()=>engravingProp&&withoutStackingOffsets(engravingProp),[renderKey]);
+  const engraving=useMemo(()=>engravingProp&&withoutPageFonts(withoutStackingOffsets(engravingProp)),[renderKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const gaps=useMemo(()=>engravingProp?.systemGaps,[gapKey]);
   // Staff gaps recompose the held chunks in the paged memo below, so editing them does not render the notation again either.
@@ -146,13 +158,34 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // Read from the unmemoized prop: header edits must not re-render the notation, but must redraw this text.
   const bandSet=pageInput.headerFooter,fields=useMemo(()=>headerFieldsOf(score),[score,score.title,score.subTitle,score.artist,score.album,score.words,score.music,score.copyright,score.tab,score.instructions,score.notices]),title=score.title;
   const titleScale=engraving?typographyOf(engraving).titleScale??1:1,pageCount=pagination?.pageCount??0;
+  // The Page header and footer roles only draw the overlay, so they come from the prop (the render path never sees them) and
+  // load their own faces; the key keeps the memos from changing on every render of an equal choice.
+  const pageRoles=engravingProp?.fonts?.roles,pageFontsKey=JSON.stringify([pageRoles?.pageHeader??null,pageRoles?.pageFooter??null]);
+  const pageFonts=useMemo<EngravingFonts|undefined>(()=>{
+    const roles={...pageRoles?.pageHeader?{pageHeader:pageRoles.pageHeader}:{},...pageRoles?.pageFooter?{pageFooter:pageRoles.pageFooter}:{}};
+    return Object.keys(roles).length?{roles}:undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[pageFontsKey]);
+  const headerFont=useMemo(()=>pageRoleFont(pageFonts,'pageHeader'),[pageFonts]),footerFont=useMemo(()=>pageRoleFont(pageFonts,'pageFooter'),[pageFonts]);
+  // Faces that failed to load, kept per source so the notation's and the overlay's loads report independently; the status is their union.
+  const fontStatusKey=useRef(JSON.stringify({failed:[],substituted:[]})),fontStatusHandler=useRef(onFontStatus);fontStatusHandler.current=onFontStatus;
+  // Notation failures cover the role faces and the music font; `substituted` is what the music font in use draws from Bravura.
+  const notationFailed=useRef<string[]>([]),overlayFailed=useRef<string[]>([]),musicSubstituted=useRef<string[]>([]);
+  const [musicShown,setMusicShown]=useState<MusicFontId>('bravura');
+  const reportFonts=useCallback(()=>{const status={failed:[...new Set([...notationFailed.current,...overlayFailed.current])],substituted:[...musicSubstituted.current]},key=JSON.stringify(status);if(key===fontStatusKey.current)return;fontStatusKey.current=key;fontStatusHandler.current?.(status);},[]);
+  useEffect(()=>{
+    if(!roleFacesPending(pageFonts)){overlayFailed.current=[];reportFonts();return;}
+    let live=true;
+    void loadRoleFaces(pageFonts).then(({failed})=>{if(!live)return;overlayFailed.current=failed;setFontsReady(count=>count+1);reportFonts();});
+    return()=>{live=false;};
+  },[pageFonts,reportFonts]);
   const pageTexts=useMemo(()=>{
     if(!pageCount)return [];
-    const {headerY,footerY}=screenPageBaselines(geometry,titleScale);
-    return Array.from({length:pageCount},(_,index)=>{const {header,footer}=pageTextItems({geometry,bands:bandSet?(index===0?bandSet.first:bandSet.other):null,title,fields,page:index+1,pages:pageCount,titleScale,headerY,footerY});return [...header,...footer];});
-    // fontsReady re-measures once the page font has loaded.
+    const {headerY,footerY}=screenPageBaselines(geometry,headerScaleOf(titleScale,headerFont));
+    return Array.from({length:pageCount},(_,index)=>{const {header,footer}=pageTextItems({geometry,bands:bandSet?(index===0?bandSet.first:bandSet.other):null,title,fields,page:index+1,pages:pageCount,titleScale,headerY,footerY,headerFont,footerFont});return [...header,...footer];});
+    // fontsReady re-measures once the page font or a role face has loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[bandSet,fields,title,geometry,titleScale,pageCount,fontsReady]);
+  },[bandSet,fields,title,geometry,titleScale,headerFont,footerFont,pageCount,fontsReady]);
   const roots=useRef(new Map<string,HTMLElement>()),barElement=useRef<HTMLSpanElement>(null),beatElement=useRef<HTMLSpanElement>(null);
   const presentation=useRef<ScreenPlaybackContext>({renderedScore,wrapper:null,scrollHost:null,physical:null,barElement:null,beatElement:null});
   presentation.current={renderedScore,wrapper:wrapper.current,scrollHost:scrollHost.current,physical:pagination&&arrangement?{pagination,arrangement,roots:roots.current}:null,barElement:barElement.current,beatElement:beatElement.current};
@@ -161,7 +194,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const pointerActions=useRef({downBeat:(_beat:model.Beat)=>{},downNote:(_note:model.Note)=>{},move:(_beat:model.Beat)=>{}});
   // What the last render pass was configured with (the accolade plan and the pixel metrics after scale and padding were set), and the marks drawn over a continuous layout.
   const accolade=useRef<{plan:AccoladePlan|null;metrics:AccoladeMetrics}|null>(null),[overlay,setOverlay]=useState<string|null>(null);
-  const [rangeBlocks,setRangeBlocks]=useState<Marker[]>([]),[surfaceClass,setSurfaceClass]=useState('');
+  const [rangeBlocks,setRangeBlocks]=useState<Band[]>([]),[loopBlocks,setLoopBlocks]=useState<Band[]>([]),[surfaceClass,setSurfaceClass]=useState('');
   useLayoutEffect(()=>{
     const host=wrapper.current?.closest<HTMLElement>('.paper-scroll')??wrapper.current?.parentElement??null;scrollHost.current=host;
     const measure=()=>{if(!host)return;const css=getComputedStyle(host),width=Math.max(0,host.clientWidth-(parseFloat(css.paddingLeft)||0)-(parseFloat(css.paddingRight)||0)),height=Math.max(0,host.clientHeight-(parseFloat(css.paddingTop)||0)-(parseFloat(css.paddingBottom)||0));setAvailable(old=>old.width===width&&old.height===height?old:{width,height});};
@@ -169,11 +202,11 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     return()=>{observer?.disconnect();window.removeEventListener('resize',measure);};
   },[]);
   useEffect(()=>{onDisplayStatus?.({zoomPercent:fit.percent,fitLimited:fit.limited,pageError});},[onDisplayStatus,fit.percent,fit.limited,pageError]);
-  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors};
+  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop};
   const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null);
   const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
-  const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{});
+  const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{}),refreshLoop=useRef(()=>{});
   const [errorBlocks,setErrorBlocks]=useState<(Marker&{label:string})[]>([]);
   const refreshDesign=useRef(()=>{}),[barHandles,setBarHandles]=useState<BarHandle[]>([]),[barDrag,setBarDrag]=useState<{bar:number;delta:number}|null>(null),designing=useRef<BarDesign|null>(null);
   const handleRefs=useRef(new Map<number,HTMLElement>()),[activeBar,setActiveBar]=useState<number|null>(null),restoreBar=useRef<number|null>(null),heldBar=useRef<number|null>(null),dragging=useRef<{bar:number;pointer:number;startX:number;start:number;width:number;delta:number;element:HTMLElement}|null>(null);
@@ -286,7 +319,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const source=value.score.tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat],beat=source?renderedBeat(source):null;
       const bound=beat?(view.boundsLookup?.findBeats(beat)??[]).find(item=>item.beat===beat):null;
       if(!beat||!bound)return [];
-      const box=bound.realBounds,rect=mapped({x:box.x,y:box.y,w:box.w,h:box.h},beatSystem(beat));
+      const box=bound.realBounds,rect=mapped(beatSpanOf(bound),beatSystem(beat));
       if(!rect||![rect.x,rect.y].every(Number.isFinite))return [];
       return [{x:Math.max(0,rect.x),y:Math.max(0,rect.y-chipHeight-chipGap),w:chipWidth(diagram),diagram}];
     });
@@ -296,6 +329,16 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const x=Math.max(block.x,(ends.get(block.y)??-Infinity)+chipGap);ends.set(block.y,x+block.w);return {...block,x};
     }));
   };
+  /** Bands over passage bars (one per system and run of bars) in the renderer's own bounds, mapped like every other overlay in this view: live layouts by the canvas offset, page layouts by the page arrangement. */
+  const bandsOf=(bars:readonly PassageBar[]):Band[]=>{
+    const lookup=api.current?.boundsLookup;if(!lookup||rendering.current)return [];
+    return passageBands(lookup,bars).flatMap(band=>{const rect=mapped({x:band.x,y:band.y,w:band.w,h:band.h},band.system);return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)&&rect.w>0&&rect.h>0?[{...rect,before:band.continuesBefore||undefined,after:band.continuesAfter||undefined}]:[];});
+  };
+  /** The selected passage, rendered beats `first` to `last`: whole bars between, the edge beats at its ends. */
+  const selectionBands=(first:model.Beat,last:model.Beat):Band[]=>{
+    const a=first.voice.bar.index,b=last.voice.bar.index;
+    return bandsOf(Array.from({length:Math.max(0,b-a+1)},(_,i)=>({bar:a+i,...(i===0?{from:first}:{}),...(i===b-a?{to:last}:{})})));
+  };
   const placeHandles=(event:PlaybackHighlightChangeEventArgs)=>{
     setRangeBlocks([]);
     if(rendering.current||!event.startBeat||!event.endBeat||!event.startBeatBounds||!event.endBeatBounds){setHandles(null);return;}
@@ -304,10 +347,25 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(presentation.current.physical&&(!(api.current?.boundsLookup?.findBeats(event.startBeat)??[]).includes(event.startBeatBounds)||!(api.current?.boundsLookup?.findBeats(event.endBeat)??[]).includes(event.endBeatBounds))){setHandles(null);return;}
     const start=mapped(event.startBeatBounds.realBounds,beatSystem(event.startBeat)),end=mapped(event.endBeatBounds.realBounds,beatSystem(event.endBeat));
     setHandles(start&&end?{start:{...start,target:address(first)},end:{...end,x:end.x+end.w,target:address(last)}}:null);
-    if(presentation.current.physical)setRangeBlocks((event.highlightBlocks??[]).flatMap(box=>{
-      const systems=api.current?.boundsLookup?.staffSystems??[];
-      return systems.flatMap(system=>{const s=system.realBounds,top=Math.max(box.y,s.y),bottom=Math.min(box.y+box.h,s.y+s.h);if(bottom<=top)return [];const rect=mapped({...box,y:top,h:bottom-top},system);return rect?[rect]:[];});
-    }));
+    setRangeBlocks(selectionBands(event.startBeat,event.endBeat));
+  };
+  /** The bracket over the bars a running loop plays. Where the loop begins or ends inside a bar its edge falls on the beat the plan reaches there; without a plan row to say, it takes the whole bar. */
+  refreshLoop.current=()=>{
+    const value=current.current,view=api.current,passage=value.loop;
+    if(!view||rendering.current||!passage){setLoopBlocks(old=>old.length?[]:old);return;}
+    const rows=playback?.scheduledNotes('').beats??[],occurrences=playback?.playbackOccurrences()??[];
+    const edge=(bar:LoopBar,tick:number,ending:boolean):model.Beat|null=>{
+      if(ending?tick>=bar.length:tick<=0)return null;
+      const found=rows.filter(row=>row.target.bar===bar.bar&&row.target.track===value.track),lane=found[0]?.target;
+      const timed=found.filter(row=>row.target.staff===lane!.staff&&row.target.voice===lane!.voice).flatMap(row=>{
+        const o=occurrences.find(candidate=>candidate.bar===bar.bar&&candidate.occurrence===row.occurrence);return o?[{row,from:row.startTick-o.startTick,to:row.endTick-o.startTick}]:[];
+      }).sort((a,b)=>a.from-b.from);
+      // The loop starts at the first beat still sounding at its start tick, and ends with the last beat that began before its end tick.
+      const hit=ending?[...timed].reverse().find(item=>item.from<tick):timed.find(item=>item.to>tick);
+      const target=hit?.row.target,source=target?value.score.tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat]:undefined;
+      return source?renderedBeat(source):null;
+    };
+    setLoopBlocks(bandsOf(passage.bars.map(bar=>({bar:bar.bar,from:edge(bar,bar.from,false),to:edge(bar,bar.to,true)}))));
   };
   refresh.current=()=>{
     const view=api.current;if(!view)return;const selected=current.current.editorSelection;
@@ -325,7 +383,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const startBeatBounds=view.boundsLookup?.findBeat(first),endBeatBounds=view.boundsLookup?.findBeat(last);
       if(startBeatBounds?.beat!==first||endBeatBounds?.beat!==last){clearHighlight(view);return;}
       view.highlightPlaybackRange(first,last);
-      if(first===last){const rect=mapped(startBeatBounds.realBounds,beatSystem(first));setMarkers(rect?[rect]:[]);}else if(!presentation.current.physical)placeHandles({startBeat:first,endBeat:last,startBeatBounds,endBeatBounds});
+      if(first===last){const rect=mapped(beatSpanOf(startBeatBounds),beatSystem(first));setMarkers(rect?[rect]:[]);if(selected.kind==='bars')setRangeBlocks(selectionBands(first,last));}else if(!presentation.current.physical)placeHandles({startBeat:first,endBeat:last,startBeatBounds,endBeatBounds});
     } catch {clearHighlight(view);}
   };
   useEffect(()=>{
@@ -363,7 +421,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     };
     pointerActions.current={downBeat,downNote,move};
     const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
-      collecting=true;chunks=[];generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
+      collecting=true;chunks=[];generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setLoopBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
     }),view.renderer.partialRenderFinished.on(event=>{
       if(collecting&&typeof event.renderResult==='string')chunks.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex,svg:event.renderResult});
     }),view.postRenderFinished.on(()=>{
@@ -376,7 +434,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
         }
       }
-      refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();refreshDesign.current();
+      refresh.current();refreshCaret.current();refreshErrors.current();refreshLoop.current();refreshDiagrams.current();refreshDesign.current();
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
@@ -391,32 +449,59 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){const host=scrollHost.current;if(host){const box=caretElement.current.getBoundingClientRect(),viewport=host.getBoundingClientRect();if(box.top<viewport.top)host.scrollTop+=box.top-viewport.top;else if(box.bottom>viewport.bottom)host.scrollTop+=box.bottom-viewport.bottom;if(box.left<viewport.left)host.scrollLeft+=box.left-viewport.left;else if(box.right>viewport.right)host.scrollLeft+=box.right-viewport.right;}revealCaret.current=false;}},[caret]);
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
   const loaded=useRef<{score:model.Score;tracks:string}|null>(null);
+  // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
+  const [drawFailure,setDrawFailure]=useState<{error:unknown}|null>(null);
+  const renderGeneration=useRef(0);
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0)return;
-    view.settings.display.scale=sourceScale;
-    if(engraving)configureEngraving(view.settings,engraving);else view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
-    view.settings.display.layoutMode=display.layout==='horizontalScreen'?LayoutMode.Horizontal:display.layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment;
-    view.settings.display.systemsLayoutMode=display.layout==='verticalScreen'?SystemsLayoutMode.Automatic:SystemsLayoutMode.UseModelLayout;
-    view.settings.display.padding=sourcePhysical||screenLayout?[0,0,0,0]:[geometry.left*factor,geometry.top*factor,geometry.right*factor,geometry.bottom*factor];
-    // Groups switch alphaTab's brackets off and reserve room beside the staves; written as absolute values after padding and scale, on every pass.
-    let plan:AccoladePlan|null=null;
-    if(projection&&trackIds){
-      // A failure while planning or configuring falls back to alphaTab's own brackets and no overlay, rather than crashing the subtree.
-      try{
-        if(engraving)plan=planAccolades({engraving,trackIds,rendered:tracks,score:projection.score,nativeMode:projection.bracketMode,settings:view.settings});
-        configureAccolades(view.settings,projection.score,plan,projection.bracketMode);
-      }catch{
-        plan=null;
-        try{configureAccolades(view.settings,projection.score,null,projection.bracketMode);}catch{/* nothing more can be undone */}
+    // `music` is the font the layout is drawn with: the chosen font's loaded data, or Bravura's (also when the chosen font failed to load).
+    const draw=(music:MusicFontData,drawn=engraving)=>{
+      view.settings.display.scale=sourceScale;
+      setMusicShown(music.id);musicSubstituted.current=music.substituted;
+      if(drawn)configureEngraving(view.settings,drawn,music);
+      // Without an engraving nothing runs configureEngraving, so a previous music font's metrics would stay: restore Bravura's.
+      else{view.settings.display.resources.engravingSettings=EngravingSettings.bravuraDefaults;view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;}
+      view.settings.display.layoutMode=display.layout==='horizontalScreen'?LayoutMode.Horizontal:display.layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment;
+      view.settings.display.systemsLayoutMode=display.layout==='verticalScreen'?SystemsLayoutMode.Automatic:SystemsLayoutMode.UseModelLayout;
+      view.settings.display.padding=sourcePhysical||screenLayout?[0,0,0,0]:[geometry.left*factor,geometry.top*factor,geometry.right*factor,geometry.bottom*factor];
+      // Groups switch alphaTab's brackets off and reserve room beside the staves; written as absolute values after padding, scale and the music font, on every pass.
+      let plan:AccoladePlan|null=null;
+      if(projection&&trackIds){
+        // A failure while planning or configuring falls back to alphaTab's own brackets and no overlay, rather than crashing the subtree.
+        try{
+          if(drawn)plan=planAccolades({engraving:drawn,trackIds,rendered:tracks,score:projection.score,nativeMode:projection.bracketMode,settings:view.settings});
+          configureAccolades(view.settings,projection.score,plan,projection.bracketMode);
+        }catch{
+          plan=null;
+          try{configureAccolades(view.settings,projection.score,null,projection.bracketMode);}catch{/* nothing more can be undone */}
+        }
       }
-    }
-    view.renderer.width=sourceWidth;view.updateSettings();
-    accolade.current={plan,metrics:accoladeMetrics(view.settings)};
-    const old=loaded.current;
-    if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
-    else view.render();
+      view.renderer.width=sourceWidth;view.updateSettings();
+      accolade.current={plan,metrics:accoladeMetrics(view.settings)};
+      const old=loaded.current;
+      if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
+      else view.render();
+    };
+    // alphaTab caches a text width table per font family, so a role face has to be in before the first render that uses it, and the music font's
+    // metadata before the layout that uses it. One gate covers both. Nothing to load (every Bravura document without role fonts, and a music font
+    // that is already loaded) keeps the render synchronous.
+    const fonts=engraving?.fonts,musicId=fonts?.music??'bravura',loadedMusic=loadedMusicFont(musicId);
+    if(!roleFacesPending(fonts)&&loadedMusic){draw(loadedMusic);notationFailed.current=[];reportFonts();return;}
+    const generation=renderGeneration.current;
+    const roles=roleFacesPending(fonts)?loadRoleFaces(fonts):Promise.resolve({failed:[] as string[]});
+    // A music font that cannot be loaded is not fatal: the score is drawn with Bravura and the failure is reported; the next change tries again.
+    const music=loadedMusic?Promise.resolve({data:loadedMusic}):loadMusicFont(musicId).then(data=>({data}),()=>({data:null}));
+    void Promise.all([roles,music]).then(([{failed},{data}])=>{
+      if(generation!==renderGeneration.current)return;
+      notationFailed.current=data?failed:[...failed,musicFonts[musicId].file];
+      setFontsReady(count=>count+1);
+      // A synchronous draw that throws reaches the error boundary from the effect; here it is kept and thrown while rendering instead of becoming an unhandled rejection.
+      try{if(data)draw(data);else draw(loadedMusicFont('bravura')!,engraving&&withoutMusicFont(engraving));}catch(error){setDrawFailure({error});}
+      reportFonts();
+    });
+    return()=>{renderGeneration.current++;};
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page,idsKey]);
-  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();refreshDesign.current();},[pagination,arrangement,pageError]);
+  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshLoop.current();refreshDiagrams.current();refreshDesign.current();},[pagination,arrangement,pageError]);
   designing.current=barDesign;
   const tabBar=barHandles.some(handle=>handle.bar===activeBar)?activeBar:barHandles[0]?.bar;
   useEffect(()=>{refreshDesign.current();},[!!barDesign,display.layout,zoom,renderedScore,available.width,available.height]);
@@ -444,6 +529,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     document.addEventListener('focusin',away);return()=>document.removeEventListener('focusin',away);
   },[]);
   useEffect(()=>{refreshErrors.current();},[errors,score,track,zoom,profile,projection,visibleTracks]);
+  // Drawn when the loop or the layout changes, not per playback tick: the key is the bars and ticks the loop covers.
+  const loopKey=loop?JSON.stringify(loop.bars):'';
+  useEffect(()=>{refreshLoop.current();},[loopKey,score,track,zoom,profile,projection,visibleTracks,playback]);
   useEffect(()=>{refreshDiagrams.current();},[score,track,zoom,profile,projection,visibleTracks]);
   const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0||(event.target instanceof Element&&event.target.closest('.score-bar-handle,.score-symbol-popover,.score-scale-diagram')))return;
     // In entry mode a click on a notation staff writes there; anywhere else it selects as usual.
@@ -574,7 +662,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(!symbols||event.target!==event.currentTarget||!(event.key==='ContextMenu'||(event.key==='F10'&&event.shiftKey)))return;
     event.preventDefault();event.stopPropagation();if(editTarget)openTargetMenu();
   };
-  return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} data-note-entry={noteEntry?'on':undefined} onMouseDownCapture={capture} onMouseMove={noteEntry?previewEntry:undefined} onMouseLeave={()=>setGhost(null)} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
+  if(drawFailure)throw drawFailure.error;
+  return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} data-music-font={musicShown==='bravura'?undefined:musicShown} data-note-entry={noteEntry?'on':undefined} onMouseDownCapture={capture} onMouseMove={noteEntry?previewEntry:undefined} onMouseLeave={()=>setGhost(null)} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
     {pageError&&<p className="score-page-error" role="alert">{pageError} Continuous view is shown at {zoom}%.</p>}
     <div className={sourcePhysical?'score-source-staging':'score-live-paper'} style={{width:sourceWidth||undefined,...(overlay&&!sourcePhysical?{position:'relative' as const}:{})}} aria-hidden={sourcePhysical||undefined} inert={sourcePhysical||undefined}>
       <div ref={container} data-testid="score-source" aria-hidden={sourcePhysical||undefined} aria-label="Music notation"/>
@@ -584,13 +673,14 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       {arrangement.pages.map(sheet=><div key={sheet.index} className="score-sheet" aria-label={`Score page ${sheet.index+1}`} style={{left:sheet.x,top:sheet.y,width:sheet.width,height:sheet.height}}>
         {pagination.blocks.filter(block=>block.page===sheet.index).map(block=><div key={block.chunk.id} ref={element=>{if(element)roots.current.set(block.chunk.id,element);else roots.current.delete(block.chunk.id);}} className="score-svg-chunk at-surface-svg" style={{left:(block.x+block.chunk.x-block.sourceBounds.x)*factor,top:(block.y+block.chunk.y-block.sourceBounds.y)*factor,width:block.chunk.width,height:block.chunk.height+shiftTotal(block.chunk.shift),transform:`scale(${factor})`}} dangerouslySetInnerHTML={{__html:block.chunk.svg}}/>)}
         <svg className="score-page-text" aria-hidden="true" viewBox={`0 0 ${geometry.width} ${geometry.height}`} width={sheet.width} height={sheet.height}>
-          {(pageTexts[sheet.index]??[]).map((item,index)=><text key={index} x={item.x} y={item.y} fontSize={item.size} fontFamily={pageTextFontFamily} fill="#111" textAnchor={item.anchor}>{item.text}</text>)}
+          {(pageTexts[sheet.index]??[]).map((item,index)=><text key={index} x={item.x} y={item.y} fontSize={item.size} fontFamily={item.family?fontStack(item.family).join(', '):pageTextFontFamily} fontWeight={item.bold?700:undefined} fontStyle={item.italic?'italic':undefined} fill="#111" textAnchor={item.anchor}>{item.text}</text>)}
         </svg>
       </div>)}
     </div>}
     <span ref={barElement} hidden className="score-playback-bar" aria-hidden="true"/>
     <span ref={beatElement} hidden className="score-playback-beat" aria-hidden="true"/>
-    {rangeBlocks.map((block,index)=><span key={index} className="score-range-block" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
+    {rangeBlocks.map((block,index)=><span key={index} className="score-range-block" aria-hidden="true" data-before={block.before} data-after={block.after} style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
+    {loopBlocks.map((block,index)=><span key={index} className="score-loop-band" aria-hidden="true" data-before={block.before} data-after={block.after} style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
     {errorBlocks.map((block,index)=><span key={index} role="img" aria-label={block.label} className="score-error-bar" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
     {diagramBlocks.map((block,index)=><div key={index} className="score-scale-diagram" style={{position:'absolute',left:block.x,top:block.y,zIndex:openDiagram===index?6:2}} onMouseEnter={()=>setOpenDiagram(index)} onMouseLeave={()=>setOpenDiagram(open=>open===index?null:open)} onFocus={()=>setOpenDiagram(index)} onBlur={()=>setOpenDiagram(open=>open===index?null:open)}>
       <button type="button" className="score-scale-diagram-chip" aria-label={`Show scale diagram ${block.diagram.name||'without a name'}`} aria-expanded={openDiagram===index} style={{height:chipHeight,width:block.w,padding:'0 4px',font:'600 10px sans-serif',border:'1px solid #97a6b6',borderRadius:4,background:'#fffdf8',color:'#161c24',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',cursor:'pointer'}}>▦ {chipLabel(block.diagram)}</button>

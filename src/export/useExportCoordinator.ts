@@ -24,6 +24,25 @@ import { copyGpInterchangeSource } from '../interchange/gp';
 import { projectGpDocument } from '../interchange/backing-projection';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { effectivePageLayout } from '../engraving/page';
+import { loadMusicFont,loadRoleFaces,type MusicFontData } from '../engraving/font-loading';
+import { fontsOf } from '../engraving/fonts';
+import { fileLabel,musicFonts } from '../engraving/font-catalog';
+import { getMessage,getResolvedLanguage } from '../i18n';
+import type { EngravingOverrides } from '../engraving/types';
+/**
+ * Everything a page render needs loaded: the export fonts, the faces of the roles the document chose, and the music font. alphaTab caches a width
+ * table per family, so a render before a face is in would measure with the wrong one. A face that fails is an error here (the screen carries on
+ * with a fallback, but an export must not print a layout measured with the wrong face). Returns the music font data every render passes on.
+ */
+async function loadExportResources(engraving:EngravingOverrides):Promise<MusicFontData> {
+  await loadExportFonts();
+  const {failed}=await loadRoleFaces(engraving.fonts);
+  const loadFailed=(files:string)=>new Error(getMessage(getResolvedLanguage(),'font_roles.load_failed',{files}));
+  if(failed.length)throw loadFailed(failed.map(fileLabel).join(', '));
+  const music=fontsOf(engraving).music;
+  // The loader's own error names a metadata file or a URL; the person gets the same message as for a role face, naming the font.
+  try{return await loadMusicFont(music);}catch{throw loadFailed(musicFonts[music].family);}
+}
 export type ExportSource={score:model.Score;settings:DocumentSettings;embeddedBacking?:Uint8Array|null;revision:number};
 type ExportOperation={finished:Promise<void>;cancelRequest:Promise<void>|null};
 export function useExportCoordinator({score,settings,currentSpeed,metronomeSound='beep',bridge,native,embeddedBacking=null,revision}:ExportSource&{currentSpeed:number|null;metronomeSound?:ClickSound;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'|'readBackingAsset'>;native:ExportNativeBridge}) {
@@ -77,7 +96,7 @@ export function useExportCoordinator({score,settings,currentSpeed,metronomeSound
       // Refusals (no stringed track selected) throw before the save dialog opens.
       if(frozenOptions.format==='ascii'){const bytes=exportAsciiTab(copy,selection);if(cancelled.current)return false;return await native.exportAsciiTab(bytes,revision,name);}
       if((frozenOptions.format==='pdf'||frozenOptions.format==='svg'||frozenOptions.format==='png')&&frozenOptions.perTrack){
-        await loadExportFonts();if(cancelled.current)return false;
+        const music=await loadExportResources(frozenSettings.engraving);if(cancelled.current)return false;
         const options=frozenOptions,now=new Date(),used=new Set<string>(),files:TrackPages[]=[];
         // A PDF is one file whatever its page count; SVG and PNG pages are numbered.
         const saved=(name:string,pages:number)=>savedFileNames(name,options.format==='pdf'?1:pages,options.format);
@@ -86,7 +105,7 @@ export function useExportCoordinator({score,settings,currentSpeed,metronomeSound
         for(const track of [...selection.tracks].sort((a,b)=>a-b)){
           await new Promise(resolve=>setTimeout(resolve,0));if(cancelled.current)return false;
           const single:ExportSelection={tracks:[track],range:selection.range,...(selection.staves?.[track]?{staves:{[track]:selection.staves[track]}}:{})};
-          const rendered=renderPdfPages(copy,single,options.layout,{page:options.page??effectivePageLayout({page:null,print:options.layout}),engraving:frozenSettings.engraving,trackIds:ids});
+          const rendered=renderPdfPages(copy,single,options.layout,{page:options.page??effectivePageLayout({page:null,print:options.layout}),engraving:frozenSettings.engraving,trackIds:ids,music});
           const pages=options.format!=='pdf'&&!options.transparent?rendered.map(svgPageWithBackground):rendered;
           const base=expandFileName(options.fileName??DEFAULT_FILE_NAME,fileNameContext(copy,single,now));
           let name=base;
@@ -98,8 +117,8 @@ export function useExportCoordinator({score,settings,currentSpeed,metronomeSound
         if(options.format==='png')assertPngSize(files.flatMap(file=>file.pages),options.dpi);
         return await native.exportTrackFiles(options.format,files,options.format==='png'?options.dpi:null,revision);
       }
-      if(frozenOptions.format==='svg'||frozenOptions.format==='png'){await loadExportFonts();if(cancelled.current)return false;const rendered=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;if(frozenOptions.format==='png')assertPngSize(rendered,frozenOptions.dpi);const pages=frozenOptions.transparent?rendered:rendered.map(svgPageWithBackground);return await (frozenOptions.format==='png'?native.exportPng(pages,frozenOptions.dpi,revision,name):native.exportSvg(pages,revision,name));}
-      if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print',revision,frozenOptions.format==='print'?null:name),active);}
+      if(frozenOptions.format==='svg'||frozenOptions.format==='png'){const music=await loadExportResources(frozenSettings.engraving);if(cancelled.current)return false;const rendered=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids,music});if(cancelled.current)return false;if(frozenOptions.format==='png')assertPngSize(rendered,frozenOptions.dpi);const pages=frozenOptions.transparent?rendered:rendered.map(svgPageWithBackground);return await (frozenOptions.format==='png'?native.exportPng(pages,frozenOptions.dpi,revision,name):native.exportSvg(pages,revision,name));}
+      if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){const music=await loadExportResources(frozenSettings.engraving);if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids,music});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print',revision,frozenOptions.format==='print'?null:name),active);}
       const audio=frozenOptions.audio;
       const selected=selectStaves(copy,selection);
       if(frozenSettings.backing?.referenceSync&&Object.keys(selection.staves??{}).length){

@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealInspectorTab} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -23,7 +23,7 @@ try{
   const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const details=name=>page.locator('summary').filter({hasText:name}).first().evaluate(node=>{for(let item=node.parentElement;item;item=item.parentElement)if(item.tagName==='DETAILS')item.open=true;});
+  const details=async name=>{await revealInspectorTab(page,'Song');return page.locator('summary').filter({hasText:name}).first().evaluate(node=>{for(let item=node.parentElement;item;item=item.parentElement)if(item.tagName==='DETAILS')item.open=true;});};
   const value=label=>page.getByLabel(label,{exact:true}).inputValue();
   await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();
 
@@ -32,12 +32,12 @@ try{
   await page.getByRole('button',{name:'Save defaults',exact:true}).click();
   await page.getByText('Saved. Scores you create with New start with these details.',{exact:true}).waitFor();
   assert.deepEqual(JSON.parse(await page.evaluate(()=>localStorage.getItem('tabplayer.authorDefaults'))),{artist:'The Band',words:'Ann Lyric',music:'Ben Tune',tab:'Cy Transcriber',copyright:'© 2026 The Band'});
-  await details('Song metadata');await details('Score information');
+  await details('Song metadata');
   assert.equal(await value('Transcriber'),'Fixture Tab','Saving defaults leaves the open score alone.');assert.equal(await value('Artist'),'Fixture Artist');
   assert.equal((await readActiveDocument(page)).project.edits.length,0);
 
   await button('New');await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent?.startsWith('New score'));
-  await details('Song metadata');await details('Score information');
+  await details('Song metadata');
   await page.waitForFunction(()=>[...document.querySelectorAll('label')].some(label=>label.textContent.startsWith('Transcriber')&&label.querySelector('input')?.value==='Cy Transcriber'));
   assert.deepEqual([await value('Artist'),await value('Lyrics author'),await value('Music author'),await value('Copyright'),await value('Title')],['The Band','Ann Lyric','Ben Tune','© 2026 The Band','Untitled']);
   const project=(await readActiveDocument(page)).project;

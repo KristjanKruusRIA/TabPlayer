@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealLeftTask,revealInspector} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealLeftTask,revealInspector,revealInspectorTab} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -27,7 +27,7 @@ try {
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const change=(label,value)=>page.getByLabel(label,{exact:true}).fill(String(value));
   const details=label=>page.locator('summary').filter({hasText:label}).first().evaluate(node=>{node.parentElement.open=true;});
-  await revealLeftTask(page,'Track');await change('New notation track name','Piano');await button('Add pitched track');await button('Track 2: Piano');await revealInspector(page);
+  await revealLeftTask(page,'Track');await change('New notation track name','Piano');await button('Add pitched track');await button('Track 2: Piano');await revealInspectorTab(page,'Selection');
   await change('Written pitch','C4');await button('Add pitched note');await change('Written pitch','E4');await button('Add pitched note');
   await page.getByRole('combobox',{name:/^Chord note/}).selectOption('1');await change('Written pitch','F4');await button('Update pitched note');
   assert.equal((await snapshot()).project.edits.at(-1).pitch,65);
@@ -36,7 +36,7 @@ try {
   await details('Notes & techniques');await page.getByRole('combobox',{name:/^Dynamics/}).selectOption('3');await idle();
   assert.equal((await snapshot()).project.edits.at(-1).patch.dynamics,3);
   await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-piano.png')});
-  await revealLeftTask(page,'Track');await change('New notation track name','Kit');await button('Add percussion track');await button('Track 3: Kit');await revealInspector(page);
+  await revealLeftTask(page,'Track');await change('New notation track name','Kit');await button('Add percussion track');await button('Track 3: Kit');await revealInspectorTab(page,'Selection');
   await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('91');await button('Add percussion note');
   await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('92');await button('Add percussion note');
   await button('Presentation');await details('Song metadata');await change('Album','Parity session');await button('Apply song metadata');await button('Edit');

@@ -262,3 +262,139 @@ cargo build --release --offline --features device --manifest-path .analysis/vst-
 ```
 
 Logs per run (`app.log`, `monitor.log`, `helper-N.log`) are in `.analysis/vst-spikes/ipc/runs/` (not committed).
+
+# VST spike 3: loop-wrap continuity with delay compensation (THE-71), 2026-11-08
+
+Task 3 of `docs/superpowers/plans/2026-11-08-vst-hosting.md`, under pre-flight rulings P2 (the device's `seek(end)`) and P21 (where the spike builds). Branch `feature/vst-hosting` at `8e72414`. Windows 11 Pro (10.0.26300).
+
+## Result
+
+**PASS. A seamless loop wrap is possible under the spec's design. Today's call sites would break it, in the places listed below, and that is what Task 12 has to change.**
+
+- With the delay lines kept across the wrap, and every output frame (pass, count-in and drain) clocking them, all four criteria held at every delay tried (D_max = 0, 64, 1,024, 4,800, and a mixed 1,024 / 4,800), with the count-in off and on, over ten passes. Numbers are below.
+- With the lines flushed the way the device would flush them (every `seek` flushes, once Task 12 makes `Renderer::seek_tick` flush them), the wrap loses the last D_max frames of every pass, and the count-in click is not delayed. Those failures come from today's unpatched call sites. They are expected, so they are Task 12's list, not a failed spike.
+- Fixing only the wrap's own `seek(start)` is not enough: the `seek(end)` that runs just before it flushes too (P2, confirmed below).
+
+## What was built
+
+An untracked `src-tauri/tests/spike_wrap.rs` (excluded through `.git/info/exclude`, deleted after these numbers were taken), built in the default `src-tauri/target` with `cargo +1.90.0 test --locked --test spike_wrap`. No product code changed. A ten-pass run takes about 25 s.
+
+- **Score.** Two bars of 4/4 at 120 bpm, 48 kHz, ppq 960. The loop is bar 1 (ticks 3,840 to 7,680), so the wrap seeks back into the middle of the score. One pass is 96,000 frames.
+- **Stems of the real `Renderer`**, in `render_stems_and_mix_until` order: track 0, track 1, a backing track, and the click (metronome on, volume 0.4).
+  - Both tracks play a one-frame impulse sample on each beat (frames 0, 24,000, 48,000 and 72,000 of the pass) and three pickup notes at frames 95,000, 95,950 and 95,975, so that the last D_max frames of a pass carry audio.
+  - The backing track is a 4 s buffer with an impulse on every beat.
+- **Control flow.** `CallbackTransport::render_block` (device.rs:1417-1512) is replicated: the count-in with the real `CountInClock` and `ClickVoice`, the loop-end check, the block split at 512 frames, `seek(end)` and `wrap`. Every `seek_tick` call is recorded with its kind (user, end of pass, wrap start, end of score).
+- **Delay lines.** The renderer has no insert hook, so each stem has an insert line and a compensation line downstream of the recorded stream, with a total of D_max for every stem. Track 0 carries the insert (D frames) in the main configuration and the other stems are compensated by D. One mixed configuration has inserts of 1,024 on track 0 and 4,800 on track 1. A policy decides what each recorded seek does to the lines.
+- **Reference.** One fresh pass of the loop, rendered once by a separate renderer, repeated ten times. With the count-in on, a count-in click (one bar, 96,000 frames) precedes every pass, including the first, because Play and every wrap start one. The expected output is that stream delayed by exactly D_max.
+- **Count-in on** means one bar with `between_loops` set; **off** means zero bars.
+
+## Fidelity of the model
+
+- The recorded stream equals the fresh-pass reference bit for bit, for all ten passes, count-in off and on. A pass after `seek_tick(end)` and `seek_tick(start)` is identical to a fresh one.
+- Callback sizes 509 (the wrap falls inside a block) and 128 give the identical stream.
+- The real `CallbackTransport` (headless, `SetLoop` then `Play`, same renderer, 509-frame callbacks) produces a mix that equals the model's mix: 0 of 960,000 frames (off) and 0 of 1,920,000 (on) differ.
+- The stem sum differs from that mix by at most 0.227, only where the impulses coincide above 0.9 and `master_limit` acts. The delay model works on the stems before the limiter, so the criteria compare stem sums.
+
+## Pass criteria (Task 3 Step 2), delay lines kept (policy `Keep`)
+
+Ten passes of 96,000 frames. All five delay configurations gave the same numbers.
+
+| Criterion | Count-in off | Count-in on |
+|---|---|---|
+| Output equals the continuous reference delayed by exactly D_max | **yes**: 0 of 960,000 frames differ, max difference 0.000 | **yes**: 0 of 1,920,000 frames differ, max difference 0.000 |
+| No gap at any wrap | **yes**: 0 frames silent where audio is expected; output length equals input length exactly | **yes**: 0 silent frames; length exact |
+| Backing and track impulses frame-aligned on every pass | **yes**: 120 checks (10 passes, 4 beats, 3 stems), 0 off the expected frame, 0 differing between stems; every stem peaks at the beat frame + D_max | **yes**: the same, 120 checks, 0 and 0 |
+| Count-in clicks delayed by D_max; the previous pass's last D_max frames play out during it | not applicable | **yes**: 10 of 10 count-ins start exactly D_max frames after their input position; 9 of 9 wraps play the previous pass's last D_max frames, equal to the reference tail frame for frame, during the first D_max frames of the count-in |
+
+The tail check has audio in it for every D_max of 64 and above (the pickups). At D_max = 0 there is nothing to play out.
+
+## What breaks with the device as it stands
+
+The same recorded stream, with the lines handled the way today's call sites would handle them. Counts are over ten passes (nine wraps with audio after them).
+
+| Policy | Count-in off | Count-in on |
+|---|---|---|
+| `Today`: every `seek` flushes the lines; count-in frames bypass them | D_max 0 passes. D_max 64: 450 frames differ (50 per wrap, the pickups). D_max 1,024 and above: 900 (100 per wrap). The last D_max frames of each pass are replaced by silence. | D_max 0 passes. Above 0: the tail is lost at every wrap (0 of 9), the count-in click is undelayed, and 98,520 to 192,820 frames differ (D_max 64 to 4,800). The click is the larger part of that count. |
+| `KeptButStalled`: `wrap_to_tick` keeps the lines but the count-in still bypasses them | passes (no count-in to stall) | the same failures as `Today`: the tail does not play (0 of 9) and the click is undelayed |
+| `EndSeekOnly`: the wrap's own seek is fixed, `self.seek(end)` before it stays | **fails**: 450 frames (D_max 64) or 900 (D_max 1,024 and above) differ, the same as `Today` | **fails**: the same counts. The click is delayed (10 of 10) but the tail is lost (0 of 9). |
+
+End of a score with no loop (192,000 frames, then D_max frames of drain):
+
+| D_max | `Today` and `EndSeekOnly` (flush at `seek(end)`) | `Keep` (no flush, lines drained) |
+|---|---|---|
+| 64 | 50 frames differ; the drain is silent (tail energy 0 of 4.785) | 0 differ; tail energy 4.785 of 4.785 |
+| 1,024 | 100 differ; silent drain (0 of 7.178) | 0 differ; 7.178 of 7.178 |
+| 4,800 | 100 differ; silent drain (0 of 7.178) | 0 differ; 7.178 of 7.178 |
+
+So the two flush points in P2, `seek(end)` before `wrap` and `seek(end)` at the end, each lose the same D_max frames, and either one alone is enough to break a wrap.
+
+## Keep and reset list for the wrap path
+
+`Renderer::seek_tick` (renderer.rs:1430-1607), one line per field or state. "Reset" means the wrap keeps resetting it, as today; this is what makes every pass identical to the reference. "Keep" means the field is not touched. The last block is state Task 12 adds, which a wrap must not touch.
+
+| State | Where | Today at a wrap | Wrap with a VST insert |
+|---|---|---|---|
+| MIDI output tap `on_seek()`: notes released, state re-sent | :1436 | reset | reset (external MIDI, unrelated to the insert) |
+| `seconds` set from the tick | :1439 | reset | reset (position) |
+| `clock_origin_seconds`, `clock_origin_tick`, `clock_frames` (`reset_clock_origin`) | :1440, :1661 | reset | reset (maps frames to time; the device frame count continues) |
+| `tail` flag | :1441 | cleared | reset |
+| `slots` and `active`: all sounding voices and pending release samples | :1442-1445 | cut | reset |
+| Per-track built-in effects `mix.channels[i].dsp.reset()`: gate, compressor, amp, cabinet, EQs, chorus, delay, reverb tails | :1446-1448 | cut | reset (a built-in tail is cut as today; the insert's own tail is not, see below) |
+| `Track.kit_rendered` and `settle_idle_kit()`: drum kit level ramps | :1449-1454 | set to target | reset |
+| `mix.master.reset()`: master effect tails, limiter gain and leaving gain | :1455 | reset | **open, see limits**: if the master bus follows the delay lines, this reset falls inside delayed live audio |
+| `next_note`, `next_midi` cursors | :1456-1457 | reset | reset |
+| Per track: `channels`, `drum_used`, synth and drum synth `reset()` with program setup, `ranges`, `rpn_msb`, `rpn_lsb` | :1458-1489 | reset | reset |
+| MIDI events before the tick replayed, held and sustained notes struck again | :1490-1563 | rebuilt | reset (rebuilt) |
+| Notes begun before the tick that are still sounding: `start_note` and `seek_elapsed_seconds` | :1565-1602 | rebuilt | reset (rebuilt) |
+| `backing.seek(seconds)`: filter, grain state, tails cleared | :1603-1605 | reset | reset |
+| `reset_click_position()`: `last_click`, click voice | :1606, :1844 | reset | reset |
+| Not touched by `seek_tick`: `tempo`, `midi_fade`, per-channel `Gain` smoothing, backing gain, master level, `parked_mix`, metronome settings, the MIDI tap object, plan, timeline, resources | | kept | keep |
+| **Bridge to the helper**: link, epoch, sequence counters, input and output blocks in flight (the P pipeline) | Tasks 6, 11 | does not exist | **keep**: the input stream is the concatenated loop, so nothing is cut at a wrap |
+| **Insert delay lines (P + L) per stem, and their contents** | Task 12 | does not exist | **keep**: the last D_max frames of the pass are still in them |
+| **Compensation lines** for tracks without an insert, the backing track, the click and the count-in click | Task 12 | does not exist | **keep**, and clock them on every output frame |
+| **Plug-in instance state**: its processing, internal tails, parameters; no `setProcessing` cycle, no state reload | helper | does not exist | **keep**: its own tail rings through the wrap |
+| D_max and each stem's latency value | Task 12 | does not exist | **keep**: constant across a wrap |
+| Priming and crossfade state (P8, P32) | Tasks 11, 13 | does not exist | **keep**: a wrap is not an attach |
+
+What flushes the new state: a user seek, a stop, a fault restore, and an install without preserve (P2). An install with preserve keeps streaming.
+
+## Device call-site findings (P2)
+
+`CallbackTransport` in `src-tauri/src/audio/device.rs`.
+
+| Call site | Line | What it does now | What Task 12 has to do |
+|---|---|---|---|
+| `render_block`, loop end already reached when a block starts | :1457-1461 | `wrap(start)` | nothing beyond `wrap` |
+| `render_block`, nothing left to render before the end | :1474-1475 | `self.seek(end)`, then `wrap(start)` | replace `seek(end)` with a position update that does not touch the lines (not reached in a steady loop) |
+| `render_block`, after the last frame of a pass | :1501-1503 | `self.seek(end)`, then `wrap(start)` | **replace `seek(end)`**: it is the first of two `seek_tick` calls per wrap and flushes the lines (model: `EndSeekOnly` fails) |
+| `render_block`, end of score with no loop | :1475, :1502, :1505-1510 | `self.seek(end)`, then `playing = false` and phase `Ended` | no flush at the end; keep pulling the lines for D_max more frames (a drain) after `Ended`, then idle (model: the drain keeps the tail) |
+| `wrap` | :1390-1397 | `passes + 1`, `resolve_renderer`, `self.seek(start)`, `start_count` if between loops | call `wrap_to_tick`: the renderer resets above, not the flush. `resolve_renderer` may change the tempo ratio (progressive tempo); that moves `clock_origin` only, and the lines count frames, so it does not touch them. |
+| `render_block`, count-in frames | :1439-1456 | the click is written straight to `output` and nothing else runs | stay in the delay path: push silence for the tracks and backing, put the click through the click compensation line, and clock every line, so the previous pass's tail plays out (model: `KeptButStalled` fails) |
+| `seek` | :1361-1368 | `renderer.seek_tick` | keep as the flushing path for user seeks. Callers: `Invalidate` :1188, `PlayRange` :1240, `Play` :1265, :1268, :1270, `Stop` :1290, `SeekTick` :1298, `SetLoop` jumping into the loop :1328, fault restore :1596. |
+| `install_with_practice`, preserve | :1061-1062 | `renderer.seek_tick(self.tick)` on the new renderer | position the new renderer without the flush; the lines and bridge belong to the link, not the renderer (P2, with P8) |
+| `install_with_practice`, no preserve | :1063-1076 | transport state reset, new renderer | flush (as P2 rules) |
+
+A fix therefore needs `seek_tick` split into a reposition part (every row marked "reset" above) and a flush part (the lines, bridge and insert), or `wrap_to_tick` and an end-of-pass equivalent with the same effect as the reposition part.
+
+## Limits
+
+- **Replicated flow, not the device's.** The real `CallbackTransport` has no place for the lines, so the control flow of `render_block` is replicated. Its mix matches the real transport's mix exactly, which supports the replica, but the count of two `seek_tick` calls per wrap (`self.seek(end)` at :1502 and the `seek(start)` inside `wrap` at :1393) comes from the replica and from reading the code. Task 12 owns the device-level tests, which drive `render_into` with a headless output.
+- **The insert is a pure delay.** No plug-in processing, no helper process, no P-block jitter, no underrun or priming. The equality checks are bit-exact for that reason; a real insert will not be bit-exact.
+- **Stems are summed before the master bus.** The master bus sits after the sum in the renderer and `mix.master.reset()` runs at every wrap today. If Task 12 puts the delay lines before the master bus, that reset lands in the middle of delayed live audio. This was not modelled, and it needs a ruling: keep the master state at a wrap when an insert is active, or place the lines after the master bus. A default master has no effects and a limiter at unity, so it may be inaudible, but a configured master bus could step.
+- **One configuration.** A constant 120 bpm at speed 1.0, one 4/4 bar loop starting at tick 3,840, 48 kHz. Progressive tempo, fixed tempo, a loop that is not on a bar line, and a loop whose end falls inside a held note were not run. The reference cuts voices at the wrap, as the renderer does, so no note rings across it.
+- **Callback sizes 509 and 128** only, with `BLOCK` = 512.
+- **Pause and resume** were not modelled. The device renders nothing while paused, so the lines would simply freeze; whether that is wanted is a Task 12 question.
+- **The `:1475` path** (nothing left to render when a block starts) is not reached in a steady loop.
+- **Test profile.** Built at the repository's test profile (no optimisation); only equality was measured, not time.
+
+## Reproduce
+
+The spike file is deleted; these commands assume it has been rebuilt from the description above.
+
+```powershell
+$env:RUSTUP_TOOLCHAIN = '1.90.0'
+cargo test --locked --manifest-path src-tauri/Cargo.toml --test spike_wrap -- --nocapture
+# SPIKE_PASSES=2 shortens the run; the default is 10
+```
+
+The worktree needed `src-tauri/resources/library` (git-ignored, like `resources/audio`) for `build.rs`; it is a junction to the main checkout's copy.

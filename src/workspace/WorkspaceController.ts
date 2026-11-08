@@ -116,12 +116,18 @@ export class WorkspaceController {
       await admitDocumentBase(candidate.project);
       buildDocument(candidate.project);
       const snapshot=await this.bridge.addDocument(candidate.token);committed=true;
-      if(replaceId&&this.state.documents.some(entry=>entry.id===replaceId)) {
-        const entry=this.state.documents.find(entry=>entry.id===replaceId)!;
-        const closeSnapshot=await this.bridge.closeDocuments([{documentId:replaceId,revision:entry.controller.getState().revision,discard:false}]);
-        await this.synchronize(closeSnapshot);
-      } else {
-        await this.synchronize(snapshot);
+      // The opened score is always adopted first. Closing the untouched blank tab is a courtesy that may fail without losing it.
+      const known=new Set(this.state.documents.map(entry=>entry.id));
+      const added=snapshot.documents.some(record=>!known.has(record.documentId));
+      await this.synchronize(snapshot);
+      const replaced=replaceId&&added?this.state.documents.find(entry=>entry.id===replaceId):undefined;
+      if(replaced&&this.isReplaceable(replaced)) {
+        try {
+          const closeSnapshot=await this.bridge.closeDocuments([{documentId:replaced.id,revision:replaced.controller.getState().revision,discard:false}]);
+          await this.synchronize(closeSnapshot);
+        } catch {
+          try{await this.synchronize(await this.bridge.snapshot());}catch{}
+        }
       }
       return true;
     } catch(error) {

@@ -299,3 +299,47 @@ pub fn allow_foreground(pid: u32) {
         unsafe { AllowSetForegroundWindow(pid) };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, TRUE};
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows_sys::Win32::System::Diagnostics::Debug::GetErrorMode;
+    use windows_sys::Win32::System::Threading::CreateEventW;
+
+    /// A handle the app passes in is made non-inheritable, so a plug-in's child process does not receive it.
+    #[test]
+    fn a_handle_taken_from_the_app_is_made_non_inheritable() {
+        let inheritable = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: std::ptr::null_mut(),
+            bInheritHandle: TRUE,
+        };
+        // SAFETY: an unnamed auto-reset event with security attributes that outlive the call.
+        let event = unsafe { CreateEventW(&inheritable, 0, 0, std::ptr::null()) };
+        assert!(!event.is_null());
+        let flags = |handle: HANDLE| {
+            let mut flags = 0u32;
+            // SAFETY: a handle this test owns; `flags` is writable.
+            assert_ne!(unsafe { GetHandleInformation(handle, &mut flags) }, 0);
+            flags
+        };
+        assert_ne!(flags(event) & HANDLE_FLAG_INHERIT, 0, "made inheritable");
+        assert_eq!(checked_handle(event as u64), Some(event));
+        assert_eq!(flags(event) & HANDLE_FLAG_INHERIT, 0, "and now it is not");
+        // A value that is not a handle is refused.
+        assert_eq!(checked_handle(0), None);
+        // SAFETY: closes the event once.
+        unsafe { CloseHandle(event) };
+    }
+
+    /// The process settings keep a crashing plug-in from raising a dialog.
+    #[test]
+    fn the_process_is_hardened_against_error_dialogs() {
+        harden_process();
+        let wanted = SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX;
+        // SAFETY: a plain query.
+        assert_eq!(unsafe { GetErrorMode() } & wanted, wanted);
+    }
+}

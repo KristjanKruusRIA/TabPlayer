@@ -42,6 +42,11 @@ impl HostContext {
         self.restart_flags.swap(0, Ordering::AcqRel)
     }
 
+    /// The restart flags waiting, left in place.
+    pub fn peek_restart_flags(&self) -> u32 {
+        self.restart_flags.load(Ordering::Acquire)
+    }
+
     /// Puts restart flags back, for a restart that could not be carried out yet. No wake: the main thread's timer asks
     /// again.
     pub fn requeue_restart_flags(&self, flags: u32) {

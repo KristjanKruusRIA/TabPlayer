@@ -4,6 +4,10 @@
 //! ends the helper and has none.) `EditorClosed` is both the reply to `CloseEditor` and an unsolicited message when the
 //! user closes the window, so a receiver takes a repeat as harmless.
 //!
+//! One message answers no request: when the plug-in can no longer be run (a reconfigure it asked for fails, or leaves a
+//! different audio layout), the helper sends an `Error` and exits with code 4. A router must accept an `Error` with
+//! nothing pending, or charge it to the request at the head of its queue, and then expect the exit.
+//!
 //! Every call into the core is wrapped in `catch_unwind`. A panic sends `Error { Internal }` and ends the helper with
 //! exit code 3, so the app sees one failed helper instead of a hang. Unsolicited messages (`StateDirty`,
 //! `LatencyChanged`) are coalesced and rate limited here, because the app kills a helper that sends more than 64 a
@@ -92,6 +96,15 @@ impl<C: PluginCore, E: Emit> Session<C, E> {
     pub fn refuse(&self, detail: &str) {
         self.out
             .emit(HelperMessage::error(ErrorCode::BadRequest, detail));
+    }
+
+    /// Answers a request the helper had no room for, in its turn. Nothing was done and asking again is fine, which is
+    /// what `Busy` says (a `BadRequest` would say the sender has a bug).
+    pub fn refuse_busy(&self) {
+        self.out.emit(HelperMessage::error(
+            ErrorCode::Busy,
+            "The helper is busy; ask again.",
+        ));
     }
 
     /// Answers one request.
@@ -449,10 +462,18 @@ mod tests {
             assert_eq!(s.handle(request.clone()), Flow::Continue);
             assert_eq!(seen.borrow().len(), before + 1, "{request:?}");
         }
-        // A refusal is a reply too.
+        // A refusal is a reply too, and a full queue says `Busy`, not `BadRequest`.
         let before = seen.borrow().len();
-        s.refuse("busy");
-        assert_eq!(seen.borrow().len(), before + 1);
+        s.refuse("bad");
+        s.refuse_busy();
+        assert_eq!(seen.borrow().len(), before + 2);
+        assert!(matches!(
+            seen.borrow().last(),
+            Some(HelperMessage::Error {
+                code: ErrorCode::Busy,
+                ..
+            })
+        ));
         // The helper is silent only when it ends.
         let before = seen.borrow().len();
         assert_eq!(s.handle(HostMessage::Shutdown), Flow::Exit(0));

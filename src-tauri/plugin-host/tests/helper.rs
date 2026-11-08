@@ -396,6 +396,13 @@ mod windows_helper {
         }
     }
 
+    /// How many times the test plug-in has been activated (`setActive(true)`): bytes 1 to 4 of its controller state.
+    fn activations(helper: &mut Helper) -> u32 {
+        let state = controller_state(helper);
+        assert_eq!(state.len(), 5);
+        u32::from_le_bytes([state[1], state[2], state[3], state[4]])
+    }
+
     fn expect_error(message: HelperMessage, wanted: ErrorCode) {
         match message {
             HelperMessage::Error { code, .. } => assert_eq!(code, wanted),
@@ -713,11 +720,11 @@ mod windows_helper {
                 assert!(out.iter().all(|f| *f == [0.4, 0.4]));
             }
             // The plug-in saw `kOffline` (2) in `setupProcessing`: its controller state is that one byte.
-            assert_eq!(controller_state(&mut helper), [2]);
+            assert_eq!(controller_state(&mut helper)[0], 2);
             // And a realtime load saw `kRealtime` (0).
             let mut realtime = Helper::spawn(&[]);
             realtime.loaded(state(0.5, 0, TestMode::Normal));
-            assert_eq!(controller_state(&mut realtime), [0]);
+            assert_eq!(controller_state(&mut realtime)[0], 0);
         }
 
         fn latency_change_is_reported() {
@@ -844,15 +851,103 @@ mod windows_helper {
         }
 
         fn a_malformed_frame_is_answered_in_its_turn() {
-            let mut helper = Helper::spawn(&[]);
+            // The editor keeps the main thread busy for a second, so the requests below wait in the queue. A reader that
+            // answered the bad frame itself would do it at once, ahead of the replies owed before it.
+            let mut helper = Helper::spawn(&[("TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS", "1000")]);
             helper.loaded(state(1.0, 0, TestMode::Normal));
+            helper.send(&HostMessage::OpenEditor { title: String::new(), near: None });
+            std::thread::sleep(Duration::from_millis(200));
             helper.send(&HostMessage::GetState);
             // A whole frame that is not a message: four bytes of length, then three bytes that are not JSON.
             helper.send_raw(&[3, 0, 0, 0, b'x', b'y', b'z']);
             helper.send(&HostMessage::GetState);
+            assert!(matches!(helper.recv_reply(), HelperMessage::EditorOpened { .. }));
             assert!(matches!(helper.recv_reply(), HelperMessage::State { .. }));
             expect_error(helper.recv_reply(), ErrorCode::BadRequest);
             assert!(matches!(helper.recv_reply(), HelperMessage::State { .. }));
+        }
+
+        fn requests_past_the_queue_are_answered_busy_in_order() {
+            let mut helper = Helper::spawn(&[("TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS", "1000")]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            helper.send(&HostMessage::OpenEditor { title: String::new(), near: None });
+            std::thread::sleep(Duration::from_millis(200));
+            // The queue holds 4; the other 3 are refused, in their place, with an error that says to ask again.
+            for _ in 0..7 {
+                helper.send(&HostMessage::GetState);
+            }
+            assert!(matches!(helper.recv_reply(), HelperMessage::EditorOpened { .. }));
+            for _ in 0..4 {
+                assert!(matches!(helper.recv_reply(), HelperMessage::State { .. }));
+            }
+            for _ in 0..3 {
+                expect_error(helper.recv_reply(), ErrorCode::Busy);
+            }
+            // And it works again.
+            helper.send(&HostMessage::GetState);
+            assert!(matches!(helper.recv_reply(), HelperMessage::State { .. }));
+        }
+
+        fn a_plug_in_that_announces_from_set_active_does_not_loop() {
+            // Every `setActive(true)` announces a latency change. A host that re-activates the plug-in in answer would do
+            // it forever; this one drops what is announced from inside its own set-up.
+            let mut helper = Helper::spawn(&[("TABPLAYER_TEST_PLUGIN_ANNOUNCE_ON_ACTIVE", "1")]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            let at_load = activations(&mut helper);
+            assert!(
+                (2..=4).contains(&at_load),
+                "settled in a bounded number of rounds: {at_load}"
+            );
+            // Blocks keep coming back whole for a few seconds, and the plug-in is left alone.
+            let started = Instant::now();
+            for _ in 0..800 {
+                let out = helper.ring().round_trip(&block_of(0.5), &meta());
+                assert!(out.iter().all(|f| *f == [0.5, 0.5]), "no dip");
+                std::thread::sleep(Duration::from_millis(3));
+            }
+            assert!(started.elapsed() > Duration::from_secs(2));
+            assert_eq!(activations(&mut helper), at_load, "no further activation");
+            // A real latency change still reconfigures, once, and is reported.
+            helper.send(&HostMessage::SetParameter { id: 1, value: 480.0 / 48_000.0 });
+            let mut reports = 0;
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline {
+                if let Some(Ok(HelperMessage::LatencyChanged { latency })) = helper.try_recv(Duration::from_millis(100)) {
+                    assert_eq!(latency, 480);
+                    reports += 1;
+                }
+            }
+            assert_eq!(reports, 1, "one report for one change");
+            assert_eq!(activations(&mut helper), at_load + 1);
+        }
+
+        fn a_plug_in_that_announces_every_block_cannot_stall_the_stream() {
+            // The audio thread announces a latency change on every block. Reconfigures are rate limited to about one a
+            // second and the announcements meanwhile are coalesced, so blocks keep coming back and the plug-in is
+            // reconfigured a bounded number of times.
+            let mut helper = Helper::spawn(&[("TABPLAYER_TEST_PLUGIN_ANNOUNCE_EVERY_BLOCK", "1")]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            let started = Instant::now();
+            for _ in 0..1000 {
+                helper.ring().round_trip(&block_of(0.5), &meta());
+                std::thread::sleep(Duration::from_millis(3));
+            }
+            let seconds = started.elapsed().as_secs_f64();
+            assert!(seconds > 3.0, "the run is long enough to mean something: {seconds}");
+            let limit = seconds.ceil() as u32 + 2;
+            // Count the reports first: asking for the state discards the unsolicited messages it passes.
+            let reports = helper
+                .rx
+                .try_iter()
+                .filter(|m| matches!(m, Ok(HelperMessage::LatencyChanged { .. })))
+                .count() as u32;
+            let count = activations(&mut helper);
+            assert!(count >= 2, "the announcements did cause reconfigures: {count}");
+            assert!(count <= limit, "{count} activations in {seconds:.1} s");
+            assert!(
+                (1..=limit).contains(&reports),
+                "{reports} reports in {seconds:.1} s"
+            );
         }
 
         fn a_closed_pipe_ends_the_helper_even_when_its_main_thread_is_stuck() {

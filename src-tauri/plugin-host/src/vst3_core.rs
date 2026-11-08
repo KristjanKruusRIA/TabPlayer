@@ -24,30 +24,30 @@ use tabplayer_plugin_protocol::{
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long to wait before asking again for a restart that found the audio thread stuck.
 const RETRY_AFTER: Duration = Duration::from_secs(1);
+/// The shortest time between two reconfigures. A plug-in that announces on every block or preset change, or from inside
+/// its own set-up, gets at most one dip a second; what it announces meanwhile is coalesced into the next one.
+const RECONFIGURE_INTERVAL: Duration = Duration::from_secs(1);
+/// Rounds of reconfiguring after a load, for a plug-in that announces again while it is set up.
+const SETTLE_ROUNDS: usize = 3;
 
 /// What a `restartComponent` call asks the helper to do (preflight ruling P15). Parameter, title, MIDI controller and
 /// note-expression flags stay with the controller and change nothing here: turning a knob must not make the audio dip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RestartPlan {
-    /// `kReloadComponent` or `kIoChanged`: the plug-in is deactivated and set up again, with the audio thread parked.
+    /// `kReloadComponent`, `kIoChanged` or `kLatencyChanged`: the plug-in is deactivated and set up again, with the audio
+    /// thread parked, and the app is told `LatencyChanged` with the latency that follows, whether or not the value moved,
+    /// so that it flushes and primes instead of finding an unexplained gap. (`kLatencyChanged` reconfigures too:
+    /// Steinberg's workflow deactivates and reactivates the component around the new latency, and a plug-in that works
+    /// it out in `setupProcessing` or `setActive` reports the old value otherwise.)
     pub reconfigure: bool,
-    /// `kIoChanged` (and `kLatencyChanged`) always tell the app to re-prepare; `kReloadComponent` only if the latency moved.
-    pub report_always: bool,
-    /// `kLatencyChanged`: read the latency again, and report it if it differs.
-    pub reread_latency: bool,
 }
 
 pub fn restart_plan(flags: u32) -> RestartPlan {
     let has = |flag: u32| flags & flag != 0;
     RestartPlan {
-        // `kLatencyChanged` reconfigures too: Steinberg's workflow deactivates and reactivates the component around the
-        // new latency, and a plug-in that works it out in `setupProcessing` or `setActive` reports the old value
-        // otherwise.
         reconfigure: has(RestartFlags::RELOAD_COMPONENT)
             || has(RestartFlags::IO_CHANGED)
             || has(RestartFlags::LATENCY_CHANGED),
-        report_always: has(RestartFlags::IO_CHANGED),
-        reread_latency: has(RestartFlags::LATENCY_CHANGED),
     }
 }
 
@@ -200,8 +200,15 @@ impl PluginCore for Vst3Core {
         // A plug-in that announces a latency change while it takes its state (the test plug-in does, and so do real ones)
         // is deactivated and activated again here, with no audio thread to park. Without this the same restart would
         // arrive later, while blocks are flowing, and reset the plug-in under them.
-        let flags = self.instance.host().take_restart_flags();
-        if restart_plan(flags).reconfigure {
+        //
+        // A plug-in that announces from inside its own set-up raises the flag again during the reconfigure. The latency
+        // read afterwards already includes what it announced, so that latency flag is dropped; any other flag is another
+        // round, up to `SETTLE_ROUNDS`.
+        for _ in 0..SETTLE_ROUNDS {
+            let flags = self.instance.host().take_restart_flags();
+            if !restart_plan(flags).reconfigure {
+                break;
+            }
             let layout = self
                 .instance
                 .configure(f64::from(self.sample_rate), BLOCK_FRAMES, self.mono)
@@ -212,6 +219,11 @@ impl PluginCore for Vst3Core {
                     "The plug-in changed its audio layout.",
                 ));
             }
+            self.drop_own_latency_announcement();
+        }
+        // Whatever is left (a plug-in that never settles) waits for the first poll, which is rate limited.
+        if restart_plan(self.instance.host().peek_restart_flags()).reconfigure {
+            self.retry_after = Some(Instant::now() + RECONFIGURE_INTERVAL);
         }
         self.reported_latency = self.instance.latency();
         Ok(())
@@ -326,6 +338,8 @@ impl Vst3Core {
             let result =
                 self.instance
                     .configure(f64::from(self.sample_rate), BLOCK_FRAMES, self.mono);
+            // What the plug-in announced from inside its own set-up is covered by the latency read below.
+            self.drop_own_latency_announcement();
             match result {
                 Ok(layout) if layout == self.layout => {}
                 Ok(_) => {
@@ -341,13 +355,22 @@ impl Vst3Core {
                 }
             }
             gate.resume();
-        }
-        if plan.reconfigure || plan.reread_latency {
+            // The next reconfigure is at least `RECONFIGURE_INTERVAL` away; announcements until then are coalesced.
+            self.retry_after = Some(Instant::now() + RECONFIGURE_INTERVAL);
             let latency = self.instance.latency();
-            if plan.report_always || latency != self.reported_latency {
-                self.reported_latency = latency;
-                events.push(CoreEvent::LatencyChanged(latency));
-            }
+            self.reported_latency = latency;
+            events.push(CoreEvent::LatencyChanged(latency));
+        }
+    }
+
+    /// Takes the restart flags raised during the helper's own reconfigure and puts back all but `kLatencyChanged`: the
+    /// latency is read after the reconfigure, so an announcement made from inside it needs no second one. Without this a
+    /// plug-in that announces from `setActive` would be reconfigured forever.
+    fn drop_own_latency_announcement(&self) {
+        let raised = self.instance.host().take_restart_flags();
+        let others = raised & !RestartFlags::LATENCY_CHANGED;
+        if others != 0 {
+            self.instance.host().requeue_restart_flags(others);
         }
     }
 }
@@ -388,26 +411,20 @@ mod tests {
             0,
         ] {
             let plan = restart_plan(flag);
-            assert!(
-                !plan.reconfigure && !plan.reread_latency && !plan.report_always,
-                "flag {flag:#x}"
-            );
+            assert!(!plan.reconfigure, "flag {flag:#x}");
         }
     }
 
     #[test]
     fn latency_io_and_reload_flags_have_their_own_actions() {
         use RestartFlags as F;
-        let latency = restart_plan(F::LATENCY_CHANGED);
-        assert!(latency.reread_latency && latency.reconfigure && !latency.report_always);
-        let io = restart_plan(F::IO_CHANGED);
-        assert!(io.reconfigure && io.report_always);
-        let reload = restart_plan(F::RELOAD_COMPONENT);
-        assert!(reload.reconfigure && !reload.report_always && !reload.reread_latency);
+        for flag in [F::LATENCY_CHANGED, F::IO_CHANGED, F::RELOAD_COMPONENT] {
+            assert!(restart_plan(flag).reconfigure, "flag {flag:#x}");
+        }
         // A param change riding along with a reload does not matter.
         assert_eq!(
             restart_plan(F::RELOAD_COMPONENT | F::PARAM_VALUES_CHANGED),
-            reload
+            restart_plan(F::RELOAD_COMPONENT)
         );
     }
 

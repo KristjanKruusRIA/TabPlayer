@@ -155,6 +155,8 @@ impl EditorLink {
         });
         let win = window::HostWindow::new(title, 100.0, 100.0, at)?;
         let scale = win.dpi().max(96) as f32 / 96.0;
+        // A DPI change recorded for an earlier editor is not this one's.
+        window::DPI_CHANGED.store(0, Ordering::Release);
         if let Some(support) = view.cast::<sb::IPlugViewContentScaleSupport>() {
             // SAFETY: valid view interface.
             unsafe { support.setContentScaleFactor(scale) };
@@ -214,6 +216,7 @@ impl EditorLink {
     }
 
     fn teardown(g: &mut EditorInner) {
+        window::DPI_CHANGED.store(0, Ordering::Release);
         if let Some(view) = g.view.take() {
             // SAFETY: valid, attached view; main thread (callers check). `removed` before the
             // window goes, and the frame is detached before it is released.

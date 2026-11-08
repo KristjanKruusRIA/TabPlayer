@@ -121,7 +121,7 @@ enum Item {
     Request(HostMessage),
     /// A frame that did not parse. Queued so the main thread answers it in its turn, behind the requests before it.
     Malformed,
-    /// A request the helper had no room for (the main thread is busy inside a plug-in). Answered in its turn as well.
+    /// A request the helper had no room for (the main thread is busy inside a plug-in). Answered `Busy` in its turn.
     Refused,
     /// The pipe closed (code 0) or broke (code 1): end the helper.
     Quit(i32),
@@ -142,6 +142,9 @@ impl Queue {
             return false;
         }
         let item = match item {
+            // `Shutdown` is tiny and ends the helper: it is never refused, whatever is waiting. It becomes a quit, which
+            // the main thread takes in its turn, after the replies owed before it.
+            Item::Request(HostMessage::Shutdown) => Item::Quit(0),
             Item::Request(_) if items.len() >= QUEUE_LIMIT => Item::Refused,
             other => other,
         };
@@ -219,7 +222,7 @@ fn pump(main: &mut Main) {
                 Flow::Continue
             }
             Item::Refused => {
-                main.session.refuse("The helper is busy.");
+                main.session.refuse_busy();
                 Flow::Continue
             }
         };
@@ -577,6 +580,8 @@ mod tests {
         // The reader is not blocked: the next requests are queued as refusals, behind the ones before them.
         assert!(queue.push(Item::Request(HostMessage::GetState)));
         assert!(queue.push(Item::Malformed));
+        // `Shutdown` is never refused for lack of room: it is queued as a quit, behind what is waiting.
+        assert!(queue.push(Item::Request(HostMessage::Shutdown)));
         let mut seen = Vec::new();
         while let Some(item) = queue.pop() {
             seen.push(match item {
@@ -594,7 +599,8 @@ mod tests {
                 "request",
                 "request",
                 "refused",
-                "malformed"
+                "malformed",
+                "quit"
             ]
         );
         // Past the flood limit nothing is queued, so the reader ends the helper.

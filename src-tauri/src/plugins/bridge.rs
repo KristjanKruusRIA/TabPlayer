@@ -378,7 +378,9 @@ impl BridgeLink {
         self.ring.sample_rate()
     }
 
-    /// See [`MappedRing::with_host`].
+    /// See [`MappedRing::with_host`]. Once an insert on this link plays, only the audio thread calls this: an insert
+    /// whose `try_lock` fails skips that frame's send or fetch, and a skipped send is an underrun at its time (review
+    /// M1). Other threads may use it only before the insert starts or after it is retired.
     pub fn with_host<R>(&self, f: impl FnOnce(&mut HostRing) -> R) -> Option<R> {
         self.ring.with_host(f)
     }

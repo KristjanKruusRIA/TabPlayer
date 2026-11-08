@@ -1824,6 +1824,16 @@ pub struct TrackDsp {
     plugin: Option<Box<PluginInsert>>,
     plugin_leaving: Option<Box<PluginInsert>>,
     plugin_fade: u32,
+    /// Whether the leaving insert still runs: while it fades, and, with no insert arriving, until the built-in chain's
+    /// input has glided back to the undelayed signal.
+    leaving_live: bool,
+    /// What a crossfade cut short by another change was still playing of the sound before it, held and faded out
+    /// beside the new crossfade (review M2); how much of the leaving insert's output was heard when it began to leave;
+    /// and, of the last frame, how far the crossfade was and what all but the arriving sound added up to.
+    leaving_held: [f32; 2],
+    leaving_scale: f32,
+    fade_s: f32,
+    leaving_part: [f32; 2],
     built_in_live: bool,
     /// Samples the board had to replace because its state produced a non-finite value.
     non_finite: u32,
@@ -1874,6 +1884,11 @@ impl TrackDsp {
             plugin: None,
             plugin_leaving: None,
             plugin_fade: 0,
+            leaving_live: false,
+            leaving_held: [0.0; 2],
+            leaving_scale: 1.0,
+            fade_s: 1.0,
+            leaving_part: [0.0; 2],
             built_in_live: true,
             non_finite: 0,
             max_delay_seconds,
@@ -2267,17 +2282,45 @@ impl TrackDsp {
                 // The same helper with another pipeline or latency: a new epoch, primed from where the old one stood.
                 arriving.continue_from(running);
             }
-            // A crossfade the old configuration was still running is cut short with it.
+            // A crossfade the old configuration was still running goes on.
+            self.carry_fade(old);
             return;
         }
-        // Another helper, or none: the running insert fades out over the ramp beside what plays now.
         if old.plugin.is_some() {
+            // Another helper, or none: the running insert fades out over the ramp beside what plays now. What the old
+            // configuration's own crossfade still played of an earlier sound is held and fades out with it (review M2).
+            self.leaving_held = old.leaving_part;
+            self.leaving_scale = old.fade_s;
+            self.fade_s = 0.0;
+            self.leaving_part = old.leaving_part;
             std::mem::swap(&mut self.plugin_leaving, &mut old.plugin);
             self.plugin_fade = self.ramp_frames;
-        } else if old.plugin_fade > 0 {
-            std::mem::swap(&mut self.plugin_leaving, &mut old.plugin_leaving);
-            self.plugin_fade = old.plugin_fade.min(self.ramp_frames);
+            self.leaving_live = true;
+        } else {
+            self.carry_fade(old);
         }
+        let live = self.leaving_live;
+        if let Some(leaving) = self.plugin_leaving.as_mut().filter(|_| live) {
+            match self.plugin.as_mut() {
+                // The arriving insert's stand-in starts on the timing the track was playing (review C1).
+                Some(arriving) => arriving.seed_from(leaving),
+                // Without one, the stand-in glides back to the undelayed signal (review I1).
+                None => leaving.retime(0),
+            }
+        }
+    }
+    /// Takes over a crossfade from an insert that `old` was still running.
+    fn carry_fade(&mut self, old: &mut Self) {
+        if !old.leaving_live {
+            return;
+        }
+        std::mem::swap(&mut self.plugin_leaving, &mut old.plugin_leaving);
+        self.plugin_fade = old.plugin_fade.min(self.ramp_frames);
+        self.leaving_live = true;
+        self.leaving_held = old.leaving_held;
+        self.leaving_scale = old.leaving_scale;
+        self.fade_s = old.fade_s;
+        self.leaving_part = old.leaving_part;
     }
     /// Puts a plug-in in place of Drive, Amp and Cabinet. Call it off the audio thread, on a configuration that is not
     /// playing yet: an insert it displaces is dropped here. The second board never takes one.
@@ -2296,7 +2339,7 @@ impl TrackDsp {
     }
     /// Whether a plug-in plays on this board, or is still fading out.
     pub fn has_plugin(&self) -> bool {
-        self.plugin.is_some() || self.plugin_fade > 0
+        self.plugin.is_some() || self.leaving_live
     }
     /// Readies a board that starts from silence while the track already sounds, as a block switched on mid-play
     /// is: the room microphone's reflections fade in rather than arriving at full level.
@@ -2446,7 +2489,7 @@ impl TrackDsp {
         };
         // With a plug-in, the board splits at the first of Drive, Amp and Cabinet: the plug-in stands there, and the
         // other two are skipped in place.
-        let inserted = self.plugin.is_some() || self.plugin_fade > 0;
+        let inserted = self.has_plugin();
         let mut three = [Stage::Drive, Stage::Amp, Stage::Cabinet];
         let mut found = 0;
         for stage in self.chain {
@@ -3115,19 +3158,45 @@ impl TrackDsp {
                             cache = Some(y);
                             y
                         };
-                        let arriving = match self.plugin.as_mut() {
-                            Some(insert) => insert.process(x, ctx, &mut run),
-                            None => run(x),
-                        };
-                        let fading = self.plugin_fade;
-                        x = match self.plugin_leaving.as_mut().filter(|_| fading > 0) {
-                            Some(leaving) => {
-                                let out = leaving.process(x, ctx, &mut run);
-                                let s = 1.0 - fading as f32 / self.ramp_frames as f32;
-                                self.plugin_fade = fading - 1;
-                                std::array::from_fn(|c| out[c] + (arriving[c] - out[c]) * s)
+                        // The arriving insert runs first, so the built-in chain plays on its input; with none
+                        // arriving, the leaving one runs first and the chain plays on the input it glides back.
+                        let live = self.leaving_live;
+                        let leaving = self.plugin_leaving.as_mut().filter(|_| live);
+                        let (arriving, leaving_out) = match (self.plugin.as_mut(), leaving) {
+                            (Some(insert), leaving) => {
+                                let arriving = insert.process(x, ctx, &mut run);
+                                (
+                                    arriving,
+                                    leaving.map(|l| (l.process(x, ctx, &mut run), false)),
+                                )
                             }
-                            None => arriving,
+                            (None, Some(leaving)) => {
+                                let out = leaving.process(x, ctx, &mut run);
+                                let gliding = leaving.gliding();
+                                (run(leaving.built_in_input()), Some((out, gliding)))
+                            }
+                            (None, None) => (run(x), None),
+                        };
+                        x = match leaving_out {
+                            Some((out, gliding)) => {
+                                let fading = self.plugin_fade;
+                                let s = 1.0 - fading as f32 / self.ramp_frames as f32;
+                                self.plugin_fade = fading.saturating_sub(1);
+                                if self.plugin_fade == 0 && !gliding {
+                                    self.leaving_live = false;
+                                }
+                                let (scale, held) = (self.leaving_scale, self.leaving_held);
+                                let part: [f32; 2] =
+                                    std::array::from_fn(|c| (out[c] * scale + held[c]) * (1.0 - s));
+                                self.fade_s = s;
+                                self.leaving_part = part;
+                                std::array::from_fn(|c| arriving[c] * s + part[c])
+                            }
+                            None => {
+                                self.fade_s = 1.0;
+                                self.leaving_part = [0.0; 2];
+                                arriving
+                            }
                         };
                         if !ran {
                             built_in_live = false;
@@ -3574,6 +3643,9 @@ impl TrackDsp {
             insert.flush();
         }
         self.plugin_fade = 0;
+        self.leaving_live = false;
+        self.fade_s = 1.0;
+        self.leaving_part = [0.0; 2];
         self.gate_envelope = 1.0;
         self.compressor_envelope = 0.0;
         self.amp_dc = [0.0; 2];

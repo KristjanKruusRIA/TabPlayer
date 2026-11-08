@@ -10,10 +10,23 @@
 //! ```
 //!
 //! `g` is 1 while the plug-in plays, and the built-in chain is not run then. It glides over 10 ms:
-//! - up from 0 once the first `D` frames after an attach or flush have passed (priming, preflight ruling P8): a result
-//!   missing then is not an underrun, and the built-in tone plays meanwhile;
+//! - up from 0 once the first `D` frames after an attach or flush have passed and a result block is playing (priming,
+//!   preflight ruling P8): a result fetched before frame `D` that is missing is skipped, not an underrun, and the
+//!   built-in tone plays meanwhile. Results fetched from frame `D` on must be there;
 //! - down to 0 on a fault, holding the last sample the plug-in played and ramping it out, so the output never steps and
 //!   never drops to silence. A fault is sticky: the insert never goes back to a helper it has given up on.
+//!
+//! The built-in chain's input is read from the insert's history some frames back: its *timing*. That is `D` once the
+//! insert has settled, so the stand-in lines up with the plug-in it stands in for. It changes only by a 10 ms crossfade
+//! between the two delayed signals, and only once the history reaches the new timing: an insert added to a playing
+//! track starts on the undelayed signal the track was playing (review C1), one replacing another starts on the timing
+//! the other had, and one leaving the board glides back to the undelayed signal (review I1).
+//!
+//! A board with a plug-in splits where the plug-in sits: the stages before it feed the insert, and the stages after it
+//! take the insert's output. The inserts and their stand-in run once each a frame at that point. The stand-in runs
+//! Drive, Amp and Cabinet back to back in their board order, so a stage the board places between two of them (say, EQ
+//! between Drive and Amp) plays after all three while the plug-in is in, not between them as it does without one
+//! (review M3). A plug-in replaces the three as one block; this is the order a fallback plays.
 //!
 //! Every result block is checked whole at its first frame, before any of it plays: it must be ready, of the expected
 //! sequence and epoch, finite and within [`RUNAWAY_LIMIT`] (preflight ruling P14). Only a copy is ever played.
@@ -162,6 +175,10 @@ fn block_meta(ctx: &FrameContext) -> BlockMeta {
 }
 
 /// See the module documentation.
+///
+/// Only the audio thread touches an insert while it is in a running configuration: the ring's host end is reached
+/// through [`BridgeLink::with_host`], which only ever *tries* its lock, so another holder (a test, or a second insert on
+/// the same helper during a swap) makes a frame skip its ring work rather than wait (review M1).
 pub struct PluginInsert {
     link: BridgeLink,
     shared: Arc<InsertShared>,
@@ -194,10 +211,20 @@ pub struct PluginInsert {
     /// Frames processed since the stream started.
     run: u64,
 
-    /// The input's history for the built-in chain, which reads it `D` frames back. Every insert's line holds the longest
-    /// `D` there can be, so one on the same helper with another `D` takes the line over whole (`continue_from`).
+    /// The input's history for the built-in chain. Every insert's line holds the longest `D` there can be (plus the
+    /// current frame), so an insert that replaces another takes its line over whole (`continue_from`, `seed_from`).
+    /// `dry_pos` is where the next frame goes, and `history` how many frames of the line are real.
     dry: Box<[[f32; 2]]>,
     dry_pos: usize,
+    history: usize,
+    /// The built-in chain's input timing: `timing_from` frames back crossfading to `timing_to` frames back, `timing_s`
+    /// of the way there. `timing_goal` is where it heads next, once the history reaches it.
+    timing_from: usize,
+    timing_to: usize,
+    timing_s: f32,
+    timing_goal: usize,
+    /// This frame's input to the built-in chain.
+    built_in_input: [f32; 2],
 
     /// How much of the plug-in is heard, and the last sample it played (held and ramped out on a fault).
     g: f32,
@@ -260,9 +287,17 @@ impl PluginInsert {
             next_read: 0,
             epoch: 0,
             run: 0,
-            dry: vec![[0.0; 2]; MAX_PIPELINE_FRAMES + max_latency_frames(rate) as usize]
+            dry: vec![[0.0; 2]; MAX_PIPELINE_FRAMES + max_latency_frames(rate) as usize + 1]
                 .into_boxed_slice(),
             dry_pos: 0,
+            // An export starts on `D` behind silence; live playback starts on the undelayed signal the track plays, and
+            // glides to `D` once the history holds it.
+            history: if offline.is_some() { delay } else { 0 },
+            timing_from: if offline.is_some() { delay } else { 0 },
+            timing_to: if offline.is_some() { delay } else { 0 },
+            timing_s: 1.0,
+            timing_goal: delay,
+            built_in_input: [0.0; 2],
             // An export plays the plug-in from its first frame (the exporter trims `D`); live playback primes first.
             g: if offline.is_some() { 1.0 } else { 0.0 },
             last: [0.0; 2],
@@ -300,15 +335,25 @@ impl PluginInsert {
     }
 
     /// Discards what is in flight, after a user stop or seek: the next frame starts a new epoch, and the insert primes
-    /// again with the built-in tone. A fault stays.
+    /// again with the built-in tone on `D` frames of silence. A fault stays.
     pub fn flush(&mut self) {
         self.started = false;
         self.in_fill = 0;
         self.out_pos = BLOCK_FRAMES;
         self.playable = false;
         self.run = 0;
-        self.dry.fill([0.0; 2]);
-        self.dry_pos = 0;
+        // Only the `D` frames the built-in chain will read (review M5).
+        let span = self.dry.len();
+        let clear = self.delay.min(span);
+        let end = self.dry_pos.min(span);
+        let here = clear.min(end);
+        self.dry[end - here..end].fill([0.0; 2]);
+        self.dry[span - (clear - here)..].fill([0.0; 2]);
+        self.history = clear;
+        self.timing_from = self.delay;
+        self.timing_to = self.delay;
+        self.timing_s = 1.0;
+        self.timing_goal = self.delay;
         if self.offline.is_none() {
             self.g = 0.0;
         }
@@ -334,14 +379,98 @@ impl PluginInsert {
     /// epoch and primes, starting from where `leaving`'s output stood, so the track glides to the built-in tone for the
     /// priming span and back (preflight ruling P8). The built-in chain's input history changes hands whole: the lines
     /// are swapped, not copied, so `leaving` takes this one's empty line off the audio thread with it.
+    ///
+    /// A fault `leaving` had stays, and is told on this insert's shared word, the one the supervisor now watches
+    /// (review I2). The built-in chain glides from `leaving`'s timing to this insert's `D` (review I1).
     pub fn continue_from(&mut self, leaving: &mut PluginInsert) {
         self.g = leaving.g;
         self.last = leaving.last;
         self.fault = self.fault.or(leaving.fault);
-        if self.dry.len() == leaving.dry.len() {
-            std::mem::swap(&mut self.dry, &mut leaving.dry);
-            self.dry_pos = leaving.dry_pos;
+        if let Some(reason) = self.fault {
+            self.shared.fault.store(reason.code(), Ordering::Relaxed);
         }
+        self.take_history(leaving);
+    }
+
+    /// Starts from `leaving`, an insert on another helper that this one replaces while it fades out: the built-in
+    /// chain's input history and timing change hands, so the stand-in primes on the timing the track was playing and
+    /// glides to this insert's `D` (review C1). The lines are swapped, not copied. The board runs the built-in chain at
+    /// most once a frame, on the input the arriving insert asks for first, so `leaving` never plays from the line it
+    /// takes in exchange.
+    pub fn seed_from(&mut self, leaving: &mut PluginInsert) {
+        self.take_history(leaving);
+    }
+
+    fn take_history(&mut self, leaving: &mut PluginInsert) {
+        // Lines differ only between rates, and a configuration at another rate starts afresh.
+        if self.dry.len() != leaving.dry.len() {
+            return;
+        }
+        std::mem::swap(&mut self.dry, &mut leaving.dry);
+        self.dry_pos = leaving.dry_pos;
+        self.history = leaving.history;
+        self.timing_from = leaving.timing_from;
+        self.timing_to = leaving.timing_to;
+        self.timing_s = leaving.timing_s;
+        self.built_in_input = leaving.built_in_input;
+    }
+
+    /// Points the built-in chain's input timing at `frames` back: a leaving insert glides back to the undelayed signal
+    /// the board plays without it.
+    pub fn retime(&mut self, frames: usize) {
+        self.timing_goal = frames.min(self.dry.len() - 1);
+    }
+
+    /// Whether the built-in chain's input timing is still on its way to its goal.
+    pub fn gliding(&self) -> bool {
+        self.timing_to != self.timing_goal
+            || (self.timing_from != self.timing_to && self.timing_s < 1.0)
+    }
+
+    /// The built-in chain's input on the last frame processed.
+    pub fn built_in_input(&self) -> [f32; 2] {
+        self.built_in_input
+    }
+
+    /// The input `back` frames before the current one (0: the current one).
+    fn dry_at(&self, back: usize) -> [f32; 2] {
+        let span = self.dry.len();
+        let index = (self.dry_pos + span - 1 - back.min(span - 1)) % span;
+        self.dry.get(index).copied().unwrap_or([0.0; 2])
+    }
+
+    /// Writes the current input and returns the built-in chain's input, advancing the timing crossfade.
+    fn advance_dry(&mut self, x: [f32; 2]) -> [f32; 2] {
+        let span = self.dry.len();
+        if let Some(slot) = self.dry.get_mut(self.dry_pos) {
+            *slot = x;
+        }
+        self.dry_pos = (self.dry_pos + 1) % span;
+        self.history = (self.history + 1).min(span);
+        if self.timing_s >= 1.0 {
+            self.timing_from = self.timing_to;
+        }
+        // A glide under way finishes first; a new one starts once the history reaches its timing.
+        if self.timing_from == self.timing_to
+            && self.timing_to != self.timing_goal
+            && self.timing_goal < self.history
+        {
+            self.timing_to = self.timing_goal;
+            self.timing_s = 0.0;
+        }
+        let dry = if self.timing_from == self.timing_to {
+            self.dry_at(self.timing_to)
+        } else {
+            self.timing_s = (self.timing_s + 1.0 / self.ramp_frames as f32).min(1.0);
+            let (a, b, s) = (
+                self.dry_at(self.timing_from),
+                self.dry_at(self.timing_to),
+                self.timing_s,
+            );
+            std::array::from_fn(|c| a[c] + (b[c] - a[c]) * s)
+        };
+        self.built_in_input = dry;
+        dry
     }
 
     /// One frame. `x` is the track's signal where the plug-in sits; `ctx` is the renderer's context for this frame;
@@ -378,17 +507,8 @@ impl PluginInsert {
             }
         }
 
-        // The built-in chain's input: `D` frames ago. `new` makes the line at least `D` long.
-        let span = self.dry.len();
-        let back = (self.dry_pos + span - self.delay.min(span)) % span;
-        let dry = self.dry.get(back).copied().unwrap_or(x);
-        if let Some(slot) = self.dry.get_mut(self.dry_pos) {
-            *slot = x;
-        }
-        self.dry_pos += 1;
-        if self.dry_pos >= span {
-            self.dry_pos = 0;
-        }
+        // The built-in chain's input: `D` frames ago once settled. `new` makes the line longer than any `D`.
+        let dry = self.advance_dry(x);
 
         // The result side: the plug-in's sample `P` frames after its input.
         let mut wet = None;
@@ -409,9 +529,11 @@ impl PluginInsert {
             self.run = self.run.saturating_add(1);
         }
 
+        // The plug-in comes in only once a result is playing past the priming span: a block skipped while priming that
+        // reaches past `D` keeps the built-in tone until the first playable one (review I4).
         let target = if self.fault.is_none()
             && self.started
-            && (self.offline.is_some() || self.run > self.delay as u64)
+            && (self.offline.is_some() || (self.run > self.delay as u64 && wet.is_some()))
         {
             1.0
         } else {
@@ -467,7 +589,8 @@ impl PluginInsert {
     }
 
     /// Publishes the gathered block and wakes the helper. A block that cannot go (the host end is in use, or another
-    /// insert moved the sequence on) is never answered, and is an underrun at its time: the stream never slips.
+    /// insert moved the sequence on) is never answered, and is an underrun at its time: the stream never slips. The
+    /// sequence moves on either way, so the fetch side's count stays the send side's (review M1).
     fn send(&mut self) {
         let (seq, block, meta) = (self.next_send, &self.in_block, &self.in_meta);
         let sent = self

@@ -23,6 +23,7 @@ use tabplayer_lib::{
     plugins::bridge::{BridgeLink, InsertShared, fault},
 };
 use tabplayer_plugin_protocol::{
+    limits::RING_BLOCKS,
     limits::{BLOCK_FRAMES, MAX_PIPELINE_FRAMES, max_latency_frames, pipeline_frames},
     ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, HelperRing, InputRead, OwnedRing, RING_BYTES},
 };
@@ -68,6 +69,9 @@ struct Controls {
     paused: AtomicBool,
     /// Frame 5 of this block's answer is replaced by `poison_value`.
     poison_block: AtomicU64,
+    /// Blocks below this sequence are answered in another epoch, so the insert never finds them: a result that is
+    /// missing at its time without the helper stalling.
+    stale_below: AtomicU64,
     poison_value: AtomicU32,
     stop: AtomicBool,
     /// Every block received: its sequence, its header and its first input frame.
@@ -87,6 +91,7 @@ impl FakeHelper {
             constant_value: AtomicU32::new(0),
             paused: AtomicBool::new(false),
             poison_block: AtomicU64::new(NO_BLOCK),
+            stale_below: AtomicU64::new(0),
             poison_value: AtomicU32::new(0),
             stop: AtomicBool::new(false),
             received: Mutex::new(Vec::new()),
@@ -135,7 +140,12 @@ impl FakeHelper {
                                 out[5] =
                                     [f32::from_bits(c.poison_value.load(Ordering::Relaxed)); 2];
                             }
-                            assert!(ring.publish_output(seq, info.epoch, &out, &info.meta));
+                            let epoch = if seq < c.stale_below.load(Ordering::Relaxed) {
+                                info.epoch.wrapping_add(1)
+                            } else {
+                                info.epoch
+                            };
+                            assert!(ring.publish_output(seq, epoch, &out, &info.meta));
                             output.signal();
                         }
                         InputRead::NotYet => break,
@@ -336,8 +346,10 @@ fn insert_output_is_plugin_output_delayed_by_d() {
             &format!("frame {m}"),
         );
     }
-    // Before `D`, the built-in chain (here: nothing) plays the input delayed by `D`: silence.
-    assert!(out[..d].iter().all(|f| *f == [0.0; 2]));
+    // Before `D`, the built-in chain (here: nothing) plays the input the track was playing, undelayed (review C1).
+    for (m, frame) in out[..d].iter().enumerate() {
+        assert_eq!(*frame, signal(m), "frame {m}");
+    }
     assert_eq!(track.plugin().unwrap().faulted(), None);
 }
 
@@ -524,11 +536,14 @@ fn disconnect_falls_back_at_once() {
 
 #[test]
 fn hostile_indices_never_index_out_of_bounds() {
-    let rig = rig(0, 0.5);
-    // The fake helper is not answering; the test plays a hostile one that scribbles over the whole mapping.
-    rig.helper.pause(true);
-    let mut track = dsp(FxSettings::default());
-    track.attach_plugin(rig.insert(0, 0.0, 0.0));
+    // A helper that keeps a credible stream going while something scribbles over the output side of the mapping (block
+    // headers, block data and the output count) now and then: the insert either plays or faults cleanly, its output
+    // stays finite and bounded, and it reads the ring on most callbacks.
+    let header_bytes = 64;
+    let out_headers = header_bytes + RING_BLOCKS * 64;
+    let out_data = header_bytes + 2 * RING_BLOCKS * 64 + RING_BLOCKS * BLOCK_FRAMES * 8;
+    assert_eq!(out_data + RING_BLOCKS * BLOCK_FRAMES * 8, RING_BYTES);
+    let output_write = 32 / 8;
     let mut state = 0x9E37_79B9_7F4A_7C15u64;
     let mut random = move || {
         state ^= state << 13;
@@ -536,32 +551,66 @@ fn hostile_indices_never_index_out_of_bounds() {
         state ^= state << 17;
         state
     };
-    let header = rig.base.cast::<AtomicU64>();
-    for callback in 0..200 {
-        for _ in 0..64 {
-            let word = (random() as usize % (RING_BYTES / 8)).max(1);
-            // SAFETY: an aligned word inside the ring; every field there is an atomic cell, so this is the race a
-            // hostile helper makes, not a data race.
-            let cell = unsafe { &*header.add(word) };
-            let value = match random() % 4 {
-                0 => u64::MAX,
-                1 => 0,
-                2 => callback as u64 * 4 + (random() % 8),
-                _ => random(),
-            };
-            cell.store(value, Ordering::Relaxed);
+    let (mut callbacks, mut live, mut faulted) = (0, 0, 0);
+    for _trial in 0..40 {
+        let rig = rig(0, 0.5);
+        let mut track = dsp(FxSettings::default());
+        track.attach_plugin(rig.insert(0, 0.0, 0.0));
+        let words = rig.base.cast::<AtomicU64>();
+        for callback in 0..16 {
+            // After the priming span, one callback in eight.
+            if callback > 3 && random() % 8 == 0 {
+                for _ in 0..4 {
+                    let word = match random() % 8 {
+                        0 => output_write,
+                        1..=3 => (out_headers + random() as usize % (RING_BLOCKS * 64)) / 8,
+                        _ => (out_data + random() as usize % (RING_BLOCKS * BLOCK_FRAMES * 8)) / 8,
+                    };
+                    let value = match random() % 4 {
+                        0 => u64::MAX,
+                        1 => 0,
+                        2 => random() % 1024,
+                        _ => random(),
+                    };
+                    // SAFETY: an aligned word inside the ring; every field there is an atomic cell, so this is the race
+                    // a hostile helper makes, not a data race.
+                    unsafe { &*words.add(word) }.store(value, Ordering::Relaxed);
+                }
+            }
+            if callback > 3 {
+                callbacks += 1;
+                if track.plugin().unwrap().faulted().is_none() {
+                    live += 1;
+                }
+            }
+            for m in 0..CALLBACK {
+                let y = track.process_at(
+                    signal(callback * CALLBACK + m),
+                    &FrameContext::at_bpm(120.0),
+                );
+                assert!(
+                    y[0].is_finite()
+                        && y[1].is_finite()
+                        && y[0].abs() <= 64.0
+                        && y[1].abs() <= 64.0
+                );
+            }
+            // A scribbled count can make the fake helper look idle; give it a moment, without insisting.
+            let deadline = Instant::now() + Duration::from_millis(20);
+            while rig.link.ring().blocks_pending() && Instant::now() < deadline {
+                std::thread::yield_now();
+            }
         }
-        for m in 0..CALLBACK {
-            let y = track.process_at(
-                signal(callback * CALLBACK + m),
-                &FrameContext::at_bpm(120.0),
-            );
-            assert!(
-                y[0].is_finite() && y[1].is_finite() && y[0].abs() <= 64.0 && y[1].abs() <= 64.0
-            );
+        if track.plugin().unwrap().faulted().is_some() {
+            faulted += 1;
         }
     }
-    assert!(track.plugin().unwrap().faulted().is_some());
+    eprintln!("hostile: {live} of {callbacks} callbacks live, {faulted} of 40 trials faulted");
+    assert!(
+        live * 2 > callbacks,
+        "the insert reads the ring on most callbacks"
+    );
+    assert!(faulted > 0, "some scribbles are caught");
 }
 
 #[test]
@@ -826,7 +875,7 @@ fn transition_with_same_link_keeps_streaming() {
     let mut old = dsp(FxSettings::default());
     old.attach_plugin(rig.insert(0, 0.0, 0.0));
     let mut out = Vec::new();
-    play(&mut old, &[&rig], 0, RATE as usize / 2, &signal, &mut out);
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
     let epoch = rig.link.control().epoch();
     // Another configuration (a settings change elsewhere on the board) with an insert on the same helper.
     let mut changed = FxSettings::default();
@@ -869,7 +918,7 @@ fn swap_with_changed_latency_reprimes_without_fault() {
     let mut old = dsp(FxSettings::default());
     old.attach_plugin(rig.insert(0, 0.0, 0.0));
     let mut out = Vec::new();
-    play(&mut old, &[&rig], 0, RATE as usize / 2, &signal, &mut out);
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
     let mut new = dsp(FxSettings::default());
     new.attach_plugin(rig.insert_for(1056, 0, 0.0, 0.0));
     new.transition_from(&mut old);
@@ -963,14 +1012,7 @@ fn transition_to_other_plugin_crossfades() {
     let mut old = dsp(FxSettings::default());
     old.attach_plugin(first.insert(0, 0.0, 0.0));
     let mut out = Vec::new();
-    play(
-        &mut old,
-        &[&first, &second],
-        0,
-        RATE as usize / 2,
-        &signal,
-        &mut out,
-    );
+    play(&mut old, &[&first, &second], 0, SWAP, &signal, &mut out);
     let mut new = dsp(FxSettings::default());
     new.attach_plugin(second.insert(100, 0.0, 0.0));
     new.transition_from(&mut old);
@@ -1017,7 +1059,7 @@ fn removing_the_plugin_crossfades_to_the_built_in_chain() {
     let mut old = dsp(FxSettings::default());
     old.attach_plugin(rig.insert(0, 0.0, 0.0));
     let mut out = Vec::new();
-    play(&mut old, &[&rig], 0, RATE as usize / 2, &signal, &mut out);
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
     let mut new = dsp(FxSettings::default());
     new.transition_from(&mut old);
     let swap = out.len();
@@ -1042,41 +1084,45 @@ fn removing_the_plugin_crossfades_to_the_built_in_chain() {
 
 #[test]
 fn insert_process_stays_off_the_heap() {
-    // 48,000 frames through Drive, Amp and Cabinet with a plug-in, a same-helper swap with another pipeline (P8) and
-    // its priming span, then a fault: nothing allocates or frees on the audio thread.
-    let rig = rig(0, 0.5);
-    let mut first = dsp(driven());
-    first.attach_plugin(rig.insert(0, 0.0, 0.0));
-    let mut second = dsp(driven());
-    second.attach_plugin(rig.insert_for(1056, 0, 0.0, 0.0));
+    // Through Drive, Amp and Cabinet with a plug-in: a same-helper swap with another pipeline (P8) and its priming span,
+    // a swap to another helper and its crossfade, a second swap inside that crossfade, a stop (`reset`, which flushes),
+    // a fault, and the removal fade. Nothing allocates or frees on the audio thread; every board that is replaced is
+    // kept, and dropped after the count, as the device drops retired configurations off it.
+    let a = rig(0, 0.5);
+    let b = rig(100, 0.8);
+    let c = rig(50, 0.6);
+    let rigs = [&a, &b, &c];
+    let mut boards: Vec<TrackDsp> = (0..6).map(|_| dsp(driven())).collect();
+    boards[0].attach_plugin(a.insert(0, 0.0, 0.0));
+    boards[1].attach_plugin(a.insert_for(1056, 0, 0.0, 0.0));
+    boards[2].attach_plugin(b.insert(100, 0.0, 0.0));
+    boards[3].attach_plugin(c.insert(50, 0.0, 0.0));
+    boards[4].attach_plugin(c.insert(50, 3.0, 0.0));
     let mut out = Vec::with_capacity(4 * RATE as usize);
     let quarter = RATE as usize / 4;
+    let swap = |boards: &mut Vec<TrackDsp>, to: usize| {
+        let (old, new) = boards.split_at_mut(to);
+        new[0].transition_from(&mut old[to - 1]);
+    };
     COUNT_HEAP.with(|flag| flag.set(true));
-    play(&mut first, &[&rig], 0, quarter, &signal, &mut out);
-    second.transition_from(&mut first);
-    play(
-        &mut second,
-        &[&rig],
-        quarter,
-        2 * quarter,
-        &signal,
-        &mut out,
-    );
-    rig.helper.pause(true);
-    play(
-        &mut second,
-        &[&rig],
-        3 * quarter,
-        quarter,
-        &signal,
-        &mut out,
-    );
+    play(&mut boards[0], &rigs, 0, quarter, &signal, &mut out);
+    swap(&mut boards, 1);
+    play(&mut boards[1], &rigs, out.len(), quarter, &signal, &mut out);
+    swap(&mut boards, 2);
+    play(&mut boards[2], &rigs, out.len(), 200, &signal, &mut out);
+    swap(&mut boards, 3);
+    play(&mut boards[3], &rigs, out.len(), quarter, &signal, &mut out);
+    boards[3].reset();
+    play(&mut boards[3], &rigs, out.len(), quarter, &signal, &mut out);
+    swap(&mut boards, 4);
+    c.helper.pause(true);
+    play(&mut boards[4], &rigs, out.len(), quarter, &signal, &mut out);
+    let faulted = boards[4].plugin().unwrap().faulted();
+    swap(&mut boards, 5);
+    play(&mut boards[5], &rigs, out.len(), quarter, &signal, &mut out);
     COUNT_HEAP.with(|flag| flag.set(false));
-    assert_eq!(out.len(), RATE as usize);
-    assert_eq!(
-        second.plugin().unwrap().faulted(),
-        Some(FaultReason::Underrun)
-    );
+    assert_eq!(faulted, Some(FaultReason::Underrun));
+    assert!(!boards[5].has_plugin());
     assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
 }
 
@@ -1227,4 +1273,429 @@ fn track_with_insert_never_rests() {
         "a silent board without a plug-in rests"
     );
     assert_eq!(track.driven_at_rest(), [false, false]);
+}
+// ---- fix round 1 ------------------------------------------------------------------------------------------------
+
+/// A frame that is not a zero crossing of either test sine (24,000 is one of both: review M4).
+const SWAP: usize = 24_037;
+
+/// Plays frame by frame from `from` for `frames`, a callback at a time, and returns the frame at which `track`'s insert
+/// first reports a fault, if it does.
+fn play_watching(
+    track: &mut TrackDsp,
+    rigs: &[&Rig],
+    from: usize,
+    frames: usize,
+    input: &dyn Fn(usize) -> [f32; 2],
+    out: &mut Vec<[f32; 2]>,
+) -> Option<usize> {
+    let mut fault_at = None;
+    let mut n = from;
+    while n < from + frames {
+        let end = (n + CALLBACK).min(from + frames);
+        for m in n..end {
+            out.push(track.process_at(input(m), &FrameContext::at_bpm(120.0)));
+            if fault_at.is_none() && track.plugin().is_some_and(|p| p.faulted().is_some()) {
+                fault_at = Some(m);
+            }
+        }
+        n = end;
+        for rig in rigs {
+            rig.settle();
+        }
+    }
+    fault_at
+}
+
+/// No 64-frame window from `start` to `end` falls below 10 % of the quieter steady level around them.
+fn assert_no_dropout(out: &[[f32; 2]], start: usize, end: usize, what: &str) {
+    let lower = rms(&out[start - 4_800..start]).min(rms(&out[end..end + 4_800]));
+    for at in start - 256..end {
+        let level = rms(&out[at..at + 64]);
+        assert!(
+            level >= 0.1 * lower,
+            "{what}: window at {at}: {level} against {lower}"
+        );
+    }
+}
+
+#[test]
+fn attaching_mid_play_keeps_the_built_in_tone() {
+    // Review C1: a plug-in added while the track plays primes with the built-in tone the track was already playing.
+    let rig = rig(0, 0.5);
+    let mut old = dsp(driven());
+    let mut out = Vec::new();
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
+    let mut new = dsp(driven());
+    new.attach_plugin(rig.insert(0, 0.0, 0.0));
+    new.transition_from(&mut old);
+    play(
+        &mut new,
+        &[&rig],
+        SWAP,
+        RATE as usize / 2,
+        &signal,
+        &mut out,
+    );
+    let d = new.plugin_delay();
+    let end = SWAP + d + 3 * RAMP;
+    assert_no_dropout(&out, SWAP, end, "attach");
+    assert_smooth(
+        &out[SWAP - 4_800..SWAP],
+        &out[SWAP - 1..end],
+        &out[end..end + 4_800],
+        "attach",
+    );
+    assert_eq!(new.plugin().unwrap().faulted(), None);
+}
+
+#[test]
+fn other_plugin_swap_keeps_sound_while_priming() {
+    // Review C1: swapping to another helper fades into the built-in tone on the timing that was playing, not into an
+    // empty line.
+    let first = rig(0, 1.0);
+    let second = rig(100, 0.8);
+    let mut old = dsp(driven());
+    old.attach_plugin(first.insert(0, 0.0, 0.0));
+    let mut out = Vec::new();
+    play(&mut old, &[&first, &second], 0, SWAP, &signal, &mut out);
+    let mut new = dsp(driven());
+    new.attach_plugin(second.insert(100, 0.0, 0.0));
+    new.transition_from(&mut old);
+    play(
+        &mut new,
+        &[&first, &second],
+        SWAP,
+        RATE as usize / 2,
+        &signal,
+        &mut out,
+    );
+    let d = new.plugin_delay();
+    let end = SWAP + d + 3 * RAMP;
+    assert_no_dropout(&out, SWAP, end, "swap");
+    // The driven built-in tone that plays between the two has steeper steps than either plug-in's clean output.
+    assert_smooth(
+        &out[SWAP + 2 * RAMP..SWAP + d],
+        &out[SWAP - 1..end],
+        &out[end..end + 4_800],
+        "swap",
+    );
+    assert_eq!(new.plugin().unwrap().faulted(), None);
+}
+
+/// A board with `settings` on `rig`'s plug-in that has underrun and settled on the built-in tone by frame `SWAP`.
+fn faulted_by_swap(rig: &Rig, settings: FxSettings, out: &mut Vec<[f32; 2]>) -> TrackDsp {
+    let mut old = dsp(settings);
+    old.attach_plugin(rig.insert(0, 0.0, 0.0));
+    play(&mut old, &[rig], 0, SWAP / 2, &signal, out);
+    rig.helper.pause(true);
+    let fault = play_watching(&mut old, &[rig], SWAP / 2, SWAP - SWAP / 2, &signal, out);
+    assert!(
+        fault.is_some_and(|at| at + 4 * RAMP < SWAP),
+        "the fault settles before the swap"
+    );
+    old
+}
+
+#[test]
+fn removing_a_faulted_plugin_is_smooth() {
+    // Review I1: the built-in input glides from the plug-in's timing to the board's own, never jumps. The board has no
+    // built-in stages on, so a jump in the input's timing is not hidden by the cabinet's filter.
+    let rig = rig(0, 0.5);
+    let mut out = Vec::new();
+    let mut old = faulted_by_swap(&rig, FxSettings::default(), &mut out);
+    let mut new = dsp(FxSettings::default());
+    new.transition_from(&mut old);
+    play(
+        &mut new,
+        &[&rig],
+        SWAP,
+        RATE as usize / 4,
+        &signal,
+        &mut out,
+    );
+    let end = SWAP + 3 * RAMP;
+    assert_smooth(
+        &out[SWAP - 4_800..SWAP],
+        &out[SWAP - 1..end],
+        &out[end..end + 4_800],
+        "removal after a fault",
+    );
+}
+
+#[test]
+fn replacing_a_faulted_plugin_is_smooth() {
+    let first = rig(0, 0.5);
+    let second = rig(100, 0.8);
+    let mut out = Vec::new();
+    let mut old = faulted_by_swap(&first, driven(), &mut out);
+    let mut new = dsp(driven());
+    new.attach_plugin(second.insert(100, 0.0, 0.0));
+    new.transition_from(&mut old);
+    play(
+        &mut new,
+        &[&first, &second],
+        SWAP,
+        RATE as usize / 2,
+        &signal,
+        &mut out,
+    );
+    let d = new.plugin_delay();
+    let end = SWAP + d + 3 * RAMP;
+    assert_smooth(
+        &out[SWAP - 4_800..SWAP],
+        &out[SWAP - 1..end],
+        &out[end..end + 4_800],
+        "replacing after a fault",
+    );
+    assert_no_dropout(&out, SWAP, end, "replacing after a fault");
+    assert_eq!(new.plugin().unwrap().faulted(), None);
+}
+
+#[test]
+fn reprepared_faulted_plugin_is_smooth_and_tells_the_new_shared_word() {
+    // Review I1 and I2: the same helper re-prepared with another pipeline after a fault keeps the fault, glides the
+    // built-in input to the new timing, and reports the fault on the word the supervisor now watches.
+    let rig = rig(0, 0.5);
+    let mut out = Vec::new();
+    let mut old = faulted_by_swap(&rig, FxSettings::default(), &mut out);
+    let fresh = Arc::new(InsertShared::default());
+    let mut new = dsp(FxSettings::default());
+    new.attach_plugin(Box::new(
+        PluginInsert::new(
+            rig.link.clone(),
+            InsertMode::Realtime {
+                pipeline_frames: pipeline_frames(1056),
+            },
+            0,
+            0.0,
+            0.0,
+            RATE,
+            fresh.clone(),
+        )
+        .unwrap(),
+    ));
+    new.transition_from(&mut old);
+    assert_eq!(new.plugin().unwrap().faulted(), Some(FaultReason::Underrun));
+    assert_eq!(fresh.fault.load(Ordering::Relaxed), fault::UNDERRUN);
+    play(
+        &mut new,
+        &[&rig],
+        SWAP,
+        RATE as usize / 4,
+        &signal,
+        &mut out,
+    );
+    let end = SWAP + 3 * RAMP;
+    assert_smooth(
+        &out[SWAP - 4_800..SWAP],
+        &out[SWAP - 1..end],
+        &out[end..end + 4_800],
+        "re-prepare after a fault",
+    );
+}
+
+#[test]
+fn a_result_missing_while_priming_is_skipped() {
+    // Review I4: with a latency of 200 frames, blocks 0 and 1 are due before `D`. The helper answers them in another
+    // epoch, so they are missing at their time; that is priming, not an underrun.
+    let rig = rig(200, 0.5);
+    rig.helper.controls.stale_below.store(2, Ordering::Relaxed);
+    let mut track = dsp(FxSettings::default());
+    track.attach_plugin(rig.insert(200, 0.0, 0.0));
+    let mut out = Vec::new();
+    play(&mut track, &[&rig], 0, RATE as usize / 4, &signal, &mut out);
+    assert_eq!(track.plugin().unwrap().faulted(), None);
+    let d = track.plugin_delay();
+    for m in out.len() - 2_000..out.len() {
+        let x = signal(m - d);
+        assert_close(
+            out[m],
+            [0.5 * x[0], 0.5 * x[1]],
+            1e-6,
+            &format!("frame {m}"),
+        );
+    }
+}
+
+#[test]
+fn a_block_straddling_d_does_not_dip() {
+    // Review I4: with a latency of 57 frames block 0 is due before `D` and covers 71 frames after it. When it is
+    // missing, the plug-in fades in only once a playable block plays, instead of ramping up held silence and stepping.
+    let rig = rig(57, 1.0);
+    rig.helper.controls.stale_below.store(1, Ordering::Relaxed);
+    let mut track = dsp(FxSettings::default());
+    track.attach_plugin(rig.insert(57, 0.0, 0.0));
+    let d = track.plugin_delay();
+    let mut out = Vec::new();
+    // The input is already sounding when the insert starts, as on a track that plays.
+    let input = |m: usize| signal(m + 10_037);
+    play(&mut track, &[&rig], 0, RATE as usize / 4, &input, &mut out);
+    assert_eq!(track.plugin().unwrap().faulted(), None);
+    let end = d + 3 * RAMP;
+    assert_smooth(
+        &out[d - 256..d],
+        &out[d - 1..end],
+        &out[end..end + 4_800],
+        "block straddling D",
+    );
+}
+
+#[test]
+fn fallback_resets_the_stages_that_ran_while_priming() {
+    // Review I5: the stand-in ran while the insert primed, then stood still behind the plug-in. When the plug-in faults
+    // mid-play, Drive, Amp and Cabinet start again from rest: the output is a plug-in-free board reset at the fault's
+    // frame and fed the input delayed by `D`.
+    let rig = rig(0, 0.5);
+    let mut track = dsp(driven());
+    track.attach_plugin(rig.insert(0, 0.0, 0.0));
+    let d = track.plugin_delay();
+    let mut out = Vec::new();
+    play(&mut track, &[&rig], 0, SWAP, &signal, &mut out);
+    rig.helper.pause(true);
+    let total = SWAP + RATE as usize / 2;
+    let fault_at =
+        play_watching(&mut track, &[&rig], SWAP, total - SWAP, &signal, &mut out).expect("a fault");
+    let mut reference = dsp(driven());
+    for m in 0..total {
+        if m == fault_at {
+            reference.reset();
+        }
+        let y = reference.process(signal(m - d.min(m)), 120.0);
+        if m >= fault_at + RAMP {
+            assert_close(out[m], y, 1e-6, &format!("frame {m}"));
+        }
+    }
+}
+
+#[test]
+fn underrun_through_drive_amp_cabinet_is_smooth() {
+    // Review I5: the underrun case with the built-in stand-in on.
+    let rig = rig(0, 0.5);
+    let mut track = dsp(driven());
+    track.attach_plugin(rig.insert(0, 0.0, 0.0));
+    let mut out = Vec::new();
+    play(&mut track, &[&rig], 0, SWAP, &signal, &mut out);
+    rig.helper.pause(true);
+    let fault_at = play_watching(
+        &mut track,
+        &[&rig],
+        SWAP,
+        RATE as usize / 2,
+        &signal,
+        &mut out,
+    )
+    .expect("a fault");
+    assert_smooth(
+        &out[fault_at - 4_800..fault_at],
+        &out[fault_at - 1..fault_at + 2 * RAMP],
+        &out[fault_at + 2 * RAMP..fault_at + 2 * RAMP + 4_800],
+        "underrun through the stand-in",
+    );
+    assert_no_dropout(
+        &out,
+        fault_at,
+        fault_at + 2 * RAMP,
+        "underrun through the stand-in",
+    );
+}
+
+#[test]
+fn reprepare_through_drive_amp_cabinet_is_smooth() {
+    // Review I5: the same helper with another pipeline, with the built-in stand-in on.
+    let rig = rig(0, 0.5);
+    let mut old = dsp(driven());
+    old.attach_plugin(rig.insert(0, 0.0, 0.0));
+    let mut out = Vec::new();
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
+    let mut new = dsp(driven());
+    new.attach_plugin(rig.insert_for(1056, 0, 0.0, 0.0));
+    new.transition_from(&mut old);
+    play(
+        &mut new,
+        &[&rig],
+        SWAP,
+        RATE as usize / 2,
+        &signal,
+        &mut out,
+    );
+    assert_eq!(new.plugin().unwrap().faulted(), None);
+    let d = new.plugin_delay();
+    let end = SWAP + d + 3 * RAMP;
+    // The driven stand-in that plays while it primes has steeper steps than the plug-in's clean output.
+    assert_smooth(
+        &out[SWAP + 2 * RAMP..SWAP + d],
+        &out[SWAP - 1..end],
+        &out[end..end + 4_800],
+        "re-prepare through the stand-in",
+    );
+    assert_no_dropout(&out, SWAP, end, "re-prepare through the stand-in");
+}
+
+#[test]
+fn removal_through_drive_amp_cabinet_is_smooth() {
+    // Review I5: removing a playing plug-in, with the built-in stand-in on.
+    let rig = rig(0, 0.5);
+    let mut old = dsp(driven());
+    old.attach_plugin(rig.insert(0, 0.0, 0.0));
+    let mut out = Vec::new();
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
+    let mut new = dsp(driven());
+    new.transition_from(&mut old);
+    play(
+        &mut new,
+        &[&rig],
+        SWAP,
+        RATE as usize / 4,
+        &signal,
+        &mut out,
+    );
+    let end = SWAP + 2 * RAMP;
+    assert_smooth(
+        &out[SWAP - 4_800..SWAP],
+        &out[SWAP - 1..end],
+        &out[end..end + 4_800],
+        "removal through the stand-in",
+    );
+    assert_no_dropout(&out, SWAP, end, "removal through the stand-in");
+    assert!(!new.has_plugin());
+}
+
+#[test]
+fn a_second_change_inside_the_crossfade_does_not_step() {
+    // Review M2: plug-in A, then B, then C 200 frames later, while A still fades out: what A still played is held and
+    // faded out beside the new crossfade, not dropped.
+    let a = rig(0, 1.0);
+    let b = rig(100, 0.8);
+    let c = rig(50, 0.6);
+    let rigs = [&a, &b, &c];
+    let mut first = dsp(FxSettings::default());
+    first.attach_plugin(a.insert(0, 0.0, 0.0));
+    let mut out = Vec::new();
+    play(&mut first, &rigs, 0, SWAP, &signal, &mut out);
+    let mut second = dsp(FxSettings::default());
+    second.attach_plugin(b.insert(100, 0.0, 0.0));
+    second.transition_from(&mut first);
+    play(&mut second, &rigs, SWAP, 200, &signal, &mut out);
+    let mut third = dsp(FxSettings::default());
+    third.attach_plugin(c.insert(50, 0.0, 0.0));
+    third.transition_from(&mut second);
+    play(
+        &mut third,
+        &rigs,
+        SWAP + 200,
+        RATE as usize / 2,
+        &signal,
+        &mut out,
+    );
+    let d = third.plugin_delay();
+    let end = SWAP + 200 + d + 3 * RAMP;
+    assert_smooth(
+        &out[SWAP - 4_800..SWAP],
+        &out[SWAP - 1..end],
+        &out[end..end + 4_800],
+        "two changes inside 10 ms",
+    );
+    assert_no_dropout(&out, SWAP, end, "two changes inside 10 ms");
+    assert_eq!(third.plugin().unwrap().faulted(), None);
 }

@@ -19,7 +19,7 @@ mod windows_tests {
         export::{
             audio::{AudioExportRender, AudioExportRequest, MeasureRange},
             stems::{StemKind, StemTrack, write_stems},
-            wav::{AudioFormat, write_wav},
+            wav::{AudioFormat, BLOCK_FRAMES, write_wav},
         },
         plugins::{
             helper::probe,
@@ -179,6 +179,69 @@ mod windows_tests {
             ]
         }))
         .unwrap()
+    }
+
+    /// Bar 0 plays again after bar 1, and every track holds the same note through both of its occurrences.
+    fn plan_held_across_join(tracks: &[&str]) -> PlaybackPlan {
+        let mut midi = Vec::new();
+        for (on, off) in [(0, 3840), (7680, 11520)] {
+            for id in tracks {
+                midi.push(serde_json::json!({"type": "noteOn", "trackId": id, "tick": on, "channel": 0, "key": 52, "velocity": 100}));
+            }
+            for id in tracks {
+                midi.push(serde_json::json!({"type": "noteOff", "trackId": id, "tick": off, "channel": 0, "key": 52, "velocity": 0}));
+            }
+        }
+        midi.sort_by_key(|event| event["tick"].as_i64());
+        let tracks: Vec<_> = tracks
+            .iter()
+            .map(|id| serde_json::json!({"id": id, "program": 0, "percussion": false}))
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "generation": 1,
+            "ppq": 960,
+            "durationTick": 11520,
+            "durationMs": 6000,
+            "tracks": tracks,
+            "tempos": [{"tick": 0, "bpm": 120}],
+            "occurrences": [
+                {"bar": 0, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 0, "endTick": 3840, "startMs": 0, "endMs": 2000},
+                {"bar": 1, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 3840, "endTick": 7680, "startMs": 2000, "endMs": 4000},
+                {"bar": 0, "occurrence": 1, "meterNumerator": 4, "meterDenominator": 4, "startTick": 7680, "endTick": 11520, "startMs": 4000, "endMs": 6000}
+            ],
+            "notes": [],
+            "midi": midi
+        }))
+        .unwrap()
+    }
+
+    /// Every stem of an export, in memory, at full precision.
+    fn render_all_stems(export: &mut AudioExportRender, count: usize) -> Vec<Vec<[f32; 2]>> {
+        let mut outputs = vec![vec![[0.0f32; 2]; BLOCK_FRAMES]; count];
+        let mut stems = vec![Vec::new(); count];
+        loop {
+            let n = export.render_stems(&mut outputs).unwrap();
+            if n == 0 {
+                break;
+            }
+            for (stem, output) in stems.iter_mut().zip(&outputs) {
+                stem.extend_from_slice(&output[..n]);
+            }
+        }
+        stems
+    }
+
+    fn render_all_mix(export: &mut AudioExportRender) -> Vec<[f32; 2]> {
+        let mut buffer = vec![[0.0f32; 2]; 4096];
+        let mut mix = Vec::new();
+        loop {
+            let n = export.render_mix(&mut buffer).unwrap();
+            if n == 0 {
+                break;
+            }
+            mix.extend_from_slice(&buffer[..n]);
+        }
+        mix
     }
 
     fn test_slot(class_id: &str, state_id: &str) -> PluginSlot {
@@ -414,6 +477,50 @@ mod windows_tests {
             let tail_samples = &samples[score_samples..];
             let tail_energy: i64 = tail_samples.iter().map(|&s| (s as i64).abs()).sum();
             assert!(tail_energy > 0, "Tail frames must have non-zero audio energy");
+
+            // The note's release fills a long tail whether or not the delay is flushed. With a 20 ms tail the note
+            // still sounds at the very end, so the last D_max frames are what the export flushes out of the
+            // compensation and the plug-in: the export must equal the same export without the plug-in, to the
+            // last frame.
+            let settings = dry_settings_for_tracks(&["t1"]);
+            let request = make_request(vec!["t1"], None, 0.02);
+            let mut baseline = AudioExportRender::new(
+                Renderer::new(plan.clone(), resources(), settings.clone(), RATE).unwrap(),
+                &plan,
+                request.clone(),
+            )
+            .unwrap();
+            let expected = render_all_mix(&mut baseline);
+            let slot = test_slot(TEST_CLASS_ID, &state_id);
+            let req = SlotRequest {
+                track_id: "t1".into(),
+                slot,
+                state: encode_state(&comp, &[]).unwrap().into(),
+            };
+            let offline = rig.service.offline_inserts("doc1", &[req], RATE).unwrap();
+            assert_eq!(offline.inserts.len(), 1);
+            let mut export = AudioExportRender::new_with_plugins(
+                Renderer::new(plan.clone(), resources(), settings, RATE).unwrap(),
+                &plan,
+                request,
+                Some(offline),
+            )
+            .unwrap();
+            let got = render_all_mix(&mut export);
+            assert_eq!(got.len(), expected.len());
+            let d_max = tabplayer_plugin_protocol::limits::BLOCK_FRAMES + 480;
+            let last = &expected[expected.len() - d_max..];
+            assert!(
+                last.iter().any(|f| f[0].abs() > 1e-3),
+                "the note must still sound in the last D_max frames"
+            );
+            for (i, (g, e)) in got.iter().zip(&expected).enumerate() {
+                assert!(
+                    (g[0] - e[0]).abs() < 1e-6 && (g[1] - e[1]).abs() < 1e-6,
+                    "frame {i} of {}: {g:?} with the plug-in, {e:?} without",
+                    expected.len()
+                );
+            }
         }
 
         fn stems_are_aligned_in_export() {
@@ -723,6 +830,43 @@ mod windows_tests {
 
             assert_eq!(written, export.total_frames());
             assert!(path.exists());
+
+            // The length alone holds for a join that flushes. Now the plug-in track and a dry twin hold a note up to
+            // the join: the D_max frames before it in the output are what the compensation lines and the insert
+            // still held at the join, and the plug-in stem stays aligned with the dry one on both sides.
+            let ids = ["t1", "t2"];
+            let slot = test_slot(TEST_CLASS_ID, &state_id);
+            let req = SlotRequest {
+                track_id: "t1".into(),
+                slot,
+                state: encode_state(&comp, &[]).unwrap().into(),
+            };
+            let offline = rig.service.offline_inserts("doc1", &[req], RATE).unwrap();
+            assert_eq!(offline.inserts.len(), 1);
+            let plan = Arc::new(plan_held_across_join(&ids));
+            let request = make_request(ids.to_vec(), Some(MeasureRange { first: 0, last: 0 }), 0.2);
+            let renderer = Renderer::new(plan.clone(), resources(), dry_settings_for_tracks(&ids), RATE).unwrap();
+            let mut export = AudioExportRender::new_with_plugins(renderer, &plan, request, Some(offline)).unwrap();
+            let stems = render_all_stems(&mut export, 3);
+            assert_eq!(stems[0].len() as u64, export.total_frames());
+            let join = 96_000;
+            let d_max = tabplayer_plugin_protocol::limits::BLOCK_FRAMES + 64;
+            let (plugged, dry) = (&stems[0], &stems[1]);
+            assert!(dry.iter().any(|f| f[0].abs() > 0.01), "the score must sound");
+            for (name, stem) in [("plug-in", plugged), ("dry", dry)] {
+                let from = join - d_max - 480;
+                let mut zeros = 0;
+                for (i, f) in stem[from..join].iter().enumerate() {
+                    zeros = if f[0] == 0.0 && f[1] == 0.0 { zeros + 1 } else { 0 };
+                    assert!(zeros < 32, "the {name} stem falls silent {} frames before the join", join - (from + i));
+                }
+            }
+            for (i, (p, d)) in plugged.iter().zip(dry).enumerate() {
+                assert!(
+                    (p[0] - d[0]).abs() < 1e-6 && (p[1] - d[1]).abs() < 1e-6,
+                    "frame {i}: the plug-in stem {p:?} is not aligned with the dry stem {d:?}"
+                );
+            }
         }
 
         fn export_uses_a_fresh_offline_helper() {
@@ -750,10 +894,22 @@ mod windows_tests {
             // Start a playback session
             rig.service.ensure("doc1", &[req.clone()]);
             std::thread::sleep(Duration::from_millis(100));
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            let playback_pid = loop {
+                if let Some(pid) = rig.service.session_pid("doc1", "t1") {
+                    break pid;
+                }
+                assert!(std::time::Instant::now() < deadline, "the playback helper did not start");
+                std::thread::sleep(Duration::from_millis(20));
+            };
 
             // Run offline export
             let offline = rig.service.offline_inserts("doc1", &[req], RATE).unwrap();
             assert_eq!(offline.inserts.len(), 1);
+            // The export runs in its own, new helper process, not in the one playing.
+            assert_eq!(offline.sessions.len(), 1);
+            let offline_pid = offline.sessions[0].pid().expect("the offline helper is a process");
+            assert_ne!(offline_pid, playback_pid, "the export must not use the playback helper");
 
             let plan = Arc::new(plan_2_tracks());
             let request = make_request(vec!["t1"], None, 0.2);
@@ -784,6 +940,24 @@ mod windows_tests {
             // Verify playback session is still alive and untouched
             let statuses = rig.service.statuses("doc1");
             assert!(!statuses.is_empty(), "playback session should still be tracked");
+
+            // The same playback helper, still ready and still beating, once the export is done and its helper gone.
+            drop(export);
+            assert_eq!(
+                rig.service.session_pid("doc1", "t1"),
+                Some(playback_pid),
+                "the playback helper must be the one that was playing before the export"
+            );
+            assert!(
+                statuses.iter().all(|s| s.status == PluginStatus::Ready),
+                "the playback slot must stay ready: {statuses:?}"
+            );
+            let beat = rig.service.heartbeat("doc1", "t1").expect("the playback helper beats");
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while rig.service.heartbeat("doc1", "t1") == Some(beat) {
+                assert!(std::time::Instant::now() < deadline, "the playback helper stopped beating");
+                std::thread::sleep(Duration::from_millis(20));
+            }
         }
     }
 }

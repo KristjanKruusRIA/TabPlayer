@@ -283,7 +283,13 @@ impl AudioExportRender {
             if !self.tail_started && self.segment + 1 < self.schedule.segments.len() {
                 self.segment += 1;
                 let segment = &self.schedule.segments[self.segment];
-                self.renderer.wrap_to_tick(segment.start_tick);
+                // With a plug-in, the join keeps the inserts, the compensation lines and the master streaming. With
+                // none, it is the seek it was before plug-ins, so the export stays bit-identical.
+                if self.renderer.plugins_active() {
+                    self.renderer.wrap_to_tick(segment.start_tick);
+                } else {
+                    self.renderer.seek_tick(segment.start_tick);
+                }
                 self.remaining = segment.frames;
             } else if !self.tail_started {
                 self.tail_started = true;
@@ -988,5 +994,299 @@ mod tests {
         stop.store(true, Ordering::Relaxed);
         input_ev.signal();
         let _ = helper_thread.join();
+
+        // The length alone holds for a join that flushes too. A range that plays bar 0 twice has two segments; the
+        // plug-in track and a dry twin both sound across the join. The join must not drop D_max frames of either,
+        // and the plug-in stem must stay frame-aligned with the dry stem on both sides of it.
+        assert_two_segments_stream();
+    }
+
+    /// A score whose bar 0 plays again after bar 1, with the same note on every track in both of its occurrences.
+    fn repeated_bar_plan(tracks: &[&str]) -> PlaybackPlan {
+        let mut midi = Vec::new();
+        for id in tracks {
+            for (on, off) in [(0, 3840), (7680, 11520)] {
+                midi.push(serde_json::json!({"type": "noteOn", "trackId": id, "tick": on, "channel": 0, "key": 52, "velocity": 100}));
+                midi.push(serde_json::json!({"type": "noteOff", "trackId": id, "tick": off, "channel": 0, "key": 52, "velocity": 0}));
+            }
+        }
+        midi.sort_by_key(|event| event["tick"].as_i64());
+        let tracks: Vec<_> = tracks
+            .iter()
+            .map(|id| serde_json::json!({"id": id, "program": 0, "percussion": false}))
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "generation": 1, "ppq": 960, "durationTick": 11520, "durationMs": 6000,
+            "tracks": tracks,
+            "tempos": [{"tick": 0, "bpm": 120}],
+            "occurrences": [
+                {"bar": 0, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 0, "endTick": 3840, "startMs": 0, "endMs": 2000},
+                {"bar": 1, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 3840, "endTick": 7680, "startMs": 2000, "endMs": 4000},
+                {"bar": 0, "occurrence": 1, "meterNumerator": 4, "meterDenominator": 4, "startTick": 7680, "endTick": 11520, "startMs": 4000, "endMs": 6000}
+            ],
+            "notes": [],
+            "midi": midi
+        }))
+        .unwrap()
+    }
+
+    /// General MIDI voices with the built-in Drive, Amp and Cabinet off, which a plug-in would replace.
+    fn dry_gm_settings(tracks: &[&str]) -> crate::settings::DocumentSettings {
+        let mut settings = crate::settings::DocumentSettings::default();
+        for id in tracks {
+            let mut sound = crate::settings::TrackSound {
+                voice_id: Some("gm".into()),
+                ..Default::default()
+            };
+            sound.effects.drive.enabled = false;
+            sound.effects.amp.enabled = false;
+            sound.effects.cabinet.enabled = false;
+            settings.sounds.insert((*id).into(), sound);
+        }
+        settings
+    }
+
+    fn export_resources() -> std::sync::Arc<crate::audio::resources::AudioResources> {
+        std::sync::Arc::new(
+            crate::audio::resources::AudioResources::load_for_requests(
+                &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+                &[],
+            )
+            .unwrap(),
+        )
+    }
+
+    fn range_request(tracks: &[&str], tail_seconds: f64) -> AudioExportRequest {
+        AudioExportRequest {
+            tracks: tracks
+                .iter()
+                .map(|id| StemTrack {
+                    id: (*id).into(),
+                    name: (*id).into(),
+                    preset: "clean".into(),
+                    kind: StemKind::Score,
+                })
+                .collect(),
+            range: Some(MeasureRange { first: 0, last: 0 }),
+            format: AudioFormat::wav(48000, 24),
+            speed: 1.0,
+            metronome: false,
+            metronome_sound: Default::default(),
+            tail_seconds,
+            include_backing: false,
+            include_mix: true,
+            normalize_rms_db: None,
+        }
+    }
+
+    fn assert_two_segments_stream() {
+        use crate::audio::plugin_insert::{InsertMode, PluginInsert};
+        use crate::plugins::bridge::{BridgeLink, InsertShared};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        use std::time::Duration;
+        use tabplayer_plugin_protocol::ring::{Block, OwnedRing};
+
+        let ids = ["t1", "t2"];
+        let plan = repeated_bar_plan(&ids);
+        let mut renderer = Renderer::new(
+            Arc::new(plan.clone()),
+            export_resources(),
+            dry_gm_settings(&ids),
+            48000,
+        )
+        .unwrap();
+
+        // A stand-in helper: each block comes back `LATENCY` frames late, from silence again on every new epoch.
+        const LATENCY: usize = 256;
+        let owned = OwnedRing::new(48000);
+        let mut helper = owned.helper();
+        let link = BridgeLink::in_process(owned);
+        let input_ev = link.input_event().clone();
+        let output_ev = link.output_event().clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = stop.clone();
+        let thread_input_ev = input_ev.clone();
+        let helper_thread = std::thread::spawn(move || {
+            let mut block: Block = [[0.0; 2]; 128];
+            let mut line = vec![[0.0f32; 2]; LATENCY];
+            let mut pos = 0;
+            let mut epoch = None;
+            let mut seq = 0;
+            while !stop_clone.load(Ordering::Relaxed) {
+                thread_input_ev.wait(Duration::from_millis(2));
+                while let Some(input) = helper.read_input(seq, &mut block).block() {
+                    if epoch != Some(input.epoch) {
+                        line.iter_mut().for_each(|f| *f = [0.0; 2]);
+                        epoch = Some(input.epoch);
+                    }
+                    for frame in block.iter_mut() {
+                        let late = line[pos];
+                        line[pos] = *frame;
+                        pos = (pos + 1) % LATENCY;
+                        *frame = late;
+                    }
+                    helper.publish_output(seq, input.epoch, &block, &input.meta);
+                    output_ev.signal();
+                    seq = seq.wrapping_add(1);
+                }
+            }
+        });
+        let insert = PluginInsert::new(
+            link,
+            InsertMode::Offline {
+                timeout: Duration::from_secs(5),
+            },
+            LATENCY as u32,
+            0.0,
+            0.0,
+            48000,
+            Arc::new(InsertShared::default()),
+        )
+        .unwrap();
+        renderer.attach_plugin(0, Box::new(insert));
+        let d_max = renderer.plugin_delay_frames();
+        assert!(d_max > LATENCY);
+
+        let mut render =
+            AudioExportRender::new_with_plugins(renderer, &plan, range_request(&ids, 0.1), None)
+                .unwrap();
+        assert_eq!(render.schedule.segments.len(), 2);
+        let join = render.schedule.segments[0].frames as usize;
+        let mut outputs = vec![vec![[0.0f32; 2]; BLOCK_FRAMES]; 3];
+        let mut stems = vec![Vec::new(); 3];
+        loop {
+            let n = render.render_stems(&mut outputs).unwrap();
+            if n == 0 {
+                break;
+            }
+            for (stem, output) in stems.iter_mut().zip(&outputs) {
+                stem.extend_from_slice(&output[..n]);
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        input_ev.signal();
+        let _ = helper_thread.join();
+
+        assert_eq!(stems[0].len() as u64, render.total_frames());
+        let (plugged, dry) = (&stems[0], &stems[1]);
+        assert!(
+            dry.iter().any(|f| f[0].abs() > 0.01),
+            "the score must sound"
+        );
+        // With the pre-roll trimmed, output frame `join` is where the second segment's first note starts (the
+        // synthesizer's onset is silent for a block). The D_max frames before it are the first segment's held note,
+        // which at the join was still in the compensation lines and the insert: a flushing join would silence them.
+        for (name, stem) in [("plug-in", plugged), ("dry", dry)] {
+            let mut zeros = 0;
+            let from = join - d_max - 480;
+            for (i, f) in stem[from..join].iter().enumerate() {
+                zeros = if f[0] == 0.0 && f[1] == 0.0 {
+                    zeros + 1
+                } else {
+                    0
+                };
+                assert!(
+                    zeros < 32,
+                    "the {name} stem falls silent {} frames before the join",
+                    join - (from + i)
+                );
+            }
+        }
+        for (i, (p, d)) in plugged.iter().zip(dry).enumerate() {
+            assert!(
+                (p[0] - d[0]).abs() < 1e-6 && (p[1] - d[1]).abs() < 1e-6,
+                "frame {i} (join at {join}): the plug-in stem {p:?} is not aligned with the dry stem {d:?}"
+            );
+        }
+    }
+
+    /// With no plug-in, a range export's segment joins are the seeks they were before plug-ins: a master reverb and
+    /// limiter start again at each join, and the bytes do not change.
+    #[test]
+    fn a_range_export_without_plugins_seeks_at_each_join() {
+        use crate::settings::{MasterLimiter, MasterSettings};
+        use std::sync::Arc;
+
+        let ids = ["t1"];
+        let plan = repeated_bar_plan(&ids);
+        let mut settings = dry_gm_settings(&ids);
+        let defaults = MasterSettings::default();
+        settings.master = Some(MasterSettings {
+            reverb: crate::audio::dsp::Reverb {
+                enabled: true,
+                mix: 0.8,
+                room: 0.9,
+                damping: 0.1,
+                ..defaults.reverb.clone()
+            },
+            limiter: MasterLimiter {
+                enabled: true,
+                ceiling_db: -12.0,
+                release_ms: 300.0,
+            },
+            ..defaults
+        });
+        let request = range_request(&ids, 0.5);
+
+        let renderer = Renderer::new(
+            Arc::new(plan.clone()),
+            export_resources(),
+            settings.clone(),
+            48000,
+        )
+        .unwrap();
+        let mut render = AudioExportRender::new(renderer, &plan, request.clone()).unwrap();
+        let mut got = Vec::new();
+        let mut buffer = vec![[0.0f32; 2]; 4096];
+        loop {
+            let n = render.render_mix(&mut buffer).unwrap();
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buffer[..n]);
+        }
+
+        let mut reference =
+            Renderer::new(Arc::new(plan.clone()), export_resources(), settings, 48000).unwrap();
+        reference.set_speed(1.0).unwrap();
+        reference.set_metronome_settings(crate::audio::practice::MetronomeSettings {
+            enabled: false,
+            volume: 0.4,
+            visual: false,
+            sound: Default::default(),
+        });
+        let schedule = RenderSchedule::new(
+            &plan,
+            request.range,
+            48000,
+            1.0,
+            0.5,
+            reference.duration_seconds(),
+        )
+        .unwrap();
+        assert_eq!(schedule.segments.len(), 2);
+        let mut expected = Vec::new();
+        for segment in &schedule.segments {
+            reference.seek_tick(segment.start_tick);
+            let mut part = vec![[0.0f32; 2]; segment.frames as usize];
+            reference.render_until(&mut part, segment.end_tick);
+            expected.extend_from_slice(&part);
+        }
+        reference.begin_tail();
+        let mut tail = vec![[0.0f32; 2]; schedule.tail_frames as usize];
+        reference.render_into(&mut tail);
+        expected.extend_from_slice(&tail);
+
+        assert!(
+            expected.iter().any(|f| f[0].abs() > 0.01),
+            "the score must sound"
+        );
+        assert_eq!(got.len(), expected.len());
+        for (i, (g, e)) in got.iter().zip(&expected).enumerate() {
+            assert_eq!(g, e, "frame {i} differs from seeking at each join");
+        }
     }
 }

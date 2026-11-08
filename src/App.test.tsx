@@ -27,6 +27,11 @@ import type { BackingWaveform as WaveformReceipt,BackingWaveformProps,NativeBack
 import {getHarmonyChord} from './harmony/chord-source';
 import type {HarmonyLibrary,HarmonyLibraryEntry} from './editor/harmony-types';
 import type {ReferenceSyncControls} from './audio/reference-sync-types';
+// These are behaviour tests, not budgets: each mounts the whole workspace in jsdom, where one role query over it costs 0.1 to 0.25 s.
+// The limit is a hang guard. The heaviest test here takes 3.7 to 3.8 s on an otherwise idle machine, against the 5 s default, and
+// 4.4 to 7.4 s in full runs with 6 workers; before the worker cap, 12 of these tests timed out at 5.1 to 9.1 s in one run. A real
+// hang still stops at 30 s.
+vi.setConfig({testTimeout:30000});
 const engravingView=vi.hoisted(()=>vi.fn());
 const waveform=vi.hoisted(()=>({props:[] as BackingWaveformProps[],read:vi.fn(async(document:BackingWaveformProps['document'],source:WaveformSourceInput,buckets:number,owner:NativeBackingWaveformBridge['owner']):Promise<WaveformReceipt>=>({owner,document,source,durationMs:16000,sampleRate:1000,frameCount:16000,channels:1,bucketCount:buckets,peaks:Array.from({length:buckets},()=>({min:[0,0],max:[0,0]}))})),embedded:vi.fn(async(sourceKey:string,_bytes:Uint8Array):Promise<WaveformSourceInput>=>({kind:'embedded',sourceKey:sourceKey.toLowerCase(),sha256:'e'.repeat(64),bytesBase64:'UklGRg=='}))}));
 vi.mock('./audio/BackingWaveform',()=>({BackingWaveform:(props:BackingWaveformProps)=>{waveform.props.push(props);return <section aria-label="Backing waveform"><button onClick={()=>{}}>Waveform probe</button></section>;}}));

@@ -9552,7 +9552,7 @@
       "historical_status": "missing",
       "current_status": "partial",
       "current_behavior": "Public bracket/extended-barline/separator controls, long/short/hidden track-name policies and global system spacing are editable and projected without music/audio changes. Neighbouring tracks can be grouped under a bracket or a brace, drawn on screen (in the page layouts, and in parchment and the screen layouts through an overlay) and in the export pages that PDF, SVG, PNG and print are all rendered from (only the PDF path was checked on the desktop); the space below each track is editable (25 to 400%) in the page layouts and in export; and long names on the first system with short names after is proven, with a one-gesture option. Each is one undoable edit saved with the document, and a Windows desktop test checks them on screen and in the export pages through undo, redo, save and reopen.",
-      "remaining_gap": "Staff gaps do not show in parchment or the screen layouts and cannot open between a track's own staves; extended bar lines are whole-system; no names on the first system of each page; no Guitar Pro stylesheet export; export group braces draw about 5.6% short until the export music font size is fixed (D12); no original-GP8 comparison.",
+      "remaining_gap": "Staff gaps do not show in parchment or the screen layouts and cannot open between a track's own staves; extended bar lines are whole-system; no names on the first system of each page; no Guitar Pro stylesheet export; no original-GP8 comparison.",
       "current_evidence": [
         "engraving",
         "engraving_validation",

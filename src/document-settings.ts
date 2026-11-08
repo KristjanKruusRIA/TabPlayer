@@ -1,6 +1,7 @@
 import type { model } from '@coderline/alphatab';
 import type { DocumentSettings, EffectBlock, FxSettings, MasterSettings, SettingsEdit, TrackSound, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
 import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
+import {copyTrackStaffLayout} from './engraving/staff-groups';
 import {validatePageLayout} from './engraving/page';
 import {validateInterpretation} from './audio/interpretation';
 import {validateDrumKit} from './audio/drum-kit';
@@ -11,6 +12,7 @@ export function copyTrackSettings(settings:DocumentSettings,source:string,copy:s
   if(settings.mixes[source])settings.mixes[copy]=structuredClone(settings.mixes[source]);
   const profile=settings.engraving.profiles.find(entry=>entry.trackId===source);
   if(profile)settings.engraving={...settings.engraving,profiles:[...settings.engraving.profiles,{...profile,trackId:copy}]};
+  settings.engraving=copyTrackStaffLayout(settings.engraving,source,copy);
 }
 export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings, ReferenceSyncBounds, MasterSettings, MasterLimiter } from './edit-types';
 

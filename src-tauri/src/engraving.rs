@@ -150,6 +150,37 @@ pub struct BarWidth {
 pub const MAX_BAR_INDEX: u32 = 99_999;
 pub const MAX_BAR_WIDTHS: usize = 10_000;
 pub const MAX_SYSTEM_GAPS: usize = 10_000;
+pub const MAX_STAFF_GROUPS: usize = 64;
+pub const MAX_GROUP_TRACKS: usize = 64;
+pub const MAX_STAFF_GAPS: usize = 256;
+pub const MAX_TRACK_ID_BYTES: usize = 65_536;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StaffGroupKind {
+    Bracket,
+    Brace,
+}
+
+/// Tracks drawn under one bracket or brace. Members are track identities, never trimmed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StaffGroup {
+    pub track_ids: Vec<String>,
+    pub kind: StaffGroupKind,
+}
+
+/// A track's staff gap as a factor of the standard gap (1 is the default).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StaffGap {
+    pub track_id: String,
+    pub scale: f64,
+}
+
+fn valid_staff_track_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= MAX_TRACK_ID_BYTES
+}
 
 /// A system's gap as a factor of the standard gap (1 is the default). `bar` is an anchor bar; the gap applies to the rendered system that contains it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -183,6 +214,12 @@ pub struct EngravingOverrides {
     /// Absent (and omitted again when empty) in documents saved before system gaps existed. Entries run in bar order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub system_gaps: Vec<SystemGap>,
+    /// Absent (and omitted again when empty) in documents saved before staff groups existed. An explicit empty list is accepted and written back without the field.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub staff_groups: Vec<StaffGroup>,
+    /// Absent (and omitted again when empty) in documents saved before staff gaps existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub staff_gaps: Vec<StaffGap>,
 }
 
 impl EngravingOverrides {
@@ -230,6 +267,44 @@ impl EngravingOverrides {
         Ok(())
     }
 
+    fn validate_staff_groups(&self) -> Result<(), String> {
+        const MESSAGE: &str =
+            "Staff groups must name 2 to 64 distinct tracks, each in one group only.";
+        if self.staff_groups.len() > MAX_STAFF_GROUPS {
+            return Err(MESSAGE.into());
+        }
+        let mut seen = HashSet::new();
+        for group in &self.staff_groups {
+            if !(2..=MAX_GROUP_TRACKS).contains(&group.track_ids.len()) {
+                return Err(MESSAGE.into());
+            }
+            for id in &group.track_ids {
+                if !valid_staff_track_id(id) || !seen.insert(id.as_str()) {
+                    return Err(MESSAGE.into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_staff_gaps(&self) -> Result<(), String> {
+        const MESSAGE: &str = "Staff gaps must be 25% to 400% of the default, one per track.";
+        if self.staff_gaps.len() > MAX_STAFF_GAPS {
+            return Err(MESSAGE.into());
+        }
+        let mut seen = HashSet::new();
+        for entry in &self.staff_gaps {
+            if !valid_staff_track_id(&entry.track_id)
+                || !seen.insert(entry.track_id.as_str())
+                || !entry.scale.is_finite()
+                || !(0.25..=4.0).contains(&entry.scale)
+            {
+                return Err(MESSAGE.into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self
             .system_spacing
@@ -240,6 +315,8 @@ impl EngravingOverrides {
         self.typography.validate()?;
         self.validate_bar_widths()?;
         self.validate_system_gaps()?;
+        self.validate_staff_groups()?;
+        self.validate_staff_gaps()?;
         let mut ids = HashSet::new();
         if self
             .profiles

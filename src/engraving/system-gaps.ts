@@ -91,7 +91,7 @@ export function systemGapOffsets(stacking:GapStacking|undefined,systems:readonly
   return offsets;
 }
 
-/** `engraving` without its system gaps. Gaps only move stacked systems, so everything that renders or projects the notation works from this and ignores a gap-only edit. */
-export function withoutSystemGaps(engraving:EngravingOverrides):EngravingOverrides {const {systemGaps:_gaps,...rest}=engraving;void _gaps;return rest;}
-/** A key that changes with every engraving field except the system gaps. Memoize notation work on it. */
-export const engravingRenderKey=(engraving:EngravingOverrides|undefined):string=>JSON.stringify(engraving&&withoutSystemGaps(engraving));
+/** `engraving` without its system gaps and staff gaps. Both only move stacked chunks, so everything that renders or projects the notation works from this and ignores a gap-only edit. */
+export function withoutStackingOffsets(engraving:EngravingOverrides):EngravingOverrides {const {systemGaps:_gaps,staffGaps:_staffGaps,...rest}=engraving;void _gaps;void _staffGaps;return rest;}
+/** A key that changes with every engraving field except the system gaps and staff gaps. Memoize notation work on it. */
+export const engravingRenderKey=(engraving:EngravingOverrides|undefined):string=>JSON.stringify(engraving&&withoutStackingOffsets(engraving));

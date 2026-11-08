@@ -86,14 +86,14 @@ The budget went through four versions, each after a measurement showed the last 
    - multiply-adds as before (convolutions, mixins, 1x1s, heads, LSTM gate products; biases not counted);
    - plus 120 per layer (`LAYER_COST`; 110 fitted to the reviewer's runs, raised to 120 so that 4 x 32 layers of 10 channels, kernel 1, ReLU, measured at 6.8 us, is estimated at 91% of its time instead of 88%);
    - plus 26 per tanh or sigmoid evaluation (`NONLINEAR_COST`): an ungated layer with Tanh, Sigmoid or Fasttanh has one per channel, a gated layer has one more (the gate), ReLU and Hardtanh have none. Fasttanh is counted like Tanh because it was not measured;
-   - plus 26 per kernel tap beyond the first, per layer and convolution output channel (a gated layer has twice the channels), on layers narrower than 8 channels (`TAP_COST`, `NARROW_CHANNELS`). Each tap is its own small matrix-vector product; below the width of a SIMD register the call costs far more than its multiply-adds. Layers of 8 or more channels measured at their estimate without it (8 channels with kernel 2 took 5.2 us with 26,001 multiply-adds, where 6 channels with kernel 3 took 11.5 us with 19,429), and the standard model's 16 and 8 channel layers are untouched, so the reference does not move because of this term;
+   - plus 26 per kernel tap beyond the first, per layer and convolution output channel (a gated layer has twice the channels), on layers narrower than 8 channels (`TAP_COST`, `NARROW_CHANNELS`). Each tap is its own small matrix-vector product; below the width of a SIMD register the call costs far more than its multiply-adds. The standard model's 16 and 8 channel layers are untouched, so the reference does not move because of this term. The rule is a threshold at 8 channels, and it is not right above it: output widths that are not a multiple of 8 also run slower than estimated (see the limit on widths below), which the final re-review measured;
    - for an LSTM, five evaluations per unit and layer (three sigmoids, two tanh), and the sum weighted by 5/4 (`LSTM_COST_NUM / LSTM_COST_DEN`).
 
    `TAP_COST` was fitted to the narrow runs with a kernel above 1, taking the smallest value that puts every one at 90% or more of its measured time at 0.145 ns per unit: 24.6 for 6 channels, kernel 3, 128 layers (11.5 us); 12.2 for 6 channels, kernel 5 (12.9 us); 19.5 for 4 channels, kernel 3, 64 layers; 19.4 for 7 channels, kernel 4, 64 layers; 12.8 for 3 channels, kernel 7; 8.2 for 2 channels, kernel 5, gated; 4 for 3 channels, kernel 3, gated. 26 leaves the 6 channel, kernel 3 run at 92%. It over-estimates the others, by up to 65%. A first form that charged every layer, wide ones too, was tried and dropped: it was fitted to the same two runs, raised the reference by a third and so loosened the budget for everything.
 
    The reference is a standard-size A1 with Tanh: 13,321 multiply-adds + 20 x 120 + 240 x 26 = 21,961 units. (The trainer fixture `wavenet_standard.nam` is a ReLU model and costs 15,721; the constant is pinned to the Tanh shape by a test.) Budget: 43,922 units per sample at 48 kHz, 2,108,256,000 per second (`MAX_COST_PER_SECOND`).
 
-**The estimator is a model fitted on one machine, not a law.** It is a release build, one thread, on a shared development machine. The 0.145 ns per unit that every comparison uses is the figure the terms were fitted at; the standard model itself runs at 0.115 ns per unit, so the budget is about 2.5 times the standard model's time, not 2.
+**The estimator is a model fitted on one machine, not a law.** It is a release build, one thread, on a shared development machine. The 0.145 ns per unit that every comparison uses is the figure the terms were fitted at; the standard model itself runs at 0.115 ns per unit, so the budget is up to about 3.6 times the standard model's time (the slowest admitted shape found, below), not 2.
 
 The LSTM weight was re-checked with the gate cost included. Measured on LSTMs of 1 x 24 to 2 x 46, time per estimated unit at weight 1.1 ran 0.115 to 0.156 ns (the 2 x 46 the worst), against the fit of 0.145. At 5/4 the largest admitted, 2 x 44 and 3 x 33, come to 0.14 and 0.13, and every measured LSTM is estimated at or above its time (a test checks the measured times against the estimates).
 
@@ -110,7 +110,7 @@ Tests (written before the term, and seen to fail first): the reviewer's table be
 | 3 x 128 gated Tanh | 4,285 | 39,613 | 5.59 | yes |
 | 1 x 128 ReLU | 393 | 15,753 | 2.11 | yes |
 
-(N x 128 means four arrays of N channels with 32 layers in all, kernel 1.)
+(N x 128 means four arrays of N channels, kernel 1, with 32 layers per array, 128 in all.)
 
 **History cap and prewarm.** `MAX_RING_FLOATS` went from 4,000,000 to 131,072 floats: the standard A1 needs 49,104 (the others fewer), so the cap is 2.7 times the largest official need. It bounds memory, not time. Prewarm feeds the receptive field of zeros through the model, so its work is receptive field x cost per sample, and the cost terms alone did not bound it: a thin model with a long field (1 channel, kernel 8, dilation 146, 130,817 samples) prewarmed for about 0.44 s of estimated time. The new cap is on the receptive field itself: **0.6 s of the model's own rate** (`MAX_FIELD_NUM / MAX_FIELD_DEN` = 3/5, `max_receptive_field`: 28,800 samples at 48 kHz, 4,800 at 8 kHz), refused with the same "too heavy" message. It is in seconds, not samples, so that it holds at every model rate: the budget is per second, so prewarm work is at most 0.6 x 2,108,256,000 = 1.26 billion units, about 0.18 s at 0.145 ns per unit, at any rate. Every official preset has a field of 4,093 samples (0.085 to 0.09 s at 44.1 and 48 kHz), so the cap is seven times what they need. An LSTM prewarms for half a second of its rate, which is at most 1.05 billion units. A search over every width, kernel, gating and array count at the longest dilations both caps allow found the worst admitted WaveNet at 1.24 billion units (4 arrays of 32 layers, 1 channel, kernel 8, Tanh, dilation 32, field 28,673), and the prewarm of that model, timed in the bench, is 176 ms; the worst LSTM, 2 x 44, is 144 ms. Both are under the 0.25 s asked for.
 
@@ -128,7 +128,7 @@ Tests (written before the term, and seen to fail first): the reviewer's table be
 | (refused now) 4 x 32 layers, 6 channels, kernel 5, ReLU | 28,645 | 123,877 | 12.9 |
 | (refused now) 4 x 32 layers, 3 channels, kernel 3, gated | 8,893 | 84,157 | 7.4 |
 
-The slowest admitted model is the 10 channel, kernel 1 ReLU one at 6.8 us, 2.7 times the standard model.
+The slowest admitted model found is not in this table: the final re-review measured ungated ReLU models at the most layers the budget allows, and the slowest was 12 channels, kernel 8, 30 layers at 9.09 us, about 3.6 times the standard model's 2.51 us (the 10 channel, kernel 1 model above is the slowest of those I timed, at 6.8 us). Their table is under the limits.
 
 What that means for a session, with the sample period at 48 kHz being 20.8 us. Four tracks each playing the same capture, with the two channels of each track mirrored (4 voices) or different (dual mono, 8 voices):
 
@@ -137,12 +137,12 @@ What that means for a session, with the sample period at 48 kHz being 20.8 us. F
 | standard A1 with Tanh | 2.51 us (12%) | 10.0 us (48%) | 20.1 us (96%) |
 | largest A1 by estimated cost | 5.46 us (26%) | 21.8 us (105%) | 43.7 us (210%) |
 | largest thin model (1 channel, kernel 4, gated) | 4.29 us (21%) | 17.2 us (82%) | 34.3 us (165%) |
-| slowest admitted thin model (10 channels, kernel 1, ReLU) | 6.8 us (33%) | 27.2 us (131%) | 54.4 us (261%) |
+| slowest admitted model found by the re-review (12 channels, kernel 8, 30 layers, ReLU) | 9.1 us (44%) | 36.4 us (175%) | 72.8 us (350%) |
 | largest LSTM by estimated cost (2 x 44) | 6.09 us (29%) | 24.4 us (117%) | 48.7 us (234%) |
 
 Percentages are of one sample period on one thread, engine only, excluding resampling, calibration and the rest of the chain. The standard model with Tanh itself uses 96% of a thread for four tracks with differing stereo channels. Four tracks of captures at the budget do not fit, mirrored or not, and the budget does not try to make them: it guards each capture, and captures on several tracks together are not budgeted.
 
-Calibration runs one second of audio through the stage when a stage is first built for a capture and rate, off the audio thread (the library status measures at the capture's own rate and the amp reuses that unless the device rate differs): about 0.12 s for the standard model, 0.26 s for the largest A1, 0.29 s for the largest LSTM and 0.33 s for the slowest thin model. The result is kept per capture and rate.
+Calibration runs one second of audio through the stage when a stage is first built for a capture and rate, off the audio thread (the library status measures at the capture's own rate and the amp reuses that unless the device rate differs): about 0.12 s for the standard model, 0.26 s for the largest A1, 0.29 s for the largest LSTM and about 0.45 s for the slowest admitted model (9.1 us). The result is kept per capture and rate.
 
 ### Automated checks
 
@@ -171,10 +171,30 @@ Run on the worktree (Rust 1.88.0 via `RUSTUP_TOOLCHAIN`), after the desktop proo
 - The `uncalibrated` status is measured at the capture's own rate and the amp measures at the device rate; a model that faults at one and not the other would show the wrong state. No such model is known.
 - The detail of a refusal or unsupported capture (`{detail}` in the notices) is the native English message, also in the Estonian and German texts. The rest of those notices is translated.
 - The cost budget is per capture. Captures on several tracks together are not budgeted: even the standard model with Tanh takes 96% of a thread for four tracks with differing stereo channels, and larger admitted captures take more (see the four-track table), and the estimator ignores resampling and the rest of the chain.
-- The cost estimator is a model fitted on one machine (release build, one thread, 0.145 ns per unit); another CPU will scale it, and it is not a law. It is conservative on most shapes and tight on a few: the slowest admitted model measured, 4 x 32 layers of 10 channels, kernel 1, ReLU, is estimated at 91% of its time (the tests require 90% of every measured model). Widths of 8 or more are assumed to need no tap term on the strength of measurements at 8, 9, 10 and 26 channels only (12 and 16 channel kernel-3 models were measured too heavy to admit and so not timed). Fasttanh is counted like Tanh without a measurement. This was the last estimator round; shapes not measured may still miss.
+- The cost estimator is a model fitted on one machine (release build, one thread, 0.145 ns per unit); another CPU will scale it, and it is not a law. It is conservative on most shapes and tight or low on others: a 4 x 32 layer, 10 channel, kernel 1 ReLU model is estimated at 91% of its time (the tests require 90% of every model I measured). Fasttanh is counted like Tanh without a measurement. The estimator was closed after the last round on the ruling that anything left goes here.
+- Output widths that are not a multiple of 8 run slower than estimated, above the narrow-layer threshold as well as below it: `matvec_acc` handles the remainder of each output row one value at a time, and the tap term is charged only below 8 channels. The final re-review measured these admitted models, ungated ReLU at 48 kHz, each at the most layers the budget allows, with the estimate as a share of the measured time:
+
+  | Model | Budget used | us per sample | Estimate / measured |
+  |---|---|---|---|
+  | 12 channels, kernel 8, 30 layers | 98% | 9.09 | 68% |
+  | 15 channels, kernel 8, 20 layers | 98% | 9.12 | 69% |
+  | 13 channels, kernel 8, 26 layers | 98% | 8.87 | 70% |
+  | 12 channels, kernel 5, 43 layers | 98% | 8.89 | 70% |
+  | 11 channels, kernel 2, 87 layers | 99% | 7.90 | 80% |
+  | 9 channels, kernel 8, 50 layers | 98% | 7.47 | 84% |
+  | 8 channels, kernel 8, 62 layers | 100% | 7.06 | 90% |
+
+  The slowest, about 9.1 us, is about 3.6 times the standard model's 2.51 us and takes 175% of a sample period for four tracks with mirrored channels and 350% with differing ones. My own timings at 8, 9, 10 and 26 channels did not show this because they used few layers or small kernels; the 12 and 16 channel kernel-3 models I tried were refused by the budget before they could be timed.
 - The cabinet picker has no busy note like the amp capture picker's (it has no busy path of its own); it is left for its own follow-up.
+
+## Follow-ups
+
+- Charge the tap cost on the convolution's output width modulo 8 instead of only below 8 channels (for example per tap, layer and remainder value), and re-fit against the table in the limits. Possible future fix; the estimator is unchanged here.
+- A cap on the total number of layers or taps, if a bound on time that does not depend on the fit is wanted.
+- The cabinet picker's busy note.
 
 ## Environment notes
 
 - The worktree's `src-tauri/resources/library` was a junction to the main checkout, which `scripts/prepare-library.mjs` refuses. It is an ignored folder; it was replaced by a real folder filled by `node scripts/prepare-library.mjs` so the build could run. Nothing tracked changed.
 - `.analysis/compatibility` is absent in a worktree, so tests that read those fixtures (`plan.test.ts`, some audio tests in Rust) can fail here for that reason alone. None of the runs above failed for that reason.
+

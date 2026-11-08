@@ -218,6 +218,16 @@ it('changes no sound when the track is not the one the import began on', async()
   expect(await screen.findByText(/The track changed meanwhile/)).toBeInTheDocument();
   expect(onEdit).not.toHaveBeenCalled();
 });
+it('changes no sound when the picker is gone before the file dialog closes', async()=>{
+  const onEdit=vi.fn();let open!:()=>void;
+  library.gate=new Promise<void>(done=>{open=done;});library.importing=entry('c'.repeat(32),'Vox AC30');
+  const view=render(<SoundPanel trackId="t" sound={soundWith(ref(A,0))} onEdit={onEdit}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Import cabinet impulse response'}));
+  view.unmount();
+  open();
+  await new Promise(done=>setTimeout(done,30));
+  expect(onEdit).not.toHaveBeenCalled();
+});
 it('shows the missing response at the document level, naming the track, without asking when none is named', async()=>{
   const sounds={lead:soundWith(ref(missingId,0,'Shared cab'),'combo'),rhythm:soundWith()};
   const {rerender}=render(<CabinetNotices sounds={sounds} trackNames={{lead:'Lead guitar',rhythm:'Rhythm'}}/>);

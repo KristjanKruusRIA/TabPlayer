@@ -4,6 +4,8 @@ import { buildDocument, buildScore, effectiveAudioSettings, previewEdit, replayD
 import { blankProject, type EditCommand } from './project';
 import type { SyncAnchor } from './edit-types';
 import { buildPlaybackPlan } from './audio/plan';
+import { completeSound, defaultEffects, laterFields, soundProblem } from './document-settings';
+import { soundPreset } from './audio/sound-model';
 
 afterEach(()=>vi.restoreAllMocks());
 
@@ -120,4 +122,28 @@ it('accepts backing anchors in performed repeat order instead of lexical bar ord
   const candidate=previewEdit(project,backingEdit([{bar:1,occurrence:0,ratio:0,audioMs:2000},{bar:0,occurrence:1,ratio:0,audioMs:3000}]),current);
   expect(candidate.settings.backing?.anchors).toEqual([{bar:1,occurrence:0,ratio:0,audioMs:2000},{bar:0,occurrence:1,ratio:0,audioMs:3000}]);
   expect(candidate.score===current.score).toBe(true);
+});
+
+const ampSound=(capture?:unknown)=>{const sound=soundPreset('lead');if(capture!==undefined)(sound.effects.amp as unknown as Record<string,unknown>).capture=capture;return sound;};
+it('reads a stored null capture or impulse response as none, so a sound with one equals the same sound without',()=>{
+  const bare=ampSound(),stored=ampSound(null);
+  (stored.effects.cabinet as unknown as Record<string,unknown>).ir=null;
+  const second=ampSound(null);stored.effects.second=second.effects;
+  const done=completeSound(stored);
+  expect('capture' in done.effects.amp).toBe(false);expect('ir' in done.effects.cabinet).toBe(false);
+  expect('capture' in done.effects.second!.amp).toBe(false);
+  expect(done.effects.amp).toEqual(completeSound(bare).effects.amp);expect(done.effects.cabinet).toEqual(completeSound(bare).effects.cabinet);
+  // The sound that was passed in is not touched.
+  expect((stored.effects.amp as unknown as Record<string,unknown>).capture).toBeNull();
+});
+it('leaves the amp exactly as it was while no capture is chosen',()=>{
+  expect(defaultEffects().amp).toEqual({enabled:false,model:'clean',drive:.1,gainDb:0});
+  expect(laterFields('amp')).toEqual(['bassDb','midDb','trebleDb','presenceDb','capture']);
+  const older=ampSound();expect('capture' in older.effects.amp).toBe(false);
+  expect(soundProblem(older)).toBeNull();expect(completeSound(older).effects.amp).toEqual(older.effects.amp);
+});
+it('accepts the amp captures the native player accepts and refuses the rest',()=>{
+  const good={id:'ab'.repeat(16),name:'Plexi',levelDb:0};
+  for(const value of [good,{...good,levelDb:-12},{...good,levelDb:12},{...good,name:'x'.repeat(64)},null])expect(soundProblem(ampSound(value)),JSON.stringify(value)).toBeNull();
+  for(const value of [{...good,id:'zz'},{...good,id:'A'.repeat(32)},{...good,name:'x'.repeat(65)},{...good,name:''},{...good,levelDb:12.5},{...good,levelDb:-12.5},{...good,levelDb:Number.NaN},{...good,extra:1},{id:good.id,name:good.name},'text',[]])expect(soundProblem(ampSound(value)),JSON.stringify(value)).toBe('Invalid effect parameter.');
 });

@@ -51,6 +51,11 @@ const completeEffects=(saved:FxSettings):FxSettings=>{
     const settings=effects[block] as {model?:unknown}|undefined;
     if(settings&&typeof settings==='object'&&!Array.isArray(settings)&&settings.model===undefined)effects[block]={...settings,model};
   }
+  // The native player reads a null capture or impulse response as none, so the key goes and a sound that saved one equals the same sound without it.
+  for(const [block,field] of [['amp','capture'],['cabinet','ir']]){
+    const settings=effects[block] as Record<string,unknown>|undefined;
+    if(settings&&typeof settings==='object'&&!Array.isArray(settings)&&settings[field]===null){const {[field]:_none,...rest}=settings;void _none;effects[block]=rest;}
+  }
   // The native player reads a null second pedalboard as none.
   const second=effects.second as FxSettings|null|undefined;
   if(second===null)delete effects.second;
@@ -83,7 +88,7 @@ const sync=later(one(0,...modulationDivisions.map(([value])=>value)));
 const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   gate:{thresholdDb:range(-96,0),releaseMs:range(1,1000)},
   compressor:{thresholdDb:range(-60,0),ratio:range(1,20),attackMs:range(.1,200),releaseMs:range(1,2000),makeupDb:range(0,24)},
-  amp:{model:one('clean','crunch','lead','metal','bass','bassDrive'),drive:unit,gainDb:range(-24,24),bassDb:tone,midDb:tone,trebleDb:tone,presenceDb:tone},cabinet:{model:one('open','closed','combo','bass','bassStack'),ir:later(cabinetIr)},
+  amp:{model:one('clean','crunch','lead','metal','bass','bassDrive'),drive:unit,gainDb:range(-24,24),bassDb:tone,midDb:tone,trebleDb:tone,presenceDb:tone,capture:later(cabinetIr)},cabinet:{model:one('open','closed','combo','bass','bassStack'),ir:later(cabinetIr)},
   eq:{lowDb:range(-24,24),midDb:range(-24,24),highDb:range(-24,24),midHz:range(200,5000)},
   chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit,syncQuarterNotes:sync},
   wah:{model:one('classic','vintage','wide','bass'),mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},
@@ -108,6 +113,7 @@ export const cabinetIrFits=(value:unknown):boolean=>{
   const {id,name,levelDb}=value as Record<string,unknown>;
   return typeof id==='string'&&/^[0-9a-f]{32}$/.test(id)&&typeof name==='string'&&name===name.trim()&&!/^[\u0085﻿]|[\u0085﻿]$/.test(name)&&[...name].length>=1&&[...name].length<=MAX_IR_NAME_LENGTH&&irText(name)&&typeof levelDb==='number'&&Number.isFinite(levelDb)&&levelDb>=-12&&levelDb<=12;
 };
+// An amp capture reference and a cabinet impulse response reference share one rule (a library identity, a name and a level trim), so `capture` is marked `cabinetIr` above and checked by `cabinetIrFits`.
 const fits=(value:unknown,rule:FieldRule):boolean=>'cabinetIr' in rule?cabinetIrFits(value):'one' in rule?rule.one.includes(value as string|number):'each' in rule?Array.isArray(value)&&value.length===rule.length&&value.every(item=>fits(item,rule.each)):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
 export function soundProblem(sound: TrackSound): string|null {

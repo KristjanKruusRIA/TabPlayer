@@ -8,6 +8,7 @@ import { DEFAULT_FILE_NAME,FILE_NAME_TOKENS,PER_TRACK_FILE_NAME,expandFileName,f
 import { Dialog,Segmented,busyGuard,busyRegion } from '../ui';
 import { useI18n } from '../i18n';
 import { CabinetNotices } from '../audio/CabinetNotices';
+import { CaptureNotices } from '../audio/CaptureNotices';
 import type { TrackSound } from '../edit-types';
 import { previewGp5 } from './gp5';
 import './export-dialog.css';
@@ -105,6 +106,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         {!currentSpeedAvailable&&<p>Fixed BPM has no single speed coefficient. Export at saved speed is available.</p>}
         <p>Audio export does not include count-in or progressive speed changes.</p>
         <CabinetNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
+        <CaptureNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
         <label className="export-check"><input type="checkbox" checked={audio.metronome} onChange={e=>setAudio({...audio,metronome:e.target.checked})}/>Metronome</label>
         <label className="export-check"><input type="checkbox" checked={audio.backing} onChange={e=>setAudio({...audio,backing:e.target.checked})}/>Include backing</label>
         <label>Effect tail (seconds)<input type="number" min="0" max="30" step=".1" value={audio.tailSeconds} onChange={e=>setAudio({...audio,tailSeconds:Number(e.target.value)})}/></label>

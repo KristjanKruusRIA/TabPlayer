@@ -795,8 +795,11 @@ it('switching restores per-tab views, resets musical selection and drafts, and r
   expect(a.getState()).toBe(before);expect(b.getState()).toBe(bHistory);expect(integration.playerOptions).toHaveBeenCalledTimes(3);expect(integration.destroy).toHaveBeenCalledTimes(2);expect(screen.getAllByRole('region',{name:'Score workspace'})).toHaveLength(1);expect(integration.play).not.toHaveBeenCalled();expect(integration.playSelection).not.toHaveBeenCalled();expect(integration.playFromCursor).not.toHaveBeenCalled();
 });
 it.each([{ctrlKey:true},{metaKey:true}])('routes workspace New, Open, cycle and close shortcuts outside fields and dialogs: %j',async modifier=>{
-  const a=await setup(blankProject(),blankProject()),id=a.getState().documentId;let score=screen.getByRole('region',{name:'Score workspace'});
-  fireEvent.keyDown(score,{key:'n',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(2));const b=activeController();score=screen.getByRole('region',{name:'Score workspace'});
+  const a=await setup(blankProject(),blankProject()),id=a.getState().documentId;
+  // Edits keep both blank scores from being replaced when a score opens (THE-198), so Open adds a third tab.
+  change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(a).notes[0]?.fret).toBe(7));let score=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(score,{key:'n',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(2));const b=activeController();
+  change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(b).notes[0]?.fret).toBe(7));score=screen.getByRole('region',{name:'Score workspace'});
   fireEvent.keyDown(score,{key:'o',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(3));const c=activeController();
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Tab',...modifier});await waitFor(()=>expect(activeController()).toBe(a));
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Tab',shiftKey:true,...modifier});await waitFor(()=>expect(activeController()).toBe(c));

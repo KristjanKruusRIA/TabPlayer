@@ -191,6 +191,7 @@ export const et: MessageCatalog = {
   'transport.play_from_position': 'Esita juhtriba asukohast',
   'transport.loop': 'Kordus',
   'transport.clear_loop': 'Eemalda kordus',
+  'transport.loop_cleared_by_edit': 'Kordus eemaldati, sest muudatus puudutas takte, mida see hõlmas.',
   'transport.loop_bars': 'Korda takte',
   'transport.loop_start': 'Korduse algus',
   'transport.loop_end': 'Korduse lõpp',

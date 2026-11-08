@@ -191,6 +191,7 @@ export const de: MessageCatalog = {
   'transport.play_from_position': 'Ab Transportposition abspielen',
   'transport.loop': 'Schleife',
   'transport.clear_loop': 'Schleife löschen',
+  'transport.loop_cleared_by_edit': 'Die Schleife wurde entfernt, weil Ihre Änderung die von ihr abgedeckten Takte verändert hat.',
   'transport.loop_bars': 'Takte wiederholen',
   'transport.loop_start': 'Schleifenbeginn',
   'transport.loop_end': 'Schleifenende',

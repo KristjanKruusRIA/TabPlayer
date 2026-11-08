@@ -381,3 +381,20 @@ it('cancels closing when the user cancels the requested save',async () => {
   expect(await controller.requestClose()).toBe(false);
   expect(controller.getState().snapshot.dirty).toBe(true);
 });
+
+it('tells the player where the bars went for an edit, its undo and its redo, and nothing for an edit that moves none',async()=>{
+  const beforeChange=vi.fn(),controller=await DocumentController.create(makeBridge(),beforeChange);
+  const bars=()=>controller.getState().score.masterBars.length,start=bars();
+  await controller.edit({type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:7});
+  expect(beforeChange).toHaveBeenLastCalledWith(undefined);
+  await controller.edit({type:'insertMeasures',beforeBar:0,count:2});
+  expect(bars()).toBe(start+2);
+  expect(beforeChange).toHaveBeenLastCalledWith({oldToNew:Array.from({length:start},(_,bar)=>bar+2),inserted:[0,1]});
+  await controller.undo();
+  expect(bars()).toBe(start);
+  expect(beforeChange).toHaveBeenLastCalledWith({oldToNew:[null,null,...Array.from({length:start},(_,bar)=>bar)],inserted:[]});
+  await controller.redo();
+  expect(beforeChange).toHaveBeenLastCalledWith({oldToNew:Array.from({length:start},(_,bar)=>bar+2),inserted:[0,1]});
+  await controller.undo();await controller.undo();
+  expect(beforeChange).toHaveBeenLastCalledWith(undefined);
+});

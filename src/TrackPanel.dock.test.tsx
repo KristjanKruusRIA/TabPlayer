@@ -19,7 +19,7 @@ const target={track:0,staff:0,bar:0,voice:0,beat:0};
 
 function setup(busy=false,extra:{shown?:number[];onToggleShown?:(track:number)=>void;master?:object;setMaster?:(next:object)=>unknown;onAddTrack?:()=>void}={}){
   const score=previewEdit(previewEdit(blankProject(),{type:'setRest',target}).project,{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}).score;
-  let state={ready:true,playing:false,time:0,endTime:1000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null} as PlaybackState;
+  let state={ready:true,playing:false,time:0,endTime:1000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loopNotice:null,range:null,loop:null,error:null} as PlaybackState;
   const listeners=new Set<()=>void>();const mixes=new Map<string,{mute:boolean;solo:boolean;volume:number;pan:number}>();
   const mixOf=(track:model.Track)=>mixes.get(track.name)??{mute:false,solo:false,volume:1,pan:0};
   const player={subscribe:vi.fn((fn:()=>void)=>{listeners.add(fn);return()=>listeners.delete(fn);}),getState:()=>state,mix:vi.fn(mixOf),

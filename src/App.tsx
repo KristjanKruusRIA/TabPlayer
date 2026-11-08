@@ -142,7 +142,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
   useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
-  useEffect(()=>{controller.setBeforeChange(()=>player?.beforeScoreChange());return()=>controller.setBeforeChange(()=>{});},[controller,player]);
+  useEffect(()=>{controller.setBeforeChange(bars=>player?.beforeScoreChange(true,bars));return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);

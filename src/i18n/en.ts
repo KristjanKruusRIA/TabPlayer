@@ -189,6 +189,7 @@ export const en = {
   'transport.play_from_position': 'Play from transport position',
   'transport.loop': 'Loop',
   'transport.clear_loop': 'Clear loop',
+  'transport.loop_cleared_by_edit': 'The loop was removed because your edit changed the bars it covered.',
   'transport.loop_bars': 'Loop bars',
   'transport.loop_start': 'Loop start',
   'transport.loop_end': 'Loop end',

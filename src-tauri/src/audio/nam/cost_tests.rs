@@ -106,13 +106,32 @@ fn a1(channels: [usize; 2], head: usize, dilations: [&[usize]; 2]) -> NamSpec {
 /// Four arrays of `channels` and kernel 1 (dilation 1), `layers` layers in all: the reviewer's many-thin-layers
 /// models, where multiply-adds say little about the time.
 fn thin(channels: usize, layers: usize, gated: bool, activation: Activation) -> NamSpec {
+    thin_k(channels, 1, layers, gated, activation)
+}
+
+/// [`thin`] with a kernel of `kernel` taps.
+fn thin_k(
+    channels: usize,
+    kernel: usize,
+    layers: usize,
+    gated: bool,
+    activation: Activation,
+) -> NamSpec {
     let per = layers / 4;
     wavenet(
         (0..4)
             .map(|i| {
                 let head = if i == 3 { 1 } else { channels };
                 let input = if i == 0 { 1 } else { channels };
-                array_with(input, channels, head, 1, vec![1; per], gated, activation)
+                array_with(
+                    input,
+                    channels,
+                    head,
+                    kernel,
+                    vec![1; per],
+                    gated,
+                    activation,
+                )
             })
             .collect(),
     )
@@ -189,7 +208,8 @@ fn the_standard_constants_are_what_the_estimator_says() {
         2 * STANDARD_A1_COST_PER_SAMPLE * 48_000
     );
     assert_eq!(BUDGET_FACTOR, 2);
-    assert_eq!((LAYER_COST, NONLINEAR_COST), (110, 26));
+    assert_eq!((LAYER_COST, NONLINEAR_COST, TAP_COST), (120, 26, 26));
+    assert_eq!(NARROW_CHANNELS, 8);
 }
 
 #[test]
@@ -229,7 +249,8 @@ fn the_estimator_counts_small_models_by_hand() {
 fn layers_and_transcendentals_are_counted_by_activation_and_gating() {
     // One array of 4 channels and 5 layers. Per layer and channel: an evaluation for Tanh, Sigmoid or Fasttanh, none
     // for ReLU or Hardtanh, and one more (the gate sigmoid) when the layer is gated.
-    let (layers, channels) = (5u64, 4u64);
+    // 8 channels: wide enough that the tap term does not apply.
+    let (layers, channels) = (5u64, 8u64);
     let extra = |activation, gated| {
         let spec = wavenet(vec![array_with(
             1,
@@ -273,7 +294,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
             "standard ReLU",
             a1_with([16, 8], 8, [&D10, &D10], ReLU),
             13_321,
-            15_521,
+            15_721,
             1.93,
             true,
         ),
@@ -281,7 +302,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
             "standard Tanh",
             a1([16, 8], 8, [&D10, &D10]),
             13_321,
-            21_761,
+            21_961,
             2.58,
             true,
         ),
@@ -289,7 +310,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
             "6x128 gated Tanh",
             thin(6, 128, true, Tanh),
             15_589,
-            69_605,
+            70_885,
             10.13,
             false,
         ),
@@ -297,7 +318,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
             "8x124 gated Tanh",
             thin(8, 124, true, Tanh),
             26_193,
-            91_417,
+            92_657,
             9.15,
             false,
         ),
@@ -305,7 +326,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
             "8x124 gated Sigmoid",
             thin(8, 124, true, Sigmoid),
             26_193,
-            91_417,
+            92_657,
             8.10,
             false,
         ),
@@ -313,7 +334,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
             "5x128 gated Tanh",
             thin(5, 128, true, Tanh),
             11_041,
-            58_401,
+            59_681,
             7.12,
             false,
         ),
@@ -321,7 +342,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
             "3x128 gated Tanh",
             thin(3, 128, true, Tanh),
             4_285,
-            38_333,
+            39_613,
             5.59,
             true,
         ),
@@ -329,7 +350,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
             "1x128 ReLU",
             thin(1, 128, false, ReLU),
             393,
-            14_473,
+            15_753,
             2.11,
             true,
         ),
@@ -356,6 +377,7 @@ fn the_reviewers_runs_are_estimated_and_the_estimate_is_not_below_the_time() {
         (2, 46, 6.73),
         (4, 28, 5.73),
         (3, 34, 5.98),
+        (2, 44, 6.09),
     ] {
         let units = cost_per_sample(&lstm_spec(layers, hidden));
         let estimated_us = units as f64 * NS_PER_UNIT / 1000.0;
@@ -412,10 +434,13 @@ fn standard_lstm_sizes_are_admitted_and_the_largest_is_pinned() {
     }
     assert_eq!(cost_per_sample(&lstm_spec(1, 24)), 6_930);
     assert_eq!(cost_per_sample(&lstm_spec(3, 24)), 26_250);
-    // Three layers of 33 units (43,518 against 43,522) are the largest by estimated cost; each neighbour is over.
+    // Two layers of 44 units (43,615 against 43,922) are the largest by estimated cost, and three of 33 (43,518) are
+    // close; each neighbour is over.
+    assert_eq!(cost_per_sample(&lstm_spec(2, 44)), 43_615);
+    assert!(parse_nam(&lstm_bytes(2, 44)).is_ok());
     assert_eq!(cost_per_sample(&lstm_spec(3, 33)), 43_518);
     assert!(parse_nam(&lstm_bytes(3, 33)).is_ok());
-    for (layers, hidden) in [(3, 34), (2, 44), (4, 28)] {
+    for (layers, hidden) in [(2, 45), (3, 34), (4, 28)] {
         assert_eq!(
             parse_nam(&lstm_bytes(layers, hidden)),
             Err(NamError::TooHeavy),
@@ -430,24 +455,30 @@ fn standard_lstm_sizes_are_admitted_and_the_largest_is_pinned() {
 
 #[test]
 fn the_largest_admitted_wavenets_by_estimated_cost() {
-    // A1 shape: channels 26 then 10, head 10 (43,517 against 43,522), and one channel more is over.
-    let wide = a1([26, 10], 10, [&D10, &D10]);
-    assert_eq!(macs_per_sample(&wide), 31_957);
-    assert_eq!(cost_per_sample(&wide), 43_517);
+    use Activation::{ReLU, Tanh};
+    // A1 shape: channels 25 then 12, head 12 (43,788 against 43,922), and one channel more is over.
+    let wide = a1([25, 12], 12, [&D10, &D10]);
+    assert_eq!(cost_per_sample(&wide), 43_788);
     assert!(within_budget(&wide, 48_000));
-    assert!(!within_budget(&a1([27, 10], 10, [&D10, &D10]), 48_000));
-    // Many thin layers: 4 arrays of 32 layers, 3 channels, kernel 3, gated Tanh (42,941).
-    let layers = (0..4)
-        .map(|i| {
-            let head = if i == 3 { 1 } else { 3 };
-            let input = if i == 0 { 1 } else { 3 };
-            array(input, 3, head, 3, vec![1; 32], true)
-        })
-        .collect();
-    let thin_wide = wavenet(layers);
-    assert_eq!(cost_per_sample(&thin_wide), 42_941);
-    assert!(within_budget(&thin_wide, 48_000));
-    assert!(parse_nam(&wavenet_bytes(&thin_wide)).is_ok());
+    assert!(!within_budget(&a1([26, 12], 12, [&D10, &D10]), 48_000));
+    assert_eq!(cost_per_sample(&a1([26, 10], 10, [&D10, &D10])), 43_717);
+    // Many thin layers, 4 arrays of 32: one channel, kernel 4, gated Tanh (43,401); one channel, kernel 8, Tanh
+    // (43,273); 5 channels, kernel 1, gated ReLU (43,041); 10 channels, kernel 1, ReLU (42,861); 5 channels, kernel 2,
+    // ReLU (42,401).
+    for (spec, units) in [
+        (thin_k(1, 4, 128, true, Tanh), 43_401),
+        (thin_k(1, 8, 128, false, Tanh), 43_273),
+        (thin_k(5, 1, 128, true, ReLU), 43_041),
+        (thin_k(10, 1, 128, false, ReLU), 42_861),
+        (thin_k(5, 2, 128, false, ReLU), 42_401),
+    ] {
+        assert_eq!(cost_per_sample(&spec), units);
+        assert!(within_budget(&spec, 48_000));
+        assert!(parse_nam(&wavenet_bytes(&spec)).is_ok());
+    }
+    // The same shapes with more channels, taps or layers than that are over.
+    assert!(!within_budget(&thin_k(1, 5, 128, true, Tanh), 48_000));
+    assert!(!within_budget(&thin_k(2, 4, 128, true, Tanh), 48_000));
 }
 
 #[test]
@@ -500,12 +531,12 @@ fn the_budget_is_per_second_so_the_model_rate_counts() {
     assert!(parse_nam(&serde_json::to_vec(&v).unwrap()).is_ok());
 }
 
-/// The most cost units prewarm may need for any admitted WaveNet, spent off the audio thread, once per stage:
-/// receptive field times cost per sample, at about 0.145 ns a unit: 3.5 billion is about half a second.
-const PREWARM_WORK_LIMIT: u128 = 3_500_000_000;
+/// The most cost units prewarm may need for any admitted model, spent off the audio thread, once per stage: a quarter
+/// of a second at about 0.145 ns a unit.
+const PREWARM_WORK_LIMIT: u128 = 1_724_000_000;
 
 #[test]
-fn the_history_cap_admits_the_official_presets_and_bounds_prewarm() {
+fn the_history_cap_admits_the_official_presets() {
     // Floats of history for an A1 preset (kernel 3, so a reach of 2 * dilation), as the parser counts them.
     let history = |channels: [usize; 2], dilations: [&[usize]; 2]| -> usize {
         (0..2)
@@ -520,17 +551,67 @@ fn the_history_cap_admits_the_official_presets_and_bounds_prewarm() {
             history(channels, dilations)
         );
     }
-    // Prewarm feeds `receptive_field` zeros through the model. Take every width, kernel, gating and array count,
-    // with the longest equal dilations the history cap lets through, keep those the budget admits, and find the
-    // one whose prewarm is the most work.
+}
+
+#[test]
+fn the_receptive_field_is_capped_in_seconds_of_model_audio() {
+    // 0.6 s of the model's rate: 28,800 samples at 48 kHz, 4,800 at 8 kHz. Every official preset has 4,093.
+    assert_eq!(max_receptive_field(48_000), 28_800);
+    assert_eq!(max_receptive_field(8_000), 4_800);
+    for (name, channels, head, dilations) in PRESETS {
+        let NamSpec::WaveNet(spec) = a1(channels, head, dilations) else {
+            panic!()
+        };
+        let span: usize = spec
+            .arrays
+            .iter()
+            .map(|a| a.dilations.iter().sum::<usize>() * (a.kernel_size - 1))
+            .sum();
+        assert_eq!(1 + span, 4_093, "{name}");
+        assert!(1 + span <= max_receptive_field(8_000), "{name} at 8 kHz");
+    }
+    // Four thousand and ninety-six is the largest dilation, so long fields take several layers (kernel 2, one channel).
+    let long = |layers: usize, rate: u32| {
+        let weights = 1 + layers * 6 + 1 + 1;
+        let v = json!({
+            "version": "0.5.4", "architecture": "WaveNet",
+            "config": {"layers": [{
+                "input_size": 1, "condition_size": 1, "head_size": 1, "channels": 1,
+                "kernel_size": 2, "dilations": vec![4_096; layers], "activation": "ReLU",
+                "gated": false, "head_bias": false
+            }], "head": null, "head_scale": 0.02},
+            "weights": vec![0.0; weights], "sample_rate": rate
+        });
+        parse_nam(&serde_json::to_vec(&v).unwrap())
+    };
+    // 7 layers of dilation 4,096: receptive field 28,673, under the 48 kHz cap; 8 layers: 32,769, over it.
+    assert!(long(1, 8_000).is_ok());
+    assert_eq!(long(2, 8_000), Err(NamError::TooHeavy));
+    assert!(long(7, 48_000).is_ok());
+    assert_eq!(long(8, 48_000), Err(NamError::TooHeavy));
+    // The same eight layers at 96 kHz are 0.34 s of audio and pass.
+    assert!(long(8, 96_000).is_ok());
+}
+
+#[test]
+fn prewarm_is_bounded_for_every_admitted_model() {
+    // Prewarm feeds `receptive_field` zeros through the model: receptive field times cost per sample. The receptive
+    // field cap (0.6 s of model audio) times the budget (cost per second) bounds it at every rate:
+    // 0.6 x 2,108,256,000 = 1.26 billion units, about 0.18 s.
+    assert!(MAX_COST_PER_SECOND as u128 * 3 / 5 <= PREWARM_WORK_LIMIT);
+    // And in practice: take every width, kernel, gating and array count, with the longest equal dilations the
+    // history cap and the receptive field cap let through, keep those the budget admits, and find the worst.
+    let cap = max_receptive_field(48_000);
     let mut worst = (0u128, String::new());
-    for channels in [1usize, 2, 4, 8, 16, 32, 64] {
+    for channels in [1usize, 2, 3, 4, 6, 8, 16, 32, 64] {
         for kernel in 2..=8usize {
             for gated in [false, true] {
                 for arrays in 1..=4usize {
                     let layers = MAX_LAYERS_PER_ARRAY;
                     let reach = arrays * layers * channels * (kernel - 1);
-                    let d = (MAX_RING_FLOATS / reach).clamp(1, MAX_DILATION);
+                    let by_ring = MAX_RING_FLOATS / reach;
+                    let by_field = (cap - 1) / (arrays * layers * (kernel - 1));
+                    let d = by_ring.min(by_field).clamp(1, MAX_DILATION);
                     let list = (0..arrays)
                         .map(|i| {
                             let input = if i == 0 { 1 } else { channels };
@@ -539,10 +620,10 @@ fn the_history_cap_admits_the_official_presets_and_bounds_prewarm() {
                         })
                         .collect();
                     let spec = wavenet(list);
-                    if reach * d > MAX_RING_FLOATS || !within_budget(&spec, 48_000) {
+                    let rf = 1 + arrays * layers * (kernel - 1) * d;
+                    if reach * d > MAX_RING_FLOATS || rf > cap || !within_budget(&spec, 48_000) {
                         continue;
                     }
-                    let rf = 1 + arrays * layers * (kernel - 1) * d;
                     let work = rf as u128 * cost_per_sample(&spec) as u128;
                     if work > worst.0 {
                         worst = (
@@ -559,4 +640,112 @@ fn the_history_cap_admits_the_official_presets_and_bounds_prewarm() {
         worst.0 as f64, worst.1
     );
     assert!(worst.0 <= PREWARM_WORK_LIMIT, "{} {}", worst.0, worst.1);
+    // An LSTM prewarms for half a second of its rate.
+    let lstm = cost_per_second(&lstm_spec(3, 33), 48_000) as u128 / 2;
+    assert!(lstm <= PREWARM_WORK_LIMIT, "{lstm}");
+}
+
+#[test]
+fn narrow_deep_models_with_kernel_taps_are_counted_by_tap() {
+    use Activation::ReLU;
+    // Per extra kernel tap, layer and convolution output channel (a gated layer has twice the channels).
+    let taps = |kernel: usize, gated: bool| {
+        let spec = wavenet(vec![array_with(1, 4, 1, kernel, vec![1; 5], gated, ReLU)]);
+        let again = wavenet(vec![array_with(1, 4, 1, 1, vec![1; 5], gated, ReLU)]);
+        // Subtract what the same layers cost with one tap, and the multiply-adds the extra taps add.
+        (cost_per_sample(&spec) - macs_per_sample(&spec))
+            - (cost_per_sample(&again) - macs_per_sample(&again))
+    };
+    assert_eq!(taps(1, false), 0);
+    assert_eq!(taps(3, false), TAP_COST * 5 * 4 * 2);
+    assert_eq!(taps(5, false), TAP_COST * 5 * 4 * 4);
+    assert_eq!(taps(3, true), TAP_COST * 5 * 8 * 2);
+    // Layers of 8 channels or more fill a register and pay nothing for taps.
+    let wide = |kernel: usize, channels: usize| {
+        let spec = wavenet(vec![array_with(
+            1,
+            channels,
+            1,
+            kernel,
+            vec![1; 5],
+            false,
+            ReLU,
+        )]);
+        cost_per_sample(&spec) - macs_per_sample(&spec)
+    };
+    assert_eq!(wide(7, 8), wide(1, 8));
+    assert_eq!(wide(7, 12), wide(1, 12));
+    assert_eq!(wide(7, 7) - wide(1, 7), TAP_COST * 5 * 7 * 6);
+}
+
+/// Measured models: (name, model, microseconds per sample on the reference machine). Every one is checked against
+/// its estimate at 0.145 ns a unit.
+fn measured() -> Vec<(&'static str, NamSpec, f64)> {
+    use Activation::{ReLU, Sigmoid, Tanh};
+    vec![
+        (
+            "standard ReLU",
+            a1_with([16, 8], 8, [&D10, &D10], ReLU),
+            1.93,
+        ),
+        ("standard Tanh", a1([16, 8], 8, [&D10, &D10]), 2.58),
+        ("6x128 gated Tanh", thin(6, 128, true, Tanh), 10.13),
+        ("8x124 gated Tanh", thin(8, 124, true, Tanh), 9.15),
+        ("8x124 gated Sigmoid", thin(8, 124, true, Sigmoid), 8.10),
+        ("5x128 gated Tanh", thin(5, 128, true, Tanh), 7.12),
+        ("3x128 gated Tanh", thin(3, 128, true, Tanh), 5.59),
+        ("1x128 ReLU", thin(1, 128, false, ReLU), 2.11),
+        ("A1 26/10 Tanh", a1([26, 10], 10, [&D10, &D10]), 4.83),
+        ("4x32 3ch k1 gated Tanh", thin(3, 128, true, Tanh), 5.27),
+        (
+            "4x32 3ch k3 gated Tanh",
+            thin_k(3, 3, 128, true, Tanh),
+            7.42,
+        ),
+        ("4x32 6ch k5 ReLU", thin_k(6, 5, 128, false, ReLU), 12.94),
+        ("4x32 6ch k3 ReLU", thin_k(6, 3, 128, false, ReLU), 11.50),
+        ("4x32 10ch k1 ReLU", thin_k(10, 1, 128, false, ReLU), 6.81),
+        ("4x32 5ch k2 ReLU", thin_k(5, 2, 128, false, ReLU), 6.47),
+        (
+            "4x32 5ch k1 gated ReLU",
+            thin_k(5, 1, 128, true, ReLU),
+            5.98,
+        ),
+        ("4x32 8ch k2 ReLU", thin_k(8, 2, 128, false, ReLU), 5.26),
+        ("4x32 1ch k8 Tanh", thin_k(1, 8, 128, false, Tanh), 6.01),
+        (
+            "4x32 1ch k4 gated Tanh",
+            thin_k(1, 4, 128, true, Tanh),
+            4.33,
+        ),
+        ("A1 25/12 Tanh", a1([25, 12], 12, [&D10, &D10]), 5.46),
+    ]
+}
+
+#[test]
+fn the_estimate_is_at_least_nine_tenths_of_every_measured_time() {
+    for (name, spec, us) in measured() {
+        let units = cost_per_sample(&spec);
+        let estimated_us = units as f64 * NS_PER_UNIT / 1000.0;
+        assert!(
+            estimated_us >= us * 0.9,
+            "{name}: {estimated_us:.2} us estimated against {us} measured ({units} units)"
+        );
+    }
+}
+
+#[test]
+fn the_narrow_deep_kernel_5_relu_model_is_refused() {
+    use Activation::ReLU;
+    // 4 arrays of 32 layers, 6 channels, kernel 5, ungated ReLU: 28,645 multiply-adds, which ran at 12.9 us, five
+    // times the standard model. With the tap term it costs 122,597 units against a budget of 43,922.
+    let spec = thin_k(6, 5, 128, false, ReLU);
+    assert_eq!(macs_per_sample(&spec), 28_645);
+    assert_eq!(cost_per_sample(&spec), 123_877);
+    assert!(!within_budget(&spec, 48_000));
+    assert_eq!(parse_nam(&wavenet_bytes(&spec)), Err(NamError::TooHeavy));
+    // The 3 channel, kernel 3 gated model that ran at 7.4 us is refused as well.
+    let gated = thin_k(3, 3, 128, true, Activation::Tanh);
+    assert!(cost_per_sample(&gated) > MAX_COST_PER_SECOND / 48_000);
+    assert_eq!(parse_nam(&wavenet_bytes(&gated)), Err(NamError::TooHeavy));
 }

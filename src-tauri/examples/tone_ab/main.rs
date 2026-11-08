@@ -858,7 +858,9 @@ fn nam_bench_bytes(path: &str, bytes: &[u8]) {
     let cost = cost_per_sample(file.spec());
     let model = NamModel::build(&file);
     let mut state = NamState::new(&model);
+    let prewarm_started = Instant::now();
     state.prewarm(&model);
+    let prewarm_ms = prewarm_started.elapsed().as_secs_f64() * 1e3;
     let samples = RATE as usize * 10;
     let input: Vec<f32> = (0..samples)
         .map(|i| 0.3 * (i as f32 * 0.0287).sin() * (i as f32 * 0.00031).sin())
@@ -874,10 +876,11 @@ fn nam_bench_bytes(path: &str, bytes: &[u8]) {
     }
     let per_sample = best / samples as f64 * 1e6;
     println!(
-        "{path}: {per_sample:.3} us/sample, {:.1}x real time at {} Hz, {macs} MACs/sample, {cost} estimated cost units/sample, {:.3} ns per unit (check {guard:.3})",
+        "{path}: {per_sample:.3} us/sample, {:.1}x real time at {} Hz, {macs} MACs/sample, {cost} estimated cost units/sample, {:.3} ns per unit, prewarm {prewarm_ms:.0} ms ({} samples) (check {guard:.3})",
         samples as f64 / RATE as f64 / best,
         model.model_rate(),
-        per_sample * 1e3 / cost as f64
+        per_sample * 1e3 / cost as f64,
+        model.prewarm_samples()
     );
 }
 fn main() {

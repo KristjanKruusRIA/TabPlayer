@@ -5,7 +5,7 @@
 //! computed from the config, and must equal what the forward pass consumes,
 //! before the `weights` array is converted.
 
-use super::cost::within_budget;
+use super::cost::{max_receptive_field, within_budget};
 use super::raw::{Scalar, read_root};
 use serde_json::{Map, Value};
 
@@ -186,7 +186,7 @@ pub fn parse_nam(bytes: &[u8]) -> Result<NamFile, NamError> {
         return Err(NamError::Invalid("too many weights"));
     }
     // Memory is bounded by the caps; time is bounded here, from the architecture, before the weights are used.
-    if !within_budget(&spec, model_rate) {
+    if !within_budget(&spec, model_rate) || receptive_field > max_receptive_field(model_rate) {
         return Err(NamError::TooHeavy);
     }
     if weights.len() != expected {

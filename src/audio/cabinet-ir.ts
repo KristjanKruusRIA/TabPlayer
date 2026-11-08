@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { getMessage, getResolvedLanguage } from '../i18n';
 
 /** A cabinet impulse response in the library, as the native player describes it. Bundled responses ship with the app. */
 export interface CabinetIrEntry { id:string;name:string;sampleRate:number;channels:number;durationMs:number;bytes:number;
@@ -25,9 +26,10 @@ export const onCabinetLibrary=(listener:()=>void)=>{window.addEventListener(LIBR
 /** A response's length for the picker, such as `0.35 s`. */
 export const irDuration=(milliseconds:number)=>`${(milliseconds/1000).toFixed(2)} s`;
 /** The notice for a response the library cannot supply, saying which cabinet plays instead; null while it can. */
-export function irNotice(name:string,status:CabinetIrStatus|undefined,fallback:string):string|null {
+export type SayIr = (key: 'sound.ir_notice_missing' | 'sound.ir_notice_unreadable', values: Record<string, string>) => string;
+export function irNotice(name:string,status:CabinetIrStatus|undefined,fallback:string,say?:SayIr):string|null {
   if(!status||status.state==='ready')return null;
-  return status.state==='missing'
-    ?`The impulse response “${name}” is not in this computer's cabinet library, so the built-in ${fallback} cabinet plays instead. Import the file to use it; the document is unchanged.`
-    :`The impulse response “${name}” cannot be read${status.message?` (${status.message.replace(/\.$/,'')})`:''}, so the built-in ${fallback} cabinet plays instead. The document is unchanged.`;
+  const detail=status.message?` (${status.message.replace(/\.$/,'')})`:''; const tell=say??((key:'sound.ir_notice_missing'|'sound.ir_notice_unreadable',values:Record<string,string>)=>getMessage(getResolvedLanguage(),key,values)); return status.state==='missing'?tell('sound.ir_notice_missing',{name,fallback}):tell('sound.ir_notice_unreadable',{name,fallback,detail});
+
+
 }

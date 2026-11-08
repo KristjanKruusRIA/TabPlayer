@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FxSettings, TrackSound } from '../edit-types';
+import { useI18n } from '../i18n';
 import { cabinetIrs, irNotice, onCabinetLibrary, type CabinetIrStatus } from './cabinet-ir';
 import './sound-panel.css';
 
@@ -20,6 +21,7 @@ function cabinetUses(sounds:Record<string,TrackSound>|undefined){
  * line each, with the track. Asked again when the library changes. It reads the document and never changes it.
  */
 export function useCabinetNotices(sounds:Record<string,TrackSound>|undefined,trackNames?:Record<string,string>):string[] {
+  const { t } = useI18n();
   const uses=useMemo(()=>cabinetUses(sounds),[sounds]);
   const ids=useMemo(()=>[...new Set(uses.map(use=>use.id))],[uses]);
   const key=ids.join(',');
@@ -38,12 +40,12 @@ export function useCabinetNotices(sounds:Record<string,TrackSound>|undefined,tra
     if(!ids.length||found.key!==key)return [];
     const lines:string[]=[];
     for(const use of uses){
-      const text=irNotice(use.name,found.status.find(item=>item.id===use.id),use.model.replace(/[A-Z]/g,letter=>` ${letter.toLowerCase()}`));
+      const text=irNotice(use.name,found.status.find(item=>item.id===use.id),use.model.replace(/[A-Z]/g,letter=>` ${letter.toLowerCase()}`),(k,values)=>t(k,values));
       const track=trackNames?.[use.trackId];
       if(text)lines.push(track?`${track}: ${text}`:text);
     }
     return [...new Set(lines)];
-  },[uses,ids,found,key,trackNames]);
+  },[uses,ids,found,key,trackNames,t]);
 }
 /** The notices for the cabinet responses a document cannot find, shown where the document is open and in the export. */
 export function CabinetNotices({sounds,trackNames,className='cabinet-notices'}:{sounds:Record<string,TrackSound>|undefined;trackNames?:Record<string,string>;className?:string}) {

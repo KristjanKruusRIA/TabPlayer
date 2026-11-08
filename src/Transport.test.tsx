@@ -9,11 +9,12 @@ import { NativePlaybackController } from './audio/NativePlaybackController';
 import type { NativeAudioBridge,NativeAudioStatus } from './audio/bridge';
 import { buildDocument,previewEdit } from './engine';
 import { blankProject } from './project';
+import { setLanguagePreference } from './i18n';
 const cursor={track:0,staff:0,bar:0,voice:0,beat:0};
 const cursorChoices=[{generation:7,occurrenceIndex:0,startTick:0},{generation:7,occurrenceIndex:1,startTick:3840}];
 const passage={generation:7,startOccurrence:0,endOccurrence:0,startTick:480,endTick:1920};
 const occurrences=[0,1].map(occurrence=>({bar:0,occurrence,startTick:occurrence*3840,endTick:(occurrence+1)*3840,startMs:occurrence*2000,endMs:(occurrence+1)*2000,meterNumerator:4,meterDenominator:4,clickTicks:[]}));
-afterEach(()=>{cleanup();vi.useRealTimers();});
+afterEach(()=>{cleanup();vi.useRealTimers();setLanguagePreference('en');});
 function renderTransport(element:Parameters<typeof render>[0]) {
   const view=render(element),summary=screen.queryByText(/^More playback/,{selector:'summary'});
   if(summary&&!summary.closest('details')!.open)fireEvent.click(summary);return view;
@@ -224,8 +225,18 @@ it('says so in the transport message line when an edit ended the loop',()=>{
   expect(screen.getByText('The loop was removed because your edit changed the bars it covered.')).toBeInTheDocument();
 });
 it('practice_notices_are_visible_and_control_errors_stay_inline',()=>{
-  const {player}=playerFor(snapshot({practiceNotice:'Fixed tempo disabled because this score has backing audio.'}));player.setSpeed.mockImplementation(()=>{throw new Error('Practice change rejected.');});renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const {player}=playerFor(snapshot({practiceNotice:'fixed_tempo_disabled_backing'}));player.setSpeed.mockImplementation(()=>{throw new Error('Practice change rejected.');});renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
   expect(screen.getByText('Fixed tempo disabled because this score has backing audio.')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Slower'}));expect(screen.getByRole('alert')).toHaveTextContent('Practice change rejected.');
+});
+it('translates practice notice when language preference changes',()=>{
+  const {player}=playerFor(snapshot({practiceNotice:'fixed_tempo_disabled_backing'}));
+  setLanguagePreference('et');
+  const {unmount}=renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  expect(screen.getByText('Fikseeritud tempo on välja lülitatud, sest sellel palal on taustheli.')).toBeInTheDocument();
+  unmount();
+  setLanguagePreference('de');
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  expect(screen.getByText('Festes Tempo deaktiviert, da diese Partitur über Begleitaudio verfügt.')).toBeInTheDocument();
 });
 it('steps bars from the toolbar and shows the selected track, bar, signature and tempo in the position display',()=>{
   const {player,update}=playerFor(snapshot({measure:1}));

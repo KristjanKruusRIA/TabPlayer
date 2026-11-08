@@ -384,7 +384,7 @@ it.each(['imported','embedded'])('normalizes fixed before preparing %s backing, 
   const backing={assetId:'recording',offsetMs:0,anchors:[],mix:{gain:1,pan:0,mute:true,solo:false}};
   const next=kind==='imported'?{...built,settings:{...built.settings,backing}}:{...built,embeddedBacking:new Uint8Array([1,2]),embeddedBackingSettings:{offsetMs:0,anchors:[],mix:backing.mix}};
   await player.loadDocument(project,next);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...settings,tempo:{kind:'relative',ratio:1}});
-  expect(player.getState().practiceNotice).toBe('Fixed tempo disabled because this score has backing audio.');
+  expect(player.getState().practiceNotice).toBe('fixed_tempo_disabled_backing');
   expect(()=>player.setPractice(settings)).toThrow('backing track');expect(player.getState().practice.settings.tempo).not.toEqual({kind:'fixed',bpm:90});player.destroy();
 });
 it('publishes loop only after native acknowledgement and clears it on generation replacement',async()=>{

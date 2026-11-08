@@ -31,7 +31,7 @@ Runs counts the sweep-level runs that reached a verdict: first sweep, rerun of e
 | `advanced-editor` | PASS | 3 | F/F/P | Advanced native editor: curves, articulation, imported program, voice copy, staff, measure, key, chord, bass6/ | stale |
 | `audio` | PASS | 1 | P | Native CPAL playback and independent bounded WASAPI loopback PCM, cursor, pause/seek/loop/speed, sound history | alias |
 | `cancellation` | PASS | 3 | F/F/P | Close score Cancel preserves the dirty score, revision and active owner. | stale |
-| `critique-fixes` | PASS | 3 | F/F/P | {"passed":true,"states":["new-1280","caret-beat-2","compact-960","compact-1280","compact-1600","expanded-1280" | stale |
+| `critique-fixes` | PASS | 4 | F/F/P/P | {"passed":true,"states":["new-1280","caret-beat-2","compact-960","compact-1280","compact-1600","expanded-1280" | stale. Rerun on HEAD 048708e after the review edits (6f18f99), build 5a891a1d: PASS. |
 | `editor` | PASS | 3 | F/F/P | Native editor: two tracks, fret entry, real rendered note selection, native command history passed. | stale |
 | `exports` | PASS | 2 | P/P | stems at 50% practice speed: native destination, valid output and immutable dirty snapshot passed. | none |
 | `exports-per-track` | PASS | 2 | P/P | pdf one file per track: 1 Guitar9.pdf, 2 Bass6.pdf, 3 Drums.pdf, 4 Keys.pdf | none |
@@ -45,12 +45,12 @@ Runs counts the sweep-level runs that reached a verdict: first sweep, rerun of e
 | `parity-clipboard` | PASS | 2 | P/P | {"crossDocumentClipboard":true,"settingsHistoryAfterPasteKeepsAudio":true,"literalMidi":[[0,60,95],[0,64,95],[ | none |
 | `parity-command-palette` | PASS | 2 | P/P | command palette: fret, duration, measure and tempo commands ran as undoable edits; a bad measure was explained | none |
 | `parity-delay-models` | PASS | 2 | P/P | Delay models passed: {"dryTone":-9.5793404531616,"digital":{"division":0.5,"firstRepeat":0.5,"tone":[-9.579352 | none |
-| `parity-document-tabs` | PASS | 3 | F/F/P | "passed": true | stale+environment |
+| `parity-document-tabs` | PASS | 4 | F/F/P/P | "passed": true | stale+environment. Rerun on HEAD 048708e after the review edits (6f18f99), build 5a891a1d: PASS. |
 | `parity-drive-effect` | PASS | 2 | P/P | Drive effect passed: {"dry":{"sustainDb":-18.179935036975124,"crest":5.081035496273725},"overdrive":{"sustainD | none |
 | `parity-duplicate-track` | PASS | 3 | F/F/P | duplicate track: Guitar9@0, Bass6@2, Bass6@6, Drums@9, Keys@4; undo removed the copy. | stale |
 | `parity-edition-palette` | PASS | 2 | P/P | edition palette: accent, string number, 8va, strum, tuplet list and text each ran as one native edit; undo rem | none |
 | `parity-effect-order` | PASS | 2 | P/P | Effect order passed: {"before":[0.500002281870854,0.5000027297237697],"after":[0.9063033676071471,0.8777390264 | none |
-| `parity-engraving` | PASS | 3 | F/F/P | {"sourceHash":"6961cbb1377842440b23580b34a85cec538b620bf62a7a9c119b92400cb603ed","presentationKeepsNativeGener | stale |
+| `parity-engraving` | PASS | 4 | F/F/P/P | {"sourceHash":"6961cbb1377842440b23580b34a85cec538b620bf62a7a9c119b92400cb603ed","presentationKeepsNativeGener | stale. Rerun on HEAD 048708e after the review edits (6f18f99), build 5a891a1d: PASS. |
 | `parity-entry` | PASS | 3 | F/F/P | {"nativeAudio":{"outputPeak":0.1702335923910141,"renderedFrames":5280},"gpRoundtrip":{"album":"Parity session" | stale |
 | `parity-expressions` | PASS | 2 | P/P | expressions: ff, [Verse], D.S. al Coda, bass, G major and Am ran as undoable edits; an overfilling 3/4 was exp | none |
 | `parity-factory-sounds` | PASS | 2 | P/P | Factory sounds passed: {"jazz":{"levelDb":-24.83425796287058,"upperShareDb":-25.40783053206399},"metal":{"leve | none |
@@ -139,7 +139,7 @@ Runs counts the sweep-level runs that reached a verdict: first sweep, rerun of e
 | `parity-file-library (--group=folders)` | NOT RUN | 0 | - | - | environment (interactive) |
 | `parity-file-drop` | FAIL | 3 | F/F/F | Windows refused owned foreground request | environment |
 | `parity-library-reveal` | PASS | 1 | P | "status": "passed" | none |
-| `parity-recovery (--self-test; groups crash, clean, paths, corruption, ownership, visual)` | PASS | 8 | P x7, ownership F then P | "passed": true | stale (ownership group) |
+| `parity-recovery (--self-test; groups crash, clean, paths, corruption, ownership, visual)` | PASS | 9 | P x7, ownership F then P, ownership P | "passed": true | stale (ownership group). Ownership group rerun on HEAD 048708e after the review edits (6f18f99), build 5a891a1d: PASS. |
 | `parity-workstation (default flags)` | FAIL | 6 | F/F/F/F/P/F | The error feedback overlaps no control in the expanded playback panel (viewport 960, overlapping: Seek measure) | stale (fixed), then UI bug |
 
 Notes on these rows:
@@ -203,7 +203,7 @@ Every assertion that the edits weakened or dropped, and what covers it now:
 | `parity-input-preferences` | advance is not a preference; keypad and auto-duration walks assume the cursor stays on the beat it wrote | the driver turns Advance off before those walks and expects `advance:false` | The Advance-on path is not driven by any desktop driver; `src/editor/input-preferences.test.tsx` covers the preference defaults |
 | `advanced-editor` | selects a stringed track in the removed left list before editing | assumes the open score's first track is stringed and still throws if Apply tuning is disabled | The throw on a non-stringed first track |
 | `native-audio` | one Metronome checkbox | clicks the first of two (transport and Practice tools) | Only the transport one is exercised |
-| `critique-fixes` | Play and Pause found by title text; transport fieldset not disabled | native `playing` state plus the `.transport` button named Pause, then Play; Play enabled before the Space test | Nothing weaker; the old fieldset wait has no equivalent |
+| `critique-fixes` | Play and Pause found by accessible name (role button, name Pause or Play); transport fieldset not disabled | native `playing` state plus the `.transport` button named Pause, then Play; Play enabled before the Space test | Nothing weaker; the old fieldset wait has no equivalent |
 
 `parity-reload-recovery` got a precautionary Selection-tab reveal. It was not seen failing, so the change is not a weakening.
 

@@ -7,6 +7,7 @@
 use tabplayer_plugin_protocol::{
     control::ClassInfo,
     limits::{MAX_CLASSES, MAX_NAME_CHARS, MAX_SUBCATEGORIES_CHARS, MAX_VERSION_CHARS},
+    validate::clean_text,
 };
 
 /// The category of a VST3 class that is a processor.
@@ -40,46 +41,6 @@ pub fn class_id_bytes(text: &str) -> Option<[u8; 16]> {
         *byte = u8::from_str_radix(&text[2 * i..2 * i + 2], 16).ok()?;
     }
     Some(out)
-}
-
-/// Characters of the Unicode "format" category and the like that a name must not hold: the soft hyphen, zero-width and
-/// bidirectional marks, word joiners and invisible operators, the byte-order mark and the interlinear annotation marks.
-fn format_char(c: char) -> bool {
-    matches!(
-        c,
-        '\u{AD}'
-            | '\u{61C}'
-            | '\u{180E}'
-            | '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206F}'
-            | '\u{FEFF}'
-            | '\u{FFF9}'..='\u{FFFB}'
-    )
-}
-
-/// A character an XML 1.0 document can hold, as the protocol's name rule needs.
-fn xml_char(c: char) -> bool {
-    matches!(
-        c,
-        '\u{9}' | '\u{A}' | '\u{D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
-    )
-}
-
-/// `raw` as protocol text of at most `max_chars` characters: tab and line breaks become spaces, other control, format and
-/// non-characters are dropped, and the result is trimmed (twice, because the cut can expose a space).
-pub fn clean_text(raw: &str, max_chars: usize) -> String {
-    let kept: String = raw
-        .chars()
-        .filter_map(|c| match c {
-            '\t' | '\n' | '\r' => Some(' '),
-            c if c.is_control() || format_char(c) || !xml_char(c) => None,
-            c => Some(c),
-        })
-        .collect();
-    let cut: String = kept.trim().chars().take(max_chars).collect();
-    cut.trim().to_string()
 }
 
 /// Whether a class is an audio effect: a processor class whose sub-categories name `Fx` and not `Instrument`. A class

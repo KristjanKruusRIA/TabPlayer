@@ -6,34 +6,45 @@
 //! probe's names are cleaned and validated with the protocol crate's rules; and the file is written to a temporary file in
 //! its own folder and renamed over the old one, so a reader never sees half a library.
 //!
+//! A library file is in one of four states, and only some may be replaced. Missing: nothing is lost, so a change writes
+//! it. Readable: a change writes the old entries with the change. Damaged (oversized, not JSON, not a library): [`add`]
+//! may replace it, because the user is rebuilding the library, but a removal or a re-scan never does. Written by a newer
+//! version: read-only, nothing is listed and nothing is ever written. A file that cannot be read at all (another program
+//! holds it, the folder is unreachable) aborts the operation, because "cannot read" is not "empty".
+//!
 //! The library never loads plug-in code itself. [`PluginLibrary::add`] takes the probe as a function, so the caller says
 //! how a bundle is scanned (the app probes in a helper process of its own that is killed afterwards) and tests need no
 //! helper. [`PluginLibrary::resolve`] only looks and never probes, because a re-probe loads plug-in code and must come
 //! after the consent check (preflight ruling P13); [`PluginLibrary::reprobe`] is that later step.
+//!
+//! [`add`]: PluginLibrary::add
 use crate::plugins::helper::HelperError;
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{self, Read, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf, Prefix},
     sync::{Mutex, MutexGuard, PoisonError},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tabplayer_plugin_protocol::{
+    bundle::{ARCH_DIRS, bundle_binary, is_vst3_name},
     control::ClassInfo,
     limits::{MAX_CLASSES, MAX_NAME_CHARS, MAX_SUBCATEGORIES_CHARS, MAX_VERSION_CHARS},
-    validate::{valid_class_id, valid_name, valid_text, valid_vendor},
+    validate::{clean_text, valid_class_id, valid_name, valid_text, valid_vendor},
 };
 
 /// The library file's name in the library folder.
 pub const LIBRARY_FILE: &str = "library.json";
-/// How much of the library file is read. A larger file reads as an empty library.
+/// How much of the library file is read. A larger file is a damaged library.
 pub const MAX_FILE_BYTES: usize = 1 << 20;
 /// The most classes the library holds.
 pub const MAX_ENTRIES: usize = 256;
-/// The longest bundle path the library keeps, in characters. A full library of the longest paths, with every backslash
-/// doubled by JSON, still fits [`MAX_FILE_BYTES`].
-pub const MAX_BUNDLE_PATH_CHARS: usize = 1024;
+/// The longest bundle path the library keeps, measured as it is written in the file: the JSON-escaped UTF-8 length, since
+/// a backslash costs 2 bytes and a character outside the basic plane costs 4. An entry's other fields come to at most 805
+/// bytes at their longest, so 256 entries of the longest paths come to 256 * (805 + 3200) + a few bytes: under
+/// [`MAX_FILE_BYTES`].
+pub const MAX_BUNDLE_JSON_BYTES: usize = 3200;
 /// What a class without a usable name is called, as the helper calls it.
 const UNNAMED: &str = "Unnamed plug-in";
 /// The file format version.
@@ -56,6 +67,25 @@ pub struct LibraryEntry {
     pub module_modified: i64,
 }
 
+/// The length of `text` as JSON writes it inside its quotes.
+fn json_len(text: &str) -> usize {
+    serde_json::to_string(text).map_or(usize::MAX, |quoted| quoted.len() - 2)
+}
+
+fn bundle_fits(path: &Path) -> bool {
+    path.to_str()
+        .is_some_and(|text| json_len(text) <= MAX_BUNDLE_JSON_BYTES)
+}
+
+/// Whether a path is made of a drive or share, a root and named parts only: no `.` or `..`, no `\\.\` device.
+fn plain_components(path: &Path) -> bool {
+    path.components().all(|part| match part {
+        Component::Prefix(prefix) => !matches!(prefix.kind(), Prefix::DeviceNS(_)),
+        Component::RootDir | Component::Normal(_) => true,
+        Component::CurDir | Component::ParentDir => false,
+    })
+}
+
 impl LibraryEntry {
     /// Whether an entry read from the library file is one the app could have written.
     fn is_valid(&self) -> bool {
@@ -64,10 +94,9 @@ impl LibraryEntry {
             && valid_vendor(&self.vendor)
             && valid_text(&self.version, MAX_VERSION_CHARS, true)
             && self.bundle.is_absolute()
-            && self
-                .bundle
-                .to_str()
-                .is_some_and(|text| text.chars().count() <= MAX_BUNDLE_PATH_CHARS)
+            && is_vst3_name(&self.bundle)
+            && plain_components(&self.bundle)
+            && bundle_fits(&self.bundle)
     }
 }
 
@@ -91,15 +120,21 @@ pub enum LibraryError {
     NotVst3,
     /// The bundle holds no module for this machine.
     NoModule,
+    /// The picked file is inside a bundle, but is not the module the helper loads from it.
+    NotMainModule,
     /// The path is too long for the library, or is not valid text.
     BadPath,
     /// The scan found no audio-effect class.
     NoEffects,
     /// Adding would take the library past [`MAX_ENTRIES`].
     TooMany,
+    /// The library file is damaged. Adding a plug-in starts a new one.
+    Damaged,
+    /// The library file was written by a newer TabPlayer and is left alone.
+    NewerVersion,
     /// The scan failed. [`HelperError::status`] says what it means for the plug-in.
     Probe(HelperError),
-    /// The library file could not be written.
+    /// The library file could not be read or written.
     Io(String),
 }
 
@@ -111,6 +146,9 @@ impl std::fmt::Display for LibraryError {
             LibraryError::NoModule => {
                 f.write_str("This .vst3 folder holds no plug-in for this computer.")
             }
+            LibraryError::NotMainModule => f.write_str(
+                "This file is not the plug-in's main file for this computer. Choose the .vst3 folder or its main file.",
+            ),
             LibraryError::BadPath => {
                 f.write_str("The plug-in's location is too long or is not valid text.")
             }
@@ -118,8 +156,16 @@ impl std::fmt::Display for LibraryError {
             LibraryError::TooMany => {
                 write!(f, "The plug-in library is full ({MAX_ENTRIES} plug-ins).")
             }
+            LibraryError::Damaged => f.write_str(
+                "The plug-in library file is damaged. Adding a plug-in starts a new library.",
+            ),
+            LibraryError::NewerVersion => {
+                f.write_str("This plug-in library was made by a newer TabPlayer.")
+            }
             LibraryError::Probe(error) => write!(f, "Could not scan the plug-in: {error}"),
-            LibraryError::Io(detail) => write!(f, "Could not save the plug-in library: {detail}"),
+            LibraryError::Io(detail) => {
+                write!(f, "Could not use the plug-in library file: {detail}")
+            }
         }
     }
 }
@@ -141,11 +187,27 @@ struct FileOut<'a> {
     entries: &'a [LibraryEntry],
 }
 
+/// Just the version, which is read first so a newer file is recognised whatever else it holds.
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FileIn {
+struct Head {
     version: u32,
+}
+
+#[derive(Deserialize)]
+struct FileIn {
     entries: Vec<serde_json::Value>,
+}
+
+/// What a library file holds.
+#[derive(Debug, PartialEq)]
+enum Stored {
+    /// There is no file.
+    Missing,
+    Entries(Vec<LibraryEntry>),
+    /// Larger than [`MAX_FILE_BYTES`], not JSON, or not a library of this version's shape.
+    Damaged,
+    /// Written by a newer version.
+    Newer,
 }
 
 /// All of `reader` up to `cap` bytes, or none when there is more. Reads at most `cap + 1` bytes.
@@ -155,15 +217,21 @@ fn read_capped(reader: impl Read, cap: usize) -> io::Result<Option<Vec<u8>>> {
     Ok((bytes.len() <= cap).then_some(bytes))
 }
 
-/// The entries in a library file's bytes: none for anything that is not a library of this version, and of the entries
-/// in one only those the app could have written, each class once, at most [`MAX_ENTRIES`].
-fn parse(bytes: &[u8]) -> Vec<LibraryEntry> {
-    let Ok(file) = serde_json::from_slice::<FileIn>(bytes) else {
-        return Vec::new();
+/// What a library file's bytes are. Of the entries in a library only those the app could have written are kept, each
+/// class once, at most [`MAX_ENTRIES`].
+fn parse(bytes: &[u8]) -> Stored {
+    let Ok(head) = serde_json::from_slice::<Head>(bytes) else {
+        return Stored::Damaged;
     };
-    if file.version != FORMAT_VERSION {
-        return Vec::new();
+    if head.version > FORMAT_VERSION {
+        return Stored::Newer;
     }
+    if head.version != FORMAT_VERSION {
+        return Stored::Damaged;
+    }
+    let Ok(file) = serde_json::from_slice::<FileIn>(bytes) else {
+        return Stored::Damaged;
+    };
     let mut entries: Vec<LibraryEntry> = Vec::new();
     for value in file.entries {
         let Ok(entry) = serde_json::from_value::<LibraryEntry>(value) else {
@@ -176,17 +244,48 @@ fn parse(bytes: &[u8]) -> Vec<LibraryEntry> {
             }
         }
     }
-    entries
+    Stored::Entries(entries)
 }
 
-/// The library in `file`: empty when it is missing, larger than [`MAX_FILE_BYTES`], or damaged. Reading never writes.
-fn read_entries(file: &Path) -> Vec<LibraryEntry> {
-    let Ok(open) = std::fs::File::open(file) else {
-        return Vec::new();
+/// The library in `file`. A missing file is `Missing`; any other failure to open or read it is an error, because the
+/// library may be intact behind it. Reading never writes.
+fn read_stored(file: &Path) -> Result<Stored, LibraryError> {
+    let open = match std::fs::File::open(file) {
+        Ok(open) => open,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Stored::Missing),
+        Err(error) => return Err(LibraryError::Io(error.to_string())),
     };
     match read_capped(open, MAX_FILE_BYTES) {
-        Ok(Some(bytes)) => parse(&bytes),
-        _ => Vec::new(),
+        Ok(Some(bytes)) => Ok(parse(&bytes)),
+        Ok(None) => Ok(Stored::Damaged),
+        Err(error) => Err(LibraryError::Io(error.to_string())),
+    }
+}
+
+/// Whether `name` is a temporary file that `atomic-write-file` made for the library file: `.library.json.` and six
+/// letters or digits.
+fn is_temporary(name: &str) -> bool {
+    name.strip_prefix('.')
+        .and_then(|name| name.rsplit_once('.'))
+        .is_some_and(|(destination, suffix)| {
+            destination == LIBRARY_FILE
+                && suffix.len() == 6
+                && suffix.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+}
+
+/// Removes the temporary files a failed rename left in `folder`. `atomic-write-file` marks its file as finished before the
+/// rename, so it does not remove the file when the rename fails (the recovery store does the same: `finish_atomic`).
+fn remove_temporaries(folder: &Path) {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let owned = entry.file_type().is_ok_and(|kind| kind.is_file())
+            && entry.file_name().to_str().is_some_and(is_temporary);
+        if owned {
+            let _ = std::fs::remove_file(entry.path());
+        }
     }
 }
 
@@ -201,13 +300,19 @@ fn write_entries(file: &Path, entries: &[LibraryEntry]) -> Result<(), LibraryErr
         // Cannot happen with the caps above, but a file the next read would refuse must never be written.
         return Err(LibraryError::Io("the library is too large".into()));
     }
-    if let Some(folder) = file.parent() {
+    let folder = file.parent();
+    if let Some(folder) = folder {
         std::fs::create_dir_all(folder).map_err(io)?;
     }
     // A temporary file in the same folder, written and flushed, then renamed over the old file.
     let mut out = AtomicWriteFile::open(file).map_err(io)?;
     out.write_all(&bytes).map_err(io)?;
-    out.commit().map_err(io)
+    out.commit().map_err(|error| {
+        if let Some(folder) = folder {
+            remove_temporaries(folder);
+        }
+        io(error)
+    })
 }
 
 /// Writers take this lock, read the file again under it and write, so two writers never lose each other's change. A
@@ -219,80 +324,70 @@ fn write_lock() -> MutexGuard<'static, ()> {
 
 // ---- paths -------------------------------------------------------------------------------------------------------
 
-/// The `Contents/<dir>` folder names a module can be in, for any machine.
-const ARCH_DIRS: [&str; 5] = [
-    "x86_64-win",
-    "x86-win",
-    "arm64-win",
-    "arm64ec-win",
-    "arm64x-win",
-];
+/// Whether `part` is a DOS device name, which Win32 reads as the device whatever follows its first dot.
+fn reserved_device(part: &str) -> bool {
+    let stem = part
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches(' ')
+        .to_uppercase();
+    matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|device| {
+        stem.strip_prefix(device).is_some_and(|number| {
+            matches!(
+                number,
+                "0" | "1"
+                    | "2"
+                    | "3"
+                    | "4"
+                    | "5"
+                    | "6"
+                    | "7"
+                    | "8"
+                    | "9"
+                    | "\u{b9}"
+                    | "\u{b2}"
+                    | "\u{b3}"
+            )
+        })
+    })
+}
 
-/// The folder names that hold this machine's modules, most specific first.
-fn own_arch_dirs() -> &'static [&'static str] {
-    if cfg!(target_arch = "aarch64") {
-        &["arm64-win", "arm64ec-win", "arm64x-win"]
-    } else if cfg!(target_arch = "x86") {
-        &["x86-win"]
-    } else {
-        &["x86_64-win"]
+/// A verbatim drive path (`\\?\C:\..`) as an ordinary one, but only when Win32 reads the ordinary form as the same path:
+/// short enough, and no part that ends in a dot or a space, is a device name, holds a character a name cannot hold, or is
+/// empty, `.` or `..`. Otherwise none, and the verbatim form stays (the rules of the `dunce` crate).
+fn plain_drive_path(verbatim: &str) -> Option<&str> {
+    let rest = verbatim.strip_prefix(r"\\?\")?;
+    let bytes = rest.as_bytes();
+    if rest.len() >= 200
+        || bytes.len() < 4
+        || !bytes[0].is_ascii_alphabetic()
+        || bytes[1] != b':'
+        || bytes[2] != b'\\'
+    {
+        return None;
     }
+    let safe = |part: &str| {
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && !part.ends_with(['.', ' '])
+            && !part.chars().any(|c| c < ' ' || "<>:\"/|?*\\".contains(c))
+            && !reserved_device(part)
+    };
+    rest[3..].split('\\').all(safe).then_some(rest)
 }
 
-fn is_vst3(path: &Path) -> bool {
-    path.extension()
-        .and_then(std::ffi::OsStr::to_str)
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("vst3"))
-}
-
-/// A canonical Windows path without its `\\?\` prefix when it is an ordinary drive path that is short enough to do
-/// without. Canonical paths are the only ones the library keeps.
+/// A canonical Windows path without its `\\?\` prefix when that is safe ([`plain_drive_path`]).
 fn simplify(path: PathBuf) -> PathBuf {
     #[cfg(windows)]
-    if let Some(rest) = path.to_str().and_then(|text| text.strip_prefix(r"\\?\")) {
-        let bytes = rest.as_bytes();
-        if bytes.len() >= 3
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-            && bytes[2] == b'\\'
-            && rest.len() < 200
-        {
-            return PathBuf::from(rest);
-        }
+    if let Some(plain) = path.to_str().and_then(plain_drive_path) {
+        return PathBuf::from(plain);
     }
     path
-}
-
-/// The loadable binary of a bundle: a single-file module itself, or `Contents/<arch>/<name>.vst3` in a bundle folder,
-/// falling back to the first `.vst3` file there. This is the helper's own rule.
-fn module_of(bundle: &Path) -> Option<PathBuf> {
-    let meta = std::fs::metadata(bundle).ok()?;
-    if meta.is_file() {
-        return Some(bundle.to_path_buf());
-    }
-    let stem = bundle.file_stem()?;
-    for dir in own_arch_dirs() {
-        let folder = bundle.join("Contents").join(dir);
-        let mut named = folder.join(stem);
-        named.set_extension("vst3");
-        if std::fs::metadata(&named).is_ok_and(|m| m.is_file()) {
-            return Some(named);
-        }
-        let Ok(entries) = std::fs::read_dir(&folder) else {
-            continue;
-        };
-        let mut files: Vec<PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| is_vst3(path) && std::fs::metadata(path).is_ok_and(|m| m.is_file()))
-            .take(64)
-            .collect();
-        files.sort();
-        if let Some(first) = files.into_iter().next() {
-            return Some(first);
-        }
-    }
-    None
 }
 
 fn millis(time: SystemTime) -> i64 {
@@ -323,7 +418,7 @@ fn locate(picked: &Path) -> Result<Located, LibraryError> {
     let canonical = simplify(
         std::fs::canonicalize(picked).map_err(|error| LibraryError::NotFound(error.to_string()))?,
     );
-    if !is_vst3(&canonical) {
+    if !is_vst3_name(&canonical) {
         return Err(LibraryError::NotVst3);
     }
     let meta =
@@ -344,24 +439,29 @@ fn locate(picked: &Path) -> Result<Located, LibraryError> {
                     .is_some_and(|name| name.eq_ignore_ascii_case("Contents"))
             })
             .and_then(Path::parent)
-            .filter(|root| is_vst3(root) && std::fs::metadata(root).is_ok_and(|m| m.is_dir()));
+            .filter(|root| is_vst3_name(root) && std::fs::metadata(root).is_ok_and(|m| m.is_dir()));
         match root {
-            Some(root) => (
-                root.to_path_buf(),
-                module_of(root).ok_or(LibraryError::NoModule)?,
-            ),
+            Some(root) => {
+                // The helper loads the bundle's own module, whichever file was picked. Another file in it would be
+                // scanned and recorded as if it were that one.
+                let main = bundle_binary(root).ok_or(LibraryError::NoModule)?;
+                let main = std::fs::canonicalize(&main)
+                    .map(simplify)
+                    .map_err(|_| LibraryError::NoModule)?;
+                if main != canonical {
+                    return Err(LibraryError::NotMainModule);
+                }
+                (root.to_path_buf(), main)
+            }
             None => (canonical.clone(), canonical),
         }
     } else if meta.is_dir() {
-        let module = module_of(&canonical).ok_or(LibraryError::NoModule)?;
+        let module = bundle_binary(&canonical).ok_or(LibraryError::NoModule)?;
         (canonical, module)
     } else {
         return Err(LibraryError::NotVst3);
     };
-    let fits = bundle
-        .to_str()
-        .is_some_and(|text| text.chars().count() <= MAX_BUNDLE_PATH_CHARS);
-    if !fits {
+    if !bundle_fits(&bundle) {
         return Err(LibraryError::BadPath);
     }
     Ok(Located { bundle, module })
@@ -369,25 +469,9 @@ fn locate(picked: &Path) -> Result<Located, LibraryError> {
 
 // ---- probe results -----------------------------------------------------------------------------------------------
 
-/// `raw` as protocol text of at most `max_chars` characters. Tab and line breaks become spaces; a character the protocol
-/// refuses (control, bidirectional control, not storable in XML) is dropped; the result is trimmed.
-fn clean_text(raw: &str, max_chars: usize) -> String {
-    let kept: String = raw
-        .chars()
-        .filter_map(|c| match c {
-            '\t' | '\n' | '\r' | ' ' => Some(' '),
-            c => {
-                let mut one = [0u8; 4];
-                valid_text(c.encode_utf8(&mut one), 1, false).then_some(c)
-            }
-        })
-        .collect();
-    let cut: String = kept.trim().chars().take(max_chars).collect();
-    cut.trim().to_string()
-}
-
-/// The classes of a probe result as the library keeps them: cleaned, valid, each class ID once, at most
-/// [`MAX_CLASSES`]. The helper cleans too, but this result crosses a process boundary, so it is not taken on trust.
+/// The classes of a probe result as the library keeps them: cleaned with the protocol's own cleaner (the helper's too),
+/// valid, each class ID once, at most [`MAX_CLASSES`]. The helper cleans, but this result crosses a process boundary, so
+/// it is not taken on trust.
 fn clean_classes(raw: Vec<ClassInfo>) -> Vec<ClassInfo> {
     let mut out: Vec<ClassInfo> = Vec::new();
     for class in raw {
@@ -420,11 +504,14 @@ pub struct PluginLibrary {
 }
 
 impl PluginLibrary {
-    /// The library in `dir` (`<app_data>/plugins`). A missing, oversized or damaged file reads as an empty library, and
-    /// is left as it is: only the next successful change replaces it.
+    /// The library in `dir` (`<app_data>/plugins`). A missing, damaged, newer or unreadable file lists nothing, and is left
+    /// as it is: [`add`](Self::add) may replace a damaged one, and nothing replaces the others.
     pub fn open(dir: impl AsRef<Path>) -> PluginLibrary {
         let file = dir.as_ref().join(LIBRARY_FILE);
-        let entries = read_entries(&file);
+        let entries = match read_stored(&file) {
+            Ok(Stored::Entries(entries)) => entries,
+            _ => Vec::new(),
+        };
         PluginLibrary { file, entries }
     }
 
@@ -432,28 +519,53 @@ impl PluginLibrary {
         &self.entries
     }
 
-    /// Applies `change` to the file's current entries and writes the result. Nothing is written when `change` fails.
+    /// Applies `change` to the file's current entries and writes the result, when it differs. The file is read again under
+    /// the write lock. Nothing is written when `change` fails, when the file cannot be read, or when it is newer or (unless
+    /// `replace_damaged`) damaged.
     fn commit(
         &mut self,
+        replace_damaged: bool,
         change: impl FnOnce(&mut Vec<LibraryEntry>) -> Result<(), LibraryError>,
     ) -> Result<(), LibraryError> {
         let _guard = write_lock();
-        let mut entries = read_entries(&self.file);
+        let held = match read_stored(&self.file)? {
+            Stored::Missing => Vec::new(),
+            Stored::Entries(entries) => entries,
+            Stored::Damaged if replace_damaged => Vec::new(),
+            Stored::Damaged => return Err(LibraryError::Damaged),
+            Stored::Newer => return Err(LibraryError::NewerVersion),
+        };
+        let mut entries = held.clone();
         change(&mut entries)?;
-        write_entries(&self.file, &entries)?;
+        if entries != held {
+            write_entries(&self.file, &entries)?;
+        }
         self.entries = entries;
         Ok(())
     }
 
     /// Adds the effect classes of the plug-in at `picked`: a `.vst3` bundle folder, the module inside one (which stands
-    /// for its bundle) or a single-file module. `probe` scans the canonical bundle path. A class that is already in the
-    /// library is replaced, and so is anything else the library holds from this bundle that the scan no longer finds.
-    /// Returns the whole library. A failed scan, or a library that would pass [`MAX_ENTRIES`], changes nothing.
+    /// for its bundle, and must be the module the helper loads from it) or a single-file module. `probe` scans the
+    /// canonical bundle path. A class that is already in the library is replaced, and so is anything else the library
+    /// holds from this bundle that the scan no longer finds. Returns the whole library. A failed scan, or a library that
+    /// would pass [`MAX_ENTRIES`], changes nothing; and a library that is full, newer or unreadable is refused before the
+    /// scan, which runs plug-in code. (A full library also refuses a bundle it does not hold yet when that bundle would
+    /// only have replaced classes of other bundles; remove one first.)
     pub fn add<F>(&mut self, picked: &Path, probe: F) -> Result<Vec<LibraryEntry>, LibraryError>
     where
         F: FnOnce(&Path) -> Result<Vec<ClassInfo>, HelperError>,
     {
         let located = locate(picked)?;
+        match read_stored(&self.file)? {
+            Stored::Newer => return Err(LibraryError::NewerVersion),
+            Stored::Entries(held)
+                if held.len() >= MAX_ENTRIES
+                    && held.iter().all(|entry| entry.bundle != located.bundle) =>
+            {
+                return Err(LibraryError::TooMany);
+            }
+            _ => {}
+        }
         // Measured before the scan: a module that changes during it reads as changed afterwards, not as scanned.
         let (module_len, module_modified) = stat(&located.module).ok_or(LibraryError::NoModule)?;
         let classes = clean_classes(probe(&located.bundle).map_err(LibraryError::Probe)?);
@@ -473,7 +585,7 @@ impl PluginLibrary {
                 module_modified,
             })
             .collect();
-        self.commit(|entries| {
+        self.commit(true, |entries| {
             entries.retain(|held| {
                 held.bundle != bundle && fresh.iter().all(|new| new.class_id != held.class_id)
             });
@@ -491,7 +603,7 @@ impl PluginLibrary {
         let Some(entry) = self.entries.iter().find(|held| held.class_id == class_id) else {
             return Resolved::Missing;
         };
-        let Some((len, modified)) = module_of(&entry.bundle).and_then(|module| stat(&module))
+        let Some((len, modified)) = bundle_binary(&entry.bundle).and_then(|module| stat(&module))
         else {
             return Resolved::Missing;
         };
@@ -505,7 +617,7 @@ impl PluginLibrary {
     /// As [`resolve`](Self::resolve), and a changed module is scanned again with `probe`, which loads plug-in code: call
     /// this only after the consent check. A class the scan still finds is updated (with every other class of the bundle
     /// that the scan finds) and comes back `Found`; one it does not find comes back `Missing` and stays in the library,
-    /// for the user to remove. A failed scan changes nothing.
+    /// for the user to remove. A failed scan changes nothing. A damaged or newer library file is never replaced here.
     pub fn reprobe<F>(&mut self, class_id: &str, probe: F) -> Result<Resolved, LibraryError>
     where
         F: FnOnce(&Path) -> Result<Vec<ClassInfo>, HelperError>,
@@ -515,7 +627,7 @@ impl PluginLibrary {
             other => return Ok(other),
         };
         let Some((module_len, module_modified)) =
-            module_of(&old.bundle).and_then(|module| stat(&module))
+            bundle_binary(&old.bundle).and_then(|module| stat(&module))
         else {
             return Ok(Resolved::Missing);
         };
@@ -523,7 +635,7 @@ impl PluginLibrary {
         if classes.iter().all(|class| class.class_id != class_id) {
             return Ok(Resolved::Missing);
         }
-        self.commit(|entries| {
+        self.commit(false, |entries| {
             for held in entries.iter_mut().filter(|held| held.bundle == old.bundle) {
                 if let Some(class) = classes.iter().find(|class| class.class_id == held.class_id) {
                     held.name = class.name.clone();
@@ -543,23 +655,24 @@ impl PluginLibrary {
         )
     }
 
-    /// Removes a class. Nothing is written when the library does not hold it, so a damaged file stays as it is.
+    /// Removes a class. Nothing is written when the library does not hold it, and a damaged, newer or unreadable file is
+    /// never replaced here.
     pub fn remove(&mut self, class_id: &str) -> Result<Vec<LibraryEntry>, LibraryError> {
         if !self.entries.iter().any(|held| held.class_id == class_id) {
             return Ok(self.entries.clone());
         }
-        self.commit(|entries| {
+        self.commit(false, |entries| {
             entries.retain(|held| held.class_id != class_id);
             Ok(())
         })?;
         Ok(self.entries.clone())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use tabplayer_plugin_protocol::bundle::own_arch_dirs;
 
     fn class(id: char, name: &str) -> ClassInfo {
         ClassInfo {
@@ -721,43 +834,57 @@ mod tests {
         );
         assert_eq!(std::fs::read(&file).unwrap(), before);
         assert_eq!(library.entries().len(), MAX_ENTRIES);
-        // Re-adding a class that is already there replaces it and so fits.
-        let replaced = library.add(&extra, ok(vec![numbered(7)])).unwrap();
-        assert_eq!(replaced.len(), MAX_ENTRIES);
+        // The class IDs are known only after a scan, so a full library refuses a bundle it does not hold before it (the
+        // `a_full_library_is_refused_before_the_scan` test); here the cap is met after a scan by a bundle it does hold.
+        let pack = canon(&dir.path().join("Pack0.vst3"));
+        let more: Vec<ClassInfo> = (0..MAX_CLASSES).map(|n| numbered(10_000 + n)).collect();
+        let replaced = library.add(&pack, ok(more)).unwrap();
         assert_eq!(
-            replaced
-                .iter()
-                .filter(|e| e.class_id == numbered(7).class_id)
-                .count(),
-            1
+            replaced.len(),
+            MAX_ENTRIES,
+            "the bundle's classes were replaced"
         );
-        assert_eq!(
-            replaced
-                .iter()
-                .find(|e| e.class_id == numbered(7).class_id)
-                .unwrap()
-                .bundle,
-            canon(&extra),
-            "the class now comes from the new bundle"
-        );
-        // A library of the longest entries still fits the read cap.
-        let longest = LibraryEntry {
-            class_id: "F".repeat(32),
-            name: "\u{e9}".repeat(MAX_NAME_CHARS),
-            vendor: "\u{e9}".repeat(MAX_NAME_CHARS),
-            version: "9".repeat(MAX_VERSION_CHARS),
-            bundle: PathBuf::from(format!("C:\\{}", "\\".repeat(MAX_BUNDLE_PATH_CHARS - 3))),
-            module_len: u64::MAX,
-            module_modified: i64::MIN,
-        };
-        assert!(longest.is_valid());
-        let full = vec![longest; MAX_ENTRIES];
-        let bytes = serde_json::to_vec(&FileOut {
-            version: FORMAT_VERSION,
-            entries: &full,
-        })
-        .unwrap();
-        assert!(bytes.len() < MAX_FILE_BYTES, "{}", bytes.len());
+        let extra_classes = (0..=MAX_CLASSES - 1)
+            .map(|n| numbered(20_000 + n))
+            .chain(std::iter::once(numbered(30_000)))
+            .collect::<Vec<_>>();
+        assert_eq!(extra_classes.len(), MAX_CLASSES + 1);
+        // 65 classes in one scan are cut to 64, so a held bundle can never push the library past the cap.
+        let cut = library.add(&pack, ok(extra_classes)).unwrap();
+        assert_eq!(cut.len(), MAX_ENTRIES);
+        // A library of the longest entries still fits the read cap, whichever characters its paths are made of: a
+        // backslash costs 2 bytes in the file and a character outside the basic plane costs 4.
+        for filler in ['\\', '\u{1F600}'] {
+            let unit = json_len(&filler.to_string());
+            let mut path = String::from("C:\\");
+            while json_len(&path) + unit <= MAX_BUNDLE_JSON_BYTES - 6 {
+                path.push(filler);
+            }
+            path.push_str("a.vst3");
+            let longest = LibraryEntry {
+                class_id: "F".repeat(32),
+                name: "\u{1F600}".repeat(MAX_NAME_CHARS),
+                vendor: "\"".repeat(MAX_NAME_CHARS).replace('"', "\u{1F600}"),
+                version: "\u{1F600}".repeat(MAX_VERSION_CHARS),
+                bundle: PathBuf::from(path),
+                module_len: u64::MAX,
+                module_modified: i64::MIN,
+            };
+            assert!(longest.is_valid(), "{filler:?}");
+            assert!(json_len(longest.bundle.to_str().unwrap()) > MAX_BUNDLE_JSON_BYTES - 12);
+            let full = vec![longest; MAX_ENTRIES];
+            let bytes = serde_json::to_vec(&FileOut {
+                version: FORMAT_VERSION,
+                entries: &full,
+            })
+            .unwrap();
+            assert!(bytes.len() < MAX_FILE_BYTES, "{filler:?}: {}", bytes.len());
+        }
+        // One byte more than the cap is not a valid bundle path.
+        let mut too_long = String::from("C:\\");
+        too_long.push_str(&"\u{1F600}".repeat(MAX_BUNDLE_JSON_BYTES / 4));
+        assert!(!bundle_fits(Path::new(&too_long)));
+        assert!(bundle_fits(Path::new("C:\\Plugins\\Amp.vst3")));
     }
 
     #[test]
@@ -806,7 +933,26 @@ mod tests {
         bidi["name"] = "evil\u{202E}name".into();
         let mut lower = good('D');
         lower["classId"] = "d".repeat(32).into();
-        let file = serde_json::json!({"version": 1, "entries": [good('A'), relative, bidi, lower, good('A'), 7, {"classId": 1}, good('E')]});
+        let mut not_vst3 = good('F');
+        not_vst3["bundle"] = dir.path().join("payload.dll").to_str().unwrap().into();
+        let mut parent = good('G');
+        parent["bundle"] = dir
+            .path()
+            .join("a")
+            .join("..")
+            .join("x.vst3")
+            .to_str()
+            .unwrap()
+            .into();
+        let mut huge = good('H');
+        huge["bundle"] = dir
+            .path()
+            .join("\u{1F600}".repeat(MAX_BUNDLE_JSON_BYTES / 4))
+            .join("x.vst3")
+            .to_str()
+            .unwrap()
+            .into();
+        let file = serde_json::json!({"version": 1, "entries": [good('A'), relative, bidi, lower, good('A'), 7, {"classId": 1}, not_vst3, parent, huge, good('E')]});
         std::fs::write(data.join(LIBRARY_FILE), serde_json::to_vec(&file).unwrap()).unwrap();
         let ids: Vec<char> = PluginLibrary::open(&data)
             .entries()
@@ -1146,5 +1292,366 @@ mod tests {
         assert_eq!(simplify(unc.clone()), unc);
         let long = PathBuf::from(format!(r"\\?\C:\{}\A.vst3", "x".repeat(300)));
         assert_eq!(simplify(long.clone()), long);
+    }
+
+    #[test]
+    fn a_damaged_file_is_replaced_only_by_add_and_never_by_remove_or_reprobe() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let root = bundle(dir.path(), "Amp", b"first");
+        let module = root
+            .join("Contents")
+            .join(own_arch_dirs()[0])
+            .join("Amp.vst3");
+        let mut library = PluginLibrary::open(&data);
+        let entry = library
+            .add(&root, ok(vec![class('A', "Amp")]))
+            .unwrap()
+            .remove(0);
+        let file = data.join(LIBRARY_FILE);
+        // The file is damaged after the library was opened, so its in-memory list is stale.
+        std::fs::write(&file, b"{ not json").unwrap();
+        assert_eq!(
+            library.remove(&entry.class_id).unwrap_err(),
+            LibraryError::Damaged
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), b"{ not json");
+        std::fs::write(&module, b"second, longer").unwrap();
+        let scanned = Cell::new(false);
+        let error = library
+            .reprobe(&entry.class_id, |_| {
+                scanned.set(true);
+                Ok(vec![class('A', "Amp renamed")])
+            })
+            .unwrap_err();
+        assert_eq!(error, LibraryError::Damaged);
+        assert!(scanned.get(), "the scan ran, and its result was dropped");
+        assert_eq!(std::fs::read(&file).unwrap(), b"{ not json");
+        // An add starts a new library.
+        library
+            .add(&root, ok(vec![class('A', "Amp renamed")]))
+            .unwrap();
+        assert_eq!(PluginLibrary::open(&data).entries().len(), 1);
+    }
+
+    #[test]
+    fn a_library_made_by_a_newer_version_lists_nothing_and_is_never_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let file = data.join(LIBRARY_FILE);
+        let newer = br#"{"version":2,"entries":[{"somethingNew":true}],"extra":1}"#;
+        std::fs::write(&file, newer).unwrap();
+        let root = bundle(dir.path(), "Amp", b"x");
+        let mut library = PluginLibrary::open(&data);
+        assert!(library.entries().is_empty());
+        let scanned = Cell::new(false);
+        let error = library
+            .add(&root, |_| {
+                scanned.set(true);
+                Ok(vec![class('A', "Amp")])
+            })
+            .unwrap_err();
+        assert_eq!(error, LibraryError::NewerVersion);
+        assert!(!scanned.get(), "and nothing is scanned for it");
+        assert_eq!(std::fs::read(&file).unwrap(), newer);
+        assert!(library.remove(&"A".repeat(32)).unwrap().is_empty());
+        assert_eq!(std::fs::read(&file).unwrap(), newer);
+        // Version 0 is not a newer version: it is damaged.
+        assert_eq!(parse(br#"{"version":0,"entries":[]}"#), Stored::Damaged);
+        assert_eq!(parse(br#"{"version":1}"#), Stored::Damaged);
+        assert_eq!(parse(br#"{"version":9}"#), Stored::Newer);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_library_file_that_cannot_be_read_aborts_the_change() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_DELETE: u32 = 4;
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let root = bundle(dir.path(), "Amp", b"first");
+        let module = root
+            .join("Contents")
+            .join(own_arch_dirs()[0])
+            .join("Amp.vst3");
+        let other = bundle(dir.path(), "Other", b"x");
+        let mut library = PluginLibrary::open(&data);
+        library
+            .add(&root, ok(vec![class('A', "Amp"), class('B', "Amp 2")]))
+            .unwrap();
+        let file = data.join(LIBRARY_FILE);
+        let before = std::fs::read(&file).unwrap();
+        std::fs::write(&module, b"second, longer").unwrap();
+        // Another program holds the library without sharing it for reading.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_DELETE)
+            .open(&file)
+            .unwrap();
+        let scanned = Cell::new(false);
+        let added = library.add(&other, |_| {
+            scanned.set(true);
+            Ok(vec![class('C', "Other")])
+        });
+        assert!(matches!(added, Err(LibraryError::Io(_))), "{added:?}");
+        assert!(
+            !scanned.get(),
+            "an unreadable library is found before the scan"
+        );
+        let again = library.reprobe(&"A".repeat(32), ok(vec![class('A', "Amp renamed")]));
+        assert!(matches!(again, Err(LibraryError::Io(_))), "{again:?}");
+        let removed = library.remove(&"B".repeat(32));
+        assert!(matches!(removed, Err(LibraryError::Io(_))), "{removed:?}");
+        drop(held);
+        assert_eq!(std::fs::read(&file).unwrap(), before);
+        assert_eq!(
+            library.entries().len(),
+            2,
+            "the list in memory is unchanged"
+        );
+        assert_eq!(PluginLibrary::open(&data).entries().len(), 2);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_failed_rename_leaves_no_temporary_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let mut library = PluginLibrary::open(&data);
+        library
+            .add(
+                &bundle(dir.path(), "One", b"x"),
+                ok(vec![class('A', "One")]),
+            )
+            .unwrap();
+        let file = data.join(LIBRARY_FILE);
+        // Readable but not replaceable: the library is read, the new file is written, and then the rename fails.
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&file)
+            .unwrap();
+        let error = library
+            .add(
+                &bundle(dir.path(), "Two", b"x"),
+                ok(vec![class('B', "Two")]),
+            )
+            .unwrap_err();
+        assert!(matches!(error, LibraryError::Io(_)), "{error:?}");
+        drop(held);
+        let names: Vec<String> = std::fs::read_dir(&data)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, [LIBRARY_FILE], "no temporary file is left");
+        assert_eq!(PluginLibrary::open(&data).entries().len(), 1);
+    }
+
+    #[test]
+    fn temporary_files_of_the_library_are_recognised_and_only_those_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            ".library.json.aB3dE9",
+            ".library.json.000000",
+            ".library.json.toolong1",
+            ".library.json.abc",
+            ".other.json.abcdef",
+            "library.json.abcdef",
+            LIBRARY_FILE,
+        ] {
+            std::fs::write(dir.path().join(name), b"x").unwrap();
+        }
+        std::fs::create_dir(dir.path().join(".library.json.folder")).unwrap();
+        std::fs::create_dir(dir.path().join(".library.json.dirdir")).unwrap();
+        remove_temporaries(dir.path());
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                ".library.json.abc",
+                ".library.json.dirdir",
+                ".library.json.folder",
+                ".library.json.toolong1",
+                ".other.json.abcdef",
+                "library.json",
+                "library.json.abcdef",
+            ]
+        );
+        remove_temporaries(&dir.path().join("missing"));
+    }
+
+    #[test]
+    fn the_verbatim_prefix_is_stripped_only_when_every_part_is_safe() {
+        assert_eq!(
+            plain_drive_path(r"\\?\C:\Plug-ins\Amp.vst3"),
+            Some(r"C:\Plug-ins\Amp.vst3")
+        );
+        assert_eq!(
+            plain_drive_path(r"\\?\d:\Amp.vst3\Contents\x86_64-win\Amp.vst3"),
+            Some(r"d:\Amp.vst3\Contents\x86_64-win\Amp.vst3")
+        );
+        for kept in [
+            r"\\?\C:\evil.\Amp.vst3",
+            r"\\?\C:\evil \Amp.vst3",
+            r"\\?\C:\Amp.vst3.",
+            r"\\?\C:\CON\Amp.vst3",
+            r"\\?\C:\nul.txt\Amp.vst3",
+            r"\\?\C:\Com1\Amp.vst3",
+            r"\\?\C:\LPT\u{b9}\Amp.vst3"
+                .replace(r"\u{b9}", "\u{b9}")
+                .as_str(),
+            r"\\?\C:\a\\b\Amp.vst3",
+            r"\\?\C:\a\..\Amp.vst3",
+            r"\\?\C:\a\.\Amp.vst3",
+            r"\\?\C:\a<b\Amp.vst3",
+            r"\\?\C:\a:b\Amp.vst3",
+            r"\\?\C:\a|b\Amp.vst3",
+            r"\\?\C:\Amp.vst3\",
+            r"\\?\C:\",
+            r"\\?\C:",
+            r"\\?\UNC\host\share\Amp.vst3",
+            r"\\?\Volume{1234}\Amp.vst3",
+            r"C:\Plug-ins\Amp.vst3",
+        ] {
+            assert_eq!(plain_drive_path(kept), None, "{kept}");
+        }
+        // Names that only look like devices are fine.
+        assert!(plain_drive_path(r"\\?\C:\Console\COM10\Aux2\Amp.vst3").is_some());
+        // Long paths keep the prefix.
+        let long = format!(r"\\?\C:\{}\Amp.vst3", "x".repeat(250));
+        assert_eq!(plain_drive_path(&long), None);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn a_verbatim_path_with_a_trailing_dot_keeps_its_own_module() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        // `evil.` and `evil` are two folders to the verbatim APIs and one to everything else.
+        let verbatim = |parts: &[&str]| {
+            let mut path = PathBuf::from(format!(
+                r"\\?\{}",
+                base.display().to_string().trim_start_matches(r"\\?\")
+            ));
+            for part in parts {
+                path.push(part);
+            }
+            path
+        };
+        let dotted = verbatim(&["evil.", "Amp.vst3"]);
+        std::fs::create_dir_all(dotted.parent().unwrap()).unwrap();
+        std::fs::write(&dotted, b"six!!!").unwrap();
+        let plain = verbatim(&["evil"]);
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("Amp.vst3"), b"twenty-four bytes long").unwrap();
+        let located = locate(&dotted).unwrap();
+        assert!(
+            located.bundle.to_str().unwrap().starts_with(r"\\?\"),
+            "{:?}",
+            located.bundle
+        );
+        assert_eq!(stat(&located.module).unwrap().0, 6);
+        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let entries = library.add(&dotted, ok(vec![class('A', "Amp")])).unwrap();
+        assert_eq!(entries[0].module_len, 6);
+        assert_eq!(
+            library.resolve(&entries[0].class_id),
+            Resolved::Found(entries[0].clone())
+        );
+    }
+
+    #[test]
+    fn names_are_cleaned_by_the_rule_the_helper_uses() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = bundle(dir.path(), "Amp", b"x");
+        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let entries = library
+            .add(
+                &root,
+                ok(vec![
+                    ClassInfo {
+                        name: "Amp\u{a0}Sim\u{3000}Pro".into(),
+                        vendor: "Neural\u{a0}DSP".into(),
+                        ..class('A', "")
+                    },
+                    ClassInfo {
+                        name: "Neural\u{200b} DSP".into(),
+                        vendor: "Ne\u{ad}ural\u{2060}".into(),
+                        ..class('B', "")
+                    },
+                ]),
+            )
+            .unwrap();
+        assert_eq!(entries[0].name, "Amp\u{a0}Sim\u{3000}Pro");
+        assert_eq!(entries[0].vendor, "Neural\u{a0}DSP");
+        assert_eq!(entries[1].name, "Neural DSP");
+        assert_eq!(entries[1].vendor, "Neural");
+    }
+
+    #[test]
+    fn picking_another_file_in_a_bundle_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = bundle(dir.path(), "Amp", b"main module");
+        let inner = root.join("Contents").join(own_arch_dirs()[0]);
+        std::fs::write(inner.join("Other.vst3"), b"20 bytes of other....").unwrap();
+        let scanned = Cell::new(false);
+        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let error = library
+            .add(&inner.join("Other.vst3"), |_| {
+                scanned.set(true);
+                Ok(vec![class('A', "Amp")])
+            })
+            .unwrap_err();
+        assert_eq!(error, LibraryError::NotMainModule);
+        assert!(!scanned.get());
+        assert!(!dir.path().join("data").exists());
+        let entries = library
+            .add(&inner.join("Amp.vst3"), ok(vec![class('A', "Amp")]))
+            .unwrap();
+        assert_eq!(entries[0].module_len, 11, "the module that was picked");
+    }
+
+    #[test]
+    fn a_full_library_is_refused_before_the_scan() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let packs: Vec<PathBuf> = (0..4)
+            .map(|group| bundle(dir.path(), &format!("Pack{group}"), b"x"))
+            .collect();
+        for (group, root) in packs.iter().enumerate() {
+            let classes = (0..MAX_CLASSES)
+                .map(|n| numbered(group * MAX_CLASSES + n + 1))
+                .collect();
+            library.add(root, ok(classes)).unwrap();
+        }
+        let scanned = Cell::new(false);
+        let extra = bundle(dir.path(), "Extra", b"x");
+        let error = library
+            .add(&extra, |_| {
+                scanned.set(true);
+                Ok(vec![numbered(1000)])
+            })
+            .unwrap_err();
+        assert_eq!(error, LibraryError::TooMany);
+        assert!(
+            !scanned.get(),
+            "no plug-in code runs for a refusal that is known"
+        );
+        // A bundle the library already holds is scanned: its classes are replaced, not added to.
+        let rescanned = Cell::new(false);
+        library
+            .add(&packs[0], |_| {
+                rescanned.set(true);
+                Ok((0..MAX_CLASSES).map(|n| numbered(n + 1)).collect())
+            })
+            .unwrap();
+        assert!(rescanned.get());
     }
 }

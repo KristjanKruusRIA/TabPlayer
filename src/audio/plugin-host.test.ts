@@ -16,7 +16,7 @@ const entry: PluginLibraryEntry = {
   name: 'Amp',
   vendor: 'Vendor',
   version: '1.0',
-  bundle: 'C:\Plugins\Amp.vst3',
+  bundle: String.raw`C:\Plugins\Amp.vst3`,
   moduleLen: 10,
   moduleModified: 1_700_000_000_000,
 };
@@ -27,6 +27,7 @@ beforeEach(() => {
 });
 
 it('lists, adds and removes through the native commands', async () => {
+  expect(entry.bundle).toBe('C:' + String.fromCharCode(92) + 'Plugins' + String.fromCharCode(92) + 'Amp.vst3');
   answer = [entry];
   expect(await pluginLibrary.list()).toEqual([entry]);
   expect(await pluginLibrary.add()).toEqual([entry]);

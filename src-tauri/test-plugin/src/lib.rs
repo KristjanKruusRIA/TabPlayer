@@ -33,7 +33,9 @@
 //!
 //! The helper, the client and the end-to-end tests drive it through ordinary VST3 means only: four parameters
 //! (see [`PARAM_GAIN`] and its siblings), the component state ([`encode_test_state`]) and, on Windows, an editor.
-//! Seven environment variables, read inside the process that hosts the plug-in, add the rest:
+//! Nine environment variables, read inside the process that hosts the plug-in, add the rest:
+//! `TABPLAYER_TEST_PLUGIN_ANNOUNCE_ON_ACTIVE=1` makes `setActive(true)` announce a latency change whether or not there was
+//! one, `TABPLAYER_TEST_PLUGIN_ANNOUNCE_EVERY_BLOCK=1` makes every `process` call do the same (from the audio thread),
 //! `TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE=1` makes `getState` return `kResultOk` even when the host's stream refused
 //! a write,
 //! `TABPLAYER_TEST_PLUGIN_PRINT=1` makes it print to the console (Rust's and the C runtime's) when it loads and on every
@@ -121,6 +123,8 @@ pub const EDITOR_HEIGHT: i32 = 200;
 const ENV_HANG_FACTORY: &str = "TABPLAYER_TEST_PLUGIN_HANG_FACTORY";
 const ENV_PRINT: &str = "TABPLAYER_TEST_PLUGIN_PRINT";
 const ENV_IGNORE_WRITE_FAILURE: &str = "TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE";
+const ENV_ANNOUNCE_ON_ACTIVE: &str = "TABPLAYER_TEST_PLUGIN_ANNOUNCE_ON_ACTIVE";
+const ENV_ANNOUNCE_EVERY_BLOCK: &str = "TABPLAYER_TEST_PLUGIN_ANNOUNCE_EVERY_BLOCK";
 #[cfg_attr(not(windows), allow(dead_code))]
 const ENV_VIEW_MODAL_MS: &str = "TABPLAYER_TEST_PLUGIN_VIEW_MODAL_MS";
 const ENV_STATE_PADDING: &str = "TABPLAYER_TEST_PLUGIN_STATE_PADDING";
@@ -517,6 +521,8 @@ pub(crate) struct Shared {
     reported_latency: AtomicU32,
     /// The `processMode` of the last `setupProcessing` (0 realtime, 1 prefetch, 2 offline). The controller's state is this one byte.
     process_mode: AtomicU32,
+    /// How many times the host has activated the component (`setActive(true)`).
+    activations: AtomicU32,
 }
 
 impl Shared {
@@ -531,6 +537,7 @@ impl Shared {
             handler: Mutex::new(None),
             reported_latency: AtomicU32::new(0),
             process_mode: AtomicU32::new(0),
+            activations: AtomicU32::new(0),
         }
     }
 
@@ -561,6 +568,15 @@ impl Shared {
             .reported_latency
             .swap(latency.min(MAX_LATENCY), Ordering::Relaxed);
         if needs_latency_restart(told, latency) {
+            // SAFETY: the handler is a live host object that this plug-in holds a reference to.
+            unsafe { handler.restartComponent(RestartFlags_::kLatencyChanged) };
+        }
+    }
+
+    /// Announces a latency change whether or not there was one, as plug-ins do that work the latency out in their own
+    /// set-up or announce on every preset change. Only the two `TABPLAYER_TEST_PLUGIN_ANNOUNCE_*` switches call it.
+    fn announce_always(&self) {
+        if let Some(handler) = self.handler() {
             // SAFETY: the handler is a live host object that this plug-in holds a reference to.
             unsafe { handler.restartComponent(RestartFlags_::kLatencyChanged) };
         }
@@ -806,7 +822,14 @@ impl IComponentTrait for TestPlugin {
         kResultOk
     }
 
-    unsafe fn setActive(&self, _state: TBool) -> tresult {
+    unsafe fn setActive(&self, state: TBool) -> tresult {
+        if state != 0 {
+            self.shared.activations.fetch_add(1, Ordering::Relaxed);
+            static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            if *ON.get_or_init(|| std::env::var(ENV_ANNOUNCE_ON_ACTIVE).as_deref() == Ok("1")) {
+                self.shared.announce_always();
+            }
+        }
         kResultOk
     }
 
@@ -921,6 +944,12 @@ impl IAudioProcessorTrait for TestPlugin {
             return kInvalidArgument;
         }
         print_noise("process");
+        static EVERY_BLOCK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if *EVERY_BLOCK
+            .get_or_init(|| std::env::var(ENV_ANNOUNCE_EVERY_BLOCK).as_deref() == Ok("1"))
+        {
+            self.shared.announce_always();
+        }
         let process_data = &*data;
 
         // Take the last value of each parameter queue, then read the mode and latency they leave.
@@ -1025,11 +1054,14 @@ impl IEditControllerTrait for TestPlugin {
         kResultOk
     }
 
-    /// One byte: the process mode `setupProcessing` last saw, so a test can tell whether the host asked for offline
-    /// processing.
+    /// Five bytes, so a test can see what the host did: the process mode `setupProcessing` last saw (0 realtime, 1
+    /// prefetch, 2 offline), then how many times the component has been activated, as a little-endian `u32`.
     unsafe fn getState(&self, state: *mut IBStream) -> tresult {
         let mode = self.shared.process_mode.load(Ordering::Relaxed) as u8;
-        if write_stream(state, &[mode]) {
+        let activations = self.shared.activations.load(Ordering::Relaxed);
+        let mut bytes = vec![mode];
+        bytes.extend_from_slice(&activations.to_le_bytes());
+        if write_stream(state, &bytes) {
             kResultOk
         } else {
             kResultFalse

@@ -133,6 +133,9 @@ pub enum ErrorCode {
     Internal,
     /// This platform has no plug-in host (the stub helper builds on every platform and refuses every request).
     UnsupportedPlatform,
+    /// A request refused because the helper had no room for it (its main thread is busy inside the plug-in). Nothing was
+    /// done; asking again later is fine. Unlike `BadRequest`, it is not a bug in the sender.
+    Busy,
 }
 
 /// What the app sends. `Load` is the first message to an audio helper, `Probe` to a probing one.
@@ -574,6 +577,7 @@ mod tests {
             HelperMessage::Done,
             HelperMessage::error(ErrorCode::Unreadable, "it did not load"),
             HelperMessage::error(ErrorCode::UnsupportedPlatform, "no plug-in host here"),
+            HelperMessage::error(ErrorCode::Busy, "the helper is busy"),
         ]
     }
 

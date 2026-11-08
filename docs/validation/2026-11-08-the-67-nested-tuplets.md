@@ -44,7 +44,7 @@ Row N06 in the GP8 parity tracker (`docs/validation/2026-10-15-gp8-parity-progre
     - Rendered output: `[ 5, 5, 3 (bracketed), 5, 5 ]`. No outer bracket is drawn, and no outer grouping number encompasses the measure.
   - When compound ratios are used (Case 4: 15:8 eighths):
     - alphaTab lacks single-glyph symbols for ratios outside standard single-level tuplets; it formats the ratio into digit glyphs with a colon (`1`, `5`, `:`, `8`).
-    - Because 15:8 does not match the hardcoded ticks in `TupletGroup._allTicks`, `isFull` remains `false`.
+    - `isFull` remains `false`: for equal-length beats a group is full when its beat count reaches the tuplet numerator, and three 15:8 beats never reach 15.
     - alphaTab paints the full string `"15:8"` above every individual beat of the triplet, along with individual `"5"` marks on outer beats.
     - Neither outer brackets nor nested bracket tiers can be rendered by alphaTab.
 
@@ -53,7 +53,7 @@ Row N06 in the GP8 parity tracker (`docs/validation/2026-10-15-gp8-parity-progre
   - The GPIF XML structure (`score.gpif`) abstracts durations into `<Rhythms><Rhythm id="...">`.
   - A `<Rhythm>` element accepts `<NoteValue>`, `<AugmentationDot>`, and `<PrimaryTuplet num="..." den="..."/>`.
   - alphaTab's `GpifParser` reads only `<PrimaryTuplet>`; `GpifWriter` writes only `<PrimaryTuplet>`.
-  - Arobas Guitar Pro 8 itself does not support nested tuplets. While Arobas named the tag `<PrimaryTuplet>` in anticipation of future expansion, `<SecondaryTuplet>` was never introduced into the GPIF specification or GP8 runtime. Applying a tuplet to notes inside a tuplet in Guitar Pro 8 either replaces the tuplet ratio or is disallowed.
+  - Unverified: whether Guitar Pro 8 itself supports nested tuplets. alphaTab's GPIF reader knows only `<PrimaryTuplet>`, and no GP8 file or runtime was examined here, so this digest makes no claim about a `<SecondaryTuplet>` tag or GP8's own behaviour.
   - TabPlayer's GP export (`src/interchange/gp.ts`) wraps alphaTab's `Gp7Exporter` and produces valid GPIF `<PrimaryTuplet>` elements only. Any nested rhythm would export as broken, independent primary rhythms.
 - **Guitar Pro 5 (`.gp5`):**
   - The GP5 binary specification allocates a single 32-bit integer per beat for tuplet definitions (`1` for none, `3` for 3:2, `5` for 5:4, `6` for 6:4, `7` for 7:4, and `9`–`13` for n:8).
@@ -70,7 +70,7 @@ Row N06 in the GP8 parity tracker (`docs/validation/2026-10-15-gp8-parity-progre
 
 ### 3. TabPlayer Edit Types and Replay Safety
 - **Current Edit Shape:**
-  - Document history is managed by Rust (`src-tauri/src/edit_types.rs`) and replayed in TypeScript (`src/editor/notation.ts`, `src/editor/replay.ts`, `src/engine.ts`).
+  - Document history is managed by Rust (`src-tauri/src/edit_types.rs`) and replayed in TypeScript (`src/editor/notation.ts`, `src/engine.ts`).
   - Rhythm edits use `SetBeatRhythm`:
     ```rust
     SetBeatRhythm {
@@ -95,9 +95,9 @@ Row N06 in the GP8 parity tracker (`docs/validation/2026-10-15-gp8-parity-progre
 ### 4. Recommendation
 - **Recommendation:** Record row N06 as an **alphaTab upstream architectural limit** (and Guitar Pro format limit). Do not build product code or limited workarounds.
 - **Rationale:**
-  1. *Upstream Architectural Barrier:* alphaTab 1.8.4 does not support nested tuplets in its data model (`Beat`/`TupletGroup`), rendering engine (`_paintTupletHelper`), or importer/exporter suites. Overcoming this would require deep, intrusive patches or forks of alphaTab, violating the core rule against monkey-patching or altering third-party dependencies (`CLAUDE.md`).
+  1. *Upstream Architectural Barrier:* alphaTab 1.8.4 does not support nested tuplets in its data model (`Beat`/`TupletGroup`), rendering engine (`_paintTupletHelper`), or importer/exporter suites. Overcoming this would require deep, intrusive patches to alphaTab's model, renderer and readers, well beyond the thin wrappers TabPlayer already keeps (such as `withPlainTrills` in `src/interchange/gp.ts`).
   2. *Severe Engraving Degradation:* A "limited form" (such as compound ratios for playback) produces unusable visual output: alphaTab prints raw fraction strings like `15:8` on every note, omits outer brackets, and stamps fragmented numbers across the measure. In an application where a comfortable, high-clarity practice UI is the primary goal (`PRODUCT.md`), broken notation is unacceptable.
-  3. *Absence in Ecosystem:* Neither Guitar Pro 5, 7, nor 8 supports nested tuplets. GP8 files contain no schema for secondary tuplets, and GP5 files reject them at the binary level.
+  3. *Absence in Ecosystem:* GP5 cannot store nested tuplets (TabPlayer's `gp5.ts` refuses unsupported tuplets), and alphaTab's GPIF reader for GP7/8 has no representation for them; whether GP8 itself can author them is unverified.
   4. *Target Audience:* TabPlayer is built for guitar and bass players practicing and learning songs (`PRODUCT.md`). Nested tuplets (complex nested polyrhythms) belong almost exclusively to avant-garde contemporary classical scores and are essentially absent in guitar/bass tablature literature.
   5. *Tracker Integrity:* Marking N06 as an upstream engine limitation maintains total transparency in the GP8 parity tracker without accumulating fragile technical debt.
 
@@ -120,7 +120,7 @@ Row N06 in the GP8 parity tracker (`docs/validation/2026-10-15-gp8-parity-progre
      - Group 1 and Group 3 stamped bare `"5"` digits over each individual beat without brackets; Group 2 drew a bracket with `"3"`. No outer quintuplet bracket was rendered.
   4. *Case 4 (SVG Rendering of Case 2 compound 15:8):*
      - Rendered with `ScoreRenderer`.
-     - Because 15:8 does not match standard ticks in `TupletGroup._allTicks`, `isFull` remained `false`.
+     - `isFull` remained `false`, since three beats never reach the numerator 15.
      - Rendered glyph numbers: `[ 5, 5, 1, 5, ':', 8, 1, 5, ':', 8, 1, 5, ':', 8, 5, 5 ]`.
      - The literal string `"15:8"` was rendered over every single triplet note. Engraving was unusable.
   5. The scratch test file passed 4 of 4 assertions before removal and was deleted cleanly prior to commit (`git status` clean).
@@ -147,5 +147,5 @@ Independent technical review verifies the four core topics:
 
 - **No product code changes:** In accordance with Task 5 instructions, no product code was modified or committed; this delivery consists solely of this architectural digest.
 - **Desktop driver port 9223:** Desktop test drivers were not run, as they require port 9223 and live WebView2 execution, which are reserved for merge verification.
-- **Absence of proprietary GP8 binaries:** Findings regarding Guitar Pro 8's runtime handling of nested tuplets are derived from Arobas GPIF format documentation, reverse-engineering notes in `docs/research/`, and alphaTab's GPIF parser rather than live binary instrumentation of Guitar Pro 8.1.5.
+- **Absence of proprietary GP8 binaries:** Findings regarding Guitar Pro 8's runtime handling of nested tuplets are derived from Arobas GPIF format documentation, and alphaTab's GPIF parser (no note in `docs/research/` covers tuplets) rather than live binary instrumentation of Guitar Pro 8.1.5.
 - **Worktree fixture limit:** Worktrees do not contain `.analysis/compatibility/` fixtures; all test verification was performed using authored score models in the scratch Vitest harness.

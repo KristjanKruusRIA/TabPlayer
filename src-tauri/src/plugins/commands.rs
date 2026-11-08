@@ -238,7 +238,7 @@ pub async fn plugin_retry(
     track_id: String,
 ) -> Result<(), String> {
     let service = app.state::<Arc<PluginService>>();
-    service.retry(&document_id, &track_id);
+    service.retry(&document_id, &track_id)?;
     Ok(())
 }
 

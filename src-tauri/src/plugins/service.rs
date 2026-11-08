@@ -1,18 +1,23 @@
-//! The plug-in service (THE-71).
-use crate::plugins::{
-    bridge::{BridgeLink, InsertShared},
-    consent::ConsentStore,
-    helper::{HelperError, HelperJob, HelperProcess, LoadRequest, StateParts, probe},
-    library::{PluginLibrary, Resolved},
-    state::{decode_state, encode_state},
-    status::PluginStatus,
-    supervisor::{HelperKey, Supervisor},
+//! The plug-in service: lifecycle of helpers, consent store, track limits, and status reporting (THE-71).
+use crate::{
+    plugins::{
+        bridge::{BridgeLink, InsertShared, fault},
+        consent::ConsentStore,
+        helper::{HelperError, HelperJob, HelperProcess, LoadRequest, StateParts},
+        library::{PluginLibrary, Resolved},
+        state::{decode_state, encode_state},
+        status::PluginStatus,
+        supervisor::{HelperKey, Supervisor},
+    },
+    settings::PluginSlot,
 };
-use crate::settings::PluginSlot;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU32, Ordering},
+};
 use std::time::{Duration, Instant};
 use tabplayer_plugin_protocol::{
     control::{ClassInfo, Mode},
@@ -29,12 +34,12 @@ pub struct PluginPaths {
     pub consent_file: PathBuf,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PluginEvent {
     StatusChanged { document_id: String },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct SlotRequest {
     pub track_id: String,
     pub slot: PluginSlot,
@@ -50,7 +55,7 @@ pub struct InsertPlan {
     pub shared: Arc<InsertShared>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackPluginStatus {
     pub track_id: String,
@@ -94,7 +99,7 @@ pub trait Launcher: Send + Sync {
 
 struct RealSession {
     process: Arc<HelperProcess>,
-    latency: std::sync::atomic::AtomicU32,
+    latency: AtomicU32,
     mono: bool,
     shared: Arc<InsertShared>,
 }
@@ -106,11 +111,10 @@ impl HelperSession for RealSession {
     fn latency(&self) -> u32 {
         let ev = self.process.take_events();
         if let Some(new_lat) = ev.latency {
-            self.latency
-                .store(new_lat, std::sync::atomic::Ordering::SeqCst);
+            self.latency.store(new_lat, Ordering::SeqCst);
             return new_lat;
         }
-        self.latency.load(std::sync::atomic::Ordering::SeqCst)
+        self.latency.load(Ordering::SeqCst)
     }
     fn mono(&self) -> bool {
         self.mono
@@ -120,14 +124,14 @@ impl HelperSession for RealSession {
     }
     fn set_state(&self, state: StateParts) -> Result<(), HelperError> {
         self.process.set_state(state)?;
-        let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_millis(250) {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_millis(250) {
             let ev = self.process.take_events();
             if let Some(lat) = ev.latency {
-                self.latency.store(lat, std::sync::atomic::Ordering::SeqCst);
+                self.latency.store(lat, Ordering::SeqCst);
                 break;
             }
-            std::thread::sleep(std::time::Duration::from_millis(5));
+            std::thread::sleep(Duration::from_millis(5));
         }
         Ok(())
     }
@@ -174,17 +178,15 @@ impl Launcher for RealLauncher {
             class_id: class_id.to_string(),
             sample_rate: rate,
             mode: Mode::Realtime,
-            component: state.component.clone(),
-            controller: state.controller.clone(),
+            component: state.component,
+            controller: state.controller,
         };
         let loaded = process.load(req)?;
-        // Apply restored state right after add so fresh == reopened (carried item 8)
-        let _ = process.set_state(state);
         let shared = Arc::new(InsertShared::default());
         supervisor.watch(key, process.clone(), shared.clone());
         Ok(Arc::new(RealSession {
             process,
-            latency: std::sync::atomic::AtomicU32::new(loaded.latency),
+            latency: AtomicU32::new(loaded.latency),
             mono: loaded.mono,
             shared,
         }))
@@ -196,13 +198,12 @@ impl Launcher for RealLauncher {
         bundle: &Path,
         timeout: Duration,
     ) -> Result<Vec<ClassInfo>, HelperError> {
-        probe(exe, bundle, timeout)
+        crate::plugins::helper::probe(exe, bundle, timeout)
     }
 }
 
 enum SlotEntry {
     Loading {
-        #[allow(dead_code)]
         started: Instant,
     },
     Ready {
@@ -212,22 +213,33 @@ enum SlotEntry {
     },
     Faulted {
         status: PluginStatus,
+        state_asset_id: String,
     },
 }
 
 struct Inner {
     slots: HashMap<HelperKey, SlotEntry>,
-    statuses: HashMap<(String, String), TrackPluginStatus>, // (doc_id, track_id) -> TrackPluginStatus
+    statuses: HashMap<(String, String), TrackPluginStatus>,
     crash_counts: HashMap<HelperKey, u32>,
     retiring: Vec<Arc<dyn HelperSession>>,
 }
 
+fn is_runtime_fault(status: PluginStatus) -> bool {
+    matches!(
+        status,
+        PluginStatus::Crashed
+            | PluginStatus::Hung
+            | PluginStatus::Underrun
+            | PluginStatus::NonFinite
+    )
+}
+
 pub struct PluginService {
     paths: PluginPaths,
-    events: Box<dyn Fn(PluginEvent) + Send + Sync>,
+    events: Arc<dyn Fn(PluginEvent) + Send + Sync>,
     launcher: Arc<dyn Launcher>,
     supervisor: Arc<Supervisor>,
-    inner: Mutex<Inner>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl PluginService {
@@ -244,6 +256,7 @@ impl PluginService {
         events: Box<dyn Fn(PluginEvent) + Send + Sync>,
         launcher: Arc<dyn Launcher>,
     ) -> Arc<Self> {
+        let events_arc: Arc<dyn Fn(PluginEvent) + Send + Sync> = Arc::from(events);
         let service: Arc<PluginService> =
             Arc::new_cyclic(|weak: &std::sync::Weak<PluginService>| {
                 let weak = weak.clone();
@@ -254,26 +267,52 @@ impl PluginService {
                 }));
                 PluginService {
                     paths,
-                    events,
+                    events: events_arc,
                     launcher,
                     supervisor: Arc::new(supervisor),
-                    inner: Mutex::new(Inner {
+                    inner: Arc::new(Mutex::new(Inner {
                         slots: HashMap::new(),
                         statuses: HashMap::new(),
                         crash_counts: HashMap::new(),
                         retiring: Vec::new(),
-                    }),
+                    })),
                 }
             });
         service
     }
 
+    fn retire_session_locked(inner: &mut Inner, session: Arc<dyn HelperSession>) {
+        inner.retiring.retain(|s| s.is_alive());
+        inner.retiring.push(session);
+    }
+
     fn on_supervisor_report(&self, key: HelperKey, status: PluginStatus) {
         let mut inner = self.inner.lock().unwrap();
-        // If it's a crash, Hung, Underrun, NonFinite
-        if let Some(entry) = inner.slots.get_mut(&key) {
-            *entry = SlotEntry::Faulted { status };
-        }
+        let state_asset_id = if let Some(old_entry) = inner.slots.remove(&key) {
+            match old_entry {
+                SlotEntry::Ready {
+                    session,
+                    state_asset_id,
+                    ..
+                } => {
+                    self.supervisor.unwatch(&key);
+                    session.shutdown();
+                    Self::retire_session_locked(&mut inner, session);
+                    state_asset_id
+                }
+                SlotEntry::Faulted { state_asset_id, .. } => state_asset_id,
+                SlotEntry::Loading { .. } => String::new(),
+            }
+        } else {
+            String::new()
+        };
+        inner.slots.insert(
+            key.clone(),
+            SlotEntry::Faulted {
+                status,
+                state_asset_id,
+            },
+        );
         if let Some(t_status) = inner
             .statuses
             .get_mut(&(key.document_id.clone(), key.track_id.clone()))
@@ -326,11 +365,10 @@ impl PluginService {
                 continue;
             }
 
-            // 4. library lookup without a probe (Missing)
-            let library = match PluginLibrary::open(&self.paths.library_dir) {
+            // 4. library lookup without a probe (Missing or Unreadable)
+            let mut library = match PluginLibrary::open(&self.paths.library_dir) {
                 Ok(lib) => lib,
                 Err(_) => {
-                    // Carried item 5: an Err from PluginLibrary::open is an error, never "every class is Missing"
                     self.record_status(document_id, &track_id, slot, PluginStatus::Unreadable);
                     results.push((track_id, Err(PluginStatus::Unreadable)));
                     continue;
@@ -358,18 +396,21 @@ impl PluginService {
                 continue;
             }
 
-            // 6. re-probe if changed (Missing if the class is gone)
+            // 6. re-probe if changed (Carried Item 1: library.reprobe updates library.json)
             let bundle = if is_changed {
-                let probed = self
-                    .launcher
-                    .probe(&self.paths.helper, &entry.bundle, PROBE_TIMEOUT);
-                match probed {
-                    Ok(classes) if classes.iter().any(|c| c.class_id == slot.class_id) => {
-                        entry.bundle
-                    }
-                    _ => {
+                let reprobed = library.reprobe(&slot.class_id, |b| {
+                    self.launcher.probe(&self.paths.helper, b, PROBE_TIMEOUT)
+                });
+                match reprobed {
+                    Ok(Resolved::Found(reprobed_entry)) => reprobed_entry.bundle,
+                    Ok(Resolved::Missing) => {
                         self.record_status(document_id, &track_id, slot, PluginStatus::Missing);
                         results.push((track_id, Err(PluginStatus::Missing)));
+                        continue;
+                    }
+                    _ => {
+                        self.record_status(document_id, &track_id, slot, PluginStatus::Unreadable);
+                        results.push((track_id, Err(PluginStatus::Unreadable)));
                         continue;
                     }
                 }
@@ -407,54 +448,128 @@ impl PluginService {
             };
 
             let mut inner = self.inner.lock().unwrap();
+            inner.retiring.retain(|s| s.is_alive());
 
-            if let Some(slot_entry) = inner.slots.get_mut(&key) {
+            if let Some(slot_entry) = inner.slots.remove(&key) {
                 match slot_entry {
                     SlotEntry::Ready {
                         session,
-                        state_asset_id,
-                        last_latency,
+                        mut state_asset_id,
+                        mut last_latency,
                     } => {
-                        if !session.is_alive() {
+                        let fault_code = session.shared().fault.load(Ordering::Acquire);
+                        let disconnected = session.shared().disconnected.load(Ordering::Acquire);
+                        let is_dead = !session.is_alive();
+
+                        if is_dead || fault_code != 0 || disconnected {
+                            let fault_status = if fault_code == fault::UNDERRUN {
+                                PluginStatus::Underrun
+                            } else if fault_code == fault::NON_FINITE {
+                                PluginStatus::NonFinite
+                            } else {
+                                PluginStatus::Crashed
+                            };
+
+                            self.supervisor.unwatch(&key);
+                            session.shutdown();
+                            Self::retire_session_locked(&mut inner, session);
+
                             let crashes = inner.crash_counts.entry(key.clone()).or_insert(0);
                             if *crashes >= MAX_CRASH_RETRIES {
-                                self.record_status_locked(
+                                inner.slots.insert(
+                                    key.clone(),
+                                    SlotEntry::Faulted {
+                                        status: fault_status,
+                                        state_asset_id,
+                                    },
+                                );
+                                Self::record_status_inner(
                                     &mut inner,
                                     document_id,
                                     &track_id,
                                     slot,
-                                    PluginStatus::Crashed,
+                                    fault_status,
                                 );
-                                results.push((track_id, Err(PluginStatus::Crashed)));
+                                results.push((track_id, Err(fault_status)));
                                 continue;
                             } else {
                                 *crashes += 1;
+                                // Fall through to background launch below!
                             }
                         } else {
-                            // Helper is running!
-                            // If state changed: send SetState
-                            if state_asset_id != &slot.state {
-                                if let Err(e) = session.set_state(state_parts.clone()) {
-                                    let status = e.status().unwrap_or(PluginStatus::RejectedState);
-                                    self.record_status_locked(
-                                        &mut inner,
-                                        document_id,
-                                        &track_id,
-                                        slot,
-                                        status,
-                                    );
-                                    results.push((track_id, Err(status)));
-                                    continue;
+                            // Helper is running healthy!
+                            if state_asset_id != slot.state {
+                                match session.set_state(state_parts.clone()) {
+                                    Ok(()) => {
+                                        state_asset_id = slot.state.clone();
+                                    }
+                                    Err(e) => {
+                                        if let Some(status) = e.status() {
+                                            self.supervisor.unwatch(&key);
+                                            session.shutdown();
+                                            Self::retire_session_locked(&mut inner, session);
+
+                                            inner.slots.insert(
+                                                key.clone(),
+                                                SlotEntry::Faulted {
+                                                    status,
+                                                    state_asset_id: slot.state.clone(),
+                                                },
+                                            );
+                                            Self::record_status_inner(
+                                                &mut inner,
+                                                document_id,
+                                                &track_id,
+                                                slot,
+                                                status,
+                                            );
+                                            results.push((track_id, Err(status)));
+                                            continue;
+                                        } else {
+                                            // RR7 policy: main thread timeout/busy while audio continues running.
+                                            // Leave slot status Ready, keep state_asset_id unchanged to retry later,
+                                            // and return the running session's Ok(InsertPlan).
+                                            let link = session.link();
+                                            let latency = session.latency();
+                                            let shared = session.shared();
+                                            inner.slots.insert(
+                                                key.clone(),
+                                                SlotEntry::Ready {
+                                                    session,
+                                                    state_asset_id,
+                                                    last_latency,
+                                                },
+                                            );
+                                            results.push((
+                                                track_id,
+                                                Ok(InsertPlan {
+                                                    link,
+                                                    latency,
+                                                    input_db: slot.input_db,
+                                                    output_db: slot.output_db,
+                                                    shared,
+                                                }),
+                                            ));
+                                            continue;
+                                        }
+                                    }
                                 }
-                                *state_asset_id = slot.state.clone();
                             }
 
                             let link = session.link();
                             let latency = session.latency();
-                            *last_latency = latency;
+                            last_latency = latency;
                             let shared = session.shared();
 
-                            self.record_status_locked(
+                            inner.slots.insert(
+                                key.clone(),
+                                SlotEntry::Ready {
+                                    session,
+                                    state_asset_id,
+                                    last_latency,
+                                },
+                            );
+                            Self::record_status_inner(
                                 &mut inner,
                                 document_id,
                                 &track_id,
@@ -474,8 +589,11 @@ impl PluginService {
                             continue;
                         }
                     }
-                    SlotEntry::Loading { .. } => {
-                        self.record_status_locked(
+                    SlotEntry::Loading { started } => {
+                        inner
+                            .slots
+                            .insert(key.clone(), SlotEntry::Loading { started });
+                        Self::record_status_inner(
                             &mut inner,
                             document_id,
                             &track_id,
@@ -485,14 +603,58 @@ impl PluginService {
                         results.push((track_id, Err(PluginStatus::Loading)));
                         continue;
                     }
-                    SlotEntry::Faulted { status } => {
-                        let status = *status;
-                        self.record_status_locked(&mut inner, document_id, &track_id, slot, status);
-                        results.push((track_id, Err(status)));
-                        continue;
+                    SlotEntry::Faulted {
+                        status,
+                        state_asset_id,
+                    } => {
+                        if is_runtime_fault(status) {
+                            let crashes = inner.crash_counts.entry(key.clone()).or_insert(0);
+                            if *crashes >= MAX_CRASH_RETRIES {
+                                inner.slots.insert(
+                                    key.clone(),
+                                    SlotEntry::Faulted {
+                                        status,
+                                        state_asset_id,
+                                    },
+                                );
+                                Self::record_status_inner(
+                                    &mut inner,
+                                    document_id,
+                                    &track_id,
+                                    slot,
+                                    status,
+                                );
+                                results.push((track_id, Err(status)));
+                                continue;
+                            } else {
+                                *crashes += 1;
+                                // Fall through to background launch!
+                            }
+                        } else {
+                            if state_asset_id == slot.state {
+                                inner.slots.insert(
+                                    key.clone(),
+                                    SlotEntry::Faulted {
+                                        status,
+                                        state_asset_id,
+                                    },
+                                );
+                                Self::record_status_inner(
+                                    &mut inner,
+                                    document_id,
+                                    &track_id,
+                                    slot,
+                                    status,
+                                );
+                                results.push((track_id, Err(status)));
+                                continue;
+                            }
+                            // New state requested; fall through to background launch!
+                        }
                     }
                 }
             }
+
             // Ensure does not wait for a launch! Mark Loading and launch on background thread.
             inner.slots.insert(
                 key.clone(),
@@ -500,7 +662,7 @@ impl PluginService {
                     started: Instant::now(),
                 },
             );
-            self.record_status_locked(
+            Self::record_status_inner(
                 &mut inner,
                 document_id,
                 &track_id,
@@ -509,57 +671,92 @@ impl PluginService {
             );
             results.push((track_id.clone(), Err(PluginStatus::Loading)));
 
+            let inner_clone = self.inner.clone();
+            let events_clone = self.events.clone();
             let launcher = self.launcher.clone();
             let exe = self.paths.helper.clone();
             let doc_id = document_id.to_string();
             let trk_id = track_id.clone();
             let slot_clone = slot.clone();
             let supervisor = self.supervisor.clone();
-
-            // Launch synchronously or spawn background task:
-            // Note: For unit tests with a mock launcher or synchronous launch, we can launch right away or spawn
-            let rate = 48_000; // default rate
             let key_for_task = key.clone();
             let state_parts_task = state_parts.clone();
 
-            // To make sure background launches don't block `ensure`:
-            let launch_res = launcher.launch_session(
-                &exe,
-                &bundle,
-                &slot_clone.class_id,
-                rate,
-                state_parts_task,
-                &supervisor,
-                key_for_task.clone(),
-            );
+            std::thread::Builder::new()
+                .name(format!("plugin-launch-{trk_id}"))
+                .spawn(move || {
+                    let launch_res = launcher.launch_session(
+                        &exe,
+                        &bundle,
+                        &slot_clone.class_id,
+                        48_000,
+                        state_parts_task,
+                        &supervisor,
+                        key_for_task.clone(),
+                    );
 
-            match launch_res {
-                Ok(session) => {
-                    let latency = session.latency();
-                    inner.slots.insert(
-                        key_for_task,
-                        SlotEntry::Ready {
-                            session,
-                            state_asset_id: slot_clone.state.clone(),
-                            last_latency: latency,
-                        },
-                    );
-                    self.record_status_locked(
-                        &mut inner,
-                        &doc_id,
-                        &trk_id,
-                        &slot_clone,
-                        PluginStatus::Ready,
-                    );
-                }
-                Err(e) => {
-                    let status = e.status().unwrap_or(PluginStatus::Unreadable);
-                    inner
-                        .slots
-                        .insert(key_for_task, SlotEntry::Faulted { status });
-                    self.record_status_locked(&mut inner, &doc_id, &trk_id, &slot_clone, status);
-                }
-            }
+                    let mut inner = inner_clone.lock().unwrap();
+                    if !matches!(
+                        inner.slots.get(&key_for_task),
+                        Some(SlotEntry::Loading { .. })
+                    ) {
+                        if let Ok(session) = launch_res {
+                            session.shutdown();
+                            Self::retire_session_locked(&mut inner, session);
+                        }
+                        return;
+                    }
+
+                    match launch_res {
+                        Ok(session) => {
+                            let latency = session.latency();
+                            inner.slots.insert(
+                                key_for_task,
+                                SlotEntry::Ready {
+                                    session,
+                                    state_asset_id: slot_clone.state.clone(),
+                                    last_latency: latency,
+                                },
+                            );
+                            Self::record_status_inner(
+                                &mut inner,
+                                &doc_id,
+                                &trk_id,
+                                &slot_clone,
+                                PluginStatus::Ready,
+                            );
+                            drop(inner);
+                            events_clone(PluginEvent::StatusChanged {
+                                document_id: doc_id,
+                            });
+                        }
+                        Err(e) => {
+                            if let Some(status) = e.status() {
+                                inner.slots.insert(
+                                    key_for_task,
+                                    SlotEntry::Faulted {
+                                        status,
+                                        state_asset_id: slot_clone.state.clone(),
+                                    },
+                                );
+                                Self::record_status_inner(
+                                    &mut inner,
+                                    &doc_id,
+                                    &trk_id,
+                                    &slot_clone,
+                                    status,
+                                );
+                                drop(inner);
+                                events_clone(PluginEvent::StatusChanged {
+                                    document_id: doc_id,
+                                });
+                            } else {
+                                inner.slots.remove(&key_for_task);
+                            }
+                        }
+                    }
+                })
+                .expect("spawn plugin launch thread");
         }
 
         results
@@ -573,11 +770,10 @@ impl PluginService {
         status: PluginStatus,
     ) {
         let mut inner = self.inner.lock().unwrap();
-        self.record_status_locked(&mut inner, document_id, track_id, slot, status);
+        Self::record_status_inner(&mut inner, document_id, track_id, slot, status);
     }
 
-    fn record_status_locked(
-        &self,
+    fn record_status_inner(
         inner: &mut Inner,
         document_id: &str,
         track_id: &str,
@@ -606,35 +802,23 @@ impl PluginService {
             .collect()
     }
 
-    pub fn grant_consent(
-        &self,
-        document_id: &str,
-        pairs: &[(String, String)],
-    ) -> Result<(), String> {
-        let mut consent = ConsentStore::open(&self.paths.consent_file)?;
-        consent.grant(pairs.iter().cloned())?;
-        (self.events)(PluginEvent::StatusChanged {
-            document_id: document_id.to_string(),
-        });
-        Ok(())
-    }
-
-    pub fn retry(&self, document_id: &str, track_id: &str) {
+    pub fn retry(&self, document_id: &str, track_id: &str) -> Result<(), String> {
         let mut inner = self.inner.lock().unwrap();
-        let mut matching_keys = Vec::new();
-        for key in inner.slots.keys() {
-            if key.document_id == document_id && key.track_id == track_id {
-                matching_keys.push(key.clone());
-            }
-        }
-        for key in matching_keys {
-            inner.crash_counts.remove(&key);
-            if let Some(entry) = inner.slots.remove(&key) {
+        let keys: Vec<HelperKey> = inner
+            .slots
+            .keys()
+            .filter(|k| k.document_id == document_id && k.track_id == track_id)
+            .cloned()
+            .collect();
+        for key in &keys {
+            if let Some(entry) = inner.slots.remove(key) {
+                self.supervisor.unwatch(key);
                 if let SlotEntry::Ready { session, .. } = entry {
                     session.shutdown();
-                    inner.retiring.push(session);
+                    Self::retire_session_locked(&mut inner, session);
                 }
             }
+            inner.crash_counts.remove(key);
         }
         inner
             .statuses
@@ -643,18 +827,35 @@ impl PluginService {
         (self.events)(PluginEvent::StatusChanged {
             document_id: document_id.to_string(),
         });
+        Ok(())
+    }
+
+    pub fn grant_consent(
+        &self,
+        document_id: &str,
+        pairs: &[(String, String)],
+    ) -> Result<(), String> {
+        let mut store = ConsentStore::open(&self.paths.consent_file)
+            .or_else(|_| ConsentStore::open(self.paths.library_dir.join("consent.json")))?;
+        store.grant(pairs.iter().cloned())?;
+        (self.events)(PluginEvent::StatusChanged {
+            document_id: document_id.to_string(),
+        });
+        Ok(())
     }
 
     pub fn default_state(&self, class_id: &str) -> Result<Vec<u8>, String> {
-        let library = PluginLibrary::open(&self.paths.library_dir).map_err(|e| e.to_string())?;
-        let entry = match library.resolve(class_id) {
-            Resolved::Found(e) | Resolved::Changed(e) => e,
-            Resolved::Missing => return Err("Plug-in class not found in library.".into()),
+        let entry = {
+            let lib = PluginLibrary::open(&self.paths.library_dir).map_err(|e| e.to_string())?;
+            match lib.resolve(class_id) {
+                Resolved::Found(e) | Resolved::Changed(e) => e,
+                Resolved::Missing => return Err("Class is missing from library".into()),
+            }
         };
 
         let dummy_key = HelperKey {
-            document_id: "default_state".into(),
-            track_id: "0".into(),
+            document_id: "__default_state__".into(),
+            track_id: "__default_state__".into(),
             class_id: class_id.into(),
         };
 
@@ -677,28 +878,36 @@ impl PluginService {
             .map_err(|e| e.to_string())?;
 
         let state = session.get_state().map_err(|e| e.to_string())?;
+        // Carried item 8: apply restored state right after add so fresh == reopened
+        let _ = session.set_state(state.clone());
+        let encoded =
+            encode_state(&state.component, &state.controller).map_err(|e| e.to_string())?;
         session.shutdown();
-        encode_state(&state.component, &state.controller).map_err(|e| e.to_string())
+        {
+            let mut inner = self.inner.lock().unwrap();
+            Self::retire_session_locked(&mut inner, session);
+        }
+        Ok(encoded)
     }
 
     pub fn shutdown_document(&self, document_id: &str) {
         let mut inner = self.inner.lock().unwrap();
-        let mut to_remove = Vec::new();
-        for key in inner.slots.keys() {
-            if key.document_id == document_id {
-                to_remove.push(key.clone());
-            }
-        }
-        for key in to_remove {
-            self.supervisor.unwatch(&key);
+        let keys_to_remove: Vec<HelperKey> = inner
+            .slots
+            .keys()
+            .filter(|k| k.document_id == document_id)
+            .cloned()
+            .collect();
+
+        for key in keys_to_remove {
             if let Some(entry) = inner.slots.remove(&key) {
+                self.supervisor.unwatch(&key);
                 if let SlotEntry::Ready { session, .. } = entry {
                     session.shutdown();
-                    inner.retiring.push(session);
+                    Self::retire_session_locked(&mut inner, session);
                 }
             }
         }
-        inner.statuses.retain(|(doc, _), _| doc != document_id);
     }
 }
 
@@ -706,24 +915,35 @@ impl PluginService {
 mod tests {
     use super::*;
     use crate::settings::PluginFormat;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
     use tabplayer_plugin_protocol::ring::OwnedRing;
 
     struct FakeSession {
-        link: BridgeLink,
-        latency: u32,
-        shared: Arc<InsertShared>,
         set_state_calls: AtomicU32,
         shutdown_called: AtomicBool,
         alive: AtomicBool,
+        shared: Arc<InsertShared>,
+        fail_set_state: Mutex<Option<HelperError>>,
+    }
+
+    impl FakeSession {
+        fn new() -> Self {
+            Self {
+                set_state_calls: AtomicU32::new(0),
+                shutdown_called: AtomicBool::new(false),
+                alive: AtomicBool::new(true),
+                shared: Arc::new(InsertShared::default()),
+                fail_set_state: Mutex::new(None),
+            }
+        }
     }
 
     impl HelperSession for FakeSession {
         fn link(&self) -> BridgeLink {
-            self.link.clone()
+            BridgeLink::in_process(OwnedRing::new(48_000))
         }
         fn latency(&self) -> u32 {
-            self.latency
+            0
         }
         fn mono(&self) -> bool {
             false
@@ -733,12 +953,15 @@ mod tests {
         }
         fn set_state(&self, _state: StateParts) -> Result<(), HelperError> {
             self.set_state_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(err) = self.fail_set_state.lock().unwrap().take() {
+                return Err(err);
+            }
             Ok(())
         }
         fn get_state(&self) -> Result<StateParts, HelperError> {
             Ok(StateParts {
-                component: vec![1, 2, 3],
-                controller: vec![4, 5, 6],
+                component: b"comp".to_vec(),
+                controller: b"ctrl".to_vec(),
             })
         }
         fn shutdown(&self) {
@@ -755,6 +978,9 @@ mod tests {
 
     struct FakeLauncher {
         launch_count: AtomicU32,
+        probe_count: AtomicU32,
+        launch_delay_ms: AtomicU64,
+        fail_next: Mutex<Option<HelperError>>,
         last_session: Mutex<Option<Arc<FakeSession>>>,
     }
 
@@ -762,6 +988,9 @@ mod tests {
         fn new() -> Self {
             Self {
                 launch_count: AtomicU32::new(0),
+                probe_count: AtomicU32::new(0),
+                launch_delay_ms: AtomicU64::new(0),
+                fail_next: Mutex::new(None),
                 last_session: Mutex::new(None),
             }
         }
@@ -779,14 +1008,14 @@ mod tests {
             _key: HelperKey,
         ) -> Result<Arc<dyn HelperSession>, HelperError> {
             self.launch_count.fetch_add(1, Ordering::SeqCst);
-            let session = Arc::new(FakeSession {
-                link: BridgeLink::in_process(OwnedRing::new(48_000)),
-                latency: 0,
-                shared: Arc::new(InsertShared::default()),
-                set_state_calls: AtomicU32::new(0),
-                shutdown_called: AtomicBool::new(false),
-                alive: AtomicBool::new(true),
-            });
+            let delay = self.launch_delay_ms.load(Ordering::SeqCst);
+            if delay > 0 {
+                std::thread::sleep(Duration::from_millis(delay));
+            }
+            if let Some(err) = self.fail_next.lock().unwrap().take() {
+                return Err(err);
+            }
+            let session = Arc::new(FakeSession::new());
             *self.last_session.lock().unwrap() = Some(session.clone());
             Ok(session)
         }
@@ -797,20 +1026,27 @@ mod tests {
             _bundle: &Path,
             _timeout: Duration,
         ) -> Result<Vec<ClassInfo>, HelperError> {
-            Ok(vec![])
+            self.probe_count.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![ClassInfo {
+                class_id: "A".repeat(32),
+                name: "Test Class".into(),
+                vendor: "Vendor".into(),
+                version: "1.0".into(),
+                subcategories: "Fx".into(),
+            }])
         }
     }
 
     fn test_slot(class_id: &str, state_id: &str) -> PluginSlot {
         PluginSlot {
+            active: true,
             format: PluginFormat::Vst3,
             class_id: class_id.to_string(),
-            name: "Test".to_string(),
-            vendor: "Test".to_string(),
-            active: true,
+            name: "Test Plug".into(),
+            vendor: "Vendor".into(),
+            state: state_id.to_string(),
             input_db: 0.0,
             output_db: 0.0,
-            state: state_id.to_string(),
         }
     }
 
@@ -823,50 +1059,59 @@ mod tests {
     ) {
         let dir = tempfile::tempdir().unwrap();
         let helper = dir.path().join("tabplayer-plugin-host.exe");
-        std::fs::write(&helper, b"binary").unwrap();
+        std::fs::write(&helper, b"fake-exe").unwrap();
+
         let library_dir = dir.path().join("plugins");
         std::fs::create_dir_all(&library_dir).unwrap();
         let consent_file = library_dir.join("consent.json");
 
-        let class_id = "0123456789ABCDEF0123456789ABCDEF";
-        let _state_bytes = encode_state(b"comp", b"ctrl").unwrap();
-        let state_id = "a".repeat(64);
-
-        // Populate library with test class
-        let bundle_dir = dir.path().join("test.vst3");
-        let arch = tabplayer_plugin_protocol::bundle::own_arch_dirs()[0];
-        let inner = bundle_dir.join("Contents").join(arch);
-        std::fs::create_dir_all(&inner).unwrap();
-        let module_path = inner.join("test.vst3");
-        std::fs::write(&module_path, b"test module binary").unwrap();
+        let class_id = "A".repeat(32);
+        let state_id = "0".repeat(64);
 
         let mut lib = PluginLibrary::open(&library_dir).unwrap();
-        lib.add(&bundle_dir, |_| {
-            Ok(vec![tabplayer_plugin_protocol::control::ClassInfo {
-                class_id: class_id.to_string(),
-                name: "Test".to_string(),
-                vendor: "Test".to_string(),
-                version: "1.0".to_string(),
-                subcategories: String::new(),
+        let fake_bundle = dir.path().join("test.vst3");
+        std::fs::write(&fake_bundle, b"module").unwrap();
+        lib.add(&fake_bundle, |_| {
+            Ok(vec![ClassInfo {
+                class_id: class_id.clone(),
+                name: "Test Class".into(),
+                vendor: "Vendor".into(),
+                version: "1.0".into(),
+                subcategories: "Fx".into(),
             }])
         })
         .unwrap();
 
-        // Populate consent store
-        let mut consent = ConsentStore::open(&consent_file).unwrap();
-        consent
-            .grant([(class_id.to_string(), state_id.clone())])
+        let launcher = Arc::new(FakeLauncher::new());
+        let service = PluginService::new_with_launcher(
+            PluginPaths {
+                helper,
+                library_dir,
+                consent_file,
+            },
+            Box::new(|_| {}),
+            launcher.clone(),
+        );
+
+        service
+            .grant_consent("doc1", &[(class_id.clone(), state_id.clone())])
             .unwrap();
 
-        let paths = PluginPaths {
-            helper,
-            library_dir,
-            consent_file,
-        };
+        (service, launcher, dir, class_id, state_id)
+    }
 
-        let launcher = Arc::new(FakeLauncher::new());
-        let service = PluginService::new_with_launcher(paths, Box::new(|_| {}), launcher.clone());
-        (service, launcher, dir, class_id.to_string(), state_id)
+    fn wait_for_slot(service: &PluginService, doc_id: &str, track_id: &str) -> PluginStatus {
+        let start = Instant::now();
+        while start.elapsed() < Duration::from_secs(2) {
+            let statuses = service.statuses(doc_id);
+            if let Some(s) = statuses.iter().find(|s| s.track_id == track_id) {
+                if s.status != PluginStatus::Loading {
+                    return s.status;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("timeout waiting for slot {track_id}");
     }
 
     #[test]
@@ -885,8 +1130,10 @@ mod tests {
         let plans = service.ensure("doc1", &requests);
         assert_eq!(plans.len(), 9);
         assert_eq!(plans[8].1.as_ref().err(), Some(&PluginStatus::TooMany));
-        // Only first 8 could have attempted launch
-        assert!(launcher.launch_count.load(Ordering::SeqCst) <= 8);
+        for i in 0..8 {
+            wait_for_slot(&service, "doc1", &format!("track_{i}"));
+        }
+        assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 8);
     }
 
     #[test]
@@ -904,7 +1151,7 @@ mod tests {
         }];
 
         let plans = service.ensure("doc1", &requests);
-        assert!(plans.is_empty());
+        assert_eq!(plans.len(), 0);
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 0);
     }
 
@@ -955,10 +1202,16 @@ mod tests {
             state: state_bytes.clone(),
         }];
 
-        service.ensure("doc1", &requests);
+        let plans1 = service.ensure("doc1", &requests);
+        assert_eq!(plans1[0].1.as_ref().err(), Some(&PluginStatus::Loading));
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 1);
 
-        service.ensure("doc1", &requests);
+        let plans2 = service.ensure("doc1", &requests);
+        assert!(plans2[0].1.is_ok());
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 1);
     }
 
@@ -969,7 +1222,6 @@ mod tests {
         let state_bytes2: Arc<[u8]> = encode_state(b"c2", b"d2").unwrap().into();
         let state_id2 = "b".repeat(64);
 
-        // Pre-consent state2
         service
             .grant_consent("doc1", &[(class_id.clone(), state_id2.clone())])
             .unwrap();
@@ -980,6 +1232,10 @@ mod tests {
             state: state_bytes1,
         }];
         service.ensure("doc1", &req1);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 1);
 
         let req2 = vec![SlotRequest {
@@ -987,10 +1243,10 @@ mod tests {
             slot: test_slot(&class_id, &state_id2),
             state: state_bytes2,
         }];
-        service.ensure("doc1", &req2);
-        // Not relaunched
+        let plans2 = service.ensure("doc1", &req2);
+        assert!(plans2[0].1.is_ok());
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 1);
-        // set_state was called
+
         let session = launcher.last_session.lock().unwrap().clone().unwrap();
         assert_eq!(session.set_state_calls.load(Ordering::SeqCst), 1);
     }
@@ -1006,12 +1262,17 @@ mod tests {
             state: state_bytes,
         }];
         service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+
         let session = launcher.last_session.lock().unwrap().clone().unwrap();
         assert!(session.is_alive());
 
         service.shutdown_document("doc1");
-        assert!(!session.is_alive());
         assert!(session.shutdown_called.load(Ordering::SeqCst));
+        assert!(!session.is_alive());
     }
 
     #[test]
@@ -1027,6 +1288,10 @@ mod tests {
 
         // Launch 1
         service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 1);
         launcher
             .last_session
@@ -1038,6 +1303,10 @@ mod tests {
 
         // Crash 1 -> Relaunch 2
         service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 2);
         launcher
             .last_session
@@ -1049,6 +1318,10 @@ mod tests {
 
         // Crash 2 -> Relaunch 3
         service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 3);
         launcher
             .last_session
@@ -1060,6 +1333,10 @@ mod tests {
 
         // Crash 3 -> Relaunch 4
         service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 4);
         launcher
             .last_session
@@ -1077,8 +1354,11 @@ mod tests {
 
     #[test]
     fn prepare_does_not_wait_for_a_launch() {
-        let (service, _launcher, _dir, class_id, state_id) = test_service();
+        let (service, launcher, _dir, class_id, state_id) = test_service();
         let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
+
+        // Simulate 80ms launch latency in launcher
+        launcher.launch_delay_ms.store(80, Ordering::SeqCst);
 
         let req = vec![SlotRequest {
             track_id: "track_0".into(),
@@ -1086,9 +1366,143 @@ mod tests {
             state: state_bytes,
         }];
 
-        // ensure returns immediately without blocking
         let start = Instant::now();
-        let _plans = service.ensure("doc1", &req);
-        assert!(start.elapsed() < Duration::from_millis(500));
+        let plans1 = service.ensure("doc1", &req);
+        // Returns immediately without waiting for the 80ms launch
+        assert!(start.elapsed() < Duration::from_millis(40));
+        assert_eq!(plans1[0].1.as_ref().err(), Some(&PluginStatus::Loading));
+
+        // When the background launch finishes, slot becomes Ready
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        let plans2 = service.ensure("doc1", &req);
+        assert!(plans2[0].1.is_ok());
+    }
+
+    #[test]
+    fn changed_bundle_is_reprobed_after_consent_and_updates_library() {
+        let (service, launcher, dir, class_id, state_id) = test_service();
+        let fake_bundle = dir.path().join("test.vst3");
+
+        // Touch the file to change its modified time so library.resolve returns Changed
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::write(&fake_bundle, b"module-updated").unwrap();
+
+        let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
+        let req = vec![SlotRequest {
+            track_id: "track_0".into(),
+            slot: test_slot(&class_id, &state_id),
+            state: state_bytes.clone(),
+        }];
+
+        let probe_count_before = launcher.probe_count.load(Ordering::SeqCst);
+        service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+
+        // reprobe was executed
+        assert_eq!(
+            launcher.probe_count.load(Ordering::SeqCst),
+            probe_count_before + 1
+        );
+
+        // Subsequent ensure does not reprobe again because library.json was updated
+        service.ensure("doc1", &req);
+        assert_eq!(
+            launcher.probe_count.load(Ordering::SeqCst),
+            probe_count_before + 1
+        );
+    }
+
+    #[test]
+    fn runtime_faults_and_crashes_restart_helper() {
+        let (service, launcher, _dir, class_id, state_id) = test_service();
+        let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
+        let req = vec![SlotRequest {
+            track_id: "track_0".into(),
+            slot: test_slot(&class_id, &state_id),
+            state: state_bytes.clone(),
+        }];
+
+        // Launch 1
+        service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 1);
+
+        // Simulate supervisor reporting a crash
+        let key = HelperKey {
+            document_id: "doc1".into(),
+            track_id: "track_0".into(),
+            class_id: class_id.clone(),
+        };
+        service.on_supervisor_report(key, PluginStatus::Crashed);
+        assert_eq!(service.statuses("doc1")[0].status, PluginStatus::Crashed);
+
+        // Next ensure relaunches (Launch 2)
+        service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 2);
+
+        // Simulate audio ring underrun fault on session
+        let session = launcher.last_session.lock().unwrap().clone().unwrap();
+        session
+            .shared
+            .fault
+            .store(fault::UNDERRUN, Ordering::Release);
+
+        // Next ensure detects the fault and relaunches (Launch 3)
+        service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn set_state_timeout_keeps_ready_and_retains_insert() {
+        let (service, launcher, _dir, class_id, state_id) = test_service();
+        let state_bytes1: Arc<[u8]> = encode_state(b"c1", b"d1").unwrap().into();
+        let state_bytes2: Arc<[u8]> = encode_state(b"c2", b"d2").unwrap().into();
+        let state_id2 = "e".repeat(64);
+
+        service
+            .grant_consent("doc1", &[(class_id.clone(), state_id2.clone())])
+            .unwrap();
+
+        let req1 = vec![SlotRequest {
+            track_id: "track_0".into(),
+            slot: test_slot(&class_id, &state_id),
+            state: state_bytes1,
+        }];
+        service.ensure("doc1", &req1);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+
+        let session = launcher.last_session.lock().unwrap().clone().unwrap();
+        // Cause set_state to fail with Timeout (status() returns None)
+        *session.fail_set_state.lock().unwrap() = Some(HelperError::Timeout);
+
+        let req2 = vec![SlotRequest {
+            track_id: "track_0".into(),
+            slot: test_slot(&class_id, &state_id2),
+            state: state_bytes2,
+        }];
+        let plans2 = service.ensure("doc1", &req2);
+        // RR7: slot remains Ready, and returns Ok(InsertPlan)
+        assert!(plans2[0].1.is_ok());
+        assert_eq!(service.statuses("doc1")[0].status, PluginStatus::Ready);
     }
 }

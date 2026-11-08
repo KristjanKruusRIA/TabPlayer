@@ -124,9 +124,17 @@ mod windows_tests {
             doc_id: &str,
             requests: &[SlotRequest],
         ) -> Vec<(String, Result<InsertPlan, PluginStatus>)> {
-            // First call launches helper synchronously and transitions slot to Ready;
-            // second call returns Ok(InsertPlan).
             self.service.ensure(doc_id, requests);
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(5) {
+                let statuses = self.service.statuses(doc_id);
+                if !statuses.is_empty()
+                    && statuses.iter().all(|s| s.status != PluginStatus::Loading)
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
             self.service.ensure(doc_id, requests)
         }
     }
@@ -425,8 +433,7 @@ mod windows_tests {
                 state: valid_container,
             };
 
-            let _ = rig.service.ensure("doc1", &[req_reject.clone()]);
-            let plans2 = rig.service.ensure("doc1", &[req_reject]);
+            let plans2 = rig.ensure_ready("doc1", &[req_reject]);
             assert_eq!(plans2[0].1.as_ref().err(), Some(&PluginStatus::RejectedState));
             let statuses = rig.service.statuses("doc1");
             let t2_status = statuses.iter().find(|s| s.track_id == "t2").unwrap();
@@ -464,8 +471,7 @@ mod windows_tests {
                 state: state_bytes,
             };
 
-            let _ = rig.service.ensure("doc1", &[req.clone()]);
-            let plans = rig.service.ensure("doc1", &[req]);
+            let plans = rig.ensure_ready("doc1", &[req]);
             assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::TooMuchLatency));
 
             let statuses = rig.service.statuses("doc1");

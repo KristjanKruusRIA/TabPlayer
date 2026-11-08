@@ -2424,6 +2424,15 @@ impl AudioService {
             .as_ref()
             .map(|document| document.plan.generation)
     }
+    /// Track IDs of the prepared document in track order.
+    pub fn prepared_track_ids(&self) -> Option<Vec<String>> {
+        self.control
+            .lock()
+            .unwrap()
+            .document
+            .as_ref()
+            .map(|document| document.plan.tracks.iter().map(|t| t.id.clone()).collect())
+    }
     pub fn prepare(
         &self,
         plan: PlaybackPlan,

@@ -230,21 +230,39 @@ impl NativeAudio {
     ) -> Result<(), String> {
         let slot_requests: Vec<crate::plugins::service::SlotRequest> = {
             let ws = workspace.lock().map_err(|e| e.to_string())?;
-            settings
-                .sounds
-                .iter()
-                .filter_map(|(track_id, sound)| {
-                    let slot = sound.plugin.clone()?;
-                    let bytes = ws
-                        .asset_bytes(&owner.document_id, &slot.state)
-                        .unwrap_or_default();
-                    Some(crate::plugins::service::SlotRequest {
-                        track_id: track_id.clone(),
-                        slot,
-                        state: bytes.into(),
+            if let Some(track_ids) = self.service.prepared_track_ids() {
+                track_ids
+                    .iter()
+                    .filter_map(|track_id| {
+                        let sound = settings.sounds.get(track_id)?;
+                        let slot = sound.plugin.clone()?;
+                        let bytes = ws
+                            .asset_bytes(&owner.document_id, &slot.state)
+                            .unwrap_or_default();
+                        Some(crate::plugins::service::SlotRequest {
+                            track_id: track_id.clone(),
+                            slot,
+                            state: bytes.into(),
+                        })
                     })
-                })
-                .collect()
+                    .collect()
+            } else {
+                settings
+                    .sounds
+                    .iter()
+                    .filter_map(|(track_id, sound)| {
+                        let slot = sound.plugin.clone()?;
+                        let bytes = ws
+                            .asset_bytes(&owner.document_id, &slot.state)
+                            .unwrap_or_default();
+                        Some(crate::plugins::service::SlotRequest {
+                            track_id: track_id.clone(),
+                            slot,
+                            state: bytes.into(),
+                        })
+                    })
+                    .collect()
+            }
         };
         let plugin_plans = if let Some(plugins) = &self.plugins {
             plugins.ensure(&owner.document_id, &slot_requests)

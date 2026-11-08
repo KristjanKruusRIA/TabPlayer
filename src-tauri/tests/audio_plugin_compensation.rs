@@ -30,7 +30,7 @@ use tabplayer_lib::{
         resources::{AudioResources, Instrument, Region},
     },
     plugins::bridge::{BridgeLink, InsertShared},
-    settings::{DocumentSettings, MasterSettings},
+    settings::{DocumentSettings, MasterLimiter, MasterSettings},
 };
 use tabplayer_plugin_protocol::{
     limits::{BLOCK_FRAMES, pipeline_frames},
@@ -244,6 +244,25 @@ fn impulse_resources() -> AudioResources {
     resources
 }
 
+/// Like `impulse_resources`, but every note plays a 50 ms tone burst and then silence.
+fn burst_resources() -> AudioResources {
+    let mut resources = impulse_resources();
+    let mut buffer = vec![[0.0f32; 2]; 96_000];
+    for (i, frame) in buffer.iter_mut().take(2_400).enumerate() {
+        let x = (std::f64::consts::TAU * 440.0 * i as f64 / RATE as f64).sin() as f32 * 0.5;
+        *frame = [x, x];
+    }
+    resources.samples.insert(
+        "impulse_sample".into(),
+        Arc::new(DecodedAudio {
+            sample_rate: RATE,
+            channels: 2,
+            frames: Arc::new(buffer),
+        }),
+    );
+    resources
+}
+
 fn test_plan_bars(track_count: usize, bars: usize) -> PlaybackPlan {
     let tracks: Vec<_> = (0..track_count)
         .map(|i| serde_json::json!({"id": format!("track-{i}"), "program": 0, "percussion": false}))
@@ -402,6 +421,70 @@ fn add_note_span(plan: &mut PlaybackPlan, track: usize, start_tick: f64, end_tic
         .sort_by(|a, b| a.start_tick.partial_cmp(&b.start_tick).unwrap());
     plan.midi
         .sort_by(|a, b| a.tick().partial_cmp(&b.tick()).unwrap());
+}
+
+fn install_sine_backing(renderer: &mut Renderer, plan: &PlaybackPlan, amplitude: f32) {
+    let frames: Vec<[f32; 2]> = (0..192_000)
+        .map(|i| {
+            let phase = std::f64::consts::TAU * 220.0 * i as f64 / RATE as f64;
+            [phase.sin() as f32 * amplitude; 2]
+        })
+        .collect();
+    renderer
+        .install_backing(
+            Arc::new(DecodedAudio {
+                sample_rate: RATE,
+                channels: 2,
+                frames: Arc::new(frames),
+            }),
+            tabplayer_lib::audio::backing::BackingMap::new(&[], 0.0, plan).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+}
+
+/// Renders `out` in callbacks, letting the fake helpers catch up after each.
+fn render_transport(transport: &mut CallbackTransport, out: &mut [[f32; 2]], rigs: &[&Rig]) {
+    for chunk in out.chunks_mut(CALLBACK) {
+        transport.render_into(chunk);
+        for rig in rigs {
+            rig.settle();
+        }
+    }
+}
+
+/// The frames that staged note-ons are stamped with.
+fn note_on_stamps(tap: &MidiTap) -> Vec<u64> {
+    tap.staged()
+        .iter()
+        .filter_map(|record| match record {
+            MidiRecord::Message { frame, bytes, .. } if bytes[0] & 0xF0 == 0x90 && bytes[2] > 0 => {
+                Some(*frame)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A master with a long reverb and a limiter that engages: state that a reset would audibly clear.
+fn master_with_tails() -> DocumentSettings {
+    let mut settings = DocumentSettings::default();
+    settings.master = Some(MasterSettings {
+        reverb: Reverb {
+            enabled: true,
+            mix: 0.8,
+            room: 0.9,
+            damping: 0.1,
+            ..MasterSettings::default().reverb
+        },
+        limiter: MasterLimiter {
+            enabled: true,
+            ceiling_db: -12.0,
+            release_ms: 300.0,
+        },
+        ..Default::default()
+    });
+    settings
 }
 
 fn practice_settings(bars: u8, between_loops: bool) -> PracticeSettings {
@@ -618,6 +701,51 @@ fn midi_out_stamps_are_delayed_by_d_max() {
         }
         ref other => panic!("expected Message, got {other:?}"),
     }
+
+    // The renderer itself sets the delay: a tap it takes is retimed to its D_max, and a mix that changes D_max
+    // retimes the tap it has. The tap starts with no delay, so only the renderer can give it one.
+    let mut plan = test_plan(2);
+    add_note(&mut plan, 0, 0.0);
+    let settings = DocumentSettings::default();
+    let (l_1, l_2) = (128, 512);
+    let (rig_1, rig_2) = (rig(l_1, 1.0), rig(l_2, 1.0));
+    let d_1 = (pipeline_frames(CALLBACK) + l_1) as u64;
+    let d_2 = (pipeline_frames(CALLBACK) + l_2) as u64;
+    let prep_1 = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_1.insert(l_1 as u32)), None]);
+    let prep_2 = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_2.insert(l_2 as u32)), None]);
+    let mut renderer = Renderer::new_with_mix(
+        Arc::new(plan),
+        Arc::new(base_resources()),
+        prep_1,
+        settings,
+        RATE,
+    )
+    .unwrap();
+    let fresh = MidiTap::new(&[0, 0], &[(0, RouteSpec::single(0, 0))]);
+    assert!(renderer.replace_midi(fresh).is_none());
+    renderer.midi_set_cursor(5_000);
+    let mut frame = [[0.0f32; 2]; 1];
+    renderer.render_into(&mut frame);
+    assert_eq!(
+        note_on_stamps(renderer.midi_tap().unwrap()),
+        vec![5_000 + d_1],
+        "the renderer must give a tap it takes its D_max"
+    );
+
+    renderer.set_mix(prep_2);
+    renderer.midi_tap().unwrap().clear_staged();
+    renderer.seek_tick(0.0);
+    renderer.midi_set_cursor(9_000);
+    renderer.render_into(&mut frame);
+    assert_eq!(
+        note_on_stamps(renderer.midi_tap().unwrap()),
+        vec![9_000 + d_2],
+        "a mix that changes D_max must retime the renderer's tap"
+    );
 }
 
 #[test]
@@ -646,29 +774,13 @@ fn loop_wrap_keeps_streaming() {
         Arc::new(plan.clone()),
         Arc::new(resources),
         prep,
-        settings,
+        settings.clone(),
         RATE,
     )
     .unwrap();
 
     // Continuous backing tone
-    let backing_frames: Vec<[f32; 2]> = (0..192_000)
-        .map(|i| {
-            let phase = std::f64::consts::TAU * 220.0 * i as f64 / RATE as f64;
-            [phase.sin() as f32 * 0.3; 2]
-        })
-        .collect();
-    renderer
-        .install_backing(
-            Arc::new(DecodedAudio {
-                sample_rate: RATE,
-                channels: 2,
-                frames: Arc::new(backing_frames),
-            }),
-            tabplayer_lib::audio::backing::BackingMap::new(&[], 0.0, &plan).unwrap(),
-            Default::default(),
-        )
-        .unwrap();
+    install_sine_backing(&mut renderer, &plan, 0.3);
 
     let mut transport = CallbackTransport::headless(RATE);
     let practice = practice_settings(0, false);
@@ -693,6 +805,45 @@ fn loop_wrap_keeps_streaming() {
     for chunk in rendered.chunks_mut(CALLBACK) {
         transport.render_into(chunk);
         rig_a.settle();
+    }
+
+    // The same loop without the plug-in, as the reference: the fake plug-in has unit gain, so with compensation the
+    // whole output is this reference delayed by exactly D_max, wraps included. A wrap that flushed the compensation
+    // lines would drop the dry track and the backing for D_max frames after every wrap, while the plug-in track
+    // kept streaming.
+    let mut reference_renderer = Renderer::new_with_mix(
+        Arc::new(plan.clone()),
+        Arc::new(base_resources()),
+        PreparedMix::prepare(&settings, &plan, RATE).unwrap(),
+        settings,
+        RATE,
+    )
+    .unwrap();
+    install_sine_backing(&mut reference_renderer, &plan, 0.3);
+    let mut reference_transport = CallbackTransport::headless(RATE);
+    reference_transport.install_with_practice(Box::new(reference_renderer), 1, false, practice);
+    reference_transport
+        .command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 3840.0,
+            end_tick: 7680.0,
+        })
+        .unwrap();
+    reference_transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut reference = vec![[0.0f32; 2]; total_frames];
+    for chunk in reference.chunks_mut(CALLBACK) {
+        reference_transport.render_into(chunk);
+    }
+    // Past the plug-in's start-up, every frame is the reference D_max frames earlier.
+    for f in (d_max + 4_800)..total_frames {
+        let (got, want) = (rendered[f], reference[f - d_max]);
+        assert!(
+            (got[0] - want[0]).abs() < 1e-5 && (got[1] - want[1]).abs() < 1e-5,
+            "frame {f} (pass {}) is {got:?}, but the reference D_max earlier is {want:?}",
+            f / pass_frames
+        );
     }
 
     assert_eq!(
@@ -829,6 +980,71 @@ fn count_in_between_loops_is_delayed_and_drains() {
         count_in_tail.iter().any(|f| f[0].abs() > 0.0001),
         "previous pass tail must play in count-in"
     );
+
+    // That alone holds for an undelayed click too. Two identical transports whose count-in clicks differ only in
+    // volume (0.8 and 0): the second plays only the previous pass's tail, and the difference between them is only
+    // the click. So the tail must be there, and the click must start exactly D_max frames into the count-in, not on
+    // its first frame.
+    let window = d_max + 2_400;
+    let run = |volume: f64| -> Vec<[f32; 2]> {
+        let mut plan = test_plan(2);
+        add_note(&mut plan, 0, 7660.0);
+        let settings = DocumentSettings::default();
+        let pass_len = 96_000 * 2; // the first count-in and the first pass
+        let rig_a = rig(l, 1.0);
+        let prep = PreparedMix::prepare(&settings, &plan, RATE)
+            .unwrap()
+            .with_inserts(vec![Some(rig_a.insert(l as u32)), None]);
+        let renderer = Renderer::new_with_mix(
+            Arc::new(plan.clone()),
+            Arc::new(base_resources()),
+            prep,
+            settings.clone(),
+            RATE,
+        )
+        .unwrap();
+        let mut transport = CallbackTransport::headless(RATE);
+        let mut practice = practice_settings(1, true);
+        practice.metronome.volume = volume;
+        transport.install_with_practice(Box::new(renderer), 1, false, practice);
+        transport
+            .command(TransportCommand::SetLoop {
+                generation: 1,
+                start_tick: 3840.0,
+                end_tick: 7680.0,
+            })
+            .unwrap();
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        let mut ahead = vec![[0.0f32; 2]; pass_len];
+        render_transport(&mut transport, &mut ahead, &[&rig_a]);
+        assert_eq!(transport.status().practice.completed_passes, 1);
+        assert_eq!(transport.status().practice.phase, PracticePhase::CountIn);
+        let mut count_in = vec![[0.0f32; 2]; window];
+        render_transport(&mut transport, &mut count_in, &[&rig_a]);
+        count_in
+    };
+    let clicked = run(0.8);
+    let tail_only = run(0.0);
+
+    assert!(
+        tail_only[..d_max].iter().any(|f| f[0].abs() > 1e-4),
+        "the previous pass's tail must play during the first D_max frames of the count-in"
+    );
+    let click: Vec<f32> = clicked
+        .iter()
+        .zip(&tail_only)
+        .map(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs()))
+        .collect();
+    let onset = click
+        .iter()
+        .position(|&x| x > 1e-6)
+        .expect("the count-in click must sound");
+    assert!(
+        (d_max..d_max + 16).contains(&onset),
+        "the count-in click must start D_max = {d_max} frames into the count-in, not at {onset}"
+    );
 }
 
 #[test]
@@ -875,12 +1091,23 @@ fn end_of_score_plays_out_the_compensation_delay() {
     );
     assert_ne!(transport.status().practice.phase, PracticePhase::Ended);
 
-    // Drain d_max frames
+    // Drain d_max frames: the transport plays through all but the last one, and ends exactly on it.
     let mut drain_out = vec![[0.0f32; 2]; d_max];
-    for chunk in drain_out.chunks_mut(CALLBACK) {
+    let (body, last) = drain_out.split_at_mut(d_max - 1);
+    for chunk in body.chunks_mut(CALLBACK) {
         transport.render_into(chunk);
         rig_a.settle();
     }
+    assert!(
+        transport.status().playing,
+        "the drain must last D_max frames, not end one early"
+    );
+    transport.render_into(last);
+    assert!(
+        !transport.status().playing,
+        "the drain must end after exactly D_max frames"
+    );
+    assert_eq!(transport.status().practice.phase, PracticePhase::Ended);
 
     // Drain should have audio
     assert!(
@@ -1135,6 +1362,57 @@ fn compensation_stays_off_the_heap() {
 
 #[test]
 fn master_bus_stays_continuous_across_wrap() {
+    // Only the master can still sound at the wrap: the plug-in sits on a silent track, and the dry track's 50 ms
+    // burst left the compensation lines long before. So what plays after the wrap is the master reverb's tail
+    // alone, which a master reset would cut to silence.
+    {
+        let mut plan = impulse_plan(2);
+        add_note(&mut plan, 1, 0.0);
+        let mut settings = DocumentSettings::default();
+        settings.master = Some(MasterSettings {
+            reverb: Reverb {
+                enabled: true,
+                mix: 0.8,
+                room: 0.9,
+                damping: 0.1,
+                ..MasterSettings::default().reverb
+            },
+            ..Default::default()
+        });
+        let l = 64;
+        let rig_a = rig(l, 1.0);
+        let prep = PreparedMix::prepare(&settings, &plan, RATE)
+            .unwrap()
+            .with_inserts(vec![Some(rig_a.insert(l as u32)), None]);
+        let mut renderer = Renderer::new_with_mix(
+            Arc::new(plan),
+            Arc::new(burst_resources()),
+            prep,
+            settings,
+            RATE,
+        )
+        .unwrap();
+        let mut out = vec![[0.0f32; 2]; 9_600];
+        for chunk in out.chunks_mut(CALLBACK) {
+            renderer.render_into(chunk);
+            rig_a.settle();
+        }
+        assert!(
+            out.iter().any(|f| f[0].abs() > 0.01),
+            "the burst must reach the master"
+        );
+        assert!(
+            out[9_599][0].abs() > 1e-9,
+            "the master reverb must still ring when the wrap comes"
+        );
+        renderer.wrap_to_tick(0.0);
+        let ring_out = renderer.drain_frame();
+        assert!(
+            ring_out[0].abs() > 1e-9 || ring_out[1].abs() > 1e-9,
+            "the master reverb's tail must carry across the wrap, got {ring_out:?}"
+        );
+    }
+
     let mut plan = test_plan(1);
     add_note(&mut plan, 0, 0.0);
     let mut settings = DocumentSettings::default();
@@ -1371,4 +1649,428 @@ fn spike_3_configurations() {
             );
         }
     }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Review fixes (THE-71, Tasks 12 and 14 review)
+// ---------------------------------------------------------------------------------------------------
+
+/// A no-plug-in renderer playing `plan` with `settings`.
+fn plain_renderer(plan: &PlaybackPlan, settings: &DocumentSettings) -> Renderer {
+    Renderer::new(
+        Arc::new(plan.clone()),
+        Arc::new(base_resources()),
+        settings.clone(),
+        RATE,
+    )
+    .unwrap()
+}
+
+fn sustained_plan() -> PlaybackPlan {
+    let mut plan = test_plan(2);
+    add_note(&mut plan, 0, 0.0);
+    add_note_span(&mut plan, 0, 960.0, 7680.0);
+    add_note_span(&mut plan, 1, 3840.0, 7680.0);
+    plan
+}
+
+#[test]
+fn no_plugin_wrap_is_bit_identical_to_a_seek() {
+    // Without a plug-in, a wrap is what it was before plug-ins: a seek that resets the master bus, so a long master
+    // reverb and an engaged limiter start every pass afresh.
+    let plan = sustained_plan();
+    let settings = master_with_tails();
+    let mut wrapped = plain_renderer(&plan, &settings);
+    let mut sought = plain_renderer(&plan, &settings);
+    let mut a = vec![[0.0f32; 2]; 48_000];
+    let mut b = vec![[0.0f32; 2]; 48_000];
+    wrapped.render_into(&mut a);
+    sought.render_into(&mut b);
+    assert_eq!(a, b);
+    assert!(a.iter().any(|f| f[0].abs() > 0.01), "the score must sound");
+    wrapped.wrap_to_tick(3840.0);
+    sought.seek_tick(3840.0);
+    wrapped.render_into(&mut a);
+    sought.render_into(&mut b);
+    assert_eq!(
+        a, b,
+        "a wrap with no plug-in must be bit-identical to a seek"
+    );
+}
+
+#[test]
+fn no_plugin_loop_is_bit_identical_to_seeking_each_pass() {
+    // The transport's loop with no plug-in plays exactly what it did before plug-ins: each pass ends with a seek to
+    // the loop's end and a seek back to its start, so the master bus restarts on every pass.
+    let plan = sustained_plan();
+    let settings = master_with_tails();
+    let pass_frames = 96_000;
+    let passes = 3;
+
+    let mut transport = CallbackTransport::headless(RATE);
+    transport.install_with_practice(
+        Box::new(plain_renderer(&plan, &settings)),
+        1,
+        false,
+        practice_settings(0, false),
+    );
+    transport
+        .command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 3840.0,
+            end_tick: 7680.0,
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut looped = vec![[0.0f32; 2]; pass_frames * passes];
+    render_transport(&mut transport, &mut looped, &[]);
+    assert_eq!(transport.status().practice.completed_passes, passes as u64);
+
+    let mut reference = plain_renderer(&plan, &settings);
+    reference.seek_tick(3840.0);
+    let mut expected = vec![[0.0f32; 2]; pass_frames * passes];
+    for pass in expected.chunks_mut(pass_frames) {
+        let status = reference.render_until(pass, 7680.0);
+        assert_eq!(status.frames, pass_frames);
+        reference.seek_tick(7680.0);
+        reference.seek_tick(3840.0);
+    }
+    assert!(expected.iter().any(|f| f[0].abs() > 0.01));
+    for (f, (got, want)) in looped.iter().zip(&expected).enumerate() {
+        assert_eq!(got, want, "frame {f} (pass {}) differs", f / pass_frames);
+    }
+}
+
+#[test]
+fn an_edit_while_playing_keeps_the_compensation_streaming() {
+    // An edit while playing installs a new renderer at the same place. Its compensation must carry the old one's
+    // lines on, or the backing, the click and every dry track fall silent for D_max frames.
+    let plan = test_plan(2);
+    let settings = DocumentSettings::default();
+    let l = 256;
+    let rig_a = rig(l, 1.0);
+    let build = || {
+        let prep = PreparedMix::prepare(&settings, &plan, RATE)
+            .unwrap()
+            .with_inserts(vec![Some(rig_a.insert(l as u32)), None]);
+        let mut renderer = Renderer::new_with_mix(
+            Arc::new(plan.clone()),
+            Arc::new(base_resources()),
+            prep,
+            settings.clone(),
+            RATE,
+        )
+        .unwrap();
+        install_sine_backing(&mut renderer, &plan, 0.3);
+        renderer
+    };
+    let practice = practice_settings(0, false);
+    let mut transport = CallbackTransport::headless(RATE);
+    transport.install_with_practice(Box::new(build()), 1, false, practice);
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut before = vec![[0.0f32; 2]; 9_600];
+    render_transport(&mut transport, &mut before, &[&rig_a]);
+    assert!(before[4_800..].iter().any(|f| f[0].abs() > 0.1));
+
+    let retired = transport.install_with_practice(Box::new(build()), 1, true, practice);
+    assert!(retired.is_some());
+    drop(retired);
+    assert!(transport.status().playing);
+    let mut after = vec![[0.0f32; 2]; 9_600];
+    render_transport(&mut transport, &mut after, &[&rig_a]);
+
+    let mut zeros = 0;
+    let mut longest = 0;
+    for frame in &after {
+        if frame[0].abs() < 1e-6 && frame[1].abs() < 1e-6 {
+            zeros += 1;
+            longest = longest.max(zeros);
+        } else {
+            zeros = 0;
+        }
+    }
+    assert!(
+        longest < 32,
+        "an edit while playing left {longest} silent frames"
+    );
+    // The backing sine continues where it was, D_max frames late, with no jump.
+    for i in 1..after.len() {
+        assert!(
+            (after[i][0] - after[i - 1][0]).abs() < 0.05,
+            "step at frame {i} after the edit"
+        );
+    }
+    assert!(
+        (after[0][0] - before[before.len() - 1][0]).abs() < 0.05,
+        "step at the edit"
+    );
+}
+
+#[test]
+fn a_plugin_added_after_a_device_fault_does_not_replay_the_opening() {
+    // A device fault stops playback, so nothing sounds. When the output comes back with a plug-in added, the
+    // compensation starts at its full delay: the first D_max frames after Play are silence. Had the fault left the
+    // boards marked as sounding, the lines would start undelayed and then glide back, replaying the opening.
+    let mut plan = test_plan(2);
+    add_note_span(&mut plan, 1, 0.0, 7680.0);
+    let settings = DocumentSettings::default();
+    let l = 256;
+    let d_max = pipeline_frames(CALLBACK) + l;
+    let rig_a = rig(l, 1.0);
+    let practice = practice_settings(0, false);
+
+    let mut transport = CallbackTransport::headless(RATE);
+    transport.install_with_practice(
+        Box::new(plain_renderer(&plan, &settings)),
+        1,
+        false,
+        practice,
+    );
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut played = vec![[0.0f32; 2]; 4_800];
+    render_transport(&mut transport, &mut played, &[]);
+    assert!(played.iter().any(|f| f[0].abs() > 0.01));
+
+    transport.device_error();
+    assert!(!transport.status().playing);
+
+    let prep = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_a.insert(l as u32)), None]);
+    let with_plugin = Renderer::new_with_mix(
+        Arc::new(plan.clone()),
+        Arc::new(base_resources()),
+        prep,
+        settings.clone(),
+        RATE,
+    )
+    .unwrap();
+    drop(transport.install_with_practice(Box::new(with_plugin), 1, true, practice));
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut resumed = vec![[0.0f32; 2]; d_max + 4_800];
+    render_transport(&mut transport, &mut resumed, &[&rig_a]);
+    if let Some(f) = resumed[..d_max]
+        .iter()
+        .position(|f| f[0].abs() > 1e-6 || f[1].abs() > 1e-6)
+    {
+        panic!("frame {f} after Play sounds within D_max = {d_max}: the opening is replayed");
+    }
+    assert!(
+        resumed[d_max..].iter().any(|f| f[0].abs() > 0.01),
+        "playback must resume after the compensation delay"
+    );
+}
+
+#[test]
+fn count_in_and_drain_keep_the_midi_out_fade() {
+    // A track sent to a MIDI port is silent in the mix. Its plug-in still holds D frames of the track's sound in its
+    // pipeline, which a count-in or a drain plays out: the MIDI-out fade must silence it there as in a played frame.
+    let mut plan = test_plan(1);
+    add_note_span(&mut plan, 0, 0.0, 7680.0);
+    let settings = DocumentSettings::default();
+    let l = 256;
+    let rig_a = rig(l, 1.0);
+    let prep = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_a.insert(l as u32))]);
+    let mut renderer = Renderer::new_with_mix(
+        Arc::new(plan),
+        Arc::new(base_resources()),
+        prep,
+        settings,
+        RATE,
+    )
+    .unwrap();
+    let mut out = vec![[0.0f32; 2]; 9_600];
+    for chunk in out.chunks_mut(CALLBACK) {
+        renderer.render_into(chunk);
+        rig_a.settle();
+    }
+    assert!(out[4_800..].iter().any(|f| f[0].abs() > 0.01));
+
+    assert!(
+        renderer
+            .replace_midi(MidiTap::new(&[0], &[(0, RouteSpec::single(0, 0))]))
+            .is_none()
+    );
+    // The fade takes 5 ms (240 frames); after it, nothing of the routed track may sound.
+    let mut count_in = vec![[0.0f32; 2]; 960];
+    for chunk in count_in.chunks_mut(CALLBACK) {
+        for frame in chunk.iter_mut() {
+            *frame = renderer.count_in_frame(0.0);
+        }
+        rig_a.settle();
+    }
+    let mut drain = vec![[0.0f32; 2]; 960];
+    for chunk in drain.chunks_mut(CALLBACK) {
+        for frame in chunk.iter_mut() {
+            *frame = renderer.drain_frame();
+        }
+        rig_a.settle();
+    }
+    for (i, f) in count_in[480..].iter().chain(&drain).enumerate() {
+        assert_eq!(
+            *f,
+            [0.0; 2],
+            "frame {} of the count-in and drain plays a track routed to MIDI",
+            480 + i
+        );
+    }
+}
+
+#[test]
+fn removing_the_last_plugin_returns_to_the_plain_path() {
+    // Removing the last plug-in while playing glides the compensation to zero. Once the glide ends, the renderer is
+    // back on the no-plug-in path: a count-in is the plain click again, and the next mix exchange retires the
+    // leftover compensation with the old mix.
+    let plan = sustained_plan();
+    let settings = master_with_tails();
+    let l = 128;
+    let rig_a = rig(l, 1.0);
+    let prep = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_a.insert(l as u32)), None]);
+    let plain_1 = PreparedMix::prepare(&settings, &plan, RATE).unwrap();
+    let plain_2 = PreparedMix::prepare(&settings, &plan, RATE).unwrap();
+    let mut renderer = Renderer::new_with_mix(
+        Arc::new(plan),
+        Arc::new(base_resources()),
+        prep,
+        settings,
+        RATE,
+    )
+    .unwrap();
+    let mut out = vec![[0.0f32; 2]; 9_600];
+    for chunk in out.chunks_mut(CALLBACK) {
+        renderer.render_into(chunk);
+        rig_a.settle();
+    }
+    let first = renderer.replace_mix(plain_1);
+    for chunk in out.chunks_mut(CALLBACK) {
+        let _ = renderer.settle_mix();
+        renderer.render_into(chunk);
+        rig_a.settle();
+    }
+    assert_eq!(renderer.plugin_delay_frames(), 0);
+    assert_eq!(
+        renderer.count_in_frame(0.5),
+        [0.5, 0.5],
+        "once the glide has ended, a count-in is the plain click"
+    );
+    assert_eq!(renderer.drain_frame(), [0.0, 0.0]);
+    drop(first);
+
+    let retired = renderer
+        .replace_mix(plain_2)
+        .expect("nothing is ramping, so the mix installs at once");
+    assert!(
+        retired.compensation().is_some(),
+        "the leftover compensation must leave with the old mix"
+    );
+}
+
+#[test]
+fn transport_count_in_drain_and_mix_changes_stay_off_the_heap() {
+    // The transport's count-in and drain branches, and installing a mix that adds or removes the compensation while
+    // sounding, run on the audio thread and must not touch the heap.
+    let mut plan = test_plan_bars(1, 1);
+    add_note(&mut plan, 0, 3800.0);
+    let settings = DocumentSettings::default();
+    let l = 128;
+    let d_max = pipeline_frames(CALLBACK) + l;
+    let rig_a = rig(l, 1.0);
+    let prep = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_a.insert(l as u32))]);
+    let renderer = Renderer::new_with_mix(
+        Arc::new(plan.clone()),
+        Arc::new(base_resources()),
+        prep,
+        settings.clone(),
+        RATE,
+    )
+    .unwrap();
+    let mut transport = CallbackTransport::headless(RATE);
+    let mut practice = practice_settings(1, false);
+    practice.metronome.volume = 0.8;
+    transport.install_with_practice(Box::new(renderer), 1, false, practice);
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut buffer = vec![[0.0f32; 2]; CALLBACK];
+    transport.render_into(&mut buffer);
+    rig_a.settle();
+    assert_eq!(transport.status().practice.phase, PracticePhase::CountIn);
+
+    HEAP_OPERATIONS.with(|n| n.set(0));
+    COUNT_HEAP.with(|f| f.set(true));
+    // The rest of the count-in, the bar, and the drain at its end.
+    let mut ended = false;
+    for _ in 0..((96_000 * 2 + d_max) / CALLBACK + 4) {
+        transport.render_into(&mut buffer);
+        rig_a.settle();
+        if transport.status().practice.phase == PracticePhase::Ended {
+            ended = true;
+            break;
+        }
+    }
+    COUNT_HEAP.with(|f| f.set(false));
+    let ops = HEAP_OPERATIONS.with(|n| n.get());
+    assert!(ended, "the transport must count in, play and drain");
+    assert_eq!(
+        ops, 0,
+        "count-in, play and drain touched the heap {ops} times"
+    );
+
+    // Installing a mix while sounding: plug-in to none, then none to plug-in.
+    let rig_b = rig(l, 1.0);
+    let with_plugin = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_a.insert(l as u32))]);
+    let without = PreparedMix::prepare(&settings, &plan, RATE).unwrap();
+    let back = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_b.insert(l as u32))]);
+    let mut renderer = Renderer::new_with_mix(
+        Arc::new(plan),
+        Arc::new(base_resources()),
+        with_plugin,
+        settings,
+        RATE,
+    )
+    .unwrap();
+    let mut block = vec![[0.0f32; 2]; CALLBACK];
+    for _ in 0..10 {
+        renderer.render_into(&mut block);
+        rig_a.settle();
+    }
+    HEAP_OPERATIONS.with(|n| n.set(0));
+    COUNT_HEAP.with(|f| f.set(true));
+    let first = renderer.replace_mix(without);
+    for _ in 0..10 {
+        let _ = renderer.settle_mix();
+        renderer.render_into(&mut block);
+        rig_a.settle();
+    }
+    let second = renderer.replace_mix(back);
+    for _ in 0..10 {
+        let _ = renderer.settle_mix();
+        renderer.render_into(&mut block);
+        rig_b.settle();
+    }
+    COUNT_HEAP.with(|f| f.set(false));
+    let ops = HEAP_OPERATIONS.with(|n| n.get());
+    drop((first, second));
+    assert_eq!(
+        ops, 0,
+        "installing mixes that remove and add the compensation touched the heap {ops} times"
+    );
 }

@@ -49,7 +49,14 @@ impl DelayLine {
     }
 
     pub fn flush(&mut self) {
-        self.buf.fill([0.0; 2]);
+        // After a flush the line claims `delay + 1` frames of silent history, the frames just behind the write
+        // position. Reads never reach further back than the history, which grows only as new frames overwrite the
+        // buffer from the start, so only those frames need zeroing, not the whole buffer.
+        let span = self.buf.len();
+        let from = span.saturating_sub(self.delay + 1);
+        if let Some(stale) = self.buf.get_mut(from..) {
+            stale.fill([0.0; 2]);
+        }
         self.write_pos = 0;
         self.history = self.delay + 1;
         self.timing_from = self.delay;
@@ -176,6 +183,12 @@ impl Compensation {
         self.track_lines.iter().any(|l| l.gliding())
             || self.backing_line.gliding()
             || self.click_line.gliding()
+    }
+
+    /// Whether the stage still does anything. One left behind by removing the last plug-in delays nothing once its
+    /// glide to zero has ended, and then plays exactly as no compensation does.
+    pub fn active(&self) -> bool {
+        self.d_max > 0 || self.gliding()
     }
 
     /// Delays track `i` by `D_max - D_i`.

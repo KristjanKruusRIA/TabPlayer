@@ -384,3 +384,63 @@ it('fixed-tempo practice setting restricts the speed field with aria-disabled, r
   expect(player.setSpeed).not.toHaveBeenCalled();
   expect(input).toHaveValue('75');
 });
+
+it('typed practice speed: the message describes the field and does not share the transport error',()=>{
+  const {player,update}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).not.toHaveAttribute('aria-describedby');
+  fireEvent.change(input,{target:{value:'fast'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(input).toHaveAttribute('aria-invalid','true');
+  expect(input).toHaveAccessibleDescription('Speed must be a number from 10% to 300%.');
+  // A typo is not a playback error: the More playback summary carries no error suffix.
+  expect(screen.getByText(/^More playback/,{selector:'summary'})).toHaveTextContent(/^More playback$/);
+  // A successful Slower clears it and drops the description.
+  fireEvent.click(screen.getByRole('button',{name:'Slower'}));
+  expect(player.setSpeed).toHaveBeenLastCalledWith(75);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(input).not.toHaveAttribute('aria-invalid');
+  expect(input).not.toHaveAttribute('aria-describedby');
+  // A valid entry clears it too.
+  fireEvent.change(input,{target:{value:'9'}});fireEvent.blur(input);
+  expect(screen.getByRole('alert')).toBeInTheDocument();
+  fireEvent.change(input,{target:{value:'80'}});fireEvent.keyDown(input,{key:'Enter'});
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(input).not.toHaveAttribute('aria-invalid');
+  update(snapshot({speed:80}));
+});
+
+it('typed practice speed: tabbing through the field leaves an unrelated transport error in place',()=>{
+  const {player}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  player.play.mockImplementation(()=>{throw new Error('Play failed.');});
+  fireEvent.click(screen.getByRole('button',{name:'Play'}));
+  expect(screen.getByRole('alert')).toHaveTextContent('Play failed.');
+  fireEvent.focus(input);fireEvent.blur(input);
+  expect(screen.getByRole('alert')).toHaveTextContent('Play failed.');
+  // Retyping the shown value also leaves it alone.
+  fireEvent.change(input,{target:{value:'100'}});fireEvent.blur(input);
+  expect(screen.getByRole('alert')).toHaveTextContent('Play failed.');
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  // A typo adds its own message beside it and does not replace it.
+  fireEvent.change(input,{target:{value:'x'}});fireEvent.blur(input);
+  expect(screen.getAllByRole('alert').map(node=>node.textContent)).toEqual(['Speed must be a number from 10% to 300%.','Error: Play failed.']);
+});
+
+it('typed practice speed: accepts a decimal comma and refuses hex, exponent and signed forms',()=>{
+  const {player}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).toHaveAttribute('inputmode','decimal');
+  fireEvent.change(input,{target:{value:'62,5'}});fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).toHaveBeenLastCalledWith(62.5);
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  player.setSpeed.mockClear();
+  for(const text of ['0x1F','1e2','+50','-50','5 0','1,2,3']){
+    fireEvent.change(input,{target:{value:text}});fireEvent.keyDown(input,{key:'Enter'});
+    expect(screen.getByRole('alert'),text).toHaveTextContent('Speed must be a number');
+  }
+  expect(player.setSpeed).not.toHaveBeenCalled();
+});

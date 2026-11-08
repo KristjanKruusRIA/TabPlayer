@@ -110,15 +110,20 @@ try{
       });
     }finally{host.remove();}
   });
-  // What the screen draws: families, styles and sizes of the lyric, the marker, the page header and the notation glyphs.
+  // What the screen draws: families, styles and sizes of the lyric, the marker, the page header and the notation glyphs. In the page layouts alphaTab renders
+  // into a hidden staging surface ([aria-label="Music notation"]) and the person sees the chunks copied into .score-pages, so both are measured: `visible` is
+  // what is on the page, the top level what alphaTab drew.
   const drawn=()=>page.evaluate(()=>{
-    const surface=[...document.querySelectorAll('[aria-label="Music notation"] svg')],texts=surface.flatMap(svg=>[...svg.querySelectorAll('text')].filter(text=>text.textContent.trim()));
     const style=text=>{if(!text)return null;const css=getComputedStyle(text);return {content:text.textContent.trim(),family:css.fontFamily,style:css.fontStyle,weight:css.fontWeight,size:css.fontSize};};
-    const glyphs=texts.filter(text=>text.parentNode.classList?.contains('at')),glyph=glyphs.find(text=>text.textContent.trim()==='')??glyphs[0];
+    const measure=selector=>{
+      const texts=[...document.querySelectorAll(selector)].flatMap(svg=>[...svg.querySelectorAll('text')].filter(text=>text.textContent.trim()));
+      const glyphs=texts.filter(text=>text.parentNode.classList?.contains('at')),glyph=glyphs.find(text=>text.textContent.trim()==='\uE0A4')??glyphs[0];
+      return {lyric:style(texts.find(text=>text.textContent.trim()==='Lyriq')),marker:style(texts.find(text=>text.textContent.includes('Verseq'))),chord:style(texts.find(text=>text.textContent.includes('Cmaj7'))),
+        glyph:style(glyph),glyphFamilies:[...new Set(glyphs.map(text=>getComputedStyle(text).fontFamily))],glyphCount:glyphs.length};
+    };
     const header=document.querySelector('.score-page-text text');
-    const families=[...new Set(glyphs.map(text=>getComputedStyle(text).fontFamily))];
-    return {lyric:style(texts.find(text=>text.textContent.trim()==='Lyriq')),marker:style(texts.find(text=>text.textContent.includes('Verseq'))),chord:style(texts.find(text=>text.textContent.includes('Cmaj7'))),
-      header:header?{...style(header),attrSize:header.getAttribute('font-size'),attrFamily:header.getAttribute('font-family')}:null,glyph:style(glyph),glyphFamilies:families,glyphCount:glyphs.length,
+    return {...measure('[aria-label="Music notation"] svg'),visible:measure('.score-pages .score-svg-chunk svg'),
+      header:header?{...style(header),attrSize:header.getAttribute('font-size'),attrFamily:header.getAttribute('font-family')}:null,
       faces:[...document.fonts].filter(face=>face.status==='loaded').map(face=>`${face.family}|${face.weight}|${face.style}`)};
   });
   const alias=(family,name)=>typeof family==='string'&&family.replaceAll('"','').split(',')[0].trim()===name;
@@ -133,11 +138,13 @@ try{
   const baseProject=(await snapshot()).project;
 
   // ---- A default document ----
-  const plain=await poll(drawn,value=>value.lyric&&value.marker&&value.header&&value.glyph&&value.glyphCount>0,'the default score is drawn');
+  const plain=await poll(drawn,value=>value.lyric&&value.marker&&value.header&&value.glyph&&value.glyphCount>0&&value.visible.glyph&&value.visible.lyric&&value.visible.marker,'the default score is drawn');
   const plainPdf=await exportPdf(),plainPages=await exportedPages();
   await check('default: no role or music font is chosen and the screen draws system fonts, not the aliases',async()=>{
     assert.equal(lastFonts(baseProject),undefined);
     for(const key of ['lyric','marker','chord','header'])assert.ok(!/TabPlayer (Sans|Serif|Mono)/.test(plain[key].family),`${key} family ${plain[key].family}`);
+    for(const key of ['lyric','marker','chord'])assert.ok(!/TabPlayer (Sans|Serif|Mono)/.test(plain.visible[key].family),`visible ${key} family ${plain.visible[key].family}`);
+    assert.ok(plain.visible.glyphCount>0&&!/Petaluma|Leland/.test(plain.visible.glyph.family),'the visible page draws Bravura');
     assert.ok(!/Petaluma|Leland/.test(plain.glyph.family),plain.glyph.family);
     return JSON.stringify({lyric:plain.lyric.family,marker:plain.marker.family,glyph:plain.glyph.family});
   });
@@ -181,11 +188,14 @@ try{
     assert.deepEqual(lastFonts(applied.project),{music:'petaluma',roles:{lyrics:{font:'notoSerif',italic:true},markers:{font:'notoSansMono',bold:true},pageHeader:{font:'notoSerif',size:1.5}}});
   });
   await check('Apply engraving again with nothing changed records nothing',async()=>{await button('Apply engraving');assert.equal((await edits()).length,applied.project.edits.length);});
-  const typed=await poll(drawn,value=>value.glyph&&/Petaluma/.test(value.glyph.family)&&value.lyric&&alias(value.lyric.family,'TabPlayer Serif')&&value.marker&&value.header,'the chosen fonts are drawn');
+  const typed=await poll(drawn,value=>value.glyph&&/Petaluma/.test(value.glyph.family)&&value.lyric&&alias(value.lyric.family,'TabPlayer Serif')&&value.marker&&value.header&&value.visible.glyph&&/Petaluma/.test(value.visible.glyph.family)&&alias(value.visible.lyric?.family,'TabPlayer Serif'),'the chosen fonts are drawn');
   // Screenshots for a look by eye (not asserted): the page, and the fonts panel scrolled into view.
   await page.screenshot({path:resolve(evidenceDirectory,'font-roles-page.png')});await page.getByRole('combobox',{name:/^Music font/}).scrollIntoViewIfNeeded();await page.screenshot({path:resolve(evidenceDirectory,'font-roles-panel.png')});await page.getByRole('combobox',{name:/^Markers italic/}).scrollIntoViewIfNeeded();await page.screenshot({path:resolve(evidenceDirectory,'font-roles-roles.png')});
   await check('screen: lyrics use the Serif alias in italic, markers the Mono alias in bold, the header the Serif alias at 150%',async()=>{
     assert.ok(alias(typed.lyric.family,'TabPlayer Serif'),typed.lyric.family);assert.equal(typed.lyric.style,'italic');
+    // The page the person sees (the copied chunks), not only alphaTab's hidden staging surface.
+    assert.ok(alias(typed.visible.lyric.family,'TabPlayer Serif')&&typed.visible.lyric.style==='italic',JSON.stringify(typed.visible.lyric));
+    assert.ok(alias(typed.visible.marker.family,'TabPlayer Mono')&&Number(typed.visible.marker.weight)>=700,JSON.stringify(typed.visible.marker));
     assert.ok(alias(typed.marker.family,'TabPlayer Mono'),typed.marker.family);assert.ok(Number(typed.marker.weight)>=700,`weight ${typed.marker.weight}`);
     assert.ok(alias(typed.header.family,'TabPlayer Serif'),typed.header.family);assert.equal(parseFloat(typed.header.attrSize),27,`header size ${typed.header.attrSize}`);
     assert.ok(alias(typed.chord.family,'TabPlayer Serif')===false&&!/TabPlayer/.test(typed.chord.family),'Chord names (no font chosen) keep the system font');
@@ -195,6 +205,7 @@ try{
   await check('screen: music glyphs use Petaluma and the Petaluma face is loaded',async()=>{
     assert.ok(/^"?Petaluma"?/.test(typed.glyph.family.trim()),typed.glyph.family);
     assert.ok(typed.glyphFamilies.every(family=>/Petaluma/.test(family)),JSON.stringify(typed.glyphFamilies));
+    assert.ok(typed.visible.glyphCount>0&&typed.visible.glyphFamilies.every(family=>/Petaluma/.test(family)),`visible page: ${JSON.stringify(typed.visible.glyphFamilies)}`);assert.equal(parseFloat(typed.visible.glyph.size),36);
     assert.ok(typed.faces.some(entry=>entry.startsWith('Petaluma|')),`loaded ${JSON.stringify(typed.faces)}`);
     assert.equal(parseFloat(typed.glyph.size),36);return typed.glyph.family;
   });
@@ -254,7 +265,7 @@ try{
   await check('switching to Leland is one more edit; glyphs and the PDF use Leland and no longer Petaluma',async()=>{
     assert.equal((await edits()).length,beforeLeland);await button('Apply engraving');
     const after=await snapshot();assert.equal(after.project.edits.length,beforeLeland+1);assert.deepEqual(lastFonts(after.project),{...lastFonts(stored.project),music:'leland'});
-    const now=await poll(drawn,value=>value.glyph&&/Leland/.test(value.glyph.family),'Leland glyphs are drawn');assert.ok(now.glyphFamilies.every(family=>/Leland/.test(family)),JSON.stringify(now.glyphFamilies));
+    const now=await poll(drawn,value=>value.glyph&&/Leland/.test(value.glyph.family),'Leland glyphs are drawn');assert.ok(now.glyphFamilies.every(family=>/Leland/.test(family)),JSON.stringify(now.glyphFamilies));assert.ok(now.visible.glyphCount>0&&now.visible.glyphFamilies.every(family=>/Leland/.test(family)),`visible page: ${JSON.stringify(now.visible.glyphFamilies)}`);
     assert.ok(alias(now.lyric.family,'TabPlayer Serif'),'text roles are unchanged');
     const fonts=await exportPdf();assert.ok(fonts.includes('Leland')&&!fonts.includes('Petaluma'),JSON.stringify(fonts));
     const pages=await exportedPages();for(const sheet of pages){assert.equal(sheet.musicCss,'.at{font-family:Leland,Bravura;font-size:36px}');assert.deepEqual(sheet.spill,[]);}
@@ -263,7 +274,7 @@ try{
   await choose('Music font','bravura');await button('Apply engraving');
   await check('switching back to Bravura omits music from the fonts, draws Bravura and no D12 music face is embedded',async()=>{
     const after=await snapshot();assert.deepEqual(lastFonts(after.project),{roles:lastFonts(stored.project).roles},'music is omitted at its default');
-    const now=await poll(drawn,value=>value.glyph&&!/Petaluma|Leland/.test(value.glyph.family),'Bravura glyphs are drawn');assert.ok(now.glyphFamilies.every(family=>!/Petaluma|Leland/.test(family)),JSON.stringify(now.glyphFamilies));
+    const now=await poll(drawn,value=>value.glyph&&!/Petaluma|Leland/.test(value.glyph.family),'Bravura glyphs are drawn');assert.ok(now.glyphFamilies.every(family=>!/Petaluma|Leland/.test(family)),JSON.stringify(now.glyphFamilies));assert.ok(now.visible.glyphCount>0&&now.visible.glyphFamilies.every(family=>!/Petaluma|Leland/.test(family)),`visible page: ${JSON.stringify(now.visible.glyphFamilies)}`);
     const fonts=await exportPdf();assert.ok(fonts.includes('Bravura')&&!fonts.includes('Petaluma')&&!fonts.includes('Leland'),JSON.stringify(fonts));
     assert.ok(fonts.includes('NotoSerif-Italic'),'role faces remain');
     const pages=await exportedPages();for(const sheet of pages)assert.equal(sheet.musicCss,'.at{font-family:Bravura;font-size:36px}');

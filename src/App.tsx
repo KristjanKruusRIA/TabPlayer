@@ -31,7 +31,7 @@ import { CabinetNotices } from './audio/CabinetNotices';
 import { CaptureNotices } from './audio/CaptureNotices';
 import { PluginNotices } from './audio/PluginNotices';
 import { usePluginStatus } from './audio/usePluginStatus';
-import { onPluginStatus, onPluginEditorClosed, pluginConsentGrant, pluginRetry } from './audio/plugin-host';
+import { onPluginStatus, onPluginEditorClosed, pluginConsentGrant, pluginRetry, handlePluginEditorClosed } from './audio/plugin-host';
 import { AmpCapture } from './audio/AmpCapture';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
@@ -165,33 +165,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     onPluginEditorClosed(payload => {
-      if (payload.documentId === state.documentId) {
-        if (payload.assetToken && payload.state) {
-          const currentSound = controller.getState().settings.sounds[payload.trackId];
-          const currentPlugin = currentSound?.plugin;
-          if (currentPlugin) {
-            const nextSound = {
-              ...currentSound,
-              plugin: {
-                ...currentPlugin,
-                state: payload.state,
-              },
-            };
-            const candidate = {
-              token: payload.assetToken,
-              assetId: payload.state,
-              info: {
-                filename: `${currentPlugin.name}.bin`,
-                mediaType: 'application/octet-stream',
-                byteLength: 0,
-              },
-            };
-            void controller.edit({ type: 'setTrackSound', trackId: payload.trackId, sound: nextSound }, candidate);
-          } else {
-            void controller.cancelAsset?.(payload.assetToken);
-          }
-        }
-      }
+      handlePluginEditorClosed(payload, state.documentId, controller);
     }).then(fn => { unlisten = fn; }, () => {});
     return () => { unlisten?.(); };
   }, [state.documentId, controller]);

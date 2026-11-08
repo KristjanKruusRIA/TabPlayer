@@ -1,7 +1,20 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import type { PluginSlot } from '../edit-types';
+import type { EditCommand, PluginSlot, TrackSound } from '../edit-types';
 import type { MessageKey } from '../i18n';
+import type { AssetCandidate } from '../project';
+
+export function makePluginStateCandidate(stateId: string, token: string): AssetCandidate {
+  return {
+    token,
+    assetId: stateId,
+    info: {
+      filename: 'plugin-state.tpstate',
+      mediaType: 'application/x-tabplayer-plugin-state',
+      byteLength: 20,
+    },
+  };
+}
 
 export type PluginStatus =
   | 'loading'
@@ -83,8 +96,18 @@ export const pluginConsentGrant = (documentId: string) =>
 export const pluginRetry = (documentId: string, trackId: string) =>
   invoke<void>('plugin_retry', { documentId, trackId });
 
-export const pluginEditorOpen = (documentId: string, trackId: string, title: string) =>
-  invoke<number>('plugin_editor_open', { documentId, trackId, title });
+let openedEditor: { documentId: string; trackId: string; classId?: string } | null = null;
+
+export const setOpenedEditor = (editor: { documentId: string; trackId: string; classId?: string } | null) => {
+  openedEditor = editor;
+};
+
+export const getOpenedEditor = () => openedEditor;
+
+export const pluginEditorOpen = (documentId: string, trackId: string, title: string, classId?: string) => {
+  openedEditor = { documentId, trackId, classId };
+  return invoke<number>('plugin_editor_open', { documentId, trackId, title });
+};
 
 export const pluginEditorSave = (documentId: string, trackId: string) =>
   invoke<PluginEditorSaveResult | null>('plugin_editor_save', { documentId, trackId });
@@ -97,6 +120,46 @@ export const onPluginStatus = (handler: (payload: { documentId: string }) => voi
 
 export const onPluginEditorClosed = (handler: (payload: PluginEditorClosedPayload) => void) =>
   listen<PluginEditorClosedPayload>('plugin-editor-closed', event => handler(event.payload));
+
+export interface EditorCloseController {
+  getState: () => { settings: { sounds: Record<string, TrackSound | undefined> } };
+  edit: (command: EditCommand, asset?: AssetCandidate) => Promise<unknown> | void;
+  cancelAsset?: (token: string) => Promise<unknown> | void;
+}
+
+export function handlePluginEditorClosed(
+  payload: PluginEditorClosedPayload,
+  currentDocumentId: string,
+  controller: EditorCloseController
+): void {
+  if (payload.documentId !== currentDocumentId) return;
+  if (!payload.assetToken || !payload.state) return;
+
+  const currentSound = controller.getState().settings.sounds[payload.trackId];
+  const currentPlugin = currentSound?.plugin;
+  const changedMeanwhile =
+    !currentPlugin ||
+    (openedEditor &&
+      openedEditor.documentId === payload.documentId &&
+      openedEditor.trackId === payload.trackId &&
+      Boolean(openedEditor.classId) &&
+      currentPlugin.classId !== openedEditor.classId);
+
+  if (changedMeanwhile) {
+    void controller.cancelAsset?.(payload.assetToken);
+    return;
+  }
+
+  const nextSound: TrackSound = {
+    ...currentSound,
+    plugin: {
+      ...currentPlugin,
+      state: payload.state,
+    },
+  };
+  const candidate = makePluginStateCandidate(payload.state, payload.assetToken);
+  void controller.edit({ type: 'setTrackSound', trackId: payload.trackId, sound: nextSound }, candidate);
+}
 
 /** Maps status to its short label message key. */
 export function statusLabelKey(status: PluginStatus): MessageKey {

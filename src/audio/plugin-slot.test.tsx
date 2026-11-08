@@ -2,15 +2,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import type { PluginSlot, TrackSound } from '../edit-types';
+import type { EditCommand, PluginSlot, TrackSound } from '../edit-types';
 import { PluginSlotPanel } from './PluginSlotPanel';
 import { PluginNotices } from './PluginNotices';
 import { usePluginStatus } from './usePluginStatus';
 import { renderHook, act } from '@testing-library/react';
-import type { PluginLibraryEntry, TrackPluginStatus } from './plugin-host';
+import {
+  handlePluginEditorClosed,
+  makePluginStateCandidate,
+  setOpenedEditor,
+  type PluginLibraryEntry,
+  type TrackPluginStatus,
+} from './plugin-host';
 import { soundPreset } from './sound-model';
 import { useSoundEditing } from './useSoundEditing';
 import { copySound, soundClipboard, forgetSoundClipboard } from './sound-library';
+import { previewEdit } from '../engine';
+import { blankProject } from '../project';
 
 const mockCalls: Array<[string, unknown]> = [];
 let invokeHandler: (command: string, args?: any) => Promise<any> = async () => [];
@@ -136,6 +144,21 @@ describe('PluginSlotPanel', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/moved to another file/i)).toBeInTheDocument();
+    });
+  });
+
+  it('renders fallback option for slot.classId when not present in library entries', async () => {
+    invokeHandler = async (command: string) => {
+      if (command === 'plugin_library_list') return [];
+      return null;
+    };
+
+    render(<PluginSlotPanel trackId="track-1" slot={mockSlot} onChange={vi.fn()} />);
+
+    await waitFor(() => {
+      const select = screen.getByLabelText(/plug-in/i);
+      expect(select).toHaveValue(mockSlot.classId);
+      expect(screen.getByRole('option', { name: /Super Amp/i })).toBeInTheDocument();
     });
   });
 
@@ -421,7 +444,7 @@ describe('Sound editing preserves plug-in', () => {
   });
 
   describe('plugin-editor-closed event handling', () => {
-    it('with a token, it writes one edit', () => {
+    it('with a token, it writes one edit using makePluginStateCandidate', () => {
       const controller = {
         getState: () => ({
           settings: {
@@ -431,45 +454,19 @@ describe('Sound editing preserves plug-in', () => {
           },
         }),
         edit: vi.fn(),
-        bridge: { cancelAsset: vi.fn() },
+        cancelAsset: vi.fn(),
       };
 
-      const handler = (payload: { documentId: string; trackId: string; assetToken: string | null; state: string | null }) => {
-        if (payload.documentId === 'doc-1') {
-          if (payload.assetToken && payload.state) {
-            const currentSound = controller.getState().settings.sounds[payload.trackId];
-            const currentPlugin = currentSound?.plugin;
-            if (currentPlugin) {
-              const nextSound = {
-                ...currentSound,
-                plugin: {
-                  ...currentPlugin,
-                  state: payload.state,
-                },
-              };
-              const candidate = {
-                token: payload.assetToken,
-                assetId: payload.state,
-                info: {
-                  filename: `${currentPlugin.name}.bin`,
-                  mediaType: 'application/octet-stream',
-                  byteLength: 0,
-                },
-              };
-              controller.edit({ type: 'setTrackSound', trackId: payload.trackId, sound: nextSound }, candidate);
-            } else {
-              controller.bridge.cancelAsset(payload.assetToken);
-            }
-          }
-        }
-      };
-
-      handler({
-        documentId: 'doc-1',
-        trackId: 'track-1',
-        assetToken: 'token-abc',
-        state: 'new-state-xyz',
-      });
+      handlePluginEditorClosed(
+        {
+          documentId: 'doc-1',
+          trackId: 'track-1',
+          assetToken: 'token-abc',
+          state: 'new-state-xyz',
+        },
+        'doc-1',
+        controller
+      );
 
       expect(controller.edit).toHaveBeenCalledWith(
         {
@@ -479,9 +476,13 @@ describe('Sound editing preserves plug-in', () => {
             plugin: expect.objectContaining({ state: 'new-state-xyz' }),
           }),
         },
-        expect.objectContaining({ token: 'token-abc', assetId: 'new-state-xyz' })
+        expect.objectContaining({
+          token: 'token-abc',
+          assetId: 'new-state-xyz',
+          info: expect.objectContaining({ byteLength: 20 }),
+        })
       );
-      expect(controller.bridge.cancelAsset).not.toHaveBeenCalled();
+      expect(controller.cancelAsset).not.toHaveBeenCalled();
     });
 
     it('with null, it writes nothing', () => {
@@ -490,35 +491,25 @@ describe('Sound editing preserves plug-in', () => {
           settings: { sounds: { 'track-1': { ...soundPreset('lead'), plugin: mockSlot } } as Record<string, any> },
         }),
         edit: vi.fn(),
-        bridge: { cancelAsset: vi.fn() },
+        cancelAsset: vi.fn(),
       };
 
-      const handler = (payload: { documentId: string; trackId: string; assetToken: string | null; state: string | null }) => {
-        if (payload.documentId === 'doc-1') {
-          if (payload.assetToken && payload.state) {
-            const currentSound = controller.getState().settings.sounds[payload.trackId];
-            const currentPlugin = currentSound?.plugin;
-            if (currentPlugin) {
-              controller.edit({ type: 'setTrackSound', trackId: payload.trackId, sound: { ...currentSound, plugin: { ...currentPlugin, state: payload.state } } });
-            } else {
-              controller.bridge.cancelAsset(payload.assetToken);
-            }
-          }
-        }
-      };
-
-      handler({
-        documentId: 'doc-1',
-        trackId: 'track-1',
-        assetToken: null,
-        state: null,
-      });
+      handlePluginEditorClosed(
+        {
+          documentId: 'doc-1',
+          trackId: 'track-1',
+          assetToken: null,
+          state: null,
+        },
+        'doc-1',
+        controller
+      );
 
       expect(controller.edit).not.toHaveBeenCalled();
-      expect(controller.bridge.cancelAsset).not.toHaveBeenCalled();
+      expect(controller.cancelAsset).not.toHaveBeenCalled();
     });
 
-    it('if the track plug-in changed meanwhile, it cancels the token and writes nothing', () => {
+    it('if the track plug-in was removed meanwhile, it cancels the token and writes nothing', () => {
       const controller = {
         getState: () => ({
           settings: {
@@ -528,32 +519,95 @@ describe('Sound editing preserves plug-in', () => {
           },
         }),
         edit: vi.fn(),
-        bridge: { cancelAsset: vi.fn() },
+        cancelAsset: vi.fn(),
       };
 
-      const handler = (payload: { documentId: string; trackId: string; assetToken: string | null; state: string | null }) => {
-        if (payload.documentId === 'doc-1') {
-          if (payload.assetToken && payload.state) {
-            const currentSound = controller.getState().settings.sounds[payload.trackId];
-            const currentPlugin = currentSound?.plugin;
-            if (currentPlugin) {
-              controller.edit({ type: 'setTrackSound', trackId: payload.trackId, sound: { ...currentSound, plugin: { ...currentPlugin, state: payload.state } } });
-            } else {
-              controller.bridge.cancelAsset(payload.assetToken);
-            }
-          }
-        }
-      };
-
-      handler({
-        documentId: 'doc-1',
-        trackId: 'track-1',
-        assetToken: 'token-abc',
-        state: 'new-state-xyz',
-      });
+      handlePluginEditorClosed(
+        {
+          documentId: 'doc-1',
+          trackId: 'track-1',
+          assetToken: 'token-abc',
+          state: 'new-state-xyz',
+        },
+        'doc-1',
+        controller
+      );
 
       expect(controller.edit).not.toHaveBeenCalled();
-      expect(controller.bridge.cancelAsset).toHaveBeenCalledWith('token-abc');
+      expect(controller.cancelAsset).toHaveBeenCalledWith('token-abc');
+    });
+
+    it('if the track plug-in classId changed while the editor was open, it cancels the token and writes nothing', () => {
+      setOpenedEditor({
+        documentId: 'doc-1',
+        trackId: 'track-1',
+        classId: 'A'.repeat(32),
+      });
+
+      const differentSlot: PluginSlot = {
+        ...mockSlot,
+        classId: 'B'.repeat(32),
+        name: 'Different Amp',
+      };
+
+      const controller = {
+        getState: () => ({
+          settings: {
+            sounds: {
+              'track-1': { ...soundPreset('lead'), plugin: differentSlot },
+            } as Record<string, any>,
+          },
+        }),
+        edit: vi.fn(),
+        cancelAsset: vi.fn(),
+      };
+
+      handlePluginEditorClosed(
+        {
+          documentId: 'doc-1',
+          trackId: 'track-1',
+          assetToken: 'token-diff',
+          state: 'new-state-xyz',
+        },
+        'doc-1',
+        controller
+      );
+
+      expect(controller.edit).not.toHaveBeenCalled();
+      expect(controller.cancelAsset).toHaveBeenCalledWith('token-diff');
+    });
+
+    it('previewEdit accepts setTrackSound with makePluginStateCandidate and valid 64-hex state without throwing', () => {
+      const project = blankProject();
+      const stateId = 'a'.repeat(64);
+      const candidate = makePluginStateCandidate(stateId, 'token-123');
+      const projectWithAsset = {
+        ...project,
+        assets: {
+          ...project.assets,
+          [candidate.assetId]: candidate.info,
+        },
+      };
+      const edit: EditCommand = {
+        type: 'setTrackSound',
+        trackId: 'base/0',
+        sound: {
+          ...soundPreset('lead'),
+          plugin: {
+            format: 'vst3',
+            classId: 'A'.repeat(32),
+            name: 'Super Amp',
+            vendor: 'Audio Corp',
+            active: true,
+            inputDb: 0,
+            outputDb: 0,
+            state: stateId,
+          },
+        },
+      };
+      expect(() => previewEdit(projectWithAsset, edit)).not.toThrow();
+      const built = previewEdit(projectWithAsset, edit);
+      expect(built.settings.sounds['base/0']?.plugin?.state).toBe(stateId);
     });
   });
 });

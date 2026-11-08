@@ -164,7 +164,7 @@ export function PluginSlotPanel({
   const handleEditorOpen = () => {
     if (!slot) return;
     const title = t('plugin.editor_title', { name: slot.name });
-    pluginEditorOpen(documentId, trackId, title).catch(err => {
+    pluginEditorOpen(documentId, trackId, title, slot.classId).catch(err => {
       setError(localizePluginError(err, t));
     });
   };
@@ -208,6 +208,12 @@ export function PluginSlotPanel({
               onChange={e => handleSelect(e.target.value)}
             >
               <option value="">{t('plugin.builtin_tone')}</option>
+              {slot && !entries.some(e => e.classId === slot.classId) && (
+                <option value={slot.classId}>
+                  {slot.name}
+                  {slot.vendor ? ` (${slot.vendor})` : ''}
+                </option>
+              )}
               {entries.map(entry => (
                 <option key={entry.classId} value={entry.classId}>
                   {entry.name}

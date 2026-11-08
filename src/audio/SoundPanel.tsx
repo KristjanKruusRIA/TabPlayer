@@ -12,7 +12,7 @@ import { BusyFieldset, busyGuard } from '../ui';
 import { useI18n } from '../i18n';
 import { DrumKitPicker } from './DrumKitPicker';
 import { PluginSlotPanel } from './PluginSlotPanel';
-import type { PluginStatus } from './plugin-host';
+import { makePluginStateCandidate, type PluginStatus } from './plugin-host';
 import type { AssetCandidate } from '../project';
 import { useSoundEditing } from './useSoundEditing';
 import type { Board } from './useSoundEditing';
@@ -100,16 +100,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
           delete next.plugin;
         }
         if (assetToken && nextSlot) {
-          const assetCandidate: AssetCandidate = {
-            token: assetToken,
-            assetId: nextSlot.state,
-            info: {
-              filename: `${nextSlot.name}.bin`,
-              mediaType: 'application/octet-stream',
-              byteLength: 0,
-            },
-          };
-          void onEdit({ type: 'setTrackSound', trackId, sound: next }, assetCandidate);
+          void onEdit({ type: 'setTrackSound', trackId, sound: next }, makePluginStateCandidate(nextSlot.state, assetToken));
         } else {
           void editing.save(next);
         }

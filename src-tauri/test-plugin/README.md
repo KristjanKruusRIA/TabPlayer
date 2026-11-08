@@ -8,13 +8,15 @@ A stereo gain with an exact delay. The output is the input times the gain, delay
 
 It is one class that is both the component and the edit controller, so a probe sees exactly one class: `TEST_CLASS_ID`, named "TabPlayer Test Gain".
 
+The controller's `getState` writes one byte: the `processMode` the host passed to `setupProcessing` (0 realtime, 1 prefetch, 2 offline). The component's state is the record described below.
+
 ## Parameters
 
 | ID | Name | Normalized value |
 |---|---|---|
 | 0 | Gain | the gain, 0 to 1 (default 1); a state can carry any finite gain |
 | 1 | Latency | frames / 48,000, one step per frame (at most one second) |
-| 2 | Mode | one step per mode: Normal, Crash, Hang, NaN, Slow, Hang on load, Reject state |
+| 2 | Mode | one step per mode: Normal, Crash, Hang, NaN, Slow, Hang on load, Reject state, Fail process |
 | 3 | Edits | how many edits the editor has reported, over 1,024 |
 
 Slow takes 50 ms through the parameter. To choose another length, set the state: `Slow { ms }` is part of it.
@@ -27,6 +29,7 @@ Slow takes 50 ms through the parameter. To choose another length, set the state:
 - **Slow**: every `process` call takes at least `ms` milliseconds.
 - **Hang on load**: `setState` never returns once it has read a state with this mode.
 - **Reject state**: `setState` returns `kResultFalse`, and so does a state that carries this mode.
+- **Fail process**: every `process` call returns `kResultFalse` and writes nothing.
 
 ## State
 
@@ -40,7 +43,7 @@ The factory implements `IPluginFactory2`: the class reports the subcategory `Fx`
 
 ## Editor (Windows)
 
-`createView("editor")` returns an `IPlugView` holding one child static window, 300 by 200. When it attaches it reports one edit on parameter 3 through `beginEdit`, `performEdit` and `endEdit`. Other platforms have no editor and return no view.
+`createView("editor")` returns an `IPlugView` holding one child static window, 300 by 200 at scale 1. It also takes `IPlugViewContentScaleSupport`: after `setContentScaleFactor(f)` the view's size and its child window are `f` times that, so a host's DPI handling can be seen. When it attaches it reports one edit on parameter 3 through `beginEdit`, `performEdit` and `endEdit`. Other platforms have no editor and return no view.
 
 ## Environment variables
 
@@ -51,6 +54,7 @@ They are read inside the process that hosts the plug-in.
 - `TABPLAYER_TEST_PLUGIN_VIEW_NO_EDIT=1`: the editor does not report an edit when it attaches.
 - `TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS=<n>`: the editor blocks its thread for `n` milliseconds after it attaches.
 - `TABPLAYER_TEST_PLUGIN_VIEW_MODAL_MS=<n>`: the editor runs a nested message loop on its thread for `n` milliseconds after it attaches, as a modal licence dialog does: window messages are dispatched and thread messages are dropped.
+- `TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE=1`: `getState` returns `kResultOk` even when the host's stream refused a write, as plug-ins that write without checking do.
 - `TABPLAYER_TEST_PLUGIN_PRINT=1`: the plug-in prints on load and on every block, through Rust's standard output and error and through the C runtime's `puts`. A host must keep that off its control pipe.
 
 ## Build

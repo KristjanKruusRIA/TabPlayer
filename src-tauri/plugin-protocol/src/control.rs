@@ -212,8 +212,14 @@ pub enum HelperMessage {
     EditorOpened {
         window: u64,
     },
+    /// The editor is closed. It answers `CloseEditor`, and it is also sent unasked when the user closes the window, so a
+    /// receiver treats a repeat as harmless.
     EditorClosed,
     StateDirty,
+    /// The success reply to a request that has no result to return: `SetState` and `SetParameter`. Every request gets
+    /// exactly one reply (a result, `Done` or `Error`), in the order the requests were sent, which lets the app route
+    /// replies to requests.
+    Done,
     Error {
         code: ErrorCode,
         /// At most [`MAX_DETAIL_CHARS`] characters.
@@ -329,7 +335,8 @@ impl Message for HelperMessage {
             HelperMessage::LatencyChanged { .. }
             | HelperMessage::EditorOpened { .. }
             | HelperMessage::EditorClosed
-            | HelperMessage::StateDirty => Ok(()),
+            | HelperMessage::StateDirty
+            | HelperMessage::Done => Ok(()),
         }
     }
 }
@@ -564,6 +571,7 @@ mod tests {
             },
             HelperMessage::EditorClosed,
             HelperMessage::StateDirty,
+            HelperMessage::Done,
             HelperMessage::error(ErrorCode::Unreadable, "it did not load"),
             HelperMessage::error(ErrorCode::UnsupportedPlatform, "no plug-in host here"),
         ]

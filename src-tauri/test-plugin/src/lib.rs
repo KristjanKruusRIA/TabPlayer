@@ -33,7 +33,9 @@
 //!
 //! The helper, the client and the end-to-end tests drive it through ordinary VST3 means only: four parameters
 //! (see [`PARAM_GAIN`] and its siblings), the component state ([`encode_test_state`]) and, on Windows, an editor.
-//! Six environment variables, read inside the process that hosts the plug-in, add the rest:
+//! Seven environment variables, read inside the process that hosts the plug-in, add the rest:
+//! `TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE=1` makes `getState` return `kResultOk` even when the host's stream refused
+//! a write,
 //! `TABPLAYER_TEST_PLUGIN_PRINT=1` makes it print to the console (Rust's and the C runtime's) when it loads and on every
 //! block, to show that a host keeps plug-in output off its control pipe,
 //! `TABPLAYER_TEST_PLUGIN_VIEW_MODAL_MS=<n>` makes the editor run a nested message loop for `n` milliseconds after it
@@ -102,8 +104,8 @@ pub const PARAM_EDITS: u32 = 3;
 /// The number of parameters.
 pub const PARAM_COUNT: u32 = 4;
 
-/// The number of steps of the mode parameter: seven modes, so six steps.
-const MODE_STEPS: u32 = 6;
+/// The number of steps of the mode parameter: eight modes, so seven steps.
+const MODE_STEPS: u32 = 7;
 
 /// How much state a `setState` reads before giving up on the stream. The helper's cap is 8 MiB; this leaves room for
 /// the oversize tests and bounds a stream that never ends.
@@ -118,6 +120,7 @@ pub const EDITOR_HEIGHT: i32 = 200;
 
 const ENV_HANG_FACTORY: &str = "TABPLAYER_TEST_PLUGIN_HANG_FACTORY";
 const ENV_PRINT: &str = "TABPLAYER_TEST_PLUGIN_PRINT";
+const ENV_IGNORE_WRITE_FAILURE: &str = "TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE";
 #[cfg_attr(not(windows), allow(dead_code))]
 const ENV_VIEW_MODAL_MS: &str = "TABPLAYER_TEST_PLUGIN_VIEW_MODAL_MS";
 const ENV_STATE_PADDING: &str = "TABPLAYER_TEST_PLUGIN_STATE_PADDING";
@@ -147,6 +150,8 @@ pub enum TestMode {
     HangOnLoad,
     /// `setState` returns `kResultFalse`.
     RejectState,
+    /// Every `process` call returns `kResultFalse` and writes nothing.
+    FailProcess,
 }
 
 impl TestMode {
@@ -160,6 +165,7 @@ impl TestMode {
             TestMode::Slow { .. } => 4,
             TestMode::HangOnLoad => 5,
             TestMode::RejectState => 6,
+            TestMode::FailProcess => 7,
         }
     }
 
@@ -172,6 +178,7 @@ impl TestMode {
             TestMode::Slow { .. } => "Slow",
             TestMode::HangOnLoad => "Hang on load",
             TestMode::RejectState => "Reject state",
+            TestMode::FailProcess => "Fail process",
         }
     }
 
@@ -189,7 +196,8 @@ impl TestMode {
                 },
             },
             5 => TestMode::HangOnLoad,
-            _ => TestMode::RejectState,
+            6 => TestMode::RejectState,
+            _ => TestMode::FailProcess,
         }
     }
 }
@@ -236,6 +244,7 @@ pub fn encode_test_state(state: &TestState) -> Vec<u8> {
         TestMode::Slow { ms } => (4, ms),
         TestMode::HangOnLoad => (5, 0),
         TestMode::RejectState => (6, 0),
+        TestMode::FailProcess => (7, 0),
     };
     let mut out = Vec::with_capacity(STATE_BASE_LEN + state.padding as usize);
     out.extend_from_slice(&STATE_MAGIC);
@@ -278,6 +287,7 @@ pub fn decode_test_state(bytes: &[u8]) -> Option<TestState> {
         4 => TestMode::Slow { ms },
         5 => TestMode::HangOnLoad,
         6 => TestMode::RejectState,
+        7 => TestMode::FailProcess,
         _ => return None,
     };
     let tail = &bytes[STATE_BASE_LEN..];
@@ -505,6 +515,8 @@ pub(crate) struct Shared {
     handler: Mutex<Option<ComPtr<IComponentHandler>>>,
     /// The latency the host last read through `getLatencySamples` or was last told about with a restart.
     reported_latency: AtomicU32,
+    /// The `processMode` of the last `setupProcessing` (0 realtime, 1 prefetch, 2 offline). The controller's state is this one byte.
+    process_mode: AtomicU32,
 }
 
 impl Shared {
@@ -518,6 +530,7 @@ impl Shared {
             }),
             handler: Mutex::new(None),
             reported_latency: AtomicU32::new(0),
+            process_mode: AtomicU32::new(0),
         }
     }
 
@@ -824,7 +837,10 @@ impl IComponentTrait for TestPlugin {
             std::env::var(ENV_STATE_PADDING).ok().as_deref(),
         );
         let bytes = encode_test_state(&current);
-        if write_stream(state, &bytes) {
+        let written = write_stream(state, &bytes);
+        // The SDK's own examples write through `IBStreamer` without checking and return `kResultOk`; some plug-ins do
+        // the same. `TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE=1` acts that out.
+        if written || std::env::var(ENV_IGNORE_WRITE_FAILURE).as_deref() == Ok("1") {
             kResultOk
         } else {
             kResultFalse
@@ -881,6 +897,9 @@ impl IAudioProcessorTrait for TestPlugin {
 
     unsafe fn setupProcessing(&self, setup: *mut ProcessSetup) -> tresult {
         if !setup.is_null() {
+            self.shared
+                .process_mode
+                .store((*setup).processMode.max(0) as u32, Ordering::Relaxed);
             let frames = (*setup).maxSamplesPerBlock.max(0) as usize;
             let mut inner = lock(&self.shared.inner);
             // Reserve now so `process` does not allocate for blocks up to the size the host announced.
@@ -927,6 +946,9 @@ impl IAudioProcessorTrait for TestPlugin {
         };
         self.shared.announce_latency(latency);
         act_on_mode(mode);
+        if mode == TestMode::FailProcess {
+            return kResultFalse;
+        }
 
         let frames = process_data.numSamples.max(0) as usize;
         if frames == 0
@@ -1003,8 +1025,15 @@ impl IEditControllerTrait for TestPlugin {
         kResultOk
     }
 
-    unsafe fn getState(&self, _state: *mut IBStream) -> tresult {
-        kResultOk
+    /// One byte: the process mode `setupProcessing` last saw, so a test can tell whether the host asked for offline
+    /// processing.
+    unsafe fn getState(&self, state: *mut IBStream) -> tresult {
+        let mode = self.shared.process_mode.load(Ordering::Relaxed) as u8;
+        if write_stream(state, &[mode]) {
+            kResultOk
+        } else {
+            kResultFalse
+        }
     }
 
     unsafe fn getParameterCount(&self) -> i32 {
@@ -1312,6 +1341,7 @@ mod tests {
             TestMode::Slow { ms: 0 },
             TestMode::HangOnLoad,
             TestMode::RejectState,
+            TestMode::FailProcess,
         ] {
             let state = TestState {
                 mode,
@@ -1341,7 +1371,7 @@ mod tests {
         bad[4] = 2;
         assert_eq!(decode_test_state(&bad), None, "version");
         let mut bad = good.clone();
-        bad[14] = 7;
+        bad[14] = 8;
         assert_eq!(decode_test_state(&bad), None, "mode tag");
         let mut bad = good.clone();
         bad[6..10].copy_from_slice(&f32::NAN.to_le_bytes());
@@ -1499,7 +1529,7 @@ mod tests {
             PARAM_LATENCY,
             480.0 / f64::from(MAX_LATENCY)
         ));
-        assert!(apply_parameter(&mut state, PARAM_MODE, 3.0 / 6.0));
+        assert!(apply_parameter(&mut state, PARAM_MODE, 3.0 / 7.0));
         assert!(apply_parameter(
             &mut state,
             PARAM_EDITS,
@@ -1546,14 +1576,15 @@ mod tests {
             "Slow",
             "Hang on load",
             "Reject state",
+            "Fail process",
         ]
         .iter()
         .enumerate()
         {
-            apply_parameter(&mut state, PARAM_MODE, step as f64 / 6.0);
+            apply_parameter(&mut state, PARAM_MODE, step as f64 / 7.0);
             assert_eq!(state.mode.index(), step as u32);
             assert_eq!(
-                parameter_to_string(PARAM_MODE, step as f64 / 6.0).as_deref(),
+                parameter_to_string(PARAM_MODE, step as f64 / 7.0).as_deref(),
                 Some(*name)
             );
         }
@@ -1567,7 +1598,7 @@ mod tests {
             mode: TestMode::Slow { ms: 200 },
             ..TestState::default()
         };
-        apply_parameter(&mut slow, PARAM_MODE, 4.0 / 6.0);
+        apply_parameter(&mut slow, PARAM_MODE, 4.0 / 7.0);
         assert_eq!(slow.mode, TestMode::Slow { ms: 200 });
     }
 
@@ -1589,7 +1620,7 @@ mod tests {
         for (id, text, normalized) in [
             (PARAM_GAIN, "0.50", 0.5),
             (PARAM_LATENCY, "480 frames", 480.0 / f64::from(MAX_LATENCY)),
-            (PARAM_MODE, "nan", 0.5),
+            (PARAM_MODE, "nan", 3.0 / 7.0),
             (PARAM_EDITS, "512", 0.5),
         ] {
             assert_eq!(parameter_from_string(id, text), Some(normalized), "{text}");
@@ -2233,7 +2264,7 @@ mod com_tests {
         assert_eq!(decode_test_state(&rig.get_state()), Some(good));
 
         // A plug-in set to the mode by its parameter refuses everything until the mode is taken off.
-        rig.set_param(PARAM_MODE, 6.0 / 6.0);
+        rig.set_param(PARAM_MODE, 6.0 / 7.0);
         assert_eq!(rig.set_state(&good), kResultFalse);
         rig.set_param(PARAM_MODE, 0.0);
         assert_eq!(rig.set_state(&good), kResultOk);
@@ -2353,14 +2384,43 @@ mod com_tests {
         );
     }
 
+    /// The editor takes a content scale factor and is that much bigger afterwards.
+    #[cfg(windows)]
+    #[test]
+    fn the_editor_follows_the_content_scale_factor() {
+        let rig = Rig::new();
+        unsafe {
+            let view =
+                ComPtr::from_raw(rig.controller.createView(c"editor".as_ptr())).expect("a view");
+            let scale = view
+                .cast::<IPlugViewContentScaleSupport>()
+                .expect("the view supports a content scale");
+            let size = |view: &ComPtr<IPlugView>| {
+                let mut rect = ViewRect {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                assert_eq!(view.getSize(&mut rect), kResultOk);
+                (rect.right, rect.bottom)
+            };
+            assert_eq!(size(&view), (EDITOR_WIDTH, EDITOR_HEIGHT));
+            assert_eq!(scale.setContentScaleFactor(1.5), kResultOk);
+            assert_eq!(size(&view), (450, 300));
+            assert_eq!(scale.setContentScaleFactor(f32::NAN), kInvalidArgument);
+            assert_eq!(size(&view), (450, 300));
+        }
+    }
+
     #[test]
     fn the_parameters_read_back_what_was_set() {
         let rig = Rig::new();
         rig.set_param(PARAM_GAIN, 0.5);
-        rig.set_param(PARAM_MODE, 3.0 / 6.0);
+        rig.set_param(PARAM_MODE, 3.0 / 7.0);
         unsafe {
             assert_eq!(rig.controller.getParamNormalized(PARAM_GAIN), 0.5);
-            assert_eq!(rig.controller.getParamNormalized(PARAM_MODE), 0.5);
+            assert_eq!(rig.controller.getParamNormalized(PARAM_MODE), 3.0 / 7.0);
             assert_eq!(
                 rig.controller.setParamNormalized(PARAM_COUNT, 0.5),
                 kInvalidArgument

@@ -12,14 +12,14 @@
 use std::ffi::{CStr, c_void};
 use std::ptr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 use std::time::Duration;
 
 use vst3::{Class, Steinberg::*};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW,
-    TranslateMessage, WS_CHILD, WS_VISIBLE,
+    CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, SWP_NOMOVE,
+    SWP_NOZORDER, SetWindowPos, TranslateMessage, WS_CHILD, WS_VISIBLE,
 };
 
 use crate::{
@@ -33,6 +33,9 @@ const SS_CENTER: u32 = 1;
 pub(crate) struct TestView {
     shared: Arc<Shared>,
     window: AtomicPtr<c_void>,
+    /// The content scale factor the host set (`f32` bits). The editor is `EDITOR_WIDTH` x `EDITOR_HEIGHT` times it, so a
+    /// test can see that the host told the view about a DPI change.
+    scale: AtomicU32,
 }
 
 impl TestView {
@@ -40,7 +43,17 @@ impl TestView {
         TestView {
             shared,
             window: AtomicPtr::new(ptr::null_mut()),
+            scale: AtomicU32::new(1.0f32.to_bits()),
         }
+    }
+
+    /// The editor's size in pixels at the current scale.
+    fn size(&self) -> (i32, i32) {
+        let scale = f32::from_bits(self.scale.load(Ordering::Relaxed));
+        (
+            (EDITOR_WIDTH as f32 * scale).round() as i32,
+            (EDITOR_HEIGHT as f32 * scale).round() as i32,
+        )
     }
 
     fn destroy_window(&self) {
@@ -60,7 +73,30 @@ impl Drop for TestView {
 }
 
 impl Class for TestView {
-    type Interfaces = (IPlugView,);
+    type Interfaces = (IPlugView, IPlugViewContentScaleSupport);
+}
+
+impl IPlugViewContentScaleSupportTrait for TestView {
+    unsafe fn setContentScaleFactor(&self, factor: f32) -> tresult {
+        if !factor.is_finite() || factor <= 0.0 {
+            return kInvalidArgument;
+        }
+        self.scale.store(factor.to_bits(), Ordering::Relaxed);
+        let window = self.window.load(Ordering::Acquire);
+        if !window.is_null() {
+            let (width, height) = self.size();
+            SetWindowPos(
+                window as HWND,
+                ptr::null_mut(),
+                0,
+                0,
+                width,
+                height,
+                SWP_NOMOVE | SWP_NOZORDER,
+            );
+        }
+        kResultOk
+    }
 }
 
 /// A nested message loop for `ms` milliseconds: window messages are dispatched, thread messages (no window) are dropped.
@@ -107,8 +143,8 @@ impl IPlugViewTrait for TestView {
             WS_CHILD | WS_VISIBLE | SS_CENTER,
             0,
             0,
-            EDITOR_WIDTH,
-            EDITOR_HEIGHT,
+            self.size().0,
+            self.size().1,
             parent as HWND,
             ptr::null_mut(),
             ptr::null_mut(),
@@ -158,11 +194,12 @@ impl IPlugViewTrait for TestView {
         if size.is_null() {
             return kInvalidArgument;
         }
+        let (width, height) = self.size();
         *size = ViewRect {
             left: 0,
             top: 0,
-            right: EDITOR_WIDTH,
-            bottom: EDITOR_HEIGHT,
+            right: width,
+            bottom: height,
         };
         kResultOk
     }

@@ -216,6 +216,7 @@ pub struct DocumentWorkspace {
     locked_intakes: Vec<LockedIntake>,
     checkpoint_revision: u64,
     frozen: bool,
+    plugins: Option<Arc<crate::plugins::service::PluginService>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -402,7 +403,17 @@ impl DocumentWorkspace {
             locked_intakes: Vec::new(),
             checkpoint_revision: 0,
             frozen: false,
+            plugins: None,
         })
+    }
+
+    pub fn set_plugins(&mut self, plugins: Arc<crate::plugins::service::PluginService>) {
+        self.plugins = Some(plugins);
+    }
+
+    pub fn plugin_pairs(&self, id: &str) -> Result<Vec<(String, String)>, String> {
+        let entry = self.entry(id)?;
+        Ok(entry.session.plugin_pairs())
     }
 
     pub fn snapshot(&self) -> WorkspaceSnapshot {
@@ -680,6 +691,9 @@ impl DocumentWorkspace {
         self.check_admission()?;
         self.entry(id)?;
         if self.active.document_id != id {
+            if let Some(plugins) = &self.plugins {
+                plugins.shutdown_document(&self.active.document_id);
+            }
             let revision = self.next_checkpoint_revision()?;
             self.active = AudioOwner {
                 document_id: id.into(),
@@ -750,6 +764,11 @@ impl DocumentWorkspace {
     }
 
     pub(crate) fn commit_close(&mut self, prepared: PreparedClose) -> WorkspaceSnapshot {
+        for id in &prepared.closing {
+            if let Some(plugins) = &self.plugins {
+                plugins.shutdown_document(id);
+            }
+        }
         self.documents
             .retain(|entry| !prepared.closing.contains(&entry.id));
         if let Some(replacement) = prepared.replacement {

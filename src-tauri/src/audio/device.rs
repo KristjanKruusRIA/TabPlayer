@@ -1940,6 +1940,10 @@ struct PreparedDocument {
     resources: Arc<AudioResources>,
     backing: Option<Arc<DecodedAudio>>,
     practice: PracticeSettings,
+    plugin_plans: Vec<(
+        String,
+        Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+    )>,
 }
 struct ControlState {
     producer: Option<HeapProd<CallbackCommand>>,
@@ -2081,7 +2085,8 @@ impl AudioService {
         document: &PreparedDocument,
         rate: u32,
     ) -> Result<(Box<Renderer>, PendingRoute), String> {
-        let mut renderer = Self::renderer(document, rate)?;
+        let callback_frames = self.max_callback_frames().unwrap_or(512) as usize;
+        let mut renderer = Self::renderer_with_callback_frames(document, rate, callback_frames)?;
         let mut pending = self
             .midi
             .build_route(&document.plan, &document.settings, false);
@@ -2434,6 +2439,20 @@ impl AudioService {
         backing_bytes: Option<Vec<u8>>,
         practice: PracticeSettings,
     ) -> Result<(), String> {
+        self.prepare_with_practice_and_plugins(plan, settings, backing_bytes, practice, Vec::new())
+    }
+
+    pub fn prepare_with_practice_and_plugins(
+        &self,
+        plan: PlaybackPlan,
+        settings: DocumentSettings,
+        backing_bytes: Option<Vec<u8>>,
+        practice: PracticeSettings,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
+    ) -> Result<(), String> {
         practice
             .validate(backing_bytes.is_some() || settings.backing.is_some())
             .map_err(str::to_string)?;
@@ -2442,7 +2461,7 @@ impl AudioService {
         validate_count(&plan, practice, 192_000)?;
         let generation = plan.generation;
         let previous = self.shared.desired.fetch_max(generation, Ordering::AcqRel);
-        let result = self.prepare_current(plan, settings, backing_bytes, practice);
+        let result = self.prepare_current(plan, settings, backing_bytes, practice, plugin_plans);
         if result.is_err() {
             let live = self
                 .control
@@ -2466,6 +2485,10 @@ impl AudioService {
         settings: DocumentSettings,
         backing_bytes: Option<Vec<u8>>,
         practice: PracticeSettings,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
     ) -> Result<(), String> {
         let generation = plan.generation;
         self.midi
@@ -2487,11 +2510,13 @@ impl AudioService {
             resources,
             backing,
             practice,
+            plugin_plans,
         };
         if state.producer.is_none() || self.shared.is_faulted() {
             // Validate music independently of the available device. Retain it after
             // an output failure so selecting a working device can recover it.
-            let _ = Self::renderer(&document, state.rate)?;
+            let callback_frames = self.max_callback_frames().unwrap_or(512) as usize;
+            let _ = Self::renderer_with_callback_frames(&document, state.rate, callback_frames)?;
             if let Err(error) = self.open(&mut state, document.clone(), false) {
                 if self.shared.desired.load(Ordering::Acquire) == generation
                     && self.shared.is_faulted()
@@ -2529,7 +2554,17 @@ impl AudioService {
             .backing_duration
             .store(value.to_bits(), Ordering::Relaxed);
     }
+
+    #[allow(dead_code)]
     fn renderer(document: &PreparedDocument, rate: u32) -> Result<Box<Renderer>, String> {
+        Self::renderer_with_callback_frames(document, rate, 512)
+    }
+
+    fn renderer_with_callback_frames(
+        document: &PreparedDocument,
+        rate: u32,
+        callback_frames: usize,
+    ) -> Result<Box<Renderer>, String> {
         let reference = document
             .settings
             .backing
@@ -2548,11 +2583,13 @@ impl AudioService {
                 .ok_or("Reference playback requires decoded backing audio.")?;
             ReferenceSyncMap::new(settings, &document.plan)?.validate_audio(audio)?;
         }
-        let mut renderer = Renderer::new(
+        let mut renderer = Renderer::new_with_plugins(
             document.plan.clone(),
             document.resources.clone(),
             document.settings.clone(),
             rate,
+            &document.plugin_plans,
+            callback_frames,
         )?;
         if let Some(audio) = &document.backing {
             let (anchors, offset, mix) = document
@@ -2631,7 +2668,19 @@ impl AudioService {
         Ok(())
     }
     pub fn set_mix(&self, settings: DocumentSettings, generation: u64) -> Result<(), String> {
-        self.set_mix_inner(settings, generation, None)
+        self.set_mix_with_plugins(settings, generation, Vec::new())
+    }
+
+    pub fn set_mix_with_plugins(
+        &self,
+        settings: DocumentSettings,
+        generation: u64,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
+    ) -> Result<(), String> {
+        self.set_mix_inner(settings, generation, None, plugin_plans)
     }
     pub fn set_mix_with_backing(
         &self,
@@ -2639,13 +2688,30 @@ impl AudioService {
         generation: u64,
         backing_bytes: Option<Vec<u8>>,
     ) -> Result<(), String> {
-        self.set_mix_inner(settings, generation, Some(backing_bytes))
+        self.set_mix_inner(settings, generation, Some(backing_bytes), Vec::new())
+    }
+
+    pub fn set_mix_with_backing_and_plugins(
+        &self,
+        settings: DocumentSettings,
+        generation: u64,
+        backing_bytes: Option<Vec<u8>>,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
+    ) -> Result<(), String> {
+        self.set_mix_inner(settings, generation, Some(backing_bytes), plugin_plans)
     }
     fn set_mix_inner(
         &self,
         settings: DocumentSettings,
         generation: u64,
         backing_bytes: Option<Option<Vec<u8>>>,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
     ) -> Result<(), String> {
         self.midi
             .ensure_ports(&MidiOut::port_names(&settings), Ensure::Mix);
@@ -2718,6 +2784,7 @@ impl AudioService {
                 resources,
                 settings,
                 practice: old.practice,
+                plugin_plans,
             };
             let (renderer, route) = self.routed_renderer(&document, state.rate)?;
             Self::enqueue(
@@ -2733,7 +2800,14 @@ impl AudioService {
             self.set_backing_duration(&document);
             state.document = Some(document);
         } else {
-            let mix = PreparedMix::prepare(&settings, &old.plan, state.rate)?;
+            let callback_frames = self.max_callback_frames().unwrap_or(512) as usize;
+            let mix = PreparedMix::prepare_with_plugins(
+                &settings,
+                &old.plan,
+                state.rate,
+                &plugin_plans,
+                callback_frames,
+            )?;
             let mut route = self
                 .midi
                 .build_route(&old.plan, &settings, self.midi.routed());
@@ -2744,7 +2818,9 @@ impl AudioService {
                 self.midi.wake();
             }
             self.midi.commit(route);
-            state.document.as_mut().unwrap().settings = settings;
+            let doc = state.document.as_mut().unwrap();
+            doc.settings = settings;
+            doc.plugin_plans = plugin_plans;
         }
         Ok(())
     }
@@ -2798,6 +2874,7 @@ impl AudioService {
                 resources: document.resources.clone(),
                 backing: document.backing.clone(),
                 practice: document.practice,
+                plugin_plans: document.plugin_plans.clone(),
             };
             let frozen = self.synchronize_callback(&mut state, Duration::from_secs(1));
             // The old callback is frozen (or did not answer, and is not to be trusted) and will never release what it
@@ -3142,6 +3219,7 @@ mod reference_tests {
                 frames: Arc::new(vec![[0.0; 2]; 192_000]),
             })),
             practice: PracticeSettings::default(),
+            plugin_plans: Vec::new(),
         }
     }
     #[test]
@@ -3475,6 +3553,7 @@ mod reference_tests {
             ),
             backing: None,
             practice: PracticeSettings::default(),
+            plugin_plans: Vec::new(),
         }
     }
     fn settled(log: &Arc<Mutex<Vec<Vec<u8>>>>, mut done: impl FnMut(&[Vec<u8>]) -> bool) -> bool {

@@ -27,6 +27,14 @@ const RETRY_AFTER: Duration = Duration::from_secs(1);
 /// The shortest time between two reconfigures. A plug-in that announces on every block or preset change, or from inside
 /// its own set-up, gets at most one dip a second; what it announces meanwhile is coalesced into the next one.
 const RECONFIGURE_INTERVAL: Duration = Duration::from_secs(1);
+/// Computes rate limit backoff: 1x, 2x, 4x, 8x, 16x, 32x.
+pub fn backoff_interval(base: Duration, consecutive_unchanged: u32) -> Duration {
+    if consecutive_unchanged == 0 {
+        base
+    } else {
+        base.saturating_mul(1 << consecutive_unchanged.min(5))
+    }
+}
 /// Rounds of reconfiguring after a load, for a plug-in that announces again while it is set up.
 const SETTLE_ROUNDS: usize = 3;
 
@@ -84,6 +92,8 @@ pub struct Vst3Core {
     app_pid: u32,
     /// A restart that could not be carried out (the audio thread was stuck) is tried again after this.
     retry_after: Option<Instant>,
+    /// Consecutive reconfigures with unchanged latency for rate-limit back-off.
+    unchanged_reconfigures: u32,
 }
 
 fn unreadable(error: impl std::fmt::Display) -> CoreError {
@@ -164,6 +174,7 @@ impl PluginCore for Vst3Core {
             editor_open: false,
             app_pid: 0,
             retry_after: None,
+            unchanged_reconfigures: 0,
         })
     }
 
@@ -355,9 +366,15 @@ impl Vst3Core {
                 }
             }
             gate.resume();
-            // The next reconfigure is at least `RECONFIGURE_INTERVAL` away; announcements until then are coalesced.
-            self.retry_after = Some(Instant::now() + RECONFIGURE_INTERVAL);
             let latency = self.instance.latency();
+            let interval = if latency == self.reported_latency {
+                self.unchanged_reconfigures = self.unchanged_reconfigures.saturating_add(1);
+                backoff_interval(RECONFIGURE_INTERVAL, self.unchanged_reconfigures)
+            } else {
+                self.unchanged_reconfigures = 0;
+                RECONFIGURE_INTERVAL
+            };
+            self.retry_after = Some(Instant::now() + interval);
             self.reported_latency = latency;
             events.push(CoreEvent::LatencyChanged(latency));
         }
@@ -396,6 +413,17 @@ impl BlockProcessor for Vst3Processor {
 mod tests {
     use super::*;
 
+    #[test]
+    fn unchanged_latency_announcements_back_off() {
+        let base = Duration::from_secs(1);
+        assert_eq!(backoff_interval(base, 0), Duration::from_secs(1));
+        assert_eq!(backoff_interval(base, 1), Duration::from_secs(2));
+        assert_eq!(backoff_interval(base, 2), Duration::from_secs(4));
+        assert_eq!(backoff_interval(base, 3), Duration::from_secs(8));
+        assert_eq!(backoff_interval(base, 4), Duration::from_secs(16));
+        assert_eq!(backoff_interval(base, 5), Duration::from_secs(32));
+        assert_eq!(backoff_interval(base, 6), Duration::from_secs(32));
+    }
     #[test]
     fn param_restart_flags_do_not_reprepare() {
         use RestartFlags as F;

@@ -85,6 +85,7 @@ impl ExportCapture {
 pub struct NativeAudio {
     pub service: AudioService,
     pub root: PathBuf,
+    pub plugins: Option<Arc<crate::plugins::service::PluginService>>,
     pub(crate) access: Mutex<()>,
     audition_sequence: AtomicU64,
     audition_render: Mutex<()>,
@@ -97,6 +98,7 @@ impl NativeAudio {
         Self {
             service: AudioService::new(root.clone(), publish),
             root,
+            plugins: None,
             access: Mutex::new(()),
             audition_sequence: AtomicU64::new(0),
             audition_render: Mutex::new(()),
@@ -104,6 +106,10 @@ impl NativeAudio {
             current_backing: Mutex::new(None),
             protected_paths: ProtectedPaths::default(),
         }
+    }
+    pub fn with_plugins(mut self, plugins: Arc<crate::plugins::service::PluginService>) -> Self {
+        self.plugins = Some(plugins);
+        self
     }
     pub fn with_protected_paths(mut self, protected_paths: ProtectedPaths) -> Self {
         self.protected_paths = protected_paths;
@@ -144,6 +150,28 @@ impl NativeAudio {
         source_key: String,
         practice: Option<PracticeSettings>,
     ) -> Result<(), String> {
+        let slot_requests: Vec<crate::plugins::service::SlotRequest> = {
+            let ws = workspace.lock().map_err(|e| e.to_string())?;
+            plan.tracks
+                .iter()
+                .filter_map(|t| {
+                    let slot = settings.sounds.get(&t.id).and_then(|s| s.plugin.clone())?;
+                    let bytes = ws
+                        .asset_bytes(&owner.document_id, &slot.state)
+                        .unwrap_or_default();
+                    Some(crate::plugins::service::SlotRequest {
+                        track_id: t.id.clone(),
+                        slot,
+                        state: bytes.into(),
+                    })
+                })
+                .collect()
+        };
+        let plugin_plans = if let Some(plugins) = &self.plugins {
+            plugins.ensure(&owner.document_id, &slot_requests)
+        } else {
+            Vec::new()
+        };
         let _access = self.access.lock().map_err(|e| e.to_string())?;
         let backing = {
             let workspace = workspace.lock().map_err(|e| e.to_string())?;
@@ -180,11 +208,12 @@ impl NativeAudio {
         };
         let backing_id = settings.backing.as_ref().map(|b| b.asset_id.clone());
         let generation = plan.generation;
-        let result = self.service.prepare_with_practice(
+        let result = self.service.prepare_with_practice_and_plugins(
             plan,
             settings,
             backing,
             practice.unwrap_or_default(),
+            plugin_plans,
         );
         if result.is_ok() || self.service.prepared_generation() == Some(generation) {
             *self.embedded.lock().unwrap() = original.map(|bytes| (source_key, bytes));
@@ -199,6 +228,29 @@ impl NativeAudio {
         settings: DocumentSettings,
         generation: u64,
     ) -> Result<(), String> {
+        let slot_requests: Vec<crate::plugins::service::SlotRequest> = {
+            let ws = workspace.lock().map_err(|e| e.to_string())?;
+            settings
+                .sounds
+                .iter()
+                .filter_map(|(track_id, sound)| {
+                    let slot = sound.plugin.clone()?;
+                    let bytes = ws
+                        .asset_bytes(&owner.document_id, &slot.state)
+                        .unwrap_or_default();
+                    Some(crate::plugins::service::SlotRequest {
+                        track_id: track_id.clone(),
+                        slot,
+                        state: bytes.into(),
+                    })
+                })
+                .collect()
+        };
+        let plugin_plans = if let Some(plugins) = &self.plugins {
+            plugins.ensure(&owner.document_id, &slot_requests)
+        } else {
+            Vec::new()
+        };
         let _access = self.access.lock().map_err(|e| e.to_string())?;
         let backing_id = settings.backing.as_ref().map(|b| b.asset_id.clone());
         // The asset is decoded only when the backing is changing: a mix change with the same backing never uses its bytes, and
@@ -219,7 +271,8 @@ impl NativeAudio {
         settings.validate()?;
         let mut current_backing = self.current_backing.lock().unwrap();
         if *current_backing == backing_id {
-            self.service.set_mix(settings, generation)?;
+            self.service
+                .set_mix_with_plugins(settings, generation, plugin_plans)?;
         } else {
             let backing = if backing_id.as_deref() == Some("embedded") {
                 Some(
@@ -233,8 +286,12 @@ impl NativeAudio {
             } else {
                 backing
             };
-            self.service
-                .set_mix_with_backing(settings, generation, backing)?;
+            self.service.set_mix_with_backing_and_plugins(
+                settings,
+                generation,
+                backing,
+                plugin_plans,
+            )?;
             *current_backing = backing_id;
         }
         Ok(())

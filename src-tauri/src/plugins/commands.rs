@@ -1,11 +1,19 @@
 //! The plug-in library commands (THE-71, Task 10). All of them are `async` and do their work in `spawn_blocking`, as the
 //! cabinet library's do: a scan can take a minute and must never block the IPC thread (preflight ruling P35).
+use crate::assets::StoredAsset;
 use crate::plugins::{
     helper::{HelperError, probe},
-    library::{LibraryEntry, PluginLibrary},
+    library::{LibraryEntry, PluginLibrary, Resolved},
+    service::{PluginService, TrackPluginStatus},
+    state::{STATE_FILENAME, STATE_MEDIA_TYPE},
 };
+use crate::settings::PluginSlot;
+use crate::workspace::DocumentWorkspace;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tabplayer_plugin_protocol::{limits::PROBE_TIMEOUT, validate::valid_class_id};
+use tauri::Manager;
 
 /// The helper program's file name. The installer puts it next to the app's own program, and so does a development build.
 #[cfg(windows)]
@@ -124,6 +132,114 @@ pub async fn plugin_library_remove(app: tauri::AppHandle, class_id: String) -> R
     tauri::async_runtime::spawn_blocking(move || remove_entry(&directory, &class_id))
         .await
         .map_err(|error| error.to_string())?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginChooseResult {
+    pub slot: PluginSlot,
+    pub asset_token: String,
+}
+
+#[tauri::command]
+pub async fn plugin_choose(
+    app: tauri::AppHandle,
+    document_id: String,
+    _track_id: String,
+    class_id: String,
+) -> Result<PluginChooseResult, String> {
+    if !valid_class_id(&class_id) {
+        return Err("Invalid plug-in class ID.".into());
+    }
+    let service = app.state::<Arc<PluginService>>().inner().clone();
+    let default_bytes = {
+        let s = service.clone();
+        let cid = class_id.clone();
+        tauri::async_runtime::spawn_blocking(move || s.default_state(&cid))
+            .await
+            .map_err(|e| e.to_string())??
+    };
+
+    let directory = library_directory(&app)?;
+    let entry = {
+        let dir = directory.clone();
+        let cid = class_id.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let library = PluginLibrary::open(&dir).map_err(|e| e.to_string())?;
+            match library.resolve(&cid) {
+                Resolved::Found(e) | Resolved::Changed(e) => Ok(e),
+                Resolved::Missing => Err("Plug-in class not found in library.".to_string()),
+            }
+        })
+        .await
+        .map_err(|e| e.to_string())??
+    };
+
+    let asset = StoredAsset::from_bytes(
+        STATE_FILENAME.into(),
+        STATE_MEDIA_TYPE.into(),
+        &default_bytes,
+    );
+    let state_id = asset.id()?;
+
+    let workspace = app.state::<Arc<Mutex<DocumentWorkspace>>>().inner().clone();
+    let staged = {
+        let mut ws = workspace.lock().map_err(|e| e.to_string())?;
+        ws.stage_asset(&document_id, asset)?
+    };
+
+    service.grant_consent(&document_id, &[(class_id.clone(), state_id.clone())])?;
+
+    let slot = PluginSlot {
+        format: crate::settings::PluginFormat::Vst3,
+        class_id,
+        name: entry.name,
+        vendor: entry.vendor,
+        active: true,
+        input_db: 0.0,
+        output_db: 0.0,
+        state: state_id,
+    };
+
+    Ok(PluginChooseResult {
+        slot,
+        asset_token: staged.token,
+    })
+}
+
+#[tauri::command]
+pub async fn plugin_status(
+    app: tauri::AppHandle,
+    document_id: String,
+) -> Result<Vec<TrackPluginStatus>, String> {
+    let service = app.state::<Arc<PluginService>>();
+    Ok(service.statuses(&document_id))
+}
+
+#[tauri::command]
+pub async fn plugin_consent_grant(
+    app: tauri::AppHandle,
+    document_id: String,
+) -> Result<(), String> {
+    let workspace = app.state::<Arc<Mutex<DocumentWorkspace>>>();
+    let pairs = {
+        let ws = workspace.lock().map_err(|e| e.to_string())?;
+        ws.plugin_pairs(&document_id)?
+    };
+    let service = app.state::<Arc<PluginService>>();
+    service.grant_consent(&document_id, &pairs)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn plugin_retry(
+    app: tauri::AppHandle,
+    document_id: String,
+    track_id: String,
+) -> Result<(), String> {
+    let service = app.state::<Arc<PluginService>>();
+    service.retry(&document_id, &track_id);
+    Ok(())
 }
 
 #[cfg(test)]

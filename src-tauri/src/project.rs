@@ -495,6 +495,24 @@ impl ProjectCheckpoint {
 }
 
 impl ProjectSession {
+    pub fn plugin_pairs(&self) -> Vec<(String, String)> {
+        let mut pairs = Vec::new();
+        for edit in self
+            .project
+            .baseline_edits
+            .iter()
+            .chain(&self.project.edits)
+            .chain(&self.saved)
+        {
+            if let EditCommand::SetTrackSound { sound, .. } = edit {
+                if let Some(slot) = &sound.plugin {
+                    pairs.push((slot.class_id.clone(), slot.state.clone()));
+                }
+            }
+        }
+        pairs
+    }
+
     pub fn checkpoint(&self) -> ProjectCheckpoint {
         ProjectCheckpoint {
             project: self.project.clone(),

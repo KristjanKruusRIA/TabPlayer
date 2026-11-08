@@ -107,6 +107,9 @@ impl LineInSettings {
         if !self.level.is_finite() || !(0.0..=1.0).contains(&self.level) {
             return Err("The Line-In level must be from 0 to 1.".into());
         }
+        if self.sound.plugin.is_some() {
+            return Err("Line-In does not support plug-ins.".into());
+        }
         self.sound.validate()
     }
 
@@ -119,6 +122,9 @@ impl LineInSettings {
 /// Builds the Line-In's sound chain for an output at `rate`. Allocates: control thread only.
 pub fn build_chain(sound: &TrackSound, rate: u32) -> Result<Box<TrackDsp>, String> {
     sound.validate()?;
+    if sound.plugin.is_some() {
+        return Err("Line-In does not support plug-ins.".into());
+    }
     let mut dsp = TrackDsp::new(sound.effects.clone(), rate, MAX_TRACK_DELAY_SECONDS)?;
     dsp.set_ir_index(LINE_IN_IR_INDEX);
     // Effect tails decay for a long time after the guitar stops; without this they would run through

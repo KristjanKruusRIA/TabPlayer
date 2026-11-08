@@ -132,6 +132,19 @@ impl PreparedMix {
         plan: &PlaybackPlan,
         sample_rate: u32,
     ) -> Result<Self, String> {
+        Self::prepare_with_plugins(settings, plan, sample_rate, &[], 512)
+    }
+
+    pub fn prepare_with_plugins(
+        settings: &DocumentSettings,
+        plan: &PlaybackPlan,
+        sample_rate: u32,
+        plans: &[(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )],
+        callback_frames: usize,
+    ) -> Result<Self, String> {
         settings.validate()?;
         plan.validate()?;
         let any_solo = plan
@@ -140,6 +153,12 @@ impl PreparedMix {
             .any(|t| settings.mixes.get(&t.id).is_some_and(|m| m.solo))
             || settings.backing.as_ref().is_some_and(|b| b.mix.solo);
         let mut channels = Vec::with_capacity(plan.tracks.len());
+        let pipeline_frames = tabplayer_plugin_protocol::limits::pipeline_frames(callback_frames);
+        let plan_map: std::collections::HashMap<
+            &str,
+            &Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        > = plans.iter().map(|(id, res)| (id.as_str(), res)).collect();
+
         for (index, track) in plan.tracks.iter().enumerate() {
             let mix = settings.mixes.get(&track.id).cloned().unwrap_or_default();
             validate_mix(&mix)?;
@@ -150,6 +169,21 @@ impl PreparedMix {
                 .unwrap_or_else(FxSettings::default);
             let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             dsp.set_ir_index(index);
+
+            if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
+                if let Ok(insert) = PluginInsert::new(
+                    plan.link.clone(),
+                    crate::audio::plugin_insert::InsertMode::Realtime { pipeline_frames },
+                    plan.latency,
+                    plan.input_db,
+                    plan.output_db,
+                    sample_rate,
+                    plan.shared.clone(),
+                ) {
+                    dsp.attach_plugin(Box::new(insert));
+                }
+            }
+
             let kit = mix.drum_kit.as_ref().filter(|kit| !kit.is_neutral());
             channels.push(PreparedChannel {
                 dsp,
@@ -165,13 +199,15 @@ impl PreparedMix {
             .map(|b| b.mix.clone())
             .unwrap_or_default();
         validate_mix(&backing)?;
-        Ok(Self {
+        let mut mix = Self {
             channels,
             backing: Gain::new(&backing, !backing.mute && (!any_solo || backing.solo)),
             master: MasterBus::new(settings.master.as_ref(), sample_rate)?,
             rate: sample_rate,
             compensation: None,
-        })
+        };
+        mix.update_compensation();
+        Ok(mix)
     }
     /// Accessor for delay compensation.
     pub fn compensation(&self) -> Option<&Compensation> {
@@ -507,6 +543,27 @@ impl Renderer {
         sample_rate: u32,
     ) -> Result<Self, String> {
         let mix = PreparedMix::prepare(&settings, &plan, sample_rate)?;
+        Self::new_with_mix(plan, resources, mix, settings, sample_rate)
+    }
+
+    pub fn new_with_plugins(
+        plan: Arc<PlaybackPlan>,
+        resources: Arc<AudioResources>,
+        settings: DocumentSettings,
+        sample_rate: u32,
+        plans: &[(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )],
+        callback_frames: usize,
+    ) -> Result<Self, String> {
+        let mix = PreparedMix::prepare_with_plugins(
+            &settings,
+            &plan,
+            sample_rate,
+            plans,
+            callback_frames,
+        )?;
         Self::new_with_mix(plan, resources, mix, settings, sample_rate)
     }
     pub fn new_with_mix(

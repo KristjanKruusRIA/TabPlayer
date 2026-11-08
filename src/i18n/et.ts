@@ -194,6 +194,7 @@ export const et: MessageCatalog = {
   'transport.loop_bars': 'Korda takte',
   'transport.loop_start': 'Korduse algus',
   'transport.loop_end': 'Korduse lõpp',
+  'transport.loop_range_hint': 'Korda takte {start} kuni {end}',
   'transport.click': 'Klõps',
   'transport.metronome': 'Metronoom',
   'transport.speed': 'Kiirus',

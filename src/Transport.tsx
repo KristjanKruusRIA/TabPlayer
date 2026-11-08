@@ -16,7 +16,7 @@ const display=(value:number)=>Number(value.toFixed(2));
 function BarField({label,value,min,max,onValue}:{label:string;value:number;min:number;max:number;onValue:(value:number)=>void}) {
   const [draft,setDraft]=useState(String(value));
   useEffect(()=>setDraft(String(value)),[value]);
-  return <label className="transport-bar-field"><span className="tp-sr">{label}</span><input type="number" min={min} max={max} step={1} value={draft} onChange={event=>{
+  return <label className="transport-bar-field"><span className="tp-sr">{label}</span><input type="number" title={label} min={min} max={max} step={1} value={draft} onChange={event=>{
     const text=event.target.value;setDraft(text);
     const next=Number(text);
     if(text.trim()!==''&&Number.isInteger(next)&&next>=min&&next<=max)onValue(next);
@@ -50,6 +50,19 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
   const [error,setError]=useState<string|null>(null);
   const [cursorChoice,setCursorChoice]=useState<CursorPlaybackChoice|null>(null),[passageChoice,setPassageChoice]=useState<PassagePlaybackChoice|null>(null),[nextStart,setNextStart]=useState<'cursor'|'position'>('cursor');
   const loop=state.loop!==null,practice=state.practice,fixed=practice.settings.tempo.kind==='fixed';
+  // The two bar fields show the loop that is actually running; with none running they follow the selected bars (or the cursor's bar), so Loop repeats what the player is looking at.
+  const loopBars=useMemo(()=>{
+    const active=state.loop;if(!active||!occurrences.length)return null;
+    const first=occurrences.find(o=>active.startTick>=o.startTick&&active.startTick<o.endTick),last=[...occurrences].reverse().find(o=>o.startTick<active.endTick);
+    return first&&last&&first.bar<=last.bar?{first:first.bar,last:last.bar}:null;
+  },[state.loop,occurrences]);
+  const selectedBars=useMemo(()=>{
+    const bars=selection?.kind==='range'?[selection.range.start.bar,selection.range.end.bar]:selection?.kind==='bars'?[selection.firstBar,selection.lastBar]:selection?.kind==='notes'?selection.notes.map(note=>note.target.bar):[];
+    if(!bars.length)bars.push(cursor.bar);
+    return {first:Math.min(...bars),last:Math.max(...bars)};
+  },[selection,cursor.bar]);
+  useEffect(()=>{if(!loopBars)return;setStart(loopBars.first+1);setEnd(loopBars.last+1);},[loopBars?.first,loopBars?.last]);
+  useEffect(()=>{if(state.loop)return;setStart(Math.min(selectedBars.first+1,Math.max(1,measures)));setEnd(Math.min(selectedBars.last+1,Math.max(1,measures)));},[selectedBars.first,selectedBars.last]);
   const speeds=[...new Set([10,25,50,75,100,125,150,200,250,300,state.speed])].sort((a,b)=>a-b),speedIndex=speeds.indexOf(state.speed);
   const counting=practice.countInRemaining>0&&(practice.phase==='countIn'||practice.phase==='paused');
   const {choices:cursorChoices,error:cursorError}=useMemo(()=>{
@@ -106,7 +119,7 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
     </div>
     <div className="transport-group transport-loop" role="group" aria-label={t('transport.loop')}><span className="transport-caption">{t('transport.loop_bars')}</span>
       <div className="transport-row"><BarField label={t('transport.loop_start')} min={1} max={measures} value={start} onValue={setStart}/><span className="transport-dash" aria-hidden="true"/><BarField label={t('transport.loop_end')} min={1} max={measures} value={end} onValue={setEnd}/>
-        <button {...busyGuard({busy,unavailable:state.practicePending,className:'transport-toggle transport-loopbutton',onClick:()=>act(()=>loop?player.clearLoop():player.setLoop(start-1,end-1))})} aria-pressed={loop}><LoopGlyph/>{loop?t('transport.clear_loop'):t('transport.loop')}</button></div>
+        <button {...busyGuard({busy,unavailable:state.practicePending,className:'transport-toggle transport-loopbutton',onClick:()=>act(()=>loop?player.clearLoop():player.setLoop(start-1,end-1))})} title={loop?t('transport.clear_loop'):t('transport.loop_range_hint',{start:String(start),end:String(end)})} aria-pressed={loop}><LoopGlyph/>{loop?t('transport.clear_loop'):t('transport.loop')}</button></div>
     </div>
     <div className="transport-group transport-click"><span className="transport-caption">{t('transport.click')}</span>
       <label className="transport-toggle transport-metronome" title={t('transport.metronome')} data-on={practice.settings.metronome.enabled} aria-disabled={settingsBusy||undefined}><input type="checkbox" checked={practice.settings.metronome.enabled} aria-disabled={settingsBusy||undefined} onChange={e=>{if(settingsBusy)return;act(()=>{const settings=structuredClone(practice.settings);settings.metronome.enabled=e.target.checked;player.setPractice(settings);});}}/><MetronomeGlyph/><span className="transport-label">{t('transport.metronome')}</span></label>

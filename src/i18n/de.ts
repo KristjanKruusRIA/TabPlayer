@@ -194,6 +194,7 @@ export const de: MessageCatalog = {
   'transport.loop_bars': 'Takte wiederholen',
   'transport.loop_start': 'Schleifenbeginn',
   'transport.loop_end': 'Schleifenende',
+  'transport.loop_range_hint': 'Takte {start} bis {end} wiederholen',
   'transport.click': 'Klick',
   'transport.metronome': 'Metronom',
   'transport.speed': 'Tempo',

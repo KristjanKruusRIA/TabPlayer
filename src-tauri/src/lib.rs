@@ -1150,6 +1150,20 @@ pub fn run() {
                             }),
                         );
                     }
+                    plugins::service::PluginEvent::Notice {
+                        document_id,
+                        track_id,
+                        key,
+                    } => {
+                        let _ = plugin_handle.emit(
+                            "plugin-notice",
+                            serde_json::json!({
+                                "documentId": document_id,
+                                "trackId": track_id,
+                                "key": key,
+                            }),
+                        );
+                    }
                 }),
             )
             .map_err(|e| e.to_string())?;
@@ -1171,6 +1185,24 @@ pub fn run() {
                 .with_plugins(plugin_service)
                 .with_protected_paths(protected),
             );
+            // Prepares the mix again when a plug-in became ready or faulted, announced a new latency, or the device's
+            // callback grew past the pipeline the mix was built for (review H1, H2 of Task 13).
+            let tick_handle = app.handle().clone();
+            let tick_workspace = Arc::downgrade(&workspace);
+            std::thread::Builder::new()
+                .name("plugin-reprepare".into())
+                .spawn(move || {
+                    while let Some(workspace) = tick_workspace.upgrade() {
+                        let audio = tick_handle.state::<runtime::NativeAudio>();
+                        if audio.plugin_tick_stopped() {
+                            break;
+                        }
+                        audio.plugin_tick(&workspace);
+                        drop(workspace);
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                })
+                .map_err(|e| e.to_string())?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1459,6 +1491,11 @@ pub fn run() {
                 // Every note a port is holding is released and the ports are closed.
                 if let Some(audio) = app.try_state::<runtime::NativeAudio>() {
                     audio.service.midi_out().shutdown();
+                    // No tick starts a helper from here on, and the helpers are asked to end (review L2).
+                    audio.stop_plugin_tick();
+                    if let Some(plugins) = &audio.plugins {
+                        plugins.shutdown_all();
+                    }
                 }
             }
         });

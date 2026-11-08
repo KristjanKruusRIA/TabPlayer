@@ -33,6 +33,7 @@ mod windows_tests {
         settings::{PluginFormat, PluginSlot, TrackSound},
         workspace::{DocumentRevision, DocumentWorkspace},
     };
+    use tabplayer_plugin_protocol::{limits::MAX_STATE_BYTES, state::STATE_OVERHEAD};
     use tabplayer_test_plugin::{
         TEST_CLASS_ID, TestMode, TestState, decode_test_state, encode_test_state,
     };
@@ -200,7 +201,7 @@ mod windows_tests {
                 slot,
                 state: default_bytes.into(),
             };
-            service.ensure(&document_id, &[req]);
+            service.ensure(&document_id, Some(RATE), &[req]);
 
             let start = Instant::now();
             while start.elapsed() < Duration::from_secs(5) {
@@ -379,7 +380,7 @@ mod windows_tests {
                 },
                 state: bytes.into(),
             };
-            rig.service.ensure(&rig.document_id, &[req]);
+            rig.service.ensure(&rig.document_id, Some(RATE), &[req]);
 
             // Close without further edits
             let payload = rig
@@ -495,7 +496,7 @@ mod windows_tests {
                 },
                 state: new_state_bytes.into(),
             };
-            rig.service.ensure(&rig.document_id, &[req]);
+            rig.service.ensure(&rig.document_id, Some(RATE), &[req]);
 
             // Open editor
             let _hwnd = rig
@@ -530,7 +531,7 @@ mod windows_tests {
                 slot: doc_slot,
                 state: initial_bytes.into(),
             };
-            rig.service.ensure(&rig.document_id, &[undo_req]);
+            rig.service.ensure(&rig.document_id, Some(RATE), &[undo_req]);
 
             // Now close editor without further edits
             let payload = rig
@@ -545,17 +546,33 @@ mod windows_tests {
         fn history_full_refuses_save() {
             let rig = Rig::new();
 
-            // Fill document assets to MAX_PROJECT_STATE_BYTES
+            // Fill the history to MAX_PROJECT_STATE_BYTES exactly, through the real edit path: with the initial state,
+            // seven full states and one that takes the rest.
             {
                 let mut ws = rig.workspace.lock().unwrap();
+                let initial_len = ws
+                    .asset_bytes(&rig.document_id, &rig.initial_state_id)
+                    .unwrap()
+                    .len();
                 for i in 0..8 {
-                    let bytes = vec![i as u8; 8 << 20]; // 8 MiB with distinct byte so each has unique SHA-256
+                    let raw_len = if i < 7 { MAX_STATE_BYTES } else { MAX_STATE_BYTES - initial_len };
+                    // A distinct byte per state, so each has its own SHA-256.
+                    let bytes = encode_state(
+                        &vec![i as u8 + 1; raw_len - STATE_OVERHEAD - b"controller".len()],
+                        b"controller",
+                    )
+                    .unwrap();
                     let asset = StoredAsset::from_bytes(
                         STATE_FILENAME.into(),
                         STATE_MEDIA_TYPE.into(),
                         &bytes,
                     );
                     let id = asset.id().unwrap();
+                    let staged = ws.stage_asset(&rig.document_id, asset).unwrap();
+                    let rev = DocumentRevision {
+                        document_id: rig.document_id.clone(),
+                        revision: ws.document(&rig.document_id).unwrap().revision,
+                    };
                     let edit = EditCommand::SetTrackSound {
                         track_id: "base/0".into(),
                         sound: TrackSound {
@@ -572,7 +589,7 @@ mod windows_tests {
                             ..TrackSound::default()
                         },
                     };
-                    ws.inject_history_state(&rig.document_id, id, asset, edit).unwrap();
+                    ws.apply_edit(&rev, edit, Some(&staged.token)).unwrap();
                 }
             }
 
@@ -647,7 +664,7 @@ mod windows_tests {
                 },
                 state: state_bytes.into(),
             };
-            let plans = rig.service.ensure(&rig.document_id, &[req]);
+            let plans = rig.service.ensure(&rig.document_id, Some(RATE), &[req]);
             let plan = plans.into_iter().next().unwrap().1.unwrap();
             let mut insert = PluginInsert::new(
                 plan.link,

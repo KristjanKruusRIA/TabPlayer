@@ -935,6 +935,13 @@ impl DocumentWorkspace {
         Ok(snapshot)
     }
 
+    /// How many staged assets of the document wait for an edit.
+    #[cfg(test)]
+    pub(crate) fn staged_asset_count(&self, id: &str) -> usize {
+        self.entry(id)
+            .map_or(0, |entry| entry.candidates.staged_asset_count())
+    }
+
     pub fn stage_asset(&mut self, id: &str, asset: StoredAsset) -> Result<StagedAsset, String> {
         let entry = self.entry_mut(id)?;
         if entry.session.lock().is_some() {
@@ -972,6 +979,8 @@ impl DocumentWorkspace {
         Ok(entry.session.lock().is_some() || entry.session.edit_locked())
     }
 
+    /// The slot of the track's last `SetTrackSound`. It does not replay the settings (a duplicated track's slot comes
+    /// from `DuplicateTrack`, which this does not see), so the plug-in service does not use it; tests read it.
     pub fn track_plugin_slot(
         &self,
         id: &str,
@@ -988,18 +997,6 @@ impl DocumentWorkspace {
         asset: &StoredAsset,
     ) -> Result<(), String> {
         self.entry(id)?.session.check_plugin_state(state_id, asset)
-    }
-
-    pub fn inject_history_state(
-        &mut self,
-        id: &str,
-        state_id: String,
-        asset: StoredAsset,
-        edit: EditCommand,
-    ) -> Result<(), String> {
-        let entry = self.entry_mut(id)?;
-        entry.session.inject_history_state(state_id, asset, edit);
-        Ok(())
     }
 
     pub(crate) fn capture_export_backing(

@@ -124,7 +124,7 @@ mod windows_tests {
             doc_id: &str,
             requests: &[SlotRequest],
         ) -> Vec<(String, Result<InsertPlan, PluginStatus>)> {
-            self.service.ensure(doc_id, requests);
+            self.service.ensure(doc_id, Some(RATE), requests);
             let start = Instant::now();
             while start.elapsed() < Duration::from_secs(5) {
                 let statuses = self.service.statuses(doc_id);
@@ -135,7 +135,7 @@ mod windows_tests {
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
-            self.service.ensure(doc_id, requests)
+            self.service.ensure(doc_id, Some(RATE), requests)
         }
     }
 
@@ -410,7 +410,7 @@ mod windows_tests {
                 state: Arc::new([0xDE, 0xAD, 0xBE, 0xEF]),
             };
 
-            let plans = rig.service.ensure("doc1", &[req_corrupt]);
+            let plans = rig.service.ensure("doc1", Some(RATE), &[req_corrupt]);
             assert_eq!(plans.len(), 1);
             assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::RejectedState));
             let statuses = rig.service.statuses("doc1");
@@ -515,7 +515,7 @@ mod windows_tests {
                 state: state_bytes,
             };
 
-            let plans = rig.service.ensure("doc1", &[req]);
+            let plans = rig.service.ensure("doc1", Some(RATE), &[req]);
             assert_eq!(plans.len(), 1);
             assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Missing));
 
@@ -644,7 +644,7 @@ mod windows_tests {
                 state: state_bytes_2,
             };
 
-            let plans_2 = rig.service.ensure("doc1", &[req_2]);
+            let plans_2 = rig.service.ensure("doc1", Some(RATE), &[req_2]);
             assert!(plans_2[0].1.is_ok());
 
             let mix_2 =
@@ -653,6 +653,101 @@ mod windows_tests {
             let delay_2 = mix_2.plugin_delay_frames();
 
             assert_eq!(delay_2, delay_1 + (128 - 64));
+        }
+
+        fn plays_at_44_1_khz_with_a_helper_started_at_that_rate() {
+            // Review C1 of Task 13: the helper runs at the device's rate, so a 44.1 kHz device gets the plug-in.
+            const DEVICE: u32 = 44_100;
+            let rig = Rig::new();
+            let state_id = "c".repeat(64);
+            let comp = encode_test_state(&TestState {
+                gain: 0.5,
+                latency: 64,
+                mode: TestMode::Normal,
+                ..TestState::default()
+            });
+            rig.service
+                .grant_consent("doc1", &[(TEST_CLASS_ID.to_string(), state_id.clone())])
+                .unwrap();
+            let slot = test_slot(TEST_CLASS_ID, &state_id);
+            let mut settings = DocumentSettings::default();
+            settings.sounds.insert(
+                "t1".into(),
+                TrackSound {
+                    plugin: Some(slot.clone()),
+                    ..Default::default()
+                },
+            );
+            let req = SlotRequest {
+                track_id: "t1".into(),
+                slot,
+                state: encode_state(&comp, &[]).unwrap().into(),
+            };
+            rig.service.ensure("doc1", Some(DEVICE), std::slice::from_ref(&req));
+            let start = Instant::now();
+            while rig.service.statuses("doc1")[0].status == PluginStatus::Loading {
+                assert!(start.elapsed() < Duration::from_secs(10), "the helper did not load");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let plans = rig.service.ensure("doc1", Some(DEVICE), &[req]);
+            let plan = plans[0].1.as_ref().expect("a ready insert");
+            assert_eq!(plan.link.sample_rate(), DEVICE);
+
+            let mut renderer = Renderer::new_with_plugins(
+                Arc::new(plan_2_tracks()),
+                resources(),
+                settings,
+                DEVICE,
+                &plans,
+                CALLBACK,
+            )
+            .unwrap();
+            assert_eq!(renderer.plugin_delay_frames(), 64 + pipeline_frames(CALLBACK));
+            let mut buf = [[0.0f32; 2]; CALLBACK];
+            for _ in 0..40 {
+                renderer.render_into(&mut buf);
+                std::thread::sleep(Duration::from_millis(11));
+            }
+            assert_eq!(rig.service.statuses("doc1")[0].status, PluginStatus::Ready);
+        }
+
+        fn a_latency_the_plug_in_announces_asks_for_one_reprepare() {
+            // Review H2 of Task 13: the plug-in announces a new latency on its own (here from a parameter change, as
+            // automation or its editor would); the service asks for the mix to be prepared again, once.
+            let rig = Rig::new();
+            let state_id = "d".repeat(64);
+            let comp = encode_test_state(&TestState {
+                latency: 0,
+                mode: TestMode::Normal,
+                ..TestState::default()
+            });
+            rig.service
+                .grant_consent("doc1", &[(TEST_CLASS_ID.to_string(), state_id.clone())])
+                .unwrap();
+            let req = SlotRequest {
+                track_id: "t1".into(),
+                slot: test_slot(TEST_CLASS_ID, &state_id),
+                state: encode_state(&comp, &[]).unwrap().into(),
+            };
+            let plans = rig.ensure_ready("doc1", std::slice::from_ref(&req));
+            assert_eq!(plans[0].1.as_ref().unwrap().latency, 0);
+            // Whatever the load asked for.
+            std::thread::sleep(Duration::from_millis(1_500));
+            rig.service.take_reprepare("doc1");
+
+            rig.service
+                .set_parameter("doc1", "t1", 1, 480.0 / 48_000.0)
+                .unwrap();
+            let start = Instant::now();
+            while !rig.service.take_reprepare("doc1") {
+                assert!(start.elapsed() < Duration::from_secs(5), "no re-prepare was asked for");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            let plans = rig.service.ensure("doc1", Some(RATE), &[req]);
+            assert_eq!(plans[0].1.as_ref().unwrap().latency, 480);
+            // The latency stays: nothing more is asked for.
+            std::thread::sleep(Duration::from_secs(3));
+            assert!(!rig.service.take_reprepare("doc1"));
         }
     }
 }

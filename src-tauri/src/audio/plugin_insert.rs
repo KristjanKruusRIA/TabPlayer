@@ -99,6 +99,8 @@ pub enum InsertError {
     TooMuchLatency,
     /// The pipeline is empty or above `limits::MAX_PIPELINE_FRAMES`.
     PipelineTooLong,
+    /// The helper runs at another sample rate than the device: it must be started again at the device's rate.
+    RateMismatch,
 }
 
 impl std::fmt::Display for InsertError {
@@ -108,6 +110,7 @@ impl std::fmt::Display for InsertError {
             InsertError::PipelineTooLong => {
                 "the audio device's callbacks are too long for a plug-in"
             }
+            InsertError::RateMismatch => "the plug-in runs at another sample rate than the device",
         })
     }
 }
@@ -238,6 +241,28 @@ pub struct PluginInsert {
 }
 
 impl PluginInsert {
+    /// Whether [`new`](Self::new) would accept an insert on a ring of `link_rate` at the device `rate`, without building
+    /// one. The app checks this before a prepare, so a refusal reaches the user as a status instead of being dropped.
+    pub fn check(
+        link_rate: u32,
+        mode: InsertMode,
+        latency: u32,
+        rate: u32,
+    ) -> Result<(), InsertError> {
+        if link_rate != rate {
+            return Err(InsertError::RateMismatch);
+        }
+        if latency > max_latency_frames(rate) {
+            return Err(InsertError::TooMuchLatency);
+        }
+        if let InsertMode::Realtime { pipeline_frames } = mode {
+            if pipeline_frames == 0 || pipeline_frames > MAX_PIPELINE_FRAMES {
+                return Err(InsertError::PipelineTooLong);
+            }
+        }
+        Ok(())
+    }
+
     /// Builds an insert on `link`, off the audio thread: it allocates the delay line for the built-in chain.
     ///
     /// `latency` is the plug-in's reported latency in frames; `input_db` and `output_db` are the slot's trims (clamped
@@ -251,19 +276,10 @@ impl PluginInsert {
         rate: u32,
         shared: Arc<InsertShared>,
     ) -> Result<PluginInsert, InsertError> {
-        debug_assert_eq!(
-            rate,
-            link.sample_rate(),
-            "the insert runs at the ring's rate"
-        );
-        if latency > max_latency_frames(rate) {
-            return Err(InsertError::TooMuchLatency);
-        }
+        // An error, never a panic: this runs while the audio service holds its control lock (review C1).
+        Self::check(link.sample_rate(), mode, latency, rate)?;
         let (offline, pipeline) = match mode {
             InsertMode::Realtime { pipeline_frames } => {
-                if pipeline_frames == 0 || pipeline_frames > MAX_PIPELINE_FRAMES {
-                    return Err(InsertError::PipelineTooLong);
-                }
                 (None, pipeline_frames.div_ceil(BLOCK_FRAMES) * BLOCK_FRAMES)
             }
             InsertMode::Offline { timeout } => (Some(timeout), BLOCK_FRAMES),

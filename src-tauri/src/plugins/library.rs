@@ -43,7 +43,8 @@ pub const MAX_ENTRIES: usize = 256;
 /// The longest bundle path the library keeps, measured as it is written in the file: the JSON-escaped UTF-8 length, since
 /// a backslash costs 2 bytes and a character outside the basic plane costs 4. An entry's other fields come to at most 805
 /// bytes at their longest, so 256 entries of the longest paths come to 256 * (805 + 3200) + a few bytes: under
-/// [`MAX_FILE_BYTES`].
+/// [`MAX_FILE_BYTES`]. A `previous_bundle` has no room in that budget; it is a hint only, so a library that would not fit
+/// with it is written without it (see `write_entries`).
 pub const MAX_BUNDLE_JSON_BYTES: usize = 3200;
 /// What a class without a usable name is called, as the helper calls it.
 const UNNAMED: &str = "Unnamed plug-in";
@@ -89,6 +90,11 @@ fn plain_components(path: &Path) -> bool {
     })
 }
 
+/// Whether a bundle path is one the library could have written: absolute, a `.vst3`, plain parts only, and short enough.
+fn valid_bundle(path: &Path) -> bool {
+    path.is_absolute() && is_vst3_name(path) && plain_components(path) && bundle_fits(path)
+}
+
 impl LibraryEntry {
     /// Whether an entry read from the library file is one the app could have written.
     fn is_valid(&self) -> bool {
@@ -96,10 +102,9 @@ impl LibraryEntry {
             && valid_name(&self.name)
             && valid_vendor(&self.vendor)
             && valid_text(&self.version, MAX_VERSION_CHARS, true)
-            && self.bundle.is_absolute()
-            && is_vst3_name(&self.bundle)
-            && plain_components(&self.bundle)
-            && bundle_fits(&self.bundle)
+            && valid_bundle(&self.bundle)
+            // The library file is untrusted: a previous bundle passes the same checks as the bundle (review 16-6).
+            && self.previous_bundle.as_deref().is_none_or(valid_bundle)
     }
 }
 
@@ -297,11 +302,27 @@ fn remove_temporaries(folder: &Path) {
 
 fn write_entries(file: &Path, entries: &[LibraryEntry]) -> Result<(), LibraryError> {
     let io = |error: io::Error| LibraryError::Io(error.to_string());
-    let bytes = serde_json::to_vec(&FileOut {
-        version: FORMAT_VERSION,
-        entries,
-    })
-    .map_err(|error| LibraryError::Io(error.to_string()))?;
+    let encode = |entries: &[LibraryEntry]| {
+        serde_json::to_vec(&FileOut {
+            version: FORMAT_VERSION,
+            entries,
+        })
+        .map_err(|error| LibraryError::Io(error.to_string()))
+    };
+    let mut bytes = encode(entries)?;
+    if bytes.len() > MAX_FILE_BYTES {
+        // The previous bundles are hints outside the size budget: a library that does not fit with them is written
+        // without them (review 16-6).
+        let bare: Vec<LibraryEntry> = entries
+            .iter()
+            .cloned()
+            .map(|entry| LibraryEntry {
+                previous_bundle: None,
+                ..entry
+            })
+            .collect();
+        bytes = encode(&bare)?;
+    }
     if bytes.len() > MAX_FILE_BYTES {
         // Cannot happen with the caps above, but a file the next read would refuse must never be written.
         return Err(LibraryError::Io("the library is too large".into()));
@@ -1282,6 +1303,81 @@ mod tests {
         let entries = library.add(&root, ok(vec![class('A', "A2")])).unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["Keep", "A2"]);
+    }
+
+    fn longest_entry(class: char) -> LibraryEntry {
+        let mut path = String::from("C:\\");
+        while json_len(&path) + 4 <= MAX_BUNDLE_JSON_BYTES - 6 {
+            path.push('\u{1F600}');
+        }
+        path.push_str("a.vst3");
+        LibraryEntry {
+            class_id: class.to_string().repeat(32),
+            name: "\u{1F600}".repeat(MAX_NAME_CHARS),
+            vendor: "\u{1F600}".repeat(MAX_NAME_CHARS),
+            version: "\u{1F600}".repeat(MAX_VERSION_CHARS),
+            bundle: PathBuf::from(&path),
+            module_len: u64::MAX,
+            module_modified: i64::MIN,
+            previous_bundle: Some(PathBuf::from(path.replace("a.vst3", "b.vst3"))),
+        }
+    }
+
+    #[test]
+    fn previous_bundle_is_checked_as_untrusted_file_data() {
+        let mut entry = LibraryEntry {
+            class_id: "A".repeat(32),
+            name: "Amp".into(),
+            vendor: "Vendor".into(),
+            version: "1.0".into(),
+            bundle: PathBuf::from("C:\\Plugins\\Two.vst3"),
+            module_len: 1,
+            module_modified: 1,
+            previous_bundle: Some(PathBuf::from("C:\\Plugins\\One.vst3")),
+        };
+        assert!(entry.is_valid());
+        let mut too_long = String::from("C:\\");
+        too_long.push_str(&"\u{1F600}".repeat(MAX_BUNDLE_JSON_BYTES / 4));
+        too_long.push_str(".vst3");
+        for bad in [
+            "Plugins\\One.vst3",
+            "C:\\Plugins\\..\\One.vst3",
+            "C:\\Plugins\\One.dll",
+            "\\\\.\\C:\\One.vst3",
+            too_long.as_str(),
+        ] {
+            entry.previous_bundle = Some(PathBuf::from(bad));
+            assert!(!entry.is_valid(), "{bad}");
+        }
+        // An entry read with a bad previous bundle is dropped, as any other entry the app could not have written.
+        let bytes = serde_json::to_vec(&FileOut {
+            version: FORMAT_VERSION,
+            entries: &[entry],
+        })
+        .unwrap();
+        assert!(matches!(parse(&bytes), Stored::Entries(entries) if entries.is_empty()));
+    }
+
+    #[test]
+    fn a_full_library_of_moved_classes_still_fits_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(LIBRARY_FILE);
+        let full: Vec<LibraryEntry> = (0..MAX_ENTRIES)
+            .map(|i| {
+                let mut entry = longest_entry('A');
+                entry.class_id = format!("{i:032X}");
+                entry
+            })
+            .collect();
+        assert!(full.iter().all(LibraryEntry::is_valid));
+        write_entries(&file, &full).expect("a library the caps allow is always written");
+        let bytes = std::fs::read(&file).unwrap();
+        assert!(bytes.len() <= MAX_FILE_BYTES);
+        let Stored::Entries(read) = parse(&bytes) else {
+            panic!("the library reads back");
+        };
+        assert_eq!(read.len(), MAX_ENTRIES);
+        assert_eq!(read[0].bundle, full[0].bundle);
     }
 
     #[test]

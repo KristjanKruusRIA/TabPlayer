@@ -35,6 +35,65 @@ pub fn backoff_interval(base: Duration, consecutive_unchanged: u32) -> Duration 
         base.saturating_mul(1 << consecutive_unchanged.min(5))
     }
 }
+/// When the helper may reconfigure again for the plug-in's announcements, and which reconfigures the app is told of
+/// (review M5 of Task 13).
+///
+/// - After a reconfigure that found a new latency, the next one waits [`RECONFIGURE_INTERVAL`], and the app is told.
+/// - After one that found the latency unchanged, the wait doubles each time ([`backoff_interval`], up to 32 s). The app is
+///   told of the first such reconfigure of a run only, which explains the one dip it caused; later ones change nothing
+///   the app needs, so they are not announced and never make it prepare again.
+/// - A plug-in whose latency already reads differently while it waits is reconfigured at once: a real change never sits
+///   out the back-off.
+#[derive(Debug)]
+pub struct ReconfigureLimiter {
+    reported: u32,
+    unchanged: u32,
+    next_at: Option<Instant>,
+}
+
+impl ReconfigureLimiter {
+    pub fn new(reported: u32) -> Self {
+        Self {
+            reported,
+            unchanged: 0,
+            next_at: None,
+        }
+    }
+
+    /// The latency the app was last told.
+    pub fn reported(&self) -> u32 {
+        self.reported
+    }
+
+    /// The app learned `latency` another way (in `Loaded`, after a state was applied).
+    pub fn set_reported(&mut self, latency: u32) {
+        self.reported = latency;
+    }
+
+    /// Whether announcements waiting at `now` may be acted on. `current` reads the plug-in's latency now, without a
+    /// reconfigure; it is read only during a wait.
+    pub fn may_reconfigure(&self, now: Instant, current: impl FnOnce() -> u32) -> bool {
+        match self.next_at {
+            Some(at) if now < at => current() != self.reported,
+            _ => true,
+        }
+    }
+
+    /// Records a reconfigure at `now` that found `latency`. Returns the latency to tell the app, if any.
+    pub fn reconfigured(&mut self, now: Instant, latency: u32) -> Option<u32> {
+        if latency == self.reported {
+            self.unchanged = self.unchanged.saturating_add(1);
+            self.next_at = Some(now + backoff_interval(RECONFIGURE_INTERVAL, self.unchanged));
+            (self.unchanged == 1).then_some(latency)
+        } else {
+            self.unchanged = 0;
+            self.next_at = Some(now + RECONFIGURE_INTERVAL);
+            self.reported = latency;
+            Some(latency)
+        }
+    }
+}
+
 /// Rounds of reconfiguring after a load, for a plug-in that announces again while it is set up.
 const SETTLE_ROUNDS: usize = 3;
 
@@ -43,8 +102,8 @@ const SETTLE_ROUNDS: usize = 3;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RestartPlan {
     /// `kReloadComponent`, `kIoChanged` or `kLatencyChanged`: the plug-in is deactivated and set up again, with the audio
-    /// thread parked, and the app is told `LatencyChanged` with the latency that follows, whether or not the value moved,
-    /// so that it flushes and primes instead of finding an unexplained gap. (`kLatencyChanged` reconfigures too:
+    /// thread parked, and the app is told `LatencyChanged` with the latency that follows when it moved, and for the first
+    /// unchanged reconfigure of a run (see [`ReconfigureLimiter`]). (`kLatencyChanged` reconfigures too:
     /// Steinberg's workflow deactivates and reactivates the component around the new latency, and a plug-in that works
     /// it out in `setupProcessing` or `setActive` reports the old value otherwise.)
     pub reconfigure: bool,
@@ -86,14 +145,13 @@ pub struct Vst3Core {
     /// The ids of the plug-in's own parameters. VST3 parameter ids are arbitrary 32-bit numbers, so the app's ids are
     /// checked against this list.
     params: HashSet<u32>,
-    /// The latency the app was last told.
-    reported_latency: u32,
+    /// The latency the app was last told, and when the next reconfigure may come.
+    limiter: ReconfigureLimiter,
     editor_open: bool,
     app_pid: u32,
-    /// A restart that could not be carried out (the audio thread was stuck) is tried again after this.
+    /// A restart that could not be carried out (the audio thread was stuck), or that a plug-in still asks for after its
+    /// load has settled, is tried again after this.
     retry_after: Option<Instant>,
-    /// Consecutive reconfigures with unchanged latency for rate-limit back-off.
-    unchanged_reconfigures: u32,
 }
 
 fn unreadable(error: impl std::fmt::Display) -> CoreError {
@@ -170,11 +228,10 @@ impl PluginCore for Vst3Core {
             mono,
             layout,
             params,
-            reported_latency,
+            limiter: ReconfigureLimiter::new(reported_latency),
             editor_open: false,
             app_pid: 0,
             retry_after: None,
-            unchanged_reconfigures: 0,
         })
     }
 
@@ -191,7 +248,7 @@ impl PluginCore for Vst3Core {
     }
 
     fn latency(&self) -> u32 {
-        self.reported_latency
+        self.limiter.reported()
     }
 
     fn set_state(&mut self, component: &[u8], controller: &[u8]) -> Result<(), CoreError> {
@@ -203,7 +260,7 @@ impl PluginCore for Vst3Core {
         }
         // The state may have changed the latency; the plug-in then announces it through `restartComponent`, which
         // `poll` handles. Reading it here keeps `Loaded` honest when the state is part of the load.
-        self.reported_latency = self.instance.latency();
+        self.limiter.set_reported(self.instance.latency());
         Ok(())
     }
 
@@ -236,7 +293,7 @@ impl PluginCore for Vst3Core {
         if restart_plan(self.instance.host().peek_restart_flags()).reconfigure {
             self.retry_after = Some(Instant::now() + RECONFIGURE_INTERVAL);
         }
-        self.reported_latency = self.instance.latency();
+        self.limiter.set_reported(self.instance.latency());
         Ok(())
     }
 
@@ -310,7 +367,15 @@ impl PluginCore for Vst3Core {
 
     fn poll(&mut self, gate: &PauseGate) -> Vec<CoreEvent> {
         let mut events = Vec::new();
-        let flags = if self.retry_after.is_none_or(|at| Instant::now() >= at) {
+        let now = Instant::now();
+        let reconfigure_waiting =
+            restart_plan(self.instance.host().peek_restart_flags()).reconfigure;
+        let flags = if self.retry_after.is_none_or(|at| now >= at)
+            && (!reconfigure_waiting
+                || self
+                    .limiter
+                    .may_reconfigure(now, || self.instance.latency()))
+        {
             self.retry_after = None;
             self.instance.host().take_restart_flags()
         } else {
@@ -367,16 +432,9 @@ impl Vst3Core {
             }
             gate.resume();
             let latency = self.instance.latency();
-            let interval = if latency == self.reported_latency {
-                self.unchanged_reconfigures = self.unchanged_reconfigures.saturating_add(1);
-                backoff_interval(RECONFIGURE_INTERVAL, self.unchanged_reconfigures)
-            } else {
-                self.unchanged_reconfigures = 0;
-                RECONFIGURE_INTERVAL
-            };
-            self.retry_after = Some(Instant::now() + interval);
-            self.reported_latency = latency;
-            events.push(CoreEvent::LatencyChanged(latency));
+            if let Some(latency) = self.limiter.reconfigured(Instant::now(), latency) {
+                events.push(CoreEvent::LatencyChanged(latency));
+            }
         }
     }
 
@@ -423,6 +481,68 @@ mod tests {
         assert_eq!(backoff_interval(base, 4), Duration::from_secs(16));
         assert_eq!(backoff_interval(base, 5), Duration::from_secs(32));
         assert_eq!(backoff_interval(base, 6), Duration::from_secs(32));
+    }
+
+    #[test]
+    fn unchanged_reconfigures_wait_longer_each_time() {
+        let t0 = Instant::now();
+        let at = |ms: u64| t0 + Duration::from_millis(ms);
+        let mut limiter = ReconfigureLimiter::new(0);
+        assert!(limiter.may_reconfigure(t0, || 0));
+        limiter.reconfigured(t0, 0);
+        // 2 s after the first unchanged reconfigure.
+        assert!(!limiter.may_reconfigure(at(500), || 0));
+        assert!(!limiter.may_reconfigure(at(1_999), || 0));
+        assert!(limiter.may_reconfigure(at(2_000), || 0));
+        limiter.reconfigured(at(2_000), 0);
+        // Then 4 s.
+        assert!(!limiter.may_reconfigure(at(5_999), || 0));
+        assert!(limiter.may_reconfigure(at(6_000), || 0));
+        limiter.reconfigured(at(6_000), 0);
+        // Then 8 s.
+        assert!(!limiter.may_reconfigure(at(13_999), || 0));
+        assert!(limiter.may_reconfigure(at(14_000), || 0));
+    }
+
+    #[test]
+    fn an_unchanged_latency_is_not_announced_again() {
+        let t0 = Instant::now();
+        let mut limiter = ReconfigureLimiter::new(0);
+        let found: Vec<Option<u32>> = (0..4u64)
+            .map(|i| limiter.reconfigured(t0 + Duration::from_secs(40 * i), 0))
+            .collect();
+        // The first reconfigure of a run explains its dip; the rest are not announced.
+        assert_eq!(found, vec![Some(0), None, None, None]);
+        let t1 = t0 + Duration::from_secs(200);
+        assert_eq!(limiter.reconfigured(t1, 480), Some(480));
+        assert_eq!(limiter.reported(), 480);
+        assert_eq!(
+            limiter.reconfigured(t1 + Duration::from_secs(1), 480),
+            Some(480)
+        );
+        assert_eq!(limiter.reconfigured(t1 + Duration::from_secs(3), 480), None);
+    }
+
+    #[test]
+    fn a_real_change_does_not_sit_out_the_back_off() {
+        let t0 = Instant::now();
+        let mut limiter = ReconfigureLimiter::new(0);
+        for i in 0..5u64 {
+            limiter.reconfigured(t0 + Duration::from_secs(40 * i), 0);
+        }
+        let soon = t0 + Duration::from_secs(160) + Duration::from_millis(1);
+        assert!(
+            !limiter.may_reconfigure(soon, || 0),
+            "waits for nothing new"
+        );
+        assert!(
+            limiter.may_reconfigure(soon, || 480),
+            "goes at once for a new latency"
+        );
+        // After a change, the wait is back to the base interval.
+        assert_eq!(limiter.reconfigured(soon, 480), Some(480));
+        assert!(!limiter.may_reconfigure(soon + Duration::from_millis(999), || 480));
+        assert!(limiter.may_reconfigure(soon + Duration::from_secs(1), || 480));
     }
     #[test]
     fn param_restart_flags_do_not_reprepare() {

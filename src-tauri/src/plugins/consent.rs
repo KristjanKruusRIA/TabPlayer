@@ -1,14 +1,20 @@
 //! Stores the user's consent for plug-ins and their states (THE-71).
+//!
+//! The store is a read-modify-write of one file. Callers in one process must serialize it (the plug-in service holds a
+//! lock around every open and grant); the temp file of each write is unique, so two writes never share one.
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use tabplayer_plugin_protocol::validate::valid_class_id;
 
 pub const MAX_CONSENT_PAIRS: usize = 4096;
 pub const MAX_FILE_BYTES: usize = 1 << 20; // 1 MiB
 pub const FORMAT_VERSION: u32 = 1;
+
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Serialize, Deserialize)]
 struct ConsentFile {
@@ -20,6 +26,9 @@ struct ConsentFile {
 pub struct ConsentStore {
     path: PathBuf,
     pairs: VecDeque<(String, String)>,
+    /// The file on disk could not be read as a consent file (damaged, oversized or from a newer version). It is kept
+    /// aside as `<name>.damaged` before the next grant replaces it, so earlier consent is not lost without a trace.
+    damaged: bool,
 }
 
 fn valid_state_id(s: &str) -> bool {
@@ -33,41 +42,35 @@ fn read_capped(reader: impl Read, cap: usize) -> io::Result<Option<Vec<u8>>> {
 }
 
 impl ConsentStore {
-    /// Opens the consent store at `path`. A missing, damaged or oversized file is read as an empty store
-    /// and left as it is until the next grant.
+    fn empty(path: PathBuf, damaged: bool) -> Self {
+        Self {
+            path,
+            pairs: VecDeque::new(),
+            damaged,
+        }
+    }
+
+    /// Opens the consent store at `path`. A missing file is an empty store. A damaged, oversized or newer file is
+    /// read as an empty store and left as it is until the next grant, which keeps it aside first. A file that cannot
+    /// be opened at all is an error.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref().to_path_buf();
         if !path.exists() {
-            return Ok(Self {
-                path,
-                pairs: VecDeque::new(),
-            });
+            return Ok(Self::empty(path, false));
         }
 
         let file = File::open(&path).map_err(|e| e.to_string())?;
         let bytes = match read_capped(file, MAX_FILE_BYTES).map_err(|e| e.to_string())? {
             Some(b) => b,
-            None => {
-                // Oversized file reads as empty.
-                return Ok(Self {
-                    path,
-                    pairs: VecDeque::new(),
-                });
-            }
+            None => return Ok(Self::empty(path, true)),
         };
 
         let Ok(data) = serde_json::from_slice::<ConsentFile>(&bytes) else {
-            return Ok(Self {
-                path,
-                pairs: VecDeque::new(),
-            });
+            return Ok(Self::empty(path, true));
         };
 
         if data.version != FORMAT_VERSION {
-            return Ok(Self {
-                path,
-                pairs: VecDeque::new(),
-            });
+            return Ok(Self::empty(path, true));
         }
 
         let mut pairs = VecDeque::new();
@@ -87,7 +90,11 @@ impl ConsentStore {
             }
         }
 
-        Ok(Self { path, pairs })
+        Ok(Self {
+            path,
+            pairs,
+            damaged: false,
+        })
     }
 
     /// Whether the user has consented to run `class_id` with `state_id`.
@@ -136,7 +143,7 @@ impl ConsentStore {
         self.commit()
     }
 
-    fn commit(&self) -> Result<(), String> {
+    fn commit(&mut self) -> Result<(), String> {
         let data = ConsentFile {
             version: FORMAT_VERSION,
             pairs: self
@@ -152,9 +159,17 @@ impl ConsentStore {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
 
-        let tmp = self
-            .path
-            .with_extension(format!("tmp-{}", std::process::id()));
+        if self.damaged && self.path.is_file() {
+            let mut aside = self.path.clone().into_os_string();
+            aside.push(".damaged");
+            fs::copy(&self.path, PathBuf::from(aside)).map_err(|e| e.to_string())?;
+        }
+
+        let tmp = self.path.with_extension(format!(
+            "tmp-{}-{}",
+            std::process::id(),
+            TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
         {
             let mut file = File::create(&tmp).map_err(|e| e.to_string())?;
             file.write_all(&encoded).map_err(|e| e.to_string())?;
@@ -165,11 +180,11 @@ impl ConsentStore {
             let _ = fs::remove_file(&tmp);
             e.to_string()
         })?;
+        self.damaged = false;
 
         Ok(())
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,6 +222,61 @@ mod tests {
         store.grant(pairs.clone()).unwrap();
         for (c, s) in &pairs {
             assert!(store.allowed(c, s));
+        }
+    }
+
+    #[test]
+    fn a_damaged_file_is_kept_aside_before_a_grant_replaces_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("consent.json");
+        std::fs::write(&path, b"{ not json").unwrap();
+        let mut store = ConsentStore::open(&path).unwrap();
+        let class = "0123456789ABCDEF0123456789ABCDEF";
+        store.grant([(class.to_string(), "c".repeat(64))]).unwrap();
+        assert_eq!(
+            std::fs::read(path.with_extension("json.damaged")).unwrap(),
+            b"{ not json"
+        );
+        assert!(
+            ConsentStore::open(&path)
+                .unwrap()
+                .allowed(class, &"c".repeat(64))
+        );
+    }
+
+    #[test]
+    fn commits_in_one_process_do_not_share_a_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("consent.json");
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for j in 0..20 {
+                        let mut store = ConsentStore {
+                            path: path.clone(),
+                            pairs: VecDeque::new(),
+                            damaged: false,
+                        };
+                        store
+                            .grant([(format!("{i:X}").repeat(32), format!("{j:x}").repeat(64))])
+                            .map(|_| ())
+                            .or_else(|error| {
+                                // Renaming over a file another thread is renaming can be refused on Windows; a
+                                // collision on the temp file is what this test is about.
+                                if error.contains("os error 5") || error.contains("os error 32") {
+                                    Ok(())
+                                } else {
+                                    Err(error)
+                                }
+                            })
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
         }
     }
 

@@ -107,7 +107,7 @@ pub const PARAM_EDITS: u32 = 3;
 pub const PARAM_COUNT: u32 = 4;
 
 /// The number of steps of the mode parameter: eight modes, so seven steps.
-const MODE_STEPS: u32 = 7;
+const MODE_STEPS: u32 = 8;
 
 /// How much state a `setState` reads before giving up on the stream. The helper's cap is 8 MiB; this leaves room for
 /// the oversize tests and bounds a stream that never ends.
@@ -156,6 +156,9 @@ pub enum TestMode {
     RejectState,
     /// Every `process` call returns `kResultFalse` and writes nothing.
     FailProcess,
+    /// The next `process` call crashes for real, with an access violation, so the system's own crash handling (Windows
+    /// Error Reporting included) runs. [`TestMode::Crash`] skips that handling to end the process at once.
+    Fault,
 }
 
 impl TestMode {
@@ -170,6 +173,7 @@ impl TestMode {
             TestMode::HangOnLoad => 5,
             TestMode::RejectState => 6,
             TestMode::FailProcess => 7,
+            TestMode::Fault => 8,
         }
     }
 
@@ -183,6 +187,7 @@ impl TestMode {
             TestMode::HangOnLoad => "Hang on load",
             TestMode::RejectState => "Reject state",
             TestMode::FailProcess => "Fail process",
+            TestMode::Fault => "Fault",
         }
     }
 
@@ -201,7 +206,8 @@ impl TestMode {
             },
             5 => TestMode::HangOnLoad,
             6 => TestMode::RejectState,
-            _ => TestMode::FailProcess,
+            7 => TestMode::FailProcess,
+            _ => TestMode::Fault,
         }
     }
 }
@@ -249,6 +255,7 @@ pub fn encode_test_state(state: &TestState) -> Vec<u8> {
         TestMode::HangOnLoad => (5, 0),
         TestMode::RejectState => (6, 0),
         TestMode::FailProcess => (7, 0),
+        TestMode::Fault => (8, 0),
     };
     let mut out = Vec::with_capacity(STATE_BASE_LEN + state.padding as usize);
     out.extend_from_slice(&STATE_MAGIC);
@@ -292,6 +299,7 @@ pub fn decode_test_state(bytes: &[u8]) -> Option<TestState> {
         5 => TestMode::HangOnLoad,
         6 => TestMode::RejectState,
         7 => TestMode::FailProcess,
+        8 => TestMode::Fault,
         _ => return None,
     };
     let tail = &bytes[STATE_BASE_LEN..];
@@ -511,10 +519,19 @@ fn crash() -> ! {
     std::process::abort()
 }
 
+/// Crashes for real: a write through a null pointer, which is an access violation (`0xC0000005` on Windows), so the
+/// process meets the system's crash handling rather than ending itself.
+fn fault() -> ! {
+    // SAFETY: none; this is the point. The write faults and the process does not continue.
+    unsafe { std::ptr::write_volatile(std::ptr::null_mut::<u32>(), 1) };
+    std::process::abort()
+}
+
 /// Acts out the fault of a mode at the top of `process`. Called with no lock held.
 fn act_on_mode(mode: TestMode) {
     match mode {
         TestMode::Crash => crash(),
+        TestMode::Fault => fault(),
         TestMode::Hang => hang_forever(),
         TestMode::Slow { ms } => std::thread::sleep(Duration::from_millis(u64::from(ms))),
         _ => {}
@@ -1388,6 +1405,7 @@ mod tests {
             TestMode::HangOnLoad,
             TestMode::RejectState,
             TestMode::FailProcess,
+            TestMode::Fault,
         ] {
             let state = TestState {
                 mode,
@@ -1417,7 +1435,7 @@ mod tests {
         bad[4] = 2;
         assert_eq!(decode_test_state(&bad), None, "version");
         let mut bad = good.clone();
-        bad[14] = 8;
+        bad[14] = 9;
         assert_eq!(decode_test_state(&bad), None, "mode tag");
         let mut bad = good.clone();
         bad[6..10].copy_from_slice(&f32::NAN.to_le_bytes());
@@ -1575,7 +1593,7 @@ mod tests {
             PARAM_LATENCY,
             480.0 / f64::from(MAX_LATENCY)
         ));
-        assert!(apply_parameter(&mut state, PARAM_MODE, 3.0 / 7.0));
+        assert!(apply_parameter(&mut state, PARAM_MODE, 3.0 / 8.0));
         assert!(apply_parameter(
             &mut state,
             PARAM_EDITS,
@@ -1623,14 +1641,15 @@ mod tests {
             "Hang on load",
             "Reject state",
             "Fail process",
+            "Fault",
         ]
         .iter()
         .enumerate()
         {
-            apply_parameter(&mut state, PARAM_MODE, step as f64 / 7.0);
+            apply_parameter(&mut state, PARAM_MODE, step as f64 / 8.0);
             assert_eq!(state.mode.index(), step as u32);
             assert_eq!(
-                parameter_to_string(PARAM_MODE, step as f64 / 7.0).as_deref(),
+                parameter_to_string(PARAM_MODE, step as f64 / 8.0).as_deref(),
                 Some(*name)
             );
         }
@@ -1644,7 +1663,7 @@ mod tests {
             mode: TestMode::Slow { ms: 200 },
             ..TestState::default()
         };
-        apply_parameter(&mut slow, PARAM_MODE, 4.0 / 7.0);
+        apply_parameter(&mut slow, PARAM_MODE, 4.0 / 8.0);
         assert_eq!(slow.mode, TestMode::Slow { ms: 200 });
     }
 
@@ -1666,7 +1685,7 @@ mod tests {
         for (id, text, normalized) in [
             (PARAM_GAIN, "0.50", 0.5),
             (PARAM_LATENCY, "480 frames", 480.0 / f64::from(MAX_LATENCY)),
-            (PARAM_MODE, "nan", 3.0 / 7.0),
+            (PARAM_MODE, "nan", 3.0 / 8.0),
             (PARAM_EDITS, "512", 0.5),
         ] {
             assert_eq!(parameter_from_string(id, text), Some(normalized), "{text}");
@@ -2310,7 +2329,7 @@ mod com_tests {
         assert_eq!(decode_test_state(&rig.get_state()), Some(good));
 
         // A plug-in set to the mode by its parameter refuses everything until the mode is taken off.
-        rig.set_param(PARAM_MODE, 6.0 / 7.0);
+        rig.set_param(PARAM_MODE, 6.0 / 8.0);
         assert_eq!(rig.set_state(&good), kResultFalse);
         rig.set_param(PARAM_MODE, 0.0);
         assert_eq!(rig.set_state(&good), kResultOk);
@@ -2463,10 +2482,10 @@ mod com_tests {
     fn the_parameters_read_back_what_was_set() {
         let rig = Rig::new();
         rig.set_param(PARAM_GAIN, 0.5);
-        rig.set_param(PARAM_MODE, 3.0 / 7.0);
+        rig.set_param(PARAM_MODE, 3.0 / 8.0);
         unsafe {
             assert_eq!(rig.controller.getParamNormalized(PARAM_GAIN), 0.5);
-            assert_eq!(rig.controller.getParamNormalized(PARAM_MODE), 3.0 / 7.0);
+            assert_eq!(rig.controller.getParamNormalized(PARAM_MODE), 3.0 / 8.0);
             assert_eq!(
                 rig.controller.setParamNormalized(PARAM_COUNT, 0.5),
                 kInvalidArgument

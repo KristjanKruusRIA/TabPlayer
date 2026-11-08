@@ -1185,6 +1185,77 @@ mod windows_tests {
     }
 
     #[test]
+    fn oversized_frame_kills_and_is_unreadable() {
+        let job = HelperJob::new().unwrap();
+        // A length prefix of 0x7FFFFFFF: over the 12 MiB cap even for a state that is owed.
+        let helper = fake_helper(
+            &job,
+            "Wait-Request; $o.Write([byte[]](255,255,255,127),0,4);$o.Flush();Start-Sleep 30",
+        );
+        let error = helper
+            .request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
+            .expect_err("the frame is refused");
+        assert!(matches!(error, HelperError::Misbehaved(_)), "{error:?}");
+        assert_eq!(error.status(), Some(PluginStatus::Unreadable));
+        assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
+        assert!(
+            wait_until(Duration::from_secs(2), || helper.exited().is_some()),
+            "killed"
+        );
+        assert!(
+            !helper.was_killed(),
+            "enforced by the client, not asked by the app"
+        );
+    }
+
+    #[test]
+    fn a_big_frame_is_refused_unless_a_state_was_asked_for() {
+        let job = HelperJob::new().unwrap();
+        // After the load nothing is owed, so the cap is 64 KiB. A length prefix of 70,000 is under the 12 MiB cap and over
+        // that one, and no body follows: only the small cap refuses it on the prefix, where a reader that always allowed
+        // 12 MiB would wait for a body that never comes.
+        let script = format!(
+            "Wait-Request; Send '{}'; $o.Write([byte[]](112,17,1,0),0,4);$o.Flush();Start-Sleep 30",
+            loaded_json(0)
+        );
+        let helper = fake_helper(&job, &script);
+        helper.load(fake_load()).expect("loads");
+        assert!(
+            wait_until(Duration::from_secs(20), || helper.violation().is_some()),
+            "the frame is refused"
+        );
+        assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
+        let detail = helper.violation_detail().unwrap();
+        assert!(
+            detail.contains("70000") && detail.contains("65536"),
+            "{detail}"
+        );
+        assert!(wait_until(Duration::from_secs(2), || helper
+            .exited()
+            .is_some()));
+    }
+
+    #[test]
+    fn an_error_reply_in_a_big_frame_is_refused() {
+        let job = HelperJob::new().unwrap();
+        // The big cap is allowed because a `GetState` is owed, but only a state may use it: an `Error` padded to 200 KB
+        // is not one.
+        let script = format!(
+            "Wait-Request; Send '{}'; Wait-Request; $p=' '*200000;              Send ('{{\"error\":{{\"code\":\"internal\",\"detail\":\"x\"}}}}'+$p); Start-Sleep 30",
+            loaded_json(0)
+        );
+        let helper = fake_helper(&job, &script);
+        helper.load(fake_load()).expect("loads");
+        let error = helper
+            .request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
+            .expect_err("an error is no state");
+        assert!(matches!(error, HelperError::Misbehaved(_)), "{error:?}");
+        assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
+        let detail = helper.violation_detail().unwrap();
+        assert!(detail.contains("an error in a frame of"), "{detail}");
+    }
+
+    #[test]
     fn a_helper_that_ends_unasked_with_code_zero_is_a_crash_too() {
         let job = HelperJob::new().unwrap();
         let helper = Arc::new(fake_helper(&job, "exit 0"));

@@ -650,6 +650,19 @@ mod windows_helper {
             assert_ne!(status.code(), Some(0));
         }
 
+        fn fault_mode_is_a_real_crash_that_ends_the_helper_without_a_dialog() {
+            // An access violation inside the plug-in, which meets the system's own crash handling. The helper hardens its
+            // process (no error dialog, no Windows Error Reporting UI) so that this ends it promptly with the exception
+            // code: a dialog, or a wait for a dump, would leave the helper alive here.
+            let mut helper = Helper::spawn(&[]);
+            helper.loaded(state(1.0, 0, TestMode::Fault));
+            let sent = Instant::now();
+            helper.ring().send(&block_of(0.5), &meta());
+            let status = helper.wait_exit(WAIT).expect("a crashed plug-in ends the helper, with no dialog to wait on");
+            assert_eq!(status.code(), Some(0xC000_0005_u32 as i32), "{status:?}");
+            assert!(sent.elapsed() < WAIT);
+        }
+
         fn hang_mode_stops_heartbeat() {
             let mut helper = Helper::spawn(&[]);
             helper.loaded(state(1.0, 0, TestMode::Hang));

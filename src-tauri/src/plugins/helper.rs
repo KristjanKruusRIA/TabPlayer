@@ -122,8 +122,10 @@ pub enum HelperError {
     LoadTimeout,
     /// The probe did not finish in time, and its helper was killed: a bundle that hangs when it is scanned.
     ProbeTimeout,
-    /// The helper was ended by the app (`kill`, `shutdown`, drop, a failed load) and so cannot answer. It says nothing
-    /// about the plug-in.
+    /// The helper was ended on purpose and so cannot answer: by the app (`kill`, `shutdown`, drop, a failed load), by a
+    /// load or probe timeout (which kills it and returns its own error to that call), or by the supervisor's kill of a
+    /// hung helper (which it reports as `Hung`). Requests that follow any of these get this, so it says nothing about the
+    /// plug-in and never overwrites the status that was reported for the end.
     Ended,
     /// The helper ended before it answered, with this exit code when it is known.
     Exited(Option<i32>),

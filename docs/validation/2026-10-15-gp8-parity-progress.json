@@ -1806,7 +1806,25 @@
     "style_typography_limits": {
       "path": "docs/validation/2026-10-30-gp8-style-typography.md",
       "start_line": 36,
-      "end_line": 44,
+      "end_line": 45,
+      "kind": "validation_report"
+    },
+    "fontroles_behavior": {
+      "path": "docs/validation/2026-11-08-gp8-font-roles.md",
+      "start_line": 3,
+      "end_line": 11,
+      "kind": "validation_report"
+    },
+    "fontroles_evidence": {
+      "path": "docs/validation/2026-11-08-gp8-font-roles.md",
+      "start_line": 13,
+      "end_line": 85,
+      "kind": "validation_report"
+    },
+    "fontroles_limits": {
+      "path": "docs/validation/2026-11-08-gp8-font-roles.md",
+      "start_line": 87,
+      "end_line": 106,
       "kind": "validation_report"
     },
     "partial_capo_behavior": {
@@ -9550,12 +9568,15 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "The Engraving panel sets one text family and text, title and tab number sizes, with Classic, Jazz and Rock presets, as one undoable setEngraving edit. Export uses the sizes and refuses text that would pass the paper edge.",
-      "remaining_gap": "Music font is fixed to Bravura; one family for all text; export keeps Noto; on screen, text at a system's end can run past the page.",
+      "current_behavior": "The Engraving panel sets one text family and text, title and tab number sizes, with Classic, Jazz and Rock presets, as one undoable setEngraving edit. Export uses the sizes and refuses text that would pass the paper edge. 2026-11-08: ten text roles (title block, page header, page footer, chord names, staff text, lyrics, track names, bar numbers, markers, tab numbers) take a bundled Noto Sans, Noto Serif or Noto Sans Mono font, a size, bold and italic, and a music font (Bravura, Petaluma, Leland) is chosen, all as one setEngraving edit that is saved with the document and with a style (library version 3). Chosen fonts are drawn on screen and in the exported PDF, and a desktop test checks computed styles, embedded PDF font names, undo, redo, save and reopen.",
+      "remaining_gap": "Screen and export share glyph shapes, not layout widths; roles without a font keep system fonts on screen; title block is screen only; Noto Sans Mono has no italic; non-Bravura music fonts keep Bravura spacing and draw missing symbols from Bravura; a failed font load aborts export; older builds refuse fonts; only PDF and a subset of the roles were run on the desktop; no GP8 manual comparison, three families only, no user or system fonts, and GP files carry no fonts.",
       "current_evidence": [
         "style_typography_behavior",
         "style_typography_evidence",
-        "style_typography_limits"
+        "style_typography_limits",
+        "fontroles_behavior",
+        "fontroles_evidence",
+        "fontroles_limits"
       ],
       "runtime_rechecked_by_this_audit": false
     },

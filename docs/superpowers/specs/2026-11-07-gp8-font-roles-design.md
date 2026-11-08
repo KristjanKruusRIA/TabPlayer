@@ -8,7 +8,7 @@ GP8's stylesheet sets a font, size and style per text kind and a music font. Tab
 
 - ten **text roles**, each with an optional bundled font, size, bold and italic, applied on screen and in every export (PDF, print, SVG, PNG);
 - a **music font** choice of Bravura (default), Petaluma or Leland, on screen and in export;
-- the fonts that make this work identically everywhere: Noto Sans, Noto Serif and Noto Sans Mono static faces, and the two extra SMuFL fonts with their metadata.
+- the fonts that give the chosen faces' glyph shapes everywhere (layout widths can still differ, see Limits): Noto Sans, Noto Serif and Noto Sans Mono static faces, and the two extra SMuFL fonts with their metadata.
 
 Nothing is a new edit command: the choices live in a new optional `engraving.fonts` field carried by the existing `setEngraving` edit. The GP8 manual's role and music-font lists were not available (no network during research); the role list below is the user's decision, not a copy of GP8.
 
@@ -173,3 +173,10 @@ A document without `fonts` looks exactly as today: system Arial/Georgia (or the 
 - Older builds refuse documents, edit logs and style libraries that use fonts.
 - Any font dropped by the licence gate is named here.
 - About 12.8 MB larger install (exact figure in the validation doc).
+- Screen and export share the glyph shapes of the chosen faces, not a guarantee of identical layout: alphaTab's `FontSizes` uses the first family that already has a width table, so a chosen alias may be measured with Noto Sans widths (after an export or a page view in the same session) and widths can differ.
+- ♯ ♭ ♮ in text of a chosen role come from Noto Sans CJK JP or a system face on screen and from Bravura in exports.
+- The Markers role also restyles the tempo text, which alphaTab draws with the marker font.
+- After a failed font load every later edit retries the load and registers duplicate `FontFace` entries.
+- A role face or music font that fails to load aborts an export; the screen carries on with a fallback font.
+- The fit-check error text is English only.
+- The panel's status lines are inserted with their text, so some screen readers may not announce them.

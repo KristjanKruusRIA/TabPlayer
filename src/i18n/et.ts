@@ -1698,5 +1698,5 @@ export const et: MessageCatalog = {
   'font_roles.substituted_one': "1 muusikamärki pole fondis {font} ja see joonistatakse Bravurast.",
   'font_roles.substituted_other': "{count} muusikamärki pole fondis {font} ja need joonistatakse Bravurast.",
   'font_roles.missing_glyph': "Fondil {font} pole märki „{chars}“ ({role}); see joonistatakse varufondist.",
-  'font_roles.load_failed': "Fonti ei saanud laadida: {files}. Partituur joonistatakse varufondiga, kuni see on laaditud, ja seda vajav eksport ebaõnnestub.",
+  'font_roles.load_failed': "Fonti ei saanud laadida: {files}. Partituur joonistatakse varufondiga, kuni font on laaditud, ja seda vajav eksport ebaõnnestub.",
 };

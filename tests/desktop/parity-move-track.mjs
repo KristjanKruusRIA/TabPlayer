@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealDock} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,revealLeftTask} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,rmSync } from 'node:fs';
@@ -20,11 +20,12 @@ try{
   await button('Open');
   const before=await tracks();assert.deepEqual(before.map(text=>text.replace(/^Track \d+: /,'')).slice(0,4),['Guitar9','Bass6','Drums','Keys']);
   await button('Track 2: Bass6');
-  await page.locator('.track-settings').getByRole('button',{name:'Move track up',exact:true}).click();await waitForWorkspaceIdle(page);
+  await revealLeftTask(page,'Track');await page.locator('.track-settings').getByRole('button',{name:'Move track up',exact:true}).click();await waitForWorkspaceIdle(page);
   const document=await readActiveDocument(page);
   assert.deepEqual(document.project.edits.at(-1),{type:'moveTrack',track:1,to:0});
   assert.deepEqual((await tracks()).slice(0,2),['Track 1: Bass6','Track 2: Guitar9']);
   // The selection follows the moved track, so the panel still shows Bass6 and it can't move further up.
+  await revealLeftTask(page,'Track');
   assert.equal(await page.locator('.track-settings h2').innerText(),'Bass6');
   assert.equal(await page.locator('.track-settings').getByRole('button',{name:'Move track up',exact:true}).isDisabled(),true);
   await button('Export GP');
@@ -34,6 +35,7 @@ try{
   await button('Undo');
   assert.deepEqual((await tracks()).slice(0,2),['Track 1: Guitar9','Track 2: Bass6']);
   // Undo moves Bass6 back to second place and the selection goes with it.
+  await revealLeftTask(page,'Track');
   assert.equal(await page.locator('.track-settings h2').innerText(),'Bass6');
   assert.deepEqual(errors,[]);
   console.log(`move track: ${order.map(([name])=>name).join(', ')}; undo restored the order.`);

@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealInspectorTab} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -34,6 +34,7 @@ try{
   assert.deepEqual(await view(),['parchment','100','selected']);
 
   await control('Zoom (%)').fill('130');await control('Displayed tracks').selectOption('all');await settled(['parchment','130','all']);
+  await revealInspectorTab(page,'Song');
   await page.locator('summary').filter({hasText:/^Default view$/}).first().evaluate(node=>{for(let item=node.parentElement;item;item=item.parentElement)if(item.tagName==='DETAILS')item.open=true;});
   await page.getByRole('button',{name:'Use current view',exact:true}).click();
   assert.deepEqual([await chosen('Default layout'),await control('Default zoom (%)').inputValue(),await chosen('Default tracks')],['Parchment','130','All tracks']);

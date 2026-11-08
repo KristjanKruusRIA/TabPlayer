@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,closeWelcomeLibrary,hidePractice,revealPlaybackControls,hidePlaybackControls} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
@@ -13,10 +13,10 @@ const result={sourceHash:hash(),states:[],errors:[]};
 let pid,browser,page;
 const save=()=>writeFileSync(resolve(output,'validation.json'),JSON.stringify(result,null,2));
 try{
-  pid=launch({TABPLAYER_TEST_OPEN:fixture});result.pid=pid;save();browser=await connect();page=browser.contexts()[0].pages()[0];page.setDefaultTimeout(10000);
+  pid=launch({TABPLAYER_TEST_OPEN:fixture});result.pid=pid;save();browser=await connect();page=browser.contexts()[0].pages()[0];page.setDefaultTimeout(10000);await closeWelcomeLibrary(page);
   page.on('pageerror',error=>result.errors.push(error.message));
   const idle=()=>waitForWorkspaceIdle(page);
-  const click=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
+  const click=async name=>{if(name!=='Practice')await hidePractice(page);await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const summary=async name=>{const node=page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first();if(!(await node.evaluate(element=>element.parentElement.open)))await node.click();};
   const snapshot=async name=>{
     await page.waitForTimeout(150);const path=resolve(output,`${name}.png`);await page.screenshot({path});
@@ -61,22 +61,22 @@ try{
   await click('Practice');await summary('Practice settings');await page.getByLabel('Relative speed (%)').fill('123');await click('Presentation');await summary('Page layout');
   await page.getByLabel('Width (mm)',{exact:true}).fill('250');await snapshot('presentation-1280');await click('Edit');await click('Practice');assert.equal(await page.getByLabel('Relative speed (%)').inputValue(),'123');
   await click('Presentation');assert.equal(await page.getByLabel('Width (mm)',{exact:true}).inputValue(),'250');await click('Edit');
-  await click('Edit chord diagram');const harmony=page.getByRole('dialog',{name:'Harmony chord',exact:true});await harmony.waitFor();
+  await clickWorkstationButton(page,'Edit chord diagram',{waitForIdle:false});const harmony=page.getByRole('dialog',{name:'Harmony chord',exact:true});await harmony.waitFor();
   await harmony.getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('.harmony-body fieldset')?.getAttribute('aria-disabled')!=='true');
   const nameInput=await harmony.getByLabel('Chord name',{exact:true}).elementHandle();await page.waitForFunction(input=>input===document.activeElement,nameInput);
   result.harmonyInitial=await harmony.evaluate(element=>({bodyScroll:element.querySelector('.harmony-body')?.scrollTop,focus:document.activeElement?.closest('label')?.textContent??document.activeElement?.tagName}));
-  assert.ok(result.harmonyInitial.bodyScroll<10,'Harmony must open at the beginning');await snapshot('harmony-initial-1280');await click('Generate shapes');
+  assert.ok(result.harmonyInitial.bodyScroll<10,'Harmony must open at the beginning');await snapshot('harmony-initial-1280');await harmony.getByRole('button',{name:'Generate shapes',exact:true}).click();
   const candidates=harmony.getByRole('button',{name:/^Use shape /});assert.ok(await candidates.count()>1);await candidates.nth(1).click();assert.equal(await candidates.nth(1).getAttribute('aria-pressed'),'true');
   for(const width of [960,1600]){await page.setViewportSize({width,height:900});await snapshot(`harmony-shapes-${width}`);const apply=await harmony.getByRole('button',{name:'Apply chord',exact:true}).boundingBox();assert.ok(apply&&apply.y>=0&&apply.y+apply.height<=900,'Harmony Apply must stay visible');}
   await page.keyboard.press('Escape');assert.equal(await harmony.count(),0);await page.setViewportSize({width:1280,height:900});
   const help=page.locator('.keyboard-help');await help.locator('summary').click();await snapshot('help-1280');await page.keyboard.press('Escape');assert.equal(await help.getAttribute('open'),null);
-  await click('Export score');const exports=page.getByRole('dialog',{name:'Export score',exact:true});await snapshot('export-gp-1280');
+  await clickWorkstationButton(page,'Export score',{waitForIdle:false});const exports=page.getByRole('dialog',{name:'Export score',exact:true});await snapshot('export-gp-1280');
   const checks=await exports.locator('.export-check').evaluateAll(labels=>labels.map(label=>{const input=label.querySelector('input'),box=label.getBoundingClientRect(),check=input.getBoundingClientRect();return {label:label.textContent.trim(),inputWidth:check.width,verticalDifference:Math.abs((check.y+check.height/2)-(box.y+box.height/2))};}));
   assert.ok(checks.every(check=>check.inputWidth<30&&check.verticalDifference<3));result.exportChecks=checks;
   await exports.getByRole('combobox',{name:'Export format'}).selectOption('wav');await snapshot('export-audio-1280');
   await exports.getByRole('combobox',{name:'Export format'}).selectOption('gp');await exports.locator('.export-track>label input').evaluateAll(nodes=>nodes.forEach(node=>{if(node.checked)node.click();}));
   await exports.getByRole('button',{name:'Export',exact:true}).click();assert.equal(await exports.getByRole('alert').innerText(),'Select at least one track to export.');await page.keyboard.press('Escape');
-  await page.waitForFunction(()=>!document.querySelector('.transport fieldset')?.disabled,{},{timeout:60000});await workspace.focus();await page.keyboard.press('Space');await page.getByRole('button',{name:'Pause',exact:true}).waitFor();await page.keyboard.press('Space');await page.getByRole('button',{name:'Play',exact:true}).waitFor();await click('Stop');
+  await revealPlaybackControls(page);await summary('Selected playback');await page.getByRole('combobox',{name:/^Cursor occurrence/}).selectOption({index:1});await hidePlaybackControls(page);await page.waitForFunction(()=>{const button=document.querySelector('button.transport-playbutton');return button&&!button.disabled&&/^Play/.test(button.title);},{},{timeout:60000});await workspace.focus();const playing=value=>page.waitForFunction(async value=>(await window.__TAURI_INTERNALS__.invoke('audio_status')).playing===value,value,{timeout:10000});const transport=page.locator('.transport');await page.keyboard.press('Space');await playing(true);await transport.getByRole('button',{name:'Pause',exact:true}).waitFor();await page.keyboard.press('Space');await playing(false);await transport.getByRole('button',{name:'Play',exact:true}).waitFor();await click('Stop');
   result.final=await readActiveDocument(page);assert.deepEqual(result.final.project,result.initial.project);assert.equal(hash(),result.sourceHash);assert.deepEqual(result.errors,[]);
   result.passed=true;save();console.log(JSON.stringify({passed:true,states:result.states.map(state=>state.name),sourceHash:result.sourceHash,pid}));
 }catch(error){result.failure=String(error.stack??error);if(page)await page.screenshot({path:resolve(output,'failure.png')}).catch(()=>{});save();throw error;}

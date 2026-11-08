@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask,revealInspectorTab} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { mkdir,readdir,readFile,writeFile } from 'node:fs/promises';
@@ -73,9 +73,10 @@ try{
   await block('Octaver','octaver',false);
   // Transpose the score up a fourth: the shift still adds an octave, at the same level, from the new pitch.
   const workspace=page.getByRole('region',{name:'Score workspace'});await workspace.focus();await page.keyboard.press('Control+a');
+  await revealInspectorTab(page,'Selection');await page.locator('summary').filter({hasText:/^Music selection$/}).first().evaluate(node=>{node.parentElement.open=true;});
   for(let step=0;step<5;step++)await button('Up semitone');
   const dryT=await exportWav('dry-transposed'),pitchT=strongest(dryT);
-  await block('Pitch shift','pitch',true);
+  await revealLeftTask(page,'Sound');await block('Pitch shift','pitch',true);
   const upT=await exportWav('up-octave-transposed');
   const aboveT=render=>power(render,pitchT*2)/power(render,pitchT);
   const results={pitch,pitchT,dryAbove:above(dry),upAbove:above(up),dryBelow:below(dry),downBelow:below(down),dryAboveT:aboveT(dryT),upAboveT:aboveT(upT),levelDb:20*Math.log10(level(up)/level(dry)),levelDbT:20*Math.log10(level(upT)/level(dryT))};

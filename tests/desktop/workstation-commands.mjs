@@ -70,10 +70,26 @@ export async function revealInspector(page) {
   await page.locator('.workstation-inspector').waitFor({state:'visible'});
 }
 
+/** The three inspector tabs share one panel, so a control is only visible on its own tab. This opens the first tab in which `locator`
+ * is visible and returns it; a driver that does not know where a control lives can call it before acting. */
+export async function revealInspectorControl(page,locator) {
+  await revealInspector(page);
+  for(const tab of ['Selection','Track','Song']) {
+    await revealInspectorTab(page,tab);
+    if(await locator.first().isVisible())return locator;
+  }
+  throw new Error(`Control is not visible on any inspector tab: ${locator}`);
+}
+
 /** Practice settings open from the toolbar's practice button. */
 export async function revealPractice(page) {
   const menu=page.locator('details.gp-practice');
   if(!await menu.evaluate(node=>node.open))await menu.locator(':scope>summary').click();
+}
+/** The practice popover opens over the inspector tabs, so close it before touching anything behind it. */
+export async function hidePractice(page) {
+  const menu=page.locator('details.gp-practice');
+  if(await menu.evaluate(node=>node.open))await menu.locator(':scope>summary').click();
 }
 /** @param {'Overview'|'Mixer'|'Instrument'} view */
 export async function revealDock(page,view) {
@@ -138,7 +154,7 @@ export async function clickWorkstationButton(page,name,{waitForIdle=true}={}) {
     if(name==='Edit')await revealInspectorTab(page,'Selection');
     else if(name==='Practice')await revealPractice(page);
     else if(name==='Presentation')await revealInspectorTab(page,'Song');
-    else await page.getByRole('button',{name,exact:true}).click();
+    else {const control=page.getByRole('button',{name,exact:true});if(!await control.first().isVisible())await revealInspectorControl(page,control);await control.click();}
   }
   if(waitForIdle)await waitForWorkspaceIdle(page);
 }

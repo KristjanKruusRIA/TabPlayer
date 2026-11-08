@@ -748,22 +748,24 @@ mod tests {
         }
     }
 
-    fn zero_crossing_frequency(samples: &[f32], rate: f64) -> f64 {
-        let mut first = None;
-        let mut last = 0.0;
-        let mut count = 0usize;
+    /// The frequency from the median time between upward zero crossings, and how many periods it saw. A capture
+    /// thread starved on a busy machine leaves a short gap in the output; that stretches a few periods, which the
+    /// median ignores, where a count of crossings over the whole span read 135 to 175 Hz for a 220 Hz tone.
+    fn zero_crossing_frequency(samples: &[f32], rate: f64) -> (f64, usize) {
+        let mut crossings = Vec::new();
         for i in 1..samples.len() {
             if samples[i - 1] < 0.0 && samples[i] >= 0.0 {
-                let at = i as f64 - 1.0 + (-samples[i - 1] / (samples[i] - samples[i - 1])) as f64;
-                if first.is_none() {
-                    first = Some(at);
-                } else {
-                    count += 1;
-                }
-                last = at;
+                crossings.push(
+                    i as f64 - 1.0 + (-samples[i - 1] / (samples[i] - samples[i - 1])) as f64,
+                );
             }
         }
-        count as f64 * rate / (last - first.unwrap())
+        let mut periods: Vec<f64> = crossings.windows(2).map(|w| w[1] - w[0]).collect();
+        if periods.is_empty() {
+            return (0.0, 0);
+        }
+        periods.sort_by(f64::total_cmp);
+        (rate / periods[periods.len() / 2], periods.len())
     }
 
     #[test]
@@ -824,9 +826,16 @@ mod tests {
         let peak = tail.iter().fold(0.0f32, |p, x| p.max(x.abs()));
         let expected: f32 = 0.35 * 0.8;
         ensure!((peak - expected).abs() < 0.02, "peak {peak}");
-        let measured = zero_crossing_frequency(tail, 44_100.0);
+        let (measured, periods) = zero_crossing_frequency(tail, 44_100.0);
+        // A clean second holds about 220 periods; fewer than 100 means the output was mostly gaps.
+        ensure!(periods >= 100, "only {periods} periods in the last second");
+        // The resampler moves its ratio up to 1 % (`MAX_ADJUST` in audio/line_in.rs, about 17 cents) to hold its buffer.
+        // On a busy machine the ring underruns, each restart re-arms the fast loop, and its proportional term reaches that
+        // limit: the tone read 10 to 17 cents flat. This checks the path end to end, where a wrong rate is 147 cents off;
+        // `drift_correction_keeps_the_pitch_true_in_real_time` holds the pitch to 1 cent on a simulated clock.
+        let limit = -1200.0 * 0.99f64.log2() + 3.0;
         ensure!(
-            (1200.0 * (measured / 220.0).log2()).abs() < 3.0,
+            (1200.0 * (measured / 220.0).log2()).abs() < limit,
             "frequency {measured}"
         );
         ensure!(

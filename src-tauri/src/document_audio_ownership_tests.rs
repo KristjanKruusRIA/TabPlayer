@@ -756,17 +756,25 @@ fn set_mix_with_an_unchanged_backing_does_not_decode_the_asset() {
             TransportCommand::Invalidate { generation: 1 },
         )
         .unwrap();
-    audio
-        .prepare(
-            &workspace,
-            &owner,
-            plan(1),
-            settings.clone(),
-            None,
-            "source".into(),
-            None,
-        )
-        .unwrap();
+    // Preparing opens the output device. The Linux and Windows CI runners have none, so there the test says so and
+    // stops; on a machine with a device it runs in full.
+    if let Err(error) = audio.prepare(
+        &workspace,
+        &owner,
+        plan(1),
+        settings.clone(),
+        None,
+        "source".into(),
+        None,
+    ) {
+        assert!(
+            error.contains("No audio output device")
+                || error.contains("Could not configure audio output"),
+            "{error}"
+        );
+        eprintln!("no usable audio output device ({error}); skipped");
+        return;
+    }
     assert_eq!(
         *audio.current_backing.lock().unwrap(),
         Some(staged.asset_id.clone())

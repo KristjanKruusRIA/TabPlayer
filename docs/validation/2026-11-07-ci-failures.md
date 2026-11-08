@@ -53,6 +53,35 @@ Run 42467609586, at develop `703cecf`, had the two fixes above and the memory fi
 - **Review:** an independent reviewer found nothing blocking. It confirmed that the setting reaches every `waitFor` and `findBy` in the file, stays within the file, and that no wait there expects to time out.
 - **Not fixed here:** after a key is dropped, several queue tests wait only 30 ms before checking that no further edit landed, which is shorter than one render. These checks were already weak before this change.
 
+### Third run: the Rust tests (2026-11-08)
+
+Run 42472305778, at develop `cd23cc7`, passed the frontend step on all three platforms, which confirms the queue fix. It was the first run since the repository went public to reach the Rust tests. `cargo test` stopped at the library binary, so the integration tests in `src-tauri/tests` did not run on CI. Four library tests failed:
+
+| Test | Platforms | Failure | Cause | Change |
+|---|---|---|---|---|
+| `set_mix_with_an_unchanged_backing_does_not_decode_the_asset` | Linux, Windows | `prepare` found no audio output device | Linux and Windows runners have no audio device | when `prepare` reports no usable output device, the test says so and stops; elsewhere it runs in full. It guards decoding under the workspace lock, not the device, so `#[ignore]` would have dropped it from every normal run |
+| `a_slow_port_opening_does_not_delay_the_messages_to_a_port_that_is_open` (MIDI out) | macOS | note 1 written 41 ms in, due 20 ms, bound 15 ms late | the bound measured how promptly the runner scheduled the thread, not whether the 400 ms open blocked the port | at most 100 ms late; the check that every note went out before the slow open finished is unchanged |
+| `a_folder_above_the_target_with_unreadable_attributes_does_not_refuse_it` (Windows) | Windows | setup proof: reading the denied folder succeeded | the `icacls` deny did not stop the runner's account | both outcome checks always run; when the deny did not bind, the test says the unreadable case was not exercised instead of failing |
+| `a_tone_flows_from_capture_to_the_output_at_the_expected_level` (Line-In) | macOS, Windows | 94 Hz and 217.6 Hz for a 220 Hz tone | wall-clock test; a starved capture thread leaves gaps, and the resampler slows its ratio by up to 1 % (`MAX_ADJUST`, about 17 cents) to refill its buffer | frequency from the median crossing interval, at least 100 periods in the last second, limit 1 % + 3 cents; `drift_correction_keeps_the_pitch_true_in_real_time` still holds pitch to 1 cent on a simulated clock |
+
+- **Reproduction of the Line-In failure:**
+  - With all 28 cores kept busy, three of three runs failed, measuring 135 to 175 Hz.
+  - With the median measurement, the tone read 217.8 to 218.7 Hz: steadily about 17 cents flat, which is the resampler at its 1 % limit, not gaps.
+  - With the new limit, it passed five of five under the same load.
+- **Local checks:**
+  - `cargo test --no-fail-fast`: 70 test binaries, 1,472 passed, 0 failed, 17 ignored. CI has not yet run the integration tests.
+  - The four changed tests pass with `--nocapture`. The device test ran in full, and the Windows test did exercise the unreadable case on this machine.
+  - The MIDI test passed five of five.
+  - `cargo fmt --check` is clean.
+- **Review:** an independent reviewer found nothing blocking. Its points are applied:
+  - the device test skips at runtime instead of being ignored;
+  - the Windows test keeps both of its outcome checks;
+  - the Line-In comment now gives the correct cause: underrun restarts re-arm the fast loop, whose proportional term reaches the limit;
+  - the pitch limit is now based on 1 % flat.
+- **Limits:**
+  - The skip paths and the 100 ms MIDI bound were not run on a runner like CI's.
+  - A controller with its sign inverted would also stay within the new Line-In limit. The simulated-clock test still catches that.
+
 ## `batch/convert.test.ts` killed on macOS ("JavaScript heap out of memory")
 
 - **Symptom:** Vitest reported the crash as an unhandled error, and the file was missing from the totals (329 of 330). The 1 November macOS run was also one file short (313 of 314), so it has probably crashed since the test was added on 2026-10-30.

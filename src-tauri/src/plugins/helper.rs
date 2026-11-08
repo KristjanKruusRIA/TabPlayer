@@ -1034,14 +1034,30 @@ impl HelperProcess {
 
         let loaded = match self.exchange(Kind::Load, frame, timeout)? {
             HelperMessage::Loaded {
+                protocol_version,
+                build_id,
                 latency,
                 class,
                 mono,
-            } => Loaded {
-                latency,
-                class,
-                mono,
-            },
+            } => {
+                if protocol_version != tabplayer_plugin_protocol::limits::PROTOCOL_VERSION {
+                    return Err(HelperError::Misbehaved(format!(
+                        "helper protocol version {protocol_version} did not match {}",
+                        tabplayer_plugin_protocol::limits::PROTOCOL_VERSION
+                    )));
+                }
+                if build_id != tabplayer_plugin_protocol::limits::BUILD_ID {
+                    return Err(HelperError::Misbehaved(format!(
+                        "helper build ID {build_id:?} did not match {:?}",
+                        tabplayer_plugin_protocol::limits::BUILD_ID
+                    )));
+                }
+                Loaded {
+                    latency,
+                    class,
+                    mono,
+                }
+            }
             other => {
                 return Err(HelperError::Misbehaved(format!(
                     "{} answered the load",
@@ -1514,7 +1530,25 @@ pub fn probe_with(
         })?);
         let helper = HelperProcess::launch_with(exe, probe_job()?, options)?;
         match helper.exchange(Kind::Probe, frame, timeout)? {
-            HelperMessage::Probed { classes } => Ok(classes),
+            HelperMessage::Probed {
+                protocol_version,
+                build_id,
+                classes,
+            } => {
+                if protocol_version != tabplayer_plugin_protocol::limits::PROTOCOL_VERSION {
+                    return Err(HelperError::Misbehaved(format!(
+                        "helper protocol version {protocol_version} did not match {}",
+                        tabplayer_plugin_protocol::limits::PROTOCOL_VERSION
+                    )));
+                }
+                if build_id != tabplayer_plugin_protocol::limits::BUILD_ID {
+                    return Err(HelperError::Misbehaved(format!(
+                        "helper build ID {build_id:?} did not match {:?}",
+                        tabplayer_plugin_protocol::limits::BUILD_ID
+                    )));
+                }
+                Ok(classes)
+            }
             other => Err(helper.unexpected(&other)),
         }
         // The helper is dropped here, which kills it if it has not already ended.
@@ -1534,8 +1568,14 @@ mod tests {
             subcategories: String::new(),
         };
         vec![
-            HelperMessage::Probed { classes: vec![] },
+            HelperMessage::Probed {
+                protocol_version: tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
+                build_id: tabplayer_plugin_protocol::limits::BUILD_ID.into(),
+                classes: vec![],
+            },
             HelperMessage::Loaded {
+                protocol_version: tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
+                build_id: tabplayer_plugin_protocol::limits::BUILD_ID.into(),
                 latency: 0,
                 class,
                 mono: false,

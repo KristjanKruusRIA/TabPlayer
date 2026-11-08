@@ -4,6 +4,9 @@ use std::time::Duration;
 /// Version of the control messages and of the ring layout. Both sides refuse anything else.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// Build identifier of the helper and the host. The app and the helper must match (preflight ruling P33).
+pub const BUILD_ID: &str = "0.2.0";
+
 /// Frames in one ring block. Measured in Spike 2 (`docs/validation/2026-11-08-vst-spikes.md`): the p99 hand-off at
 /// this size is 2.31 ms with a real amp plug-in in eight helpers, against a 10.67 ms callback.
 pub const BLOCK_FRAMES: usize = 128;

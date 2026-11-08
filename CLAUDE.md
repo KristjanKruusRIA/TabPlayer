@@ -11,6 +11,7 @@ Local Tauri 2 desktop tablature player and editor for guitar and bass. Rust owns
 ## Codebase map
 
 - `src/`: React UI, grouped by area (`editor`, `engraving`, `shell`, `workspace`, `i18n`, `ui` and others).
+- `src-tauri/`: Cargo workspace comprising the main `tabplayer` app, `plugin-protocol` (wire protocol and limits), `plugin-host` (`tabplayer-plugin-host` helper) and `test-plugin` (`tabplayer-test-plugin` synthetic VST3). Use `--workspace` for workspace tests and `--all` for workspace formatting.
 - `src-tauri/src/`: native core; `audio/` is the renderer and `edit_types.rs` holds edit types. Integration tests are in `src-tauri/tests/`.
 - `tests/desktop/`: real-app drivers. `tests/fixtures/`: shared protocol fixtures.
 - `docs/validation/2026-10-15-gp8-parity-progress.md`: GP8 parity tracker. `docs/backlog.md`: unscheduled ideas outside it.
@@ -25,6 +26,9 @@ npm test                     # Node resource tests, then Vitest
 npm run typecheck
 cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml
 cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
+npm run prepare:plugin-host      # debug helper build for local development
+npm run tauri -- dev --config src-tauri/tauri.plugin-host.conf.json  # local dev with plug-in hosting
+cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin  # e2e test prerequisite
 node scripts/prepare-audio.mjs --offline
 node scripts/font-coverage.mjs   # after changing a bundled font: rewrites src/engraving/font-coverage.json and scripts/music-substitutes.json
 node tests/desktop/parity-<name>.mjs   # from the checkout root, after the desktop test build
@@ -38,7 +42,7 @@ CI runs on Windows, macOS and Linux with exact Rust 1.90.0 and Node 24.20.0, and
 
 ## Desktop verification
 
-- `scripts/build-desktop-test.ps1` builds the test app with the `desktop-test` feature.
+- `scripts/build-desktop-test.ps1` builds the test app with the `desktop-test` feature, builds the helper (`tabplayer-plugin-host.exe`) and test plug-in (`tabplayer_test_plugin.dll`) in release, and copies them beside `.analysis/desktop-smoke/tabplayer.exe`.
 - Drivers in `tests/desktop/` launch `.analysis/desktop-smoke/tabplayer.exe`, resolved from the current directory, and attach over CDP on port 9223. If you built elsewhere, copy that binary there first or the driver silently tests an old build.
 - Only one app can use port 9223 at a time.
 - Synthetic F5/Ctrl+R do not reach WebView2 accelerators; `page.reload()` is not proof of a real reload shortcut.

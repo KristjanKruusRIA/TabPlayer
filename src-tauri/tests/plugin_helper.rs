@@ -275,8 +275,10 @@ mod windows_tests {
     /// A `Loaded` reply for the test class, as JSON.
     fn loaded_json(latency: u32) -> String {
         format!(
-            "{{\"loaded\":{{\"latency\":{latency},\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\"name\":\"X\",\
-             \"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}"
+            "{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":{latency},\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\"name\":\"X\",\
+             \"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}",
+            tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
+            tabplayer_plugin_protocol::limits::BUILD_ID
         )
     }
 
@@ -933,11 +935,13 @@ mod windows_tests {
     #[test]
     fn a_different_class_than_asked_for_is_unreadable() {
         let job = HelperJob::new().unwrap();
-        let helper = fake_helper(
-            &job,
-            "Wait-Request; Send '{\"loaded\":{\"latency\":0,\"class\":{\"classId\":\"00000000000000000000000000000001\",\
-             \"name\":\"Other\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"},\"mono\":false}}'; Start-Sleep 30",
+        let script = format!(
+            "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":0,\"class\":{{\"classId\":\"00000000000000000000000000000001\",\
+             \"name\":\"Other\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+            tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
+            tabplayer_plugin_protocol::limits::BUILD_ID
         );
+        let helper = fake_helper(&job, &script);
         let load = LoadRequest {
             bundle: std::env::temp_dir().join("x.vst3"),
             class_id: TEST_CLASS_ID.into(),
@@ -1287,6 +1291,44 @@ mod windows_tests {
             helper.request(HostMessage::GetState),
             Err(HelperError::Exited(_))
         ));
+    }
+    #[test]
+    fn mismatched_build_id_is_refused() {
+        let job = HelperJob::new().unwrap();
+        let script = format!(
+            "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"stale-build-id\",\"latency\":0,\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\
+             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+            tabplayer_plugin_protocol::limits::PROTOCOL_VERSION
+        );
+        let helper = fake_helper(&job, &script);
+        let error = helper
+            .load(fake_load())
+            .expect_err("mismatched build id must be refused");
+        assert!(
+            matches!(error, HelperError::Misbehaved(_)),
+            "expected Misbehaved, got {error:?}"
+        );
+        assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
+    }
+
+    #[test]
+    fn mismatched_protocol_version_is_refused() {
+        let job = HelperJob::new().unwrap();
+        let script = format!(
+            "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":0,\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\
+             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+            tabplayer_plugin_protocol::limits::PROTOCOL_VERSION + 99,
+            tabplayer_plugin_protocol::limits::BUILD_ID
+        );
+        let helper = fake_helper(&job, &script);
+        let error = helper
+            .load(fake_load())
+            .expect_err("mismatched protocol version must be refused");
+        assert!(
+            matches!(error, HelperError::Misbehaved(_)),
+            "expected Misbehaved, got {error:?}"
+        );
+        assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
     }
 }
 

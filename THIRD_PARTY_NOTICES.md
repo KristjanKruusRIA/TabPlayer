@@ -20,6 +20,86 @@ TabPlayer is an independent application. It contains no Guitar Pro application c
 - PDF export uses svg2pdf 0.13.0 (MIT/Apache-2.0) and pdf-writer 0.12.1 (MIT/Apache-2.0). Their complete license files are included in the generated package inventory under `licenses/`.
 - PDF text shaping uses a locally patched usvg 0.45.1 (Apache-2.0 OR MIT). The patch merges fallback by complete source clusters so Latin ligatures and Unicode fallback can coexist. Upstream source revision `1b6c2fddbcbeffa8135df4323b02aaae84890907`, exact crate provenance and patch notes are retained in `vendor/usvg/`; both upstream licenses are packaged in `licenses/usvg-0.45.1/`.
 - VST3 plug-in hosting (a separate helper process that loads the user's own plug-ins) uses the `vst3` crate 0.3.0 and `com-scrape-types` 0.1.1 by Micah Johnston (MIT OR Apache-2.0), whose bindings are generated from Steinberg's VST3 `pluginterfaces` (MIT, Copyright (c) Steinberg Media Technologies GmbH), and a Windows extract of SoundCraft's `vst3-host` FFI in the helper and its bundle resolution, which the app links as well through the protocol crate (Copyright (c) 2026 ArtCraft Team and the SoundCraft contributors, MIT), with `libloading` 0.9.0 (ISC). The `vst3` licence files are in the generated package inventory under `licenses/`; the other texts are packaged as `licenses/steinberg-pluginterfaces-MIT.txt`, `licenses/com-scrape-types-MIT.txt` and `licenses/soundcraft-vst3-host-MIT.txt`.
+
+  Steinberg VST3 pluginterfaces (https://github.com/steinbergmedia/vst3_pluginterfaces), MIT licence. The `vst3` crate 0.3.0 generates its bindings from the VST 3 SDK 3.8.0 interface headers, and the plug-in helper and the test plug-in link those bindings. The text below is the LICENSE.txt of that repository at tag v3.8.0_build_66 (commit 31d6eeba6daaa3e2a8bfbe3e7a90ca0b7fbfbc1c), verbatim:
+
+  ```text
+  MIT License
+
+  Copyright (c) 2025, Steinberg Media Technologies GmbH
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+  ```
+
+  SoundCraft vst3-host (https://github.com/storytold/soundcraft, commit b6f9f15), MIT OR Apache-2.0, used here under MIT. TabPlayer's plug-in host helper vendors a Windows extract of its FFI (src-tauri/plugin-host/src/vst3/). SoundCraft's licence:
+
+  ```text
+  MIT License
+
+  Copyright (c) 2026 ArtCraft Team and the SoundCraft contributors
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+  ```
+
+  com-scrape-types 0.1.1 (https://github.com/coupler-rs/vst3-rs, authors: Micah Johnston), MIT OR Apache-2.0, used here under MIT:
+
+  ```text
+  Permission is hereby granted, free of charge, to any
+  person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the
+  Software without restriction, including without
+  limitation the rights to use, copy, modify, merge,
+  publish, distribute, sublicense, and/or sell copies of
+  the Software, and to permit persons to whom the Software
+  is furnished to do so, subject to the following
+  conditions:
+
+  The above copyright notice and this permission notice
+  shall be included in all copies or substantial portions
+  of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+  ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+  TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+  PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+  SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+  CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+  IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+  DEALINGS IN THE SOFTWARE.
+  ```
 - React, React DOM, Scheduler, Tauri and their dependencies retain their respective licences. Build-generated licence copies and package inventory are in `licenses/`.
 - fflate 0.8.3, Copyright (c) 2026 Arjun Barrett, is distributed under MIT. Its complete license is packaged in `licenses/fflate-0.8.3/LICENSE`.
 - Neural Amp Modeler capture playback (`src-tauri/src/audio/nam/`) is TabPlayer's own Rust port of the inference code of NAM Core (https://github.com/sdatkinson/NeuralAmpModelerCore), Copyright (c) 2023 Steven Atkinson, distributed under MIT. The `.nam` file format and test fixtures also come from the NAM trainer (https://github.com/sdatkinson/neural-amp-modeler, Copyright (c) 2019-2025 Steven Atkinson, MIT); fixture provenance and both licence texts are in `src-tauri/tests/fixtures/nam/README.md`. The `nam-rs` crate (MIT) is a development-only dependency used to cross-check output and is not shipped. NAM Core's licence:

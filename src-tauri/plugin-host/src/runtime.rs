@@ -396,7 +396,11 @@ pub fn main() -> i32 {
 fn probe(out: &Arc<ControlOut>, bundle: &str) -> i32 {
     match guarded(out, || Vst3Core::probe(Path::new(bundle))) {
         Ok(classes) => {
-            out.emit(HelperMessage::Probed { classes });
+            out.emit(HelperMessage::Probed {
+                protocol_version: tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
+                build_id: tabplayer_plugin_protocol::limits::BUILD_ID.into(),
+                classes,
+            });
             0
         }
         Err(error) => failed(out, error),
@@ -502,6 +506,8 @@ fn run_session(out: &Arc<ControlOut>, input: File, params: Params) -> i32 {
     };
 
     let loaded = HelperMessage::Loaded {
+        protocol_version: tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
+        build_id: tabplayer_plugin_protocol::limits::BUILD_ID.into(),
         latency: core.latency(),
         class: core.class().clone(),
         mono: core.mono(),

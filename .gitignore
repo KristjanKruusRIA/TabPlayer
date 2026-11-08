@@ -22,3 +22,4 @@ src-tauri/icons/Square*Logo.png
 .impeccable/*.local.json
 .impeccable/hook.cache.json
 .agents/
+src-tauri/binaries/

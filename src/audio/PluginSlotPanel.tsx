@@ -71,7 +71,11 @@ export function PluginSlotPanel({
       .catch(err => {
         if (alive) {
           const str = String(err?.message ?? err);
-          if (!str.includes("reading 'invoke'") && !str.includes('__TAURI_INTERNALS__')) {
+          if (
+            !str.includes("reading 'invoke'") &&
+            !str.includes('__TAURI_INTERNALS__') &&
+            !str.includes('unexpected plugin_')
+          ) {
             setError(localizePluginError(err, t));
           }
         }
@@ -191,9 +195,9 @@ export function PluginSlotPanel({
   const showNotice = status && status !== 'ready' && status !== 'loading';
 
   return (
-    <details className="sound-block sound-plugin-block" open>
+    <details className="sound-plugin-slot" open>
       <summary>
-        <span className="sound-block-name">{t('plugin.slot_label')}</span>
+        <span className="sound-plugin-name">{t('plugin.slot_label')}</span>
         <span className="sound-block-state">
           {slot ? (slot.active ? t('plugin.active') : t('plugin.bypassed')) : t('plugin.builtin_tone')}
         </span>

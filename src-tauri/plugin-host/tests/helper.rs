@@ -295,7 +295,18 @@ mod windows_helper {
 
         fn loaded(&mut self, plugin_state: Vec<u8>) -> u32 {
             match self.load(plugin_state, Mode::Realtime) {
-                HelperMessage::Loaded { latency, class, .. } => {
+                HelperMessage::Loaded {
+                    protocol_version,
+                    build_id,
+                    latency,
+                    class,
+                    ..
+                } => {
+                    assert_eq!(
+                        protocol_version,
+                        tabplayer_plugin_protocol::limits::PROTOCOL_VERSION
+                    );
+                    assert_eq!(build_id, tabplayer_plugin_protocol::limits::BUILD_ID);
                     assert_eq!(class.class_id, self.class_id);
                     latency
                 }
@@ -416,7 +427,13 @@ mod windows_helper {
             let bundle = helper.bundle.to_str().unwrap().to_string();
             helper.send(&HostMessage::Probe { bundle });
             match helper.recv() {
-                HelperMessage::Probed { classes } => {
+                HelperMessage::Probed {
+                    protocol_version,
+                    build_id,
+                    classes,
+                } => {
+                    assert_eq!(protocol_version, tabplayer_plugin_protocol::limits::PROTOCOL_VERSION);
+                    assert_eq!(build_id, tabplayer_plugin_protocol::limits::BUILD_ID);
                     assert_eq!(
                         classes,
                         [ClassInfo {
@@ -459,7 +476,7 @@ mod windows_helper {
         fn load_reports_latency() {
             let mut helper = Helper::spawn(&[]);
             match helper.load(state(0.5, 480, TestMode::Normal), Mode::Realtime) {
-                HelperMessage::Loaded { latency, class, mono } => {
+                HelperMessage::Loaded { latency, class, mono, .. } => {
                     assert_eq!(latency, 480);
                     assert_eq!(class.name, "TabPlayer Test Gain");
                     assert!(!mono);
@@ -1017,7 +1034,7 @@ mod windows_helper {
             let mut probe = Helper::spawn(&[]);
             probe.send(&HostMessage::Probe { bundle: path.clone() });
             let classes = match probe.recv_within(Duration::from_secs(60)) {
-                HelperMessage::Probed { classes } => classes,
+                HelperMessage::Probed { classes, .. } => classes,
                 other => panic!("expected Probed, got {other:?}"),
             };
             eprintln!("classes: {classes:?}");

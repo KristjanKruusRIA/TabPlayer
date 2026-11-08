@@ -12,14 +12,14 @@
 .sound-panel .muted{color:var(--ws-muted);font-size:11px;line-height:1.35}
 .sound-panel .sound-chain-label{margin:12px 0 6px}
 .sound-chain{border-top:1px solid var(--ws-border)}
-.sound-block{border-bottom:1px solid var(--ws-border)}
-.sound-block>summary{position:relative;min-height:28px;margin:0;padding:6px 0;line-height:16px;color:var(--ws-text);font-size:12px}
-.sound-block-name{font-weight:600}
+.sound-block, .sound-plugin-slot{border-bottom:1px solid var(--ws-border)}
+.sound-block>summary, .sound-plugin-slot>summary{position:relative;min-height:28px;margin:0;padding:6px 0;line-height:16px;color:var(--ws-text);font-size:12px}
+.sound-block-name, .sound-plugin-name{font-weight:600}
 .sound-block-state{float:right;margin-left:8px;color:var(--ws-muted);font-size:11px;font-weight:400}
-.sound-block[open]>summary{background:var(--ws-raised)}
-.sound-panel .sound-block>fieldset{margin:0;padding:6px 0 8px}
-.sound-panel .sound-block label{margin:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(68px,42%);align-items:center;gap:6px}
-.sound-panel .sound-block .check{display:flex;flex-direction:row}
+.sound-block[open]>summary, .sound-plugin-slot[open]>summary{background:var(--ws-raised)}
+.sound-panel :is(.sound-block, .sound-plugin-slot)>fieldset{margin:0;padding:6px 0 8px}
+.sound-panel :is(.sound-block, .sound-plugin-slot) label{margin:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(68px,42%);align-items:center;gap:6px}
+.sound-panel :is(.sound-block, .sound-plugin-slot) .check{display:flex;flex-direction:row}
 .sound-output{margin-top:12px}
 .sound-panel [role=alert]{margin:8px 0 0;padding:8px;border:1px solid var(--ws-error);border-radius:3px;color:var(--ws-error);background:var(--ws-error-surface);font-size:12px;line-height:1.35;overflow-wrap:anywhere}
 .sound-panel ::selection{color:var(--ws-accent-ink);background:var(--ws-accent)}

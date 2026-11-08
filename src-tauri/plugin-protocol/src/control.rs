@@ -6,9 +6,9 @@
 //! validated ([`Message::validate`]) before the caller sees it.
 use crate::{
     limits::{
-        MAX_CLASSES, MAX_DETAIL_CHARS, MAX_FRAME_BYTES, MAX_PATH_CHARS, MAX_SAMPLE_RATE,
+        BUILD_ID, MAX_CLASSES, MAX_DETAIL_CHARS, MAX_FRAME_BYTES, MAX_PATH_CHARS, MAX_SAMPLE_RATE,
         MAX_STATE_BYTES, MAX_SUBCATEGORIES_CHARS, MAX_TITLE_CHARS, MAX_VERSION_CHARS,
-        MIN_SAMPLE_RATE,
+        MIN_SAMPLE_RATE, PROTOCOL_VERSION,
     },
     state::STATE_OVERHEAD,
     validate::{valid_class_id, valid_name, valid_text, valid_vendor},
@@ -196,9 +196,13 @@ pub enum HostMessage {
 )]
 pub enum HelperMessage {
     Probed {
+        protocol_version: u32,
+        build_id: String,
         classes: Vec<ClassInfo>,
     },
     Loaded {
+        protocol_version: u32,
+        build_id: String,
         /// The plug-in's latency in frames.
         latency: u32,
         class: ClassInfo,
@@ -317,13 +321,44 @@ fn bundle_ok(bundle: &str) -> Result<(), String> {
 impl Message for HelperMessage {
     fn validate(&self) -> Result<(), String> {
         match self {
-            HelperMessage::Probed { classes } => {
+            HelperMessage::Probed {
+                protocol_version,
+                build_id,
+                classes,
+            } => {
+                if *protocol_version != PROTOCOL_VERSION {
+                    return Err(format!(
+                        "helper protocol version {protocol_version} did not match {PROTOCOL_VERSION}"
+                    ));
+                }
+                if build_id != BUILD_ID {
+                    return Err(format!(
+                        "helper build ID {build_id:?} did not match {BUILD_ID:?}"
+                    ));
+                }
                 if classes.len() > MAX_CLASSES {
                     return Err("Too many plug-in classes.".into());
                 }
                 classes.iter().try_for_each(ClassInfo::validate)
             }
-            HelperMessage::Loaded { class, .. } => class.validate(),
+            HelperMessage::Loaded {
+                protocol_version,
+                build_id,
+                class,
+                ..
+            } => {
+                if *protocol_version != PROTOCOL_VERSION {
+                    return Err(format!(
+                        "helper protocol version {protocol_version} did not match {PROTOCOL_VERSION}"
+                    ));
+                }
+                if build_id != BUILD_ID {
+                    return Err(format!(
+                        "helper build ID {build_id:?} did not match {BUILD_ID:?}"
+                    ));
+                }
+                class.validate()
+            }
             HelperMessage::State {
                 component,
                 controller,
@@ -554,12 +589,18 @@ mod tests {
     fn helper_messages() -> Vec<HelperMessage> {
         vec![
             HelperMessage::Probed {
+                protocol_version: PROTOCOL_VERSION,
+                build_id: BUILD_ID.into(),
                 classes: vec![class(), class()],
             },
             HelperMessage::Probed {
+                protocol_version: PROTOCOL_VERSION,
+                build_id: BUILD_ID.into(),
                 classes: Vec::new(),
             },
             HelperMessage::Loaded {
+                protocol_version: PROTOCOL_VERSION,
+                build_id: BUILD_ID.into(),
                 latency: 4800,
                 class: class(),
                 mono: true,
@@ -666,7 +707,7 @@ mod tests {
         }
         let class_json = |extra: &str| {
             format!(
-                r#"{{"loaded":{{"latency":0,"mono":false,"class":{{"classId":"{CLASS}","name":"A","vendor":"","version":"","subcategories":""{extra}}}}}}}"#
+                r#"{{"loaded":{{"protocolVersion":{PROTOCOL_VERSION},"buildId":"{BUILD_ID}","latency":0,"mono":false,"class":{{"classId":"{CLASS}","name":"A","vendor":"","version":"","subcategories":""{extra}}}}}}}"#
             )
         };
         assert!(serde_json::from_str::<HelperMessage>(&class_json("")).is_ok());
@@ -682,6 +723,8 @@ mod tests {
         long.name = "x".repeat(MAX_NAME_CHARS + 1);
         assert!(matches!(
             frame(&HelperMessage::Loaded {
+                protocol_version: PROTOCOL_VERSION,
+                build_id: BUILD_ID.into(),
                 latency: 0,
                 class: long,
                 mono: false
@@ -692,6 +735,8 @@ mod tests {
         long.vendor = "v".repeat(MAX_NAME_CHARS + 1);
         assert!(matches!(
             frame(&HelperMessage::Probed {
+                protocol_version: PROTOCOL_VERSION,
+                build_id: BUILD_ID.into(),
                 classes: vec![long]
             }),
             Err(FrameError::Invalid(_))
@@ -718,11 +763,17 @@ mod tests {
         // Too many classes.
         let classes = vec![class(); MAX_CLASSES + 1];
         assert!(matches!(
-            frame(&HelperMessage::Probed { classes }),
+            frame(&HelperMessage::Probed {
+                protocol_version: PROTOCOL_VERSION,
+                build_id: BUILD_ID.into(),
+                classes
+            }),
             Err(FrameError::Invalid(_))
         ));
         assert!(
             frame(&HelperMessage::Probed {
+                protocol_version: PROTOCOL_VERSION,
+                build_id: BUILD_ID.into(),
                 classes: vec![class(); MAX_CLASSES]
             })
             .is_ok()
@@ -908,6 +959,8 @@ mod tests {
             write_frame(
                 &mut wire,
                 &HelperMessage::Loaded {
+                    protocol_version: PROTOCOL_VERSION,
+                    build_id: BUILD_ID.into(),
                     latency: 0,
                     class: long,
                     mono: false
@@ -960,5 +1013,66 @@ mod tests {
             discard_frame(&mut &[0u8; 10][..], 11),
             Err(FrameError::Truncated)
         ));
+    }
+
+    #[test]
+    fn probed_and_loaded_require_matching_protocol_version_and_build_id() {
+        let mut probed = HelperMessage::Probed {
+            protocol_version: PROTOCOL_VERSION,
+            build_id: BUILD_ID.into(),
+            classes: vec![class()],
+        };
+        assert!(probed.validate().is_ok());
+
+        let mut loaded = HelperMessage::Loaded {
+            protocol_version: PROTOCOL_VERSION,
+            build_id: BUILD_ID.into(),
+            latency: 0,
+            class: class(),
+            mono: false,
+        };
+        assert!(loaded.validate().is_ok());
+
+        // Mismatched protocol version.
+        if let HelperMessage::Probed {
+            ref mut protocol_version,
+            ..
+        } = probed
+        {
+            *protocol_version = PROTOCOL_VERSION + 1;
+        }
+        assert!(probed.validate().is_err());
+
+        if let HelperMessage::Loaded {
+            ref mut protocol_version,
+            ..
+        } = loaded
+        {
+            *protocol_version = PROTOCOL_VERSION + 1;
+        }
+        assert!(loaded.validate().is_err());
+
+        // Mismatched build id.
+        if let HelperMessage::Probed {
+            ref mut protocol_version,
+            ref mut build_id,
+            ..
+        } = probed
+        {
+            *protocol_version = PROTOCOL_VERSION;
+            *build_id = "mismatched-build-id".into();
+        }
+        assert!(probed.validate().is_err());
+
+        if let HelperMessage::Loaded {
+            ref mut protocol_version,
+            ref mut build_id,
+            ..
+        } = loaded
+        {
+            *protocol_version = PROTOCOL_VERSION;
+            *build_id = "mismatched-build-id".into();
+        }
+        assert!(loaded.validate().is_err());
     }
 }

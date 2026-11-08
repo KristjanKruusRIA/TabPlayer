@@ -4395,12 +4395,14 @@ dependencies = [
  "svg2pdf",
  "symphonia",
  "tabplayer-plugin-protocol",
+ "tabplayer-test-plugin",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-single-instance",
  "tempfile",
  "vorbis_rs",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

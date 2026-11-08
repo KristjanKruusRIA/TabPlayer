@@ -840,7 +840,7 @@ fn loop_wrap_keeps_streaming() {
     for f in (d_max + 4_800)..total_frames {
         let (got, want) = (rendered[f], reference[f - d_max]);
         assert!(
-            (got[0] - want[0]).abs() < 1e-5 && (got[1] - want[1]).abs() < 1e-5,
+            got == want,
             "frame {f} (pass {}) is {got:?}, but the reference D_max earlier is {want:?}",
             f / pass_frames
         );
@@ -1859,7 +1859,7 @@ fn an_edit_while_playing_keeps_the_compensation_streaming() {
     for f in 0..d {
         let (got, want) = (after[f], reference[f]);
         assert!(
-            (got[0] - want[0]).abs() < 1e-5 && (got[1] - want[1]).abs() < 1e-5,
+            got == want,
             "frame {f} after the edit: the plug-in track plays {got:?}, not what its insert held, {want:?}"
         );
     }

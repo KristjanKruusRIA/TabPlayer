@@ -34,6 +34,12 @@
 .transport-metronome { position:relative; }
 .transport-speed .transport-row { gap:2px; }
 .app-shell .transport .transport-step { width:30px; padding:0; }
+.transport-speed-field { display:inline-flex; align-items:center; gap:2px; }
+.transport-speed-field input { width:46px; min-height:28px; padding:0 4px; text-align:center; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-input); color:var(--tp-text); font:500 13px/1 var(--tp-font-mono); font-variant-numeric:tabular-nums; -moz-appearance:textfield; appearance:textfield; }
+.transport-speed-field input::-webkit-inner-spin-button,.transport-speed-field input::-webkit-outer-spin-button { -webkit-appearance:none; margin:0; }
+.transport-speed-field input:is(:disabled,[aria-disabled=true]) { opacity:.45; border-style:solid; color:var(--tp-text); }
+.transport-speed-field input[aria-invalid=true] { border-color:var(--tp-error); }
+.transport-speed-unit { font:500 12px/1 var(--tp-font-mono); color:var(--tp-muted); user-select:none; }
 .transport-speedvalue { min-width:50px; text-align:center; font:500 15px/1 var(--tp-font-mono); font-variant-numeric:tabular-nums; color:var(--tp-text); }
 .transport-tempo { font-family:var(--tp-font-mono); font-size:11px; font-variant-numeric:tabular-nums; }
 .transport-more { align-self:center; margin-left:auto; }

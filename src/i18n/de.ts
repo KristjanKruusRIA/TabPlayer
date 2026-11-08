@@ -205,6 +205,8 @@ export const de: MessageCatalog = {
   'transport.click': 'Klick',
   'transport.metronome': 'Metronom',
   'transport.speed': 'Tempo',
+  'transport.speed_field': 'Tempo in Prozent',
+  'transport.speed_range_error': 'Das Tempo muss eine Zahl zwischen 10 % und 300 % sein.',
   'transport.practice_playback': 'Übungswiedergabe',
   'transport.tempo_unavailable': 'Tempo nicht verfügbar',
   'transport.slower': 'Langsamer',

@@ -205,6 +205,8 @@ export const et: MessageCatalog = {
   'transport.click': 'Klõps',
   'transport.metronome': 'Metronoom',
   'transport.speed': 'Kiirus',
+  'transport.speed_field': 'Kiiruse protsent',
+  'transport.speed_range_error': 'Kiirus peab olema arv vahemikus 10% kuni 300%.',
   'transport.practice_playback': 'Harjutusesitus',
   'transport.tempo_unavailable': 'Tempo pole saadaval',
   'transport.slower': 'Aeglasemalt',

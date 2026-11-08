@@ -261,3 +261,115 @@ it('lets the position display change track, go to a bar, open measure settings a
   fireEvent.change(screen.getByRole('combobox',{name:'Current track'}),{target:{value:'1'}});expect(onTrack).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button',{name:'Tempo 120 (click to change)'}));expect(onMeasure).toHaveBeenCalledTimes(2);
 });
+
+it('typed practice speed: sets on Enter or blur, restores on Escape, steps presets and updates the field',()=>{
+  const {player,update}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).toHaveValue('100');
+
+  // Typing a number from 10 to 300 and pressing Enter sets the speed
+  fireEvent.change(input,{target:{value:'60'}});
+  expect(input).toHaveValue('60');
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).toHaveBeenLastCalledWith(60);
+
+  // Leaving the field sets the speed
+  fireEvent.change(input,{target:{value:'85'}});
+  fireEvent.blur(input);
+  expect(player.setSpeed).toHaveBeenLastCalledWith(85);
+
+  // Boundary values 10 and 300
+  fireEvent.change(input,{target:{value:'10'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).toHaveBeenLastCalledWith(10);
+  fireEvent.change(input,{target:{value:'300'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).toHaveBeenLastCalledWith(300);
+
+  // Escape restores the shown value
+  update(snapshot({speed:300}));
+  expect(input).toHaveValue('300');
+  fireEvent.change(input,{target:{value:'140'}});
+  expect(input).toHaveValue('140');
+  fireEvent.keyDown(input,{key:'Escape'});
+  expect(input).toHaveValue('300');
+  expect(player.setSpeed).toHaveBeenCalledTimes(4);
+
+  // Preset steps of Slower and Faster update the field and step from custom speed
+  update(snapshot({speed:60}));
+  expect(input).toHaveValue('60');
+  fireEvent.click(screen.getByRole('button',{name:'Faster'}));
+  expect(player.setSpeed).toHaveBeenLastCalledWith(75);
+  fireEvent.click(screen.getByRole('button',{name:'Slower'}));
+  expect(player.setSpeed).toHaveBeenLastCalledWith(50);
+
+  // Choosing the current value does nothing
+  update(snapshot({speed:100}));
+  player.setSpeed.mockClear();
+  fireEvent.change(input,{target:{value:'100'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  fireEvent.blur(input);
+  expect(player.setSpeed).not.toHaveBeenCalled();
+});
+
+it('typed practice speed: refuses out of range or non-numeric values with an inline message, leaving speed unchanged',()=>{
+  const {player}=playerFor();
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).toHaveValue('100');
+
+  // Below range (< 10) on Enter
+  fireEvent.change(input,{target:{value:'9'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Speed must be a number from 10% to 300%.');
+  expect(input).toHaveAttribute('aria-invalid','true');
+
+  // Above range (> 300) on blur
+  fireEvent.change(input,{target:{value:'301'}});
+  fireEvent.blur(input);
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Speed must be a number from 10% to 300%.');
+  expect(input).toHaveAttribute('aria-invalid','true');
+
+  // Not a number on Enter
+  fireEvent.change(input,{target:{value:'fast'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Speed must be a number from 10% to 300%.');
+  expect(input).toHaveAttribute('aria-invalid','true');
+
+  // Empty string on blur
+  fireEvent.change(input,{target:{value:''}});
+  fireEvent.blur(input);
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(screen.getByRole('alert')).toHaveTextContent('Speed must be a number from 10% to 300%.');
+
+  // Escape clears the inline message and restores shown value
+  fireEvent.keyDown(input,{key:'Escape'});
+  expect(input).toHaveValue('100');
+  expect(input).not.toHaveAttribute('aria-invalid');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+it('fixed-tempo practice setting restricts the speed field with aria-disabled, readOnly and title hint',()=>{
+  const fixed=snapshot({speed:75});
+  fixed.practice.settings.tempo={kind:'fixed',bpm:90};
+  fixed.practice.currentBpm=90;
+  fixed.practice.effectiveRatio=.75;
+  const {player}=playerFor(fixed);
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const input=screen.getByLabelText('Speed percentage');
+  expect(input).toHaveAttribute('aria-disabled','true');
+  expect(input).toHaveAttribute('readonly');
+  expect(input).toHaveAttribute('title','Fixed tempo controls playback speed.');
+  expect(input).not.toBeDisabled();
+
+  // Changes are refused
+  fireEvent.change(input,{target:{value:'120'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  fireEvent.blur(input);
+  expect(player.setSpeed).not.toHaveBeenCalled();
+  expect(input).toHaveValue('75');
+});

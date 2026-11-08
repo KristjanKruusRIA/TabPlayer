@@ -108,10 +108,10 @@ export async function setPlaybackSpeed(page,percent) {
   if(!speedPresets.includes(percent))throw new Error(`Unknown speed preset: ${percent}`);
   const group=page.getByRole('group',{name:'Speed',exact:true}),readout=group.locator('.transport-speedvalue');
   for(let attempt=0;attempt<speedPresets.length;attempt++) {
-    const text=await readout.textContent(),current=Number.parseFloat(text);
+    const text=await readout.evaluate(node=>'value' in node?node.value:node.textContent),current=Number.parseFloat(text);
     if(current===percent)return;
     await group.getByRole('button',{name:percent<current?'Slower':'Faster',exact:true}).click();
-    await page.waitForFunction(([selector,previous])=>document.querySelector(selector)?.textContent!==previous,['.transport-speedvalue',text],{timeout:10000});
+    await page.waitForFunction(([selector,previous])=>{const node=document.querySelector(selector);const text=node?('value' in node?node.value:node.textContent):'';return text!==previous;},['.transport-speedvalue',text],{timeout:10000});
   }
   throw new Error(`Speed did not reach ${percent}%`);
 }

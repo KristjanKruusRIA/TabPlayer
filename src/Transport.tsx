@@ -26,6 +26,76 @@ function BarField({label,value,min,max,onValue}:{label:string;value:number;min:n
     if(text.trim()!==''&&Number.isInteger(next)&&next>=min&&next<=max)onValue(next);
   }}/></label>;
 }
+/** A numeric speed field (10% to 300%). Enter or blur commits; Escape restores the shown value.
+ * Values out of range or not a number show an inline error. */
+function SpeedField({label,value,busy,unavailable,fixed,onValue,onError}:{label:string;value:number;busy:boolean;unavailable:boolean;fixed:boolean;onValue:(value:number)=>void;onError:(message:string|null)=>void}) {
+  const {t}=useI18n();
+  const [draft,setDraft]=useState(String(display(value)));
+  const [invalid,setInvalid]=useState(false);
+  useEffect(()=>{
+    setDraft(String(display(value)));
+    setInvalid(false);
+  },[value]);
+  const commit=(text:string)=>{
+    if(busy||unavailable||fixed)return;
+    const clean=text.trim().replace(/%$/,'').trim();
+    if(clean===''){
+      setInvalid(true);
+      onError(t('transport.speed_range_error'));
+      return;
+    }
+    const num=Number(clean);
+    if(!Number.isFinite(num)||isNaN(num)||num<10||num>300){
+      setInvalid(true);
+      onError(t('transport.speed_range_error'));
+      return;
+    }
+    setInvalid(false);
+    onError(null);
+    if(num===value){
+      setDraft(String(display(value)));
+      return;
+    }
+    onValue(num);
+  };
+  const handleKeyDown=(event:React.KeyboardEvent<HTMLInputElement>)=>{
+    if(event.key==='Enter'){
+      event.preventDefault();
+      commit(draft);
+    }else if(event.key==='Escape'){
+      event.preventDefault();
+      event.stopPropagation();
+      setDraft(String(display(value)));
+      setInvalid(false);
+      onError(null);
+    }
+  };
+  const guard=busyGuard<HTMLInputElement>({
+    busy,
+    unavailable:unavailable||fixed,
+    className:'transport-speed-input transport-speedvalue',
+    onKeyDown:handleKeyDown,
+  });
+  return <label className="transport-speed-field"><span className="tp-sr">{label}</span>
+    <input
+      type="text"
+      inputMode="numeric"
+      title={fixed?t('transport.fixed_tempo_hint'):label}
+      aria-label={label}
+      readOnly={busy||unavailable||fixed}
+      aria-invalid={invalid?'true':undefined}
+      {...guard}
+      value={draft}
+      onChange={event=>{
+        if(busy||unavailable||fixed)return;
+        setDraft(event.target.value);
+      }}
+      onBlur={()=>{
+        if(busy||unavailable||fixed)return;
+        commit(draft);
+      }}
+    /><span className="transport-speed-unit" aria-hidden="true">%</span></label>;
+}
 /** Play, loop, speed and the click are one row of captioned groups, so each is found by its caption without opening anything.
  * Seeking and the occurrence-aware "selected passage" controls sit behind More playback, which opens upward from the bar. */
 export interface TransportDisplay {
@@ -142,7 +212,7 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
     </div>
     <div className="transport-group transport-speed" role="group" aria-label={t('transport.speed')}><span className="transport-caption">{t('transport.speed')}<span className="transport-tempo" role="status" aria-label={t('transport.practice_playback')} aria-live="off">{practice.currentBpm>0?`${display(practice.currentBpm)} BPM`:t('transport.tempo_unavailable')}<span className="tp-sr"> · {display(practice.effectiveRatio*100)}%</span></span></span>
       <div className="transport-row"><button {...busyGuard({busy,unavailable:state.practicePending||fixed||speedIndex<=0,className:'transport-step',onClick:()=>stepSpeed(-1)})} title={fixed?t('transport.fixed_tempo_hint'):t('transport.slower')}><MinusGlyph/><span className="tp-sr">{t('transport.slower')}</span></button>
-        <output className="transport-speedvalue" aria-live="off">{display(state.speed)}%</output>
+        <SpeedField label={t('transport.speed_field')} value={state.speed} busy={busy} unavailable={state.practicePending} fixed={fixed} onValue={speed=>act(()=>player.setSpeed(speed))} onError={setError}/>
         <button {...busyGuard({busy,unavailable:state.practicePending||fixed||speedIndex>=speeds.length-1,className:'transport-step',onClick:()=>stepSpeed(1)})} title={fixed?t('transport.fixed_tempo_hint'):t('transport.faster')}><PlusGlyph/><span className="tp-sr">{t('transport.faster')}</span></button></div>
     </div>
     <details className="transport-more" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{t('transport.more_playback')}{(error||state.error||cursorError||passageError)?t('transport.error_suffix'):''}<MoreGlyph/></summary><div className="transport-more-content"><fieldset disabled={!state.ready}>

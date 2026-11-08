@@ -2264,6 +2264,12 @@ impl TrackDsp {
         }
         self.plugin_from(old);
     }
+    /// An edit while playing, where a new renderer replaces the old one: takes over only `old`'s plug-in insert and its
+    /// crossfade, as a mix change does, so the plug-in track keeps streaming. The built-in chain stays this board's
+    /// own, because the edit may have changed the voice. Boxes only change hands; does not allocate.
+    pub(crate) fn continue_plugin_from(&mut self, old: &mut Self) {
+        self.plugin_from(old);
+    }
     /// The plug-in part of `transition_from`. Boxes only change hands; whatever this configuration displaces is left in
     /// `old`, which is dropped off the audio thread.
     fn plugin_from(&mut self, old: &mut Self) {

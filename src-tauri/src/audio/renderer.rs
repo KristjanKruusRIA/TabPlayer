@@ -1928,14 +1928,29 @@ impl Renderer {
     fn compensation_active(&self) -> bool {
         self.mix.compensation.as_ref().is_some_and(|c| c.active())
     }
-    /// An edit while playing: this renderer replaces `old` at the same place. It takes over `old`'s compensation lines
-    /// the way a mix change does, so the delayed stems keep streaming instead of dropping D_max frames. Moves buffers;
-    /// does not allocate. `old` is retired off the audio thread with whatever it keeps.
+    /// An edit while playing: this renderer replaces `old` at the same place. It takes over `old`'s plug-in inserts and
+    /// compensation lines the way a mix change does, so the plug-in tracks and the delayed stems keep streaming instead
+    /// of dropping D frames. Lines and inserts pair by position, so a renderer for other tracks, or the same tracks in
+    /// another order, takes over nothing and starts as a plain install. Moves buffers; does not allocate. `old` is
+    /// retired off the audio thread with whatever it keeps.
     pub fn continue_from(&mut self, old: &mut Renderer) {
-        if self.rate != old.rate {
+        let same_tracks = self.plan.tracks.len() == old.plan.tracks.len()
+            && self
+                .plan
+                .tracks
+                .iter()
+                .zip(&old.plan.tracks)
+                .all(|(new, old)| new.id == old.id);
+        if self.rate != old.rate
+            || !same_tracks
+            || self.mix.channels.len() != old.mix.channels.len()
+        {
             return;
         }
         let old_sounding = old.mix.channels.iter().any(|c| c.dsp.sounding());
+        for (new, old) in self.mix.channels.iter_mut().zip(&mut old.mix.channels) {
+            new.dsp.continue_plugin_from(&mut old.dsp);
+        }
         carry_compensation(
             &mut self.mix.compensation,
             &mut old.mix.compensation,

@@ -1808,6 +1808,134 @@ fn an_edit_while_playing_keeps_the_compensation_streaming() {
         (after[0][0] - before[before.len() - 1][0]).abs() < 0.05,
         "step at the edit"
     );
+
+    // The plug-in track itself: it holds a note across the edit, with the backing silent. What the running insert
+    // already holds, its D frames in flight, must still play after the edit, as without one. A new insert would start
+    // on D frames of silence instead. (The edit's seek cuts the sounding note itself, as it does with no plug-in, so
+    // the note ends D frames after the edit either way.)
+    let mut held = test_plan(2);
+    add_note_span(&mut held, 0, 0.0, 7680.0);
+    let d = pipeline_frames(CALLBACK) + l;
+    let build_held = |r: &Rig| {
+        let prep = PreparedMix::prepare(&settings, &held, RATE)
+            .unwrap()
+            .with_inserts(vec![Some(r.insert(l as u32)), None]);
+        Renderer::new_with_mix(
+            Arc::new(held.clone()),
+            Arc::new(base_resources()),
+            prep,
+            settings.clone(),
+            RATE,
+        )
+        .unwrap()
+    };
+    let play = |r: &Rig, edit: bool| {
+        let mut transport = CallbackTransport::headless(RATE);
+        transport.install_with_practice(Box::new(build_held(r)), 1, false, practice);
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        let mut before = vec![[0.0f32; 2]; 9_600];
+        render_transport(&mut transport, &mut before, &[r]);
+        if edit {
+            drop(transport.install_with_practice(Box::new(build_held(r)), 1, true, practice));
+        }
+        let mut after = vec![[0.0f32; 2]; 4_800];
+        render_transport(&mut transport, &mut after, &[r]);
+        (before, after)
+    };
+    let rig_b = rig(l, 1.0);
+    let rig_r = rig(l, 1.0);
+    let (before, after) = play(&rig_b, true);
+    let (_, reference) = play(&rig_r, false);
+    assert!(
+        before[4_800..].iter().any(|f| f[0].abs() > 0.01),
+        "the held note must sound through the plug-in before the edit"
+    );
+    assert!(
+        reference[..d].iter().all(|f| f[0] != 0.0 || f[1] != 0.0),
+        "the note must sound through the first D frames without an edit"
+    );
+    for f in 0..d {
+        let (got, want) = (after[f], reference[f]);
+        assert!(
+            (got[0] - want[0]).abs() < 1e-5 && (got[1] - want[1]).abs() < 1e-5,
+            "frame {f} after the edit: the plug-in track plays {got:?}, not what its insert held, {want:?}"
+        );
+    }
+}
+
+#[test]
+fn an_edit_with_other_tracks_installs_plainly() {
+    // An edit that changes the tracks cannot hand lines and inserts over by position: the new renderer starts as a
+    // plain install, exactly as one that was not continued.
+    let l = 256;
+    let rig_a = rig(l, 1.0);
+    let old_plan = test_plan(2);
+    let settings = DocumentSettings::default();
+    let prep = PreparedMix::prepare(&settings, &old_plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_a.insert(l as u32)), None]);
+    let mut old = Renderer::new_with_mix(
+        Arc::new(old_plan.clone()),
+        Arc::new(base_resources()),
+        prep,
+        settings.clone(),
+        RATE,
+    )
+    .unwrap();
+    install_sine_backing(&mut old, &old_plan, 0.3);
+    let mut block = vec![[0.0f32; 2]; CALLBACK];
+    for _ in 0..20 {
+        old.render_into(&mut block);
+        rig_a.settle();
+    }
+
+    let mut renamed = test_plan(2);
+    renamed.tracks.swap(0, 1);
+    for other in [test_plan(3), renamed] {
+        let fresh = || {
+            let mut renderer = plain_renderer(&other, &settings);
+            install_sine_backing(&mut renderer, &other, 0.3);
+            renderer.wrap_to_tick(0.0);
+            renderer
+        };
+        let mut continued = fresh();
+        continued.continue_from(&mut old);
+        let mut reference = fresh();
+        let mut a = vec![[0.0f32; 2]; 4_800];
+        let mut b = vec![[0.0f32; 2]; 4_800];
+        continued.render_into(&mut a);
+        reference.render_into(&mut b);
+        assert!(b.iter().any(|f| f[0].abs() > 0.1));
+        if let Some(f) = a.iter().zip(&b).position(|(x, y)| x != y) {
+            panic!(
+                "frame {f}: a renderer for {} tracks took over the old one's state",
+                other.tracks.len()
+            );
+        }
+    }
+}
+
+#[test]
+fn a_flush_leaves_no_stale_samples() {
+    // A flush zeroes only the frames a line can still read. Fill a line, flush it, then lengthen its delay: every
+    // read, up to the oldest frame the flush claims as silence, must be zero.
+    use tabplayer_lib::audio::compensation::DelayLine;
+    let delay = 4;
+    let mut line = DelayLine::new(delay, 64, 8);
+    for _ in 0..200 {
+        line.process([1.0, -1.0]);
+    }
+    line.flush();
+    line.retime_to(40);
+    for i in 0..200 {
+        let out = line.process([0.0; 2]);
+        assert_eq!(
+            out, [0.0; 2],
+            "read {i} after a flush returned a stale sample"
+        );
+    }
 }
 
 #[test]
@@ -2072,5 +2200,52 @@ fn transport_count_in_drain_and_mix_changes_stay_off_the_heap() {
     assert_eq!(
         ops, 0,
         "installing mixes that remove and add the compensation touched the heap {ops} times"
+    );
+
+    // An edit while playing: the transport installs a new renderer, preserving its place, which takes over the old
+    // one's lines and insert on the audio thread.
+    let mut plan = test_plan(1);
+    add_note_span(&mut plan, 0, 0.0, 7680.0);
+    let settings = DocumentSettings::default();
+    let rig_c = rig(l, 1.0);
+    let build = || {
+        let prep = PreparedMix::prepare(&settings, &plan, RATE)
+            .unwrap()
+            .with_inserts(vec![Some(rig_c.insert(l as u32))]);
+        Box::new(
+            Renderer::new_with_mix(
+                Arc::new(plan.clone()),
+                Arc::new(base_resources()),
+                prep,
+                settings.clone(),
+                RATE,
+            )
+            .unwrap(),
+        )
+    };
+    let practice = practice_settings(0, false);
+    let mut transport = CallbackTransport::headless(RATE);
+    transport.install_with_practice(build(), 1, false, practice);
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    for _ in 0..10 {
+        transport.render_into(&mut block);
+        rig_c.settle();
+    }
+    let next = build();
+    HEAP_OPERATIONS.with(|n| n.set(0));
+    COUNT_HEAP.with(|f| f.set(true));
+    let retired = transport.install_with_practice(next, 1, true, practice);
+    for _ in 0..10 {
+        transport.render_into(&mut block);
+        rig_c.settle();
+    }
+    COUNT_HEAP.with(|f| f.set(false));
+    let ops = HEAP_OPERATIONS.with(|n| n.get());
+    drop(retired);
+    assert_eq!(
+        ops, 0,
+        "an install that preserves the place touched the heap {ops} times"
     );
 }

@@ -88,6 +88,11 @@ export async function runRealPluginAcceptance({ pluginBundlePath } = {}) {
     }
   }).trim();
 
+  /** How many of the owned app's helpers own a visible top-level window (the vendor editor). */
+  const helperWindows = () => Number(ps(
+    `${ownedScript}$n=0;if($null -ne $p){foreach($c in @(Get-CimInstance Win32_Process -Filter "Name='tabplayer-plugin-host.exe'"|Where-Object {[int]$_.ParentProcessId -eq $p.Id})){$h=Get-Process -Id $c.ProcessId -ErrorAction SilentlyContinue;if($null -ne $h -and $h.MainWindowHandle -ne 0){$n++}}};$n`
+  ));
+
   const portRows = () => JSON.parse(ps(
     '$rows=@(Get-NetTCPConnection -State Listen -LocalPort 9223 -ErrorAction SilentlyContinue|ForEach-Object {@{pid=[int]$_.OwningProcess}});ConvertTo-Json -InputObject $rows -Compress'
   ));
@@ -211,15 +216,19 @@ export async function runRealPluginAcceptance({ pluginBundlePath } = {}) {
   const quit = async () => {
     if (browser) await browser.close();
     browser = null;
+    const ownedPid = identity?.pid;
     if (identity && inspect()) {
       ps(`${ownedScript}if($null -ne $p){Stop-Process -Id $p.Id;if(-not $p.WaitForExit(5000)){throw 'Owned process did not exit'}}`);
     }
-    try {
-      execFileSync('powershell.exe', [
-        '-NoProfile', '-Command',
-        'Get-Process tabplayer-plugin-host -ErrorAction SilentlyContinue | Stop-Process -Force'
-      ], { windowsHide: true });
-    } catch {}
+    // Stop only the helpers this run's app left behind (children of its process id), never another TabPlayer's.
+    if (ownedPid) {
+      try {
+        execFileSync('powershell.exe', [
+          '-NoProfile', '-Command',
+          `Get-CimInstance Win32_Process -Filter "Name='tabplayer-plugin-host.exe'" | Where-Object { [int]$_.ParentProcessId -eq ${Number(ownedPid)} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`
+        ], { windowsHide: true });
+      } catch {}
+    }
     identity = null;
   };
 
@@ -327,7 +336,11 @@ export async function runRealPluginAcceptance({ pluginBundlePath } = {}) {
     const chosenSlot = await poll(async () => (await lastSoundEdit())?.sound?.plugin, p => p?.classId === realClassId, 'real plug-in chosen');
     report.pluginName = chosenSlot.name;
     report.pluginVendor = chosenSlot.vendor ?? '';
-    report.pluginVersion = chosenSlot.version ?? '';
+    // The slot holds no version; the library entry does.
+    const libraryEntry = (await invoke('plugin_library_list')).find(entry => entry.classId === realClassId);
+    assert.ok(libraryEntry, 'The chosen plug-in is in the library');
+    report.pluginVersion = libraryEntry.version ?? '';
+    const stateBeforeEditor = chosenSlot.state;
 
     // Play
     await button('Play');
@@ -344,12 +357,22 @@ export async function runRealPluginAcceptance({ pluginBundlePath } = {}) {
 
     const editBtn = page.getByRole('button', { name: 'Edit plug-in', exact: true });
     await editBtn.click();
-    await sleep(1500);
+    // A window owned by the helper process must appear, and it must be gone again after the close.
+    const editorWindows = await poll(async () => helperWindows(), n => n >= 1, 'a helper-owned editor window opens');
 
     await page.evaluate(([doc, trk]) => window.__TAURI_INTERNALS__.invoke('plugin_editor_close', { documentId: doc, trackId: trk }), [docId1, trackId1]);
     await idle();
+    await poll(async () => helperWindows(), n => n === 0, 'the editor window closes');
+    await sleep(500);
+    const editsAfter = (await record()).snapshot.project.edits.length;
+    // A real editor may or may not change the state when opened, so one edit or none is allowed, never more.
+    assert.ok(editsAfter === editsBefore || editsAfter === editsBefore + 1, `Editor session recorded ${editsAfter - editsBefore} edits`);
+    const stateAfterEditor = (await lastSoundEdit()).sound.plugin.state;
+    if (editsAfter === editsBefore) assert.equal(stateAfterEditor, stateBeforeEditor, 'No edit recorded, so the state is unchanged');
     report.editorVerified = true;
-    console.log('[Acceptance] Editor open and close verified.');
+    report.editorWindows = editorWindows;
+    report.editorEdits = editsAfter - editsBefore;
+    console.log(`[Acceptance] Editor open and close verified: ${editorWindows} helper window(s), ${editsAfter - editsBefore} edit(s) recorded.`);
 
     // Save
     await button('Save');
@@ -370,6 +393,7 @@ export async function runRealPluginAcceptance({ pluginBundlePath } = {}) {
     const docId2 = (await workspace()).active.documentId;
     const reopenStatuses = await invoke('plugin_status', { documentId: docId2 });
     assert.equal(reopenStatuses[0]?.status, 'ready', 'Reopened document status is ready');
+    assert.equal((await lastSoundEdit()).sound.plugin.state, stateAfterEditor, 'The reopened document holds the same plug-in state');
     report.reopenVerified = true;
     console.log('[Acceptance] Reopened document verified with status ready.');
 
@@ -379,6 +403,7 @@ export async function runRealPluginAcceptance({ pluginBundlePath } = {}) {
     const realStats = stats(realWav);
     assert.ok(realStats.rms > 0.001, 'Real plug-in export is not silent');
     assert.equal(realWav.samples[0].length, builtinWav.samples[0].length, 'Export frames match baseline');
+    assert.notEqual(sha256(realExportBytes), sha256(builtinBytes), 'The real plug-in export differs from the built-in baseline');
 
     report.exportFrames = realWav.samples[0].length;
     report.exportRms = realStats.rms;

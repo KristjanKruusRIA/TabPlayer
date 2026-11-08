@@ -2,10 +2,15 @@
 // audio playback runs with the plug-in active and non-zero delay compensation; opening and closing the plug-in's
 // editor window adds exactly one undo step; undo and redo revert and restore the plug-in state; saving and reopening
 // restores the plug-in and state; a plug-in crash triggers a fallback to the built-in tone and shows a crashed notice
-// without mutating the document, and "Try again" recovers; hang mode keeps the Tauri UI unblocked (< 200 ms CDP evaluate);
-// clearing consent gives a needsConsent notice and "Allow" recovers; removing the plug-in from the library gives a
-// missing notice without mutating the document; and offline WAV export produces non-silent audio with the exact same
-// frame count as a built-in export.
+// without mutating the document, and "Try again" recovers; hang mode makes the Rust side report `hung` through
+// plugin_status, kills the helper, keeps audio_status and plugin_status answering quickly and keeps the built-in tone
+// playing; clearing consent gives a needsConsent notice and "Allow" recovers; removing the plug-in from the library gives
+// a missing notice without mutating the document; and offline WAV export with the plug-in at a gain of 0.5 differs from
+// the built-in export by exactly that gain, with the same frame count and the same alignment.
+//
+// The test plug-in at its default settings is an exact pass-through (its export is byte-identical to the built-in one),
+// so an export proof is only meaningful after a parameter that changes the sound has been set. Step 9 sets the gain.
+// The editor sessions run with TABPLAYER_TEST_PLUGIN_VIEW_NO_EDIT=1, so a session that changes nothing records no edit.
 //
 // Build with scripts/build-desktop-test.ps1 (or tests/desktop/string-count-build.mjs), then:
 //   node tests/desktop/parity-vst-plugin.mjs
@@ -164,6 +169,15 @@ export async function runVstPluginParity({ buildPath } = {}) {
     `${ownedScript}if($null -eq $p){throw 'Owned process exited'};$rows=@();foreach($port in @(Get-NetTCPConnection -State Listen -LocalPort 9223 -ErrorAction SilentlyContinue)){$chain=@();$cursor=[int]$port.OwningProcess;for($depth=0;$depth -lt 20 -and $cursor -gt 0;$depth++){$child=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$cursor);if($null -eq $child){break};$chain+=@{pid=[int]$child.ProcessId;parent=[int]$child.ParentProcessId;commandLine=$child.CommandLine};if([int]$child.ProcessId -eq $p.Id){break};$cursor=[int]$child.ParentProcessId};$rows+=@{owner=[int]$port.OwningProcess;chain=$chain}};ConvertTo-Json -InputObject @($rows) -Depth 6 -Compress`
   ));
 
+  /** The helper processes that are children of the owned app. Other TabPlayer instances' helpers are never touched. */
+  const helperRows = () => JSON.parse(ps(
+    `${ownedScript}if($null -eq $p){'[]'}else{$rows=@(Get-CimInstance Win32_Process -Filter "Name='tabplayer-plugin-host.exe'"|Where-Object {[int]$_.ParentProcessId -eq $p.Id}|ForEach-Object {@{pid=[int]$_.ProcessId}});ConvertTo-Json -InputObject $rows -Compress}`
+  ));
+  /** How many of the owned app's helpers own a visible top-level window (the vendor editor). */
+  const helperWindows = () => Number(ps(
+    `${ownedScript}$n=0;if($null -ne $p){foreach($c in @(Get-CimInstance Win32_Process -Filter "Name='tabplayer-plugin-host.exe'"|Where-Object {[int]$_.ParentProcessId -eq $p.Id})){$h=Get-Process -Id $c.ProcessId -ErrorAction SilentlyContinue;if($null -ne $h -and $h.MainWindowHandle -ne 0){$n++}}};$n`
+  ));
+
   let ui;
   const invoke = async (command, args = {}) => {
     owned();
@@ -247,16 +261,19 @@ export async function runVstPluginParity({ buildPath } = {}) {
   const quit = async () => {
     if (browser) await browser.close();
     browser = null;
+    const ownedPid = identity?.pid;
     if (identity && inspect()) {
       ps(`${ownedScript}if($null -ne $p){Stop-Process -Id $p.Id;if(-not $p.WaitForExit(5000)){throw 'Owned process did not exit'}}`);
     }
-    // Clean up any stray tabplayer-plugin-host processes from this run
-    try {
-      execFileSync('powershell.exe', [
-        '-NoProfile', '-Command',
-        'Get-Process tabplayer-plugin-host -ErrorAction SilentlyContinue | Stop-Process -Force'
-      ], { windowsHide: true });
-    } catch {}
+    // Stop only the helpers this run's app left behind (children of its process id), never another TabPlayer's.
+    if (ownedPid) {
+      try {
+        execFileSync('powershell.exe', [
+          '-NoProfile', '-Command',
+          `Get-CimInstance Win32_Process -Filter "Name='tabplayer-plugin-host.exe'" | Where-Object { [int]$_.ParentProcessId -eq ${Number(ownedPid)} } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`
+        ], { windowsHide: true });
+      } catch {}
+    }
     identity = null;
   };
 
@@ -293,6 +310,18 @@ export async function runVstPluginParity({ buildPath } = {}) {
   const pluginPicker = () => page.locator('.sound-plugin-slot select');
   const lastSoundEdit = async () => (await record()).snapshot.project.edits.filter(e => e.type === 'setTrackSound').at(-1);
 
+  /** Opens the editor, proves a helper-owned window exists, sets the gain through the test hook, closes it and waits for the one edit. */
+  const changeGainThroughEditor = async (documentId, trackId, gain) => {
+    const before = (await record()).snapshot.project.edits.length;
+    await page.getByRole('button', { name: 'Edit plug-in', exact: true }).click();
+    await poll(async () => helperWindows(), n => n >= 1, 'helper-owned editor window exists');
+    await invoke('plugin_test_set_parameter', { documentId, trackId, id: 0, value: gain });
+    await invoke('plugin_editor_close', { documentId, trackId });
+    await idle();
+    await poll(async () => (await record()).snapshot.project.edits.length, n => n === before + 1, 'the gain change recorded exactly one edit');
+    await poll(async () => helperWindows(), n => n === 0, 'editor window closed');
+  };
+
   try {
     ui = await import('./workstation-commands.mjs');
     const { exporter, model, Settings } = await import('@coderline/alphatab');
@@ -328,7 +357,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
     // =========================================================================
     // Launch 1: Add plug-in, choose on track, play, open/close editor, undo/redo, save
     // =========================================================================
-    await launch('', { TABPLAYER_TEST_OPEN: files.fixture, TABPLAYER_TEST_SAVE: files.saved });
+    await launch('', { TABPLAYER_TEST_OPEN: files.fixture, TABPLAYER_TEST_SAVE: files.saved, TABPLAYER_TEST_PLUGIN_VIEW_NO_EDIT: '1' });
     await button('Open');
     await page.locator('[aria-label="Music notation"] svg').first().waitFor();
     await native();
@@ -383,19 +412,21 @@ export async function runVstPluginParity({ buildPath } = {}) {
     await button('Stop');
     step('2. Play with ready status and pluginDelayFrames > 0', { pluginDelayFrames: playingState.pluginDelayFrames, peak: playingState.outputPeak });
 
-    // 3. Open and close the editor, and check that exactly one undo step was added
+    // 3. Editor sessions. A session that changes nothing records nothing; one that changes the gain records one undo step.
     const editsBeforeEditor = (await record()).snapshot.project.edits.length;
     const trackId1 = (await lastSoundEdit()).trackId;
     const editBtn = page.getByRole('button', { name: 'Edit plug-in', exact: true });
     await editBtn.click();
-    await sleep(600);
-
-    // Close the editor window via Tauri IPC command
-    await page.evaluate(([doc, trk]) => window.__TAURI_INTERNALS__.invoke('plugin_editor_close', { documentId: doc, trackId: trk }), [docId1, trackId1]);
+    const editorWindows = await poll(async () => helperWindows(), n => n >= 1, 'helper-owned editor window exists');
+    await invoke('plugin_editor_close', { documentId: docId1, trackId: trackId1 });
     await idle();
-    await poll(async () => (await record()).snapshot.project.edits.length, len => len === editsBeforeEditor + 1, 'exactly one undo step added');
+    await sleep(500);
+    assert.equal((await record()).snapshot.project.edits.length, editsBeforeEditor, 'Open then close without a change records no edit');
+    await poll(async () => helperWindows(), n => n === 0, 'editor window closed');
+
+    await changeGainThroughEditor(docId1, trackId1, 0.5);
     assert.equal((await record()).snapshot.project.edits.length, editsBeforeEditor + 1);
-    step('3. Open and close editor adds exactly one undo step', { editsBefore: editsBeforeEditor, editsAfter: editsBeforeEditor + 1 });
+    step('3. Open and close editor adds exactly one undo step', { editsBefore: editsBeforeEditor, editsAfter: editsBeforeEditor + 1, noChangeSessionAddedEdits: 0, editorWindows });
 
     // 4. Undo and redo, then save and reopen
     await button('Undo');
@@ -474,26 +505,43 @@ export async function runVstPluginParity({ buildPath } = {}) {
     }, st => st === 'ready', 'status recovered to ready after retry');
     step('5. Crash mode shows crashed notice, built-in tone, unchanged doc, and retry gives ready', { peak: crashAudio.outputPeak });
 
-    // 6. Use hang mode, and check that the UI answers a CDP evaluate within 200 ms
+    // 6. Hang mode, through the Rust side: plugin_status turns `hung`, the helper is killed, both commands keep answering
+    // quickly while it happens, and the built-in tone keeps playing.
     await ui.clickWorkstationButton(page, 'Play', { waitForIdle: false });
-    await poll(() => invoke('audio_status'), s => s.playing && s.renderedFrames > 4096, 'playing before hang');
+    const beforeHang = await poll(() => invoke('audio_status'), s => s.playing && s.renderedFrames > 4096, 'playing before hang');
+    const helpersBeforeHang = (await helperRows()).map(row => row.pid);
+    assert.ok(helpersBeforeHang.length >= 1, 'a helper runs for the plug-in before the hang');
 
     // Parameter 2 is Mode; 2.0 / 8.0 = 0.25 selects TestMode::Hang
-    await page.evaluate(([doc, trk]) => window.__TAURI_INTERNALS__.invoke('plugin_test_set_parameter', {
-      documentId: doc,
-      trackId: trk,
-      id: 2,
-      value: 0.25
-    }), [docId2, trackId2]);
+    await invoke('plugin_test_set_parameter', { documentId: docId2, trackId: trackId2, id: 2, value: 0.25 });
 
-    await sleep(150);
-    const evalStart = performance.now();
-    const evalRes = await page.evaluate(() => 2 + 2);
-    const evalElapsedMs = performance.now() - evalStart;
-    assert.equal(evalRes, 4);
-    assert.ok(evalElapsedMs < 200, `UI answered CDP evaluate in ${evalElapsedMs.toFixed(1)} ms (< 200 ms) while plug-in audio hung`);
+    const hangStart = performance.now();
+    let slowestCoreAnswerMs = 0;
+    const hungStatuses = await poll(async () => {
+      const began = performance.now();
+      const statuses = await invoke('plugin_status', { documentId: docId2 });
+      await invoke('audio_status');
+      slowestCoreAnswerMs = Math.max(slowestCoreAnswerMs, (performance.now() - began) / 2);
+      return statuses;
+    }, statuses => statuses[0]?.status === 'hung', 'plugin status became hung');
+    const hungAfterMs = performance.now() - hangStart;
+    assert.equal(hungStatuses[0].status, 'hung');
+    assert.ok(hungAfterMs < 10000, `The Rust side reported hung after ${hungAfterMs.toFixed(0)} ms`);
+    assert.ok(slowestCoreAnswerMs < 200, `plugin_status and audio_status answered in ${slowestCoreAnswerMs.toFixed(1)} ms while the plug-in hung`);
+
+    const killed = await poll(async () => (await helperRows()).map(row => row.pid), pids => !helpersBeforeHang.some(pid => pids.includes(pid)), 'the hung helper was killed');
+    const afterHang = await poll(() => invoke('audio_status'), s => s.playing && s.renderedFrames > beforeHang.renderedFrames + 2048 && s.outputPeak > 0.001 && !s.error, 'built-in tone keeps playing after the hang');
+    assert.match(await page.locator('.plugin-status-notice, .plugin-notice-item').first().innerText(), /stopped responding.*built-in tone plays instead/i);
     await button('Stop');
-    step('6. Hang mode keeps UI responsive answering CDP evaluate under 200 ms', { evalElapsedMs });
+    step('6. Hang mode: Rust reports hung, helper killed, commands stay quick, built-in tone keeps playing', {
+      hungAfterMs,
+      slowestCoreAnswerMs,
+      helperPidsBefore: helpersBeforeHang,
+      helperPidsAfter: killed,
+      renderedFramesBefore: beforeHang.renderedFrames,
+      renderedFramesAfter: afterHang.renderedFrames,
+      outputPeakAfter: afterHang.outputPeak
+    });
 
     // 7. Clear the consent file and reopen, check the needsConsent notice, allow, and check ready
     healthy();
@@ -579,16 +627,39 @@ export async function runVstPluginParity({ buildPath } = {}) {
       return s[0]?.status;
     }, st => st === 'ready', 'status is ready after re-adding to library');
 
+    // The test plug-in at its defaults is an exact pass-through, so set a gain that changes the sound before exporting.
+    const exportTrackId = (await invoke('plugin_status', { documentId: docId4 }))[0].trackId;
+    const gain = 0.5;
+    await changeGainThroughEditor(docId4, exportTrackId, gain);
+
     const pluginExportBytes = await exportWav('with-plugin');
     const pluginWav = channels(pluginExportBytes);
     const pluginStats = stats(pluginWav);
     assert.ok(pluginStats.rms > 0.001, 'Plug-in export is not silent');
     assert.equal(pluginWav.samples[0].length, builtinWav.samples[0].length, `Plug-in export frame count (${pluginWav.samples[0].length}) matches built-in export (${builtinWav.samples[0].length})`);
-    step('9. Export WAV is not silent and has exact same frame count as built-in export', {
+    assert.notEqual(hashFile(resolve(paths.export, 'with-plugin.wav')), hashFile(resolve(paths.export, 'builtin.wav')), 'The plug-in export differs from the built-in export');
+    const rmsRatio = pluginStats.rms / builtinStats.rms;
+    assert.ok(Math.abs(rmsRatio - gain) < 0.05, `Export level is the built-in level times the gain: ratio ${rmsRatio.toFixed(4)}, expected ${gain}`);
+    // Sample by sample over the stats window: the plug-in export is the built-in export times the gain, which also proves the
+    // plug-in's delay was trimmed to the frame (a shifted copy would not match).
+    let worstError = 0;
+    const from = Math.round(builtinWav.rate * 0.3), to = Math.round(builtinWav.rate * 1.4);
+    for (let c = 0; c < 2; c++) {
+      for (let i = from; i < to; i++) {
+        worstError = Math.max(worstError, Math.abs(pluginWav.samples[c][i] - gain * builtinWav.samples[c][i]));
+      }
+    }
+    assert.ok(worstError < 0.01, `Plug-in export equals gain times the built-in export; worst sample error ${worstError}`);
+    step('9. Export WAV with gain 0.5 differs from the built-in export by that gain, with the same frame count and alignment', {
       frames: pluginWav.samples[0].length,
       builtinFrames: builtinWav.samples[0].length,
+      gain,
       rms: pluginStats.rms,
-      peak: pluginStats.peak
+      peak: pluginStats.peak,
+      builtinRms: builtinStats.rms,
+      builtinPeak: builtinStats.peak,
+      rmsRatio,
+      worstSampleError: worstError
     });
 
     healthy();

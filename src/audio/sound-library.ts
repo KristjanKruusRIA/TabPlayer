@@ -116,7 +116,7 @@ const clipboardListeners=new Set<()=>void>();
 export const subscribeSoundClipboard=(listener:()=>void)=>{clipboardListeners.add(listener);return()=>{clipboardListeners.delete(listener);};};
 export const soundClipboard=()=>clipboard;
 const setClipboard=(next:typeof clipboard)=>{clipboard=next;clipboardListeners.forEach(listener=>listener());};
-export const copySound=(sound:TrackSound)=>setClipboard({...clipboard,sound:structuredClone(completeSound(sound))});
+export const copySound=(sound:TrackSound)=>{const completed=structuredClone(completeSound(sound));delete completed.plugin;setClipboard({...clipboard,sound:completed});};
 export const copiedSound=()=>clipboard.sound;
 export const copyPedal=<Block extends EffectBlock>(block:Block,settings:FxSettings[Block])=>setClipboard({...clipboard,pedal:{block,settings:structuredClone(settings)} as CopiedPedal});
 export const copiedPedal=()=>clipboard.pedal;

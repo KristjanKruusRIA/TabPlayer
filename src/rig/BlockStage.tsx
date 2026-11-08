@@ -146,6 +146,7 @@ export function BlockStage({editing,selected,cabinetResponse,ampCapture}:{editin
   const {block}=selected,board=selected.second&&editing.second?editing.second:editing.first;
   const {order,busy,clipboard,second}=editing,index=order.indexOf(block);
   const name=blockNames[block];
+  const replaced=!board.second&&Boolean(editing.current.plugin?.active)&&(block==='drive'||block==='amp'||block==='cabinet');
   const stageRef=useRef<HTMLElement>(null);
   const lastFocused=useRef<HTMLElement|null>(null);
   useLayoutEffect(()=>{
@@ -174,7 +175,7 @@ export function BlockStage({editing,selected,cabinetResponse,ampCapture}:{editin
   else if(block==='graphicEq')body=<GraphicEqStage editing={editing} board={board}/>;
   else body=<PedalStage editing={editing} board={board} block={block}/>;
   // A stage belongs to one track, board and block: another one is a new stage, so a drag begun on this one ends with it.
-  return <section ref={stageRef} key={`${editing.trackId}/${board.second?'second':'first'}/${block}`} className="rig-stage" role="tabpanel" aria-label={board.second?t('rig.second_pedalboard_named',{name}):name} data-block={block}
+  return <section ref={stageRef} key={`${editing.trackId}/${board.second?'second':'first'}/${block}`} className="rig-stage" role="tabpanel" aria-label={board.second?t('rig.second_pedalboard_named',{name}):name} data-block={block} data-replaced={replaced||undefined}
     onFocusCapture={e=>{lastFocused.current=e.target as HTMLElement;}}
     onBlurCapture={e=>{if(!stageRef.current?.contains(e.relatedTarget as Node))lastFocused.current=null;}}>
     <header className="rig-stage-head">
@@ -194,6 +195,7 @@ export function BlockStage({editing,selected,cabinetResponse,ampCapture}:{editin
         </>}
       </div>
     </header>
+    {replaced&&<div className="rig-replaced-banner"><p>{t('plugin.replaced_tone')}</p></div>}
     {body}
   </section>;
 }

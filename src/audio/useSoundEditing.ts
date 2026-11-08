@@ -163,10 +163,10 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const entry=library.find(item=>item.name===chosen),savedSelect=useRef<HTMLSelectElement>(null);
   const [factoryChoice,setFactoryChoice]=useState(''),factory=factorySounds.find(item=>item.id===factoryChoice),factoryNote=useId();
   /** Applies a named factory sound to the track, keeping its instrument. */
-  const applyFactoryId=(id:string)=>{const found=factorySounds.find(item=>item.id===id);if(!found)return;const applied=found.name,appliedTo=trackId;void save(factorySound(found.id,current.voiceId)!).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
+  const applyFactoryId=(id:string)=>{const found=factorySounds.find(item=>item.id===id);if(!found)return;const applied=found.name,appliedTo=trackId;const next=factorySound(found.id,current.voiceId)!;if(current.plugin)next.plugin=structuredClone(current.plugin);void save(next).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
   const applyFactory=()=>applyFactoryId(factoryChoice);
   /** Applies a saved sound by name. */
-  const applySaved=(savedName:string)=>{const item=library.find(candidate=>candidate.name===savedName);if(!item)return;const applied=item.name,appliedTo=trackId;void save(structuredClone(item.sound)).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
+  const applySaved=(savedName:string)=>{const item=library.find(candidate=>candidate.name===savedName);if(!item)return;const applied=item.name,appliedTo=trackId;const next=structuredClone(item.sound);if(current.plugin)next.plugin=structuredClone(current.plugin);void save(next).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
   // Messages and an open confirmation belong to the track they were shown for.
   const shownTrack=useRef(trackId);
   // A drag being heard ends with its track, and with the view.
@@ -187,7 +187,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     const named=factorySounds.find(item=>item.id===id);
     // A source previews the track's own sound through that source: only the instrument changes.
     const chosenSound=kind==='voice'?{...structuredClone(current),voiceId:id==='auto'?null:id}:kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
-    const heard=chosenSound&&withLock(chosenSound);
+    const heardSound=chosenSound?structuredClone(chosenSound):null;if(heardSound&&current.plugin&&kind!=='voice')heardSound.plugin=structuredClone(current.plugin);const heard=heardSound&&withLock(heardSound);
     const label=kind==='voice'?(id==='auto'?'Automatic':voiceNames[id as VoiceId]??id):kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!heard)return;
     const request=++previewRequest.current,track=trackId;setPreviewChoice('');
     // A result that arrives after another choice, a cancel or a track change is dropped.
@@ -207,7 +207,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const pastePedal=(board:Board)=>{const pedal=clipboard.pedal;if(!pedal)return;board.write(effects=>{(effects as unknown as Record<string,unknown>)[pedal.block]=structuredClone(pedal.settings);});};
   const copyPedalOf=(board:Board,block:EffectBlock)=>{copyPedal(block,board.effects[block]);setStatus(`Copied the ${blockNames[block]} pedal.`);};
   const copyCurrentSound=()=>{copySound(withLock(current,false));setStatus('Copied this track’s sound.');};
-  const pasteSound=()=>{if(clipboard.sound)void save(structuredClone(clipboard.sound));};
+  const pasteSound=()=>{if(clipboard.sound){const next=structuredClone(clipboard.sound);if(current.plugin)next.plugin=structuredClone(current.plugin);void save(next);}};
   const saveNamed=()=>{const result=saveSoundPreset(name,withLock(current,false));if(report(result,`${result.ok&&result.replaced?'Replaced':'Saved'} “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const renameChosen=()=>{if(entry&&report(renameSoundPreset(entry.name,name),`Renamed “${entry.name}” to “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const deleteChosen=()=>{if(entry&&report(deleteSoundPreset(entry.name),`Deleted “${entry.name}”.`))setChosen('');closeConfirm();};
@@ -227,7 +227,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     /** Locks or unlocks the track's sound against sound automations in the score, as one undoable edit; choosing the value it already has records nothing. */
     setLocked:(locked:boolean)=>locked===!!current.locked?Promise.resolve(false):save(current,locked),
     diagnostics, diagnosticsError, testToneMessage, testTone, refreshDiagnostics,
-    selectOutput,restorePreset:()=>save(soundPreset(current.presetId,current.voiceId)),applyPreset:(id:TrackSound['presetId'])=>save(soundPreset(id,current.voiceId)),setVoice:(voiceId:string|null)=>save({...current,voiceId}),
+    selectOutput,restorePreset:()=>{const next=soundPreset(current.presetId,current.voiceId);if(current.plugin)next.plugin=structuredClone(current.plugin);return save(next);},applyPreset:(id:TrackSound['presetId'])=>{const next=soundPreset(id,current.voiceId);if(current.plugin)next.plugin=structuredClone(current.plugin);return save(next);},setVoice:(voiceId:string|null)=>save({...current,voiceId}),
     /** Plays a drum track as the kit with this program (0 is Standard, stored as no kit); a kit already in effect records nothing. One undoable edit that keeps the rest of the sound. */
     setDrumKit:(program:number)=>{if(busy||program===drumKitFor(current.drumKit).program)return Promise.resolve(false);return save(current,undefined,program===0?null:program);},
   };

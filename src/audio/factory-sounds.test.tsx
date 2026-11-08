@@ -85,3 +85,15 @@ it('matches the catalog the native tests play',()=>{
   if(process.env.UPDATE_FACTORY_SOUNDS)writeFileSync(file,`[\n${catalog.map(entry=>JSON.stringify(entry)).join(',\n')}\n]\n`);
   expect(JSON.parse(readFileSync(file,'utf8'))).toEqual(catalog);
 });
+
+it('applies a factory sound keeping the track plug-in',async()=>{
+  const onEdit=vi.fn();
+  const plug={format:'vst3' as const,classId:'A'.repeat(32),name:'Amp',vendor:'Vendor',active:true,inputDb:0,outputDb:0,state:'s'.repeat(64)};
+  const soundWithPlugin={...soundPreset('clean','black-guitar'),plugin:plug};
+  render(<SoundPanel trackId="base/0" sound={soundWithPlugin} onEdit={onEdit}/>);
+  const select=screen.getByLabelText('Factory sound');
+  fireEvent.change(select,{target:{value:'metal-rhythm'}});
+  await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Apply factory sound'}));});
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit.mock.calls[0][0].sound.plugin).toEqual(plug);
+});

@@ -1,6 +1,7 @@
 import { useEffect,useId,useMemo,useState } from 'react';
 import type { model } from '@coderline/alphatab';
-import { PNG_RESOLUTIONS,validateSelection,type AudioExportOptions,type ExportOptions,type ExportProgress,type ExportSelection,type PngResolution,type PrintLayout } from './types';
+import { PNG_RESOLUTIONS,validateSelection,type AudioExportOptions,type ExportOptions,type ExportProgress,type ExportSelection,type PngResolution,type PrintLayout,type ExportInspection } from './types';
+import type { TrackPluginStatus } from '../audio/plugin-host';
 import type { PageLayout } from '../engraving/types';
 import { PageLayoutPanel } from '../engraving/PageLayoutPanel';
 import { validatePageLayout } from '../engraving/page';
@@ -9,11 +10,12 @@ import { Dialog,Segmented,busyGuard,busyRegion } from '../ui';
 import { useI18n } from '../i18n';
 import { CabinetNotices } from '../audio/CabinetNotices';
 import { CaptureNotices } from '../audio/CaptureNotices';
+import { PluginNotices } from '../audio/PluginNotices';
 import type { TrackSound } from '../edit-types';
 import { previewGp5 } from './gp5';
 import './export-dialog.css';
 const EXTENSIONS:Record<ExportOptions['format'],string>={gp:'gp',gp5:'gp5',pdf:'pdf',print:'',svg:'svg',png:'png',midi:'mid',musicxml:'musicxml',ascii:'txt',wav:'wav',stems:''};
-export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,gpBackingIssue,hasBacking=false,onExport,onCancel,layoutLocked=false,layoutLockedNote='This document is finalized, so exports use its current layout.',plainNote,sounds,trackNames}:{layoutLockedNote?:string;/** Shown when the score is password-protected: what an export does not carry. */plainNote?:string;sounds?:Record<string,TrackSound>;trackNames?:Record<string,string>;score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;layoutLocked?:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null;hasBacking?:boolean}) {
+export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,gpBackingIssue,hasBacking=false,onExport,onCancel,layoutLocked=false,layoutLockedNote='This document is finalized, so exports use its current layout.',plainNote,sounds,trackNames,pluginWarnings,inspection}:{layoutLockedNote?:string;/** Shown when the score is password-protected: what an export does not carry. */plainNote?:string;sounds?:Record<string,TrackSound>;trackNames?:Record<string,string>;pluginWarnings?:TrackPluginStatus[];inspection?:ExportInspection;score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;layoutLocked?:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null;hasBacking?:boolean}) {
   const { t } = useI18n();
   const [format,setFormat]=useState<ExportOptions['format']>('gp');const [tracks,setTracks]=useState(score.tracks.map(t=>t.index));
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
@@ -107,6 +109,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <p>Audio export does not include count-in or progressive speed changes.</p>
         <CabinetNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
         <CaptureNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
+        <PluginNotices statuses={pluginWarnings ?? inspection?.pluginWarnings} trackNames={trackNames} className="export-cabinet-notices"/>
         <label className="export-check"><input type="checkbox" checked={audio.metronome} onChange={e=>setAudio({...audio,metronome:e.target.checked})}/>Metronome</label>
         <label className="export-check"><input type="checkbox" checked={audio.backing} onChange={e=>setAudio({...audio,backing:e.target.checked})}/>Include backing</label>
         <label>Effect tail (seconds)<input type="number" min="0" max="30" step=".1" value={audio.tailSeconds} onChange={e=>setAudio({...audio,tailSeconds:Number(e.target.value)})}/></label>

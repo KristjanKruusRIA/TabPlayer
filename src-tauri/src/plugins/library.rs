@@ -65,6 +65,9 @@ pub struct LibraryEntry {
     pub module_len: u64,
     /// Its modification time then, in milliseconds since 1970.
     pub module_modified: i64,
+    /// If this class was previously located in a different bundle on this computer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_bundle: Option<PathBuf>,
 }
 
 /// The length of `text` as JSON writes it inside its quotes.
@@ -579,7 +582,7 @@ impl PluginLibrary {
             return Err(LibraryError::NoEffects);
         }
         let bundle = located.bundle;
-        let fresh: Vec<LibraryEntry> = classes
+        let mut fresh: Vec<LibraryEntry> = classes
             .into_iter()
             .map(|class| LibraryEntry {
                 class_id: class.class_id,
@@ -589,9 +592,17 @@ impl PluginLibrary {
                 bundle: bundle.clone(),
                 module_len,
                 module_modified,
+                previous_bundle: None,
             })
             .collect();
         self.commit(true, |entries| {
+            for fresh_entry in &mut fresh {
+                if let Some(existing) = entries.iter().find(|held| {
+                    held.class_id == fresh_entry.class_id && held.bundle != fresh_entry.bundle
+                }) {
+                    fresh_entry.previous_bundle = Some(existing.bundle.clone());
+                }
+            }
             entries.retain(|held| {
                 held.bundle != bundle && fresh.iter().all(|new| new.class_id != held.class_id)
             });
@@ -872,6 +883,7 @@ mod tests {
                 bundle: PathBuf::from(path),
                 module_len: u64::MAX,
                 module_modified: i64::MIN,
+                previous_bundle: None,
             };
             assert!(longest.is_valid(), "{filler:?}");
             assert!(json_len(longest.bundle.to_str().unwrap()) > MAX_BUNDLE_JSON_BYTES - 12);
@@ -1270,6 +1282,19 @@ mod tests {
         let entries = library.add(&root, ok(vec![class('A', "A2")])).unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
         assert_eq!(names, ["Keep", "A2"]);
+    }
+
+    #[test]
+    fn a_class_moved_to_another_bundle_records_previous_bundle() {
+        let dir = tempfile::tempdir().unwrap();
+        let one = bundle(dir.path(), "One", b"x");
+        let two = bundle(dir.path(), "Two", b"x");
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
+        library.add(&one, ok(vec![class('A', "Amp")])).unwrap();
+        let entries = library.add(&two, ok(vec![class('A', "Amp")])).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].bundle, two);
+        assert_eq!(entries[0].previous_bundle, Some(one));
     }
 
     #[test]

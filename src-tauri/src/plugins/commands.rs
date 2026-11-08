@@ -323,6 +323,7 @@ mod tests {
             bundle: dir.join(format!("{id}.vst3")),
             module_len: 1,
             module_modified: 2,
+            previous_bundle: None,
         }
     }
 

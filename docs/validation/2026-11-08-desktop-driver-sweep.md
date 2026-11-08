@@ -235,6 +235,8 @@ Found by the strict check in `parity-workstation` (`tests/desktop/parity-worksta
 
 ### Unconfirmed: closing the window with unsaved changes shows no dialog
 
+**Update (THE-183, THE-184):** resolved as a test artefact, with no product bug. The dialog is an IPC request, so request interception that holds it produces exactly this symptom, and every real or synthetic close without a held request shows it. `parity-resume-playback` is repaired and passes. See `2026-11-08-the-184-resume-playback.md`.
+
 Found while trying to repair `parity-resume-playback`.
 
 - **Driver state.** The unchanged driver fails at its first fault-injection step, "Public Tauri internals container cannot be temporarily replaced" (3 runs). Tauri 2.12 (b4c7cdf, 2026-11-07) made `window.__TAURI_INTERNALS__` and its `invoke` non-writable and non-configurable, so the driver's seam no longer works. That part is a stale driver. A rewrite was tried with request interception and is not kept, because it did not reach a pass.

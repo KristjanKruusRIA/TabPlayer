@@ -9266,7 +9266,7 @@
       "historical_status": "partial",
       "current_status": "partial",
       "current_behavior": "Fractional zoom from 25% to 300% plus fit-width, and fit-page for physical page layouts only; the zoom policy is a per-document workspace view preference kept in recovery data, not in the score file. The fitted zoom is shown rounded (THE-56), and fit width and fit page were driven at emulated 1440x900, 1280x800 and 960x600.",
-      "remaining_gap": "The native window was not resized (the sizes were emulated); fit page gives digits under 6 px at 1280x800 and 960x600, Horizontal screen fit width is unreadable on long scores, and the score area is about 200 to 300 px high at 960x600. Forced systems of six or more bars made the page layouts fall back to a continuous view; fixed in THE-56. The 2026-11-08 desktop driver sweep did not run parity-score-layouts, which needs a reviewed build admission.",
+      "remaining_gap": "The native window was not resized (the sizes were emulated); fit page gives digits under 6 px at every size (smallest 5.2 px at 1440x900, median under 6 px from 1280x800 down), Horizontal screen fit width is unreadable on long scores, and the score area is about 200 to 300 px high at 960x600. Forced systems of six or more bars made the page layouts fall back to a continuous view; fixed in THE-56. Sixteenth-note forced systems were not judged for legibility, and zoom above fit was not run, so dense systems can still crowd at high zoom. The 2026-11-08 desktop driver sweep did not run parity-score-layouts, which needs a reviewed build admission.",
       "current_evidence": [
         "engraving",
         "engraving_validation",

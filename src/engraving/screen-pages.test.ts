@@ -329,3 +329,59 @@ describe('per-system gaps',()=>{
     expect(moved.y).toBeCloseTo(top);
   });
 });
+
+describe('staff-gap band shift',()=>{
+  const rect=(x:number,y:number,w:number,h:number)=>({x,y,w,h});
+  const bar=(x:number,y:number,w:number,h:number,beats:unknown[]=[])=>Object.assign(new rendering.BarBounds(),{realBounds:rect(x,y,w,h),visualBounds:rect(x,y,w,h),beats});
+  const systemOf=(index:number,real:ScreenRect,bars:rendering.BarBounds[])=>Object.assign(new rendering.StaffSystemBounds(),{realBounds:real,visualBounds:real,bars:[Object.assign(new rendering.MasterBarBounds(),{index,bars})]});
+  const chunkOf=(id:string,y:number,height:number,first:number,shift?:ScreenRenderChunk['shift']):ScreenRenderChunk=>({id,x:0,y,width:100,height,firstMasterBarIndex:first,lastMasterBarIndex:first,svg:'<svg xmlns="http://www.w3.org/2000/svg"></svg>',...(shift?{shift}:{})});
+  function shiftedFixture(options:{shift?:NonNullable<ScreenRenderChunk['shift']>;scale?:number;flush?:boolean}={}) {
+    const voice=new model.Voice(),beat=new model.Beat();voice.addBeat(beat);
+    const note=new model.Note();beat.addNote(note);
+    const noteBounds=Object.assign(new rendering.NoteBounds(),{note,noteHeadBounds:rect(40,245,10,10)});
+    const beatBounds=Object.assign(new rendering.BeatBounds(),{beat,realBounds:rect(30,200,30,100),visualBounds:rect(30,200,30,100),onNotesX:45,notes:[noteBounds]});
+    const system=systemOf(0,rect(0,90,100,220),[bar(0,100,100,60),bar(0,200,100,100,[beatBounds])]);
+    const second=systemOf(1,rect(0,410,100,80),[bar(0,420,100,60)]);
+    const bounds=Object.assign(new rendering.BoundsLookup(),{staffSystems:[system,second]});
+    const shift=options.shift??{cuts:[180],offsets:[40]},layout=options.flush?{...page,marginsMm:{top:0,right:0,bottom:0,left:0}}:page;
+    const plainChunks=[chunkOf('a',0,400,0),chunkOf('b',400,100,1)];
+    const p=paginateScreenScore([chunkOf('a',0,400,0,shift),chunkOf('b',400,100,1)],bounds,layout);
+    const plain=paginateScreenScore(plainChunks,bounds,layout);
+    const plainAgain=paginateScreenScore(plainChunks.map(c=>({...c,shift:undefined})),bounds,layout);
+    const a=arrangeScreenPages(p,'verticalPage',options.scale??1,p.paper.width*(options.scale??1));
+    const toScreen=(x:number,y:number)=>{const block=p.blocks[0],sheet=a.pages[block.page];return {x:sheet.x+(block.x+x-block.sourceBounds.x)*a.scale,y:sheet.y+(block.y+y-block.sourceBounds.y)*a.scale};};
+    return {p,plain,plainAgain,a,system,pianoNote:{x:45,note},toScreen};
+  }
+  it('paginates a shifted chunk with its composed height, including a chunk taller than its system',()=>{
+    const {p,plain}=shiftedFixture();
+    expect(p.blocks[0].sourceBounds.h).toBe(440);expect(p.blocks[1].y-p.blocks[0].y).toBe(plain.blocks[1].y-plain.blocks[0].y+40);
+    expect(plain.blocks[0].sourceBounds.h).toBe(400);
+  });
+  it('maps a click on a moved staff and returns null inside an opened gap',()=>{
+    const {p,a,system,pianoNote,toScreen}=shiftedFixture();
+    expect(unmapScreenPoint(p,a,toScreen(10,290))!.point.y).toBe(250);
+    expect(unmapScreenPoint(p,a,toScreen(10,190))).toBeNull();
+    expect(hitTestScreenPages(p,a,toScreen(pianoNote.x,290))!.note).toBe(pianoNote.note);
+    expect(unmapScreenPoint(p,a,toScreen(10,150))!.system).toBe(system);
+  });
+  it('stretches a rect spanning the cut',()=>{const {p,a,system}=shiftedFixture();expect(mapScreenRect(p,a,system,{x:0,y:100,w:10,h:200})!.h).toBe(240);});
+  it('places unshifted blocks exactly where they were',()=>{const {plain,plainAgain}=shiftedFixture();expect(plainAgain.blocks.map(b=>[b.page,b.x,b.y,b.sourceBounds])).toEqual(plain.blocks.map(b=>[b.page,b.x,b.y,b.sourceBounds]));});
+  it('moves a rect on the lower staff down by the offset and leaves one above the cut',()=>{
+    const {p,a,system,toScreen}=shiftedFixture();
+    expect(mapScreenRect(p,a,system,{x:0,y:245,w:10,h:10})!.y).toBeCloseTo(toScreen(0,285).y,8);
+    expect(mapScreenRect(p,a,system,{x:0,y:120,w:10,h:10})!.y).toBeCloseTo(toScreen(0,120).y,8);
+  });
+  it.each([1,0.5])('resolves the cut boundaries of an opened gap at scale %s',scale=>{
+    const {p,a,toScreen}=shiftedFixture({scale,flush:true}),at=(y:number)=>unmapScreenPoint(p,a,toScreen(10,y));
+    expect(at(179.999)!.point.y).toBeCloseTo(179.999,9);
+    expect(at(180)).toBeNull();expect(at(219.999)).toBeNull();
+    expect(at(220)!.point.y).toBeCloseTo(180,9);
+  });
+  it.each([1,0.5])('lets the lower band win where a negative offset overlaps the cut at scale %s',scale=>{
+    const {p,a,system,toScreen}=shiftedFixture({shift:{cuts:[180],offsets:[-10]},scale,flush:true});
+    expect(unmapScreenPoint(p,a,toScreen(10,175))!.point.y).toBeCloseTo(185,9);
+    // Pinned: top 175 and exclusive bottom 185 both land on 175, so the rect collapses to zero height at its top.
+    const mapped=mapScreenRect(p,a,system,{x:0,y:175,w:10,h:10})!;
+    expect(mapped.h).toBe(0);expect(mapped.y).toBeCloseTo(toScreen(0,175).y,9);
+  });
+});

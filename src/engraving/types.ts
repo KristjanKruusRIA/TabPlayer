@@ -23,6 +23,12 @@ export interface BarWidth {bar:number;scale:number}
 /** One system's gap as a factor of the standard gap (1 is the default). `bar` anchors the entry; it applies to the rendered system containing that bar. */
 export interface SystemGap {bar:number;scale:number}
 
+/** A bracket or brace drawn across consecutive tracks, named by track identity in document order. */
+export type StaffGroupKind='bracket'|'brace';
+export interface StaffGroup {trackIds:string[];kind:StaffGroupKind}
+/** One track's gap above its staff as a factor of the standard gap (1 is the default). */
+export interface StaffGap {trackId:string;scale:number}
+
 export interface EngravingOverrides {
   stylesheet:{
     hideDynamics:InheritBool;
@@ -56,6 +62,10 @@ export interface EngravingOverrides {
   systemGaps?:SystemGap[];
   /** Absent means every role keeps today's font and the music font is Bravura; documents saved before font roles existed have no such field. */
   fonts?:EngravingFonts;
+  /** Absent means no staff group; documents saved before staff groups existed have no such field. */
+  staffGroups?:StaffGroup[];
+  /** Absent means every staff keeps the standard gap; one entry per track at most. */
+  staffGaps?:StaffGap[];
 }
 
 export interface PageLayout {

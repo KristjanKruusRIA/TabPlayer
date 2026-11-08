@@ -241,3 +241,23 @@ it('reset_and_apply_that_change_nothing_record_nothing_but_still_refill_the_form
   expect(commands).toEqual([]);expect(screen.getByLabelText('Hide dynamics')).toHaveValue('inherit');expect(screen.getByRole('combobox',{name:'Lyrics font'})).toHaveValue('inherit');
   fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands).toEqual([]);
 });
+
+it('apply and reset keep staff groups and gaps',()=>{
+  const commands:Edit[]=[],value=defaultEngraving();value.stylesheet.hideDynamics=true;value.staffGroups=[{trackIds:['source/guitar','b'],kind:'brace'}];value.staffGaps=[{trackId:'source/guitar',scale:2}];
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={value} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  // Each gesture changes something, since choosing what the document already has records nothing.
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'false'}});
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));
+  expect(commands).toHaveLength(2);
+  for(const command of commands){expect(command.engraving.staffGroups).toEqual(value.staffGroups);expect(command.engraving.staffGaps).toEqual(value.staffGaps);}
+});
+
+it('apply sends the latest staff groups when only they changed',()=>{
+  const commands:Edit[]=[],first=defaultEngraving();first.staffGroups=[{trackIds:['source/guitar','b'],kind:'brace'}];
+  const props={score:music(),trackIds:['source/guitar'],busy:false,onEdit:(edit:Edit)=>commands.push(edit)},view=render(<EngravingPanel {...props} value={first}/>);
+  const next=defaultEngraving();next.staffGroups=[{trackIds:['source/guitar','c'],kind:'bracket'}];next.staffGaps=[{trackId:'source/guitar',scale:3}];
+  view.rerender(<EngravingPanel {...props} value={next}/>);
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'true'}});
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toHaveLength(1);expect(commands[0].engraving.staffGroups).toEqual(next.staffGroups);expect(commands[0].engraving.staffGaps).toEqual(next.staffGaps);
+});

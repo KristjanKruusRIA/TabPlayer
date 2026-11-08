@@ -77,3 +77,12 @@ it('style_of_keeps_fonts_and_applied_style_replaces_them',async()=>{
   const bad=style();bad.fonts={roles:{lyrics:{font:'comic'}}} as never;
   await expect(putStyleLibraryEntry(entry({engraving:bad}))).rejects.toThrow();
 });
+
+it('a saved style neither carries nor clears staff groups and gaps',async()=>{
+  const document=defaultEngraving();document.staffGroups=[{trackIds:['a','b'],kind:'brace'}];document.staffGaps=[{trackId:'a',scale:2}];
+  const saved=styleOf(document);expect('staffGroups' in saved).toBe(false);expect('staffGaps' in saved).toBe(false);
+  const applied=styleApplied(style(),document);expect(applied.staffGroups).toEqual(document.staffGroups);expect(applied.staffGaps).toEqual(document.staffGaps);
+  await expect(putStyleLibraryEntry(entry({engraving:{...style(),staffGroups:[{trackIds:['a','b'],kind:'brace'}]}}))).rejects.toThrow('A saved style cannot hold staff groups.');
+  await expect(putStyleLibraryEntry(entry({engraving:{...style(),staffGaps:[{trackId:'a',scale:2}]}}))).rejects.toThrow('A saved style cannot hold staff gaps.');
+  expect(invoke).not.toHaveBeenCalled();
+});

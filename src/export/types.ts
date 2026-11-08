@@ -6,8 +6,9 @@ export interface SvgPage { svg:string; widthMm:number; heightMm:number }
 export interface TrackPages { name:string; pages:SvgPage[] }
 export const PNG_RESOLUTIONS=[72,150,300,600] as const;
 export type PngResolution=typeof PNG_RESOLUTIONS[number];
-/** `firstBar` and `lastBar` are the system's master-bar interval; chunks before the first system (title, tunings) have none. */
-export interface SvgSystem { svg:string; width:number; height:number; firstBar?:number; lastBar?:number }
+/** `firstBar` and `lastBar` are the system's master-bar interval; chunks before the first system (title, tunings) have none. `top` and `left`
+ * are the chunk's position in the whole render (alphaTab's `y` and `x`), set with the interval; marks and bands are placed from them. */
+export interface SvgSystem { svg:string; width:number; height:number; firstBar?:number; lastBar?:number; top?:number; left?:number }
 /** `container` is present only for AIFF, FLAC, Ogg Vorbis or MP3; audio is written as WAV without it. `normalizeRmsDb` is present only when
  * mixed audio is normalized to that RMS level. */
 export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;container?:'aiff'|'flac'|'ogg'|'mp3';normalizeRmsDb?:number;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }

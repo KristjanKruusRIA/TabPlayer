@@ -34,7 +34,7 @@ GP ranges initialize inherited tempo/sound/controller state and retain repeat gr
 
 ## Development
 
-Rust **1.90 or newer** is required; CI uses exact Rust **1.90.0** and Node **24.20.0** for Windows x64, macOS arm64 and Linux x64. Native tests, shipping builds and extracted resources pass on all three platforms. The Linux workflow reclaims only completed test output and unused hosted SDKs before requiring 20 GiB free; its verified run had 26 GiB available and built/extracted both packages successfully. Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/) and keep Cargo on PATH. Windows development needs MSVC Build Tools/WebView2; shipping MSI/NSIS embed the offline WebView2 runtime installer. Linux audio builds also need ALSA development headers.
+Rust **1.90 or newer** is required; CI uses exact Rust **1.90.0** and Node **24.20.0** for Windows x64, macOS arm64 and Linux x64. Native tests, shipping builds and extracted resources pass on all three platforms. The Linux workflow reclaims only completed test output and unused hosted SDKs before requiring 20 GiB free; its verified run had 26 GiB available and built/extracted both packages successfully. Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/) and keep Cargo on PATH. Windows development needs MSVC Build Tools/WebView2; the shipping MSI embeds the offline WebView2 runtime installer. Linux audio builds also need ALSA development headers.
 
 The prepared recorded resource pack contains 3,864 recordings/4,204 mappings and 1,621,552,270 sample bytes (about 1.62 GB), plus the GM SoundFont, fonts and notices. This is resource size, not installer size or decoded memory use. Preparation downloads pinned public CC0 sources at setup/build, verifies SHA-256 inventories and bundles exact licenses. Playback uses local resources. Score preparation selectively decodes required recordings. See [third-party notices](THIRD_PARTY_NOTICES.md).
 
@@ -72,10 +72,10 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml --test audio_transport 
 ## Build
 
 ```powershell
-npm run tauri -- build --bundles 'msi,nsis' -- --locked
+npm run tauri -- build --bundles msi -- --locked
 ```
 
-Windows installers are under `src-tauri/target/release/bundle/msi` and `bundle/nsis`. Use an installer for normal use; the native executable requires its bundled `audio/` resources alongside it. Cargo flags such as `--locked` follow the final `--`; Tauri's build parser does not accept them directly. Build on the corresponding host for other platforms:
+The Windows installer is under `src-tauri/target/release/bundle/msi`. Windows ships as an MSI only: since 2026-11-08 the bundled audio and the offline WebView2 installer together are too large for an NSIS installer, which fails near 2 GB. Use the installer for normal use; the native executable requires its bundled `audio/` resources alongside it. Cargo flags such as `--locked` follow the final `--`; Tauri's build parser does not accept them directly. Build on the corresponding host for other platforms:
 
 ```sh
 # macOS
@@ -84,7 +84,7 @@ npm run tauri -- build --bundles 'app,dmg' -- --locked
 npm run tauri -- build --bundles 'deb,appimage' -- --locked
 ```
 
-[Desktop CI](.github/workflows/desktop.yml) tests and builds unsigned packages, extracts each format and verifies actual sample hashes, mappings, licenses and absence of private media. Small reports are retained; large installers require explicit `upload_packages`. Final Rust 1.88 Windows MSI/NSIS builds measure about 1.52/1.29 GiB; both extracted inventories and installed NSIS resources passed. Actual MSI binary-stream inspection and NSIS extraction confirm the same 214,090,448-byte offline WebView2 runtime installer with a valid Microsoft signature. Feature-head CI run `38641519103` passes Windows MSI/NSIS, macOS app/DMG and Linux deb/AppImage native/package/resource checks. The installed production executable passed offline notation/edit/presets/Custom/active instrument highlights/native audio, with `desktop_test_io` absent. NSIS installation/uninstallation both exited successfully and the application/resources/registration were removed. Preferences and user app data were retained; earlier manual test-preference cleanup was policy-rejected and was not retried. Physical macOS/Linux audio/print, original Guitar Pro runtime acceptance and publisher signing/notarization remain unverified limits.
+[Desktop CI](.github/workflows/desktop.yml) tests and builds unsigned packages, extracts each format and verifies actual sample hashes, mappings, licenses and absence of private media. Small reports are retained; large installers require explicit `upload_packages`. History, from before Windows became MSI only: the final Rust 1.88 Windows MSI/NSIS builds measured about 1.52/1.29 GiB; both extracted inventories and installed NSIS resources passed. Actual MSI binary-stream inspection and NSIS extraction confirm the same 214,090,448-byte offline WebView2 runtime installer with a valid Microsoft signature. Feature-head CI run `38641519103` passes Windows MSI/NSIS, macOS app/DMG and Linux deb/AppImage native/package/resource checks. The installed production executable passed offline notation/edit/presets/Custom/active instrument highlights/native audio, with `desktop_test_io` absent. NSIS installation/uninstallation both exited successfully and the application/resources/registration were removed. Preferences and user app data were retained; earlier manual test-preference cleanup was policy-rejected and was not retried. Physical macOS/Linux audio/print, original Guitar Pro runtime acceptance and publisher signing/notarization remain unverified limits.
 
 After extracting an installer/application, inspect its resources without launching it or fetching data:
 

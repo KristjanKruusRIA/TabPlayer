@@ -3,6 +3,13 @@
 **Date:** 2026-11-06.
 **Branch:** `feature/w13-file-association`, from `develop` at `04a681f`.
 
+> **Superseded for Windows packaging on 2026-11-08.** Windows now ships as an MSI only (see `2026-11-07-ci-failures.md`). Everything below about the installer describes the NSIS installer. Reading Tauri's WiX template (not tested by installing), the MSI differs:
+> - It registers one ProgID per extension: `TabPlayer.tabplayer`, `TabPlayer.gp` and so on. The `name`, `mimeType` and `role` values are ignored.
+> - It installs for all users, so it needs administrator rights.
+> - It neither backs up nor restores a previous `.gp*` default.
+>
+> The app-side opening of files is unchanged.
+
 ## What changed
 
 ### Installer associations

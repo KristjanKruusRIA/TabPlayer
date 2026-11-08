@@ -95,6 +95,30 @@ Run 42479152487, at develop `18fe022`:
 | **Change** | On macOS and Linux the alias goes through a symlinked folder: a second spelling the catalog keeps apart, which the store's merge resolves to the same file with `canonicalize`. Windows keeps the `.` spelling. |
 | **Evidence** | On Windows, `file_library_store` passes 27/27 and `cargo fmt` is clean. This machine has no Linux environment, so the macOS/Linux branch is checked only by CI. |
 
+### Fifth run: Windows NSIS too large; Windows becomes MSI only (2026-11-08)
+
+Run 42486198722, at develop `528b40d`:
+- macOS and Linux passed every step, packaging included, so the alias fix holds there.
+- Windows passed every test and built its MSI with WiX. `makensis` then failed with "Internal compiler error #12345: error mmapping datablock".
+
+**Likely cause:**
+- The bundled audio is 1.86 GB (4,449 samples). With the 214 MB offline WebView2 installer and the program, the payload is about 2.08 GB, near NSIS's limit of roughly 2 GB.
+- The last passing Windows package run, 38641519103, had 3,864 samples and a 1.52 GiB MSI. The growth most likely came from the drum and slap samples added on 2026-11-06.
+- A full temporary disk on the runner can give the same error; that was not ruled out.
+
+**Decision (user):** Windows ships as an MSI only. The changes:
+- `.github/workflows/desktop.yml` builds `msi` only and verifies only the MSI. The NSIS extraction and the `*.exe` upload glob are removed.
+- The new `src-tauri/tauri.windows.conf.json` sets `bundle.targets` to `["msi"]`, so a plain local `tauri build` on Windows does not try NSIS. `tauri.conf.json` is unchanged for macOS and Linux.
+- The README's build text is updated.
+
+**Review:** an independent reviewer found nothing blocking in the CI edit. It confirmed that Tauri loads and merges the platform file, and that the verifier still fails if no MSI is produced. It raised these consequences, which come from reading Tauri's WiX template rather than from an install:
+- The MSI installs for all users, so it needs administrator rights. The NSIS default was a per-user install.
+- File associations use one ProgID per extension (`TabPlayer.gp` and so on). The MSI neither backs up nor restores a previous `.gp*` default. `2026-11-06-gp8-file-association.md` now carries this note.
+- The MSI looks for an existing NSIS install folder first. On a machine with an NSIS install it could install over that folder without removing the NSIS entry.
+- The MSI puts everything in one embedded cabinet. At about 2.08 GB it may meet the cabinet's own limit of about 2 GB as the audio grows. That is a judgement, not a test.
+
+**Not yet verified:** the MSI verify step on CI with the current audio, and the MSI's size.
+
 ## `batch/convert.test.ts` killed on macOS ("JavaScript heap out of memory")
 
 - **Symptom:** Vitest reported the crash as an unhandled error, and the file was missing from the totals (329 of 330). The 1 November macOS run was also one file short (313 of 314), so it has probably crashed since the test was added on 2026-10-30.

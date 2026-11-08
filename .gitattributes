@@ -7,6 +7,8 @@ tests/desktop/drop-score-files.ps1 -text
 # The Library and resumed-playback acceptance drivers pin these helpers' exact source bytes.
 tests/desktop/answer-unsaved-dialog.ps1 -text
 tests/desktop/cancel-dialog.ps1 -text
+# The resumed-playback driver pins the window-close helper's exact source bytes.
+tests/desktop/post-window-close.ps1 -text
 # Audio source pins hash these app-owned map and license bytes on every OS.
 assets/audio/slap/** -text
 assets/audio/drums/** -text

@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealDock} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,revealLeftTask} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,rmSync } from 'node:fs';
@@ -19,7 +19,7 @@ try{
   const swatch=async()=>{await revealDock(page,'Mixer');return page.getByRole('button',{name:'Track 2: Bass6',exact:true}).locator('.track-color-swatch').evaluate(node=>getComputedStyle(node).backgroundColor);};
   await button('Open');await button('Track 2: Bass6');
   const original=await swatch();
-  const settings=page.locator('.track-settings');await settings.getByText('Selected instrument',{exact:true}).click();
+  await revealLeftTask(page,'Track');const settings=page.locator('.track-settings');await settings.getByText('Selected instrument',{exact:true}).click();
   const input=settings.getByLabel('Track color',{exact:true});
   await input.fill('#ff8800');await settings.getByRole('button',{name:'Apply track color',exact:true}).click();await waitForWorkspaceIdle(page);
   assert.deepEqual((await readActiveDocument(page)).project.edits.at(-1),{type:'setTrackColor',track:1,color:'#ff8800'});

@@ -20,7 +20,7 @@ try {
   const details=label=>page.locator('summary').filter({hasText:label}).first().evaluate(node=>{node.parentElement.open=true;});
   for(let beat=1;beat<=4;beat++){await change('Beat',beat);await change('Fret',beat);await button('Set note');}
   await change('Beat',1);await details('Lyrics');await button('Add line');await change('Line 1 text',raw);await button('Apply lyrics');
-  await details('Beat notation');await page.getByRole('combobox',{name:/^Stem direction/}).selectOption('inverted');await page.getByLabel('Show timer',{exact:true}).check();await button('Apply beat gestures');
+  await details('Beat notation');await page.getByRole('combobox',{name:/^Stem direction/}).selectOption('inverted');await page.getByRole('checkbox',{name:'Show timer',exact:true}).check();await button('Apply beat gestures');
   await page.getByLabel('Range end beat',{exact:true}).fill('4');await page.getByRole('combobox',{name:/^Octave region/}).selectOption('1');await button('Apply octave region');
   await page.getByLabel('Range end beat',{exact:true}).fill('4');await page.getByRole('combobox',{name:/^Hairpin/}).selectOption('1');await page.getByRole('combobox',{name:/^Target dynamics/}).selectOption('7');await button('Apply hairpin');
   await page.getByRole('combobox',{name:/^Global fermata/}).selectOption('2');await change('Stored length','1.5');await button('Apply global fermata');

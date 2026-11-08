@@ -47,8 +47,8 @@ try{
   await workspace.focus();await page.keyboard.press('Escape');const chordMember=await center(frets.nth(1));
   await page.keyboard.down('Control');await page.mouse.click(chordMember.x,chordMember.y);await page.keyboard.up('Control');
   await page.getByRole('img',{name:'Selected note 1',exact:true}).waitFor();assert.match(await page.locator('.inspector').innerText(),/1 note · 1 beat/);
-  await button('Move to lower string');let command=(await snapshot()).project.edits.at(-1);assert.equal(command.type,'moveSelectionStrings');assert.equal(command.selection.notes.length,1);
-  await button('Move to higher string');await button('Undo');await button('Undo');assert.equal((await snapshot()).project.edits.length,0);
+  await page.locator('.workstation-inspector').getByRole('button',{name:'Move to lower string',exact:true}).click();await idle();let command=(await snapshot()).project.edits.at(-1);assert.equal(command.type,'moveSelectionStrings');assert.equal(command.selection.notes.length,1);
+  await page.locator('.workstation-inspector').getByRole('button',{name:'Move to higher string',exact:true}).click();await idle();await button('Undo');await button('Undo');assert.equal((await snapshot()).project.edits.length,0);
   assert.equal((await status()).tick,0);result.mouseGestures={inspectorFocusToMusic:true,shift:true,reverseDrag:true,resize:true,tripleClick:true,chordMember:true,adjacentStringMove:true};
   await workspace.focus();await page.keyboard.press('Control+a');assert.match(await page.locator('.inspector').innerText(),/Measures 1–4 · Tracks 1/);
   await button('Up semitone');assert.equal((await snapshot()).project.edits.at(-1).type,'transposeSelection');

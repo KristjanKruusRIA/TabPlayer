@@ -42,7 +42,8 @@ export async function runNotationEntryAcceptance({buildPath}={}){
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
   const staff=()=>page.getByRole('group',{name:'Pitch entry staff',exact:true});
   const entry=name=>staff().getByRole('button',{name,exact:true});
-  const choose=name=>page.getByRole('button',{name,exact:true});
+  // The palette repeats Key signature as an icon button; the entry staff's own button is the one with text.
+  const choose=name=>{const button=page.getByRole('button',{name,exact:true});return name==='Key signature'?button.and(page.locator(':not(.tp-glyph-btn)')):button;};
   const edits=async()=>(await record()).snapshot.project.edits;
   // An entry sends the expected commands, in order. Undo restores the record before them and Redo the one after;
   // `keep` leaves them applied, otherwise a last Undo removes them so the next probe starts from the same score.
@@ -98,7 +99,7 @@ export async function runNotationEntryAcceptance({buildPath}={}){
     await probe('sharp then click',async()=>{await choose('Sharp').click();await entry('F#5').click();},[{type:'setNote',target:g,...lowestFret(0,78,occupied)}]);
     assert.equal(await choose('Key signature').getAttribute('aria-pressed'),'true','The accidental lasts for one note');
     const flat=lowestFret(0,70,occupied);
-    await probe('flat then click spells the flat',async()=>{await choose('Flat').click();await entry('Bb4').click();},[{type:'setNote',target:g,...flat},{type:'setNoteSpelling',target:g,accidentalMode:5}],true);
+    await probe('flat then click spells the flat',async()=>{await choose('Flat').click();await entry('Bb4').click();},[{type:'sequence',commands:[{type:'setNote',target:g,...flat},{type:'setNoteSpelling',target:g,noteIndex:occupied.length,accidentalMode:5}]}],true);
     await probe('click removes a present note',()=>entry('Remove E5').click(),[{type:'removeNote',target:g,string:9}],true);
     await page.screenshot({path:resolve(paths.results,'01-fretted-staff.png')});result.screenshots.push('01-fretted-staff.png');
     step('Staff clicks add, flat-spell and remove fretted notes, each undoable',{edits:result.edits});
@@ -127,7 +128,7 @@ export async function runNotationEntryAcceptance({buildPath}={}){
     await page.getByText('Use the drum kit in the instrument view',{exact:false}).first().waitFor();step('Percussion staves refuse pitch entry',{});
 
     // The saved score carries every kept change, drawn where it was entered, with the flat spelling.
-    const final=await record();assert.equal(final.snapshot.project.edits.length,9);
+    const final=await record();assert.equal(final.snapshot.project.edits.length,8);
     const exportPath=`${exportBase}.gp`;assert.equal(existsSync(exportPath),false);await button('Export GP');
     const score=load(readFileSync(exportPath)),beat=track=>score.tracks[track].staves[0].bars[0].voices[0].beats[0].notes;
     assert.deepEqual(beat(0).map(note=>[note.string,note.fret]).sort((a,b)=>a[0]-b[0]),[[1,0],[flat.string,flat.fret],[8,1]].sort((a,b)=>a[0]-b[0]));

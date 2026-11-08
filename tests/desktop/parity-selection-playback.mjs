@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls,hidePractice} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
@@ -27,7 +27,7 @@ async function waitStatus(predicate,timeout=15000){
 }
 // More playback opens upward over the inspector. Playback buttons open it themselves; everything else closes it first so the inspector can be clicked.
 const playbackButtons=new Set(['Seek','Loop','Clear loop','Play from cursor','Play selection','Loop selection']);
-async function button(name){if(!playbackButtons.has(name))await hidePlaybackControls(page);await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
+async function button(name){if(!playbackButtons.has(name))await hidePlaybackControls(page);if(name!=='Practice')await hidePractice(page);await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
 async function playbackField(label){await revealPlaybackControls(page);return page.getByLabel(label,{exact:true});}
 async function playbackCombo(name){await revealPlaybackControls(page);await disclosure('Selected playback');return page.getByRole('combobox',{name,exact:true});}
 async function noAlerts(){assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);}

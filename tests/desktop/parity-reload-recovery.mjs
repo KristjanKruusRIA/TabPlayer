@@ -74,7 +74,7 @@ export async function runReloadRecoveryAcceptance({buildPath}={}){
     const initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
 
     // One unsaved edit: the live native session holds it, and a reload must not lose it.
-    await ui.revealInspector(page);await page.getByLabel('Fret',{exact:true}).fill('3');await button('Set note');
+    await ui.revealInspectorTab(page,'Selection');await page.getByLabel('Fret',{exact:true}).fill('3');await button('Set note');
     const edited=await record();assert.equal(edited.snapshot.dirty,true);assert.equal(edited.snapshot.project.edits.length,1);
     const before=await workspace();
     step('Unsaved edit exists before reload',{edits:edited.snapshot.project.edits.length,documents:before.documents.length});
@@ -89,7 +89,7 @@ export async function runReloadRecoveryAcceptance({buildPath}={}){
     }
 
     // The reattached webview is a full editor: a further edit applies once and undoes cleanly.
-    await ui.revealInspector(page);await page.getByLabel('Fret',{exact:true}).fill('5');await button('Set note');
+    await ui.revealInspectorTab(page,'Selection');await page.getByLabel('Fret',{exact:true}).fill('5');await button('Set note');
     assert.equal((await record()).snapshot.project.edits.length,2);await button('Undo');
     // Undo is a history step, so it differs from `edited` in exactly three fields: the revision counter moved on by the further edit and its undo
     // (+2), and the undone edit is now the redo entry. Everything else, project edits and the unsaved flag included, must match `edited`.

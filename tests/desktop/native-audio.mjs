@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,revealDock,revealPlaybackControls,setPlaybackSpeed} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,revealInspectorTab,revealDock,revealPlaybackControls,setPlaybackSpeed} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,mkdirSync,readFileSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
@@ -35,6 +35,7 @@ try {
   const waitStatus=async(predicate,timeout=10000)=>{const deadline=Date.now()+timeout;let last;while(Date.now()<deadline){last=await status();if(predicate(last))return last;await page.waitForTimeout(25);}throw new Error(`Native status timed out: ${JSON.stringify(last)}`);};
   const ready=async()=>{await waitStatus(s=>s.ready&&!s.error);await page.waitForFunction(()=>{const play=Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Play');return play&&!play.matches(':disabled');});};
   const button=async(name)=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
+  await revealInspectorTab(page,'Selection');
   await page.getByRole('combobox',{name:/^String/}).selectOption('6');await page.getByLabel('Fret',{exact:true}).fill('5');await button('Set note');await ready();
   await button('Show instrument');const instrument=page.getByRole('region',{name:'Instrument view'});await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('g[data-note-id]').count(),0);
   const helper=resolve('src-tauri/target/debug/examples/capture_loopback.exe');if(!existsSync(helper))throw new Error('Build the capture_loopback Cargo example before this native smoke.');
@@ -49,8 +50,8 @@ try {
   const later=await cursor.boundingBox();assert.ok(first&&later&&(first.x!==later.x||first.y!==later.y),'The native clock must move the public notation cursor.');
   await captureFinished;const captured=JSON.parse(readFileSync(capturedPath.replace(/\.wav$/,'.json'),'utf8'));assert.equal(captured.deviceId,played.deviceId);assert.equal(captured.finite,true);assert.ok(captured.peak>.001&&captured.rms>.0001);assert.ok(captured.durationSeconds>2.5&&captured.durationSeconds<3.5);assert.ok(captured.onsetFrame/captured.sampleRate<.5);assert.ok(Math.abs(captured.frequencyHz/440-1)<.03,`Captured A4 pitch: ${captured.frequencyHz}`);
   await revealLeftTask(page,'Sound');await page.getByRole('combobox',{name:/^Sound preset/}).selectOption('lead');await idle();assert.equal((await status()).generation,played.generation);assert.equal((await status()).playing,true);
-  await revealDock(page,'Mixer');const mute=page.locator('.track-channel').first().getByLabel('Mute',{exact:true});
-  const waitMute=checked=>page.waitForFunction(checked=>document.querySelector('.track-channel input[type="checkbox"]')?.checked===checked,checked);
+  await revealDock(page,'Mixer');const mute=page.locator('.track-channel[aria-label^="Channel 1"]').getByLabel('Mute',{exact:true});
+  const waitMute=checked=>page.waitForFunction(checked=>document.querySelector('.track-channel[aria-label^="Channel 1"] input[type="checkbox"]')?.checked===checked,checked);
   await mute.click();await waitMute(true);await idle();
   await button('Undo');await waitMute(false);assert.equal((await status()).generation,played.generation);assert.equal((await status()).playing,true);
   await button('Redo');await waitMute(true);assert.equal((await status()).generation,played.generation);
@@ -63,13 +64,15 @@ try {
   await revealPlaybackControls(page);await page.getByLabel('Seek measure',{exact:true}).fill('4');await button('Seek');await waitStatus(s=>Math.abs(s.tick-11520)<.01);
   await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await page.waitForFunction(()=>document.querySelectorAll('.instrument-view g[data-note-id]').length===0);
   await button('Add track');await ready();await button('Track 2: Bass');await instrument.getByRole('img',{name:'Bass fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),4);
+  await revealInspectorTab(page,'Selection');
   await page.getByRole('combobox',{name:/^String/}).selectOption('4');await page.getByLabel('Fret',{exact:true}).fill('2');await button('Set note');await ready();await button('Play');await waitStatus(s=>s.playing);await instrument.locator('g[data-note-id][data-string="4"][data-fret="2"][data-key="45"]').waitFor({state:'visible'});
   await button('Track 1: Guitar');await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),6);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await button('Track 2: Bass');await button('Remove track');await ready();await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();
+  await revealInspectorTab(page,'Selection');
   await page.getByRole('combobox',{name:/^String/}).selectOption('6');await button('Hide instrument');assert.equal(await instrument.count(),0);
   await setPlaybackSpeed(page,50);await button('Loop');await button('Play');
   await waitStatus(s=>s.speed===.5&&s.tick>3600);
   await waitStatus(s=>s.playing&&s.tick<960);await button('Stop');await button('Clear loop');
-  await page.getByLabel('Metronome',{exact:true}).click();await waitStatus(s=>s.metronome);
+  await page.getByRole('checkbox',{name:'Metronome',exact:true}).first().click();await waitStatus(s=>s.metronome);
   await button('Play');await waitStatus(s=>s.playing);const beforeEdit=await status();await page.getByLabel('Fret',{exact:true}).fill('7');await button('Set note');await waitStatus(s=>s.generation>beforeEdit.generation);await ready();assert.equal((await status()).playing,false);assert.equal((await status()).speed,.5);assert.equal((await status()).metronome,true);
   for(const action of ['Undo','Redo']){await button(action);await ready();assert.equal((await status()).speed,.5);assert.equal((await status()).metronome,true);}
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);
@@ -86,7 +89,7 @@ try {
   renameSync(backing,movedBacking);fixtureMoved=true;assert.equal(existsSync(backing),false);
   id=launch({TABPLAYER_TEST_OPEN:saved});browser=await connect();page=browser.contexts()[0].pages()[0];await offlinePage();await button('Open');await ready();await waitStatus(s=>Math.abs(s.backingDurationSeconds-2)<.001);
   const reopened=await snapshot();assert.deepEqual(reopened.project,savedSnapshot.project);assert.equal(existsSync(backing),false,'Reopen must use the saved project asset while its authored source file is unavailable.');
-  await revealDock(page,'Mixer');await page.locator('.track-channel').first().getByLabel('Mute',{exact:true}).click();await waitMute(true);await idle();await button('Play');
+  await revealDock(page,'Mixer');await page.locator('.track-channel[aria-label^="Channel 1"]').getByLabel('Mute',{exact:true}).click();await waitMute(true);await idle();await button('Play');
   const reopenedBackingSignal=await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.01);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);
   await button('Undo');await waitMute(false);assert.deepEqual((await snapshot()).project,savedSnapshot.project);
   const beforeNew=await status();await button('New');await ready();assert.ok((await status()).generation>beforeNew.generation);assert.equal((await status()).playing,false);assert.equal((await status()).speed,1);assert.equal((await status()).metronome,false);

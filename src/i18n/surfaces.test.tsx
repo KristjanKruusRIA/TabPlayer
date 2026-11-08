@@ -154,6 +154,8 @@ const fixed: Array<[string, RegExp]> = [
   ['src/workspace/MidiImportDialog.tsx', /aria-label="MIDI file"|'No file chosen'|label="Quantization"|label="Voices per track"|>Guitar and bass as tablature</],
   ['src/workspace/AsciiTabImportDialog.tsx', /<label>ASCII tab<textarea|'Reading the tab…'|'Nothing to import yet\.'/],
   ['src/workspace/DocumentTabs.tsx', /aria-label="Open scores"|`Score \${index\+1} of|'Unsaved score'|aria-label="Finalized"/],
+  ['src/workspace/MidiImportDialog.tsx', /\$\{part\.voices\} voices|plural\(part\.notes/],
+  ['src/audio/SelectionPlaybackControls.tsx', />(Play from cursor|Play selection|Loop selection)<|<summary>Selected playback|`Measure \$\{/],
   ['src/engraving/BarWidthsPanel.tsx', /<summary>Design: bar widths<\/summary>|Design mode: show bar width handles|>Restore default widths<\/button>/],
 ];
 

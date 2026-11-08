@@ -99,7 +99,7 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
       </fieldset>
       <p id={status} role="status" className={problem?'error':'muted'}>{problem??(importing?t('midi_import.opening'):settled!==options?t('midi_import.updating'):imported?summary:t('midi_import.nothing_yet'))}</p>
       {imported&&!problem&&<>
-        <ul className="midi-parts" aria-label={t('midi_import.parts')}>{imported.summary.tracks.map((part,index)=><li key={index}>{part.name}: {kinds[part.kind]}, {plural(part.notes,'note')}{part.voices>1?`, ${part.voices} voices`:''}</li>)}</ul>
+        <ul className="midi-parts" aria-label={t('midi_import.parts')}>{imported.summary.tracks.map((part,index)=><li key={index}>{part.name}: {kinds[part.kind]}, {t(part.notes===1?'midi_import.part_notes_one':'midi_import.part_notes_other',{count:part.notes})}{part.voices>1?`, ${t('midi_import.part_voices',{count:part.voices})}`:''}</li>)}</ul>
         {imported.summary.notes.length>0&&<p className="muted">{imported.summary.notes.map(note=>`${note[0].toUpperCase()}${note.slice(1)}.`).join(' ')}</p>}
       </>}
     </div>

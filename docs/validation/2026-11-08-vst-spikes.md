@@ -398,3 +398,158 @@ cargo test --locked --manifest-path src-tauri/Cargo.toml --test spike_wrap -- --
 ```
 
 The worktree needed `src-tauri/resources/library` (git-ignored, like `resources/audio`) for `build.rs`; it is a junction to the main checkout's copy.
+
+
+# VST spike 4: cross-process editor focus on Windows (THE-71), 2026-11-08
+
+Task 4 of `docs/superpowers/plans/2026-11-08-vst-hosting.md`, under pre-flight rulings P5 (message-only window), P21 (build location) and P29 (editor HWND, app pid). Branch `feature/vst-hosting`, run between `252bda3` and `9e33bc1`. Windows 11 Pro (10.0.26300), one display, 2560x1440 at 144 DPI (150 %). The foreground lock timeout reads 2147483647 ms (read only; no display or system setting was changed).
+
+## Result
+
+**PASS for (a), (b), (c), (d), (e) and (f)**, with the limits below. (d)'s "typing works" half was exercised in one plug-in (Amped ML5), and (f) at the one scale this machine has (150 %).
+
+| Criterion | Result | Numbers |
+|---|---|---|
+| (a) unowned, unparented | **PASS** | On all 7 plug-ins opened: `GW_OWNER` = 0, `GetParent` = 0, `GetAncestor(GA_PARENT)` = the desktop, no `WS_CHILD`, window pid = helper pid. |
+| (b) 10 s helper hang | **PASS** | Real app on CDP 9223, three 10 s hangs: CDP round trip max 16.3, 11.4 and 19.8 ms (p99 15.6, 9.3 and 12.1), against 200 ms allowed. The page painted at 209-238 frames/s throughout (about 240 without a hang) and 76 of 76 screenshots differed. |
+| (c) front after `AllowSetForegroundWindow(helper pid)` | **PASS** | 10/10 opens in front (and 6/6 with no extra input). Without the call the helper's `SetForegroundWindow` returned 0 and the editor did not come to the front. |
+| (d) typing, no TabPlayer shortcuts | **PASS** (typing tested in ML5 only) | "tabplayer", Space, "x" typed into ML5's preset-name field: the field showed `tabplayer x`. The stand-in saw 0 key events; the real app saw 0 keys with the editor in front and 5 of 5 when it was in front itself. |
+| (e) focus back after close | **PASS** | Helper `AllowSetForegroundWindow(app pid)`, then app `SetForegroundWindow`: stand-in in front within 0-1 ms, for a command close and a close-button close, on 5 plug-ins. Windows also restored it unaided in every run. |
+| (f) 150 %, per-monitor v2 | **PASS** | Client area equals the plug-in's requested size, with no clipped child, for ML5, Gojira X, SLAMP, DI Crank, NadIR, Emissary and the test plug-in. |
+
+No licence, activation or login dialog appeared in any run.
+
+## Method
+
+Everything is under `.analysis/vst-spikes/editor/` (git-ignored, not committed), built with `cargo +1.90.0` into `E:/cargo-target/slot-1`. The desktop test app was built from this worktree with `scripts/build-desktop-test.ps1` (default target).
+
+- **`helper.exe`** is Spike 1's SoundCraft-derived FFI in its own process. The main thread runs a `GetMessage` loop. A reader thread takes commands on stdin, queues them and posts `WM_APP` to an `HWND_MESSAGE` window (P5). Commands are `open`, `close`, `raise`, `info`, `snap`, `quit`. It sets per-monitor v2 DPI awareness first (`SetProcessDpiAwarenessContext(-4)`), creates the editor with a null owner, and is told the app's pid (P29).
+- **`app.exe`** is a stand-in parent: a plain top-level window that counts `WM_KEYDOWN`, `WM_CHAR` and `WM_PAINT`, and a driver that spawns a helper per scenario. It reads `GetForegroundWindow`, `GetWindowThreadProcessId` and `GetGUIThreadInfo`, and synthesizes input with `SendInput` (typing only while `GetForegroundWindow` is the editor). The stand-in is needed because the real app has no plug-in code yet, so nothing in it can call `AllowSetForegroundWindow(helper)`.
+- **(b) used the real app**, launched from `.analysis/desktop-smoke/tabplayer.exe` with `--remote-debugging-port=9223` (nothing listened before; nothing after). A Node script (`cdp-hang.mjs`) spawned a separate helper with `TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS=10000` and `open`, and for 12.5 s ran: `Runtime.evaluate("1+1")` every 40 ms, `Page.captureScreenshot` every 500 ms, and an on-page `requestAnimationFrame` counter drawn in a corner. The editor was shown before it attached so the hung window was visible, and Windows marked it not responding (`IsHungAppWindow` true).
+  - **Why this is equivalent:** the app and the helper share nothing but the desktop, so the only paths from a hung helper to the app are window links (owner, parent) and activation. The helper runs the real helper code path with the real hanging plug-in. What is not exercised is the app's own future pipe code (Task 15).
+  - The CDP probe times the renderer, not the native UI thread. The stand-in covers that: 310 `SendMessageTimeout(WM_NULL)` probes during the hang took max 1.5 ms (7.8 ms with the first test-plug-in build), and minimize, restore, move and `SetForegroundWindow` of the stand-in took 0-11 ms.
+- **Plug-ins** (all already installed; none registered or logged into): the test plug-in (`tabplayer_test_plugin.dll` copied to `testplug.vst3`; the hang runs inside `attached`), Amped ML5, Archetype Gojira X, SLAMP, AtlasDSP DI Crank (JUCE), and Emissary and NadIR (VSTGUI).
+- **Test plug-in provenance.** The first runs used a build of `252bda3` plus uncommitted edits to `lib.rs` by another agent (since committed as `9e33bc1`; `view.rs`, which holds the hang, is unchanged). (b) was rerun with the `9e33bc1` build: CDP max 19.8 ms, stand-in max 1.5 ms.
+
+## (a) Unowned and unparented
+
+The editor window is a plain top-level window (`WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU|WS_CLIPCHILDREN`, `0x16c80000`), created with a null owner. `GetParent` also reports an owner, so the check reads `GW_OWNER`, `GetParent` and `GetAncestor(GA_PARENT)`; the last must be the desktop. `GetWindowThreadProcessId` named the helper's pid every time (P29).
+
+- **Consequence: a taskbar button.** An unowned top-level window gets one. `WS_EX_TOOLWINDOW` (`SPIKE_EX_TOOLWINDOW=1`) removes it (`exstyle` 0x180) without changing (a), (c) or (e). Task 15 should rule on this; nothing here decides it.
+- **Control that shows why (a) matters.** The same 10 s hang with the editor owned by the stand-in's window (`--owner-control`): `ShowWindow(SW_MINIMIZE)` on the stand-in **blocked 8,043.9 ms**, against 1.8-4.9 ms when unowned. A cross-process owner lets a hung helper stall the app's UI thread.
+
+## (b) Responsiveness during a 10 s hang
+
+| Real app, CDP | samples | RTT p50 / p99 / max | frames/s | max frame gap | screenshots different |
+|---|---|---|---|---|---|
+| Baseline, runs 1 / 2 / 3 | 76-77 | 1.79 / 11.87 / 12.55; 1.37 / 7.06 / 7.2; 1.42 / 7.22 / 9.87 ms | 238-241 | 9.7-18.4 ms | 8/8 |
+| Hang 10 s, run 1 (first test-plug-in build) | 215 | 2.77 / 15.61 / 16.33 ms | 209 | 19.7 ms | 26/26 |
+| Hang 10 s, run 2 (first build) | 236 | 1.54 / 9.27 / 11.42 ms | 239 | 13.5 ms | 25/25 |
+| Hang 10 s, run 3 (`9e33bc1` build) | 236 | 1.47 / 12.14 / 19.81 ms | 238 | 20.6 ms | 25/25 |
+| Gojira X's own slow open (4.3 s inside `open`) | 160 | 1.51 / 10.66 / 11.14 ms | 240 | 14.7 ms | 17/17 |
+
+The limit is 200 ms, so the worst case is a tenth of it. The editor was visible and partly over the app window.
+
+## (c) The editor comes to the front
+
+Sequence that worked: a user action in the app, the app calls `AllowSetForegroundWindow(helper_pid)`, sends `OpenEditor`, and the helper calls `ShowWindow` then `SetForegroundWindow` on the new window. The editor was in front when `open` returned, 13-23 ms after the command for the test plug-in and 40-223 ms for the lighter JUCE plug-ins (the time is the plug-in's; Gojira X took 3.6-4.3 s).
+
+- **Control:** with no `AllowSetForegroundWindow`, the helper's `SetForegroundWindow` returned 0 and the editor stayed behind, in every run that tried it.
+- **A trap in the harness, not the design.** The first stand-in tapped Alt to gain foreground rights. An Alt tap toggles the window's system-menu mode, and every second `open` then failed (5 of 10). With a harmless key (F24) it was 10 of 10, and 6 of 6 with no synthetic input at all (the stand-in was already in front). The real app needs neither: the user's click that asks for the editor is the input.
+
+## (d) Typing, and shortcuts that must not fire
+
+- **Typing.** After clicking ML5's SAVE button its preset name turns into an editable field. Two clicks, then "tabplayer", Space and "x" with `SendInput` virtual-key events, made the field read `tabplayer x` (365 pixels changed in the field). Nothing was saved: the editor was closed without Enter.
+- **Shortcuts.** With the editor in front, the stand-in's window procedure saw 0 `WM_KEYDOWN` (Space included) and 0 `WM_CHAR`, for all five plug-ins. The real app, with a `keydown` listener in the page, saw 0 keys after a real click on the editor activated it, and 5 of 5 when the same keys were sent with the app in front.
+- **Focus inside the helper after attach.** `GetGUIThreadInfo` showed the focus on the host window (`SoundCraftVst3Editor`), not the plug-in's child, for every plug-in until a click. A key typed before any click goes to the host window and is dropped, never to the app. ML5 took focus into its JUCE child after the click. Whether the other three accept typing after a click was not tried.
+- **Not usable as evidence:** `document.hasFocus()` stays true under Playwright's CDP focus emulation, so the key counts are the evidence.
+
+## (e) Focus back to TabPlayer
+
+On close the helper calls `AllowSetForegroundWindow(app_pid)`, tears the view down and sends `EditorClosed`. The app calls `SetForegroundWindow(main)`. The stand-in was in front within 0-1 ms in every run, for a close command and for a `WM_CLOSE` (the close button), on all five plug-ins; no visible helper window was left each time.
+
+- **Windows restores it unaided.** The stand-in was already in front before the app called anything, in every run, including with the stand-in pushed to the bottom of the z-order and with the helper not allowing anything. So these runs show that the sequence works; they cannot show that it is needed.
+- **The case that would show it was not built.** It needs another process's window to be the one Windows picks, and the previously active window to be gone.
+- **Do not take focus the user moved away.** If the user switched to another app while the editor was open, the app should not call `SetForegroundWindow`. The helper knows whether the editor was in front when it closed, so `EditorClosed` should say so.
+
+## Focus hand-off sequence for Task 15
+
+**Open**
+1. The app calls `AllowSetForegroundWindow(helper_pid)` just before it sends `OpenEditor`, in response to a user action. Any thread will do.
+2. The helper, on its main thread, creates the window unowned and top level (null owner, no `WS_CHILD`), reads `GetDpiForWindow`, then sizes it as under DPI handling below.
+3. The helper shows the window, calls `SetForegroundWindow` on it, checks that `GetWindowThreadProcessId` names its own pid (P29), and replies `EditorOpened { hwnd }` with the result of `SetForegroundWindow`.
+4. Optional, untried: `SetFocus` on the plug-in's first child, or `onFocus(true)`, so typing works before a click.
+
+**Close** (the app's `CloseEditor`, or the close button, which is `WM_CLOSE`)
+1. The helper decides whether the editor was in front, calls `AllowSetForegroundWindow(app_pid)` (the pid comes in `Load`), then `removed`, `setFrame(null)` and `DestroyWindow`.
+2. The helper sends `EditorClosed { was_foreground }`.
+3. If `was_foreground`, the app calls `SetForegroundWindow` on its own main window with a direct `windows-sys` call. tao's `set_focus` was not tried; it presses Alt, which this spike showed toggles menu mode.
+
+**Never:** an owner or parent link to the app's window (the 8 s stall above); `PostThreadMessage` (P5); Alt taps.
+
+## DPI handling
+
+- The helper sets per-monitor v2 awareness before it makes any window. Task 15 should embed a manifest, or call the API first in `main`; the two are equivalent here.
+- Order that worked at 150 %:
+  1. create the window (any size) to learn its DPI;
+  2. `setContentScaleFactor(dpi / 96)` if the view offers `IPlugViewContentScaleSupport`;
+  3. `getSize`, then size the window with `AdjustWindowRectExForDpi` and `GetDpiForWindow` so the **client area** equals the view size;
+  4. `setFrame`, `attached`, then **read `getSize` again** and resize if it changed;
+  5. honour `resizeView` the same way.
+- Sizes are physical pixels. Seen at 150 %:
+
+| Plug-in | `getSize` before scale | after `setContentScaleFactor(1.5)` | after attach | Client area | Clipped |
+|---|---|---|---|---|---|
+| Amped ML5 | 1200x675 | 1800x1013 | same | 1800x1013 | no |
+| Archetype Gojira X | 1024x782 | 1536x1173 | same | 1536x1173 | no |
+| SLAMP | 1024x690 | 1024x690 | 1536x1035 | 1536x1035 | no |
+| AtlasDSP DI Crank | 387x556 | 581x834 | same | 581x834 | no |
+| NadIR (VSTGUI) | 1335x730 | no scale support | 1335x731 | 1335x731 | no |
+| Emissary (VSTGUI) | 1202x408 | no scale support | same | 1202x408 | no |
+| Test plug-in | 300x200 | no scale support | same | 300x200 | no |
+
+  - SLAMP reports its unscaled size after the scale call and corrects itself on attach, so a host that reads the size once clips it.
+  - ML5 without the scale call (`--no-content-scale`) also corrects itself on attach, from 1200x675 to 1800x1013.
+  - Emissary draws at 1:1 pixels (it did the same DPI-unaware), so it looks small at 150 %.
+- A DPI-unaware helper (the Spike 1 setup) gets `dpi=96` and Windows bitmap-scales the window. ML5 then opened at 1200x675 and was stretched by the system, which is blurry. Per-monitor v2 is the right choice.
+- `WM_DPICHANGED` is handled (move to the suggested rectangle), but it was never fired: there is one monitor. Calling `setContentScaleFactor` again after a move is not implemented.
+
+## Blank-editor retest (Spike 1, finding 2)
+
+**Not reproduced.** Emissary and NadIR drew their full interfaces in every run here (112,720 and 7,793 distinct colours; both images were looked at), with:
+
+- the per-monitor v2 helper, active and inactive (the helper not allowed to take the foreground), and the DPI-unaware helper;
+- the `GetMessage` loop and the 10 ms `PeekMessage` pump;
+- **the unchanged Spike 1 host binary, run again today**, which also drew Emissary (`logs/s4-retest-emissary`).
+
+So the blank windows in Spike 1 were not caused by the Spike 1 host's code, its DPI setting or its message pump, since the same binary draws them now. The cause is unknown: it may have been something in that session's graphics state, or in the plug-ins' first run. The C++ arm was never run, so that comparison stays open; it is no longer needed to explain a failure that cannot be reproduced, but if the blank editors come back, treat Spike 1's finding as live.
+
+## Limits
+
+- **One monitor, one scale (150 %).** No other scale was tested, no monitor move, and no `WM_DPICHANGED` in practice. Nothing was changed to get another scale.
+- **(d) typed text in one plug-in.** ML5 only. Gojira X, SLAMP and DI Crank were checked for shortcut leakage only. No plug-in asked for a licence, so none was skipped for that reason. Typing was synthesized with `SendInput`, not real keyboard hardware.
+- **(e) cannot show the sequence is needed here.** Windows restored the app unaided in every run (see above). A user who switched to another app, or a closed previous window, was not tested.
+- **(b) used the real app but not its future code.** The app had no plug-in or pipe code, so the hung helper was started by the script, and the editor was shown before attach to be visible. The hang is a sleep in `attached`, plus Gojira X's real slow open. A plug-in that hangs inside a paint message or in a modal loop was not tried.
+- **The stand-in is not WebView2.** Foreground rights, keyboard routing and message-queue responsiveness are Win32 behaviour and shown on the stand-in. The real app was used for (b) and the keyboard check only.
+- **Test plug-in build.** Runs before `9e33bc1` used an uncommitted build of the test plug-in; (b) was rerun on the committed one.
+- **Window position.** The editor was placed to the right of the stand-in. A hung editor stacked over the app's window was seen only in the real-app (b) run, where it partly overlapped.
+- **Input moves the user's cursor and goes to the foreground window.** It was sent only after `GetForegroundWindow` named the editor (or the app, for the control).
+
+## Reproduce
+
+These commands assume `.analysis/vst-spikes/editor/` as rebuilt from the description above; it is not committed.
+
+```powershell
+$env:RUSTUP_TOOLCHAIN = '1.90.0'; $env:CARGO_TARGET_DIR = 'E:/cargo-target/slot-1'
+cargo build --release --manifest-path .analysis/vst-spikes/editor/Cargo.toml   # helper.exe, app.exe
+# copy src-tauri/target/debug/tabplayer_test_plugin.dll to .analysis/vst-spikes/editor/plugins/testplug.vst3
+# (a), (c), (d) shortcuts, (e), (f) with the stand-in; add --click "x,y;x,y" --text tabplayer for a text field:
+app.exe <plugin.vst3> --scenario focus --label x --snapdir snaps
+# repeated open/close, z-order test, hang with an owner control, window snapshot:
+app.exe <plugin.vst3> --scenario repeat | bury | hang [--owner-control] | shot
+# (b) and the real-app key check (needs the desktop test app and a free port 9223):
+node .analysis/vst-spikes/editor/cdp-hang.mjs <helper.exe> <plugin.vst3> 10000 hang
+node .analysis/vst-spikes/editor/cdp-hang.mjs <helper.exe> <plugin.vst3> 0 keys
+```
+
+The worktree's `src-tauri/resources/library` was a junction (Spike 3) and `prepare-library.mjs` refuses symlinks, so it is now a real copy of the main checkout's 16 files (git-ignored). Logs and images are in `.analysis/vst-spikes/editor/logs` and `snaps` (not committed).

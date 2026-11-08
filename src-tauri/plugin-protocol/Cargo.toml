@@ -6,6 +6,7 @@ rust-version = "1.90"
 license = "MIT"
 publish = false
 description = "The wire protocol between TabPlayer and its VST3 helper process: a shared-memory audio ring, bounded control frames and the plug-in state container."
+build = "build.rs"
 
 # Caret ranges, as in the app: the committed lockfile pins the exact versions, and `--locked` builds hold to it.
 [dependencies]

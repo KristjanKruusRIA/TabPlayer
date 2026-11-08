@@ -586,6 +586,36 @@ mod tests {
         ]
     }
 
+    #[test]
+    fn a_stale_build_id_is_refused_even_when_one_character_differs() {
+        let mut stale: String = BUILD_ID.into();
+        let last = stale.pop().unwrap();
+        stale.push(if last == '0' { '1' } else { '0' });
+        let probed = HelperMessage::Probed {
+            protocol_version: PROTOCOL_VERSION,
+            build_id: stale.clone(),
+            classes: Vec::new(),
+        };
+        assert!(probed.validate().unwrap_err().contains("build ID"));
+        let loaded = HelperMessage::Loaded {
+            protocol_version: PROTOCOL_VERSION,
+            build_id: stale,
+            latency: 0,
+            class: class(),
+            mono: false,
+        };
+        assert!(loaded.validate().unwrap_err().contains("build ID"));
+        assert!(
+            HelperMessage::Probed {
+                protocol_version: PROTOCOL_VERSION,
+                build_id: BUILD_ID.into(),
+                classes: Vec::new(),
+            }
+            .validate()
+            .is_ok()
+        );
+    }
+
     fn helper_messages() -> Vec<HelperMessage> {
         vec![
             HelperMessage::Probed {

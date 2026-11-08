@@ -4,8 +4,10 @@ use std::time::Duration;
 /// Version of the control messages and of the ring layout. Both sides refuse anything else.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// Build identifier of the helper and the host. The app and the helper must match (preflight ruling P33).
-pub const BUILD_ID: &str = "0.2.0";
+/// Build identifier of the helper and the host, written by `build.rs`: `<crate version>+<git commit>-<hash of the protocol
+/// and helper sources>`. The app and the helper must match (preflight ruling P33). Both link this crate, so a helper built
+/// from other sources, or left over from an earlier build, carries another id and is refused in the first reply.
+pub const BUILD_ID: &str = env!("TABPLAYER_PLUGIN_BUILD_ID");
 
 /// Frames in one ring block. Measured in Spike 2 (`docs/validation/2026-11-08-vst-spikes.md`): the p99 hand-off at
 /// this size is 2.31 ms with a real amp plug-in in eight helpers, against a 10.67 ms callback.
@@ -135,5 +137,21 @@ mod tests {
     fn latency_cap_is_a_tenth_of_a_second() {
         assert_eq!(max_latency_frames(48_000), 4_800);
         assert_eq!(max_latency_frames(44_100), 4_410);
+    }
+}
+
+#[cfg(test)]
+mod build_id_tests {
+    use super::BUILD_ID;
+
+    #[test]
+    fn the_build_id_is_a_generated_fingerprint_not_a_typed_version() {
+        let (version, rest) = BUILD_ID.split_once('+').expect("version+fingerprint");
+        assert!(!version.is_empty(), "{BUILD_ID}");
+        let (commit, hash) = rest.rsplit_once('-').expect("commit-hash");
+        assert!(!commit.is_empty(), "{BUILD_ID}");
+        assert_eq!(hash.len(), 16, "{BUILD_ID}");
+        assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()), "{BUILD_ID}");
+        assert_ne!(BUILD_ID, "0.2.0");
     }
 }

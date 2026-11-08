@@ -98,9 +98,9 @@ it('the_fit_check_message_and_role_names_follow_the_language',()=>{
   const systems=[{svg:'<svg/>',width:700,height:50}],over=()=>[{text:'Cmaj7',left:650,right:760}];
   try{
     setLanguagePreference('de');
-    expect(()=>assertTextFits(systems,700,0,over)).toThrow('Der Text „Cmaj7“ passt nicht in die Seitenbreite. Verringere „Textgröße“ oder „Größe der Tabulaturzahlen“, den Druckmaßstab, oder verwende eine breitere Seite.');
+    expect(()=>assertTextFits(systems,700,0,over)).toThrow('Der Text „Cmaj7“ passt nicht in die Seitenbreite. Verringere „Textgröße“, „Größe der Tabulaturzahlen“ oder den Druckmaßstab, oder verwende eine breitere Seite.');
     setLanguagePreference('et');
-    expect(()=>assertTextFits(systems,700,0,over)).toThrow('Teksti „Cmaj7“ ei mahu lehe laiusele. Vähenda suurust „Teksti suurus“ või „Tabulatuurinumbrite suurus“ või printimise skaalat või kasuta laiemat lehte.');
+    expect(()=>assertTextFits(systems,700,0,over)).toThrow('Tekst „Cmaj7“ ei mahu lehe laiusesse. Vähenda väärtust „Teksti suurus“ või „Tabulatuurinumbrite suurus“, printimise skaalat või kasuta laiemat lehte.');
     // The role names are the font role labels, joined in the language.
     const long=withText('A long annotation line that surely needs more than the room left at the end of the bar, and then some more words');
     setLanguagePreference('de');

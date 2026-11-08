@@ -492,6 +492,15 @@ describe('export_awaits_role_faces_and_music',()=>{
     await act(async()=>{await expect(result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout})).rejects.toThrow(/A font could not be loaded: Noto Serif Italic\./);});
     expect(render).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
   });
+  it('a music font that cannot be loaded is reported by its display name, in the language',async()=>{
+    try{
+      setLanguagePreference('de');
+      const api=native(),{result,render,gates}=fontsHook(music(),api);
+      gates.fonts.resolve();gates.roles.resolve({failed:[]});gates.music.reject(new Error('Failed to fetch /export-fonts/petaluma_metadata.json'));
+      await act(async()=>{await expect(result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout})).rejects.toThrow(/^Eine Schrift konnte nicht geladen werden: Petaluma\.(?![^]*petaluma_metadata)/);});
+      expect(render).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
+    }finally{setLanguagePreference('en');}
+  });
   it('the font failure message follows the language and names the faces as the panel does',async()=>{
     try{
       setLanguagePreference('de');
@@ -506,7 +515,7 @@ describe('export_awaits_role_faces_and_music',()=>{
     for(const job of jobs){
       const api=native(),save=vi.fn(async()=>true),{result,render,gates}=fontsHook(music(),api);api.exportTrackFiles=save;
       gates.fonts.resolve();gates.roles.resolve({failed:[]});gates.music.reject(new Error('Music font metadata petaluma_metadata.json could not be loaded.'));
-      await act(async()=>{await expect(result.current.run(job)).rejects.toThrow(/petaluma_metadata\.json/);});
+      await act(async()=>{await expect(result.current.run(job)).rejects.toThrow(/^A font could not be loaded: Petaluma\./);});
       expect(render).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
       vi.restoreAllMocks();cleanup();
     }

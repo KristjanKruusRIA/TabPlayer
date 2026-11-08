@@ -1690,7 +1690,7 @@ export const de: MessageCatalog = {
   'typography.blank_note': "Leer behält die Größe des Renderers. Die Größe der Tabulaturzahlen skaliert auch die Ziffern der Zifferntabulatur; Bund- und Notenliniennummern behalten die Standardschrift.",
   'typography.export_note': "Exporte setzen Text in den mitgelieferten Noto-Schriften und ignorieren die Textschrift; Textgröße und Größe der Tabulaturzahlen gelten, und die Titelgröße skaliert die Kopfzeile der Seite, verkleinert auf die Seitenbreite. Ein Export wird abgelehnt (mit Nennung des Textes), wenn vergrößerter Text über die Seitenbreite hinausliefe. Auf dem Bildschirm zeichnet der Renderer den Titel der Partitur als eine zentrierte Zeile, daher kann ein sehr langer Titel bei großer Titelgröße über den Seitenrand ragen. Eine Rolle mit eigener Schrift weiter unten wird auf dem Bildschirm und in Exporten in dieser Schrift gezeichnet.",
   'font_roles.music': "Musikschrift",
-  'font_roles.music_note': "Jedes Notationssymbol wird aus der Musikschrift gezeichnet; ein Symbol, das ihr fehlt, kommt aus Bravura. Ein Zeichen, das einer Textschrift fehlt, wird am Bildschirm aus einer Systemschrift gezeichnet, im Export aus Bravura, Noto Sans, Noto Sans CJK JP oder Noto Emoji.",
+  'font_roles.music_note': "Jedes Notationssymbol wird aus der Musikschrift gezeichnet; ein Symbol, das ihr fehlt, kommt aus Bravura. Ein Zeichen, das einer Textschrift fehlt, wird auf dem Bildschirm aus einer Systemschrift gezeichnet, im Export aus Bravura, Noto Sans, Noto Sans CJK JP oder Noto Emoji.",
   'font_roles.roles_heading': "Schriften nach Rolle",
   'font_roles.roles_note': "Eine Rolle ohne Schrift behält das Aussehen von oben. Fett und Kursiv brauchen eine gewählte Schrift, weil nur die mitgelieferten Schriften auf dem Bildschirm und in Exporten dieselben Zeichenformen zeichnen (Abstände können trotzdem leicht abweichen); Quelle/Standard behält den Stil des jeweiligen Elements.",
   'font_roles.role_titleBlock': "Titelblock",
@@ -1746,7 +1746,7 @@ export const de: MessageCatalog = {
   'staff_groups.names_long_first': "Lange Namen zuerst, kurze danach",
   'staff_groups.names_long_first_help': "Volle Spurnamen im ersten System, kurze Namen in jedem weiteren System.",
   'staff_groups.names_already': "Die Namen erscheinen bereits zuerst lang und danach kurz.",
-  'export.text_overflow': "Der Text „{text}“ passt nicht in die Seitenbreite. Verringere „{textSize}“ oder „{tabSize}“, den Druckmaßstab, oder verwende eine breitere Seite.",
+  'export.text_overflow': "Der Text „{text}“ passt nicht in die Seitenbreite. Verringere „{textSize}“, „{tabSize}“ oder den Druckmaßstab, oder verwende eine breitere Seite.",
   'export.text_overflow_roles': " Auch die gewählte Schriftgröße ({roles}) vergrößert den Text: verringere sie.",
   'export.roles_joiner': " und ",
 };

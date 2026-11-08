@@ -1746,7 +1746,7 @@ export const et: MessageCatalog = {
   'staff_groups.names_long_first': "Pikad nimed esimesena, lühikesed pärast",
   'staff_groups.names_long_first_help': "Esimesel süsteemil rajade täisnimed, kõigil hilisematel süsteemidel lühinimed.",
   'staff_groups.names_already': "Nimed on juba seatud: pikad esimesena, lühikesed pärast.",
-  'export.text_overflow': "Teksti „{text}“ ei mahu lehe laiusele. Vähenda suurust „{textSize}“ või „{tabSize}“ või printimise skaalat või kasuta laiemat lehte.",
+  'export.text_overflow': "Tekst „{text}“ ei mahu lehe laiusesse. Vähenda väärtust „{textSize}“ või „{tabSize}“, printimise skaalat või kasuta laiemat lehte.",
   'export.text_overflow_roles': " Teksti suurendab ka valitud fondisuurus ({roles}): vähenda seda.",
   'export.roles_joiner': " ja ",
 };

@@ -26,7 +26,7 @@ import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { effectivePageLayout } from '../engraving/page';
 import { loadMusicFont,loadRoleFaces,type MusicFontData } from '../engraving/font-loading';
 import { fontsOf } from '../engraving/fonts';
-import { fileLabel } from '../engraving/font-catalog';
+import { fileLabel,musicFonts } from '../engraving/font-catalog';
 import { getMessage,getResolvedLanguage } from '../i18n';
 import type { EngravingOverrides } from '../engraving/types';
 /**
@@ -37,8 +37,11 @@ import type { EngravingOverrides } from '../engraving/types';
 async function loadExportResources(engraving:EngravingOverrides):Promise<MusicFontData> {
   await loadExportFonts();
   const {failed}=await loadRoleFaces(engraving.fonts);
-  if(failed.length)throw new Error(getMessage(getResolvedLanguage(),'font_roles.load_failed',{files:failed.map(fileLabel).join(', ')}));
-  return await loadMusicFont(fontsOf(engraving).music);
+  const loadFailed=(files:string)=>new Error(getMessage(getResolvedLanguage(),'font_roles.load_failed',{files}));
+  if(failed.length)throw loadFailed(failed.map(fileLabel).join(', '));
+  const music=fontsOf(engraving).music;
+  // The loader's own error names a metadata file or a URL; the person gets the same message as for a role face, naming the font.
+  try{return await loadMusicFont(music);}catch{throw loadFailed(musicFonts[music].family);}
 }
 export type ExportSource={score:model.Score;settings:DocumentSettings;embeddedBacking?:Uint8Array|null;revision:number};
 type ExportOperation={finished:Promise<void>;cancelRequest:Promise<void>|null};

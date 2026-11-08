@@ -332,11 +332,20 @@ mod shared {
 pub struct BridgeLink {
     ring: Arc<MappedRing>,
     input_event: Arc<EventHandle>,
+    output_event: Arc<EventHandle>,
 }
 
 impl BridgeLink {
-    pub(crate) fn new(ring: Arc<MappedRing>, input_event: Arc<EventHandle>) -> BridgeLink {
-        BridgeLink { ring, input_event }
+    pub(crate) fn new(
+        ring: Arc<MappedRing>,
+        input_event: Arc<EventHandle>,
+        output_event: Arc<EventHandle>,
+    ) -> BridgeLink {
+        BridgeLink {
+            ring,
+            input_event,
+            output_event,
+        }
     }
 
     /// A link over a heap ring, with its own wake-up event, so the audio tests can run a fake helper thread without a
@@ -347,6 +356,7 @@ impl BridgeLink {
         BridgeLink {
             ring: Arc::new(MappedRing::from_owned(ring)),
             input_event: Arc::new(EventHandle::new().expect("an event for the in-process link")),
+            output_event: Arc::new(EventHandle::new().expect("an event for the in-process link")),
         }
     }
 
@@ -356,6 +366,12 @@ impl BridgeLink {
 
     pub fn input_event(&self) -> &Arc<EventHandle> {
         &self.input_event
+    }
+
+    /// The event the helper signals after each answer. A real helper only signals it; an exchange that waits for answers
+    /// (the offline export) waits on it, and a fake helper thread signals it.
+    pub fn output_event(&self) -> &Arc<EventHandle> {
+        &self.output_event
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -391,7 +407,8 @@ pub mod fault {
     pub const UNDERRUN: u8 = 1;
     /// The helper returned a NaN or an infinity (or a runaway value).
     pub const NON_FINITE: u8 = 2;
-    /// The helper is gone. The supervisor writes this one, never the audio thread.
+    /// The helper is gone. The audio thread writes this itself when it sees `InsertShared::disconnected` set by the
+    /// supervisor; the supervisor never writes `fault`.
     pub const DISCONNECTED: u8 = 3;
 }
 

@@ -4,12 +4,17 @@
 //! For each watched helper, in this order:
 //! - **A violation** (the helper broke the protocol, or reported more latency than the cap) is reported as the status it
 //!   recorded.
+//! - **A fatal error** (an `Error` that answered no request: the helper cannot run its plug-in and is about to exit with
+//!   code 4) is `Crashed`, reported at once. The helper is left to finish its own orderly exit, which can take seconds.
 //! - **An exit** the app did not ask for is `Crashed`, whatever the code. The helper's C++ and structured exceptions end it
 //!   with the system's exception code, not the Rust panic code, so every nonzero exit counts, and so does a zero one the
-//!   app did not ask for.
+//!   app did not ask for. Only `kill`, `shutdown` and dropping the process count as asked.
 //! - **A stale heartbeat** while blocks are pending, for [`HANG_TIMEOUT`] (500 ms), is `Hung`: the helper is killed first
 //!   and the report follows. The clock starts when blocks are pending and the heartbeat has not moved, so an idle helper
-//!   is never hung, and a helper that stopped beating while idle gets the full 500 ms from its next block.
+//!   is never hung, and a helper that stopped beating while idle gets the full 500 ms from its next block. The clock is the
+//!   monotonic `Instant`. If the supervisor's own tick came more than 250 ms late (a stall of this thread, or of the
+//!   machine), the helper's clock is restarted instead, since the helper may have been stalled too and the kill cannot be
+//!   undone.
 //! - **The audio thread's fault code** in [`InsertShared`] is `Underrun` or `NonFinite`. A fault is reported again only
 //!   when the code changes.
 //!
@@ -17,16 +22,22 @@
 //! insert falls back to the built-in sound at its next block. A helper the app killed or shut down is dropped from the
 //! watch silently.
 //!
-//! The report callback runs on the supervisor's thread with no lock held, so it may call `unwatch`.
+//! The report callback runs on the supervisor's thread with no lock held, so it may call `unwatch`. A panic in it is
+//! caught and does not end the supervisor. Helpers that leave the watch are dropped after the lock is released, since
+//! dropping one waits a moment for the process.
 use super::{
     bridge::{InsertShared, fault},
     helper::HelperProcess,
     status::PluginStatus,
 };
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, atomic::Ordering};
 use std::thread::JoinHandle;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tabplayer_plugin_protocol::limits::{HANG_TIMEOUT, SUPERVISOR_TICK};
+
+/// A tick this much later than its predecessor says the supervisor itself was stalled.
+const STALL_GAP: Duration = Duration::from_millis(250);
 
 /// Which helper a report is about: one helper per document, track and plug-in class.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -65,9 +76,12 @@ enum Verdict {
 }
 
 impl Entry {
-    fn check(&mut self, now: Instant) -> Verdict {
+    fn check(&mut self, now: Instant, stalled: bool) -> Verdict {
         if let Some(status) = self.helper.violation() {
             return self.end(status);
+        }
+        if self.helper.fatal_error().is_some() {
+            return self.end(PluginStatus::Crashed);
         }
         if self.helper.exited().is_some() {
             return if self.helper.was_killed() {
@@ -82,7 +96,7 @@ impl Entry {
             return Verdict::Drop;
         }
         let beat = self.helper.heartbeat();
-        if beat != self.beat || !self.helper.blocks_pending() {
+        if stalled || beat != self.beat || !self.helper.blocks_pending() {
             self.beat = beat;
             self.still_since = now;
         } else if now.duration_since(self.still_since) >= HANG_TIMEOUT {
@@ -121,28 +135,39 @@ struct Inner {
 }
 
 impl Inner {
-    fn tick(&self) {
+    /// One look at every helper. `gap` is the time since the previous tick began.
+    fn tick(&self, gap: Duration) {
         let now = Instant::now();
+        let stalled = gap > STALL_GAP;
         let mut reports = Vec::new();
-        lock(&self.entries).retain_mut(|entry| match entry.check(now) {
-            Verdict::Keep => true,
-            Verdict::Fault(status) => {
-                reports.push((entry.key.clone(), status));
-                true
+        let mut left = Vec::new();
+        {
+            let mut entries = lock(&self.entries);
+            for mut entry in std::mem::take(&mut *entries) {
+                match entry.check(now, stalled) {
+                    Verdict::Keep => entries.push(entry),
+                    Verdict::Fault(status) => {
+                        reports.push((entry.key.clone(), status));
+                        entries.push(entry);
+                    }
+                    Verdict::End(status) => {
+                        reports.push((entry.key.clone(), status));
+                        left.push(entry);
+                    }
+                    Verdict::Drop => left.push(entry),
+                }
             }
-            Verdict::End(status) => {
-                reports.push((entry.key.clone(), status));
-                false
-            }
-            Verdict::Drop => false,
-        });
-        for (key, status) in reports {
-            (self.report)(key, status);
         }
+        for (key, status) in reports {
+            // A callback that panics must not end the supervision of every other helper.
+            let _ = catch_unwind(AssertUnwindSafe(|| (self.report)(key, status)));
+        }
+        drop(left);
     }
 
     fn run(&self) {
         let mut stopped = lock(&self.stopped);
+        let mut last = Instant::now();
         while !*stopped {
             let (guard, _) = self
                 .wake
@@ -153,7 +178,9 @@ impl Inner {
                 break;
             }
             drop(stopped);
-            self.tick();
+            let began = Instant::now();
+            self.tick(began.duration_since(last));
+            last = began;
             stopped = lock(&self.stopped);
         }
     }
@@ -196,17 +223,29 @@ impl Supervisor {
             helper,
             shared,
         };
-        let mut entries = lock(&self.inner.entries);
-        entries.retain(|existing| existing.key != entry.key);
-        entries.push(entry);
+        let replaced = {
+            let mut entries = lock(&self.inner.entries);
+            let (replaced, mut kept): (Vec<_>, Vec<_>) = std::mem::take(&mut *entries)
+                .into_iter()
+                .partition(|existing| existing.key == entry.key);
+            kept.push(entry);
+            *entries = kept;
+            replaced
+        };
+        drop(replaced);
     }
 
     /// Stops watching. True when the key was watched.
     pub fn unwatch(&self, key: &HelperKey) -> bool {
-        let mut entries = lock(&self.inner.entries);
-        let before = entries.len();
-        entries.retain(|entry| &entry.key != key);
-        entries.len() != before
+        let removed = {
+            let mut entries = lock(&self.inner.entries);
+            let (removed, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut *entries)
+                .into_iter()
+                .partition(|entry| &entry.key == key);
+            *entries = kept;
+            removed
+        };
+        !removed.is_empty()
     }
 
     pub fn watched(&self) -> usize {

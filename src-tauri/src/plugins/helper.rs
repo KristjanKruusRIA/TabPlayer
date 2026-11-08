@@ -16,17 +16,38 @@
 //!
 //! # What the helper may send
 //!
-//! The helper runs third-party code and is not trusted. A frame over [`MAX_FRAME_BYTES`] kills it, and so does any frame
-//! over 64 KiB unless a `GetState` or `Probe` is in flight (the only replies that can be large; preflight ruling P16). So
-//! does a message that is no valid answer to the request at the head of the queue, a reply with nothing asked, more than 64
-//! unsolicited messages in a second, or a latency over [`MAX_LATENCY_SECONDS`]. Each of those is recorded as the helper's
-//! [violation](HelperProcess::violation) and shows up as `Unreadable` or `TooMuchLatency`.
+//! The helper runs third-party code and is not trusted. A frame over `MAX_FRAME_BYTES` kills it, and so does any frame
+//! over 64 KiB unless the next reply owed is that of a `GetState` or `Probe` (the only replies that can be large;
+//! preflight ruling P16), and a big frame that turns out not to be that reply. So does a message that is no valid answer to
+//! the request at the head of the queue, a reply with nothing asked, more than 64 unsolicited messages in a second, or a
+//! latency over the cap (`MAX_LATENCY_SECONDS`). Each of those is recorded as the helper's
+//! [violation](HelperProcess::violation) and shows up as `Unreadable` or `TooMuchLatency`; once one is recorded nothing
+//! more the helper says is acted on.
 //!
-//! # Timeouts
+//! # Asked and enforced
 //!
-//! A request that times out fails alone: the helper is not killed, because a busy editor can hold its main thread for
-//! longer than 5 seconds (P16). Its reply, if it ever comes, is matched and dropped. Killing is the supervisor's heartbeat
-//! rule alone, with one exception: a load that times out kills the helper, since a helper that has not loaded is no use.
+//! [`HelperProcess::kill`], [`shutdown`](HelperProcess::shutdown) and dropping the process are the app's decisions, so the
+//! exit that follows is not a crash. A violation is the client enforcing its rules; it kills the helper too, but is
+//! reported as the violation. A fatal `Error` from the helper is reported as a crash whenever the exit comes: the client
+//! never kills a helper that is tearing itself down (its own orderly exit takes up to 6 seconds), and the job reaps it
+//! if it never ends.
+//!
+//! # Requests
+//!
+//! At most [`MAX_IN_FLIGHT`] (4, the helper's own queue length) requests are outstanding, timed-out ones included; a caller
+//! waits for a slot until its own deadline. `Busy` is retried until the deadline. A request that times out fails alone and
+//! the helper is not killed, because a busy editor can hold its main thread for longer than 5 seconds (P16); its reply, if
+//! it ever comes, is matched and dropped. Killing is the supervisor's heartbeat rule alone, with one exception: a load that
+//! times out kills the helper, since a helper that has not loaded is no use.
+//!
+//! # Limits
+//!
+//! The helper is started with `std::process::Command`, which creates it with handle inheritance on and assigns it to the job
+//! right afterwards. Every inheritable handle in the app at that moment reaches the helper, and a non-std
+//! `CreateProcess(bInheritHandles = TRUE)` running at the same moment can take the helper's pipe end, after which the
+//! app does not see the pipe close (the supervisor still sees the exit). No plug-in code runs before the helper's first
+//! frame, which is sent after the job assignment, so no plug-in can start a process outside the job. A launch with
+//! `CreateProcessW`, a handle list and a job list would close the rest; it is backlog.
 // Off Windows nothing launches, so most of this is built but never run.
 #![cfg_attr(not(windows), allow(dead_code, unused_imports))]
 use super::{
@@ -38,8 +59,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::{
-    Arc, Mutex, MutexGuard, OnceLock,
-    atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering},
+    Arc, Condvar, Mutex, MutexGuard, OnceLock,
+    atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, channel, sync_channel},
 };
 use std::time::{Duration, Instant};
@@ -49,7 +70,9 @@ use tabplayer_plugin_protocol::{
         ClassInfo, ErrorCode, FrameError, HelperMessage, HostMessage, Mode, Rect,
         read_frame_limited, write_frame,
     },
-    limits::{EDITOR_OPEN_TIMEOUT, LOAD_TIMEOUT, REQUEST_TIMEOUT, max_latency_frames},
+    limits::{
+        EDITOR_OPEN_TIMEOUT, LOAD_TIMEOUT, MAX_DETAIL_CHARS, REQUEST_TIMEOUT, max_latency_frames,
+    },
 };
 
 /// The memory one helper process may commit: a tenth of the address space a plug-in could ever need, and far below what
@@ -57,14 +80,22 @@ use tabplayer_plugin_protocol::{
 pub const HELPER_MEMORY_LIMIT_BYTES: usize = 4 << 30;
 /// The frame cap while no `GetState` or `Probe` is in flight: every other reply is a few hundred bytes.
 pub const SMALL_FRAME_BYTES: usize = 64 << 10;
-/// Requests the client has sent that have no reply yet, timed-out ones included. The helper's own queue is shorter.
-const MAX_PENDING: usize = 16;
+/// Requests the client has sent that have no reply yet, timed-out ones included: the length of the helper's own request
+/// queue, so a `Busy` from it is the exception.
+pub const MAX_IN_FLIGHT: usize = 4;
 /// Unsolicited messages in one second. The helper itself sends at most 14 (4 `StateDirty` and 10 `LatencyChanged`).
 const FLOOD_LIMIT: u32 = 64;
-/// How long an unsolicited `Error` (the helper is about to exit with 4) or a closed pipe may take to become an exit.
-const EXIT_GRACE: Duration = Duration::from_secs(2);
-/// A graceful `Shutdown` may take this long before the helper is killed.
-const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
+/// How long the dispatcher waits, once the helper's output has closed, for the exit code to fail the waiting requests with.
+const EXIT_CODE_WAIT: Duration = Duration::from_millis(250);
+/// A helper whose output closed and that has not exited after this long is killed. Its own orderly teardown is at most 6
+/// seconds (1 for the audio thread, 2 for the session, 3 for the module exits).
+const FINISH_GRACE: Duration = Duration::from_secs(10);
+/// A graceful `Shutdown` may take this long before the helper is killed: its own teardown budget and a margin.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(8);
+/// Dropping a process waits this long for it to be gone after the kill; the job reaps what is left.
+const DROP_WAIT: Duration = Duration::from_secs(2);
+/// Between attempts at a request the helper answered `Busy`.
+const BUSY_BACKOFF: Duration = Duration::from_millis(25);
 /// The helper's input is a pipe; the app never has more than this many encoded requests waiting to be written.
 const CHANNEL_MESSAGES: usize = 16;
 
@@ -84,8 +115,11 @@ pub enum HelperError {
     UnsupportedPlatform,
     /// The process could not be started, or could not be put in the job.
     Spawn(String),
-    /// No reply within the timeout. For a load the helper was killed; for another request it was not.
+    /// No reply to a request within its timeout, or no free place among the requests in flight. The helper was not
+    /// killed and the request may still be carried out; it is not a verdict on the plug-in.
     Timeout,
+    /// The load did not finish in time, and the helper was killed.
+    LoadTimeout,
     /// The helper ended before it answered, with this exit code when it is known.
     Exited(Option<i32>),
     /// The helper answered with an error.
@@ -94,22 +128,28 @@ pub enum HelperError {
     Misbehaved(String),
     /// The plug-in reports more latency than the app takes.
     TooMuchLatency { latency: u32, limit: u32 },
-    /// The request was refused before it was sent: it breaks a protocol rule, the helper is already loaded, or too many
-    /// requests are waiting.
+    /// The request was refused before it was sent: it breaks a protocol rule, the plug-in path is not absolute, or the
+    /// helper is already loaded.
     Refused(String),
 }
 
 impl HelperError {
-    /// The slot status this error means for a load or a request.
-    pub fn status(&self) -> PluginStatus {
-        match self {
+    /// The slot status this error means for a load, or none when it says nothing about the plug-in: `Busy`, and a
+    /// request that timed out with nothing killed. A caller keeps the slot's status for those and may try again.
+    ///
+    /// A failure to start the helper (including to put it in the job, which fails when the app runs inside a job that
+    /// refuses nesting) reads as `Crashed`: the helper could not run.
+    pub fn status(&self) -> Option<PluginStatus> {
+        Some(match self {
             HelperError::HostMissing => PluginStatus::HostMissing,
             HelperError::UnsupportedPlatform => PluginStatus::UnsupportedPlatform,
             HelperError::Spawn(_) | HelperError::Exited(_) => PluginStatus::Crashed,
-            HelperError::Timeout => PluginStatus::Hung,
+            HelperError::LoadTimeout => PluginStatus::Hung,
+            HelperError::Timeout => return None,
             HelperError::TooMuchLatency { .. } => PluginStatus::TooMuchLatency,
             HelperError::Misbehaved(_) | HelperError::Refused(_) => PluginStatus::Unreadable,
             HelperError::Helper { code, .. } => match code {
+                ErrorCode::Busy => return None,
                 ErrorCode::NotFound => PluginStatus::Missing,
                 ErrorCode::TooMuchLatency => PluginStatus::TooMuchLatency,
                 ErrorCode::RejectedState | ErrorCode::StateTooLarge => PluginStatus::RejectedState,
@@ -118,10 +158,14 @@ impl HelperError {
                 | ErrorCode::Unreadable
                 | ErrorCode::UnsupportedLayout
                 | ErrorCode::EditorFailed
-                | ErrorCode::Internal
-                | ErrorCode::Busy => PluginStatus::Unreadable,
+                | ErrorCode::Internal => PluginStatus::Unreadable,
             },
-        }
+        })
+    }
+
+    /// Whether trying again later can succeed and the error changes no slot status.
+    pub fn is_transient(&self) -> bool {
+        self.status().is_none()
     }
 }
 
@@ -134,6 +178,7 @@ impl std::fmt::Display for HelperError {
             }
             HelperError::Spawn(detail) => write!(f, "could not start the plug-in helper: {detail}"),
             HelperError::Timeout => f.write_str("the plug-in helper did not answer in time"),
+            HelperError::LoadTimeout => f.write_str("the plug-in did not load in time"),
             HelperError::Exited(Some(code)) => {
                 write!(f, "the plug-in helper ended with code {code}")
             }
@@ -284,9 +329,14 @@ pub struct StateParts {
 /// The helper's unsolicited messages since the last call, coalesced: the latest of each wins.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HelperEvents {
-    /// A latency that differs from the last one handed over (or the loaded one). The helper announces the latency after
-    /// every reconfigure, even when it did not move, so a repeat is not reported here: re-prepare when this is `Some`.
+    /// The latency of the latest `LatencyChanged` since the last call. The helper sends one after every reconfigure,
+    /// even when the value did not move, because the reconfigure parks its audio loop and resets the plug-in: blocks
+    /// published meanwhile come back late. So `Some` means "flush and prime", whether or not `latency_moved` is set; any
+    /// number of announcements since the last call give one `Some`.
     pub latency: Option<u32>,
+    /// Whether that latency differs from the one the app last knew (the loaded one, or the last handed over): the
+    /// pipeline delay changes, and not only the stream.
+    pub latency_moved: bool,
     /// The plug-in's state changed since the app last read it.
     pub state_dirty: bool,
     /// The user closed the editor window (or a `CloseEditor` was answered).
@@ -296,6 +346,7 @@ pub struct HelperEvents {
 struct Events {
     /// The latency the app last knew.
     known_latency: u32,
+    /// The latest announcement not yet taken.
     latency: Option<u32>,
     state_dirty: bool,
     editor_closed: bool,
@@ -371,30 +422,53 @@ struct Queue {
     /// The dispatcher has finished: nothing more will be answered.
     closed: bool,
     /// Encoded frames for the writer thread. Taken away on drop so the thread ends and closes the pipe.
-    writer: Option<Sender<Vec<u8>>>,
+    writer: Option<Sender<Frame>>,
 }
 
 struct Violation {
     status: PluginStatus,
     detail: String,
+    /// What requests that were waiting fail with.
+    error: HelperError,
 }
 
 /// The parts of a loaded helper that outlive the load call.
 struct LinkParts {
     ring: Arc<MappedRing>,
     input_event: Arc<EventHandle>,
-    /// Held so the helper's duplicate stays valid for as long as the helper, and for the offline mode that waits on it.
-    _output_event: Arc<EventHandle>,
+    output_event: Arc<EventHandle>,
+}
+
+/// An encoded frame, shared so a request the helper answered `Busy` can be sent again without copying a big state.
+type Frame = Arc<Vec<u8>>;
+
+/// Passes reads through and counts the bytes, so the size of a frame is known once it is decoded.
+struct Counting<R> {
+    inner: R,
+    bytes: usize,
+}
+
+impl<R: Read> Read for Counting<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.inner.read(buffer)?;
+        self.bytes += count;
+        Ok(count)
+    }
 }
 
 struct Shared {
     child: Mutex<Child>,
     exit_code: Mutex<Option<i32>>,
-    /// The app asked the helper to end (kill, shutdown, a violation), so an exit is not a crash.
+    /// The app asked the helper to end (`kill`, `shutdown`, drop), so an exit is not a crash. The client's own
+    /// enforcement kills do not set it.
     killed: AtomicBool,
     queue: Mutex<Queue>,
-    /// `GetState` and `Probe` requests without a reply yet. While any is, the reader allows a big frame.
-    large_in_flight: AtomicUsize,
+    /// Signalled when a place among the requests in flight frees up, and when the queue closes.
+    slots: Condvar,
+    /// Frames the reader has decoded and handed on, and frames the dispatcher has finished with. The reader waits for the
+    /// two to meet before it chooses the cap for the next frame, so the cap follows the replies already seen.
+    sent: AtomicU64,
+    routed: AtomicU64,
     events: Mutex<Events>,
     violation: Mutex<Option<Violation>>,
     /// An `Error` that answered nothing.
@@ -402,12 +476,21 @@ struct Shared {
     /// The longest latency in frames, from the load's sample rate. Zero until a load starts.
     latency_limit: AtomicU32,
     mono: AtomicBool,
+    /// A load has been accepted for sending (it may not have finished). A second one is refused.
+    load_started: AtomicBool,
+    /// Set once a load has succeeded.
     link: OnceLock<LinkParts>,
 }
 
 impl Shared {
+    /// The app's decision to end the helper.
     fn kill(&self) {
         self.killed.store(true, Ordering::SeqCst);
+        self.terminate();
+    }
+
+    /// Ends the process without saying the app asked.
+    fn terminate(&self) {
         let _ = lock(&self.child).kill();
     }
 
@@ -434,76 +517,116 @@ impl Shared {
         }
     }
 
-    /// Records the first thing the helper did wrong and kills it.
-    fn violate(&self, status: PluginStatus, detail: String) {
+    /// Records the first thing the helper did wrong and ends it. Anything it says after this is ignored, and the requests
+    /// still waiting fail with `error`.
+    fn violate(&self, status: PluginStatus, detail: &str, error: Option<HelperError>) {
+        let detail = clean_detail(detail);
         {
             let mut violation = lock(&self.violation);
             if violation.is_none() {
-                *violation = Some(Violation { status, detail });
+                let error = error.unwrap_or_else(|| HelperError::Misbehaved(detail.clone()));
+                *violation = Some(Violation {
+                    status,
+                    detail,
+                    error,
+                });
             }
         }
-        self.kill();
+        self.terminate();
     }
 
-    fn submit(&self, kind: Kind, frame: Vec<u8>) -> Result<Receiver<Reply>, HelperError> {
+    fn misbehaved(&self, detail: &str) {
+        self.violate(PluginStatus::Unreadable, detail, None);
+    }
+
+    /// Queues the request and sends its frame, waiting until `deadline` for a place among the requests in flight.
+    fn submit(
+        &self,
+        kind: Kind,
+        frame: Frame,
+        deadline: Instant,
+    ) -> Result<Receiver<Reply>, HelperError> {
         let (reply, receiver) = sync_channel(1);
         let mut queue = lock(&self.queue);
-        if queue.closed {
-            return Err(HelperError::Exited(self.exited()));
-        }
-        if queue.pending.len() >= MAX_PENDING {
-            return Err(HelperError::Refused(
-                "too many requests are waiting for the helper".into(),
-            ));
+        loop {
+            if queue.closed {
+                return Err(HelperError::Exited(self.exited()));
+            }
+            if queue.pending.len() < MAX_IN_FLIGHT {
+                break;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(HelperError::Timeout);
+            }
+            queue = self
+                .slots
+                .wait_timeout(queue, deadline - now)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0;
         }
         let Some(writer) = queue.writer.as_ref() else {
             return Err(HelperError::Exited(self.exited()));
         };
-        if kind.large() {
-            self.large_in_flight.fetch_add(1, Ordering::SeqCst);
-        }
         // Queued and sent under one lock, so the order of the queue is the order on the wire.
         if writer.send(frame).is_err() {
-            if kind.large() {
-                self.large_in_flight.fetch_sub(1, Ordering::SeqCst);
-            }
             return Err(HelperError::Exited(self.exited()));
         }
         queue.pending.push_back(Pending { kind, reply });
         Ok(receiver)
     }
 
+    /// Waits (briefly) until the dispatcher has finished with every frame decoded so far.
+    fn settle_routing(&self) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while self.routed.load(Ordering::SeqCst) < self.sent.load(Ordering::SeqCst)
+            && Instant::now() < deadline
+        {
+            std::thread::sleep(Duration::from_micros(200));
+        }
+    }
+
     /// Reads the helper's frames into `sender` until the pipe ends or the helper breaks the framing rules.
-    fn read_loop(&self, mut output: ChildStdout, sender: SyncSender<HelperMessage>) {
+    fn read_loop(&self, mut output: ChildStdout, sender: SyncSender<(HelperMessage, usize)>) {
         loop {
-            // Wait for the first byte of a frame before choosing the cap: a `GetState` may be sent while this thread is
-            // already waiting, and its reply must meet the cap that holds when the reply arrives, not the one from before.
+            // Wait for the first byte of a frame before choosing the cap, and for the replies already decoded to be routed:
+            // replies come in order, so the next frame is the reply to the head of the queue (or is unsolicited), and the
+            // cap is big only if that reply can be.
             let mut first = [0u8; 1];
             match output.read(&mut first) {
                 Ok(0) | Err(_) => return,
                 Ok(_) => {}
             }
-            let limit = if self.large_in_flight.load(Ordering::SeqCst) > 0 {
+            self.settle_routing();
+            let limit = if lock(&self.queue)
+                .pending
+                .front()
+                .is_some_and(|head| head.kind.large())
+            {
                 MAX_FRAME_BYTES
             } else {
                 SMALL_FRAME_BYTES
             };
-            let mut frame = (&first[..]).chain(&mut output);
+            let mut frame = Counting {
+                inner: (&first[..]).chain(&mut output),
+                bytes: 0,
+            };
             match read_frame_limited::<HelperMessage>(&mut frame, limit) {
                 Ok(message) => {
-                    if sender.send(message).is_err() {
+                    let length = frame.bytes.saturating_sub(4);
+                    self.sent.fetch_add(1, Ordering::SeqCst);
+                    if sender.send((message, length)).is_err() {
                         return;
                     }
                 }
                 Err(FrameError::TooLarge(length)) => {
-                    self.violate(
-                        PluginStatus::Unreadable,
-                        format!("a frame of {length} bytes is over the limit of {limit}"),
-                    );
+                    self.misbehaved(&format!(
+                        "a frame of {length} bytes is over the limit of {limit}"
+                    ));
                     return;
                 }
                 Err(FrameError::Malformed(detail) | FrameError::Invalid(detail)) => {
-                    self.violate(PluginStatus::Unreadable, detail);
+                    self.misbehaved(&detail);
                     return;
                 }
                 // The pipe ended or broke: the helper is gone or going, and the dispatcher finds out which.
@@ -512,15 +635,20 @@ impl Shared {
         }
     }
 
-    fn dispatch_loop(&self, receiver: Receiver<HelperMessage>) {
+    fn dispatch_loop(&self, receiver: Receiver<(HelperMessage, usize)>) {
         let mut flood = Flood::new();
-        while let Ok(message) = receiver.recv() {
-            self.route(message, &mut flood);
+        while let Ok((message, length)) = receiver.recv() {
+            self.route(message, length, &mut flood);
+            self.routed.fetch_add(1, Ordering::SeqCst);
         }
         self.finish();
     }
 
-    fn route(&self, message: HelperMessage, flood: &mut Flood) {
+    fn route(&self, message: HelperMessage, length: usize, flood: &mut Flood) {
+        // A helper that has broken a rule is ended, and nothing it says on its way out is acted on.
+        if lock(&self.violation).is_some() {
+            return;
+        }
         let answered = {
             let mut queue = lock(&self.queue);
             match queue.pending.front() {
@@ -529,11 +657,12 @@ impl Shared {
             }
         };
         if let Some(pending) = answered {
-            if pending.kind.large() {
-                self.large_in_flight.fetch_sub(1, Ordering::SeqCst);
-            }
+            self.slots.notify_all();
             let reply = match message {
-                HelperMessage::Error { code, detail } => Err(HelperError::Helper { code, detail }),
+                HelperMessage::Error { code, detail } => Err(HelperError::Helper {
+                    code,
+                    detail: clean_detail(&detail),
+                }),
                 other => Ok(other),
             };
             let _ = pending.reply.send(reply);
@@ -548,17 +677,21 @@ impl Shared {
                 | HelperMessage::Error { .. }
         );
         if !unsolicited {
-            self.violate(
-                PluginStatus::Unreadable,
-                format!("{} with no matching request", name_of(&message)),
-            );
+            self.misbehaved(&format!("{} with no matching request", name_of(&message)));
+            return;
+        }
+        // The big cap was allowed for a state that was owed. Something small that came padded is not that.
+        if length > SMALL_FRAME_BYTES {
+            self.misbehaved(&format!(
+                "{} in a frame of {length} bytes",
+                name_of(&message)
+            ));
             return;
         }
         if flood.hit() {
-            self.violate(
-                PluginStatus::Unreadable,
-                format!("more than {FLOOD_LIMIT} unsolicited messages in a second"),
-            );
+            self.misbehaved(&format!(
+                "more than {FLOOD_LIMIT} unsolicited messages in a second"
+            ));
             return;
         }
         match message {
@@ -569,48 +702,62 @@ impl Shared {
                 if limit != 0 && latency > limit {
                     self.violate(
                         PluginStatus::TooMuchLatency,
-                        format!("the plug-in now reports {latency} frames, over {limit}"),
+                        &format!("the plug-in now reports {latency} frames, over {limit}"),
+                        Some(HelperError::TooMuchLatency { latency, limit }),
                     );
                 } else {
-                    let mut events = lock(&self.events);
-                    events.latency = (latency != events.known_latency).then_some(latency);
+                    // Every announcement counts (the reconfigure behind it parked the helper's audio loop); the latest
+                    // wins.
+                    lock(&self.events).latency = Some(latency);
                 }
             }
             HelperMessage::Error { code, detail } => {
-                // The helper cannot run its plug-in any more and is about to exit with code 4. Wait for it, and make
-                // sure.
-                *lock(&self.fatal) = Some((code, detail));
-                if self.wait_exit(EXIT_GRACE).is_none() {
-                    self.kill();
-                }
+                // The helper cannot run its plug-in any more and is about to exit with code 4. It is left to do that: its
+                // own teardown can take seconds, and the supervisor reports the crash from this record.
+                *lock(&self.fatal) = Some((code, clean_detail(&detail)));
             }
             _ => {}
         }
     }
 
-    /// The pipe has ended. Settle how the process ended and fail whatever is still asked.
+    /// The pipe has ended. Fail whatever is still asked, then see the process off.
     fn finish(&self) {
-        if self.wait_exit(EXIT_GRACE).is_none() {
-            self.kill();
-            self.wait_exit(EXIT_GRACE);
-        }
-        let code = self.exited();
-        let detail = lock(&self.violation).as_ref().map(|v| v.detail.clone());
-        let mut queue = lock(&self.queue);
-        queue.closed = true;
-        for pending in queue.pending.drain(..) {
-            if pending.kind.large() {
-                self.large_in_flight.fetch_sub(1, Ordering::SeqCst);
+        // The pipe closes as the process ends, so the code is worth a moment.
+        let code = self.wait_exit(EXIT_CODE_WAIT);
+        let error = lock(&self.violation)
+            .as_ref()
+            .map_or(HelperError::Exited(code), |violation| {
+                violation.error.clone()
+            });
+        {
+            let mut queue = lock(&self.queue);
+            queue.closed = true;
+            for pending in queue.pending.drain(..) {
+                let _ = pending.reply.send(Err(error.clone()));
             }
-            let error = match &detail {
-                Some(detail) => HelperError::Misbehaved(detail.clone()),
-                None => HelperError::Exited(code),
-            };
-            let _ = pending.reply.send(Err(error));
+        }
+        self.slots.notify_all();
+        // A helper that closed its output and does not end is stuck. Its own teardown takes at most 6 seconds.
+        if code.is_none()
+            && self.wait_exit(FINISH_GRACE).is_none()
+            && !self.killed.load(Ordering::SeqCst)
+        {
+            self.misbehaved("the helper closed its output and did not exit");
         }
     }
 }
 
+/// Text from the helper made safe to show: no control or bidirectional formatting characters, at most
+/// `MAX_DETAIL_CHARS`, trimmed.
+fn clean_detail(text: &str) -> String {
+    let bidi = |c: char| matches!(c, '\u{61C}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}');
+    text.chars()
+        .filter(|&c| !c.is_control() && !bidi(c) && c != '\u{feff}')
+        .take(MAX_DETAIL_CHARS)
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
 fn name_of(message: &HelperMessage) -> &'static str {
     match message {
         HelperMessage::Probed { .. } => "a probe result",
@@ -703,7 +850,9 @@ impl HelperProcess {
                 exit_code: Mutex::new(None),
                 killed: AtomicBool::new(false),
                 queue: Mutex::new(Queue::default()),
-                large_in_flight: AtomicUsize::new(0),
+                slots: Condvar::new(),
+                sent: AtomicU64::new(0),
+                routed: AtomicU64::new(0),
                 events: Mutex::new(Events {
                     known_latency: 0,
                     latency: None,
@@ -714,12 +863,13 @@ impl HelperProcess {
                 fatal: Mutex::new(None),
                 latency_limit: AtomicU32::new(0),
                 mono: AtomicBool::new(false),
+                load_started: AtomicBool::new(false),
                 link: OnceLock::new(),
             });
             let started = start_threads(&shared, input, output);
             if let Err(error) = started {
-                shared.kill();
-                let _ = lock(&shared.child).wait();
+                shared.terminate();
+                shared.wait_exit(DROP_WAIT);
                 return Err(HelperError::Spawn(format!(
                     "could not start the helper's threads: {error}"
                 )));
@@ -733,11 +883,13 @@ impl HelperProcess {
     }
 
     /// Makes the ring and the events, duplicates them into the helper, and loads the plug-in. With the protocol's
-    /// [`LOAD_TIMEOUT`] (30 seconds).
+    /// [`LOAD_TIMEOUT`] (30 seconds). `request.bundle` must be an absolute path: the helper's own folder is its working
+    /// directory.
     ///
     /// Any failure but a refusal leaves the helper killed: a helper that has not loaded cannot be used again. A
-    /// [`HelperError::Refused`] (a request that breaks a protocol rule, a bad sample rate, or a second load) is raised before
-    /// anything is sent and leaves the helper as it was. The latency is checked against the cap, and so is the class the helper says it loaded.
+    /// [`HelperError::Refused`] (a request that breaks a protocol rule, a relative path, or a second load) is raised before
+    /// anything is made or sent and leaves the helper as it was. The latency is checked against the cap, and so is the
+    /// class the helper says it loaded. [`link`](Self::link) has a value only after a load that passed.
     pub fn load(&self, request: LoadRequest) -> Result<Loaded, HelperError> {
         self.load_with_timeout(request, LOAD_TIMEOUT)
     }
@@ -766,10 +918,15 @@ impl HelperProcess {
 
     #[cfg(windows)]
     fn load_inner(&self, request: LoadRequest, timeout: Duration) -> Result<Loaded, HelperError> {
-        use std::os::windows::io::AsRawHandle;
+        use tabplayer_plugin_protocol::control::Message;
         let shared = &self.shared;
-        if shared.link.get().is_some() {
+        if shared.load_started.load(Ordering::SeqCst) {
             return Err(HelperError::Refused("the helper is already loaded".into()));
+        }
+        if !request.bundle.is_absolute() {
+            return Err(HelperError::Refused(
+                "the plug-in path must be absolute".into(),
+            ));
         }
         let bundle = request
             .bundle
@@ -778,34 +935,37 @@ impl HelperProcess {
             .to_owned();
         let rate = request.sample_rate;
         let limit = max_latency_frames(rate);
-
-        let ring = Arc::new(MappedRing::create_shared(rate).map_err(HelperError::Refused)?);
-        let input_event = Arc::new(event_handle()?);
-        let output_event = Arc::new(event_handle()?);
-        let mapping = ring.mapping_handle().expect("a shared ring has a mapping");
-        let process = lock(&shared.child).as_raw_handle() as _;
-        let message = HostMessage::Load {
+        // Checked whole, with stand-ins for the handles, before anything is made or given to the helper.
+        let mut message = HostMessage::Load {
             bundle,
             class_id: request.class_id.clone(),
             sample_rate: rate,
             mode: request.mode,
-            ring: duplicate_into(process, mapping, win::MAPPING_ACCESS)?,
-            input_event: duplicate_into(process, input_event.raw(), win::EVENT_ACCESS)?,
-            output_event: duplicate_into(process, output_event.raw(), win::EVENT_ACCESS)?,
+            ring: 1,
+            input_event: 1,
+            output_event: 1,
             app_pid: std::process::id(),
             component: request.component.into(),
             controller: request.controller.into(),
         };
-        let frame = encode(&message)?;
-        shared.latency_limit.store(limit, Ordering::SeqCst);
-        let parts = LinkParts {
-            ring,
-            input_event,
-            _output_event: output_event,
-        };
-        if shared.link.set(parts).is_err() {
+        message.validate().map_err(HelperError::Refused)?;
+        if shared
+            .load_started
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             return Err(HelperError::Refused("the helper is already loaded".into()));
         }
+        let parts = match self.prepare_link(rate, &mut message) {
+            Ok(parts) => parts,
+            Err(error) => {
+                // Nothing reached the helper that it can act on.
+                shared.load_started.store(false, Ordering::SeqCst);
+                return Err(error);
+            }
+        };
+        let frame = Arc::new(encode(&message)?);
+        shared.latency_limit.store(limit, Ordering::SeqCst);
 
         let loaded = match self.exchange(Kind::Load, frame, timeout)? {
             HelperMessage::Loaded {
@@ -836,36 +996,91 @@ impl HelperProcess {
             });
         }
         shared.mono.store(loaded.mono, Ordering::SeqCst);
-        let mut events = lock(&shared.events);
-        events.known_latency = loaded.latency;
-        // An announcement that raced ahead of this call and says what the load said is not news.
-        events.latency = events.latency.filter(|&latency| latency != loaded.latency);
+        lock(&shared.events).known_latency = loaded.latency;
+        // From here the ring and the events are the audio thread's to use.
+        let _ = shared.link.set(parts);
         Ok(loaded)
     }
 
-    /// Sends one encoded request and waits for its reply. A timeout abandons the wait, not the helper.
+    /// Makes the ring and the two events and duplicates them into the helper, writing the helper's handle numbers into
+    /// `message`.
+    #[cfg(windows)]
+    fn prepare_link(&self, rate: u32, message: &mut HostMessage) -> Result<LinkParts, HelperError> {
+        use std::os::windows::io::AsRawHandle;
+        let ring = Arc::new(MappedRing::create_shared(rate).map_err(HelperError::Refused)?);
+        let input_event = Arc::new(event_handle()?);
+        let output_event = Arc::new(event_handle()?);
+        let mapping = ring.mapping_handle().expect("a shared ring has a mapping");
+        let process = lock(&self.shared.child).as_raw_handle() as _;
+        let (given_ring, given_input, given_output) = (
+            duplicate_into(process, mapping, win::MAPPING_ACCESS)?,
+            duplicate_into(process, input_event.raw(), win::EVENT_ACCESS)?,
+            duplicate_into(process, output_event.raw(), win::EVENT_ACCESS)?,
+        );
+        if let HostMessage::Load {
+            ring,
+            input_event,
+            output_event,
+            ..
+        } = message
+        {
+            *ring = given_ring;
+            *input_event = given_input;
+            *output_event = given_output;
+        }
+        Ok(LinkParts {
+            ring,
+            input_event,
+            output_event,
+        })
+    }
+
+    /// Sends one encoded request and waits for its reply. A timeout abandons the wait, not the helper (a load excepted).
+    /// A `Busy` answer, which means nothing was done, is asked again after a moment until the deadline.
     fn exchange(
         &self,
         kind: Kind,
-        frame: Vec<u8>,
+        frame: Frame,
         timeout: Duration,
     ) -> Result<HelperMessage, HelperError> {
-        let receiver = self.shared.submit(kind, frame)?;
-        match receiver.recv_timeout(timeout) {
-            Ok(reply) => reply,
-            Err(RecvTimeoutError::Timeout) => {
-                if kind == Kind::Load {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let receiver = match self.shared.submit(kind, frame.clone(), deadline) {
+                Ok(receiver) => receiver,
+                Err(HelperError::Timeout) if kind == Kind::Load => {
                     self.kill();
+                    return Err(HelperError::LoadTimeout);
                 }
-                Err(HelperError::Timeout)
+                Err(error) => return Err(error),
+            };
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let reply = match receiver.recv_timeout(remaining) {
+                Ok(reply) => reply,
+                Err(RecvTimeoutError::Timeout) => {
+                    return if kind == Kind::Load {
+                        self.kill();
+                        Err(HelperError::LoadTimeout)
+                    } else {
+                        Err(HelperError::Timeout)
+                    };
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(HelperError::Exited(self.exited()));
+                }
+            };
+            match reply {
+                Err(HelperError::Helper {
+                    code: ErrorCode::Busy,
+                    ..
+                }) if Instant::now() + BUSY_BACKOFF < deadline => std::thread::sleep(BUSY_BACKOFF),
+                other => return other,
             }
-            Err(RecvTimeoutError::Disconnected) => Err(HelperError::Exited(self.exited())),
         }
     }
 
     /// Sends a request and returns its reply: 5 seconds, or 30 for `OpenEditor`. `Load`, `Probe` and `Shutdown` have
-    /// their own calls and are refused here. A helper error comes back as [`HelperError::Helper`], including `Busy`,
-    /// which means the helper had no room and nothing was done.
+    /// their own calls and are refused here. A helper error comes back as [`HelperError::Helper`]; `Busy` is asked again
+    /// until the timeout, and is what comes back if it never gives way.
     pub fn request(&self, message: HostMessage) -> Result<HelperMessage, HelperError> {
         let timeout = Kind::of(&message).map_or(REQUEST_TIMEOUT, Kind::timeout);
         self.request_with_timeout(message, timeout)
@@ -881,7 +1096,7 @@ impl HelperProcess {
                 Err(HelperError::Refused("this message has its own call".into()))
             }
             Some(kind) => {
-                let frame = encode(&message)?;
+                let frame = Arc::new(encode(&message)?);
                 self.exchange(kind, frame, timeout)
             }
         }
@@ -939,12 +1154,13 @@ impl HelperProcess {
         HelperError::Misbehaved(format!("{} was not the expected reply", name_of(message)))
     }
 
-    /// The ring and the event of a loaded helper, for the audio thread. None until a load has started.
+    /// The ring and the events of a loaded helper, for the audio thread. None until a load has succeeded.
     pub fn link(&self) -> Option<BridgeLink> {
         let parts = self.shared.link.get()?;
         Some(BridgeLink::new(
             parts.ring.clone(),
             parts.input_event.clone(),
+            parts.output_event.clone(),
         ))
     }
 
@@ -973,12 +1189,14 @@ impl HelperProcess {
     pub fn take_events(&self) -> HelperEvents {
         let mut events = lock(&self.shared.events);
         let latency = events.latency.take();
+        let latency_moved = latency.is_some_and(|latency| latency != events.known_latency);
         if let Some(latency) = latency {
             // The caller re-prepares for it, and the next change is measured from here.
             events.known_latency = latency;
         }
         HelperEvents {
             latency,
+            latency_moved,
             state_dirty: std::mem::take(&mut events.state_dirty),
             editor_closed: std::mem::take(&mut events.editor_closed),
         }
@@ -989,43 +1207,62 @@ impl HelperProcess {
         self.shared.exited()
     }
 
-    /// Ends the process now. Idempotent.
+    /// Waits up to `timeout` for the process to end, and returns its exit code if it did.
+    pub fn wait_for_exit(&self, timeout: Duration) -> Option<i32> {
+        self.shared.wait_exit(timeout)
+    }
+
+    /// Ends the process now. Idempotent. This is the app's decision, so the exit is not reported as a crash.
     pub fn kill(&self) {
         self.shared.kill();
     }
 
-    /// Whether the app ended (or asked to end) the helper, so its exit is not a crash.
+    /// Whether the app ended (or asked to end) the helper, so its exit is not a crash. A violation also ends the helper,
+    /// but is not this: see [`violation`](Self::violation).
     pub fn was_killed(&self) -> bool {
         self.shared.killed.load(Ordering::SeqCst)
     }
 
     /// The first thing the helper did wrong, which also killed it: `Unreadable` or `TooMuchLatency`.
     pub fn violation(&self) -> Option<PluginStatus> {
-        lock(&self.shared.violation).as_ref().map(|v| v.status)
+        lock(&self.shared.violation)
+            .as_ref()
+            .map(|violation| violation.status)
     }
 
     pub fn violation_detail(&self) -> Option<String> {
         lock(&self.shared.violation)
             .as_ref()
-            .map(|v| v.detail.clone())
+            .map(|violation| violation.detail.clone())
     }
 
-    /// An `Error` the helper sent that answered no request. The helper exits after it (code 4).
+    /// An `Error` the helper sent that answered no request, with its detail cleaned. The helper exits after it (code 4),
+    /// which can take several seconds; the supervisor reports it as a crash without waiting for that.
     pub fn fatal_error(&self) -> Option<(ErrorCode, String)> {
         lock(&self.shared.fatal).clone()
     }
 
-    /// Asks the helper to end, and kills it if it has not within a second. Save the state first: nothing is kept.
+    /// Asks the helper to end and returns at once; a helper that has not ended after 8 seconds (its own teardown takes at
+    /// most 6) is killed then. Save the state first: nothing is kept. Keep this `HelperProcess` until
+    /// [`exited`](Self::exited) says it ended, since dropping it kills at once.
     pub fn shutdown(&self) {
         self.shared.killed.store(true, Ordering::SeqCst);
         let mut frame = Vec::new();
         if write_frame(&mut frame, &HostMessage::Shutdown).is_ok() {
             if let Some(writer) = &lock(&self.shared.queue).writer {
-                let _ = writer.send(frame);
+                let _ = writer.send(Arc::new(frame));
             }
         }
-        if self.shared.wait_exit(SHUTDOWN_GRACE).is_none() {
-            self.shared.kill();
+        let shared = self.shared.clone();
+        let watchdog = std::thread::Builder::new()
+            .name("plugin-helper-shutdown".into())
+            .spawn(move || {
+                if shared.wait_exit(SHUTDOWN_GRACE).is_none() {
+                    shared.terminate();
+                }
+            });
+        if watchdog.is_err() {
+            self.shared.terminate();
         }
     }
 }
@@ -1033,7 +1270,8 @@ impl HelperProcess {
 impl Drop for HelperProcess {
     fn drop(&mut self) {
         self.shared.kill();
-        let _ = lock(&self.shared.child).wait();
+        // Bounded: a process stuck in the kernel after the kill is left to the job.
+        self.shared.wait_exit(DROP_WAIT);
         // Closes the writer thread's channel, so it ends and closes the helper's input. The other two threads end when the
         // pipe does.
         lock(&self.shared.queue).writer = None;
@@ -1052,7 +1290,7 @@ fn start_threads(
     mut input: ChildStdin,
     output: ChildStdout,
 ) -> std::io::Result<()> {
-    let (writer, frames) = channel::<Vec<u8>>();
+    let (writer, frames) = channel::<Frame>();
     lock(&shared.queue).writer = Some(writer);
     std::thread::Builder::new()
         .name("plugin-helper-writer".into())
@@ -1067,7 +1305,7 @@ fn start_threads(
                 }
             }
         })?;
-    let (sender, receiver) = sync_channel::<HelperMessage>(CHANNEL_MESSAGES);
+    let (sender, receiver) = sync_channel::<(HelperMessage, usize)>(CHANNEL_MESSAGES);
     let reading = shared.clone();
     std::thread::Builder::new()
         .name("plugin-helper-reader".into())
@@ -1078,7 +1316,6 @@ fn start_threads(
         .spawn(move || dispatching.dispatch_loop(receiver))?;
     Ok(())
 }
-
 #[cfg(windows)]
 fn spawn_child(exe: &Path, options: &HelperOptions) -> Result<Child, HelperError> {
     use std::os::windows::process::CommandExt;
@@ -1181,13 +1418,19 @@ pub fn probe(exe: &Path, bundle: &Path, timeout: Duration) -> Result<Vec<ClassIn
     }
     #[cfg(windows)]
     {
-        let helper = HelperProcess::launch(exe, probe_job()?)?;
+        // The helper's working directory is its own folder, so a relative path would mean something else there.
+        if !bundle.is_absolute() {
+            return Err(HelperError::Refused(
+                "the plug-in path must be absolute".into(),
+            ));
+        }
         let bundle = bundle
             .to_str()
             .ok_or_else(|| HelperError::Refused("the plug-in path is not valid text".into()))?;
-        let frame = encode(&HostMessage::Probe {
+        let frame = Arc::new(encode(&HostMessage::Probe {
             bundle: bundle.to_owned(),
-        })?;
+        })?);
+        let helper = HelperProcess::launch(exe, probe_job()?)?;
         match helper.exchange(Kind::Probe, frame, timeout)? {
             HelperMessage::Probed { classes } => Ok(classes),
             other => Err(helper.unexpected(&other)),
@@ -1284,36 +1527,60 @@ mod tests {
             code,
             detail: String::new(),
         };
-        assert_eq!(HelperError::HostMissing.status(), PluginStatus::HostMissing);
-        assert_eq!(HelperError::Timeout.status(), PluginStatus::Hung);
+        let status = |error: HelperError| error.status();
         assert_eq!(
-            HelperError::Exited(Some(-1)).status(),
-            PluginStatus::Crashed
+            status(HelperError::HostMissing),
+            Some(PluginStatus::HostMissing)
+        );
+        assert_eq!(status(HelperError::LoadTimeout), Some(PluginStatus::Hung));
+        assert_eq!(
+            status(HelperError::Exited(Some(-1))),
+            Some(PluginStatus::Crashed)
         );
         assert_eq!(
-            HelperError::Misbehaved(String::new()).status(),
-            PluginStatus::Unreadable
+            status(HelperError::Misbehaved(String::new())),
+            Some(PluginStatus::Unreadable)
         );
         assert_eq!(
-            HelperError::TooMuchLatency {
+            status(HelperError::TooMuchLatency {
                 latency: 4801,
                 limit: 4800
-            }
-            .status(),
-            PluginStatus::TooMuchLatency
-        );
-        assert_eq!(helper(ErrorCode::NotFound).status(), PluginStatus::Missing);
-        assert_eq!(
-            helper(ErrorCode::RejectedState).status(),
-            PluginStatus::RejectedState
+            }),
+            Some(PluginStatus::TooMuchLatency)
         );
         assert_eq!(
-            helper(ErrorCode::UnsupportedPlatform).status(),
-            PluginStatus::UnsupportedPlatform
+            status(helper(ErrorCode::NotFound)),
+            Some(PluginStatus::Missing)
         );
         assert_eq!(
-            helper(ErrorCode::UnsupportedLayout).status(),
-            PluginStatus::Unreadable
+            status(helper(ErrorCode::RejectedState)),
+            Some(PluginStatus::RejectedState)
+        );
+        assert_eq!(
+            status(helper(ErrorCode::UnsupportedPlatform)),
+            Some(PluginStatus::UnsupportedPlatform)
+        );
+        assert_eq!(
+            status(helper(ErrorCode::UnsupportedLayout)),
+            Some(PluginStatus::Unreadable)
+        );
+        // These say nothing about the plug-in: the slot keeps its status and the call may be made again.
+        assert_eq!(status(HelperError::Timeout), None);
+        assert_eq!(status(helper(ErrorCode::Busy)), None);
+        assert!(HelperError::Timeout.is_transient() && helper(ErrorCode::Busy).is_transient());
+        assert!(!HelperError::Exited(None).is_transient());
+    }
+
+    #[test]
+    fn helper_text_is_made_safe_to_show() {
+        assert_eq!(clean_detail("  plain  "), "plain");
+        assert_eq!(
+            clean_detail("a\u{202e}b\u{7}c\nd\u{feff}e\u{85}f"),
+            "abcdef"
+        );
+        assert_eq!(
+            clean_detail(&"x".repeat(1_000)).chars().count(),
+            MAX_DETAIL_CHARS
         );
     }
 

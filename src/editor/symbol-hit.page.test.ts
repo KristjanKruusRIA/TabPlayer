@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { afterAll, describe, expect, it } from 'vitest';
 import { LayoutMode, model, rendering, Settings } from '@coderline/alphatab';
-import { arrangeScreenPages, paginateScreenScore, unmapScreenPoint, type ScreenRenderChunk } from '../engraving/screen-pages';
+import { accoladeMetrics } from '../engraving/accolades';
+import { arrangeScreenPages, paginateScreenScore, unmapScreenPoint, type ScreenPagination, type ScreenRenderChunk } from '../engraving/screen-pages';
+import { composeScreenChunks, shiftY } from '../engraving/staff-layout';
 import { resolveSymbol } from './symbol-hit';
 
 /**
@@ -40,16 +42,64 @@ function build() {
   const chunks: ScreenRenderChunk[] = [];
   renderer.partialRenderFinished.on(e => { chunks.push({ id: e.id, x: e.x, y: e.y, width: e.width, height: e.height, firstMasterBarIndex: e.firstMasterBarIndex, lastMasterBarIndex: e.lastMasterBarIndex, svg: e.renderResult as string }); });
   renderer.renderScore(score, [0]);
-  return { score, renderer, chunks, pagination: paginateScreenScore(chunks, renderer.boundsLookup!, page) };
+  return { score, renderer, chunks, pagination: paginateScreenScore(chunks, renderer.boundsLookup!, page), tracks: [0] };
 }
 const world = build();
 afterAll(() => world.renderer.destroy());
 
+function buildMultiTrack(staffGaps?: ReadonlyMap<number, number>) {
+  const score = new model.Score();
+  score.title = 'Duet';
+  const guitar = new model.Track(); guitar.name = 'Guitar'; guitar.playbackInfo.program = 25;
+  const guitarStaff = new model.Staff(); guitarStaff.stringTuning.tunings = [64, 59, 55, 50, 45, 40]; guitarStaff.showStandardNotation = true; guitarStaff.showTablature = true;
+  guitar.addStaff(guitarStaff); score.addTrack(guitar);
+
+  const bass = new model.Track(); bass.name = 'Bass'; bass.playbackInfo.program = 33;
+  const bassStaff = new model.Staff(); bassStaff.stringTuning.tunings = [43, 38, 33, 28]; bassStaff.showStandardNotation = true; bassStaff.showTablature = true;
+  bass.addStaff(bassStaff); score.addTrack(bass);
+
+  const chord = new model.Chord(); chord.name = 'Am'; chord.strings = [0, 0, 2, 2, 1, 0]; guitarStaff.addChord('c1', chord);
+
+  for (let i = 0; i < 4; i++) {
+    const master = new model.MasterBar(); score.addMasterBar(master);
+    if (i === 0) master.tempoAutomations = [model.Automation.buildTempoAutomation(false, 0, 120, 2)];
+
+    const gBar = new model.Bar(); gBar.clef = model.Clef.G2;
+    const gVoice = new model.Voice();
+    for (let b = 0; b < 4; b++) {
+      const beat = new model.Beat(); beat.duration = 4; beat.isEmpty = false;
+      const note = new model.Note(); note.string = 6; note.fret = 3; beat.addNote(note); gVoice.addBeat(beat);
+      if (i === 0 && b === 2) beat.chordId = 'c1';
+    }
+    gBar.addVoice(gVoice); guitarStaff.addBar(gBar);
+
+    const bBar = new model.Bar(); bBar.clef = model.Clef.F4;
+    const bVoice = new model.Voice();
+    for (let b = 0; b < 4; b++) {
+      const beat = new model.Beat(); beat.duration = 4; beat.isEmpty = false;
+      const note = new model.Note(); note.string = 4; note.fret = 3; beat.addNote(note); bVoice.addBeat(beat);
+    }
+    bBar.addVoice(bVoice); bassStaff.addBar(bBar);
+  }
+  score.finish(new Settings());
+  const settings = new Settings();
+  settings.core.engine = 'svg'; settings.core.useWorkers = false; settings.core.enableLazyLoading = false; settings.core.includeNoteBounds = true;
+  settings.display.layoutMode = LayoutMode.Page;
+  const renderer = new rendering.ScoreRenderer(settings); renderer.width = 660;
+  let chunks: ScreenRenderChunk[] = [];
+  renderer.partialRenderFinished.on(e => { chunks.push({ id: e.id, x: e.x, y: e.y, width: e.width, height: e.height, firstMasterBarIndex: e.firstMasterBarIndex, lastMasterBarIndex: e.lastMasterBarIndex, svg: e.renderResult as string }); });
+  renderer.renderScore(score, [0, 1]);
+  if (staffGaps?.size) {
+    chunks = composeScreenChunks(chunks, renderer.boundsLookup!, { plan: null, gaps: staffGaps, metrics: accoladeMetrics(new Settings()) });
+  }
+  return { score, renderer, chunks, pagination: paginateScreenScore(chunks, renderer.boundsLookup!, page), tracks: [0, 1] };
+}
+
 interface Found { text: Element; chunk: ScreenRenderChunk; x: number; y: number }
-/** The nth <text> of the rendered chunks that satisfies `want`, with its anchor in chunk coordinates (own x/y, or its group's translate). */
-function findText(want: (content: string) => boolean, nth = 0, firstBar?: number): Found {
+
+function findTextIn(w: { chunks: ScreenRenderChunk[] }, want: (content: string) => boolean, nth = 0, firstBar?: number): Found {
   const found: Found[] = [];
-  for (const chunk of world.chunks.filter(c => firstBar === undefined || c.firstMasterBarIndex === firstBar)) {
+  for (const chunk of w.chunks.filter(c => firstBar === undefined || c.firstMasterBarIndex === firstBar)) {
     const doc = new DOMParser().parseFromString(chunk.svg, 'image/svg+xml');
     for (const text of doc.querySelectorAll('text')) {
       if (!want(text.textContent ?? '')) continue;
@@ -65,21 +115,25 @@ function findText(want: (content: string) => boolean, nth = 0, firstBar?: number
   if (!hit || Number.isNaN(hit.x)) throw new Error('No such rendered text.');
   return hit;
 }
+const findText = (want: (content: string) => boolean, nth = 0, firstBar?: number) => findTextIn(world, want, nth, firstBar);
+
 const glyph = (code: number) => (content: string) => content.codePointAt(0) === code && content.length === String.fromCodePoint(code).length;
 
 type Mode = 'verticalPage' | 'grid';
-/** Click a rendered text at an offset inside it, as ScoreView receives it, and resolve it. */
-function click(found: Found, dx: number, dy: number, zoom: number, mode: Mode, score: model.Score = world.score) {
-  const pagination = world.pagination, arrangement = arrangeScreenPages(pagination, mode, zoom, 2400);
+
+function clickIn(w: { score: model.Score; pagination: ScreenPagination; tracks?: number[] }, found: Found, dx: number, dy: number, zoom: number, mode: Mode, score: model.Score = w.score) {
+  const pagination = w.pagination, arrangement = arrangeScreenPages(pagination, mode, zoom, 2400);
   const block = pagination.blocks.find(b => b.chunk === found.chunk)!, sheet = arrangement.pages[block.page];
-  const point = { x: sheet.x + (block.x + found.chunk.x - block.sourceBounds.x + found.x + dx) * zoom, y: sheet.y + (block.y + found.chunk.y - block.sourceBounds.y + found.y + dy) * zoom };
+  const chunkY = found.chunk.shift ? shiftY(found.chunk.shift, found.chunk.y + found.y + dy, 'top') : found.chunk.y + found.y + dy;
+  const point = { x: sheet.x + (block.x + found.chunk.x - block.sourceBounds.x + found.x + dx) * zoom, y: sheet.y + (block.y + chunkY - block.sourceBounds.y) * zoom };
   const hit = unmapScreenPoint(pagination, arrangement, point);
   const ref = resolveSymbol({
-    score, tracks: [0], text: found.text.textContent ?? '', centered: found.text.getAttribute('text-anchor') === 'middle',
+    score, tracks: w.tracks ?? [0], text: found.text.textContent ?? '', centered: found.text.getAttribute('text-anchor') === 'middle',
     system: hit?.system ?? null, point: hit?.point ?? null, sourceBeat: beat => beat,
   });
-  return { ref, page: block.page };
+  return { ref, page: block.page, hit };
 }
+const click = (found: Found, dx: number, dy: number, zoom: number, mode: Mode, score: model.Score = world.score) => clickIn(world, found, dx, dy, zoom, mode, score);
 
 const zooms = [0.5, 1, 1.5, 2.5];
 
@@ -127,6 +181,76 @@ describe('symbol hits on the paper layouts, rendered by alphaTab', () => {
       expect(click(findText(glyph(TAB), 0, 20), 0, -6, 1, mode).ref).toBeNull();
       const other = new model.Score(); other.title = '3';
       expect(click(findText(content => content === '3', 0, 20), 0, 0, 1, mode, other).ref).toBeNull();
+    });
+  });
+
+  describe('multi-track system and staff-gap shift', () => {
+    const multi = buildMultiTrack();
+    const gapped = buildMultiTrack(new Map([[0, 2]]));
+    afterAll(() => {
+      multi.renderer.destroy();
+      gapped.renderer.destroy();
+    });
+
+    it.each<Mode>(['verticalPage', 'grid'])('distinguishes track 0 and track 1 clefs in the same multi-track system in %s mode', mode => {
+      for (const zoom of [1, 1.5]) {
+        // Track 0 (Guitar) G2 clef
+        const t0 = clickIn(multi, findTextIn(multi, glyph(G2), 0, 0), 0, -6, zoom, mode);
+        expect(t0.ref).toEqual({ kind: 'clef', track: 0, staff: 0, bar: 0 });
+
+        // Track 1 (Bass) F4 clef in the same measure
+        const t1 = clickIn(multi, findTextIn(multi, glyph(F4), 0, 0), 0, -6, zoom, mode);
+        expect(t1.ref).toEqual({ kind: 'clef', track: 1, staff: 0, bar: 0 });
+      }
+    });
+
+    it.each<Mode>(['verticalPage', 'grid'])('finds chord and tempo on the multi-track score in %s mode', mode => {
+      const chord = clickIn(multi, findTextIn(multi, content => content === 'Am', 0, 0), 0, -3, 1, mode);
+      expect(chord.ref).toEqual({ kind: 'chord', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 2 } });
+
+      const tempo = clickIn(multi, findTextIn(multi, content => content === ' = 120', 0, 0), 12, -4, 1, mode);
+      expect(tempo.ref).toEqual({ kind: 'tempo', bar: 0, index: 0 });
+    });
+
+    it('attaches staff shift and opens vertical space between tracks', () => {
+      const systemChunk = gapped.chunks.find(c => c.shift !== undefined);
+      expect(systemChunk).toBeDefined();
+      expect(systemChunk!.shift!.offsets.length).toBeGreaterThan(0);
+      expect(systemChunk!.shift!.cuts.length).toBe(1);
+    });
+
+    it.each<Mode>(['verticalPage', 'grid'])('resolves clefs and chords across staff-gap shift in %s mode', mode => {
+      for (const zoom of zooms) {
+        // Track 0 clef above the cut
+        const t0 = clickIn(gapped, findTextIn(gapped, glyph(G2), 0, 0), 0, -6, zoom, mode);
+        expect(t0.ref).toEqual({ kind: 'clef', track: 0, staff: 0, bar: 0 });
+
+        // Track 1 clef below the cut, shifted downwards on the page
+        const t1 = clickIn(gapped, findTextIn(gapped, glyph(F4), 0, 0), 0, -6, zoom, mode);
+        expect(t1.ref).toEqual({ kind: 'clef', track: 1, staff: 0, bar: 0 });
+
+        // Chord above the gap
+        const chord = clickIn(gapped, findTextIn(gapped, content => content === 'Am', 0, 0), 0, -3, zoom, mode);
+        expect(chord.ref).toEqual({ kind: 'chord', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 2 } });
+      }
+    });
+
+    it('clears symbol hit inside the opened staff gap', () => {
+      const pagination = gapped.pagination, arrangement = arrangeScreenPages(pagination, 'verticalPage', 1, 2400);
+      const chunk = gapped.chunks.find(c => c.shift !== undefined)!;
+      const block = pagination.blocks.find(b => b.chunk === chunk)!;
+      const sheet = arrangement.pages[block.page];
+      const shift = chunk.shift!;
+      // Point inside the opened gap (between cut[0] and cut[0] + offset[0])
+      const gapY = shift.cuts[0] + shift.offsets[0] / 2;
+      const point = { x: sheet.x + block.x + 50, y: sheet.y + block.y + gapY - block.sourceBounds.y };
+      const hit = unmapScreenPoint(pagination, arrangement, point);
+      expect(hit).toBeNull();
+      const ref = resolveSymbol({
+        score: gapped.score, tracks: [0, 1], text: 'Am',
+        system: hit?.system ?? null, point: hit?.point ?? null, sourceBeat: b => b,
+      });
+      expect(ref).toBeNull();
     });
   });
 });

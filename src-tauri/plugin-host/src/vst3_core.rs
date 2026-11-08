@@ -13,7 +13,7 @@ use crate::{
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tabplayer_plugin_protocol::{
     control::{ClassInfo, ErrorCode, Mode, Rect},
     limits::BLOCK_FRAMES,
@@ -22,6 +22,8 @@ use tabplayer_plugin_protocol::{
 
 /// How long a reconfigure waits for the audio thread to park.
 const PAUSE_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long to wait before asking again for a restart that found the audio thread stuck.
+const RETRY_AFTER: Duration = Duration::from_secs(1);
 
 /// What a `restartComponent` call asks the helper to do (preflight ruling P15). Parameter, title, MIDI controller and
 /// note-expression flags stay with the controller and change nothing here: turning a knob must not make the audio dip.
@@ -38,7 +40,12 @@ pub struct RestartPlan {
 pub fn restart_plan(flags: u32) -> RestartPlan {
     let has = |flag: u32| flags & flag != 0;
     RestartPlan {
-        reconfigure: has(RestartFlags::RELOAD_COMPONENT) || has(RestartFlags::IO_CHANGED),
+        // `kLatencyChanged` reconfigures too: Steinberg's workflow deactivates and reactivates the component around the
+        // new latency, and a plug-in that works it out in `setupProcessing` or `setActive` reports the old value
+        // otherwise.
+        reconfigure: has(RestartFlags::RELOAD_COMPONENT)
+            || has(RestartFlags::IO_CHANGED)
+            || has(RestartFlags::LATENCY_CHANGED),
         report_always: has(RestartFlags::IO_CHANGED),
         reread_latency: has(RestartFlags::LATENCY_CHANGED),
     }
@@ -75,6 +82,8 @@ pub struct Vst3Core {
     reported_latency: u32,
     editor_open: bool,
     app_pid: u32,
+    /// A restart that could not be carried out (the audio thread was stuck) is tried again after this.
+    retry_after: Option<Instant>,
 }
 
 fn unreadable(error: impl std::fmt::Display) -> CoreError {
@@ -154,6 +163,7 @@ impl PluginCore for Vst3Core {
             reported_latency,
             editor_open: false,
             app_pid: 0,
+            retry_after: None,
         })
     }
 
@@ -182,6 +192,27 @@ impl PluginCore for Vst3Core {
         }
         // The state may have changed the latency; the plug-in then announces it through `restartComponent`, which
         // `poll` handles. Reading it here keeps `Loaded` honest when the state is part of the load.
+        self.reported_latency = self.instance.latency();
+        Ok(())
+    }
+
+    fn settle_after_load(&mut self) -> Result<(), CoreError> {
+        // A plug-in that announces a latency change while it takes its state (the test plug-in does, and so do real ones)
+        // is deactivated and activated again here, with no audio thread to park. Without this the same restart would
+        // arrive later, while blocks are flowing, and reset the plug-in under them.
+        let flags = self.instance.host().take_restart_flags();
+        if restart_plan(flags).reconfigure {
+            let layout = self
+                .instance
+                .configure(f64::from(self.sample_rate), BLOCK_FRAMES, self.mono)
+                .map_err(unreadable)?;
+            if layout != self.layout {
+                return Err(CoreError::new(
+                    ErrorCode::UnsupportedLayout,
+                    "The plug-in changed its audio layout.",
+                ));
+            }
+        }
         self.reported_latency = self.instance.latency();
         Ok(())
     }
@@ -256,12 +287,20 @@ impl PluginCore for Vst3Core {
 
     fn poll(&mut self, gate: &PauseGate) -> Vec<CoreEvent> {
         let mut events = Vec::new();
-        let flags = self.instance.host().take_restart_flags();
+        let flags = if self.retry_after.is_none_or(|at| Instant::now() >= at) {
+            self.retry_after = None;
+            self.instance.host().take_restart_flags()
+        } else {
+            0
+        };
         if flags != 0 {
             self.restart(flags, gate, &mut events);
         }
         if self.instance.host().take_dirty() {
             events.push(CoreEvent::StateDirty);
+        }
+        if self.editor_open {
+            self.editor.apply_dpi_change();
         }
         if self.editor_open && self.editor.closed_by_user() {
             editor::allow_app_foreground(self.app_pid);
@@ -278,7 +317,10 @@ impl Vst3Core {
         let plan = restart_plan(flags);
         if plan.reconfigure {
             if !gate.pause(PAUSE_TIMEOUT) {
-                // The audio thread is stuck inside the plug-in. The supervisor's heartbeat rule deals with that.
+                // The audio thread is stuck inside the plug-in (the supervisor's heartbeat rule deals with that). The
+                // restart is not lost: it is asked for again in a moment, and done once the thread is back.
+                self.instance.host().requeue_restart_flags(flags);
+                self.retry_after = Some(Instant::now() + RETRY_AFTER);
                 return;
             }
             let result =
@@ -357,7 +399,7 @@ mod tests {
     fn latency_io_and_reload_flags_have_their_own_actions() {
         use RestartFlags as F;
         let latency = restart_plan(F::LATENCY_CHANGED);
-        assert!(latency.reread_latency && !latency.reconfigure && !latency.report_always);
+        assert!(latency.reread_latency && latency.reconfigure && !latency.report_always);
         let io = restart_plan(F::IO_CHANGED);
         assert!(io.reconfigure && io.report_always);
         let reload = restart_plan(F::RELOAD_COMPONENT);
@@ -394,5 +436,184 @@ mod tests {
                 ErrorCode::UnsupportedLayout
             );
         }
+    }
+
+    // ---- the audio thread never allocates ------------------------------------------------------------------------
+
+    use std::alloc::{GlobalAlloc, Layout as AllocLayout, System};
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT_HEAP: Cell<bool> = const { Cell::new(false) };
+        static HEAP_OPERATIONS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    /// Counts heap operations on the threads that switch counting on, and no others.
+    struct CountAllocator;
+    unsafe impl GlobalAlloc for CountAllocator {
+        unsafe fn alloc(&self, layout: AllocLayout) -> *mut u8 {
+            count();
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: AllocLayout) {
+            count();
+            unsafe { System.dealloc(pointer, layout) }
+        }
+        unsafe fn realloc(
+            &self,
+            pointer: *mut u8,
+            layout: AllocLayout,
+            new_size: usize,
+        ) -> *mut u8 {
+            count();
+            unsafe { System.realloc(pointer, layout, new_size) }
+        }
+    }
+    fn count() {
+        // `try_with`: the thread-local may be gone while a thread exits.
+        let _ = COUNT_HEAP.try_with(|flag| {
+            if flag.get() {
+                let _ = HEAP_OPERATIONS.try_with(|n| n.set(n.get() + 1));
+            }
+        });
+    }
+    #[global_allocator]
+    static ALLOCATOR: CountAllocator = CountAllocator;
+
+    /// The heap operations `f` makes on this thread. The plug-in's own allocations are not counted: it is a separate
+    /// Rust library with its own allocator.
+    fn heap_operations(f: impl FnOnce()) -> usize {
+        HEAP_OPERATIONS.with(|n| n.set(0));
+        COUNT_HEAP.with(|flag| flag.set(true));
+        f();
+        COUNT_HEAP.with(|flag| flag.set(false));
+        HEAP_OPERATIONS.with(Cell::get)
+    }
+
+    #[test]
+    fn the_counting_allocator_counts() {
+        let operations = heap_operations(|| drop(std::hint::black_box(vec![1u8; 16])));
+        assert!(operations >= 2, "a count of zero below would prove nothing");
+    }
+
+    /// `AudioPart::process`, through the real processor and the real test plug-in, makes no heap operation: not for a
+    /// block it processes, not for a block the plug-in fails (`kResultFalse` on every call, which a bypassed or
+    /// uninitialised plug-in does), and not for a block that is too large.
+    #[test]
+    #[ignore = "needs: cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin"]
+    fn the_processor_never_allocates_not_even_when_the_plug_in_fails() {
+        use tabplayer_test_plugin::{TestMode, TestState, encode_test_state};
+        let (_guard, _dir, mut core) = load_test_plugin();
+        let mut processor = core.processor().unwrap();
+        let input = [[0.25f32; 2]; BLOCK_FRAMES];
+        let mut output = [[0.0f32; 2]; BLOCK_FRAMES];
+        let meta = BlockMeta::default();
+        // Warm up, so one-off set-up is not counted.
+        processor.process(&input, &mut output, &meta);
+
+        let working = heap_operations(|| {
+            for _ in 0..200 {
+                processor.process(&input, &mut output, &meta);
+            }
+        });
+        assert_eq!(working, 0, "processing blocks allocated");
+        assert_eq!(output[0], [0.25, 0.25]);
+
+        // A plug-in that fails every block.
+        let failing = encode_test_state(&TestState {
+            mode: TestMode::FailProcess,
+            ..TestState::default()
+        });
+        core.set_state(&failing, &[]).unwrap();
+        processor.process(&input, &mut output, &meta);
+        assert_eq!(output[0], [0.0, 0.0], "a failed block is silence");
+        let failing_blocks = heap_operations(|| {
+            for _ in 0..200 {
+                processor.process(&input, &mut output, &meta);
+            }
+        });
+        assert_eq!(failing_blocks, 0, "failing blocks allocated");
+
+        // A block that is too large for the configured size.
+        let big = vec![[0.0f32; 2]; BLOCK_FRAMES + 1];
+        let mut big_out = vec![[0.0f32; 2]; BLOCK_FRAMES + 1];
+        let too_large = heap_operations(|| {
+            for _ in 0..200 {
+                processor.process(&big, &mut big_out, &meta);
+            }
+        });
+        assert_eq!(too_large, 0, "refused blocks allocated");
+    }
+
+    /// The plug-in is loaded into the test process, which has one "main thread" at a time: the tests that do it take turns.
+    static IN_PROCESS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn load_test_plugin() -> (
+        std::sync::MutexGuard<'static, ()>,
+        tempfile::TempDir,
+        Vst3Core,
+    ) {
+        use tabplayer_test_plugin::TEST_CLASS_ID;
+        let guard = IN_PROCESS.lock().unwrap_or_else(|e| e.into_inner());
+        crate::vst3::set_main_thread();
+        let dll = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .and_then(Path::parent)
+            .unwrap()
+            .join("tabplayer_test_plugin.dll");
+        assert!(
+            dll.is_file(),
+            "the test plug-in is not built ({}). Build it first: cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin",
+            dll.display()
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let bundle = dir.path().join("TestGain.vst3");
+        std::fs::copy(&dll, &bundle).unwrap();
+        let core = Vst3Core::load(&bundle, TEST_CLASS_ID, 48_000, Mode::Realtime).unwrap();
+        (guard, dir, core)
+    }
+
+    /// A DPI change Windows reports for the editor window reaches the view: it is told the new scale, and the window is
+    /// sized to the view's new size. (Windows only sends it when a window moves between monitors of different scales,
+    /// and cannot be sent from another process, so the message is sent here, in process.)
+    #[test]
+    #[ignore = "needs: cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin"]
+    fn a_dpi_change_reaches_the_view() {
+        use windows_sys::Win32::Foundation::{HWND, RECT};
+        use windows_sys::Win32::UI::HiDpi::{
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetClientRect, SendMessageW, WM_DPICHANGED,
+        };
+        let (_guard, _dir, mut core) = load_test_plugin();
+        // SAFETY: a plain call; windows made after it are per-monitor aware, as the helper's are.
+        unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        let hwnd = core.open_editor("DPI test", None).unwrap() as usize as HWND;
+        let client = || {
+            let mut rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            // SAFETY: a window of this thread; `rect` is writable.
+            unsafe { GetClientRect(hwnd, &mut rect) };
+            (rect.right, rect.bottom)
+        };
+        // The test plug-in's editor is 300 x 200 at scale 1; the helper told it the window's scale when it opened.
+        let opened = client();
+        assert_eq!(
+            opened.0 * 2,
+            opened.1 * 3,
+            "the editor keeps its 3:2 shape: {opened:?}"
+        );
+        // Windows reports a move to a 200 % monitor (192 dpi): the window procedure notes it, and the next poll tells the view.
+        // SAFETY: sends a message with no pointer to a window of this thread.
+        unsafe { SendMessageW(hwnd, WM_DPICHANGED, 192 | (192 << 16), 0) };
+        core.poll(&PauseGate::default());
+        assert_eq!(client(), (600, 400));
+        core.close_editor();
     }
 }

@@ -78,6 +78,11 @@ pub trait PluginCore: Sized {
     fn state(&mut self) -> Result<(Vec<u8>, Vec<u8>), CoreError>;
     /// Sets one normalized parameter. The id must be one of the plug-in's own; the value is already clamped.
     fn set_parameter(&mut self, id: u32, value: f64) -> Result<(), CoreError>;
+    /// Carries out the restarts the plug-in asked for while it was loading and taking its state, before the audio thread
+    /// exists, so that `latency` is what the plug-in settles on. Call it once, after the load state is set.
+    fn settle_after_load(&mut self) -> Result<(), CoreError> {
+        Ok(())
+    }
     /// The processor side. Call it once, after the state is set.
     fn processor(&mut self) -> Result<Box<dyn BlockProcessor + Send>, CoreError>;
     /// Opens the editor window and returns its handle. `near` is a screen rectangle to centre it in.

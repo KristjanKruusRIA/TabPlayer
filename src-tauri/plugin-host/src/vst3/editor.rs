@@ -27,12 +27,19 @@ impl IPlugFrameTrait for PlugFrame {
         view: *mut sb::IPlugView,
         new_size: *mut sb::ViewRect,
     ) -> sb::tresult {
+        // TabPlayer: the window belongs to the main thread, and resizing it from another thread sends messages to the main
+        // thread synchronously, which can deadlock against a plugin worker the main thread waits for. A plugin that kept
+        // the frame after the editor closed finds a null window.
+        let window = self.window.load(Ordering::Relaxed);
+        if !window::on_main_thread() || window.is_null() {
+            return sb::kResultFalse;
+        }
         // SAFETY: in-pointer from the plugin (or null, handled).
         let Some(r) = (unsafe { new_size.as_mut() }) else {
             return sb::kInvalidArgument;
         };
         let (w, h) = rect_size(r);
-        window::resize(self.window.load(Ordering::Relaxed), w, h);
+        window::resize(window, w, h);
         // SAFETY: the plugin passes its own live view (or null, handled).
         if let Some(v) = unsafe { vst3::ComRef::from_raw(view) } {
             // SAFETY: valid view; `r` is the plugin's own writable rect.
@@ -172,6 +179,7 @@ impl EditorLink {
         }
         // SAFETY: valid view; the parent is the live content view of `win`, of the type named.
         if !ok(unsafe { view.attached(win.parent(), platform) }) {
+            frame.window.store(std::ptr::null_mut(), Ordering::Relaxed);
             // SAFETY: valid view; detach our frame again.
             unsafe { view.setFrame(std::ptr::null_mut()) };
             win.close();
@@ -214,9 +222,47 @@ impl EditorLink {
                 view.setFrame(std::ptr::null_mut());
             }
         }
-        g.frame = None;
+        // TabPlayer: cut the frame off from the window before the window goes, so a late `resizeView` finds nothing.
+        if let Some(frame) = g.frame.take() {
+            frame.window.store(std::ptr::null_mut(), Ordering::Relaxed);
+        }
         if let Some(w) = g.window.take() {
             w.close();
+        }
+    }
+
+    /// Applies a DPI change that Windows reported for the editor's window (`WM_DPICHANGED`): tells the view the new scale,
+    /// reads its size again, resizes the window to match and tells the view. Windows has already moved the window to
+    /// the rectangle it suggests; the view's own size wins. Main thread only; does nothing without an open editor or a
+    /// change.
+    pub fn apply_dpi_change(&self) {
+        if !window::on_main_thread() {
+            return;
+        }
+        let dpi = window::DPI_CHANGED.swap(0, Ordering::AcqRel);
+        if dpi == 0 {
+            return;
+        }
+        let g = self.lock();
+        let (Some(view), Some(win)) = (&g.view, &g.window) else {
+            return;
+        };
+        if let Some(support) = view.cast::<sb::IPlugViewContentScaleSupport>() {
+            // SAFETY: valid view interface.
+            unsafe { support.setContentScaleFactor(dpi as f32 / 96.0) };
+        }
+        let mut r = sb::ViewRect {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        // SAFETY: valid view; `r` is writable.
+        if ok(unsafe { view.getSize(&mut r) }) {
+            let (w, h) = rect_size(&r);
+            window::resize(win.raw(), w, h);
+            // SAFETY: valid, attached view; `r` is the rectangle it just reported.
+            unsafe { view.onSize(&mut r) };
         }
     }
 

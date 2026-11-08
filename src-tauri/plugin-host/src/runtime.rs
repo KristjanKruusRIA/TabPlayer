@@ -4,8 +4,9 @@
 //! - **main**: loads the plug-in and then runs a Win32 message loop. It owns the controller, the editor window and the
 //!   [`Session`]. Requests reach it through a message-only window (preflight ruling P5), because a thread message is
 //!   dropped while the thread is in a modal loop (a licence dialog, a menu, a window being moved).
-//! - **reader**: reads control frames from the private stdin, queues them (at most [`QUEUE_LIMIT`] waiting) and posts a
-//!   window message. It also ends the process when the pipe closes, even if the main thread is stuck in a plug-in.
+//! - **reader**: reads control frames from the private stdin, queues them and posts a window message. It never waits
+//!   for the main thread (a request with no room is queued as a refusal), so it also ends the process when the pipe
+//!   closes, even if the main thread is stuck in a plug-in.
 //! - **audio**: [`audio::run`]. Its heartbeat is the app's watchdog, so a plug-in that stalls the main thread (a dialog)
 //!   does not look like a hang, and one that stalls the audio thread does.
 use crate::{
@@ -22,7 +23,7 @@ use std::fs::File;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use tabplayer_plugin_protocol::control::{
     ErrorCode, FrameError, HelperMessage, HostMessage, read_frame, write_frame,
@@ -45,9 +46,13 @@ const WM_EVENT: u32 = WM_APP + 2;
 const TICK_MS: u32 = 50;
 /// Requests the reader holds before it stops reading. The app waits for each answer, so this is a bound, not a pipeline.
 const QUEUE_LIMIT: usize = 4;
+/// Items waiting past which the peer is flooding the helper, and it ends.
+const FLOOD_LIMIT: usize = 64;
 /// How long the helper waits for the audio thread, and for the plug-in's teardown, before it ends the process anyway.
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
 const EXIT_WATCHDOG: Duration = Duration::from_secs(3);
+/// How long a reconfigure may park the audio thread before its heartbeat stops (a plug-in hung in `setActive`).
+const PAUSE_BEAT_LIMIT: Duration = Duration::from_secs(10);
 
 static WAKE_HWND: AtomicIsize = AtomicIsize::new(0);
 
@@ -114,69 +119,81 @@ impl Emit for Arc<ControlOut> {
 
 enum Item {
     Request(HostMessage),
+    /// A frame that did not parse. Queued so the main thread answers it in its turn, behind the requests before it.
+    Malformed,
+    /// A request the helper had no room for (the main thread is busy inside a plug-in). Answered in its turn as well.
+    Refused,
     /// The pipe closed (code 0) or broke (code 1): end the helper.
     Quit(i32),
 }
 
 struct Queue {
     items: Mutex<VecDeque<Item>>,
-    drained: Condvar,
 }
 
 impl Queue {
-    fn push(&self, item: Item) {
+    /// Queues an item. The reader never waits for the main thread, so it keeps reading and sees the pipe close even when
+    /// the main thread is stuck: a request past [`QUEUE_LIMIT`] waiting is queued as a small [`Item::Refused`] instead
+    /// (its payload is dropped, which bounds memory), and past [`FLOOD_LIMIT`] items the peer is flooding and the call
+    /// returns false.
+    fn push(&self, item: Item) -> bool {
         let mut items = self.items.lock().unwrap_or_else(PoisonError::into_inner);
-        if matches!(item, Item::Request(_)) {
-            while items.len() >= QUEUE_LIMIT {
-                items = self
-                    .drained
-                    .wait_timeout(items, Duration::from_millis(50))
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .0;
-            }
+        if items.len() >= FLOOD_LIMIT {
+            return false;
         }
+        let item = match item {
+            Item::Request(_) if items.len() >= QUEUE_LIMIT => Item::Refused,
+            other => other,
+        };
         items.push_back(item);
+        true
     }
 
     fn pop(&self) -> Option<Item> {
-        let mut items = self.items.lock().unwrap_or_else(PoisonError::into_inner);
-        let item = items.pop_front();
-        if item.is_some() {
-            self.drained.notify_all();
-        }
-        item
+        self.items
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .pop_front()
     }
 }
 
+/// Wakes the main thread's message window for a queued request. It is a window message, not a thread message
+/// (`PostThreadMessageW`): a thread message is dropped while the thread runs a modal loop, a window message is
+/// dispatched to the window procedure by any loop of the thread.
 fn post_request(hwnd: isize) {
     // SAFETY: posting to a window of another thread is allowed; a stale handle fails harmlessly.
     unsafe { PostMessageW(hwnd as HWND, WM_REQUEST, 0, 0) };
 }
 
-fn reader(mut input: File, queue: Arc<Queue>, hwnd: isize, out: Arc<ControlOut>) {
+fn reader(mut input: File, queue: Arc<Queue>, hwnd: isize) {
     loop {
-        match read_frame::<HostMessage>(&mut input) {
-            Ok(request) => {
-                queue.push(Item::Request(request));
-                post_request(hwnd);
-            }
+        let item = match read_frame::<HostMessage>(&mut input) {
+            Ok(request) => Item::Request(request),
             // A whole frame was consumed: the stream is still aligned.
-            Err(FrameError::Malformed(_) | FrameError::Invalid(_)) => {
-                out.emit(HelperMessage::error(
-                    ErrorCode::BadRequest,
-                    "The request was malformed.",
-                ));
-            }
-            Err(error) => {
-                let code = i32::from(!matches!(error, FrameError::Closed));
-                queue.push(Item::Quit(code));
-                post_request(hwnd);
-                // If the main thread is stuck inside a plug-in it will never get to the quit. The pipe is closed, so
-                // nobody waits for the helper: end it.
-                std::thread::sleep(EXIT_WATCHDOG);
-                terminate(code);
-            }
+            Err(FrameError::Malformed(_) | FrameError::Invalid(_)) => Item::Malformed,
+            // A closed pipe is a clean end, a broken one is not.
+            Err(error) => Item::Quit(i32::from(!matches!(error, FrameError::Closed))),
+        };
+        let code = match item {
+            Item::Quit(code) => code,
+            _ => 1,
+        };
+        let ends = matches!(item, Item::Quit(_));
+        if !ends && queue.push(item) {
+            post_request(hwnd);
+            continue;
         }
+        if ends {
+            let _ = queue.push(Item::Quit(code));
+        } else {
+            // Flooded: end the helper.
+            let _ = queue.push(Item::Quit(1));
+        }
+        post_request(hwnd);
+        // If the main thread is stuck inside a plug-in it will never get to the quit. Nobody is waiting for the helper
+        // any more: end it.
+        std::thread::sleep(EXIT_WATCHDOG);
+        terminate(code);
     }
 }
 
@@ -197,6 +214,14 @@ fn pump(main: &mut Main) {
         let flow = match item {
             Item::Quit(code) => Flow::Exit(code),
             Item::Request(request) => main.session.handle(request),
+            Item::Malformed => {
+                main.session.refuse("The request was malformed.");
+                Flow::Continue
+            }
+            Item::Refused => {
+                main.session.refuse("The helper is busy.");
+                Flow::Continue
+            }
         };
         if let Flow::Exit(code) = flow {
             main.exit = Some(code);
@@ -277,6 +302,11 @@ fn create_message_window() -> Option<HWND> {
 // ---- the process -----------------------------------------------------------------------------------------------
 
 /// Runs `f`; a panic is reported to the app and ends the helper with code 3.
+///
+/// Only Rust panics are caught. A C++ exception or a structured-exception fault coming out of plug-in code is not: it ends
+/// the process with the system's exception code (the helper has no handler for it, and the error mode set in
+/// [`winio::harden_process`] keeps Windows from showing a dialog). So any nonzero exit means the helper failed, and 3 means
+/// only a panic of the helper's own.
 fn guarded<R>(out: &Arc<ControlOut>, f: impl FnOnce() -> R) -> R {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(value) => value,
@@ -299,6 +329,9 @@ fn failed(out: &Arc<ControlOut>, error: CoreError) -> i32 {
 /// The helper's `main`. The returned code is the process's exit code.
 pub fn main() -> i32 {
     vst3::set_main_thread();
+    // First: a plug-in crash must end the helper and not raise a dialog or wait for Windows Error Reporting, and the
+    // current directory must not be a place a plug-in's own `LoadLibrary` looks in.
+    winio::harden_process();
     winio::set_dpi_awareness();
     // Before any module loads: the plug-ins' own output must not reach the control pipe (preflight ruling P4).
     let Ok(stdio) = winio::take_stdio() else {
@@ -421,6 +454,9 @@ fn run_session(out: &Arc<ControlOut>, input: File, params: Params) -> i32 {
             return failed(out, error);
         }
     }
+    if let Err(error) = guarded(out, || core.settle_after_load()) {
+        return failed(out, error);
+    }
     let processor = match guarded(out, || core.processor()) {
         Ok(processor) => processor,
         Err(error) => return failed(out, error),
@@ -437,6 +473,7 @@ fn run_session(out: &Arc<ControlOut>, input: File, params: Params) -> i32 {
         gate: gate.clone(),
         stop: stop.clone(),
         idle_timeout: audio::IDLE_TIMEOUT,
+        pause_beat_limit: PAUSE_BEAT_LIMIT,
     };
     let audio_out = out.clone();
     let audio_thread = std::thread::Builder::new()
@@ -468,7 +505,6 @@ fn run_session(out: &Arc<ControlOut>, input: File, params: Params) -> i32 {
     };
     let queue = Arc::new(Queue {
         items: Mutex::new(VecDeque::new()),
-        drained: Condvar::new(),
     });
     MAIN.with(|cell| {
         *cell.borrow_mut() = Some(Main {
@@ -480,11 +516,10 @@ fn run_session(out: &Arc<ControlOut>, input: File, params: Params) -> i32 {
     // SAFETY: a timer on the message window of this thread; no callback, so it posts `WM_TIMER`.
     unsafe { SetTimer(hwnd, 1, TICK_MS, None) };
     out.emit(loaded);
-    let reader_out = out.clone();
     let reader_hwnd = hwnd as isize;
     if std::thread::Builder::new()
         .name("reader".into())
-        .spawn(move || reader(input, queue, reader_hwnd, reader_out))
+        .spawn(move || reader(input, queue, reader_hwnd))
         .is_err()
     {
         stop.store(true, Ordering::Release);
@@ -525,4 +560,49 @@ fn run_session(out: &Arc<ControlOut>, input: File, params: Params) -> i32 {
     let session = MAIN.with(|cell| cell.borrow_mut().take());
     drop(session);
     code
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_request_with_no_room_is_refused_in_its_turn_and_a_flood_ends_the_helper() {
+        let queue = Queue {
+            items: Mutex::new(VecDeque::new()),
+        };
+        for _ in 0..QUEUE_LIMIT {
+            assert!(queue.push(Item::Request(HostMessage::GetState)));
+        }
+        // The reader is not blocked: the next requests are queued as refusals, behind the ones before them.
+        assert!(queue.push(Item::Request(HostMessage::GetState)));
+        assert!(queue.push(Item::Malformed));
+        let mut seen = Vec::new();
+        while let Some(item) = queue.pop() {
+            seen.push(match item {
+                Item::Request(_) => "request",
+                Item::Refused => "refused",
+                Item::Malformed => "malformed",
+                Item::Quit(_) => "quit",
+            });
+        }
+        assert_eq!(
+            seen,
+            [
+                "request",
+                "request",
+                "request",
+                "request",
+                "refused",
+                "malformed"
+            ]
+        );
+        // Past the flood limit nothing is queued, so the reader ends the helper.
+        let mut accepted = 0;
+        while queue.push(Item::Malformed) {
+            accepted += 1;
+            assert!(accepted <= FLOOD_LIMIT);
+        }
+        assert_eq!(accepted, FLOOD_LIMIT);
+    }
 }

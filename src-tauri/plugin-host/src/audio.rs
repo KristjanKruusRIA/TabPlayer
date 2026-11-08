@@ -77,6 +77,9 @@ pub struct AudioLoop {
     pub gate: Arc<PauseGate>,
     pub stop: Arc<AtomicBool>,
     pub idle_timeout: Duration,
+    /// How long a pause keeps the heartbeat moving. A reconfigure that takes longer is a hang in the plug-in (its
+    /// `setActive` or `setupProcessing`), and the heartbeat then stops so the app's supervisor sees it.
+    pub pause_beat_limit: Duration,
 }
 
 type Frames = [[f32; 2]; BLOCK_FRAMES];
@@ -94,10 +97,13 @@ pub fn run(mut audio: AudioLoop) {
         if audio.gate.requested.load(Ordering::Acquire) {
             audio.processor.reset();
             audio.gate.paused.store(true, Ordering::Release);
+            let parked = std::time::Instant::now();
             while audio.gate.requested.load(Ordering::Acquire)
                 && !audio.stop.load(Ordering::Acquire)
             {
-                audio.ring.beat();
+                if parked.elapsed() < audio.pause_beat_limit {
+                    audio.ring.beat();
+                }
                 std::thread::sleep(Duration::from_millis(2));
             }
             audio.gate.paused.store(false, Ordering::Release);
@@ -222,6 +228,7 @@ mod tests {
         stop: Arc<AtomicBool>,
         resets: Arc<AtomicUsize>,
         calls: Arc<AtomicUsize>,
+        pause_beat_limit: Duration,
         thread: Option<std::thread::JoinHandle<()>>,
     }
 
@@ -238,6 +245,7 @@ mod tests {
                 stop: Arc::new(AtomicBool::new(false)),
                 resets: Arc::new(AtomicUsize::new(0)),
                 calls: Arc::new(AtomicUsize::new(0)),
+                pause_beat_limit: Duration::from_secs(60),
                 thread: None,
             }
         }
@@ -254,6 +262,7 @@ mod tests {
                 gate: self.gate.clone(),
                 stop: self.stop.clone(),
                 idle_timeout: Duration::from_millis(5),
+                pause_beat_limit: self.pause_beat_limit,
             };
             self.thread = Some(std::thread::spawn(move || run(audio)));
         }
@@ -439,6 +448,28 @@ mod tests {
             rig.gate.resume();
             assert!(!rig.gate.paused.load(Ordering::SeqCst));
         }
+        rig.stop();
+    }
+
+    #[test]
+    fn a_pause_that_goes_on_too_long_stops_the_heartbeat() {
+        let mut rig = Rig::new();
+        rig.pause_beat_limit = Duration::from_millis(60);
+        rig.start();
+        assert!(rig.gate.pause(Duration::from_secs(2)));
+        // For a while it beats, so a normal reconfigure is not mistaken for a hang.
+        let beat = rig.host.heartbeat();
+        std::thread::sleep(Duration::from_millis(30));
+        assert!(rig.host.heartbeat() > beat);
+        // Then it stops: the app's supervisor sees a helper that has gone quiet.
+        std::thread::sleep(Duration::from_millis(120));
+        let frozen = rig.host.heartbeat();
+        std::thread::sleep(Duration::from_millis(80));
+        assert_eq!(rig.host.heartbeat(), frozen);
+        // And it beats again when the pause ends.
+        rig.gate.resume();
+        std::thread::sleep(Duration::from_millis(40));
+        assert!(rig.host.heartbeat() > frozen);
         rig.stop();
     }
 

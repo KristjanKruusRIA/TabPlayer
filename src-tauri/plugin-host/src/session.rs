@@ -1,5 +1,9 @@
 //! The main thread's side of one loaded plug-in: it answers the app's requests and relays what the core notices.
 //!
+//! Every request gets exactly one reply, in the order the requests arrived: a result, `Done` or `Error`. (`Shutdown`
+//! ends the helper and has none.) `EditorClosed` is both the reply to `CloseEditor` and an unsolicited message when the
+//! user closes the window, so a receiver takes a repeat as harmless.
+//!
 //! Every call into the core is wrapped in `catch_unwind`. A panic sends `Error { Internal }` and ends the helper with
 //! exit code 3, so the app sees one failed helper instead of a hang. Unsolicited messages (`StateDirty`,
 //! `LatencyChanged`) are coalesced and rate limited here, because the app kills a helper that sends more than 64 a
@@ -83,6 +87,13 @@ impl<C: PluginCore, E: Emit> Session<C, E> {
         self.out.emit(error.message());
     }
 
+    /// Answers a request that never reached the core (a frame that did not parse, or one the helper had no room for), in
+    /// its turn: the reader queues the refusal behind the requests before it, so replies stay in request order.
+    pub fn refuse(&self, detail: &str) {
+        self.out
+            .emit(HelperMessage::error(ErrorCode::BadRequest, detail));
+    }
+
     /// Answers one request.
     pub fn handle(&mut self, request: HostMessage) -> Flow {
         match request {
@@ -96,7 +107,7 @@ impl<C: PluginCore, E: Emit> Session<C, E> {
                 component,
                 controller,
             } => match self.guarded(|c| c.set_state(&component, &controller)) {
-                Ok(Ok(())) => {}
+                Ok(Ok(())) => self.out.emit(HelperMessage::Done),
                 Ok(Err(error)) => self.fail(error),
                 Err(flow) => return flow,
             },
@@ -121,7 +132,7 @@ impl<C: PluginCore, E: Emit> Session<C, E> {
             HostMessage::SetParameter { id, value } => {
                 let value = HostMessage::clamp_parameter(value);
                 match self.guarded(|c| c.set_parameter(id, value)) {
-                    Ok(Ok(())) => {}
+                    Ok(Ok(())) => self.out.emit(HelperMessage::Done),
                     Ok(Err(error)) => self.fail(error),
                     Err(flow) => return flow,
                 }
@@ -294,7 +305,7 @@ mod tests {
             controller: vec![4].into(),
         };
         assert_eq!(s.handle(set), Flow::Continue);
-        assert!(seen.borrow().is_empty(), "SetState has no reply on success");
+        assert_eq!(*seen.borrow(), [HelperMessage::Done]);
         s.handle(HostMessage::GetState);
         assert_eq!(
             seen.borrow().last(),
@@ -345,6 +356,7 @@ mod tests {
         s.handle(HostMessage::SetParameter { id: 1, value: 3.0 });
         s.handle(HostMessage::SetParameter { id: 7, value: -2.0 });
         assert_eq!(s.core_mut().set, [(1, 1.0), (7, 0.0)]);
+        assert_eq!(*seen.borrow(), [HelperMessage::Done, HelperMessage::Done]);
         s.handle(HostMessage::SetParameter { id: 99, value: 0.5 });
         assert!(matches!(
             seen.borrow().last(),
@@ -407,6 +419,44 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn every_request_gets_exactly_one_reply() {
+        let (mut s, seen) = session(Fake {
+            known: vec![1],
+            ..Fake::default()
+        });
+        let requests = [
+            HostMessage::Probe {
+                bundle: "x.vst3".into(),
+            },
+            HostMessage::SetState {
+                component: vec![1].into(),
+                controller: Vec::new().into(),
+            },
+            HostMessage::GetState,
+            HostMessage::SetParameter { id: 1, value: 0.5 },
+            HostMessage::SetParameter { id: 9, value: 0.5 },
+            HostMessage::OpenEditor {
+                title: String::new(),
+                near: None,
+            },
+            HostMessage::CloseEditor,
+        ];
+        for request in requests {
+            let before = seen.borrow().len();
+            assert_eq!(s.handle(request.clone()), Flow::Continue);
+            assert_eq!(seen.borrow().len(), before + 1, "{request:?}");
+        }
+        // A refusal is a reply too.
+        let before = seen.borrow().len();
+        s.refuse("busy");
+        assert_eq!(seen.borrow().len(), before + 1);
+        // The helper is silent only when it ends.
+        let before = seen.borrow().len();
+        assert_eq!(s.handle(HostMessage::Shutdown), Flow::Exit(0));
+        assert_eq!(seen.borrow().len(), before);
     }
 
     #[test]

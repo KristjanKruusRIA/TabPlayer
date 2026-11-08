@@ -311,6 +311,42 @@ mod windows_helper {
             self.ring.as_ref().unwrap().host.heartbeat()
         }
 
+        /// Waits until the heartbeat has not moved for `still`, and returns it. Fails after `limit`.
+        fn wait_until_still(&self, still: Duration, limit: Duration) -> u64 {
+            let start = Instant::now();
+            let mut value = self.heartbeat();
+            let mut since = Instant::now();
+            loop {
+                std::thread::sleep(Duration::from_millis(10));
+                let now = self.heartbeat();
+                if now != value {
+                    value = now;
+                    since = Instant::now();
+                } else if since.elapsed() >= still {
+                    return value;
+                }
+                assert!(start.elapsed() < limit, "the heartbeat never stopped");
+            }
+        }
+
+        /// Writes bytes to the helper's input as they are, to send what `write_frame` would refuse.
+        fn send_raw(&mut self, bytes: &[u8]) {
+            use std::io::Write;
+            let stdin = self.stdin.as_mut().expect("stdin is open");
+            stdin.write_all(bytes).unwrap();
+            stdin.flush().unwrap();
+        }
+
+        /// The next message that is not an unsolicited `StateDirty` or `LatencyChanged`.
+        fn recv_reply(&self) -> HelperMessage {
+            loop {
+                match self.recv() {
+                    HelperMessage::StateDirty | HelperMessage::LatencyChanged { .. } => {}
+                    other => return other,
+                }
+            }
+        }
+
         fn wait_exit(&mut self, timeout: Duration) -> Option<std::process::ExitStatus> {
             let start = Instant::now();
             loop {
@@ -349,6 +385,15 @@ mod windows_helper {
     /// The `n`th input sample of the ramp: a value a float holds exactly, never zero.
     fn ramp(n: usize) -> f32 {
         ((n % 1000) + 1) as f32 / 1024.0
+    }
+
+    /// The controller part of the plug-in's state: the test plug-in writes the process mode it was set up with.
+    fn controller_state(helper: &mut Helper) -> Vec<u8> {
+        helper.send(&HostMessage::GetState);
+        match helper.recv_reply() {
+            HelperMessage::State { controller, .. } => controller.0,
+            other => panic!("expected State, got {other:?}"),
+        }
     }
 
     fn expect_error(message: HelperMessage, wanted: ErrorCode) {
@@ -501,16 +546,24 @@ mod windows_helper {
                 controller: Vec::new().into(),
             });
             helper.send(&HostMessage::GetState);
-            // Changing the latency is announced; the state comes back either side of it.
+            // Every request gets one reply, in order: `Done` for the state, then the state. Changing the latency is
+            // announced as well, whenever the helper notices.
             let mut got = None;
+            let mut done = false;
             while got.is_none() {
                 match helper.recv() {
+                    HelperMessage::Done => {
+                        assert!(got.is_none(), "Done comes before the state that was asked for after it");
+                        assert!(!done, "one Done");
+                        done = true;
+                    }
                     HelperMessage::State { component, .. } => got = Some(component.0),
                     HelperMessage::LatencyChanged { latency } => assert_eq!(latency, 200),
                     HelperMessage::StateDirty => {}
                     other => panic!("unexpected {other:?}"),
                 }
             }
+            assert!(done);
             let decoded = decode_test_state(&got.unwrap()).unwrap();
             assert_eq!((decoded.gain, decoded.latency), (0.75, 200));
             // A state the plug-in rejects is reported, and the helper goes on.
@@ -597,9 +650,9 @@ mod windows_helper {
             let idle = helper.heartbeat();
             assert!(idle > 0, "alive before the hang");
             helper.ring().send(&block_of(0.5), &meta());
-            std::thread::sleep(Duration::from_millis(150));
-            let stuck = helper.heartbeat();
-            // The supervisor kills a helper whose heartbeat has not moved for 500 ms.
+            // It freezes (no fixed sleep: wait until it has not moved for 100 ms), and then it stays frozen for longer
+            // than the supervisor's 500 ms.
+            let stuck = helper.wait_until_still(Duration::from_millis(100), Duration::from_secs(5));
             std::thread::sleep(Duration::from_millis(550));
             assert_eq!(helper.heartbeat(), stuck, "the heartbeat is frozen");
             // The main thread still answers: a hung plug-in on the audio thread does not look like a hung helper.
@@ -611,20 +664,42 @@ mod windows_helper {
         }
 
         fn oversized_state_from_plugin_is_refused() {
-            // 9 MiB of padding: a state the helper must refuse to produce.
-            let mut helper = Helper::spawn(&[("TABPLAYER_TEST_PLUGIN_STATE_PADDING", "9437184")]);
+            // 9 MiB of padding: a state the helper must refuse to produce. Both plug-ins that report the failed write
+            // (`kResultFalse`) and ones that carry on and return `kResultOk`, as the SDK's own examples do.
+            for ignore_failure in [None, Some(("TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE", "1"))] {
+                let mut env = vec![("TABPLAYER_TEST_PLUGIN_STATE_PADDING", "9437184")];
+                env.extend(ignore_failure);
+                let mut helper = Helper::spawn(&env);
+                helper.loaded(state(1.0, 0, TestMode::Normal));
+                helper.send(&HostMessage::GetState);
+                expect_error(helper.recv_reply(), ErrorCode::StateTooLarge);
+                // Nothing over the cap followed: the next thing the helper says is an ordinary answer, and no frame failed.
+                helper.send(&HostMessage::CloseEditor);
+                assert_eq!(helper.recv_reply(), HelperMessage::EditorClosed);
+                assert!(helper.rx.try_iter().all(|received| received.is_ok()));
+            }
+        }
+
+        fn a_state_at_the_cap_is_accepted_and_comes_back() {
+            let mut helper = Helper::spawn(&[]);
             helper.loaded(state(1.0, 0, TestMode::Normal));
-            helper.send(&HostMessage::GetState);
-            expect_error(helper.recv(), ErrorCode::StateTooLarge);
-            // Nothing over the cap followed: the next thing the helper says is an ordinary answer, and no frame failed.
-            helper.send(&HostMessage::CloseEditor);
-            assert_eq!(helper.recv(), HelperMessage::EditorClosed);
-            // A state at the cap is still fine to give the plug-in.
+            // As large as a container may be: the component, one byte of controller state and the 20 bytes of framing
+            // fit in the cap with a few bytes to spare.
             let at_cap = encode_test_state(&TestState {
-                padding: (MAX_STATE_BYTES - STATE_OVERHEAD - 64) as u32,
+                padding: (MAX_STATE_BYTES - STATE_OVERHEAD - 1 - 64 - 23) as u32,
                 ..TestState::default()
             });
-            assert!(at_cap.len() < MAX_STATE_BYTES);
+            assert!(at_cap.len() + 1 + STATE_OVERHEAD <= MAX_STATE_BYTES);
+            helper.send(&HostMessage::SetState {
+                component: at_cap.clone().into(),
+                controller: Vec::new().into(),
+            });
+            assert_eq!(helper.recv_reply(), HelperMessage::Done);
+            helper.send(&HostMessage::GetState);
+            match helper.recv_reply() {
+                HelperMessage::State { component, .. } => assert!(component.0 == at_cap),
+                other => panic!("expected State, got {other:?}"),
+            }
         }
 
         fn offline_mode_processes_synchronously() {
@@ -637,6 +712,12 @@ mod windows_helper {
                 let out = helper.ring().round_trip(&block_of(0.8), &meta());
                 assert!(out.iter().all(|f| *f == [0.4, 0.4]));
             }
+            // The plug-in saw `kOffline` (2) in `setupProcessing`: its controller state is that one byte.
+            assert_eq!(controller_state(&mut helper), [2]);
+            // And a realtime load saw `kRealtime` (0).
+            let mut realtime = Helper::spawn(&[]);
+            realtime.loaded(state(0.5, 0, TestMode::Normal));
+            assert_eq!(controller_state(&mut realtime), [0]);
         }
 
         fn latency_change_is_reported() {
@@ -644,8 +725,10 @@ mod windows_helper {
             assert_eq!(helper.loaded(state(1.0, 0, TestMode::Normal)), 0);
             // Parameter 1 is the latency: frames / 48,000.
             helper.send(&HostMessage::SetParameter { id: 1, value: 480.0 / 48_000.0 });
+            let mut done = false;
             loop {
                 match helper.recv() {
+                    HelperMessage::Done => done = true,
                     HelperMessage::LatencyChanged { latency } => {
                         assert_eq!(latency, 480);
                         break;
@@ -654,6 +737,7 @@ mod windows_helper {
                     other => panic!("unexpected {other:?}"),
                 }
             }
+            assert!(done, "the request was answered");
             // The processor got the value as well: the delay is 480 frames now.
             let out = helper.ring().round_trip(&block_of(1.0), &meta());
             assert!(out.iter().all(|f| *f == [0.0, 0.0]), "delayed by the new latency");
@@ -666,16 +750,13 @@ mod windows_helper {
             expect_error(helper.recv(), ErrorCode::BadRequest);
             // A known parameter with a value out of range is clamped, not refused.
             helper.send(&HostMessage::SetParameter { id: 0, value: 42.0 });
+            assert_eq!(helper.recv_reply(), HelperMessage::Done);
             helper.send(&HostMessage::GetState);
-            loop {
-                match helper.recv() {
-                    HelperMessage::State { component, .. } => {
-                        assert_eq!(decode_test_state(&component).unwrap().gain, 1.0);
-                        break;
-                    }
-                    HelperMessage::StateDirty => {}
-                    other => panic!("unexpected {other:?}"),
+            match helper.recv_reply() {
+                HelperMessage::State { component, .. } => {
+                    assert_eq!(decode_test_state(&component).unwrap().gain, 1.0);
                 }
+                other => panic!("unexpected {other:?}"),
             }
         }
 
@@ -762,6 +843,35 @@ mod windows_helper {
             helper.ring().round_trip(&block_of(1.0), &meta());
         }
 
+        fn a_malformed_frame_is_answered_in_its_turn() {
+            let mut helper = Helper::spawn(&[]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            helper.send(&HostMessage::GetState);
+            // A whole frame that is not a message: four bytes of length, then three bytes that are not JSON.
+            helper.send_raw(&[3, 0, 0, 0, b'x', b'y', b'z']);
+            helper.send(&HostMessage::GetState);
+            assert!(matches!(helper.recv_reply(), HelperMessage::State { .. }));
+            expect_error(helper.recv_reply(), ErrorCode::BadRequest);
+            assert!(matches!(helper.recv_reply(), HelperMessage::State { .. }));
+        }
+
+        fn a_closed_pipe_ends_the_helper_even_when_its_main_thread_is_stuck() {
+            // The editor blocks the main thread for 20 s. More requests than the queue holds pile up behind it; the
+            // reader goes on reading, so it still sees the pipe close and ends the helper (after its 3 s watchdog).
+            let mut helper = Helper::spawn(&[("TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS", "20000")]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            helper.send(&HostMessage::OpenEditor { title: String::new(), near: None });
+            std::thread::sleep(Duration::from_millis(300));
+            for _ in 0..8 {
+                helper.send(&HostMessage::GetState);
+            }
+            drop(helper.stdin.take());
+            let status = helper
+                .wait_exit(Duration::from_secs(8))
+                .expect("the helper ends although its main thread is stuck");
+            assert_eq!(status.code(), Some(0));
+        }
+
         fn a_hung_editor_does_not_stop_the_heartbeat() {
             let mut helper = Helper::spawn(&[("TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS", "1500")]);
             helper.loaded(state(1.0, 0, TestMode::Normal));
@@ -842,7 +952,7 @@ mod windows_helper {
                         assert_eq!(again.len(), component.len());
                         break;
                     }
-                    HelperMessage::LatencyChanged { .. } | HelperMessage::StateDirty => {}
+                    HelperMessage::Done | HelperMessage::LatencyChanged { .. } | HelperMessage::StateDirty => {}
                     other => panic!("unexpected {other:?}"),
                 }
             }
@@ -874,14 +984,20 @@ mod windows_helper {
             helper.loaded(state(1.0, 0, TestMode::Nan));
             let epoch = helper.ring().host.epoch();
             let seq = helper.ring().send(&block_of(0.5), &meta());
-            // The ring refuses to hand out a non-finite block; the helper wrote it as the plug-in produced it.
-            std::thread::sleep(Duration::from_millis(200));
+            // The ring refuses to hand out a non-finite block; the helper wrote it as the plug-in produced it. Poll until
+            // the block is published.
             let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
             use tabplayer_plugin_protocol::ring::OutputRead;
-            assert_eq!(
-                helper.ring().host.read_output_status(seq, epoch, &mut scratch),
-                OutputRead::NonFinite
-            );
+            let start = Instant::now();
+            let status = loop {
+                let status = helper.ring().host.read_output_status(seq, epoch, &mut scratch);
+                if status != OutputRead::NotReady {
+                    break status;
+                }
+                assert!(start.elapsed() < WAIT, "the block never came back");
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            assert_eq!(status, OutputRead::NonFinite);
         }
     }
 }

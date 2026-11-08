@@ -3,7 +3,7 @@
 //! A bounded multi-producer, single-consumer queue of `(id, value)` pairs in preallocated cells, after Dmitry Vyukov's
 //! bounded MPMC queue. It is the lock-free queue the spec asks for: producers (the main thread, where `performEdit` and
 //! the app's requests arrive) and the consumer (the audio thread, once per block) never take a lock and never allocate.
-//! A full queue refuses the newest edit and counts it; it never blocks.
+//! A full queue refuses the newest edit (`push` returns false and the caller says so); it never blocks.
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 struct Cell {
@@ -44,7 +44,7 @@ impl EditQueue {
         loop {
             let cell = &self.cells[position & self.mask];
             let sequence = cell.sequence.load(Ordering::Acquire);
-            let difference = sequence as isize - position as isize;
+            let difference = sequence.wrapping_sub(position) as isize;
             if difference == 0 {
                 match self.enqueue.compare_exchange_weak(
                     position,
@@ -74,7 +74,7 @@ impl EditQueue {
         let position = self.dequeue.load(Ordering::Relaxed);
         let cell = &self.cells[position & self.mask];
         let sequence = cell.sequence.load(Ordering::Acquire);
-        if sequence as isize - position.wrapping_add(1) as isize != 0 {
+        if sequence.wrapping_sub(position.wrapping_add(1)) as isize != 0 {
             return None;
         }
         self.dequeue

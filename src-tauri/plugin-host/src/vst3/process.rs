@@ -312,6 +312,11 @@ impl IBStreamTrait for MemoryStream {
             return sb::kResultFalse;
         }
         if data.len() < end {
+            // Grow geometrically but never past the cap, so the buffer never holds up to twice the cap in spare room.
+            if data.capacity() < end {
+                let target = (data.capacity() * 2).max(end).min(MAX_STATE_BYTES);
+                data.reserve_exact(target - data.len());
+            }
             data.resize(end, 0);
         }
         // SAFETY: the plugin provides `n` readable bytes at `buffer`; the destination range was

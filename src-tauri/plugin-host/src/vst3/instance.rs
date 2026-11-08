@@ -116,10 +116,15 @@ impl Instance {
         let Some(s) = stream.as_com_ref::<sb::IBStream>() else {
             return Err(false);
         };
-        if ok(f(s.as_ptr())) {
+        let wrote = ok(f(s.as_ptr()));
+        // A plugin that writes without checking, as the SDK's own examples do, returns OK after the stream refused a
+        // write. The state it produced is then incomplete, whatever it says.
+        if stream.overflowed() {
+            Err(true)
+        } else if wrote {
             Ok(stream.take())
         } else {
-            Err(stream.overflowed())
+            Err(false)
         }
     }
 
@@ -462,21 +467,19 @@ impl AudioPart {
     /// Runs one `process` call over `input.len()` frames (at most the configured maximum). The output is silence when the
     /// call fails.
     ///
-    /// Parameter edits the main thread queued become points of this block, in order. Never allocates and never takes a
-    /// lock.
+    /// Parameter edits the main thread queued become points of this block, in order. Never allocates (the errors are
+    /// static strings) and never takes a lock.
     pub fn process(
         &mut self,
         input: &[[f32; 2]],
         output: &mut [[f32; 2]],
         transport: &Transport,
-    ) -> Result<(), Vst3Error> {
+    ) -> Result<(), &'static str> {
         let frames = input.len();
         let silence = |output: &mut [[f32; 2]]| output.iter_mut().for_each(|f| *f = [0.0; 2]);
         if frames == 0 || frames > self.max_frames || output.len() != frames {
             silence(output);
-            return Err(Vst3Error::Process(
-                "block larger than the configured size".into(),
-            ));
+            return Err("block larger than the configured size");
         }
         if !self.processing {
             // Many plugins return kNotImplemented here; that is not an error.
@@ -565,11 +568,11 @@ impl AudioPart {
         let r = unsafe { self.processor.process(&mut data) };
         if !ok(r) {
             silence(output);
-            return Err(Vst3Error::Process(format!("process returned {r}")));
+            return Err("process returned a failure code");
         }
         let (Some(left), right) = (self.outputs.channel(0, 0), self.outputs.channel(0, 1)) else {
             silence(output);
-            return Err(Vst3Error::Process("the plugin has no main output".into()));
+            return Err("the plugin has no main output");
         };
         match right {
             Some(right) if !self.mono => {

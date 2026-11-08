@@ -15,7 +15,8 @@ use tabplayer_plugin_protocol::{
     ring::{HelperRing, RING_BYTES},
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, DuplicateHandle, GetHandleInformation, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0,
+    CloseHandle, DuplicateHandle, GetHandleInformation, HANDLE, HANDLE_FLAG_INHERIT,
+    INVALID_HANDLE_VALUE, SetHandleInformation, WAIT_OBJECT_0,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -23,6 +24,11 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::Console::{
     GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetStdHandle,
 };
+use windows_sys::Win32::System::Diagnostics::Debug::{
+    SEM_FAILCRITICALERRORS, SEM_NOGPFAULTERRORBOX, SEM_NOOPENFILEERRORBOX, SetErrorMode,
+};
+use windows_sys::Win32::System::ErrorReporting::{WER_FAULT_REPORTING_NO_UI, WerSetFlags};
+use windows_sys::Win32::System::LibraryLoader::SetDllDirectoryW;
 use windows_sys::Win32::System::Memory::{
     FILE_MAP_READ, FILE_MAP_WRITE, MEMORY_MAPPED_VIEW_ADDRESS, MapViewOfFile, UnmapViewOfFile,
 };
@@ -44,6 +50,31 @@ unsafe extern "C" {
     fn _open_osfhandle(handle: isize, flags: i32) -> i32;
     fn _dup2(from: i32, to: i32) -> i32;
     fn _close(fd: i32) -> i32;
+}
+
+/// Process-wide settings that keep a misbehaving plug-in from stalling or leaking out of the helper:
+/// - no error dialogs and no Windows Error Reporting UI, so a crashing plug-in ends the helper at once with its exception
+///   code (the app then sees a crash, not a hang while a dump is collected);
+/// - the current directory is taken off the DLL search path (`SetDllDirectoryW("")`), because it is inherited from the
+///   app and could be any folder; a plug-in's own flag-less `LoadLibrary` calls would search it.
+pub fn harden_process() {
+    let empty = [0u16];
+    // SAFETY: plain calls; the string is NUL-terminated and outlives the call.
+    unsafe {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+        WerSetFlags(WER_FAULT_REPORTING_NO_UI);
+        SetDllDirectoryW(empty.as_ptr());
+    }
+}
+
+/// Takes `HANDLE_FLAG_INHERIT` off a handle, so a plug-in that starts a child process with `bInheritHandles` (a licence
+/// or updater tool, say) does not pass it on. A grandchild holding the control pipe would also hide the helper's death
+/// from the app.
+fn not_inheritable(handle: HANDLE) {
+    if !handle.is_null() && handle != INVALID_HANDLE_VALUE {
+        // SAFETY: a plain call; it fails harmlessly for a value that is not a handle.
+        unsafe { SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0) };
+    }
 }
 
 /// Per-monitor DPI awareness v2, so editor windows are sized in physical pixels (Spike 4). It has to run before the first
@@ -121,6 +152,11 @@ pub fn take_stdio() -> std::io::Result<PrivateStdio> {
         ));
     }
     let (private_in, private_out) = (duplicate_own(stdin)?, duplicate_own(stdout)?);
+    // The originals may have been inherited. They are no longer used, and must not be passed on.
+    not_inheritable(stdin);
+    not_inheritable(stdout);
+    // SAFETY: a plain call.
+    not_inheritable(unsafe { GetStdHandle(STD_ERROR_HANDLE) });
     let (nul_in, nul_out) = (open_nul(false)?, open_nul(true)?);
     // SAFETY: the NUL handles are valid and stay open for the process's life.
     unsafe {
@@ -158,7 +194,11 @@ fn checked_handle(value: u64) -> Option<HANDLE> {
     let handle = usize::try_from(value).ok()? as HANDLE;
     let mut flags = 0u32;
     // SAFETY: accepts any value and only reports whether it names an open handle.
-    (unsafe { GetHandleInformation(handle, &mut flags) } != 0).then_some(handle)
+    let open = unsafe { GetHandleInformation(handle, &mut flags) } != 0;
+    if open {
+        not_inheritable(handle);
+    }
+    open.then_some(handle)
 }
 
 /// A mapped view of the ring, unmapped on drop.

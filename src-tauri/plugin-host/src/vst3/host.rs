@@ -42,6 +42,12 @@ impl HostContext {
         self.restart_flags.swap(0, Ordering::AcqRel)
     }
 
+    /// Puts restart flags back, for a restart that could not be carried out yet. No wake: the main thread's timer asks
+    /// again.
+    pub fn requeue_restart_flags(&self, flags: u32) {
+        self.restart_flags.fetch_or(flags, Ordering::AcqRel);
+    }
+
     /// Whether an edit arrived since the last call, cleared.
     pub fn take_dirty(&self) -> bool {
         self.dirty.swap(false, Ordering::AcqRel)
@@ -55,7 +61,32 @@ impl HostContext {
 }
 
 impl Class for HostContext {
-    type Interfaces = (sv::IHostApplication, sv::IComponentHandler);
+    type Interfaces = (
+        sv::IHostApplication,
+        sv::IComponentHandler,
+        sv::IComponentHandler2,
+    );
+}
+
+/// TabPlayer: `IComponentHandler2`. Plug-ins that report a preset, impulse response or model load only through
+/// `setDirty(true)` would otherwise never tell the app their state changed. Opening an editor on request and group edits
+/// are not offered.
+impl sv::IComponentHandler2Trait for HostContext {
+    unsafe fn setDirty(&self, state: sb::TBool) -> sb::tresult {
+        if state != 0 {
+            self.mark_dirty();
+        }
+        sb::kResultOk
+    }
+    unsafe fn requestOpenEditor(&self, _name: sb::FIDString) -> sb::tresult {
+        sb::kResultFalse
+    }
+    unsafe fn startGroupEdit(&self) -> sb::tresult {
+        sb::kResultFalse
+    }
+    unsafe fn finishGroupEdit(&self) -> sb::tresult {
+        sb::kResultFalse
+    }
 }
 
 impl IHostApplicationTrait for HostContext {
@@ -140,7 +171,7 @@ impl IComponentHandlerTrait for HostContext {
 const ATTR_STRING_MAX: usize = 1 << 20;
 
 /// Largest binary attribute kept.
-const ATTR_BINARY_MAX: usize = 256 << 20;
+const ATTR_BINARY_MAX: usize = 32 << 20;
 
 /// One `IAttributeList` value. Strings and blobs live in their own allocation, so a pointer
 /// handed out by `getBinary` stays valid while the list holds the value.
@@ -416,5 +447,21 @@ mod tests {
         assert!(context.take_dirty());
         assert!(!context.take_dirty());
         assert_eq!(WAKES.load(Ordering::SeqCst), 3);
+        // A restart that could not be carried out is put back and is there to take again.
+        context.requeue_restart_flags(sv::RestartFlags_::kLatencyChanged as u32);
+        assert_eq!(
+            context.take_restart_flags(),
+            sv::RestartFlags_::kLatencyChanged as u32
+        );
+        // `setDirty(true)` marks the state dirty as well; `setDirty(false)` does not.
+        // SAFETY: as above.
+        unsafe {
+            use sv::IComponentHandler2Trait;
+            context.setDirty(0);
+            assert!(!context.take_dirty());
+            context.setDirty(1);
+        }
+        assert!(context.take_dirty());
+        assert_eq!(WAKES.load(Ordering::SeqCst), 4);
     }
 }

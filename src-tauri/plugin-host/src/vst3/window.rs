@@ -30,6 +30,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeHWND);
 
+/// The DPI Windows last reported for an editor window (`WM_DPICHANGED`), 0 once the editor has dealt with it. The window
+/// procedure only records it: it can run inside a plugin call that holds the editor's lock, so the view is told later,
+/// from `EditorLink::apply_dpi_change`.
+pub static DPI_CHANGED: AtomicU32 = AtomicU32::new(0);
+
 /// The OS id of the helper's main thread, recorded at start (0 until then).
 static MAIN_THREAD: AtomicU32 = AtomicU32::new(0);
 
@@ -63,21 +68,25 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
         return 0;
     }
     if msg == WM_DPICHANGED {
-        // The standard reaction: take the rectangle Windows suggests for the new monitor's DPI.
-        // SAFETY: for WM_DPICHANGED lparam points at the suggested RECT.
-        let r = unsafe { &*(lparam as *const RECT) };
-        // SAFETY: our own window.
-        unsafe {
-            SetWindowPos(
-                hwnd,
-                std::ptr::null_mut(),
-                r.left,
-                r.top,
-                r.right - r.left,
-                r.bottom - r.top,
-                SWP_NOZORDER | SWP_NOACTIVATE,
-            )
-        };
+        // The standard reaction: take the rectangle Windows suggests for the new monitor's DPI (lparam is null in a
+        // message that was posted, not sent by Windows), then have the view told (see `DPI_CHANGED`).
+        if lparam != 0 {
+            // SAFETY: for WM_DPICHANGED sent by Windows, lparam points at the suggested RECT.
+            let r = unsafe { &*(lparam as *const RECT) };
+            // SAFETY: our own window.
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    std::ptr::null_mut(),
+                    r.left,
+                    r.top,
+                    r.right - r.left,
+                    r.bottom - r.top,
+                    SWP_NOZORDER | SWP_NOACTIVATE,
+                )
+            };
+        }
+        DPI_CHANGED.store((wparam & 0xffff) as u32, Ordering::Release);
         return 0;
     }
     // SAFETY: default handling of a message for the window it was sent to.

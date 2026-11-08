@@ -60,7 +60,8 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
   const [loopSaid,setLoopSaid]=useState('');
   const loopStatus=loopNumbers?t(loopNumbers.first===loopNumbers.last?'transport.loop_status_one':'transport.loop_status',{first:String(loopNumbers.first),last:String(loopNumbers.last)}):null;
   // A status line a screen reader speaks when the loop starts, changes or ends.
-  useEffect(()=>{setLoopSaid(previous=>loopStatus??(previous?t('transport.loop_status_off'):''));},[loopStatus]);
+  // Not while the plan is being rebuilt after an edit: the loop is restored on it (or reported by the loop notice), and "off" then "on" again would be said for nothing.
+  useEffect(()=>{if(!state.ready)return;setLoopSaid(previous=>loopStatus??(previous?t('transport.loop_status_off'):''));},[loopStatus,state.ready]);
   const selectedBars=useMemo(()=>{
     const bars=selection?.kind==='range'?[selection.range.start.bar,selection.range.end.bar]:selection?.kind==='bars'?[selection.firstBar,selection.lastBar]:selection?.kind==='notes'?selection.notes.map(note=>note.target.bar):[];
     if(!bars.length)bars.push(cursor.bar);

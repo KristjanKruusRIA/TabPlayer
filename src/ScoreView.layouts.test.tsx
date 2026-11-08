@@ -156,6 +156,19 @@ it('draws the loop again for a new layout or loop, not for a playback tick that 
  rerender(tree({...props,loop:loopOf(1,2),zoom:50} as never));
  expect(document.querySelectorAll('.score-loop-band')).toHaveLength(2);
 });
+it.each(['parchment','verticalPage'] as const)('leaves open the side where a selection or a loop goes on across a line break, in %s',layout=>{
+ const {props,tree,rerender}=setup(layout);rerender(tree({...props,loop:loopOf(0,1,2),editorSelection:rangeOver(0,2),onEditorSelection:vi.fn()} as never));
+ const sides=(selector:string)=>[...document.querySelectorAll<HTMLElement>(selector)].map(band=>[band.hasAttribute('data-before'),band.hasAttribute('data-after')]);
+ const expected=[[false,true],[true,true],[true,false]];
+ expect(sides('.score-range-block')).toEqual(expected);expect(sides('.score-loop-band')).toEqual(expected);
+ rerender(tree({...props,loop:loopOf(1),editorSelection:rangeOver(1,1),onEditorSelection:vi.fn()} as never));
+ expect(sides('.score-loop-band')).toEqual([[false,false]]);
+});
+it('draws no edge or cap on an open side in the stylesheet',()=>{
+ const css=require('node:fs').readFileSync('src/ScoreView.css','utf8') as string;
+ expect(css).toMatch(/\.score-loop-band\[data-before\]\[data-after\]\s*\{[^}]*box-shadow:\s*none/);
+ expect(css).toMatch(/\.score-range-block\[data-before\]\[data-after\]\s*\{[^}]*box-shadow:\s*none/);
+});
 it('keeps the selection and loop overlays out of the way of the pointer',()=>{
  const css=require('node:fs').readFileSync('src/ScoreView.css','utf8') as string;
  expect(css).toMatch(/\.score-playback-bar,\.score-playback-beat,\.score-range-block\s*\{[^}]*pointer-events:\s*none/);

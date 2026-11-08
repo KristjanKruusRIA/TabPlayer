@@ -13,11 +13,11 @@ Date: 2026-11-08. Branch `ux/the-193-draw-selection-loop`, based on `develop`. C
 |-------|-----------|------|
 | Score, every layout | An amber wash with a solid 2 px brown edge at each end (`.score-range-block`), from the first selected beat to the last; a beat that opens or closes its bar takes the bar edge, as alphaTab shades it. | A violet frame (`.score-loop-band`): 3 px rules above and below and 3 px end caps, with a faint violet wash, over the bars the loop plays; where it begins or ends inside a bar the edge falls on the beat the playback plan reaches there. |
 | Overview | Not drawn (it still shows the edit target cell). | The loop's bars lit on the ruler (violet underline, bold number) and one violet bracket through every track row (`.score-overview-loop`), one per run of bars. |
-| Position display | None. | "Loop 4–5" at the top right of the display, a violet strip under the lime progress line at the loop's place along the piece, and a status line read aloud ("Looping bars 4 to 5", "Looping bar 3", "Loop off"). |
+| Position display | None. | "Loop 4–5" at the top right of the display, a violet strip under the lime progress line at the loop's place along the piece, and a status line read aloud, not changed while an edit rebuilds the plan ("Looping bars 4 to 5", "Looping bar 3", "Loop off"). |
 
-- Bands are one per staff system and per run of neighbouring bars, so a passage across a line break is two bands and a loop that skips bars (a repeat) is not drawn over the bars it skips. A repeated bar is drawn once however many times the loop plays it.
+- Bands are one per staff system and per run of neighbouring bars (a bar that starts or ends the passage inside it is not joined to its neighbour, so its edge beat holds), so a passage across a line break is two bands and a loop that skips bars (a repeat) is not drawn over the bars it skips. A repeated bar is drawn once however many times the loop plays it. Where a passage goes on across a line break, that side of the band has no edge or end cap.
 - Geometry is `src/engraving/passage-bands.ts`, over alphaTab's own bounds lookup (master bar bounds, beat bounds), and is mapped by the same `mapped()` function as the edit target, error bars and handles: the canvas offset in live layouts, `mapScreenRect` with the system in page layouts, so zoom and page arrangement are followed the same way.
-- The bars a loop covers come from `src/audio/loop-passage.ts` (loop ticks and the plan's bar occurrences), shared by the score, the overview and the position display. `useLoopPassage` rebuilds it only when the loop's ticks or the plan change. Native status updates hand over a new loop object on every tick, so without this key every tick would redraw.
+- The bars a loop covers come from `src/audio/loop-passage.ts` (loop ticks and the plan's bar occurrences), shared by the score, the overview and the position display. `useLoopPassage` rebuilds it only when the loop's ticks or the plan's occurrences change (the occurrences array is the plan's own while ready, and empty while the controller prepares a rebuilt plan, so the loop is placed again once the plan arrives). Native status updates hand over a new loop object on every tick, so without this key every tick would redraw.
 - Overlays are drawn when the loop, selection, layout, zoom or render changes, never per playback frame. All overlays are `pointer-events:none` and `aria-hidden` (the overview's bracket carries the same text as an image role, like its playhead).
 - Colours are tokens on the existing theme variables (`workstation-shell.css`): `--ws-loop` (dark shell), `--ws-loop-on-paper`, `--ws-select-on-paper`, `--ws-select-wash-on-paper`. Neither is blue (edit target) or green (playback cursor); the shapes also differ (wash with side edges against a frame with top and bottom rules), so the two do not depend on hue.
 - New text `transport.loop_chip`, `transport.loop_chip_one`, `transport.loop_status`, `transport.loop_status_one`, `transport.loop_status_off`, `transport.loop_position_hint`, `overview.loop_bars`, `overview.loop_bar`, with `en`, `et` and `de`.
@@ -34,7 +34,8 @@ Computed from the token values (WCAG relative luminance):
 | Playback cursor green `#81a33c` on the paper (for reference) | 2.9 : 1 |
 | Notation ink `#111` on the amber wash at 30 percent | 15.1 : 1 |
 | Loop violet `#c4a2ff` on the shell panel `#1e1c19` / raised `#2a2723` / input `#100f0d` | 8.1 / 7.1 / 9.1 : 1 |
-| Loop violet on its own tinted ruler cell | 4.5 : 1 |
+| Ruler number (`--ws-text` `#f1ece3`) on the loop-tinted ruler cell (24 percent violet over the raised shell) | 7.7 : 1 |
+| Violet underline `#c4a2ff` on that tinted cell (a graphic, so 3 : 1 is the bar) | 4.3 : 1 |
 
 **Limit: the app has one theme.** There is no light shell. The score paper is always light (`color-scheme: light` on the paper), the rest is the dark charcoal shell. So "both themes" was checked as the two surfaces that exist: the overlays on the light paper, and the loop marks on the dark shell. A light shell, if one is added later, needs its own value for `--ws-loop`. Forced colours get `Highlight`/`CanvasText` rules; they were written but not looked at in a forced-colours session.
 
@@ -70,3 +71,4 @@ What I saw:
 - The loop strip under the display places the loop by the plan's own clock; with a progressive-tempo practice setting the lime progress and the strip can drift apart.
 - Screen reader output (the status line, the overview's bracket text) was not listened to; the text is present and is covered by the tests above.
 - Keyboard operation is unchanged: no new control was added.
+- The overview's loop bracket is a `role="img"` inside the grid, as its playhead already is. That pattern was there before this change and is left alone.

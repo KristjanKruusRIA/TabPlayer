@@ -97,3 +97,49 @@ describe('passageBands',()=>{
     for(const band of passageBands(world.lookup,whole(0,4,8)))expect(world.lookup.staffSystems).toContain(band.system);
   });
 });
+
+describe('passageBands: edges inside joined bars',()=>{
+  const first=()=>world.lookup.staffSystems[0].bars[0].index;
+  it('starts a new band where a bar ends at an inner beat and the next bar follows on the same system',()=>{
+    const a=first(),b=a+1;
+    const bands=passageBands(world.lookup,[{bar:a,to:beatOf(a,1)},{bar:b}]);
+    expect(bands.map(band=>[band.firstBar,band.lastBar])).toEqual([[a,a],[b,b]]);
+    const end=world.lookup.findBeat(beatOf(a,1))!.realBounds;
+    expect(bands[0].x+bands[0].w).toBeCloseTo(end.x+end.w);
+    expect(bands[1].x).toBeCloseTo(world.lookup.findMasterBarByIndex(b)!.realBounds.x);
+  });
+  it('starts a new band where a bar begins at an inner beat after a neighbour on the same system',()=>{
+    const a=first(),b=a+1;
+    const bands=passageBands(world.lookup,[{bar:a},{bar:b,from:beatOf(b,2)}]);
+    expect(bands.map(band=>[band.firstBar,band.lastBar])).toEqual([[a,a],[b,b]]);
+    expect(bands[1].x).toBeCloseTo(world.lookup.findBeat(beatOf(b,2))!.realBounds.x);
+  });
+  it('still joins bars whose edges are the bars own, even when edge beats are named at the bar edge',()=>{
+    const a=first(),b=a+1;
+    expect(passageBands(world.lookup,[{bar:a,from:beatOf(a,0)},{bar:b,to:beatOf(b,3)}]).map(band=>[band.firstBar,band.lastBar])).toEqual([[a,b]]);
+  });
+});
+
+describe('passageBands: which sides continue',()=>{
+  it('marks the side where the passage goes on to the next or came from the previous line',()=>{
+    const [one,two]=world.lookup.staffSystems,from=one.bars.at(-1)!.index,to=two.bars[0].index;
+    const [left,right]=passageBands(world.lookup,whole(from,to));
+    expect([left.continuesBefore,left.continuesAfter]).toEqual([false,true]);
+    expect([right.continuesBefore,right.continuesAfter]).toEqual([true,false]);
+  });
+  it('marks both sides of a middle system, and neither side of a passage inside one system',()=>{
+    const systems=world.lookup.staffSystems;
+    const bands=passageBands(world.lookup,whole(...Array.from({length:12},(_,bar)=>bar)));
+    expect(bands.map(band=>[band.continuesBefore,band.continuesAfter])).toEqual(bands.map((_,index)=>[index>0,index<bands.length-1]));
+    expect(bands.length).toBe(systems.length);
+    const inside=passageBands(world.lookup,whole(systems[0].bars[0].index,systems[0].bars[1].index))[0];
+    expect([inside.continuesBefore,inside.continuesAfter]).toEqual([false,false]);
+  });
+  it('does not mark a side that a skipped bar or an edge beat ends',()=>{
+    const [one,two]=world.lookup.staffSystems,from=one.bars.at(-1)!.index,to=two.bars[0].index;
+    const gap=passageBands(world.lookup,whole(from,to+1));
+    expect(gap.map(band=>[band.continuesBefore,band.continuesAfter])).toEqual([[false,false],[false,false]]);
+    const trimmed=passageBands(world.lookup,[{bar:from,from:beatOf(from,1)},{bar:to,to:beatOf(to,1)}]);
+    expect([trimmed[0].continuesAfter,trimmed[1].continuesBefore]).toEqual([true,true]);
+  });
+});

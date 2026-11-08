@@ -57,7 +57,14 @@
    so the two differ in shape as well as colour. Both are translucent, ignore the pointer, and sit over the notation without hiding it. */
 .score-range-block { background: color-mix(in srgb, var(--ws-select-wash-on-paper,#f5a623) 30%, transparent); box-shadow: inset 2px 0 var(--ws-select-on-paper,#9a4a00), inset -2px 0 var(--ws-select-on-paper,#9a4a00); z-index: 1; }
 .score-loop-band { position: absolute; box-sizing: border-box; pointer-events: none; z-index: 2; background: color-mix(in srgb, var(--ws-loop-on-paper,#5a2db3) 7%, transparent); border: 0 solid var(--ws-loop-on-paper,#5a2db3); border-top-width: 3px; border-bottom-width: 3px; box-shadow: inset 3px 0 var(--ws-loop-on-paper,#5a2db3), inset -3px 0 var(--ws-loop-on-paper,#5a2db3); }
-@media (forced-colors: active) { .score-range-block { background: transparent; box-shadow: none; border-left: 2px solid Highlight; border-right: 2px solid Highlight; } .score-loop-band { background: transparent; border-color: Highlight; box-shadow: inset 3px 0 Highlight, inset -3px 0 Highlight; } }
+/* Where a passage goes on across a line break, that side has no edge or cap. */
+.score-range-block[data-before] { box-shadow: inset -2px 0 var(--ws-select-on-paper,#9a4a00); }
+.score-range-block[data-after] { box-shadow: inset 2px 0 var(--ws-select-on-paper,#9a4a00); }
+.score-range-block[data-before][data-after] { box-shadow: none; }
+.score-loop-band[data-before] { box-shadow: inset -3px 0 var(--ws-loop-on-paper,#5a2db3); }
+.score-loop-band[data-after] { box-shadow: inset 3px 0 var(--ws-loop-on-paper,#5a2db3); }
+.score-loop-band[data-before][data-after] { box-shadow: none; }
+@media (forced-colors: active) { .score-range-block { background: transparent; box-shadow: none; border-left: 2px solid Highlight; border-right: 2px solid Highlight; } .score-range-block[data-before] { border-left: 0; } .score-range-block[data-after] { border-right: 0; } .score-loop-band { background: transparent; border-color: Highlight; box-shadow: inset 3px 0 Highlight, inset -3px 0 Highlight; } .score-loop-band[data-before] { box-shadow: inset -3px 0 Highlight; } .score-loop-band[data-after] { box-shadow: inset 3px 0 Highlight; } .score-loop-band[data-before][data-after] { box-shadow: none; } }
 /* Score errors: a translucent red wash with a dashed outline, so the mark survives without color. */
 .score-error-bar { position: absolute; pointer-events: none; background: #d1424214; outline: 2px dashed #c23b3b; outline-offset: -2px; }
 .score-bar-handle { position: absolute; width: 10px; z-index: 5; cursor: ew-resize; touch-action: none; background: #245cb21f; border-left: 2px solid #245cb2; box-sizing: border-box; }

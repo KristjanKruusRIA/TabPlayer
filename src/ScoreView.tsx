@@ -44,6 +44,8 @@ const address=(beat:model.Beat):BeatTarget=>({track:beat.voice.bar.staff.track.i
 const sameLane=(a:VoiceAddress,b:VoiceAddress)=>a.track===b.track&&a.staff===b.staff&&a.voice===b.voice;
 const sameBeat=(a:BeatTarget,b:BeatTarget)=>sameLane(a,b)&&a.bar===b.bar&&a.beat===b.beat;
 type Marker={x:number;y:number;w:number;h:number};
+/** A band over a passage; `before` and `after` mark a side where the passage goes on across a line break, which is left open. */
+type Band=Marker&{before?:boolean;after?:boolean};
 const noErrors:readonly ScoreError[]=[];
 type Handles={start:Marker&{target:BeatTarget};end:Marker&{target:BeatTarget}};
 type Drag={anchor:BeatTarget;last:BeatTarget;lanes:VoiceAddress[];bars?:Extract<MusicSelection,{kind:'bars'}>};
@@ -192,7 +194,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const pointerActions=useRef({downBeat:(_beat:model.Beat)=>{},downNote:(_note:model.Note)=>{},move:(_beat:model.Beat)=>{}});
   // What the last render pass was configured with (the accolade plan and the pixel metrics after scale and padding were set), and the marks drawn over a continuous layout.
   const accolade=useRef<{plan:AccoladePlan|null;metrics:AccoladeMetrics}|null>(null),[overlay,setOverlay]=useState<string|null>(null);
-  const [rangeBlocks,setRangeBlocks]=useState<Marker[]>([]),[loopBlocks,setLoopBlocks]=useState<Marker[]>([]),[surfaceClass,setSurfaceClass]=useState('');
+  const [rangeBlocks,setRangeBlocks]=useState<Band[]>([]),[loopBlocks,setLoopBlocks]=useState<Band[]>([]),[surfaceClass,setSurfaceClass]=useState('');
   useLayoutEffect(()=>{
     const host=wrapper.current?.closest<HTMLElement>('.paper-scroll')??wrapper.current?.parentElement??null;scrollHost.current=host;
     const measure=()=>{if(!host)return;const css=getComputedStyle(host),width=Math.max(0,host.clientWidth-(parseFloat(css.paddingLeft)||0)-(parseFloat(css.paddingRight)||0)),height=Math.max(0,host.clientHeight-(parseFloat(css.paddingTop)||0)-(parseFloat(css.paddingBottom)||0));setAvailable(old=>old.width===width&&old.height===height?old:{width,height});};
@@ -328,12 +330,12 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     }));
   };
   /** Bands over passage bars (one per system and run of bars) in the renderer's own bounds, mapped like every other overlay in this view: live layouts by the canvas offset, page layouts by the page arrangement. */
-  const bandsOf=(bars:readonly PassageBar[]):Marker[]=>{
+  const bandsOf=(bars:readonly PassageBar[]):Band[]=>{
     const lookup=api.current?.boundsLookup;if(!lookup||rendering.current)return [];
-    return passageBands(lookup,bars).flatMap(band=>{const rect=mapped({x:band.x,y:band.y,w:band.w,h:band.h},band.system);return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)&&rect.w>0&&rect.h>0?[rect]:[];});
+    return passageBands(lookup,bars).flatMap(band=>{const rect=mapped({x:band.x,y:band.y,w:band.w,h:band.h},band.system);return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)&&rect.w>0&&rect.h>0?[{...rect,before:band.continuesBefore||undefined,after:band.continuesAfter||undefined}]:[];});
   };
   /** The selected passage, rendered beats `first` to `last`: whole bars between, the edge beats at its ends. */
-  const selectionBands=(first:model.Beat,last:model.Beat):Marker[]=>{
+  const selectionBands=(first:model.Beat,last:model.Beat):Band[]=>{
     const a=first.voice.bar.index,b=last.voice.bar.index;
     return bandsOf(Array.from({length:Math.max(0,b-a+1)},(_,i)=>({bar:a+i,...(i===0?{from:first}:{}),...(i===b-a?{to:last}:{})})));
   };
@@ -677,8 +679,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     </div>}
     <span ref={barElement} hidden className="score-playback-bar" aria-hidden="true"/>
     <span ref={beatElement} hidden className="score-playback-beat" aria-hidden="true"/>
-    {rangeBlocks.map((block,index)=><span key={index} className="score-range-block" aria-hidden="true" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
-    {loopBlocks.map((block,index)=><span key={index} className="score-loop-band" aria-hidden="true" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
+    {rangeBlocks.map((block,index)=><span key={index} className="score-range-block" aria-hidden="true" data-before={block.before} data-after={block.after} style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
+    {loopBlocks.map((block,index)=><span key={index} className="score-loop-band" aria-hidden="true" data-before={block.before} data-after={block.after} style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
     {errorBlocks.map((block,index)=><span key={index} role="img" aria-label={block.label} className="score-error-bar" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
     {diagramBlocks.map((block,index)=><div key={index} className="score-scale-diagram" style={{position:'absolute',left:block.x,top:block.y,zIndex:openDiagram===index?6:2}} onMouseEnter={()=>setOpenDiagram(index)} onMouseLeave={()=>setOpenDiagram(open=>open===index?null:open)} onFocus={()=>setOpenDiagram(index)} onBlur={()=>setOpenDiagram(open=>open===index?null:open)}>
       <button type="button" className="score-scale-diagram-chip" aria-label={`Show scale diagram ${block.diagram.name||'without a name'}`} aria-expanded={openDiagram===index} style={{height:chipHeight,width:block.w,padding:'0 4px',font:'600 10px sans-serif',border:'1px solid #97a6b6',borderRadius:4,background:'#fffdf8',color:'#161c24',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',cursor:'pointer'}}>▦ {chipLabel(block.diagram)}</button>

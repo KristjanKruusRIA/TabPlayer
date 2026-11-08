@@ -136,6 +136,23 @@ it('the position display shows the bars a running loop plays and says so in text
   expect(lcd).not.toHaveAttribute('data-loop');expect(lcd).not.toHaveTextContent('Loop');
   expect(screen.getByText('Loop off')).toBeInTheDocument();
 });
+it('says nothing about the loop while an edit rebuilds the plan, then says it is off only when it is cleared',()=>{
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  // The edit: not ready, no loop, no occurrences.
+  player.playbackOccurrences=()=>[];
+  update(snapshot({ready:false,loop:null}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+  // The plan is back with the loop restored on it: still the same words.
+  player.playbackOccurrences=()=>eightBars;
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+  // The loop could not be restored: the player is told once the plan is ready.
+  update(snapshot({loop:null,loopNotice:'cleared'}));
+  expect(screen.getByText('Loop off')).toBeInTheDocument();
+});
 it('a loop across a repeat is named by its first and last bar, and a clock tick that hands over an equal loop changes nothing',()=>{
   const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
   renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);

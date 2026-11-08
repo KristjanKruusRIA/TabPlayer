@@ -807,12 +807,6 @@ impl ProjectSession {
         plugin_state::check_total(&states, &self.project.assets, Some((state_id, asset)))
     }
 
-    pub fn inject_history_state(&mut self, id: String, asset: StoredAsset, edit: EditCommand) {
-        self.project.assets.insert(id, asset);
-        self.project.edits.push(edit);
-        self.cursor = self.project.edits.len();
-    }
-
     /// A password to edit is set and has not been given in this session.
     pub fn edit_locked(&self) -> bool {
         self.project.edit_lock.is_some() && !self.edit_unlocked

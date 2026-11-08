@@ -152,10 +152,16 @@ pub async fn plugin_choose(
         return Err("Invalid plug-in class ID.".into());
     }
     let service = app.state::<Arc<PluginService>>().inner().clone();
+    // The plug-in is asked for its defaults at the device's rate: some plug-ins' defaults depend on it.
+    let rate = app
+        .state::<crate::runtime::NativeAudio>()
+        .service
+        .audition_rate()
+        .unwrap_or(48_000);
     let default_bytes = {
         let s = service.clone();
         let cid = class_id.clone();
-        tauri::async_runtime::spawn_blocking(move || s.default_state(&cid))
+        tauri::async_runtime::spawn_blocking(move || s.default_state_at(&cid, rate))
             .await
             .map_err(|e| e.to_string())??
     };
@@ -256,6 +262,10 @@ pub struct PluginEditorClosedPayload {
     pub track_id: String,
     pub state: Option<String>,
     pub asset_token: Option<String>,
+    /// Why the editor's changes were not kept (an i18n key such as `plugin.history_full`); the plug-in was put back to
+    /// the document's settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[tauri::command]

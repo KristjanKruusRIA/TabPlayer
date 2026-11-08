@@ -82,6 +82,21 @@ impl ExportCapture {
     }
 }
 
+/// What the mix was last built from, so the plug-in tick can build it again (review H1, H2 of Task 13).
+#[derive(Clone)]
+struct PluginMemo {
+    owner: AudioOwner,
+    settings: DocumentSettings,
+    generation: u64,
+    /// The largest device callback the mix's pipeline was sized for.
+    frames: u32,
+    /// The device rate the plug-ins were asked to run at.
+    rate: Option<u32>,
+    /// Counts the builds: a tick re-runs only the build it read.
+    version: u64,
+    has_plugins: bool,
+}
+
 pub struct NativeAudio {
     pub service: AudioService,
     pub root: PathBuf,
@@ -92,6 +107,18 @@ pub struct NativeAudio {
     embedded: Mutex<Option<(String, Vec<u8>)>>,
     current_backing: Mutex<Option<String>>,
     protected_paths: ProtectedPaths,
+    plugin_memo: Mutex<Option<PluginMemo>>,
+    /// A device for the tests: its rate and its largest callback.
+    #[cfg(test)]
+    test_device: Mutex<Option<(Option<u32>, u32)>>,
+}
+
+/// Whether any active plug-in slot is in `settings`.
+fn has_plugins(settings: &DocumentSettings) -> bool {
+    settings
+        .sounds
+        .values()
+        .any(|sound| sound.plugin.as_ref().is_some_and(|slot| slot.active))
 }
 impl NativeAudio {
     pub fn new(root: PathBuf, publish: Arc<dyn Fn(NativeAudioStatus) + Send + Sync>) -> Self {
@@ -105,7 +132,152 @@ impl NativeAudio {
             embedded: Mutex::new(None),
             current_backing: Mutex::new(None),
             protected_paths: ProtectedPaths::default(),
+            plugin_memo: Mutex::new(None),
+            #[cfg(test)]
+            test_device: Mutex::new(None),
         }
+    }
+    /// The output device's sample rate, or None while no stream is open.
+    fn device_rate(&self) -> Option<u32> {
+        #[cfg(test)]
+        if let Some((rate, _)) = *self.test_device.lock().unwrap() {
+            return rate;
+        }
+        self.service.audition_rate()
+    }
+    /// The largest callback the device has asked for, as the audio service sizes pipelines from it.
+    fn callback_frames(&self) -> u32 {
+        #[cfg(test)]
+        if let Some((_, frames)) = *self.test_device.lock().unwrap() {
+            return frames;
+        }
+        self.service.max_callback_frames().unwrap_or(512)
+    }
+    /// Asks the plug-in service for the document's inserts at the device's rate, and refuses, before the mix is built,
+    /// every plan the renderer would refuse: the renderer drops such an insert without a word (review M1 of Task 13), so
+    /// the slot is told why here. A plan for another rate (the device changed in between) waits for the next tick.
+    fn plugin_plans(
+        &self,
+        document_id: &str,
+        requests: &[crate::plugins::service::SlotRequest],
+    ) -> (
+        Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
+        Option<u32>,
+        u32,
+    ) {
+        use crate::audio::plugin_insert::{InsertError, InsertMode, PluginInsert};
+        use crate::plugins::status::PluginStatus;
+        let rate = self.device_rate();
+        let frames = self.callback_frames();
+        let Some(plugins) = &self.plugins else {
+            return (Vec::new(), rate, frames);
+        };
+        let mode = InsertMode::Realtime {
+            pipeline_frames: tabplayer_plugin_protocol::limits::pipeline_frames(frames as usize),
+        };
+        let plans = plugins
+            .ensure(document_id, rate, requests)
+            .into_iter()
+            .map(|(track_id, plan)| {
+                let plan = match (plan, rate) {
+                    (Ok(plan), Some(rate)) => {
+                        match PluginInsert::check(plan.link.sample_rate(), mode, plan.latency, rate)
+                        {
+                            Ok(()) => {
+                                plugins.clear_refusal(document_id, &track_id);
+                                Ok(plan)
+                            }
+                            Err(InsertError::RateMismatch) => {
+                                plugins.request_reprepare(document_id);
+                                Err(PluginStatus::Loading)
+                            }
+                            Err(InsertError::TooMuchLatency) => {
+                                plugins.record_refusal(
+                                    document_id,
+                                    &track_id,
+                                    PluginStatus::TooMuchLatency,
+                                );
+                                Err(PluginStatus::TooMuchLatency)
+                            }
+                            Err(InsertError::PipelineTooLong) => {
+                                // The device's callback is longer than any pipeline the insert can keep up with.
+                                plugins.record_refusal(
+                                    document_id,
+                                    &track_id,
+                                    PluginStatus::Underrun,
+                                );
+                                Err(PluginStatus::Underrun)
+                            }
+                        }
+                    }
+                    (plan, _) => plan,
+                };
+                (track_id, plan)
+            })
+            .collect();
+        (plans, rate, frames)
+    }
+    /// Records what the mix was just built from. Called with the access lock held.
+    fn remember_mix(
+        &self,
+        owner: &AudioOwner,
+        settings: DocumentSettings,
+        generation: u64,
+        frames: u32,
+        rate: Option<u32>,
+    ) {
+        let mut memo = self.plugin_memo.lock().unwrap();
+        let version = memo.as_ref().map_or(0, |memo| memo.version + 1);
+        *memo = Some(PluginMemo {
+            owner: owner.clone(),
+            has_plugins: has_plugins(&settings),
+            settings,
+            generation,
+            frames,
+            rate,
+            version,
+        });
+    }
+    /// Builds the mix again when the plug-in service asks for it (a helper became ready or faulted, or announced a new
+    /// latency), when the device's largest callback grew past the pipeline the mix was sized for, or when the device's
+    /// rate changed. Returns whether it tried. The app calls it every 100 ms from its own thread.
+    pub(crate) fn plugin_tick(&self, workspace: &Mutex<DocumentWorkspace>) -> bool {
+        use tabplayer_plugin_protocol::limits::pipeline_frames;
+        let Some(plugins) = &self.plugins else {
+            return false;
+        };
+        let Some(memo) = self.plugin_memo.lock().unwrap().clone() else {
+            return false;
+        };
+        let asked = plugins.take_reprepare(&memo.owner.document_id);
+        if !memo.has_plugins {
+            return false;
+        }
+        let frames = self.callback_frames();
+        let rate = self.device_rate();
+        let grew = pipeline_frames(frames as usize) > pipeline_frames(memo.frames as usize);
+        if !asked && !grew && rate == memo.rate {
+            return false;
+        }
+        let result = self.set_mix_from(
+            workspace,
+            &memo.owner,
+            memo.settings.clone(),
+            memo.generation,
+            Some(memo.version),
+        );
+        if result.is_err() {
+            // Not again on every tick: only when something changes once more.
+            let mut guard = self.plugin_memo.lock().unwrap();
+            if let Some(current) = guard.as_mut().filter(|m| m.version == memo.version) {
+                current.frames = current.frames.max(frames);
+                current.rate = rate;
+            }
+        }
+        true
     }
     pub fn with_plugins(mut self, plugins: Arc<crate::plugins::service::PluginService>) -> Self {
         self.plugins = Some(plugins);
@@ -167,11 +339,7 @@ impl NativeAudio {
                 })
                 .collect()
         };
-        let plugin_plans = if let Some(plugins) = &self.plugins {
-            plugins.ensure(&owner.document_id, &slot_requests)
-        } else {
-            Vec::new()
-        };
+        let (plugin_plans, rate, frames) = self.plugin_plans(&owner.document_id, &slot_requests);
         let _access = self.access.lock().map_err(|e| e.to_string())?;
         let backing = {
             let workspace = workspace.lock().map_err(|e| e.to_string())?;
@@ -208,6 +376,7 @@ impl NativeAudio {
         };
         let backing_id = settings.backing.as_ref().map(|b| b.asset_id.clone());
         let generation = plan.generation;
+        let memo_settings = settings.clone();
         let result = self.service.prepare_with_practice_and_plugins(
             plan,
             settings,
@@ -215,6 +384,9 @@ impl NativeAudio {
             practice.unwrap_or_default(),
             plugin_plans,
         );
+        if result.is_ok() {
+            self.remember_mix(owner, memo_settings, generation, frames, rate);
+        }
         if result.is_ok() || self.service.prepared_generation() == Some(generation) {
             *self.embedded.lock().unwrap() = original.map(|bytes| (source_key, bytes));
             *self.current_backing.lock().unwrap() = backing_id;
@@ -227,6 +399,18 @@ impl NativeAudio {
         owner: &AudioOwner,
         settings: DocumentSettings,
         generation: u64,
+    ) -> Result<(), String> {
+        self.set_mix_from(workspace, owner, settings, generation, None)
+    }
+    /// `set_mix`; with `only_version`, only while the last build is still that one, so a tick never undoes a newer
+    /// change.
+    fn set_mix_from(
+        &self,
+        workspace: &Mutex<DocumentWorkspace>,
+        owner: &AudioOwner,
+        settings: DocumentSettings,
+        generation: u64,
+        only_version: Option<u64>,
     ) -> Result<(), String> {
         let slot_requests: Vec<crate::plugins::service::SlotRequest> = {
             let ws = workspace.lock().map_err(|e| e.to_string())?;
@@ -264,12 +448,20 @@ impl NativeAudio {
                     .collect()
             }
         };
-        let plugin_plans = if let Some(plugins) = &self.plugins {
-            plugins.ensure(&owner.document_id, &slot_requests)
-        } else {
-            Vec::new()
-        };
+        let (plugin_plans, rate, frames) = self.plugin_plans(&owner.document_id, &slot_requests);
         let _access = self.access.lock().map_err(|e| e.to_string())?;
+        if let Some(version) = only_version {
+            if self
+                .plugin_memo
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_none_or(|memo| memo.version != version)
+            {
+                return Ok(());
+            }
+        }
+        let memo_settings = settings.clone();
         let backing_id = settings.backing.as_ref().map(|b| b.asset_id.clone());
         // The asset is decoded only when the backing is changing: a mix change with the same backing never uses its bytes, and
         // decoding a long recording on every change of a knob would hold the workspace lock for no result.
@@ -312,6 +504,7 @@ impl NativeAudio {
             )?;
             *current_backing = backing_id;
         }
+        self.remember_mix(owner, memo_settings, generation, frames, rate);
         Ok(())
     }
     /// Tries again the MIDI ports the open score sends tracks to that were not working. For the owner of the score only.
@@ -1305,5 +1498,207 @@ mod gp5_tests {
         assert!(check_gp5(b"PK\x03\x04 a Guitar Pro 7 archive, not a Guitar Pro 5 file").is_err());
         assert!(check_gp5(&[]).is_err());
         assert!(check_gp5(&header(b"FICHIER GUITAR PRO v5.10")[..20]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod plugin_tick_tests {
+    //! The plug-in tick builds the mix again when it must, and only then (review H1, H2 and M1 of Task 13). Nothing is
+    //! prepared in these tests, so the audio service refuses the mix it is given; what is checked is that the tick asked
+    //! the plug-in service for its inserts again, at the device's rate.
+    use super::*;
+    use crate::{
+        edit_types::EditCommand,
+        plugins::{
+            service::fakes::*,
+            state::{STATE_FILENAME, STATE_MEDIA_TYPE, encode_state},
+            status::PluginStatus,
+        },
+        settings::TrackSound,
+    };
+    use std::sync::atomic::Ordering;
+    use std::time::Instant;
+
+    struct Tick {
+        audio: NativeAudio,
+        workspace: Mutex<DocumentWorkspace>,
+        rig: TestRig,
+        owner: AudioOwner,
+        sound: TrackSound,
+    }
+
+    impl Tick {
+        /// Waits for the helper the tick started, and takes the re-prepare its readiness asks for.
+        fn settle(&self) {
+            assert_eq!(
+                wait_for_slot(&self.rig.service, &self.owner.document_id, "base/0"),
+                PluginStatus::Ready
+            );
+            assert!(self.rig.service.take_reprepare(&self.owner.document_id));
+        }
+
+        fn device(&self, rate: Option<u32>, frames: u32) {
+            *self.audio.test_device.lock().unwrap() = Some((rate, frames));
+        }
+
+        fn launches(&self) -> Vec<u32> {
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_millis(100) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            self.rig.launcher.rates.lock().unwrap().clone()
+        }
+
+        fn requests(&self) -> Vec<crate::plugins::service::SlotRequest> {
+            let ws = self.workspace.lock().unwrap();
+            let slot = self.sound.plugin.clone().unwrap();
+            vec![crate::plugins::service::SlotRequest {
+                track_id: "base/0".into(),
+                state: ws
+                    .asset_bytes(&self.owner.document_id, &slot.state)
+                    .unwrap()
+                    .into(),
+                slot,
+            }]
+        }
+    }
+
+    /// A document whose track `base/0` has a plug-in slot, and a mix remembered as built at `rate` for `frames`.
+    fn tick_rig(rate: Option<u32>, frames: u32) -> Tick {
+        let rig = test_rig();
+        let mut ws = DocumentWorkspace::new().unwrap();
+        let owner = ws.active_owner().clone();
+        let bytes = encode_state(b"c", b"d").unwrap();
+        let asset = StoredAsset::from_bytes(STATE_FILENAME.into(), STATE_MEDIA_TYPE.into(), &bytes);
+        let id = asset.id().unwrap();
+        let staged = ws.stage_asset(&owner.document_id, asset).unwrap();
+        let rev = DocumentRevision {
+            document_id: owner.document_id.clone(),
+            revision: ws.document(&owner.document_id).unwrap().revision,
+        };
+        let sound = TrackSound {
+            plugin: Some(test_slot(&rig.class_id, &id)),
+            ..TrackSound::default()
+        };
+        ws.apply_edit(
+            &rev,
+            EditCommand::SetTrackSound {
+                track_id: "base/0".into(),
+                sound: sound.clone(),
+            },
+            Some(&staged.token),
+        )
+        .unwrap();
+        rig.service
+            .grant_consent(&owner.document_id, &[(rig.class_id.clone(), id)])
+            .unwrap();
+        let audio =
+            NativeAudio::new(PathBuf::new(), Arc::new(|_| {})).with_plugins(rig.service.clone());
+        *audio.test_device.lock().unwrap() = Some((rate, frames));
+        let mut settings = DocumentSettings::default();
+        settings.sounds.insert("base/0".into(), sound.clone());
+        audio.remember_mix(&owner, settings, 1, frames, rate);
+        Tick {
+            audio,
+            workspace: Mutex::new(ws),
+            rig,
+            owner,
+            sound,
+        }
+    }
+
+    #[test]
+    fn nothing_changed_builds_nothing() {
+        let tick = tick_rig(Some(48_000), 512);
+        assert!(!tick.audio.plugin_tick(&tick.workspace));
+        assert!(tick.launches().is_empty());
+    }
+
+    #[test]
+    fn a_larger_device_callback_builds_the_mix_again_once() {
+        let tick = tick_rig(Some(48_000), 512);
+        tick.device(Some(48_000), 1024);
+        assert!(tick.audio.plugin_tick(&tick.workspace));
+        assert_eq!(tick.launches(), vec![48_000]);
+        tick.settle();
+        // The mix could not be built (nothing is prepared here), and the tick does not try again until something
+        // changes once more.
+        assert!(!tick.audio.plugin_tick(&tick.workspace));
+    }
+
+    #[test]
+    fn a_smaller_device_callback_builds_nothing() {
+        let tick = tick_rig(Some(48_000), 512);
+        tick.device(Some(48_000), 256);
+        assert!(!tick.audio.plugin_tick(&tick.workspace));
+    }
+
+    #[test]
+    fn a_new_device_rate_starts_the_plug_ins_at_it() {
+        let tick = tick_rig(Some(48_000), 512);
+        tick.device(Some(44_100), 512);
+        assert!(tick.audio.plugin_tick(&tick.workspace));
+        assert_eq!(tick.launches(), vec![44_100]);
+    }
+
+    #[test]
+    fn the_first_open_stream_starts_the_plug_ins() {
+        let tick = tick_rig(None, 512);
+        tick.device(Some(44_100), 512);
+        assert!(tick.audio.plugin_tick(&tick.workspace));
+        assert_eq!(tick.launches(), vec![44_100]);
+    }
+
+    #[test]
+    fn a_plug_in_service_request_builds_the_mix_again() {
+        let tick = tick_rig(Some(48_000), 512);
+        tick.rig.service.request_reprepare(&tick.owner.document_id);
+        assert!(tick.audio.plugin_tick(&tick.workspace));
+        tick.settle();
+        assert!(!tick.audio.plugin_tick(&tick.workspace));
+    }
+
+    #[test]
+    fn a_mix_without_plug_ins_is_left_alone() {
+        let tick = tick_rig(Some(48_000), 512);
+        tick.audio.remember_mix(
+            &tick.owner,
+            DocumentSettings::default(),
+            1,
+            512,
+            Some(48_000),
+        );
+        tick.device(Some(44_100), 4096);
+        assert!(!tick.audio.plugin_tick(&tick.workspace));
+    }
+
+    #[test]
+    fn an_insert_the_renderer_would_refuse_is_reported_before_the_mix_is_built() {
+        let tick = tick_rig(Some(48_000), 512);
+        let requests = tick.requests();
+        tick.audio.plugin_plans(&tick.owner.document_id, &requests);
+        assert_eq!(
+            wait_for_slot(&tick.rig.service, &tick.owner.document_id, "base/0"),
+            PluginStatus::Ready
+        );
+        let session = tick
+            .rig
+            .launcher
+            .last_session
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap();
+        // Over a tenth of a second at 48 kHz.
+        session.latency.store(4_801, Ordering::SeqCst);
+        let (plans, _, _) = tick.audio.plugin_plans(&tick.owner.document_id, &requests);
+        assert_eq!(
+            plans[0].1.as_ref().err(),
+            Some(&PluginStatus::TooMuchLatency)
+        );
+        assert_eq!(
+            tick.rig.service.statuses(&tick.owner.document_id)[0].status,
+            PluginStatus::TooMuchLatency
+        );
     }
 }

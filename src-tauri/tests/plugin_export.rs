@@ -748,7 +748,7 @@ mod windows_tests {
             };
 
             // Start a playback session
-            rig.service.ensure("doc1", &[req.clone()]);
+            rig.service.ensure("doc1", Some(RATE), &[req.clone()]);
             std::thread::sleep(Duration::from_millis(100));
 
             // Run offline export

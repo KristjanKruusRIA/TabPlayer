@@ -1150,6 +1150,20 @@ pub fn run() {
                             }),
                         );
                     }
+                    plugins::service::PluginEvent::Notice {
+                        document_id,
+                        track_id,
+                        key,
+                    } => {
+                        let _ = plugin_handle.emit(
+                            "plugin-notice",
+                            serde_json::json!({
+                                "documentId": document_id,
+                                "trackId": track_id,
+                                "key": key,
+                            }),
+                        );
+                    }
                 }),
             )
             .map_err(|e| e.to_string())?;
@@ -1171,6 +1185,22 @@ pub fn run() {
                 .with_plugins(plugin_service)
                 .with_protected_paths(protected),
             );
+            // Prepares the mix again when a plug-in became ready or faulted, announced a new latency, or the device's
+            // callback grew past the pipeline the mix was built for (review H1, H2 of Task 13).
+            let tick_handle = app.handle().clone();
+            let tick_workspace = Arc::downgrade(&workspace);
+            std::thread::Builder::new()
+                .name("plugin-reprepare".into())
+                .spawn(move || {
+                    while let Some(workspace) = tick_workspace.upgrade() {
+                        tick_handle
+                            .state::<runtime::NativeAudio>()
+                            .plugin_tick(&workspace);
+                        drop(workspace);
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                })
+                .map_err(|e| e.to_string())?;
             Ok(())
         })
         .on_window_event(|window, event| {

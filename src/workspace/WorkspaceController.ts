@@ -86,13 +86,44 @@ export class WorkspaceController {
     catch(error){this.update({error:error instanceof Error?error.message:String(error)});throw error;}
     finally{if(!this.windowClosing){this.transitioning=false;this.update({busy:this.editorOperation!==null});}}
   }
-  private async add(candidate:DocumentCandidate) {
+  private isReplaceable(entry:WorkspaceState['documents'][number]):boolean {
+    const state=entry.controller.getState();
+    const snapshot=state.snapshot;
+    const project=snapshot.project;
+    return (
+      project.base.kind==='blank'&&
+      snapshot.path===null&&
+      !snapshot.dirty&&
+      !snapshot.canUndo&&
+      !snapshot.canRedo&&
+      project.edits.length===0&&
+      project.baselineEdits.length===0&&
+      state.revision===0&&
+      !snapshot.protection?.open&&
+      snapshot.protection?.edit!=='locked'&&
+      !project.lock&&
+      Object.keys(project.assets).length===0
+    );
+  }
+  private replaceableDocumentId():DocumentId|undefined {
+    const active=this.state.documents.find(entry=>entry.id===this.state.active.documentId);
+    if(active&&this.isReplaceable(active))return active.id;
+    return this.state.documents.find(entry=>this.isReplaceable(entry))?.id;
+  }
+  private async add(candidate:DocumentCandidate,replaceId?:DocumentId) {
     let committed=false;
     try {
       await admitDocumentBase(candidate.project);
       buildDocument(candidate.project);
       const snapshot=await this.bridge.addDocument(candidate.token);committed=true;
-      await this.synchronize(snapshot);return true;
+      if(replaceId&&this.state.documents.some(entry=>entry.id===replaceId)) {
+        const entry=this.state.documents.find(entry=>entry.id===replaceId)!;
+        const closeSnapshot=await this.bridge.closeDocuments([{documentId:replaceId,revision:entry.controller.getState().revision,discard:false}]);
+        await this.synchronize(closeSnapshot);
+      } else {
+        await this.synchronize(snapshot);
+      }
+      return true;
     } catch(error) {
       if(!committed){try{await this.bridge.cancelDocument(candidate.token);}catch{}}
       throw error;
@@ -120,29 +151,30 @@ export class WorkspaceController {
     if(!outcome.opened){try{await this.bridge.cancelDocument(locked.token);}catch{}}
     return outcome.opened;
   }
-  private async intake(intake:DocumentIntake,metadata=true):Promise<boolean> {
+  private async intake(intake:DocumentIntake,metadata=true,replaceUntouched=false):Promise<boolean> {
     if(intake.kind==='locked'){const opened=await this.unlock(intake.locked);if(!opened)return false;intake=opened;}
-    if(intake.kind==='candidate')await this.add(intake.candidate);
+    const replaceId=replaceUntouched?this.replaceableDocumentId():undefined;
+    if(intake.kind==='candidate')await this.add(intake.candidate,replaceId);
     else if(intake.kind==='existing')await this.synchronize(await this.bridge.activateDocument(intake.documentId));
     if(metadata){const entry=this.state.documents.find(entry=>entry.id===this.state.active.documentId)!;this.notifyCommitted({documentId:entry.id,revision:entry.controller.getState().revision});}return true;
   }
   openDocument():Promise<boolean> {return this.transition(async()=>{
-    const intake=await this.bridge.readDocument();return intake?this.intake(intake):false;
+    const intake=await this.bridge.readDocument();return intake?this.intake(intake,true,true):false;
   });}
   /** Opens a converted score as a new untitled tab; it is never a library file, so no metadata is recorded. */
   importConverted(name:string,bytes:Uint8Array):Promise<boolean> {return this.transition(async()=>{
     if(!this.bridge.importConverted)throw new Error('Importing converted scores is unavailable.');
-    return this.intake(await this.bridge.importConverted(name,bytes),false);
+    return this.intake(await this.bridge.importConverted(name,bytes),false,false);
   });}
   openSource(source:LibrarySource,library:Pick<NativeFileLibraryBridge,'stage'>):Promise<boolean> {
-    return this.transition(async()=>this.intake(await library.stage(source),source.kind==='recent'||source.kind==='indexed'));
+    return this.transition(async()=>this.intake(await library.stage(source),source.kind==='recent'||source.kind==='indexed',true));
   }
   async openDrop(dropToken:string,count:number,library:Pick<NativeFileLibraryBridge,'dropStage'>):Promise<{opened:number;issues:string[]}> {
     if(!dropToken||!Number.isInteger(count)||count<1||count>32)throw new Error('Invalid score drop. Drop at most 32 files.');
     const result={opened:0,issues:[] as string[]};
     await this.transition(async()=>{
       for(let index=0;index<count;index++) {
-        try{if(await this.intake(await library.dropStage(dropToken,index)))result.opened++;}
+        try{if(await this.intake(await library.dropStage(dropToken,index),true,true))result.opened++;}
         catch(error){result.issues.push(error instanceof Error?error.message:String(error));}
       }
       return result.opened>0;

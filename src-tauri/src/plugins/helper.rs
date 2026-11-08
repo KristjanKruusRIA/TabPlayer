@@ -120,6 +120,11 @@ pub enum HelperError {
     Timeout,
     /// The load did not finish in time, and the helper was killed.
     LoadTimeout,
+    /// The probe did not finish in time, and its helper was killed: a bundle that hangs when it is scanned.
+    ProbeTimeout,
+    /// The helper was ended by the app (`kill`, `shutdown`, drop, a failed load) and so cannot answer. It says nothing
+    /// about the plug-in.
+    Ended,
     /// The helper ended before it answered, with this exit code when it is known.
     Exited(Option<i32>),
     /// The helper answered with an error.
@@ -144,7 +149,8 @@ impl HelperError {
             HelperError::HostMissing => PluginStatus::HostMissing,
             HelperError::UnsupportedPlatform => PluginStatus::UnsupportedPlatform,
             HelperError::Spawn(_) | HelperError::Exited(_) => PluginStatus::Crashed,
-            HelperError::LoadTimeout => PluginStatus::Hung,
+            HelperError::LoadTimeout | HelperError::ProbeTimeout => PluginStatus::Hung,
+            HelperError::Ended => return None,
             HelperError::Timeout => return None,
             HelperError::TooMuchLatency { .. } => PluginStatus::TooMuchLatency,
             HelperError::Misbehaved(_) | HelperError::Refused(_) => PluginStatus::Unreadable,
@@ -163,9 +169,17 @@ impl HelperError {
         })
     }
 
-    /// Whether trying again later can succeed and the error changes no slot status.
+    /// Whether trying the same call again later can succeed, and the error changes no slot status: a request that timed
+    /// out, or that the helper answered `Busy` to. (`Ended` also changes no status, but this helper is gone.)
     pub fn is_transient(&self) -> bool {
-        self.status().is_none()
+        matches!(
+            self,
+            HelperError::Timeout
+                | HelperError::Helper {
+                    code: ErrorCode::Busy,
+                    ..
+                }
+        )
     }
 }
 
@@ -179,6 +193,8 @@ impl std::fmt::Display for HelperError {
             HelperError::Spawn(detail) => write!(f, "could not start the plug-in helper: {detail}"),
             HelperError::Timeout => f.write_str("the plug-in helper did not answer in time"),
             HelperError::LoadTimeout => f.write_str("the plug-in did not load in time"),
+            HelperError::ProbeTimeout => f.write_str("the plug-in did not scan in time"),
+            HelperError::Ended => f.write_str("the plug-in helper was ended by the app"),
             HelperError::Exited(Some(code)) => {
                 write!(f, "the plug-in helper ended with code {code}")
             }
@@ -478,6 +494,9 @@ struct Shared {
     mono: AtomicBool,
     /// A load has been accepted for sending (it may not have finished). A second one is refused.
     load_started: AtomicBool,
+    /// The helper's `Loaded` has been routed. An honest helper sends nothing unasked before it, so an unsolicited message
+    /// earlier than this is misbehaviour, and none of them reaches the caller unchecked.
+    loaded: AtomicBool,
     /// Set once a load has succeeded.
     link: OnceLock<LinkParts>,
 }
@@ -539,6 +558,18 @@ impl Shared {
         self.violate(PluginStatus::Unreadable, detail, None);
     }
 
+    /// What a request fails with because the helper has ended, one rule for every path: the violation that ended it, else
+    /// `Ended` if the app did (and the helper had not failed first), else the exit.
+    fn ended_error(&self, code: Option<i32>) -> HelperError {
+        if let Some(violation) = lock(&self.violation).as_ref() {
+            return violation.error.clone();
+        }
+        if self.killed.load(Ordering::SeqCst) && lock(&self.fatal).is_none() {
+            return HelperError::Ended;
+        }
+        HelperError::Exited(code)
+    }
+
     /// Queues the request and sends its frame, waiting until `deadline` for a place among the requests in flight.
     fn submit(
         &self,
@@ -550,7 +581,7 @@ impl Shared {
         let mut queue = lock(&self.queue);
         loop {
             if queue.closed {
-                return Err(HelperError::Exited(self.exited()));
+                return Err(self.ended_error(self.exited()));
             }
             if queue.pending.len() < MAX_IN_FLIGHT {
                 break;
@@ -566,11 +597,11 @@ impl Shared {
                 .0;
         }
         let Some(writer) = queue.writer.as_ref() else {
-            return Err(HelperError::Exited(self.exited()));
+            return Err(self.ended_error(self.exited()));
         };
         // Queued and sent under one lock, so the order of the queue is the order on the wire.
         if writer.send(frame).is_err() {
-            return Err(HelperError::Exited(self.exited()));
+            return Err(self.ended_error(self.exited()));
         }
         queue.pending.push_back(Pending { kind, reply });
         Ok(receiver)
@@ -658,6 +689,20 @@ impl Shared {
         };
         if let Some(pending) = answered {
             self.slots.notify_all();
+            // Only a state or a class list may be big. An `Error` that came in a big frame because one was owed is not.
+            let may_be_big =
+                pending.kind.large() && !matches!(message, HelperMessage::Error { .. });
+            if length > SMALL_FRAME_BYTES && !may_be_big {
+                self.misbehaved(&format!(
+                    "{} in a frame of {length} bytes",
+                    name_of(&message)
+                ));
+                let _ = pending.reply.send(Err(self.ended_error(None)));
+                return;
+            }
+            if pending.kind == Kind::Load && matches!(message, HelperMessage::Loaded { .. }) {
+                self.loaded.store(true, Ordering::SeqCst);
+            }
             let reply = match message {
                 HelperMessage::Error { code, detail } => Err(HelperError::Helper {
                     code,
@@ -678,6 +723,15 @@ impl Shared {
         );
         if !unsolicited {
             self.misbehaved(&format!("{} with no matching request", name_of(&message)));
+            return;
+        }
+        // Nothing is sent unasked before the load is answered, bar the fatal `Error` that a pending load takes as its reply
+        // anyway. A latency announced here would never meet the cap, which is only known once the load starts.
+        if !self.loaded.load(Ordering::SeqCst) && !matches!(message, HelperMessage::Error { .. }) {
+            self.misbehaved(&format!(
+                "{} before the load was answered",
+                name_of(&message)
+            ));
             return;
         }
         // The big cap was allowed for a state that was owed. Something small that came padded is not that.
@@ -714,7 +768,10 @@ impl Shared {
             HelperMessage::Error { code, detail } => {
                 // The helper cannot run its plug-in any more and is about to exit with code 4. It is left to do that: its
                 // own teardown can take seconds, and the supervisor reports the crash from this record.
-                *lock(&self.fatal) = Some((code, clean_detail(&detail)));
+                // An error that comes after the app ended the helper is part of the end it asked for.
+                if !self.killed.load(Ordering::SeqCst) {
+                    *lock(&self.fatal) = Some((code, clean_detail(&detail)));
+                }
             }
             _ => {}
         }
@@ -724,11 +781,7 @@ impl Shared {
     fn finish(&self) {
         // The pipe closes as the process ends, so the code is worth a moment.
         let code = self.wait_exit(EXIT_CODE_WAIT);
-        let error = lock(&self.violation)
-            .as_ref()
-            .map_or(HelperError::Exited(code), |violation| {
-                violation.error.clone()
-            });
+        let error = self.ended_error(code);
         {
             let mut queue = lock(&self.queue);
             queue.closed = true;
@@ -744,6 +797,15 @@ impl Shared {
         {
             self.misbehaved("the helper closed its output and did not exit");
         }
+    }
+}
+
+/// The error of a load or a probe that did not finish in time.
+fn timeout_of(kind: Kind) -> HelperError {
+    if kind == Kind::Probe {
+        HelperError::ProbeTimeout
+    } else {
+        HelperError::LoadTimeout
     }
 }
 
@@ -864,6 +926,7 @@ impl HelperProcess {
                 latency_limit: AtomicU32::new(0),
                 mono: AtomicBool::new(false),
                 load_started: AtomicBool::new(false),
+                loaded: AtomicBool::new(false),
                 link: OnceLock::new(),
             });
             let started = start_threads(&shared, input, output);
@@ -996,7 +1059,12 @@ impl HelperProcess {
             });
         }
         shared.mono.store(loaded.mono, Ordering::SeqCst);
-        lock(&shared.events).known_latency = loaded.latency;
+        {
+            let mut events = lock(&shared.events);
+            events.known_latency = loaded.latency;
+            // Defence in depth: whatever was stored is under the cap.
+            events.latency = events.latency.filter(|&latency| latency <= limit);
+        }
         // From here the ring and the events are the audio thread's to use.
         let _ = shared.link.set(parts);
         Ok(loaded)
@@ -1047,9 +1115,9 @@ impl HelperProcess {
         loop {
             let receiver = match self.shared.submit(kind, frame.clone(), deadline) {
                 Ok(receiver) => receiver,
-                Err(HelperError::Timeout) if kind == Kind::Load => {
+                Err(HelperError::Timeout) if matches!(kind, Kind::Load | Kind::Probe) => {
                     self.kill();
-                    return Err(HelperError::LoadTimeout);
+                    return Err(timeout_of(kind));
                 }
                 Err(error) => return Err(error),
             };
@@ -1057,15 +1125,15 @@ impl HelperProcess {
             let reply = match receiver.recv_timeout(remaining) {
                 Ok(reply) => reply,
                 Err(RecvTimeoutError::Timeout) => {
-                    return if kind == Kind::Load {
+                    return if matches!(kind, Kind::Load | Kind::Probe) {
                         self.kill();
-                        Err(HelperError::LoadTimeout)
+                        Err(timeout_of(kind))
                     } else {
                         Err(HelperError::Timeout)
                     };
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(HelperError::Exited(self.exited()));
+                    return Err(self.shared.ended_error(self.exited()));
                 }
             };
             match reply {
@@ -1079,8 +1147,9 @@ impl HelperProcess {
     }
 
     /// Sends a request and returns its reply: 5 seconds, or 30 for `OpenEditor`. `Load`, `Probe` and `Shutdown` have
-    /// their own calls and are refused here. A helper error comes back as [`HelperError::Helper`]; `Busy` is asked again
-    /// until the timeout, and is what comes back if it never gives way.
+    /// their own calls and are refused here. A helper error comes back as [`HelperError::Helper`]. `Busy` is asked again
+    /// until the timeout; if the helper never gives way, what comes back at the deadline is that `Busy` (if its last
+    /// answer was one) or [`HelperError::Timeout`] (if the last attempt got none in time). Both are transient.
     pub fn request(&self, message: HostMessage) -> Result<HelperMessage, HelperError> {
         let timeout = Kind::of(&message).map_or(REQUEST_TIMEOUT, Kind::timeout);
         self.request_with_timeout(message, timeout)
@@ -1411,9 +1480,20 @@ fn probe_job() -> Result<&'static HelperJob, HelperError> {
 /// Lists the effect classes in a `.vst3` bundle, in a helper of its own that is killed afterwards. `timeout` is for the
 /// whole probe; [`PROBE_TIMEOUT`](tabplayer_plugin_protocol::limits::PROBE_TIMEOUT) is the usual one.
 pub fn probe(exe: &Path, bundle: &Path, timeout: Duration) -> Result<Vec<ClassInfo>, HelperError> {
+    probe_with(exe, bundle, timeout, &HelperOptions::default())
+}
+
+/// As [`probe`], with options for the probe helper. A probe that does not finish in `timeout` kills its helper and fails
+/// with [`HelperError::ProbeTimeout`], status `Hung`: a bundle that hangs when it is scanned.
+pub fn probe_with(
+    exe: &Path,
+    bundle: &Path,
+    timeout: Duration,
+    options: &HelperOptions,
+) -> Result<Vec<ClassInfo>, HelperError> {
     #[cfg(not(windows))]
     {
-        let _ = (exe, bundle, timeout);
+        let _ = (exe, bundle, timeout, options);
         Err(HelperError::UnsupportedPlatform)
     }
     #[cfg(windows)]
@@ -1430,7 +1510,7 @@ pub fn probe(exe: &Path, bundle: &Path, timeout: Duration) -> Result<Vec<ClassIn
         let frame = Arc::new(encode(&HostMessage::Probe {
             bundle: bundle.to_owned(),
         })?);
-        let helper = HelperProcess::launch(exe, probe_job()?)?;
+        let helper = HelperProcess::launch_with(exe, probe_job()?, options)?;
         match helper.exchange(Kind::Probe, frame, timeout)? {
             HelperMessage::Probed { classes } => Ok(classes),
             other => Err(helper.unexpected(&other)),
@@ -1569,6 +1649,10 @@ mod tests {
         assert_eq!(status(helper(ErrorCode::Busy)), None);
         assert!(HelperError::Timeout.is_transient() && helper(ErrorCode::Busy).is_transient());
         assert!(!HelperError::Exited(None).is_transient());
+        // The app ended the helper, or a probe hung: the first says nothing about the plug-in, the second does.
+        assert_eq!(status(HelperError::Ended), None);
+        assert!(!HelperError::Ended.is_transient());
+        assert_eq!(status(HelperError::ProbeTimeout), Some(PluginStatus::Hung));
     }
 
     #[test]

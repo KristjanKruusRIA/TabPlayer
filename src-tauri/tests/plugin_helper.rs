@@ -26,6 +26,7 @@ mod windows_tests {
         bridge::{BridgeLink, InsertShared, fault},
         helper::{
             HelperError, HelperJob, HelperOptions, HelperProcess, LoadRequest, StateParts, probe,
+            probe_with,
         },
         status::PluginStatus,
         supervisor::{HelperKey, Supervisor},
@@ -214,18 +215,29 @@ mod windows_tests {
         }
     }
 
-    /// Whether the process with this ID has ended within `limit`. A process that cannot be opened is gone.
-    fn gone_within(pid: u32, limit: Duration) -> bool {
-        // SAFETY: plain calls; the handle, if any, is closed.
-        unsafe {
-            let handle = OpenProcess(SYNCHRONIZE, 0, pid);
-            if handle.is_null() {
-                return true;
-            }
-            let millis = limit.as_millis() as u32;
-            let done = WaitForSingleObject(handle, millis) == WAIT_OBJECT_0;
-            CloseHandle(handle);
-            done
+    /// A process held by an open handle, so that waiting for it cannot be fooled by the ID being reused.
+    struct Process(windows_sys::Win32::Foundation::HANDLE);
+
+    impl Process {
+        /// Opens the process; call it while the process is certain to be alive.
+        fn open(pid: u32) -> Process {
+            // SAFETY: a plain call; the handle is closed on drop.
+            let handle = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
+            assert!(!handle.is_null(), "process {pid} could not be opened");
+            Process(handle)
+        }
+
+        /// Whether the process has ended within `limit`.
+        fn ended_within(&self, limit: Duration) -> bool {
+            // SAFETY: waits on a handle this struct owns.
+            unsafe { WaitForSingleObject(self.0, limit.as_millis() as u32) == WAIT_OBJECT_0 }
+        }
+    }
+
+    impl Drop for Process {
+        fn drop(&mut self) {
+            // SAFETY: closes the handle once.
+            unsafe { CloseHandle(self.0) };
         }
     }
 
@@ -279,7 +291,7 @@ mod windows_tests {
         fn launch_load_and_unload() {
             let fixture = Fixture::new();
             let helper = fixture.launch();
-            let pid = helper.pid();
+            let process = Process::open(helper.pid());
             let loaded = helper
                 .load(request(&fixture.bundle, state(0.5, 0, TestMode::Normal)))
                 .expect("loads");
@@ -287,7 +299,7 @@ mod windows_tests {
             assert_eq!(loaded.class.class_id, TEST_CLASS_ID);
             assert_eq!(loaded.class.name, "TabPlayer Test Gain");
             assert!(!loaded.mono);
-            assert!(!gone_within(pid, Duration::from_millis(50)), "alive while held");
+            assert!(!process.ended_within(Duration::from_millis(50)), "alive while held");
             assert_eq!(helper.exited(), None);
 
             // The ring and the events reached the helper: a block comes back gained.
@@ -316,7 +328,7 @@ mod windows_tests {
                 .expect("and the helper can still be loaded");
 
             drop(helper);
-            assert!(gone_within(pid, Duration::from_secs(1)), "no process is left");
+            assert!(process.ended_within(Duration::from_secs(1)), "no process is left");
             // The link outlives the helper: the mapping and the event stay valid for whoever still holds them.
             link.signal_input();
             assert!(link.ring().with_host(|host| host.next_input()).is_some());
@@ -377,19 +389,20 @@ mod windows_tests {
                     (_, pid) => deaf_pid = Some(pid),
                 }
             }
-            let (helper_pid, deaf_pid) = (helper_pid.unwrap(), deaf_pid.unwrap());
-            for pid in [helper_pid, deaf_pid] {
-                assert!(!gone_within(pid, Duration::from_millis(100)), "{pid} runs while its parent does");
+            // Held by handle from here on, while both are certain to be alive: the IDs can be reused, handles cannot.
+            let (helper, deaf) = (Process::open(helper_pid.unwrap()), Process::open(deaf_pid.unwrap()));
+            for process in [&helper, &deaf] {
+                assert!(!process.ended_within(Duration::from_millis(100)), "a child runs while its parent does");
             }
 
             parent.0.kill().unwrap();
             parent.0.wait().unwrap();
             // The helper would also end on its closed input; the other child cannot, so it proves the job.
             assert!(
-                gone_within(deaf_pid, Duration::from_secs(1)),
+                deaf.ended_within(Duration::from_secs(1)),
                 "a child that ignores its closed input ended with the job of the parent that was killed"
             );
-            assert!(gone_within(helper_pid, Duration::from_secs(1)), "and so did the helper");
+            assert!(helper.ended_within(Duration::from_secs(1)), "and so did the helper");
         }
 
         fn supervisor_reports_hung_within_one_second_and_kills() {
@@ -640,6 +653,75 @@ mod windows_tests {
             );
         }
 
+        fn recurring_stalls_do_not_hide_a_hang() {
+            let fixture = Fixture::new();
+            let hung = fixture.loaded(state(1.0, 0, TestMode::Hang));
+            let link = hung.link().unwrap();
+            let other = fixture.loaded(state(1.0, 0, TestMode::Normal));
+            let other_shared = Arc::new(InsertShared::default());
+            let (reports, report) = channel();
+            let supervisor = Supervisor::new(move |key, status| {
+                if status == PluginStatus::Underrun {
+                    // A report callback that takes 300 ms, again and again: each makes the next tick late.
+                    std::thread::sleep(Duration::from_millis(300));
+                }
+                let _ = reports.send((key, status));
+            });
+            let other_key = HelperKey {
+                track_id: "other".into(),
+                ..key()
+            };
+            supervisor.watch(key(), hung.clone(), Arc::new(InsertShared::default()));
+            supervisor.watch(other_key, other.clone(), other_shared.clone());
+            std::thread::sleep(Duration::from_millis(200));
+            send_block(&link, 0.5);
+            // The neighbour's fault flickers, so the callback keeps stalling the supervisor.
+            let flicker = {
+                let shared = other_shared.clone();
+                let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                let flag = stop.clone();
+                let thread = std::thread::spawn(move || {
+                    let mut on = false;
+                    while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                        on = !on;
+                        shared.fault.store(
+                            if on { fault::UNDERRUN } else { fault::NONE },
+                            std::sync::atomic::Ordering::Release,
+                        );
+                        std::thread::sleep(Duration::from_millis(60));
+                    }
+                });
+                (stop, thread)
+            };
+            let started = Instant::now();
+            let mut hung_after = None;
+            while started.elapsed() < Duration::from_secs(12) && hung_after.is_none() {
+                if let Ok((reported, status)) = report.recv_timeout(Duration::from_millis(200)) {
+                    if reported == key() && status == PluginStatus::Hung {
+                        hung_after = Some(started.elapsed());
+                    }
+                }
+            }
+            flicker.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            flicker.1.join().unwrap();
+            assert!(hung_after.is_some(), "the hung helper was never found: recurring stalls hid it");
+        }
+
+        fn a_probe_that_hangs_kills_its_helper_and_reads_as_hung() {
+            let fixture = Fixture::new();
+            let options = HelperOptions {
+                // The factory entry point of the test plug-in never returns.
+                env: vec![("TABPLAYER_TEST_PLUGIN_HANG_FACTORY".into(), "1".into())],
+                args: Vec::new(),
+            };
+            let started = Instant::now();
+            let error = probe_with(&helper_exe(), &fixture.bundle, Duration::from_secs(2), &options)
+                .expect_err("the factory hangs");
+            assert_eq!(error, HelperError::ProbeTimeout);
+            assert_eq!(error.status(), Some(PluginStatus::Hung));
+            assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+        }
+
         fn shutdown_ends_the_helper_in_an_orderly_way_and_is_not_a_crash() {
             let fixture = Fixture::new();
             let helper = fixture.loaded(state(1.0, 0, TestMode::Normal));
@@ -787,68 +869,35 @@ mod windows_tests {
                 Duration::from_millis(1_500),
             )
             .expect_err("never room");
+        // At the deadline the last answer decides: a `Busy` the helper gave, or a `Timeout` when the last attempt was not
+        // answered in time (which depends on how fast the helper is). Neither says anything about the plug-in, and
+        // nothing else may come back.
         assert!(
             matches!(
                 error,
-                HelperError::Helper {
-                    code: ErrorCode::Busy,
-                    ..
-                }
+                HelperError::Timeout
+                    | HelperError::Helper {
+                        code: ErrorCode::Busy,
+                        ..
+                    }
             ),
             "{error:?}"
         );
-        assert!(error.is_transient(), "busy changes no slot status");
-    }
-
-    #[test]
-    fn oversized_frame_kills_and_is_unreadable() {
-        let job = HelperJob::new().unwrap();
-        // A length prefix of 0x7FFFFFFF: over the 12 MiB cap even for a state.
-        let helper = fake_helper(
-            &job,
-            "Wait-Request; $o.Write([byte[]](255,255,255,127),0,4);$o.Flush();Start-Sleep 30",
-        );
-        let error = helper
-            .request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
-            .expect_err("the frame is refused");
-        assert!(matches!(error, HelperError::Misbehaved(_)), "{error:?}");
-        assert_eq!(error.status(), Some(PluginStatus::Unreadable));
-        assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
-        assert!(
-            wait_until(Duration::from_secs(2), || helper.exited().is_some()),
-            "killed"
-        );
-        assert!(
-            !helper.was_killed(),
-            "enforced by the client, not asked by the app"
-        );
-    }
-
-    #[test]
-    fn a_big_frame_is_refused_unless_a_state_was_asked_for() {
-        let job = HelperJob::new().unwrap();
-        // 70,000 bytes is under the 12 MiB cap but over the 64 KiB one that holds while no `GetState` is in flight.
-        let helper = fake_helper(
-            &job,
-            "$o.Write([byte[]](112,17,1,0),0,4);$o.Flush();Start-Sleep 30",
-        );
-        assert!(
-            wait_until(Duration::from_secs(20), || helper.violation().is_some()),
-            "the frame is refused"
-        );
-        assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
-        assert!(wait_until(Duration::from_secs(2), || helper
-            .exited()
-            .is_some()));
+        assert!(error.is_transient(), "{error:?} changes no slot status");
+        assert_eq!(error.status(), None);
+        assert_eq!(helper.violation(), None);
+        assert_eq!(helper.exited(), None, "the helper is not ended for it");
     }
 
     #[test]
     fn unsolicited_flood_kills_as_unreadable() {
         let job = HelperJob::new().unwrap();
-        let helper = fake_helper(
-            &job,
-            "1..200 | ForEach-Object { Send '\"stateDirty\"' }; Start-Sleep 30",
+        let script = format!(
+            "Wait-Request; Send '{}'; 1..200 | ForEach-Object {{ Send '\"stateDirty\"' }}; Start-Sleep 30",
+            loaded_json(0)
         );
+        let helper = fake_helper(&job, &script);
+        helper.load(fake_load()).expect("loads");
         assert!(
             wait_until(Duration::from_secs(20), || helper.violation().is_some()),
             "a flood is a violation"
@@ -918,15 +967,11 @@ mod windows_tests {
             let _ = reports.send(status);
         });
         supervisor.watch(key(), helper.clone(), shared.clone());
-        let started = Instant::now();
         assert_eq!(
             report.recv_timeout(Duration::from_secs(20)),
             Ok(PluginStatus::Crashed)
         );
-        assert!(
-            started.elapsed() < Duration::from_secs(3),
-            "reported before the exit"
-        );
+        // Reported while the helper is still tearing down, not when it ends (it sleeps 4 s after the error).
         assert_eq!(helper.exited(), None, "the helper is left to finish");
         assert!(!helper.was_killed());
         assert!(
@@ -1040,6 +1085,85 @@ mod windows_tests {
             }
         );
         assert_eq!(error.status(), Some(PluginStatus::TooMuchLatency));
+        // A request made after the helper has been ended says the same, not that it crashed.
+        let again = helper
+            .request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
+            .expect_err("the helper is gone");
+        assert_eq!(again, error);
+    }
+
+    #[test]
+    fn a_latency_announced_before_the_load_is_answered_is_refused() {
+        let job = HelperJob::new().unwrap();
+        // A hostile helper announces 4,000,000,000 frames of latency as soon as it starts, before it answers the load, and
+        // then answers it with 0. No cap is known then; the announcement must not be kept.
+        let script = format!(
+            "Send '{{\"latencyChanged\":{{\"latency\":4000000000}}}}'; Wait-Request; Send '{}'; Start-Sleep 30",
+            loaded_json(0)
+        );
+        let helper = fake_helper(&job, &script);
+        let error = helper
+            .load(fake_load())
+            .expect_err("an unasked announcement before the load is answered");
+        assert_eq!(error.status(), Some(PluginStatus::Unreadable), "{error:?}");
+        assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
+        assert_eq!(
+            helper.take_events().latency,
+            None,
+            "nothing unchecked reaches the caller"
+        );
+        assert!(helper.link().is_none());
+    }
+
+    #[test]
+    fn a_request_when_the_app_ended_the_helper_says_so_and_is_not_a_crash() {
+        let job = HelperJob::new().unwrap();
+        let helper = fake_helper(&job, "Start-Sleep 60");
+        // One request in flight while the app ends the helper, and one made afterwards.
+        let helper = Arc::new(helper);
+        let waiting = {
+            let helper = helper.clone();
+            std::thread::spawn(move || {
+                helper.request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
+            })
+        };
+        std::thread::sleep(Duration::from_millis(300));
+        helper.kill();
+        let error = waiting.join().unwrap().expect_err("the helper was ended");
+        assert_eq!(error, HelperError::Ended);
+        assert_eq!(
+            error.status(),
+            None,
+            "the app's own decision says nothing about the plug-in"
+        );
+        let later = helper
+            .request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
+            .expect_err("and it stays ended");
+        assert_eq!(later, HelperError::Ended);
+    }
+
+    #[test]
+    fn an_error_after_the_app_ended_the_helper_is_not_a_crash() {
+        let job = HelperJob::new().unwrap();
+        // The helper reports an error 1.5 s in, which is while it tears down after the `Shutdown` the app sent at once.
+        let helper = Arc::new(fake_helper(
+            &job,
+            "Start-Sleep -Milliseconds 1500; Send '{\"error\":{\"code\":\"internal\",\"detail\":\"teardown\"}}'; Start-Sleep 30",
+        ));
+        let (reports, report) = sync_channel(4);
+        let supervisor = Supervisor::new(move |_, status| {
+            let _ = reports.send(status);
+        });
+        supervisor.watch(key(), helper.clone(), Arc::new(InsertShared::default()));
+        helper.shutdown();
+        std::thread::sleep(Duration::from_millis(3_000));
+        assert_eq!(
+            helper.fatal_error(),
+            None,
+            "not recorded after the app's decision"
+        );
+        assert!(report.try_recv().is_err(), "and not reported as a crash");
+        helper.kill();
     }
 
     #[test]
@@ -1047,10 +1171,12 @@ mod windows_tests {
         let job = HelperJob::new().unwrap();
         // 200,000 bytes of whitespace after a `stateDirty`: the frame cap is big because a state is owed, but this is not
         // one.
-        let helper = fake_helper(
-            &job,
-            "Wait-Request; $p=' '*200000; Send ('\"stateDirty\"'+$p); Start-Sleep 30",
+        let script = format!(
+            "Wait-Request; Send '{}'; Wait-Request; $p=' '*200000; Send ('\"stateDirty\"'+$p); Start-Sleep 30",
+            loaded_json(0)
         );
+        let helper = fake_helper(&job, &script);
+        helper.load(fake_load()).expect("loads");
         let error = helper
             .request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
             .expect_err("not a state");

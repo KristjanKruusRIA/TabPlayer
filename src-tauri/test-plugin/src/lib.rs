@@ -142,7 +142,7 @@ const ENV_VIEW_HANG_MS: &str = "TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS";
 pub enum TestMode {
     /// Gain and delay only.
     Normal,
-    /// The next `process` call aborts the process.
+    /// The next `process` call ends the process at once with a fatal exception code.
     Crash,
     /// The next `process` call never returns.
     Hang,
@@ -497,10 +497,24 @@ fn hang_forever() -> ! {
     }
 }
 
+/// Ends the process at once with a fatal exception code. On Windows it asks the system to end the process
+/// (`TerminateProcess`) so that Windows Error Reporting never gets to run, which `abort` does not prevent and which can take
+/// longer than a host's hang rule when the machine is busy; elsewhere it aborts.
+fn crash() -> ! {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        // STATUS_STACK_BUFFER_OVERRUN, the code `abort` itself ends with.
+        // SAFETY: ends this process; nothing runs after it.
+        unsafe { TerminateProcess(GetCurrentProcess(), 0xC000_0409) };
+    }
+    std::process::abort()
+}
+
 /// Acts out the fault of a mode at the top of `process`. Called with no lock held.
 fn act_on_mode(mode: TestMode) {
     match mode {
-        TestMode::Crash => std::process::abort(),
+        TestMode::Crash => crash(),
         TestMode::Hang => hang_forever(),
         TestMode::Slow { ms } => std::thread::sleep(Duration::from_millis(u64::from(ms))),
         _ => {}

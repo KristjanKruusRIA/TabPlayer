@@ -13,8 +13,9 @@
 //!   and the report follows. The clock starts when blocks are pending and the heartbeat has not moved, so an idle helper
 //!   is never hung, and a helper that stopped beating while idle gets the full 500 ms from its next block. The clock is the
 //!   monotonic `Instant`. If the supervisor's own tick came more than 250 ms late (a stall of this thread, or of the
-//!   machine), the helper's clock is restarted instead, since the helper may have been stalled too and the kill cannot be
-//!   undone.
+//!   machine), the helper's clock is moved forward by the length of the stall instead: a stall is excused, since the
+//!   helper may have been stalled too and the kill cannot be undone, but the time before and after it still counts, so
+//!   recurring stalls cannot hide a hang for ever.
 //! - **The audio thread's fault code** in [`InsertShared`] is `Underrun` or `NonFinite`. A fault is reported again only
 //!   when the code changes.
 //!
@@ -22,8 +23,9 @@
 //! insert falls back to the built-in sound at its next block. A helper the app killed or shut down is dropped from the
 //! watch silently.
 //!
-//! The report callback runs on the supervisor's thread with no lock held, so it may call `unwatch`. A panic in it is
-//! caught and does not end the supervisor. Helpers that leave the watch are dropped after the lock is released, since
+//! The report callback runs on the supervisor's thread with no lock held, so it may call `unwatch`. **It must return
+//! quickly** (send to a channel, say): while it runs no helper is watched, and the time it takes is excused from every
+//! hang clock. A panic in it is caught and does not end the supervisor. Helpers that leave the watch are dropped after the lock is released, since
 //! dropping one waits a moment for the process.
 use super::{
     bridge::{InsertShared, fault},
@@ -76,7 +78,8 @@ enum Verdict {
 }
 
 impl Entry {
-    fn check(&mut self, now: Instant, stalled: bool) -> Verdict {
+    /// `stall` is how late this tick is beyond its due time, zero when it is not late enough to count.
+    fn check(&mut self, now: Instant, stall: Duration) -> Verdict {
         if let Some(status) = self.helper.violation() {
             return self.end(status);
         }
@@ -96,12 +99,16 @@ impl Entry {
             return Verdict::Drop;
         }
         let beat = self.helper.heartbeat();
-        if stalled || beat != self.beat || !self.helper.blocks_pending() {
+        if beat != self.beat || !self.helper.blocks_pending() {
             self.beat = beat;
             self.still_since = now;
-        } else if now.duration_since(self.still_since) >= HANG_TIMEOUT {
-            self.helper.kill();
-            return self.end(PluginStatus::Hung);
+        } else {
+            // Excuse the stall, but never move the start of the wait into the future.
+            self.still_since = (self.still_since + stall).min(now);
+            if now.duration_since(self.still_since) >= HANG_TIMEOUT {
+                self.helper.kill();
+                return self.end(PluginStatus::Hung);
+            }
         }
         let code = self.shared.fault.load(Ordering::Acquire);
         if code == fault::NONE {
@@ -138,13 +145,18 @@ impl Inner {
     /// One look at every helper. `gap` is the time since the previous tick began.
     fn tick(&self, gap: Duration) {
         let now = Instant::now();
-        let stalled = gap > STALL_GAP;
+        // The ticks are due `SUPERVISOR_TICK` apart; a gap beyond `STALL_GAP` is a stall, and what exceeds the tick is excused.
+        let stall = if gap > STALL_GAP {
+            gap - SUPERVISOR_TICK
+        } else {
+            Duration::ZERO
+        };
         let mut reports = Vec::new();
         let mut left = Vec::new();
         {
             let mut entries = lock(&self.entries);
             for mut entry in std::mem::take(&mut *entries) {
-                match entry.check(now, stalled) {
+                match entry.check(now, stall) {
                     Verdict::Keep => entries.push(entry),
                     Verdict::Fault(status) => {
                         reports.push((entry.key.clone(), status));

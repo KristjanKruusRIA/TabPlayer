@@ -23,7 +23,7 @@ Slow takes 50 ms through the parameter. To choose another length, set the state:
 
 ## Modes
 
-- **Crash**: the next `process` call aborts the process.
+- **Crash**: the next `process` call ends the process at once with a fatal exception code (`0xC0000409`). On Windows it uses `TerminateProcess`, so Windows Error Reporting does not run and delay the exit; elsewhere it aborts.
 - **Hang**: the next `process` call never returns.
 - **NaN**: every output sample is NaN.
 - **Slow**: every `process` call takes at least `ms` milliseconds.

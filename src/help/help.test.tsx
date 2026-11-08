@@ -49,3 +49,12 @@ it('closes when the backdrop is pressed but not when the panel is',()=>{
   fireEvent.mouseDown(screen.getByRole('dialog'));expect(onClose).not.toHaveBeenCalled();
   fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
 });
+
+it('describes the inspector tabs and the Track tab, not the old Track task',()=>{
+  const {unmount}=render(<HelpDialog initial="tracks" onClose={vi.fn()}/>);
+  const tracks=screen.getByRole('article',{name:'Tracks and sounds'});
+  expect(tracks).toHaveTextContent('The Track tab of the inspector');expect(tracks).toHaveTextContent('Keep pitch');expect(tracks).not.toHaveTextContent('Track task');
+  unmount();render(<HelpDialog initial="inspector" onClose={vi.fn()}/>);
+  const inspector=screen.getByRole('article',{name:'The inspector'});
+  expect(inspector).toHaveTextContent('three tabs');expect(inspector).toHaveTextContent('Song holds');expect(inspector).toHaveTextContent('Track holds');expect(inspector).toHaveTextContent('Selection holds');expect(inspector).toHaveTextContent('Practice settings on the toolbar');
+});

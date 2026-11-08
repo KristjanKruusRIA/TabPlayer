@@ -337,13 +337,14 @@ export const en = {
   'help.topic.editing.p4': 'Every edit can be undone with Ctrl/Cmd + Z and redone with Ctrl/Cmd + Shift + Z.',
 
   'help.topic.tracks.title': 'Tracks and sounds',
-  'help.topic.tracks.p1': 'The Track task lists the instruments. Select one to edit it, and use Selected instrument to change its name, tuning and other settings.',
-  'help.topic.tracks.p2': 'The Sound task chooses the instrument sound and effects; the Backing task aligns an audio recording with the score. Choosing Sound in View shows the full rig for the selected track.',
+  'help.topic.tracks.p1': 'The Track tab of the inspector holds the settings of the selected track. Select a track in the Tracks list in the bottom dock, or click it in the score. Information moves, duplicates or removes the track, changes its name, color, instrument and tuning, and adds an instrument; tick Keep pitch to retune without changing how the notes sound.',
+  'help.topic.tracks.p2': 'Sounds chooses the instrument sound, the effects and the audio output; Interpretation and MIDI output set how the track plays and where it is sent. Choosing Sound in View shows the full rig for the selected track, and the Backing view in the bottom dock aligns an audio recording with the score.',
   'help.topic.tracks.p3': 'Track changes are recorded in the score history, so Undo reverses them.',
 
   'help.topic.inspector.title': 'The inspector',
-  'help.topic.inspector.p1': 'Edit holds note, beat, measure, staff and score tools for the edit target or selection, including the capo. Practice holds count-in, metronome and speed-trainer settings for rehearsing a looped passage. Presentation holds the layout, default zoom, notation and default view; the zoom above the score changes the view at once.',
+  'help.topic.inspector.p1': 'The inspector has three tabs. Song holds the score’s information, its musical notation (layout, default zoom, notation and default view; the zoom above the score changes the view at once) and sound mastering. Track holds the settings of the selected track, described under Tracks and sounds. Selection holds note, beat, measure, staff and score tools for the edit target or selection, including the capo.',
   'help.topic.inspector.p2': 'Most fields change nothing until you use the panel’s action button, such as Apply or Save.',
+  'help.topic.inspector.p3': 'Count-in, metronome and speed-trainer settings for rehearsing a looped passage are in Practice settings on the toolbar, not in the inspector.',
 
   'help.topic.playback.title': 'Playback and mixing',
   'help.topic.playback.p1': 'Space plays or pauses. The playback bar along the bottom plays, stop and loop a selected passage, and More playback holds further options. Playback follows the score with a green cursor.',

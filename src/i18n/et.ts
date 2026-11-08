@@ -339,13 +339,14 @@ export const et: MessageCatalog = {
   'help.topic.editing.p4': 'Iga muudatuse saab tagasi võtta klahvidega Ctrl/Cmd + Z ja uuesti teha klahvidega Ctrl/Cmd + Shift + Z.',
 
   'help.topic.tracks.title': 'Rajad ja helid',
-  'help.topic.tracks.p1': 'Raja paneel loetleb pillid. Vali pill redigeerimiseks ja kasuta valitud pilli selle nime, häälestuse ja muude sätete muutmiseks.',
-  'help.topic.tracks.p2': 'Heli paneel valib pilli tämbri ja efektid; Taustheli paneel seab helisalvestise partituuriga kohakuti. Heli valimine Vaate menüüst avab valitud raja täieliku heliseadmestiku.',
+  'help.topic.tracks.p1': 'Inspektori vahekaart Rada sisaldab valitud raja sätteid. Vali rada alumise doki loendist Rajad või klõpsa sellel partituuris. Jaotis Teave võimaldab rada liigutada, duplitseerida või eemaldada, muuta selle nime, värvi, pilli ja häälestust ning lisada pilli; märgi Säilita helikõrgus, et noodid kõlaksid pärast ümberhäälestamist samamoodi.',
+  'help.topic.tracks.p2': 'Jaotis Helid valib pilli tämbri, efektid ja heliväljundi; Tõlgendus ja MIDI-väljund määravad, kuidas rada mängib ja kuhu see saadetakse. Heli valimine Vaate menüüst avab valitud raja täieliku heliseadmestiku ning alumise doki vaade Taustheli seab helisalvestise partituuriga kohakuti.',
   'help.topic.tracks.p3': 'Raja muudatused salvestatakse partituuri ajaloos, mistõttu saab neid tagasi võtta.',
 
   'help.topic.inspector.title': 'Inspektor',
-  'help.topic.inspector.p1': 'Muuda sisaldab noodi, löögi, takti, noodirea ja partituuri tööriistu, sealhulgas kapodastrit. Harjutus sisaldab eellööke, metronoomi ja kiirustreenerit korduva lõigu harjutamiseks. Esitlus määrab paigutuse, vaikesuumi ja noodikirja.',
+  'help.topic.inspector.p1': 'Inspektoril on kolm vahekaarti. Lugu sisaldab partituuri teavet, noodikirja sätteid (paigutus, vaikesuum, noodikiri ja vaikevaade; partituuri kohal olev suum muudab vaadet kohe) ning heli masterdamist. Rada sisaldab valitud raja sätteid, mida kirjeldab jaotis Rajad ja helid. Valik sisaldab noodi, löögi, takti, noodirea ja partituuri tööriistu toimetamismärgi või valiku jaoks, sealhulgas kapodastrit.',
   'help.topic.inspector.p2': 'Enamik välju ei muuda midagi enne paneeli toimingunupu (näiteks Rakenda või Salvesta) vajutamist.',
+  'help.topic.inspector.p3': 'Eellöökide, metronoomi ja kiirustreeneri sätted korduva lõigu harjutamiseks on tööriistaribal valikus Harjutamise seaded, mitte inspektoris.',
 
   'help.topic.playback.title': 'Esitus ja miksimine',
   'help.topic.playback.p1': 'Tühikuklahv käivitab või peatab esituse. Alumine juhtriba esitab, peatab ja kordab valitud lõiku ning Rohkem esituse valikuid sisaldab lisasätteid. Esitus liigub partituuril rohelise kursoriga.',

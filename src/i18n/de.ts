@@ -339,13 +339,14 @@ export const de: MessageCatalog = {
   'help.topic.editing.p4': 'Jede Änderung kann mit Strg/Cmd + Z rückgängig gemacht und mit Strg/Cmd + Shift + Z wiederholt werden.',
 
   'help.topic.tracks.title': 'Spuren und Sounds',
-  'help.topic.tracks.p1': 'Die Spur-Ansicht listet Instrumente auf. Wählen Sie eines aus, um Name, Stimmung und weitere Einstellungen anzupassen.',
-  'help.topic.tracks.p2': 'Die Sound-Ansicht wählt Instrumentenklang und Effekte; Begleitung synchronisiert eine Audioaufnahme mit den Noten. Sound in Ansicht zeigt das vollständige Rig der Spur.',
+  'help.topic.tracks.p1': 'Der Reiter Spur im Inspektor enthält die Einstellungen der ausgewählten Spur. Wählen Sie eine Spur in der Liste Spuren im unteren Dock oder klicken Sie sie in der Partitur an. Unter Informationen können Sie die Spur verschieben, duplizieren oder entfernen, Name, Farbe, Instrument und Stimmung ändern und ein Instrument hinzufügen; mit Tonhöhe beibehalten klingen die Noten nach dem Umstimmen unverändert.',
+  'help.topic.tracks.p2': 'Unter Klänge wählen Sie Instrumentenklang, Effekte und Audioausgabe; unter Interpretation und MIDI-Ausgang legen Sie fest, wie die Spur spielt und wohin sie gesendet wird. Sound in Ansicht zeigt das vollständige Rig der Spur, und die Ansicht Begleitung im unteren Dock synchronisiert eine Audioaufnahme mit den Noten.',
   'help.topic.tracks.p3': 'Spuränderungen werden im Partiturverlauf festgehalten und lassen sich rückgängig machen.',
 
   'help.topic.inspector.title': 'Der Inspektor',
-  'help.topic.inspector.p1': 'Bearbeiten bietet Werkzeuge für Noten, Schläge, Takte, Notensysteme und Kapodaster. Üben steuert Vorzähler, Metronom und Tempo-Trainer. Darstellung regelt Layout, Standardzoom und Notenschrift.',
+  'help.topic.inspector.p1': 'Der Inspektor hat drei Reiter. Song enthält die Informationen der Partitur, ihre Notationseinstellungen (Layout, Standardzoom, Notenschrift und Standardansicht; der Zoom über der Partitur ändert die Ansicht sofort) und das Klang-Mastering. Spur enthält die Einstellungen der ausgewählten Spur, siehe Spuren und Sounds. Auswahl bietet Werkzeuge für Note, Schlag, Takt, Notensystem und Partitur am blauen Ziel oder an der Auswahl, einschließlich Kapodaster.',
   'help.topic.inspector.p2': 'Die meisten Felder ändern erst etwas, wenn Sie die Aktionsschaltfläche des Fensters wie Anwenden oder Speichern betätigen.',
+  'help.topic.inspector.p3': 'Vorzähler, Metronom und Tempo-Trainer zum Üben einer wiederholten Passage finden Sie unter Übungseinstellungen in der Werkzeugleiste, nicht im Inspektor.',
 
   'help.topic.playback.title': 'Wiedergabe und Mischen',
   'help.topic.playback.p1': 'Leertaste startet oder pausiert. Die Leiste unten spielt ab, stoppt und wiederholt Passagen; Weitere Wiedergabeoptionen hält zusätzliche Einstellungen bereit.',

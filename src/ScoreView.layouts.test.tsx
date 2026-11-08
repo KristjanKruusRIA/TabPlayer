@@ -28,7 +28,7 @@ vi.mock('./export/pdf',async original=>({...await original<typeof import('./expo
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
  settings=new Settings();score:model.Score|null=null;tracks:number[]=[0];constructor(){state.api=this;}
  beatMouseDown=event<model.Beat>();noteMouseDown=event<model.Note>();beatMouseMove=event<model.Beat>();beatMouseUp=event<void>();renderStarted=event<void>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
- renderer={width:0,partialRenderFinished:event<unknown>()};boundsLookup={staffSystems:[] as rendering.StaffSystemBounds[],findBeats:(beat:model.Beat)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars.flatMap(m=>m.bars.flatMap(b=>b.beats))).filter(b=>b.beat===beat),findBeat:(beat:model.Beat)=>this.boundsLookup.findBeats(beat)[0],getBeatAtPos:()=>null};
+ renderer={width:0,partialRenderFinished:event<unknown>()};boundsLookup={staffSystems:[] as rendering.StaffSystemBounds[],findBeats:(beat:model.Beat)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars.flatMap(m=>m.bars.flatMap(b=>b.beats))).filter(b=>b.beat===beat),findBeat:(beat:model.Beat)=>this.boundsLookup.findBeats(beat)[0],findMasterBarByIndex:(index:number)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars).find(m=>m.index===index)??null,getBeatAtPos:()=>null};
  uiFacade={getOffset:()=>({x:0,y:0}),highlightElements(){},removeHighlights(){}};canvasElement={};customCursorHandler=undefined;customScrollHandler=undefined;
  updateSettings(){} destroy(){}
  highlightPlaybackRange(start:model.Beat,end:model.Beat){const first=this.boundsLookup.findBeat(start),last=this.boundsLookup.findBeat(end);if(first&&last)this.playbackRangeHighlightChanged.emit({startBeat:start,endBeat:end,startBeatBounds:first,endBeatBounds:last,highlightBlocks:this.boundsLookup.staffSystems.filter(s=>s.bars[0].index>=start.voice.bar.index&&s.bars[0].index<=end.voice.bar.index).map(s=>s.realBounds)});}
@@ -119,6 +119,47 @@ it('maps separate public range blocks and resizes a handle across page boundarie
  expect(parseFloat(end.style.top)).toBeGreaterThan(step*2);
  fireEvent.mouseDown(end,{button:0});fireEvent.mouseMove(document,{clientX:(880-210*96/25.4)/2+margin+66,clientY:step+margin+56});fireEvent.mouseUp(document);
  expect(selection).toHaveBeenLastCalledWith({kind:'range',range:{start:{bar:0,tick:0},end:{bar:1,tick:960},lanes:[{track:0,staff:0,voice:0}]}});
+});
+const loopOf=(...bars:number[])=>({first:bars[0],last:bars[bars.length-1],bars:bars.map(bar=>({bar,from:0,to:3840,length:3840}))});
+const rangeOver=(first:number,last:number)=>({kind:'range' as const,range:{start:{bar:first,tick:0},end:{bar:last,tick:960},lanes:[{track:0,staff:0,voice:0}]}});
+it.each(['parchment','verticalScreen','horizontalScreen','verticalPage'] as const)('shades a selection over several systems as one band per system in %s, as every layout does',layout=>{
+ const {props,tree,rerender}=setup(layout);rerender(tree({...props,editorSelection:rangeOver(0,2),onEditorSelection:vi.fn()} as never));
+ const bands=[...document.querySelectorAll<HTMLElement>('.score-range-block')];
+ expect(bands).toHaveLength(3);expect(bands.every(band=>band.getAttribute('aria-hidden')==='true')).toBe(true);
+ const tops=bands.map(band=>parseFloat(band.style.top));expect([...tops].sort((a,b)=>a-b)).toEqual(tops);expect(new Set(tops).size).toBe(3);
+});
+it('removes the selection bands when the selection is cleared',()=>{
+ const {props,tree,rerender}=setup('parchment');
+ rerender(tree({...props,editorSelection:rangeOver(0,1),onEditorSelection:vi.fn()} as never));
+ expect(document.querySelectorAll('.score-range-block')).toHaveLength(2);
+ rerender(tree({...props,editorSelection:null,onEditorSelection:vi.fn()} as never));
+ expect(document.querySelectorAll('.score-range-block')).toHaveLength(0);
+});
+it.each(['parchment','horizontalScreen','verticalPage','grid'] as const)('draws the loop on the bars it covers, one band per system, in %s',layout=>{
+ const {props,tree,rerender}=setup(layout);expect(document.querySelectorAll('.score-loop-band')).toHaveLength(0);
+ rerender(tree({...props,loop:loopOf(1,2)} as never));
+ const bands=[...document.querySelectorAll<HTMLElement>('.score-loop-band')];
+ expect(bands).toHaveLength(2);expect(bands.every(band=>band.getAttribute('aria-hidden')==='true')).toBe(true);
+ expect(parseFloat(bands[1].style.top)).toBeGreaterThan(parseFloat(bands[0].style.top));
+ rerender(tree({...props,loop:null} as never));expect(document.querySelectorAll('.score-loop-band')).toHaveLength(0);
+});
+it('leaves a loop that skips a bar as two bands on one system row, and shows loop and selection together',()=>{
+ const {props,tree,rerender}=setup('parchment');
+ rerender(tree({...props,loop:loopOf(0,2),editorSelection:rangeOver(1,2),onEditorSelection:vi.fn()} as never));
+ expect(document.querySelectorAll('.score-loop-band')).toHaveLength(2);expect(document.querySelectorAll('.score-range-block')).toHaveLength(2);
+});
+it('draws the loop again for a new layout or loop, not for a playback tick that hands over an equal loop',()=>{
+ const {props,tree,rerender}=setup('verticalPage');rerender(tree({...props,loop:loopOf(1,2)} as never));
+ const first=[...document.querySelectorAll('.score-loop-band')];expect(first).toHaveLength(2);
+ rerender(tree({...props,loop:loopOf(1,2)} as never));
+ [...document.querySelectorAll('.score-loop-band')].forEach((band,index)=>expect(band).toBe(first[index]));
+ rerender(tree({...props,loop:loopOf(1,2),zoom:50} as never));
+ expect(document.querySelectorAll('.score-loop-band')).toHaveLength(2);
+});
+it('keeps the selection and loop overlays out of the way of the pointer',()=>{
+ const css=require('node:fs').readFileSync('src/ScoreView.css','utf8') as string;
+ expect(css).toMatch(/\.score-playback-bar,\.score-playback-beat,\.score-range-block\s*\{[^}]*pointer-events:\s*none/);
+ expect(css).toMatch(/\.score-loop-band\s*\{[^}]*pointer-events:\s*none/);
 });
 it('reports truthful lower fit limits and keeps vertical screen at at most 100 percent',()=>{
  const {props,tree,rerender}=setup('verticalScreen',137.5);

@@ -9,6 +9,8 @@ import { busyGuard } from './ui/useBusyGuard';
 import type { BarCompletion } from './editor/bar-completion';
 import { FirstBarGlyph,LastBarGlyph,LoopGlyph,MetronomeGlyph,MinusGlyph,MoreGlyph,NextBarGlyph,PauseGlyph,PlayGlyph,PlusGlyph,PreviousBarGlyph,StopGlyph } from './shell/glyphs';
 import { useI18n } from './i18n';
+import { useLoopPassage } from './audio/useLoopPassage';
+import { loopFractions,loopText } from './audio/loop-passage';
 import './shell/transport.css';
 const clock=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000)%60<10?'0':''}${Math.floor(ms/1000)%60}`;
 const display=(value:number)=>Number(value.toFixed(2));
@@ -51,11 +53,14 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
   const [cursorChoice,setCursorChoice]=useState<CursorPlaybackChoice|null>(null),[passageChoice,setPassageChoice]=useState<PassagePlaybackChoice|null>(null),[nextStart,setNextStart]=useState<'cursor'|'position'>('cursor');
   const loop=state.loop!==null,practice=state.practice,fixed=practice.settings.tempo.kind==='fixed';
   // The two bar fields show the loop that is actually running; with none running they follow the selected bars (or the cursor's bar), so Loop repeats what the player is looking at.
-  const loopBars=useMemo(()=>{
-    const active=state.loop;if(!active||!occurrences.length)return null;
-    const first=occurrences.find(o=>active.startTick>=o.startTick&&active.startTick<o.endTick),last=[...occurrences].reverse().find(o=>o.startTick<active.endTick);
-    return first&&last&&first.bar<=last.bar?{first:first.bar,last:last.bar}:null;
-  },[state.loop,occurrences]);
+  const passage=useLoopPassage(player,state),loopBars=passage?{first:passage.first,last:passage.last}:null;
+  // The loop along the piece's own clock, for the strip under the position display; changes only with the loop or the plan, not per tick.
+  const loopEdges=useMemo(()=>loopFractions(passage&&state.loop,occurrences),[passage,occurrences]);
+  const loopNumbers=passage?loopText(passage):null;
+  const [loopSaid,setLoopSaid]=useState('');
+  const loopStatus=loopNumbers?t(loopNumbers.first===loopNumbers.last?'transport.loop_status_one':'transport.loop_status',{first:String(loopNumbers.first),last:String(loopNumbers.last)}):null;
+  // A status line a screen reader speaks when the loop starts, changes or ends.
+  useEffect(()=>{setLoopSaid(previous=>loopStatus??(previous?t('transport.loop_status_off'):''));},[loopStatus]);
   const selectedBars=useMemo(()=>{
     const bars=selection?.kind==='range'?[selection.range.start.bar,selection.range.end.bar]:selection?.kind==='bars'?[selection.firstBar,selection.lastBar]:selection?.kind==='notes'?selection.notes.map(note=>note.target.bar):[];
     if(!bars.length)bars.push(cursor.bar);
@@ -105,19 +110,20 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
       <button className="transport-stopbutton" title={t('transport.stop')} onClick={()=>{setNextStart('cursor');act(()=>player.stop());}}><StopGlyph/><span className="transport-label">{t('transport.stop')}</span></button>
       <span className="transport-barnav" role="group" aria-label={t('transport.bar_navigation')}>{barButton(t('transport.next_bar'),shownBar+1,<NextBarGlyph/>,shownBar>=measures-1)}{barButton(t('transport.last_bar'),measures-1,<LastBarGlyph/>,shownBar>=measures-1)}</span>
     </div>
-    <div className={`transport-group transport-position${lcd?' transport-lcd':''}`} role={lcd?'group':undefined} aria-label={lcd?t('transport.position_display'):undefined} style={lcd?{'--lcd-track':lcd.color??'transparent','--lcd-progress':`${state.endTime>0?Math.min(100,Math.max(0,state.time/state.endTime*100)):0}%`} as CSSProperties:undefined}>
+    <div className={`transport-group transport-position${lcd?' transport-lcd':''}`} role={lcd?'group':undefined} aria-label={lcd?t('transport.position_display'):undefined} data-loop={lcd&&loopNumbers?'true':undefined} style={lcd?{'--lcd-track':lcd.color??'transparent','--lcd-progress':`${state.endTime>0?Math.min(100,Math.max(0,state.time/state.endTime*100)):0}%`,...(loopNumbers&&loopEdges?{'--lcd-loop-from':`${loopEdges.from*100}%`,'--lcd-loop-size':`${(loopEdges.to-loopEdges.from)*100}%`}:{})} as CSSProperties:undefined}>
       {lcd&&(lcd.tracks&&lcd.onTrack?<select className="transport-lcd-track" aria-label={t('transport.current_track')} title={t('transport.current_track_hint')} value={lcd.trackIndex??0} aria-disabled={busy||undefined} onChange={event=>{if(!busy)lcd.onTrack!(Number(event.target.value));}}>{lcd.tracks.map((label,index)=><option key={index} value={index}>{label}</option>)}</select>:<span className="transport-lcd-track" title={lcd.track}>{lcd.track}</span>)}
       {lcd?.onGoTo?<span className="transport-lcd-bar"><button ref={goToButton} type="button" title={t('transport.bar_position_hint')} aria-expanded={goToOpen} aria-haspopup="dialog" {...busyGuard({busy,className:'transport-caption transport-bar-number transport-lcd-link',onClick:()=>{setGoToValue(shownBar+1);setGoToOpen(open=>!open);}})}><span>{t('transport.bar_n', { number: scrub ?? state.measure + 1 })}</span><span className="transport-dim transport-of">{t('transport.of_n', { total: measures })}</span></button>
         {goToOpen&&<form ref={goToForm} className="transport-goto" role="dialog" aria-label={t('transport.go_to_bar')} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();closeGoTo();}}} onSubmit={event=>{event.preventDefault();if(busy)return;const bar=Math.min(Math.max(1,Math.round(goToValue)||1),measures)-1;stepBar(bar);lcd.onGoTo!(bar);closeGoTo();}}>
           <label>{t('transport.go_to_bar')}<input type="number" autoFocus min={1} max={measures} value={goToValue} onChange={event=>setGoToValue(Number(event.target.value))}/></label>
           <button type="submit" className="primary" aria-disabled={busy||undefined}>{t('transport.go')}</button></form>}</span>
       :<span className="transport-caption transport-bar-number"><span>{t('transport.bar_n', { number: scrub ?? state.measure + 1 })}</span><span className="transport-dim transport-of">{t('transport.of_n', { total: measures })}</span></span>}
+      {lcd&&loopNumbers&&<span className="transport-lcd-loop" title={t('transport.loop_position_hint',{first:String(loopNumbers.first),last:String(loopNumbers.last)})}><LoopGlyph/>{loopNumbers.first===loopNumbers.last?t('transport.loop_chip_one',{first:String(loopNumbers.first)}):t('transport.loop_chip',{first:String(loopNumbers.first),last:String(loopNumbers.last)})}</span>}
       <output aria-live="off" className="transport-time"><span>{clock(state.time)}</span><span className="transport-dim"> / {clock(state.endTime)}</span></output>
       {lcd&&<span className="transport-lcd-meta">{completion&&<span className="transport-lcd-completion" data-kind={completion.kind} role="img" aria-label={completionText} title={completionText}>{completion.kind==='complete'?'✓':'!'}</span>}
         {meta(lcd.signatureAt(shownBar),t('transport.signature_hint',{value:lcd.signatureAt(shownBar)}))}
         {meta(practice.currentBpm>0?`♩ = ${Math.round(practice.currentBpm)}`:'♩ = –',t('transport.tempo_hint',{value:practice.currentBpm>0?String(Math.round(practice.currentBpm)):'–'}))}</span>}
     </div>
-    <div className="transport-group transport-loop" role="group" aria-label={t('transport.loop')}><span className="transport-caption">{t('transport.loop_bars')}</span>
+    <div className="transport-group transport-loop" role="group" aria-label={t('transport.loop')}><span className="transport-caption">{t('transport.loop_bars')}</span><span className="tp-sr" role="status" aria-live="polite">{loopSaid}</span>
       <div className="transport-row"><BarField label={t('transport.loop_start')} min={1} max={measures} value={start} onValue={setStart}/><span className="transport-dash" aria-hidden="true"/><BarField label={t('transport.loop_end')} min={1} max={measures} value={end} onValue={setEnd}/>
         <button {...busyGuard({busy,unavailable:state.practicePending,className:'transport-toggle transport-loopbutton',onClick:()=>act(()=>loop?player.clearLoop():player.setLoop(start-1,end-1))})} title={loop?t('transport.clear_loop'):t('transport.loop_range_hint',{start:String(start),end:String(end)})} aria-pressed={loop}><LoopGlyph/>{loop?t('transport.clear_loop'):t('transport.loop')}</button></div>
     </div>

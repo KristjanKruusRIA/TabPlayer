@@ -19,7 +19,7 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
   beatMouseMove=event<model.Beat>();beatMouseUp=event<model.Beat|null>();renderStarted=event<boolean>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
   canvasElement={};uiFacade={getOffset:()=>({x:30,y:40,w:600,h:300}),highlightElements(){},removeHighlights(){}};
   renderer={width:0,partialRenderFinished:event<never>()};renderScore(){}render(){}
-  boundsLookup={findBeat:beatBounds,findBeats:(beat:model.Beat)=>[beatBounds(beat)],getBeatAtPos:(_x:number,_y:number)=>null as model.Beat|null};
+  boundsLookup={findBeat:beatBounds,findBeats:(beat:model.Beat)=>[beatBounds(beat)],findMasterBarByIndex:(_index:number)=>null as rendering.MasterBarBounds|null,getBeatAtPos:(_x:number,_y:number)=>null as model.Beat|null};
   highlighted:[model.Beat,model.Beat]|null=null;rangeEndpoints:[model.Beat,model.Beat]|null=null;playbackRange={startTick:1920,endTick:3840};
   highlightPlaybackRange(start:model.Beat,end:model.Beat){this.rangeEndpoints=[start,end];this.highlighted=[start,end];this.playbackRangeHighlightChanged.emit(start===end?{}:{startBeat:start,endBeat:end,startBeatBounds:beatBounds(start),endBeatBounds:beatBounds(end)});}
   clearPlaybackRangeHighlight(){this.highlighted=null;this.playbackRangeHighlightChanged.emit({});}

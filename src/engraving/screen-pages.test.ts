@@ -283,3 +283,105 @@ describe('zoom arithmetic',()=>{
     for(const manualPercent of [24,301,NaN,Infinity])expect(()=>resolveScreenZoom({zoomMode:'manual',manualPercent,available:{width:0,height:0},natural:{width:0}})).toThrow();
   });
 });
+
+describe('per-system gaps',()=>{
+  const avail=267*px,top=15*px;
+  const bars=(i:number)=>fixture.bounds.staffSystems[i].bars[0].index;
+  const shape=(p:ScreenPagination)=>JSON.stringify([p.pageCount,p.blocks.map(b=>[b.chunk.id,b.page,b.x,b.y])]);
+  const stack=(gaps:Array<{bar:number;scale:number}>|undefined,systemSpacing:number|null=null)=>paginateScreenScore(fixture.chunks,fixture.bounds,page,{gaps,systemSpacing,scale:page.scale});
+  const blockOf=(p:ScreenPagination,i:number)=>p.blocks.find(b=>b.system===fixture.bounds.staffSystems[i])!;
+  it('is identical without gaps, with an empty list or with gaps outside every system',()=>{
+    const plain=shape(pagination);
+    expect(shape(stack(undefined))).toBe(plain);expect(shape(stack([]))).toBe(plain);expect(shape(stack([{bar:5000,scale:3}]))).toBe(plain);
+  });
+  it('moves the chosen system and every block after it on the page by (s-1) x 20 x spacing x scale',()=>{
+    // A system inside a page whose last block leaves room for the largest offset (0.5 x 20 x 2 x scale), so no case changes page.
+    const room=(page_:number)=>Math.max(...pagination.blocks.filter(b=>b.page===page_).map(b=>b.y+b.sourceBounds.h));
+    const index=[1,2,3,4,5,6,7,8].find(i=>{const b=blockOf(pagination,i);return b.y>top+1e-9&&blockOf(pagination,i-1).page===b.page&&room(b.page)+20*2*page.scale<=top+avail;})!;
+    expect(index).toBeDefined();
+    for(const [scale,spacing] of [[.5,null],[1.5,null],[1.5,2]] as const) {
+      const offset=(scale-1)*20*(spacing??1)*page.scale,result=stack([{bar:bars(index),scale}],spacing);
+      const base=blockOf(pagination,index),moved=blockOf(result,index);
+      expect(moved.page).toBe(base.page);
+      for(const [n,b] of result.blocks.entries()) {
+        const old=pagination.blocks[n];
+        expect(b.page).toBe(old.page);
+        expect(b.y).toBeCloseTo(old.page===base.page&&old.y>=base.y-1e-9?old.y+offset:old.y);
+      }
+    }
+    const shrunk=stack([{bar:bars(index),scale:.25}]);
+    expect(blockOf(shrunk,index).y).toBeCloseTo(blockOf(pagination,index).y-.75*20*page.scale);
+  });
+  it('adds no offset before the first system of the score or at a page top',()=>{
+    expect(shape(stack([{bar:bars(0),scale:4}]))).toBe(shape(pagination));
+    const tops=fixture.bounds.staffSystems.map((_,i)=>i).filter(i=>i>0&&Math.abs(blockOf(pagination,i).y-top)<1e-9);
+    expect(tops.length).toBeGreaterThan(0);
+    for(const i of tops)expect(blockOf(stack([{bar:bars(i),scale:4}]),i).y).toBeCloseTo(top);
+  });
+  it('counts the offset in the page fit and drops it when the system moves to the next page',()=>{
+    // A spacing of 400% makes the offset 3 x 80 x 1.13 = 271 px, larger than any page slack left after a mid-page system.
+    const i=[1,2,3,4,5,6,7,8].find(n=>{const b=blockOf(pagination,n);return b.y>top+1e-9&&b.y-top+b.sourceBounds.h+271>avail;})!;
+    const base=blockOf(pagination,i),result=stack([{bar:bars(i),scale:4}],4),moved=blockOf(result,i);
+    expect(moved.page).toBe(base.page+1);expect(moved.y).toBeCloseTo(top);
+    expect(result.pageCount).toBeGreaterThanOrEqual(pagination.pageCount);
+    // The moved system opens the next page without the offset; the system before it is still on the old page.
+    expect(result.blocks.filter(b=>b.page===moved.page).find(b=>b.system)).toBe(moved);
+    expect(moved.y).toBeCloseTo(top);
+  });
+});
+
+describe('staff-gap band shift',()=>{
+  const rect=(x:number,y:number,w:number,h:number)=>({x,y,w,h});
+  const bar=(x:number,y:number,w:number,h:number,beats:unknown[]=[])=>Object.assign(new rendering.BarBounds(),{realBounds:rect(x,y,w,h),visualBounds:rect(x,y,w,h),beats});
+  const systemOf=(index:number,real:ScreenRect,bars:rendering.BarBounds[])=>Object.assign(new rendering.StaffSystemBounds(),{realBounds:real,visualBounds:real,bars:[Object.assign(new rendering.MasterBarBounds(),{index,bars})]});
+  const chunkOf=(id:string,y:number,height:number,first:number,shift?:ScreenRenderChunk['shift']):ScreenRenderChunk=>({id,x:0,y,width:100,height,firstMasterBarIndex:first,lastMasterBarIndex:first,svg:'<svg xmlns="http://www.w3.org/2000/svg"></svg>',...(shift?{shift}:{})});
+  function shiftedFixture(options:{shift?:NonNullable<ScreenRenderChunk['shift']>;scale?:number;flush?:boolean}={}) {
+    const voice=new model.Voice(),beat=new model.Beat();voice.addBeat(beat);
+    const note=new model.Note();beat.addNote(note);
+    const noteBounds=Object.assign(new rendering.NoteBounds(),{note,noteHeadBounds:rect(40,245,10,10)});
+    const beatBounds=Object.assign(new rendering.BeatBounds(),{beat,realBounds:rect(30,200,30,100),visualBounds:rect(30,200,30,100),onNotesX:45,notes:[noteBounds]});
+    const system=systemOf(0,rect(0,90,100,220),[bar(0,100,100,60),bar(0,200,100,100,[beatBounds])]);
+    const second=systemOf(1,rect(0,410,100,80),[bar(0,420,100,60)]);
+    const bounds=Object.assign(new rendering.BoundsLookup(),{staffSystems:[system,second]});
+    const shift=options.shift??{cuts:[180],offsets:[40]},layout=options.flush?{...page,marginsMm:{top:0,right:0,bottom:0,left:0}}:page;
+    const plainChunks=[chunkOf('a',0,400,0),chunkOf('b',400,100,1)];
+    const p=paginateScreenScore([chunkOf('a',0,400,0,shift),chunkOf('b',400,100,1)],bounds,layout);
+    const plain=paginateScreenScore(plainChunks,bounds,layout);
+    const plainAgain=paginateScreenScore(plainChunks.map(c=>({...c,shift:undefined})),bounds,layout);
+    const a=arrangeScreenPages(p,'verticalPage',options.scale??1,p.paper.width*(options.scale??1));
+    const toScreen=(x:number,y:number)=>{const block=p.blocks[0],sheet=a.pages[block.page];return {x:sheet.x+(block.x+x-block.sourceBounds.x)*a.scale,y:sheet.y+(block.y+y-block.sourceBounds.y)*a.scale};};
+    return {p,plain,plainAgain,a,system,pianoNote:{x:45,note},toScreen};
+  }
+  it('paginates a shifted chunk with its composed height, including a chunk taller than its system',()=>{
+    const {p,plain}=shiftedFixture();
+    expect(p.blocks[0].sourceBounds.h).toBe(440);expect(p.blocks[1].y-p.blocks[0].y).toBe(plain.blocks[1].y-plain.blocks[0].y+40);
+    expect(plain.blocks[0].sourceBounds.h).toBe(400);
+  });
+  it('maps a click on a moved staff and returns null inside an opened gap',()=>{
+    const {p,a,system,pianoNote,toScreen}=shiftedFixture();
+    expect(unmapScreenPoint(p,a,toScreen(10,290))!.point.y).toBe(250);
+    expect(unmapScreenPoint(p,a,toScreen(10,190))).toBeNull();
+    expect(hitTestScreenPages(p,a,toScreen(pianoNote.x,290))!.note).toBe(pianoNote.note);
+    expect(unmapScreenPoint(p,a,toScreen(10,150))!.system).toBe(system);
+  });
+  it('stretches a rect spanning the cut',()=>{const {p,a,system}=shiftedFixture();expect(mapScreenRect(p,a,system,{x:0,y:100,w:10,h:200})!.h).toBe(240);});
+  it('places unshifted blocks exactly where they were',()=>{const {plain,plainAgain}=shiftedFixture();expect(plainAgain.blocks.map(b=>[b.page,b.x,b.y,b.sourceBounds])).toEqual(plain.blocks.map(b=>[b.page,b.x,b.y,b.sourceBounds]));});
+  it('moves a rect on the lower staff down by the offset and leaves one above the cut',()=>{
+    const {p,a,system,toScreen}=shiftedFixture();
+    expect(mapScreenRect(p,a,system,{x:0,y:245,w:10,h:10})!.y).toBeCloseTo(toScreen(0,285).y,8);
+    expect(mapScreenRect(p,a,system,{x:0,y:120,w:10,h:10})!.y).toBeCloseTo(toScreen(0,120).y,8);
+  });
+  it.each([1,0.5])('resolves the cut boundaries of an opened gap at scale %s',scale=>{
+    const {p,a,toScreen}=shiftedFixture({scale,flush:true}),at=(y:number)=>unmapScreenPoint(p,a,toScreen(10,y));
+    expect(at(179.999)!.point.y).toBeCloseTo(179.999,9);
+    expect(at(180)).toBeNull();expect(at(219.999)).toBeNull();
+    expect(at(220)!.point.y).toBeCloseTo(180,9);
+  });
+  it.each([1,0.5])('lets the lower band win where a negative offset overlaps the cut at scale %s',scale=>{
+    const {p,a,system,toScreen}=shiftedFixture({shift:{cuts:[180],offsets:[-10]},scale,flush:true});
+    expect(unmapScreenPoint(p,a,toScreen(10,175))!.point.y).toBeCloseTo(185,9);
+    // Pinned: top 175 and exclusive bottom 185 both land on 175, so the rect collapses to zero height at its top.
+    const mapped=mapScreenRect(p,a,system,{x:0,y:175,w:10,h:10})!;
+    expect(mapped.h).toBe(0);expect(mapped.y).toBeCloseTo(toScreen(0,175).y,9);
+  });
+});

@@ -18,7 +18,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  RUSTUP_TOOLCHAIN: 1.88.0
+  RUSTUP_TOOLCHAIN: 1.90.0
   CARGO_BUILD_JOBS: 2
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
@@ -82,7 +82,7 @@ jobs:
           sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev patchelf
       - name: Install and verify declared Rust MSRV
         run: |
-          rustup toolchain install 1.88.0 --profile minimal --component rustfmt
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt
           rustc --version
           cargo --version
       - run: npm ci

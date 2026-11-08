@@ -1,5 +1,7 @@
 use super::cabinet_ir;
 use super::ir_convolver::{IrEngine, IrKernel};
+use super::nam::CaptureStage;
+use super::nam_library;
 use super::tone;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -36,17 +38,81 @@ block!(Compressor {
     release_ms: f64 = 100.0,
     makeup_db: f64 = 0.0
 });
-block!(Amp {
-    model: String = "clean".into(),
-    drive: f64 = 0.1,
-    gain_db: f64 = 0.0
-} later {
+/// A NAM capture the user loaded, named by the identity it has in their library. A document never holds the capture:
+/// where the library has no such file, the amp's built-in model plays instead and the document is unchanged.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CaptureRef {
+    pub id: String,
+    /// What the capture was called when it was picked, so a machine without it can say which one is missing.
+    pub name: String,
+    pub level_db: f64,
+}
+impl CaptureRef {
+    /// The longest name, in characters.
+    pub const MAX_NAME: usize = 64;
+    fn validate(&self) -> Result<(), String> {
+        let xml = |c: char| {
+            matches!(
+                c,
+                '\u{9}' | '\u{A}' | '\u{D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+            )
+        };
+        if !nam_library::valid_id(&self.id) {
+            return Err("Invalid amp capture identity.".into());
+        }
+        // Names are validated, not normalized. JS and Rust trim differ only at U+0085 and U+FEFF.
+        if self.name.is_empty()
+            || self.name.trim() != self.name
+            || self.name.starts_with(['\u{feff}', '\u{85}'])
+            || self.name.ends_with(['\u{feff}', '\u{85}'])
+            || self.name.chars().count() > Self::MAX_NAME
+            || !self.name.chars().all(xml)
+        {
+            return Err("Invalid amp capture name.".into());
+        }
+        if !self.level_db.is_finite() || !(-12.0..=12.0).contains(&self.level_db) {
+            return Err("Invalid amp capture level: expected -12..12 dB.".into());
+        }
+        Ok(())
+    }
+}
+/// The amp block. Fields added after sounds could be saved default to 0 (or none) and are not written while so, so
+/// amps saved before them load and save unchanged. `capture`, when the library holds it, plays in place of `model`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Amp {
+    pub enabled: bool,
+    pub model: String,
+    pub drive: f64,
+    pub gain_db: f64,
     // The tone stack after the preamp, in dB: a bass shelf, a mid peak, a treble shelf and a presence peak.
-    bass_db,
-    mid_db,
-    treble_db,
-    presence_db
-});
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub bass_db: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub mid_db: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub treble_db: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub presence_db: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<CaptureRef>,
+}
+impl Default for Amp {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: "clean".into(),
+            drive: 0.1,
+            gain_db: 0.0,
+            bass_db: 0.0,
+            mid_db: 0.0,
+            treble_db: 0.0,
+            presence_db: 0.0,
+            capture: None,
+        }
+    }
+}
 /// A cabinet impulse response the user loaded, named by the identity it has in their library. A document never holds
 /// the audio: where the library has no such response, the cabinet's model plays instead and the document is unchanged.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1196,6 +1262,9 @@ impl FxSettings {
         if let Some(ir) = &self.cabinet.ir {
             ir.validate()?;
         }
+        if let Some(capture) = &self.amp.capture {
+            capture.validate()?;
+        }
         if let Some(second) = &self.second {
             if second.second.is_some() {
                 return Err("Invalid second pedalboard.".into());
@@ -1393,6 +1462,177 @@ fn cabinet_ir_for(cabinet: &Cabinet, rate: u32) -> Option<(Arc<IrKernel>, f32)> 
     let kernel = cabinet_ir::resolve(&ir.id, rate).filter(|kernel| kernel.rate() == rate)?;
     Some((kernel, 10f64.powf(ir.level_db / 20.0) as f32))
 }
+/// A capture playing in an amp stage: one stage for each channel, and whether the right one still mirrors the left.
+/// Everything is built off the audio thread; nothing here allocates once running.
+struct AmpCapture {
+    left: CaptureStage,
+    right: CaptureStage,
+    /// Both channels have had the same input so far, so the right stage holds what the left does and need not run.
+    twin: bool,
+    /// Whether it ran on the previous frame. A capture starting again starts from its prewarmed state.
+    live: bool,
+}
+impl AmpCapture {
+    /// One frame through the capture, scaled by `gain` after the stage's own calibrated gain. A product that leaves the
+    /// `f32` range silences the stage, which then restores itself on the next reset.
+    fn run(&mut self, x: [f32; 2], gain: f64) -> [f32; 2] {
+        // The stages take non-finite samples as silence and a signed zero as zero, so the mirror compares them so.
+        let x = x.map(CaptureStage::clean);
+        // Channels that have both settled to silence hold the same state again, so they run as one.
+        if !self.twin
+            && x[0].to_bits() == x[1].to_bits()
+            && self.left.is_blank()
+            && self.right.is_blank()
+        {
+            self.twin = true;
+        }
+        if self.twin {
+            if x[0].to_bits() == x[1].to_bits() {
+                let y = self.left.process_with(x[0], gain);
+                return [y, y];
+            }
+            self.right.copy_from(&self.left);
+            self.twin = false;
+        }
+        [
+            self.left.process_with(x[0], gain),
+            self.right.process_with(x[1], gain),
+        ]
+    }
+    fn reset(&mut self) {
+        self.left.reset();
+        self.right.reset();
+        self.twin = true;
+    }
+    /// Whether it holds nothing, and whether it runs one channel for both.
+    fn at_rest(&self) -> [bool; 2] {
+        [
+            self.left.is_blank() && (self.twin || self.right.is_blank()),
+            self.twin,
+        ]
+    }
+    /// Whether this running capture can stand for `other`'s: the same capture, neither faulted.
+    fn same_as(&self, other: &AmpCapture) -> bool {
+        self.left.same_as(&other.left) && self.right.same_as(&other.right)
+    }
+    fn never_rest(&mut self) {
+        self.left.set_never_rest(true);
+        self.right.set_never_rest(true);
+    }
+}
+/// The capture an amp names, if it is on and the user's library supplies it for `rate`. Anything else is `None` and
+/// the built-in circuit plays: a document must always open and play. Call off the audio thread, because this may read
+/// a file and calibrates the capture.
+fn amp_capture_for(amp: &Amp, rate: u32) -> Option<Box<AmpCapture>> {
+    if !amp.enabled || !CaptureStage::rate_supported(rate) {
+        return None;
+    }
+    let capture = amp.capture.as_ref()?;
+    let model = nam_library::resolve(&capture.id)?;
+    // The level is applied by the amp stage, which ramps it; the stage plays at its calibrated gain.
+    let left = CaptureStage::with_identity(&capture.id, model, rate, 0.0);
+    if left.calibration_faulted() {
+        return None;
+    }
+    let right = left.duplicate();
+    Some(Box::new(AmpCapture {
+        left,
+        right,
+        twin: true,
+        live: false,
+    }))
+}
+/// One frame of the amp stage when a capture plays on either end of the crossfade, or `None` when neither does and the
+/// built-in path plays unchanged. Each end plays as itself (a capture, a circuit or the plain curve) and only their
+/// outputs crossfade, as the circuits do. Side 0 is the previous settings and 1 the current; `cap_side` says which
+/// capture slot each plays.
+#[allow(clippy::too_many_arguments)]
+fn amp_capture_frame(
+    caps: &mut [Option<Box<AmpCapture>>; 2],
+    cap_side: [Option<usize>; 2],
+    shapes: &[Option<tone::Shape>; 2],
+    chain: &mut tone::Chain,
+    dc: &mut [f64; 2],
+    amps: [&Amp; 2],
+    t: f64,
+    x: [f32; 2],
+) -> Option<[f32; 2]> {
+    let from = if amps[0].enabled { 0 } else { 1 };
+    let to = if amps[1].enabled { 1 } else { 0 };
+    let shared = cap_side[from].is_some() && cap_side[from] == cap_side[to];
+    let two = t < 1.0 && from != to && !shared;
+    if cap_side[to].is_none() && !(two && cap_side[from].is_some()) {
+        return None;
+    }
+    let ends = [from, to];
+    let ends = if two { &ends[..] } else { &ends[1..] };
+    let mut used = [false; 2];
+    let (mut chain_used, mut plain_used) = (false, false);
+    let mut outs = [[0.0f32; 2]; 2];
+    for (k, &side) in ends.iter().enumerate() {
+        let amp = amps[side];
+        // One end plays through the ramp's own blend of the two gains; two ends each keep their own.
+        let db = if two {
+            amp.gain_db
+        } else {
+            amps[0].gain_db + (amps[1].gain_db - amps[0].gain_db) * t
+        };
+        let level = |amp: &Amp| amp.capture.as_ref().map_or(0.0, |c| c.level_db);
+        // The level ramps as the gain does when one stage plays through the change, else it is the end's own.
+        let level = if !two && cap_side[0].is_some() && cap_side[0] == cap_side[1] {
+            level(amps[0]) + (level(amps[1]) - level(amps[0])) * t
+        } else {
+            level(amp)
+        };
+        let capture = cap_side[side].and_then(|slot| caps[slot].as_mut().map(|c| (slot, c)));
+        outs[k] = if let Some((slot, capture)) = capture {
+            used[slot] = true;
+            if !capture.live {
+                capture.reset();
+                capture.live = true;
+            }
+            let gain = 10f64.powf((db + level) / 20.0);
+            capture.run(x, gain)
+        } else if let Some(shape) = shapes[side].as_ref() {
+            let gain = 10f64.powf(db / 20.0);
+            chain_used = true;
+            if !chain.live {
+                chain.reset();
+                chain.live = true;
+            }
+            chain.process(shape, x, 0.0).map(|v| (v * gain) as f32)
+        } else {
+            let gain = 10f64.powf(db / 20.0);
+            plain_used = true;
+            let pre = 1.0 + amp.drive * if amp.model == "bass" { 3.0 } else { 1.0 };
+            let bias = 0.02 * amp.drive;
+            let zero = bias.tanh();
+            std::array::from_fn(|c| {
+                let direct = (x[c] as f64 * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt();
+                dc[c] += 0.0005 * (direct - dc[c]);
+                ((direct - dc[c]) * gain) as f32
+            })
+        };
+    }
+    for (slot, capture) in caps.iter_mut().enumerate() {
+        if let Some(capture) = capture {
+            if !used[slot] {
+                capture.live = false;
+            }
+        }
+    }
+    if !chain_used {
+        chain.live = false;
+    }
+    if !plain_used {
+        *dc = [0.0; 2];
+    }
+    Some(if two {
+        std::array::from_fn(|c| outs[0][c] + (outs[1][c] - outs[0][c]) * t as f32)
+    } else {
+        outs[0]
+    })
+}
 /// One built-in cabinet by itself, as the cabinet stage plays it once settled: a designed one through the shared FIR,
 /// any other through its filters.
 fn builtin_cabinet(
@@ -1447,6 +1687,11 @@ pub struct TrackDsp {
     amp_chain: tone::Chain,
     amp_leaving: tone::Chain,
     amp_shapes: [Option<tone::Shape>; 2],
+    /// The captures the amp can play, built off the audio thread, and which of them the previous and current
+    /// settings play. Two settings that name the same capture play one running stage. A leaving capture is never
+    /// dropped on the audio thread: `transition_from` hands it to the configuration that is dropped off it.
+    amp_caps: [Option<Box<AmpCapture>>; 2],
+    amp_cap_side: [Option<usize>; 2],
     /// The tone stack's filters and the gains they were set for. They run whenever the amp does, so a flat stack that
     /// is turned up starts from the signal already flowing through them.
     amp_tone: [Biquad; 4],
@@ -1565,6 +1810,8 @@ impl TrackDsp {
         let wah_start = wah_target(&settings.wah, 0.0);
         let drive_start = drive_shape(&settings.drive, rate);
         let amp_start = tone::amp_shape(&settings.amp.model, settings.amp.drive, rate);
+        let capture_start = amp_capture_for(&settings.amp, sample_rate);
+        let capture_side = [None, capture_start.is_some().then_some(1)];
         let cabinet_start = tone::cabinet_index(&settings.cabinet.model);
         let ir_start = cabinet_ir_for(&settings.cabinet, sample_rate);
         let ir_engine = (settings.cabinet.enabled && ir_start.is_some())
@@ -1600,6 +1847,8 @@ impl TrackDsp {
             amp_chain: tone::Chain::new(rate),
             amp_leaving: tone::Chain::new(rate),
             amp_shapes: [amp_start; 2],
+            amp_caps: [None, capture_start],
+            amp_cap_side: capture_side,
             amp_tone: [Biquad::default(); 4],
             cached_amp_tone: [f64::NAN; 4],
             amp_tone_db: amp_tone_start,
@@ -1751,6 +2000,24 @@ impl TrackDsp {
             self.amp_shapes[1],
             tone::amp_shape(&self.settings.amp.model, self.settings.amp.drive, self.rate),
         ];
+        let capture = amp_capture_for(&self.settings.amp, self.rate as u32);
+        let current = self.amp_cap_side[1];
+        let held = current.and_then(|slot| self.amp_caps[slot].as_ref());
+        if capture
+            .as_ref()
+            .zip(held)
+            .is_some_and(|(new, held)| new.same_as(held))
+        {
+            // The same capture carries on as one running stage.
+            self.amp_cap_side = [current, current];
+        } else {
+            let slot = if current == Some(1) { 0 } else { 1 };
+            let side = capture.is_some().then_some(slot);
+            if capture.is_some() {
+                self.amp_caps[slot] = capture;
+            }
+            self.amp_cap_side = [current, side];
+        }
         self.cabinet_models = [
             self.cabinet_models[1],
             tone::cabinet_index(&self.settings.cabinet.model),
@@ -1806,6 +2073,27 @@ impl TrackDsp {
         self.cabinet_models[0] = old.cabinet_models[1];
         // Swapped, so that what this configuration displaces is dropped with `old`, off the audio thread.
         std::mem::swap(&mut self.cabinet_irs[0], &mut old.cabinet_irs[1]);
+        // The capture the old configuration played carries on: as the one stage if this configuration names the same
+        // capture, else as the leaving end of the crossfade. Boxes only change hands here, nothing is built or freed.
+        let own = self.amp_cap_side[1];
+        let taken = old.amp_cap_side[1].filter(|_| self.rate == old.rate);
+        let same = own
+            .and_then(|slot| self.amp_caps[slot].as_ref())
+            .zip(taken.and_then(|slot| old.amp_caps[slot].as_ref()))
+            .is_some_and(|(new, held)| new.same_as(held));
+        // The leaving capture goes where this configuration's own does not sit.
+        let leaving = if own == Some(0) { 1 } else { 0 };
+        match (own, taken) {
+            (Some(own), Some(taken)) if same => {
+                std::mem::swap(&mut self.amp_caps[own], &mut old.amp_caps[taken]);
+                self.amp_cap_side = [Some(own), Some(own)];
+            }
+            (_, Some(taken)) if old.amp_caps[taken].is_some() => {
+                std::mem::swap(&mut self.amp_caps[leaving], &mut old.amp_caps[taken]);
+                self.amp_cap_side = [Some(leaving), own];
+            }
+            _ => self.amp_cap_side = [None, own],
+        }
         self.reverb_shapes[0] = old.reverb_shapes[1];
         self.delay_shapes[0] = old.delay_shapes[1];
         self.microphone_shapes[0] = old.microphone_shapes[1];
@@ -1952,6 +2240,9 @@ impl TrackDsp {
         self.drive_chain.never_rest();
         self.drive_leaving.never_rest();
         self.cabinet_fir.never_rest();
+        for capture in self.amp_caps.iter_mut().flatten() {
+            capture.never_rest();
+        }
         if let Some(engine) = &mut self.ir_engine {
             engine.never_rest();
         }
@@ -1961,11 +2252,25 @@ impl TrackDsp {
     }
     /// Whether the driven stages hold nothing, and whether they run one channel for both.
     pub fn driven_at_rest(&self) -> [bool; 2] {
-        let stages = [
-            self.amp_chain.at_rest(),
-            self.drive_chain.at_rest(),
-            self.cabinet_fir.at_rest(),
+        // A capture in play holds the amp's state, and the circuit only while it runs beside it.
+        let mut amp = self.amp_chain.at_rest();
+        let playing = [
+            self.settings.amp.enabled.then_some(self.amp_cap_side[1]),
+            (self.ramp_left > 0 && self.previous.amp.enabled).then_some(self.amp_cap_side[0]),
         ];
+        let slots = playing.map(|side| side.flatten());
+        if slots.iter().any(Option::is_some) {
+            if !self.amp_chain.live {
+                amp = [true; 2];
+            }
+            for slot in slots.into_iter().flatten() {
+                if let Some(capture) = &self.amp_caps[slot] {
+                    let rest = capture.at_rest();
+                    amp = [amp[0] && rest[0], amp[1] && rest[1]];
+                }
+            }
+        }
+        let stages = [amp, self.drive_chain.at_rest(), self.cabinet_fir.at_rest()];
         let convolution = self.ir_engine.as_ref().map(|engine| engine.at_rest());
         [0, 1].map(|index| {
             stages.iter().all(|stage| stage[index]) && convolution.is_none_or(|stage| stage[index])
@@ -2364,68 +2669,83 @@ impl TrackDsp {
                         // A side that is off takes the other's circuit, so switching the amp only fades one sound in.
                         let from = self.amp_shapes[if p.amp.enabled { 0 } else { 1 }].as_ref();
                         let to = self.amp_shapes[if f.amp.enabled { 1 } else { 0 }].as_ref();
-                        let plain = to.is_none() || from.is_none() && t < 1.0;
-                        let wet = if plain {
-                            // A side on the driven circuit has no plain sound to ramp from, so this side's is held.
-                            let model = |s: &str| {
-                                let pre = 1.0 + drive * if s == "bass" { 3.0 } else { 1.0 };
-                                (pre, 0.02 * drive)
+                        let captured = amp_capture_frame(
+                            &mut self.amp_caps,
+                            self.amp_cap_side,
+                            &self.amp_shapes,
+                            &mut self.amp_chain,
+                            &mut self.amp_dc,
+                            [&p.amp, &f.amp],
+                            t,
+                            x,
+                        );
+                        let wet = if let Some(captured) = captured {
+                            captured
+                        } else {
+                            let plain = to.is_none() || from.is_none() && t < 1.0;
+                            let wet = if plain {
+                                // A side on the driven circuit has no plain sound to ramp from, so this side's is held.
+                                let model = |s: &str| {
+                                    let pre = 1.0 + drive * if s == "bass" { 3.0 } else { 1.0 };
+                                    (pre, 0.02 * drive)
+                                };
+                                let a = model(if self.amp_shapes[0].is_some() {
+                                    &f.amp.model
+                                } else {
+                                    &p.amp.model
+                                });
+                                let b = model(if self.amp_shapes[1].is_some() {
+                                    &p.amp.model
+                                } else {
+                                    &f.amp.model
+                                });
+                                let pre = lerp(a.0, b.0);
+                                let bias = lerp(a.1, b.1);
+                                let zero = bias.tanh();
+                                std::array::from_fn(|c| {
+                                    let v = x[c] as f64;
+                                    let direct =
+                                        (v * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt();
+                                    self.amp_dc[c] += 0.0005 * (direct - self.amp_dc[c]);
+                                    ((direct - self.amp_dc[c]) * gain) as f32
+                                })
+                            } else {
+                                self.amp_dc = [0.0; 2];
+                                x
                             };
-                            let a = model(if self.amp_shapes[0].is_some() {
-                                &f.amp.model
+                            let wet = if let Some(circuit) = to.or(from.filter(|_| t < 1.0)) {
+                                if !self.amp_chain.live {
+                                    self.amp_chain.reset();
+                                    self.amp_chain.live = true;
+                                }
+                                let y = match (from, to) {
+                                    (Some(a), Some(b)) if t < 1.0 && a != b => {
+                                        self.amp_chain.crossfade(
+                                            &mut self.amp_leaving,
+                                            a,
+                                            b,
+                                            t,
+                                            self.ramp_left == self.ramp_frames,
+                                            x,
+                                            [0.0; 2],
+                                        )
+                                    }
+                                    _ => self.amp_chain.process(circuit, x, 0.0),
+                                }
+                                .map(|v| (v * gain) as f32);
+                                match (plain, to.is_some()) {
+                                    (false, _) => y,
+                                    (true, true) => {
+                                        std::array::from_fn(|c| wet[c] + (y[c] - wet[c]) * t as f32)
+                                    }
+                                    (true, false) => {
+                                        std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * t as f32)
+                                    }
+                                }
                             } else {
-                                &p.amp.model
-                            });
-                            let b = model(if self.amp_shapes[1].is_some() {
-                                &p.amp.model
-                            } else {
-                                &f.amp.model
-                            });
-                            let pre = lerp(a.0, b.0);
-                            let bias = lerp(a.1, b.1);
-                            let zero = bias.tanh();
-                            std::array::from_fn(|c| {
-                                let v = x[c] as f64;
-                                let direct =
-                                    (v * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt();
-                                self.amp_dc[c] += 0.0005 * (direct - self.amp_dc[c]);
-                                ((direct - self.amp_dc[c]) * gain) as f32
-                            })
-                        } else {
-                            self.amp_dc = [0.0; 2];
-                            x
-                        };
-                        let wet = if let Some(circuit) = to.or(from.filter(|_| t < 1.0)) {
-                            if !self.amp_chain.live {
-                                self.amp_chain.reset();
-                                self.amp_chain.live = true;
-                            }
-                            let y = match (from, to) {
-                                (Some(a), Some(b)) if t < 1.0 && a != b => {
-                                    self.amp_chain.crossfade(
-                                        &mut self.amp_leaving,
-                                        a,
-                                        b,
-                                        t,
-                                        self.ramp_left == self.ramp_frames,
-                                        x,
-                                        [0.0; 2],
-                                    )
-                                }
-                                _ => self.amp_chain.process(circuit, x, 0.0),
-                            }
-                            .map(|v| (v * gain) as f32);
-                            match (plain, to.is_some()) {
-                                (false, _) => y,
-                                (true, true) => {
-                                    std::array::from_fn(|c| wet[c] + (y[c] - wet[c]) * t as f32)
-                                }
-                                (true, false) => {
-                                    std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * t as f32)
-                                }
-                            }
-                        } else {
-                            self.amp_chain.live = false;
+                                self.amp_chain.live = false;
+                                wet
+                            };
                             wet
                         };
                         let wanted = amp_tone(&f.amp);
@@ -3056,6 +3376,10 @@ impl TrackDsp {
         self.amp_dc = [0.0; 2];
         self.amp_chain.reset();
         self.amp_chain.live = false;
+        // The first frame that plays a capture resets it, once; one that never plays again is left alone.
+        for capture in self.amp_caps.iter_mut().flatten() {
+            capture.live = false;
+        }
         self.amp_leaving.reset();
         for b in &mut self.amp_tone {
             b.reset();

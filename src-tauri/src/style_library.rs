@@ -77,6 +77,15 @@ impl SavedStyle {
         if !self.engraving.bar_widths.is_empty() {
             return Err("A saved style cannot hold bar widths.".into());
         }
+        if !self.engraving.system_gaps.is_empty() {
+            return Err("A saved style cannot hold system gaps.".into());
+        }
+        if !self.engraving.staff_groups.is_empty() {
+            return Err("A saved style cannot hold staff groups.".into());
+        }
+        if !self.engraving.staff_gaps.is_empty() {
+            return Err("A saved style cannot hold staff gaps.".into());
+        }
         Ok(())
     }
 }
@@ -242,6 +251,29 @@ mod tests {
     }
 
     #[test]
+    fn saved_style_rejects_staff_groups_and_gaps() {
+        use crate::engraving::{StaffGap, StaffGroup, StaffGroupKind};
+        let mut grouped = style(A, "Grouped");
+        grouped.engraving.staff_groups = vec![StaffGroup {
+            track_ids: vec!["a".into(), "b".into()],
+            kind: StaffGroupKind::Brace,
+        }];
+        assert_eq!(
+            grouped.validate().unwrap_err(),
+            "A saved style cannot hold staff groups."
+        );
+        let mut gapped = style(A, "Gapped");
+        gapped.engraving.staff_gaps = vec![StaffGap {
+            track_id: "a".into(),
+            scale: 2.0,
+        }];
+        assert_eq!(
+            gapped.validate().unwrap_err(),
+            "A saved style cannot hold staff gaps."
+        );
+    }
+
+    #[test]
     fn missing_is_empty_without_write() {
         let root = tempdir().unwrap();
         let app_data = root.path().join("not-created");
@@ -370,6 +402,11 @@ mod tests {
             with(&|v| v["engraving"]["systemSpacing"] = json!(9)),
             with(&|v| v["engraving"]["profiles"] = json!([{"trackId":"t","profile":"slash"}])),
             with(&|v| v["engraving"]["barWidths"] = json!([{"bar":1,"scale":2.0}])),
+            with(&|v| v["engraving"]["systemGaps"] = json!([{"bar":1,"scale":2.0}])),
+            with(&|v| {
+                v["engraving"]["staffGroups"] = json!([{"trackIds":["a","b"],"kind":"brace"}])
+            }),
+            with(&|v| v["engraving"]["staffGaps"] = json!([{"trackId":"a","scale":2.0}])),
             with(&|v| v["name"] = json!(" pad ")),
             with(&|v| v["id"] = json!("nope")),
             with(&|v| v["extra"] = json!(1)),

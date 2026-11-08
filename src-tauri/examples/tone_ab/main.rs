@@ -6,6 +6,7 @@
 //!   cargo run --release --example tone_ab -- clean <directory>  writes every clean sound's raw PCM, to compare bytes
 //!   cargo run --release --example tone_ab -- bench              times a heavy sound on one track
 //!   cargo run --release --example tone_ab -- ir-bench           the cost of loaded cabinet responses; synthesizes its own
+//!   cargo run --release --example tone_ab -- nam-bench <file|synthetic>   the cost of one NAM capture, in microseconds per sample
 //!   cargo run --release --example tone_ab -- input              reports the levels the samples reach the chain at
 //!   cargo run --release --example tone_ab -- measure            the bench figures of each driven sound
 //!   cargo run --release --example tone_ab -- levels             every factory sound's loudness on the riff
@@ -811,6 +812,77 @@ fn ir_bench() {
         );
     }
 }
+/// Cost of one NAM capture through the inference engine alone, after prewarm, on a quiet riff-like tone.
+fn nam_bench(path: &str) {
+    let bytes = if path == "synthetic" {
+        synthetic_standard_nam()
+    } else {
+        std::fs::read(path).unwrap()
+    };
+    nam_bench_bytes(path, &bytes);
+}
+/// A standard-size A1 model (channels 16/8, head 8/1, dilations 1..512 twice) with pseudo-random weights.
+fn synthetic_standard_nam() -> Vec<u8> {
+    use tabplayer_lib::audio::nam::{NamError, parse_nam};
+    let dilations: Vec<u32> = (0..10).map(|i| 1 << i).collect();
+    let array = |input: u32, channels: u32, head: u32, bias: bool| {
+        json!({"input_size": input, "condition_size": 1, "head_size": head, "channels": channels,
+            "kernel_size": 3, "dilations": dilations, "activation": "Tanh", "gated": false, "head_bias": bias})
+    };
+    let mut model = json!({"version": "0.5.4", "architecture": "WaveNet",
+        "config": {"layers": [array(1, 16, 8, false), array(16, 8, 1, true)], "head": null, "head_scale": 0.02},
+        "weights": [], "sample_rate": 48000});
+    let Err(NamError::WeightCount { expected, .. }) =
+        parse_nam(&serde_json::to_vec(&model).unwrap())
+    else {
+        panic!("expected a weight count refusal")
+    };
+    let mut seed = 1u64;
+    let weights: Vec<f64> = (0..expected)
+        .map(|_| {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            (((seed >> 40) as f64) / (1u64 << 24) as f64 - 0.5) * 0.4
+        })
+        .collect();
+    model["weights"] = json!(weights);
+    serde_json::to_vec(&model).unwrap()
+}
+fn nam_bench_bytes(path: &str, bytes: &[u8]) {
+    use tabplayer_lib::audio::nam::{
+        NamModel, NamState, cost_per_sample, macs_per_sample, parse_nam,
+    };
+    let file = parse_nam(bytes).unwrap();
+    let macs = macs_per_sample(file.spec());
+    let cost = cost_per_sample(file.spec());
+    let model = NamModel::build(&file);
+    let mut state = NamState::new(&model);
+    let prewarm_started = Instant::now();
+    state.prewarm(&model);
+    let prewarm_ms = prewarm_started.elapsed().as_secs_f64() * 1e3;
+    let samples = RATE as usize * 10;
+    let input: Vec<f32> = (0..samples)
+        .map(|i| 0.3 * (i as f32 * 0.0287).sin() * (i as f32 * 0.00031).sin())
+        .collect();
+    let mut best = f64::INFINITY;
+    let mut guard = 0.0f32;
+    for _ in 0..5 {
+        let started = Instant::now();
+        for &x in &input {
+            guard += state.process(&model, x);
+        }
+        best = best.min(started.elapsed().as_secs_f64());
+    }
+    let per_sample = best / samples as f64 * 1e6;
+    println!(
+        "{path}: {per_sample:.3} us/sample, {:.1}x real time at {} Hz, {macs} MACs/sample, {cost} estimated cost units/sample, {:.3} ns per unit, prewarm {prewarm_ms:.0} ms ({} samples) (check {guard:.3})",
+        samples as f64 / RATE as f64 / best,
+        model.model_rate(),
+        per_sample * 1e3 / cost as f64,
+        model.prewarm_samples()
+    );
+}
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.iter().map(String::as_str).collect::<Vec<_>>()[..] {
@@ -821,11 +893,12 @@ fn main() {
         ["bench"] => bench(),
         ["mix-bench"] => mix_bench(),
         ["ir-bench"] => ir_bench(),
+        ["nam-bench", path] => nam_bench(path),
         ["input"] => input(),
         ["measure"] => measure_all(),
         ["levels"] => levels(),
         _ => eprintln!(
-            "usage: tone_ab render <tag> | ir | clean <folder> | dry <folder> | bench | mix-bench | ir-bench | input | measure | levels"
+            "usage: tone_ab render <tag> | ir | clean <folder> | dry <folder> | bench | mix-bench | ir-bench | nam-bench <file> | input | measure | levels"
         ),
     }
 }

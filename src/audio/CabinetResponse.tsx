@@ -17,16 +17,21 @@ export function CabinetResponse({ir,model,label,scope,onChange,onLibraryChange}:
   /** Called when the library gains or loses a response, so playback resolves the cabinet responses again. The document does not change when one is imported, so nothing else would. */
   onLibraryChange?:()=>void;
 }) {
-  const [entries,setEntries]=useState<CabinetIrEntry[]>([]),[status,setStatus]=useState<CabinetIrStatus>(),[message,setMessage]=useState(''),[problem,setProblem]=useState('');
+  const [entries,setEntries]=useState<CabinetIrEntry[]>([]),[found,setStatus]=useState<CabinetIrStatus>(),[message,setMessage]=useState(''),[problem,setProblem]=useState('');
   const [draft,setDraft]=useState<string|null>(null);
   const refresh=useCallback(()=>cabinetIrs.list().then(setEntries,()=>setEntries([])),[]);
   useEffect(()=>{void refresh();},[refresh]);
   const id=ir?.id;
   // The file dialog is modal to the user, not to the app: when it closes the sound may have changed, so what follows reads this.
   const latest=useRef({ir,scope,onChange});latest.current={ir,scope,onChange};
+  // The picker can be gone by then (another track or block was opened), and then nothing is written.
+  const mounted=useRef(true);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
   // What the library can supply is asked again whenever the response named, or the library's contents, change.
+  // The previous answer stays until the new one arrives, so a refresh does not blink the notice; one that belongs to another response is never shown.
+  const status=found&&found.id===id?found:undefined;
   useEffect(()=>{
-    let alive=true;setStatus(undefined);
+    let alive=true;
     if(id)cabinetIrs.status([id]).then(found=>{if(alive)setStatus(found.find(item=>item.id===id));},()=>{});
     return()=>{alive=false;};
   },[id,entries]);
@@ -41,6 +46,7 @@ export function CabinetResponse({ir,model,label,scope,onChange,onLibraryChange}:
       const entry=await cabinetIrs.import();
       if(!entry)return;
       await refresh();announceCabinetLibrary();onLibraryChange?.();
+      if(!mounted.current)return;
       // The sound as it is now, not as it was when the dialog opened. A file that is the response already named is not
       // a change: the document gains no edit, and the notice clears. If the track changed meanwhile, nothing is written.
       const now=latest.current;let note='';

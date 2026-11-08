@@ -3,7 +3,10 @@ import '../tremolo-guard';
 import { validateSelection, type ExportSelection, type PrintLayout, type SvgPage, type SvgSystem } from './types';
 import { selectStaves } from './selection';
 import { prepareScoreTimers } from '../editor/timers';
-import { configureEngraving,projectEngraving } from '../engraving/projection';
+import { configureEngraving,projectEngraving,type EngravingProjection } from '../engraving/projection';
+import { accoladeMetrics,configureAccolades,planAccolades } from '../engraving/accolades';
+import { composeEngravedSystems } from '../engraving/staff-layout';
+import { resolveStaffGaps } from '../engraving/staff-groups';
 import { pageGeometry,paginateEngravedSystems } from '../engraving/page';
 import type { EngravingOverrides,PageLayout } from '../engraving/types';
 import {pageTitleFontSize} from './page-title';
@@ -65,7 +68,7 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
   const frozen=options?structuredClone(options):null,d=frozen?pageGeometry(frozen.page):dimensions(layout);
   // Export modifies only a transient clone; screen zoom and staff visibility stay session state.
-  let copy=selectStaves(score,selection);
+  let copy=selectStaves(score,selection),projection:EngravingProjection|null=null;
   if(frozen){
     // selectStaves retains source track indices but public JSON normalizes staff flags.
     copy.tracks.forEach((track,ti)=>track.staves.forEach((staff,si)=>{const source=score.tracks[ti].staves[selection.staves?.[ti]?.[si]??si];staff.showStandardNotation=source.showStandardNotation;staff.showTablature=source.showTablature;staff.showSlash=source.showSlash;staff.showNumbered=source.showNumbered;}));
@@ -75,7 +78,7 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
       frozen.engraving.profiles=frozen.engraving.profiles.filter(entry=>!selected.has(entry.trackId));
       frozen.engraving.profiles.push(...[...selected].map(trackId=>({trackId,profile:profile as 'standard'|'tablature'|'standardTab'})));
     }
-    copy=projectEngraving(copy,frozen.trackIds,frozen.engraving).score;
+    projection=projectEngraving(copy,frozen.trackIds,frozen.engraving);copy=projection.score;
   }
   prepareScoreTimers(copy);
   copy.title='';
@@ -83,6 +86,9 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   const settings=new Settings();settings.core.engine='svg';settings.core.useWorkers=false;settings.core.enableLazyLoading=false;
   if(frozen){configureEngraving(settings,frozen.engraving);for(const element of [NotationElement.ScoreTitle,NotationElement.ScoreSubTitle,NotationElement.ScoreArtist,NotationElement.ScoreAlbum,NotationElement.ScoreWords,NotationElement.ScoreMusic,NotationElement.ScoreWordsAndMusic,NotationElement.ScoreCopyright])settings.notation.elements.set(element,false);}
   settings.display.scale=frozen?.page.scale??layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;
+  // Drawn groups switch alphaTab's brackets off and reserve their room; both need the scale and padding set above.
+  const plan=frozen&&projection?planAccolades({engraving:frozen.engraving,trackIds:frozen.trackIds,rendered:selection.tracks,score:copy,nativeMode:projection.bracketMode,settings}):null;
+  if(frozen&&projection)configureAccolades(settings,copy,plan,projection.bracketMode);
   settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
   settings.display.startBar=(selection.range?.first??0)+1;settings.display.barCount=selection.range?selection.range.last-selection.range.first+1:-1;
   for(const font of settings.display.resources.elementFonts.values())font.families=['Noto Sans','Noto Sans CJK JP','Noto Emoji'];
@@ -90,11 +96,16 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   const renderer=new rendering.ScoreRenderer(settings);renderer.width=d.usableWidth;
   const systems:SvgSystem[]=[];let failure:Error|undefined;
   renderer.error.on(e=>{failure=e;});
-  renderer.partialRenderFinished.on(e=>{if(typeof e.renderResult==='string'&&e.height>0)systems.push({svg:e.renderResult,width:e.width,height:e.height});});
+  renderer.partialRenderFinished.on(e=>{if(typeof e.renderResult==='string'&&e.height>0)systems.push(e.firstMasterBarIndex>=0?{svg:e.renderResult,width:e.width,height:e.height,firstBar:e.firstMasterBarIndex,lastBar:e.lastMasterBarIndex,top:e.y,left:e.x}:{svg:e.renderResult,width:e.width,height:e.height});});
   try{renderer.renderScore(copy,selection.tracks);if(failure)throw failure;
     if(renderer.boundsLookup?.staffSystems.some(system=>system.bars.some(bar=>bar.visualBounds.x<-.5||bar.visualBounds.x+bar.visualBounds.w>d.usableWidth+1)))throw new Error('A notation system does not fit this page width. Reduce print scale, use landscape, or add a system break.');
     if(!systems.length)throw new Error('Notation renderer produced no printable systems.');
     if(frozen&&!isDefaultTypography(typographyOf(frozen.engraving))){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right));}
-    return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1):paginateSystems(systems,score.title,layout);}
+    if(!frozen)return paginateSystems(systems,score.title,layout);
+    // Staff gaps and group marks are composed after the checks above, which need the text outside <defs>, and before pagination, which needs the composed heights.
+    const gaps=resolveStaffGaps(frozen.engraving.staffGaps,frozen.trackIds),bounds=renderer.boundsLookup;
+    if(!bounds&&(plan||gaps.size))throw new Error('Notation renderer produced no staff bounds.');
+    const composed=bounds?composeEngravedSystems(systems,bounds,{plan,gaps,metrics:accoladeMetrics(settings),idPrefix:'export'}):systems;
+    return paginateEngravedSystems(composed,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1,{gaps:frozen.engraving.systemGaps,systemSpacing:frozen.engraving.systemSpacing,scale:frozen.page.scale});}
   finally{renderer.destroy();}
 }

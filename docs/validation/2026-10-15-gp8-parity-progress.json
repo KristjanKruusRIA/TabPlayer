@@ -335,8 +335,8 @@
     },
     "engraving_source": {
       "path": "src/engraving/projection.ts",
-      "start_line": 12,
-      "end_line": 81,
+      "start_line": 18,
+      "end_line": 95,
       "kind": "source"
     },
     "page_source": {
@@ -1033,6 +1033,42 @@
       "path": "docs/validation/2026-11-07-gp8-screen-header-footer.md",
       "start_line": 39,
       "end_line": 47,
+      "kind": "validation_report"
+    },
+    "systemgaps_behavior": {
+      "path": "docs/validation/2026-11-07-gp8-system-gaps.md",
+      "start_line": 3,
+      "end_line": 12,
+      "kind": "validation_report"
+    },
+    "systemgaps_evidence": {
+      "path": "docs/validation/2026-11-07-gp8-system-gaps.md",
+      "start_line": 14,
+      "end_line": 53,
+      "kind": "validation_report"
+    },
+    "systemgaps_limits": {
+      "path": "docs/validation/2026-11-07-gp8-system-gaps.md",
+      "start_line": 55,
+      "end_line": 69,
+      "kind": "validation_report"
+    },
+    "staffgroups_behavior": {
+      "path": "docs/validation/2026-11-07-gp8-staff-groups.md",
+      "start_line": 3,
+      "end_line": 12,
+      "kind": "validation_report"
+    },
+    "staffgroups_evidence": {
+      "path": "docs/validation/2026-11-07-gp8-staff-groups.md",
+      "start_line": 14,
+      "end_line": 86,
+      "kind": "validation_report"
+    },
+    "staffgroups_limits": {
+      "path": "docs/validation/2026-11-07-gp8-staff-groups.md",
+      "start_line": 88,
+      "end_line": 108,
       "kind": "validation_report"
     },
     "strokes_behavior": {
@@ -9392,12 +9428,15 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "A finite global system-spacing override and reset-to-inherit state are stored in document history.",
-      "remaining_gap": "Independent per-system/per-staff gaps and selected-system reset tools are not delivered.",
+      "current_behavior": "A finite global system-spacing override and reset-to-inherit state are stored in document history. A \"Design: system gaps\" panel sets the space above one system (25 to 400% of the standard gap, one undoable edit, saved with the document), with Reset selected system and Reset all system gaps. The gaps show in the vertical page, horizontal page and grid views and in PDF, SVG, PNG and print, and a desktop test checks screen and PDF offsets, reset, undo, redo, save and reopen.",
+      "remaining_gap": "Gaps do not show in parchment, vertical screen or horizontal screen; older builds refuse the new field; not in GP export or saved styles; screen and export page breaks differ; no per-staff gaps.",
       "current_evidence": [
         "engraving",
         "engraving_limits",
-        "engraving_source"
+        "engraving_source",
+        "systemgaps_behavior",
+        "systemgaps_evidence",
+        "systemgaps_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -9494,13 +9533,16 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Public bracket/extended-barline/separator controls, long/short/hidden track-name policies and global system spacing are editable and projected without music/audio changes.",
-      "remaining_gap": "Arbitrary grouping/braces, independent staff spacing and complete first/subsequent-system target engraving remain unclosed.",
+      "current_behavior": "Public bracket/extended-barline/separator controls, long/short/hidden track-name policies and global system spacing are editable and projected without music/audio changes. Neighbouring tracks can be grouped under a bracket or a brace, drawn on screen (in the page layouts, and in parchment and the screen layouts through an overlay) and in the export pages that PDF, SVG, PNG and print are all rendered from (only the PDF path was checked on the desktop); the space below each track is editable (25 to 400%) in the page layouts and in export; and long names on the first system with short names after is proven, with a one-gesture option. Each is one undoable edit saved with the document, and a Windows desktop test checks them on screen and in the export pages through undo, redo, save and reopen.",
+      "remaining_gap": "Staff gaps do not show in parchment or the screen layouts and cannot open between a track's own staves; extended bar lines are whole-system; no names on the first system of each page; no Guitar Pro stylesheet export; export group braces draw about 5.6% short until the export music font size is fixed (D12); no original-GP8 comparison.",
       "current_evidence": [
         "engraving",
         "engraving_validation",
         "engraving_limits",
-        "engraving_source"
+        "engraving_source",
+        "staffgroups_behavior",
+        "staffgroups_evidence",
+        "staffgroups_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",

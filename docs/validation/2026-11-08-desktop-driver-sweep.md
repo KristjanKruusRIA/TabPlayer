@@ -5,7 +5,7 @@ Date: 2026-11-08. Linear THE-50. The last recorded full sweep passed 58 of 80 dr
 ## Summary
 
 - **99 of 105 app drivers pass** (a driver file counts once, however many groups it has). 3 fail and 3 were not run. The 4 driver self-test files also pass (42 of 42 tests).
-- The 3 failures are `parity-resume-playback` (stale driver that could not be repaired here, with a possible product bug behind its next step), `parity-file-drop` (needs an interactive foreground window) and `parity-workstation` (a strict check that finds a UI bug, below).
+- The 3 failures are `parity-resume-playback` (stale driver that could not be repaired here, with a possible product bug behind its next step), `parity-file-drop` (needs an interactive foreground window; see the THE-185 follow-up in Environment issues) and `parity-workstation` (a strict check that finds a UI bug, below).
 - The 3 drivers not run (`parity-backing-processing`, `parity-backing-tempo`, `parity-score-layouts`) are gated on a reviewed build admission that only the controller can attest.
 - Three drivers ran with reduced scope: `parity-file-library` without its manual folders group, `parity-recovery` without its explicit `performance` group, and `parity-workstation` with default flags only.
 - 32 drivers failed at first. Driver edits fixed 29 of them. `parity-practice` needed only a prerequisite (the `capture_loopback` example). Two are still failing for their own reasons (`parity-resume-playback`, `parity-file-drop`). `parity-reload-recovery` did not fail; it got a precautionary edit. One driver that the edits had fixed, `parity-workstation`, fails again after review tightened its playback-error check, because the product overlaps the error line with a control (see UI bug). No product code changed.
@@ -137,7 +137,7 @@ Runs counts the sweep-level runs that reached a verdict: first sweep, rerun of e
 | `parity-backing-waveform` | PASS | 4 | F/F/P/P | "status": "passed" | stale |
 | `parity-file-library (--group=core, restart)` | PASS | 2 | P/P | "status": "passed" | none |
 | `parity-file-library (--group=folders)` | NOT RUN | 0 | - | - | environment (interactive) |
-| `parity-file-drop` | FAIL | 3 | F/F/F | Windows refused owned foreground request | environment |
+| `parity-file-drop` | FAIL | 3 | F/F/F | Windows refused owned foreground request | environment. THE-185 follow-up: foreground now granted, drop still fails (see Environment issues). |
 | `parity-library-reveal` | PASS | 1 | P | "status": "passed" | none |
 | `parity-recovery (--self-test; groups crash, clean, paths, corruption, ownership, visual)` | PASS | 9 | P x7, ownership F then P, ownership P | "passed": true | stale (ownership group). Ownership group rerun on HEAD 048708e after the review edits (6f18f99), build 5a891a1d: PASS. |
 | `parity-workstation (default flags)` | FAIL | 6 | F/F/F/F/P/F | The error feedback overlaps no control in the expanded playback panel (viewport 960, overlapping: Seek measure) | stale (fixed), then UI bug |
@@ -212,6 +212,9 @@ The product still lists the dead `.workstation-left` selector in `src/help/help-
 ## Environment issues and limits
 
 - **`parity-file-drop`:** three consistent failures, "Windows refused owned foreground request". The OS-level drop needs the test window in the foreground, and Windows refused it while this session held the foreground. It needs an interactive desktop with nothing else holding focus.
+  - **THE-185 follow-up (2026-11-08, worktree the-185-190, build of that branch, fresh `parity-file-library --prepare` state, nothing listening on CDP port 9223 before each launch).** The driver now retries the foreground request up to 4 times, 750 ms apart (restore if minimized, `AllowSetForegroundWindow` for the app process, `SetForegroundWindow`, then the `AttachThreadInput` pattern from `select-library-folder.ps1`). A refusal that survives the retries ends as its own result: final line `NEEDS FOREGROUND`, exit code 3. Exit 0 prints `PASSED`; any other failure prints `FAILED` with exit 1. No drop assertion was changed.
+  - **Result: 3 runs, all FAILED (exit 1), none NEEDS FOREGROUND.** The foreground was granted on the first request in every run, so this session is no longer refused. The native OLE helper then timed out in each run: `watchdog (124): phase=2; callStarted=1; callReturned=0; guardPasses=63; sendAttempts=63; insertedEvents=63; sendError=0; queries=0; feedback=0`. The drag source was never queried by the OS: 63 zero-motion inputs were inserted over the owned window while it was foreground and unobscured, yet `DoDragDrop` made no callback in 4 seconds. Cause not established; no real pass was obtained. Not investigated: whether this is the injected-input method on this machine (Windows 11 build 26300), the WebView2 drop target, or a product regression.
+  - **Not exercised:** the `NEEDS FOREGROUND` branch itself. Foreground was never refused after the change, so only the granted path ran live.
 - **`parity-file-library --group=folders`:** needs a person to answer the real folder picker. Not run.
 - **Admission-gated drivers** (`parity-backing-processing`, `parity-backing-tempo`, `parity-score-layouts`): not run, see above. Their self-tests pass.
 - **`parity-recovery --group=performance`** and **`parity-workstation --captures`, `--long`, `--backing`:** need explicit flags and were not run. The screenshots these drivers take still need a person to look at them.

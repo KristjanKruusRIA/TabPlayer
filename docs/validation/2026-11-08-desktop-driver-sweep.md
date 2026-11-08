@@ -4,12 +4,12 @@ Date: 2026-11-08. Linear THE-50. The last recorded full sweep passed 58 of 80 dr
 
 ## Summary
 
-- **100 of 105 app drivers pass** (a driver file counts once, however many groups it has). 2 fail and 3 were not run. The 4 driver self-test files also pass (42 of 42 tests).
-- The 2 failures are `parity-resume-playback` (stale driver that could not be repaired here, with a possible product bug behind its next step) and `parity-file-drop` (needs an interactive foreground window).
+- **99 of 105 app drivers pass** (a driver file counts once, however many groups it has). 3 fail and 3 were not run. The 4 driver self-test files also pass (42 of 42 tests).
+- The 3 failures are `parity-resume-playback` (stale driver that could not be repaired here, with a possible product bug behind its next step), `parity-file-drop` (needs an interactive foreground window) and `parity-workstation` (a strict check that finds a UI bug, below).
 - The 3 drivers not run (`parity-backing-processing`, `parity-backing-tempo`, `parity-score-layouts`) are gated on a reviewed build admission that only the controller can attest.
 - Three drivers ran with reduced scope: `parity-file-library` without its manual folders group, `parity-recovery` without its explicit `performance` group, and `parity-workstation` with default flags only.
-- 30 drivers failed at first because they were stale or missed a prerequisite, not because the product regressed. They are fixed in this branch (see below). No product code changed.
-- No product bug is confirmed. One is suspected and unconfirmed: closing the window with unsaved changes showed no Unsaved score dialog in a probe (see Product bugs).
+- 32 drivers failed at first. Driver edits fixed 29 of them. `parity-practice` needed only a prerequisite (the `capture_loopback` example). Two are still failing for their own reasons (`parity-resume-playback`, `parity-file-drop`). `parity-reload-recovery` did not fail; it got a precautionary edit. One driver that the edits had fixed, `parity-workstation`, fails again after review tightened its playback-error check, because the product overlaps the error line with a control (see UI bug). No product code changed.
+- One UI bug is confirmed (the playback error line overlaps a control at 960 px). One more is suspected and unconfirmed: closing the window with unsaved changes showed no Unsaved score dialog in a probe (see Product bugs).
 
 ## Build and environment
 
@@ -140,15 +140,15 @@ Runs counts the sweep-level runs that reached a verdict: first sweep, rerun of e
 | `parity-file-drop` | FAIL | 3 | F/F/F | Windows refused owned foreground request | environment |
 | `parity-library-reveal` | PASS | 1 | P | "status": "passed" | none |
 | `parity-recovery (--self-test; groups crash, clean, paths, corruption, ownership, visual)` | PASS | 8 | P x7, ownership F then P | "passed": true | stale (ownership group) |
-| `parity-workstation (default flags)` | PASS | 5 | F/F/F/F/P | JSON receipt, exit 0 | stale |
+| `parity-workstation (default flags)` | FAIL | 6 | F/F/F/F/P/F | The error feedback overlaps no control in the expanded playback panel (viewport 960, overlapping: Seek measure) | stale (fixed), then UI bug |
 
 Notes on these rows:
 
 - `parity-backing-waveform`: the dock-versus-inspector geometry asserted the old layout. One run also hit a launch race ("Unexpected waveform executable" at the start of the mono phase) that did not recur in three later runs.
 - `parity-file-library`: core and restart chain through the state each returns. The folders group was not run.
 - `parity-file-drop`: see Environment issues.
-- `parity-recovery`: the ownership group launched a second app on the same session directory and required exit code non-zero with the session-lock message. Since W13 the single-instance plugin hands that launch to the running window and exits 0 first. The driver now accepts the hand-off and still requires the lock message from a launch that gets past it. The lock path itself is no longer reachable this way.
-- `parity-workstation`: Welcome Library; the Track panel checkbox is gone (it hides the Inspector now); the playback error check measured a panel that used to open upward.
+- `parity-recovery`: the ownership group launched a second app on the same session directory and required a non-zero exit with the session-lock message. Since W13 the single-instance plugin hands that launch to the running window, which exits 0 first. The driver now asserts exactly that hand-off: exit code 0 and no lock message in the output. The lock message itself is covered at process level by `src-tauri/tests/recovery_process.rs` (line 18), not by this driver.
+- `parity-workstation`: Welcome Library; the Track panel checkbox is gone (the draft-survival check now hides and shows the Inspector); the rail label check now reads the Inspector tab labels; the playback error check is strict (the error rectangle must overlap no control in `.transport-more-content`). It passed after the first fixes and fails on the strict check at 960 px, see UI bug. The `--captures` path was not run, because the driver stops at that check first.
 
 ### Not run
 
@@ -185,10 +185,29 @@ Recurring causes:
 3. **Duplicate accessible names.** The palette repeats many commands as icon buttons (Show timer, Move to lower string, Key signature, Metronome). Locators were narrowed in `parity-notation`, `parity-range-measures`, `parity-notation-entry` and `native-audio`.
 4. **Removed or renamed DOM.** `.workstation-left` (`parity-engraving`, `parity-document-tabs`), the "Score information" disclosure (`parity-author-defaults`), the Track panel checkbox (`parity-workstation`), `.track-channel` indexing now that the Master and Focus strips come first (`native-audio`), tab panel counting now that the inspector panels are tabpanels (`parity-document-tabs`), Play and Pause as icon buttons (`critique-fixes`).
 5. **Behaviour that changed on purpose.** A note plus its spelling, or plus a remembered duration, is now one `sequence` edit (`parity-notation-entry`, `parity-input-preferences`). The input preferences gained `advance` (default on) and `swapPlusMinus` (`parity-input-preferences`). `setStringCount` carries `crossVoice: true` (`parity-saved-tunings`). A second launch of the same identifier is handed to the running window (`parity-recovery`). Play from the cursor stays disabled until a performed occurrence is chosen on a repeated score (`critique-fixes`).
-6. **Geometry assertions.** `parity-backing-waveform` now checks that the dock does not overlap the visible inspector pane (`.workstation-inspector`) instead of ending before it. `parity-workstation` checks that the playback error feedback is the topmost element at its own centre.
+6. **Geometry assertions.** `parity-backing-waveform` now checks that the dock does not overlap the visible inspector pane (`.workstation-inspector`) instead of ending before it. `parity-workstation` checks that the playback error feedback overlaps no control in the expanded panel, and that it is the topmost element at its own centre. `parity-engraving` and `parity-document-tabs` check the Inspector pane and its Track tab at 960, 1280 and 1600 px.
 7. **Interpreter.** `parity-aiff-export` picks the first Python that still has `aifc`.
 
-Three edits are weaker than the rest and should be read as such. `parity-engraving` and `parity-document-tabs` no longer assert the left pane at all, because it no longer exists. `parity-reload-recovery` got a precautionary Selection-tab reveal that was not seen failing.
+### Weakened or dropped assertions
+
+Every assertion that the edits weakened or dropped, and what covers it now:
+
+| Driver | Before | Now | Covered by |
+|---|---|---|---|
+| `parity-engraving` | `.workstation-left` exists once; `.inspector` exists once | `.workstation-inspector` is visible, the Inspector tab strip shows its Track tab, and the page has no horizontal overflow at 960, 1280 and 1600 px | Left pane no longer exists; nothing else |
+| `parity-document-tabs` | left pane (or rail below 1180 px) exists, has width, and lies left of the score; inspector measured on `.inspector` | `.workstation-inspector` measured; score lies left of it; the Inspector Track tab is visible at each width | Left pane no longer exists; nothing else |
+| `parity-backing-waveform` | waveform ends before the inspector's left edge | waveform ends before the inspector or lies below it; measured on the visible `.workstation-inspector` pane | Weaker: a dock under the inspector now passes. Nothing else |
+| `parity-workstation` | rail label checks on `.workstation-rail` | the same one-line and fit checks on the Inspector tab labels | Rail no longer exists |
+| `parity-workstation` | tuning draft survives hiding the Track panel | tuning draft survives hiding and showing the Inspector | The Track panel checkbox no longer exists |
+| `parity-recovery` (ownership) | second launch exits non-zero with the session-lock message | second launch exits 0 and prints no lock message | Lock message: `src-tauri/tests/recovery_process.rs:18`. The driver no longer reaches the lock through a same-identifier launch |
+| `parity-input-preferences` | advance is not a preference; keypad and auto-duration walks assume the cursor stays on the beat it wrote | the driver turns Advance off before those walks and expects `advance:false` | The Advance-on path is not driven by any desktop driver; `src/editor/input-preferences.test.tsx` covers the preference defaults |
+| `advanced-editor` | selects a stringed track in the removed left list before editing | assumes the open score's first track is stringed and still throws if Apply tuning is disabled | The throw on a non-stringed first track |
+| `native-audio` | one Metronome checkbox | clicks the first of two (transport and Practice tools) | Only the transport one is exercised |
+| `critique-fixes` | Play and Pause found by title text; transport fieldset not disabled | native `playing` state plus the `.transport` button named Pause, then Play; Play enabled before the Space test | Nothing weaker; the old fieldset wait has no equivalent |
+
+`parity-reload-recovery` got a precautionary Selection-tab reveal. It was not seen failing, so the change is not a weakening.
+
+The product still lists the dead `.workstation-left` selector in `src/help/help-topics.ts:158`; it was not touched.
 
 ## Environment issues and limits
 
@@ -203,7 +222,16 @@ Three edits are weaker than the rest and should be read as such. `parity-engravi
 
 ## Product bugs
 
-None confirmed. Every failure that was investigated traced to a driver, a missing prerequisite or the environment.
+One UI bug is confirmed, below. One more is suspected and unconfirmed. Every other failure that was investigated traced to a driver, a missing prerequisite or the environment.
+
+### UI bug: the playback error line overlaps a control at 960 px
+
+Found by the strict check in `parity-workstation` (`tests/desktop/parity-workstation.mjs`, More playback step).
+
+- **Steps.** Open the Harbour fixture at 960 px wide, set a loop whose end precedes its start so that Loop end must follow its start, and expand More playback.
+- **Expected.** The error line (`.transport-feedback[role=alert]`) overlaps no control in the expanded panel (`.transport-more-content`).
+- **Actual.** The error line spans y 82 to 98 and the panel starts at y 79, so the error overlaps the "Seek measure" label and its row. Driver output: `{"viewport":960,"feedbackTop":82,"feedbackBottom":98.2,"panelTop":79,"panelBottom":417.7,"overlapping":["Seek measure"],"feedbackOnTop":true}`. The text is on top and readable, but it collides with the label.
+- **Status.** The driver check stays strict and the driver fails until the layout is fixed. The older version of the check assumed the panel opened upward, so it compared the wrong edge.
 
 ### Unconfirmed: closing the window with unsaved changes shows no dialog
 
@@ -217,7 +245,6 @@ Found while trying to repair `parity-resume-playback`.
 
 ### Minor observations, not filed
 
-- At 960 px wide, with More playback expanded, the playback error line ("Error: Loop end must follow its start.") overlaps the first row of the panel ("Seek measure"). The text is readable and on top.
 - The practice popover stays open over the inspector tabs until its own button is clicked again, so the tabs cannot be clicked while it is open. Probably intended.
 
 ## Reproducing

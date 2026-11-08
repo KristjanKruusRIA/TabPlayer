@@ -127,6 +127,8 @@ function clickIn(w: { score: model.Score; pagination: ScreenPagination; tracks?:
   const chunkY = found.chunk.shift ? shiftY(found.chunk.shift, found.chunk.y + found.y + dy, 'top') : found.chunk.y + found.y + dy;
   const point = { x: sheet.x + (block.x + found.chunk.x - block.sourceBounds.x + found.x + dx) * zoom, y: sheet.y + (block.y + chunkY - block.sourceBounds.y) * zoom };
   const hit = unmapScreenPoint(pagination, arrangement, point);
+  // A staff-gap shift must be undone exactly, not merely land on the nearest row.
+  if (hit && found.chunk.shift) expect(hit.point.y).toBeCloseTo(found.chunk.y + found.y + dy, 3);
   const ref = resolveSymbol({
     score, tracks: w.tracks ?? [0], text: found.text.textContent ?? '', centered: found.text.getAttribute('text-anchor') === 'middle',
     system: hit?.system ?? null, point: hit?.point ?? null, sourceBeat: beat => beat,

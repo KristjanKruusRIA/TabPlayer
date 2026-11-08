@@ -455,6 +455,12 @@ pub fn parse_state_padding(text: &str) -> u32 {
     }
 }
 
+/// The padding `getState` writes: the state's own, or what `TABPLAYER_TEST_PLUGIN_STATE_PADDING` asks for (`env`, the
+/// variable's text if it is set), whichever is larger.
+pub fn effective_padding(state_padding: u32, env: Option<&str>) -> u32 {
+    state_padding.max(env.map_or(0, parse_state_padding))
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // The shared part of the component and the controller
 // ---------------------------------------------------------------------------------------------------------------
@@ -514,7 +520,9 @@ impl Shared {
 
     /// The latency, as `getLatencySamples` reports it. The host now knows this value.
     fn read_latency(&self) -> u32 {
-        let latency = lock(&self.inner).state.latency.min(MAX_LATENCY);
+        // Recorded while the lock is held, so a read is ordered with the writes of the state.
+        let inner = lock(&self.inner);
+        let latency = inner.state.latency.min(MAX_LATENCY);
         self.reported_latency.store(latency, Ordering::Relaxed);
         latency
     }
@@ -780,9 +788,10 @@ impl IComponentTrait for TestPlugin {
     unsafe fn getState(&self, state: *mut IBStream) -> tresult {
         // Copy the state out first: encoding up to 16 MiB of zeros must not hold the lock `process` takes.
         let mut current = lock(&self.shared.inner).state;
-        if let Ok(text) = std::env::var(ENV_STATE_PADDING) {
-            current.padding = current.padding.max(parse_state_padding(&text));
-        }
+        current.padding = effective_padding(
+            current.padding,
+            std::env::var(ENV_STATE_PADDING).ok().as_deref(),
+        );
         let bytes = encode_test_state(&current);
         if write_stream(state, &bytes) {
             kResultOk
@@ -1612,6 +1621,21 @@ mod tests {
     }
 
     #[test]
+    fn the_padding_written_is_the_larger_of_the_state_and_the_variable() {
+        assert_eq!(effective_padding(0, None), 0);
+        assert_eq!(effective_padding(500, None), 500);
+        assert_eq!(effective_padding(0, Some("9437184")), 9 * 1024 * 1024);
+        assert_eq!(effective_padding(2000, Some("1000")), 2000);
+        assert_eq!(effective_padding(1000, Some("2000")), 2000);
+        assert_eq!(effective_padding(7, Some("junk")), 7);
+        assert_eq!(
+            effective_padding(0, Some("4294967295")),
+            MAX_ENV_STATE_PADDING
+        );
+        assert_eq!(effective_padding(u32::MAX, Some("1")), u32::MAX);
+    }
+
+    #[test]
     fn the_state_padding_variable_is_a_number_held_to_16_mib() {
         assert_eq!(MAX_ENV_STATE_PADDING, 16 * 1024 * 1024);
         assert_eq!(parse_state_padding("0"), 0);
@@ -1696,7 +1720,8 @@ mod com_tests {
 
         unsafe fn seek(&self, pos: i64, mode: i32, result: *mut i64) -> tresult {
             let len = self.data.borrow().len() as i64;
-            let base = match mode {
+            // The seek modes are `DefaultEnumType`, which is `i32` on Windows and `u32` elsewhere.
+            let base = match mode as IBStream_::IStreamSeekMode {
                 IBStream_::IStreamSeekMode_::kIBSeekSet => 0,
                 IBStream_::IStreamSeekMode_::kIBSeekCur => self.pos.get() as i64,
                 _ => len,

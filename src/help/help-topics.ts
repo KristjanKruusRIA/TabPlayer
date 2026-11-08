@@ -155,7 +155,7 @@ export const helpTopics: readonly HelpTopic[] = [
 
 /** Areas of the window and the topic that explains them; the first match from the focused element wins. */
 const contexts: readonly [string, HelpTopicId][] = [
-  ['.mixer-view', 'playback'], ['.sound-view', 'tracks'], ['.score-workspace', 'editing'], ['.workstation-left', 'tracks'], ['.workstation-inspector', 'inspector'], ['.workstation-dock', 'playback'], ['.transport', 'playback'], ['.toolbar', 'files'], ['.document-tabs', 'files'],
+  ['.mixer-view', 'playback'], ['.sound-view', 'tracks'], ['.score-workspace', 'editing'], ['#inspector-panel-track', 'tracks'], ['.workstation-inspector', 'inspector'], ['.workstation-dock', 'playback'], ['.transport', 'playback'], ['.toolbar', 'files'], ['.document-tabs', 'files'],
 ];
 
 /** Picks the help topic for the part of the window that had focus. */

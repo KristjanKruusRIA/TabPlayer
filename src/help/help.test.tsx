@@ -15,7 +15,7 @@ it('reports the same version as the native app and its crate',()=>{
 });
 
 it('chooses the topic for the focused part of the window',()=>{
-  document.body.innerHTML='<div class="document-tabs"><button id="tab">Score</button></div><header class="toolbar"><button id="file">Open</button></header><div class="transport"><button id="play">Play</button></div><section class="score-workspace" tabindex="0" id="score"></section><section class="workstation-left"><button id="track">Track</button></section><div class="workstation-inspector"><input id="field"></div><section class="workstation-dock"><button id="mute">Mute</button></section><p id="other"></p>';
+  document.body.innerHTML='<div class="document-tabs"><button id="tab">Score</button></div><header class="toolbar"><button id="file">Open</button></header><div class="transport"><button id="play">Play</button></div><section class="score-workspace" tabindex="0" id="score"></section><div class="workstation-inspector"><div role="tabpanel" id="inspector-panel-track"><button id="track">Track</button></div><input id="field"></div><section class="workstation-dock"><button id="mute">Mute</button></section><p id="other"></p>';
   const at=(id:string)=>topicFor(document.getElementById(id));
   expect([at('tab'),at('file'),at('play'),at('score'),at('track'),at('field'),at('mute'),at('other'),topicFor(null)]).toEqual(['files','files','playback','editing','tracks','inspector','playback','start','start']);
   document.body.innerHTML='';

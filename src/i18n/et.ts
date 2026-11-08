@@ -324,12 +324,12 @@ export const et: MessageCatalog = {
   'help.shortcut_select_track': 'Vali praegune rada',
   'help.shortcut_clipboard': 'Kopeeri / Lõika / Aseta muusika. Shift lisab toimingu kõigile valitud radadele; Shift + Aseta avab asetamisvalikud.',
   'help.shortcut_clear': 'Tühista muusikaline valik',
-  'help.workflow_description': 'Sinine kontuur tähistab toimetamise sihtmärki. Roheline jälgib esitust või valitud lõiku. Kasutage inspektori nuppe Muuda, Harjutus ja Esitlus; muudatused rakenduvad alles nende toimingunuppude vajutamisel.',
+  'help.workflow_description': 'Sinine kontuur tähistab toimetamise sihtmärki. Roheline jälgib esitust või valitud lõiku. Tööriistadeni jõuate inspektori vahekaartidelt Lugu, Rada ja Valik ning tööriistaribalt valikust Harjutamise seaded; enamik muudatusi rakendub alles toimingunuppude vajutamisel.',
 
   // Help Topics Content
   'help.topic.start.title': 'Alustamine',
   'help.topic.start.p1': 'Ava partituur menüüst Fail → Ava, alusta uut menüüst Fail → Uus või vali näide või mall Teegist.',
-  'help.topic.start.p2': 'Partituur asub keskel ning esitusnupud ribal allservas. Raja tööriistad on vasakul, inspektor paremal ning mikser, pilli vaade ja taustheli alumises dokis. Vaade näitab või peidab iga paneeli.',
+  'help.topic.start.p2': 'Partituur asub keskel ning esitusnupud ribal allservas. Inspektor on paremal: vahekaart Lugu sisaldab partituuri sätteid, Rada valitud raja sätteid ja Valik toimetamise tööriistu. Mikser, pilli vaade ja taustheli on alumises dokis. Vaade näitab või peidab iga paneeli.',
   'help.topic.start.p3': 'Vajuta F1, et saada abi akna aktiivse osa kohta. Teises dialoogis olles sulge see esmalt.',
 
   'help.topic.editing.title': 'Partituuri toimetamine',

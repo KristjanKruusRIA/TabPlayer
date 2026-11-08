@@ -23,6 +23,10 @@ function positive(value:number):boolean {return Number.isFinite(value)&&value>0;
 function validRect(rect:ScreenRect,nonempty=false):void {
   if(![rect.x,rect.y,rect.w,rect.h,rect.x+rect.w,rect.y+rect.h].every(Number.isFinite)||rect.w<0||rect.h<0||(nonempty&&(rect.w===0||rect.h===0)))throw new Error('Invalid screen bounds geometry.');
 }
+/** alphaTab reports a beat's real width as negative when beats are crowded closer than their natural width (forced systems of six or more bars). The rest of its geometry is still sound, so only the width may be negative. */
+function validBeatRealRect(rect:ScreenRect):void {
+  if(![rect.x,rect.y,rect.w,rect.h,rect.y+rect.h].every(Number.isFinite)||rect.h<0)throw new Error('Invalid screen bounds geometry.');
+}
 function contains(rect:ScreenRect,point:ScreenPoint):boolean {
   return point.x>=rect.x&&point.x<rect.x+rect.w&&point.y>=rect.y&&point.y<rect.y+rect.h;
 }
@@ -40,7 +44,7 @@ export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:S
     for(const master of system.bars)for(const bar of master.bars) {
       validRect(bar.realBounds);validRect(bar.visualBounds);
       for(const beat of bar.beats) {
-        validRect(beat.realBounds);validRect(beat.visualBounds);
+        validBeatRealRect(beat.realBounds);validRect(beat.visualBounds);
         for(const note of beat.notes??[])validRect(note.noteHeadBounds);
       }
     }

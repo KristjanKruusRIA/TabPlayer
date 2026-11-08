@@ -1,15 +1,20 @@
 //! The plug-in service: lifecycle of helpers, consent store, track limits, and status reporting (THE-71).
 use crate::{
+    assets::StoredAsset,
     plugins::{
         bridge::{BridgeLink, InsertShared, fault},
+        commands::{PluginEditorClosedPayload, PluginEditorSaveResult},
         consent::ConsentStore,
         helper::{HelperError, HelperJob, HelperProcess, LoadRequest, StateParts},
         library::{PluginLibrary, Resolved},
-        state::{decode_state, encode_state},
+        state::{
+            HISTORY_FULL_MESSAGE, STATE_FILENAME, STATE_MEDIA_TYPE, decode_state, encode_state,
+        },
         status::PluginStatus,
         supervisor::{HelperKey, Supervisor},
     },
     settings::PluginSlot,
+    workspace::DocumentWorkspace,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -24,6 +29,19 @@ use tabplayer_plugin_protocol::{
     limits::PROBE_TIMEOUT,
 };
 
+#[cfg(windows)]
+pub fn allow_foreground(pid: u32) {
+    if pid != 0 {
+        // SAFETY: plain call; fails harmlessly if pid is gone.
+        unsafe {
+            windows_sys::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(pid);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub fn allow_foreground(_pid: u32) {}
+
 pub const MAX_ACTIVE_SLOTS_PER_DOCUMENT: usize = 8;
 pub const MAX_CRASH_RETRIES: u32 = 3;
 
@@ -36,7 +54,15 @@ pub struct PluginPaths {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PluginEvent {
-    StatusChanged { document_id: String },
+    StatusChanged {
+        document_id: String,
+    },
+    EditorClosed {
+        document_id: String,
+        track_id: String,
+        state: Option<String>,
+        asset_token: Option<String>,
+    },
 }
 
 #[derive(Clone)]
@@ -139,6 +165,16 @@ pub trait HelperSession: Send + Sync {
     fn shutdown(&self);
     fn kill(&self);
     fn is_alive(&self) -> bool;
+    fn open_editor(
+        &self,
+        title: String,
+        near: Option<tabplayer_plugin_protocol::control::Rect>,
+    ) -> Result<u64, HelperError>;
+    fn close_editor(&self) -> Result<(), HelperError>;
+    fn take_editor_closed(&self) -> bool;
+    fn take_state_dirty(&self) -> bool;
+    fn pid(&self) -> Option<u32>;
+    fn heartbeat(&self) -> u64;
 }
 
 pub trait Launcher: Send + Sync {
@@ -175,6 +211,21 @@ struct RealSession {
     latency: AtomicU32,
     mono: bool,
     shared: Arc<InsertShared>,
+    editor_closed: std::sync::atomic::AtomicBool,
+    state_dirty: std::sync::atomic::AtomicBool,
+}
+
+impl RealSession {
+    fn drain_events(&self) -> crate::plugins::helper::HelperEvents {
+        let ev = self.process.take_events();
+        if ev.editor_closed {
+            self.editor_closed.store(true, Ordering::SeqCst);
+        }
+        if ev.state_dirty {
+            self.state_dirty.store(true, Ordering::SeqCst);
+        }
+        ev
+    }
 }
 
 impl HelperSession for RealSession {
@@ -182,7 +233,7 @@ impl HelperSession for RealSession {
         self.process.link().expect("bridge link after load")
     }
     fn latency(&self) -> u32 {
-        let ev = self.process.take_events();
+        let ev = self.drain_events();
         if let Some(new_lat) = ev.latency {
             self.latency.store(new_lat, Ordering::SeqCst);
             return new_lat;
@@ -199,7 +250,7 @@ impl HelperSession for RealSession {
         self.process.set_state(state)?;
         let start = Instant::now();
         while start.elapsed() < Duration::from_millis(250) {
-            let ev = self.process.take_events();
+            let ev = self.drain_events();
             if let Some(lat) = ev.latency {
                 self.latency.store(lat, Ordering::SeqCst);
                 break;
@@ -219,6 +270,30 @@ impl HelperSession for RealSession {
     }
     fn is_alive(&self) -> bool {
         self.process.exited().is_none() && !self.process.was_killed()
+    }
+    fn open_editor(
+        &self,
+        title: String,
+        near: Option<tabplayer_plugin_protocol::control::Rect>,
+    ) -> Result<u64, HelperError> {
+        self.process.open_editor(title, near)
+    }
+    fn close_editor(&self) -> Result<(), HelperError> {
+        self.process.close_editor()
+    }
+    fn take_editor_closed(&self) -> bool {
+        let _ = self.drain_events();
+        self.editor_closed.swap(false, Ordering::SeqCst)
+    }
+    fn take_state_dirty(&self) -> bool {
+        let _ = self.drain_events();
+        self.state_dirty.swap(false, Ordering::SeqCst)
+    }
+    fn pid(&self) -> Option<u32> {
+        Some(self.process.pid())
+    }
+    fn heartbeat(&self) -> u64 {
+        self.process.heartbeat()
     }
 }
 
@@ -262,6 +337,8 @@ impl Launcher for RealLauncher {
             latency: AtomicU32::new(loaded.latency),
             mono: loaded.mono,
             shared,
+            editor_closed: std::sync::atomic::AtomicBool::new(false),
+            state_dirty: std::sync::atomic::AtomicBool::new(false),
         }))
     }
 
@@ -289,6 +366,8 @@ impl Launcher for RealLauncher {
             latency: AtomicU32::new(loaded.latency),
             mono: loaded.mono,
             shared,
+            editor_closed: std::sync::atomic::AtomicBool::new(false),
+            state_dirty: std::sync::atomic::AtomicBool::new(false),
         }))
     }
 
@@ -310,6 +389,9 @@ enum SlotEntry {
         session: Arc<dyn HelperSession>,
         state_asset_id: String,
         last_latency: u32,
+        editor_open: bool,
+        opened_hwnd: Option<u64>,
+        baseline_state_id: Option<String>,
     },
     Faulted {
         status: PluginStatus,
@@ -340,6 +422,14 @@ pub struct PluginService {
     launcher: Arc<dyn Launcher>,
     supervisor: Arc<Supervisor>,
     inner: Arc<Mutex<Inner>>,
+    workspace: Arc<Mutex<Option<std::sync::Weak<Mutex<DocumentWorkspace>>>>>,
+    monitor_stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for PluginService {
+    fn drop(&mut self) {
+        self.monitor_stop.store(true, Ordering::Relaxed);
+    }
 }
 
 impl PluginService {
@@ -357,11 +447,14 @@ impl PluginService {
         launcher: Arc<dyn Launcher>,
     ) -> Arc<Self> {
         let events_arc: Arc<dyn Fn(PluginEvent) + Send + Sync> = Arc::from(events);
+        let monitor_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let workspace = Arc::new(Mutex::new(None));
+        let stop_clone = monitor_stop.clone();
         let service: Arc<PluginService> =
             Arc::new_cyclic(|weak: &std::sync::Weak<PluginService>| {
-                let weak = weak.clone();
+                let weak_for_sup = weak.clone();
                 let supervisor = Supervisor::new(Box::new(move |key, status| {
-                    if let Some(svc) = weak.upgrade() {
+                    if let Some(svc) = weak_for_sup.upgrade() {
                         svc.on_supervisor_report(key, status);
                     }
                 }));
@@ -376,8 +469,31 @@ impl PluginService {
                         crash_counts: HashMap::new(),
                         retiring: Vec::new(),
                     })),
+                    workspace,
+                    monitor_stop,
                 }
             });
+
+        let weak_service = Arc::downgrade(&service);
+        std::thread::Builder::new()
+            .name("plugin-editor-monitor".into())
+            .spawn(move || {
+                while !stop_clone.load(Ordering::Relaxed) {
+                    if let Some(svc) = weak_service.upgrade() {
+                        let ws_opt = svc.workspace.lock().unwrap().clone();
+                        if let Some(ws_weak) = ws_opt {
+                            if let Some(ws_arc) = ws_weak.upgrade() {
+                                svc.poll_events(&ws_arc);
+                            }
+                        }
+                    } else {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+            })
+            .expect("spawn editor monitor");
+
         service
     }
 
@@ -556,6 +672,9 @@ impl PluginService {
                         session,
                         mut state_asset_id,
                         mut last_latency,
+                        editor_open,
+                        opened_hwnd,
+                        mut baseline_state_id,
                     } => {
                         let fault_code = session.shared().fault.load(Ordering::Acquire);
                         let disconnected = session.shared().disconnected.load(Ordering::Acquire);
@@ -599,9 +718,15 @@ impl PluginService {
                         } else {
                             // Helper is running healthy!
                             if state_asset_id != slot.state {
-                                match session.set_state(state_parts.clone()) {
+                                let session_clone = session.clone();
+                                drop(inner);
+                                let set_res = session_clone.set_state(state_parts.clone());
+                                inner = self.inner.lock().unwrap();
+
+                                match set_res {
                                     Ok(()) => {
                                         state_asset_id = slot.state.clone();
+                                        baseline_state_id = Some(slot.state.clone());
                                     }
                                     Err(e) => {
                                         if let Some(status) = e.status() {
@@ -638,6 +763,9 @@ impl PluginService {
                                                     session,
                                                     state_asset_id,
                                                     last_latency,
+                                                    editor_open,
+                                                    opened_hwnd,
+                                                    baseline_state_id,
                                                 },
                                             );
                                             results.push((
@@ -667,6 +795,9 @@ impl PluginService {
                                     session,
                                     state_asset_id,
                                     last_latency,
+                                    editor_open,
+                                    opened_hwnd,
+                                    baseline_state_id,
                                 },
                             );
                             Self::record_status_inner(
@@ -816,6 +947,13 @@ impl PluginService {
                                     session,
                                     state_asset_id: slot_clone.state.clone(),
                                     last_latency: latency,
+                                    editor_open: false,
+                                    opened_hwnd: None,
+                                    baseline_state_id: if slot_clone.state.is_empty() {
+                                        None
+                                    } else {
+                                        Some(slot_clone.state.clone())
+                                    },
                                 },
                             );
                             Self::record_status_inner(
@@ -1249,6 +1387,376 @@ impl PluginService {
             }
         }
     }
+
+    pub fn set_workspace(&self, ws: std::sync::Weak<Mutex<DocumentWorkspace>>) {
+        *self.workspace.lock().unwrap() = Some(ws);
+    }
+
+    pub fn session_pid(&self, document_id: &str, track_id: &str) -> Option<u32> {
+        let inner = self.inner.lock().unwrap();
+        let (_, entry) = inner
+            .slots
+            .iter()
+            .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)?;
+        match entry {
+            SlotEntry::Ready { session, .. } => session.pid(),
+            _ => None,
+        }
+    }
+
+    pub fn heartbeat(&self, document_id: &str, track_id: &str) -> Option<u64> {
+        let inner = self.inner.lock().unwrap();
+        let (_, entry) = inner
+            .slots
+            .iter()
+            .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)?;
+        match entry {
+            SlotEntry::Ready { session, .. } => Some(session.heartbeat()),
+            _ => None,
+        }
+    }
+
+    pub fn get_state(&self, document_id: &str, track_id: &str) -> Result<StateParts, String> {
+        let session = {
+            let inner = self.inner.lock().unwrap();
+            let (_, entry) = inner
+                .slots
+                .iter()
+                .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)
+                .ok_or_else(|| "No active plug-in session for track.".to_string())?;
+            match entry {
+                SlotEntry::Ready { session, .. } => session.clone(),
+                _ => return Err("Plug-in session is not ready.".to_string()),
+            }
+        };
+        session.get_state().map_err(|e| e.to_string())
+    }
+
+    pub fn editor_open(
+        &self,
+        document_id: &str,
+        track_id: &str,
+        title: &str,
+        near: Option<(i32, i32, u32, u32)>,
+    ) -> Result<u64, String> {
+        let (session, pid) = {
+            let inner = self.inner.lock().unwrap();
+            let (_, entry) = inner
+                .slots
+                .iter()
+                .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)
+                .ok_or_else(|| "No active plug-in session for track.".to_string())?;
+            match entry {
+                SlotEntry::Ready { session, .. } => (session.clone(), session.pid()),
+                _ => return Err("Plug-in session is not ready.".to_string()),
+            }
+        };
+
+        let baseline_id = match session.get_state() {
+            Ok(parts) => {
+                let bytes = encode_state(&parts.component, &parts.controller).ok();
+                bytes.and_then(|b| {
+                    let asset =
+                        StoredAsset::from_bytes(STATE_FILENAME.into(), STATE_MEDIA_TYPE.into(), &b);
+                    asset.id().ok()
+                })
+            }
+            Err(_) => None,
+        };
+
+        #[cfg(windows)]
+        if let Some(p) = pid {
+            allow_foreground(p);
+        }
+
+        let near_rect =
+            near.map(
+                |(x, y, width, height)| tabplayer_plugin_protocol::control::Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+            );
+        let hwnd = session
+            .open_editor(title.to_string(), near_rect)
+            .map_err(|e| e.to_string())?;
+
+        #[cfg(windows)]
+        {
+            use windows_sys::Win32::Foundation::HWND;
+            use windows_sys::Win32::UI::WindowsAndMessaging::{
+                GA_PARENT, GW_OWNER, GWL_EXSTYLE, GetAncestor, GetDesktopWindow, GetWindow,
+                GetWindowLongPtrW, GetWindowThreadProcessId, IsWindow, WS_EX_TOOLWINDOW,
+            };
+            let h = hwnd as usize as HWND;
+            unsafe {
+                if IsWindow(h) == 0 {
+                    let _ = session.close_editor();
+                    return Err("Editor window handle is not a window.".into());
+                }
+                let mut win_pid = 0u32;
+                GetWindowThreadProcessId(h, &mut win_pid);
+                if let Some(expected_pid) = pid {
+                    if win_pid != expected_pid {
+                        let _ = session.close_editor();
+                        return Err("Editor window does not belong to helper process.".into());
+                    }
+                }
+                if !GetWindow(h, GW_OWNER).is_null() {
+                    let _ = session.close_editor();
+                    return Err("Editor window is owned.".into());
+                }
+                if GetAncestor(h, GA_PARENT) != GetDesktopWindow() {
+                    let _ = session.close_editor();
+                    return Err("Editor window is parented.".into());
+                }
+                let ex_style = GetWindowLongPtrW(h, GWL_EXSTYLE) as u32;
+                if (ex_style & WS_EX_TOOLWINDOW) != 0 {
+                    let _ = session.close_editor();
+                    return Err("Editor window has WS_EX_TOOLWINDOW style.".into());
+                }
+            }
+        }
+
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if let Some((_, entry)) = inner
+                .slots
+                .iter_mut()
+                .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)
+            {
+                if let SlotEntry::Ready {
+                    editor_open,
+                    opened_hwnd,
+                    baseline_state_id,
+                    ..
+                } = entry
+                {
+                    *editor_open = true;
+                    *opened_hwnd = Some(hwnd);
+                    if baseline_id.is_some() {
+                        *baseline_state_id = baseline_id;
+                    }
+                }
+            }
+        }
+
+        Ok(hwnd)
+    }
+
+    pub fn editor_save(
+        &self,
+        document_id: &str,
+        track_id: &str,
+        workspace: &Mutex<DocumentWorkspace>,
+    ) -> Result<Option<PluginEditorSaveResult>, String> {
+        let (session, class_id, current_state_asset_id, baseline_state_id) = {
+            let inner = self.inner.lock().unwrap();
+            let (key, entry) = inner
+                .slots
+                .iter()
+                .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)
+                .ok_or_else(|| "No active plug-in session for track.".to_string())?;
+            match entry {
+                SlotEntry::Ready {
+                    session,
+                    state_asset_id,
+                    baseline_state_id,
+                    ..
+                } => (
+                    session.clone(),
+                    key.class_id.clone(),
+                    state_asset_id.clone(),
+                    baseline_state_id.clone(),
+                ),
+                _ => return Err("Plug-in session is not ready.".to_string()),
+            }
+        };
+
+        let parts = session.get_state().map_err(|e| e.to_string())?;
+        let bytes = encode_state(&parts.component, &parts.controller).map_err(|e| e.to_string())?;
+        let asset = StoredAsset::from_bytes(STATE_FILENAME.into(), STATE_MEDIA_TYPE.into(), &bytes);
+        let state_id = asset.id()?;
+
+        let (is_locked, current_slot_state) = {
+            let ws = workspace.lock().map_err(|e| e.to_string())?;
+            let locked = ws.is_edit_locked(document_id)?;
+            let slot = ws.track_plugin_slot(document_id, track_id)?;
+            (locked, slot.map(|s| s.state))
+        };
+
+        if is_locked {
+            return Ok(None);
+        }
+
+        let is_unchanged = current_slot_state.as_deref() == Some(&state_id)
+            || baseline_state_id.as_deref() == Some(&state_id)
+            || current_state_asset_id == state_id;
+        if is_unchanged {
+            return Ok(None);
+        }
+
+        {
+            let ws = workspace.lock().map_err(|e| e.to_string())?;
+            if let Err(err) = ws.check_plugin_state(document_id, &state_id, &asset) {
+                if err == HISTORY_FULL_MESSAGE {
+                    return Err("plugin.history_full".to_string());
+                }
+                return Err(err);
+            }
+        }
+
+        let staged = {
+            let mut ws = workspace.lock().map_err(|e| e.to_string())?;
+            ws.stage_asset(document_id, asset)?
+        };
+
+        self.grant_consent(document_id, &[(class_id, state_id.clone())])?;
+
+        {
+            let mut inner = self.inner.lock().unwrap();
+            if let Some((_, entry)) = inner
+                .slots
+                .iter_mut()
+                .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)
+            {
+                if let SlotEntry::Ready {
+                    state_asset_id,
+                    baseline_state_id,
+                    ..
+                } = entry
+                {
+                    *state_asset_id = state_id.clone();
+                    *baseline_state_id = Some(state_id.clone());
+                }
+            }
+        }
+
+        Ok(Some(PluginEditorSaveResult {
+            state: state_id,
+            asset_token: staged.token,
+        }))
+    }
+
+    pub fn editor_close(
+        &self,
+        document_id: &str,
+        track_id: &str,
+        workspace: &Mutex<DocumentWorkspace>,
+    ) -> Result<PluginEditorClosedPayload, String> {
+        let (session, was_open) = {
+            let mut inner = self.inner.lock().unwrap();
+            let (_, entry) = inner
+                .slots
+                .iter_mut()
+                .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)
+                .ok_or_else(|| "No active plug-in session for track.".to_string())?;
+            match entry {
+                SlotEntry::Ready {
+                    session,
+                    editor_open,
+                    opened_hwnd,
+                    ..
+                } => {
+                    let open = *editor_open;
+                    *editor_open = false;
+                    *opened_hwnd = None;
+                    (session.clone(), open)
+                }
+                _ => return Err("Plug-in session is not ready.".to_string()),
+            }
+        };
+
+        if was_open {
+            let _ = session.close_editor();
+        }
+
+        let is_locked = {
+            let ws = workspace.lock().map_err(|e| e.to_string())?;
+            ws.is_edit_locked(document_id)?
+        };
+
+        if is_locked {
+            let doc_state_bytes = {
+                let ws = workspace.lock().map_err(|e| e.to_string())?;
+                if let Some(slot) = ws.track_plugin_slot(document_id, track_id)? {
+                    ws.asset_bytes(document_id, &slot.state).ok()
+                } else {
+                    None
+                }
+            };
+            if let Some(bytes) = doc_state_bytes {
+                if let Ok((comp, ctrl)) = decode_state(&bytes) {
+                    let _ = session.set_state(StateParts {
+                        component: comp.into(),
+                        controller: ctrl.into(),
+                    });
+                }
+            }
+            let payload = PluginEditorClosedPayload {
+                document_id: document_id.to_string(),
+                track_id: track_id.to_string(),
+                state: None,
+                asset_token: None,
+            };
+            (self.events)(PluginEvent::EditorClosed {
+                document_id: document_id.to_string(),
+                track_id: track_id.to_string(),
+                state: None,
+                asset_token: None,
+            });
+            return Ok(payload);
+        }
+
+        let save_res = self.editor_save(document_id, track_id, workspace)?;
+        let (state, asset_token) = match save_res {
+            Some(res) => (Some(res.state), Some(res.asset_token)),
+            None => (None, None),
+        };
+
+        let payload = PluginEditorClosedPayload {
+            document_id: document_id.to_string(),
+            track_id: track_id.to_string(),
+            state: state.clone(),
+            asset_token: asset_token.clone(),
+        };
+
+        (self.events)(PluginEvent::EditorClosed {
+            document_id: document_id.to_string(),
+            track_id: track_id.to_string(),
+            state,
+            asset_token,
+        });
+
+        Ok(payload)
+    }
+
+    pub fn poll_events(&self, workspace: &Mutex<DocumentWorkspace>) {
+        let to_close: Vec<(String, String)> = {
+            let inner = self.inner.lock().unwrap();
+            inner
+                .slots
+                .iter()
+                .filter_map(|(k, entry)| {
+                    if let SlotEntry::Ready {
+                        session,
+                        editor_open,
+                        ..
+                    } = entry
+                    {
+                        if *editor_open && session.take_editor_closed() {
+                            return Some((k.document_id.clone(), k.track_id.clone()));
+                        }
+                    }
+                    None
+                })
+                .collect()
+        };
+        for (doc_id, trk_id) in to_close {
+            let _ = self.editor_close(&doc_id, &trk_id, workspace);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1313,6 +1821,28 @@ mod tests {
         }
         fn is_alive(&self) -> bool {
             self.alive.load(Ordering::SeqCst)
+        }
+        fn open_editor(
+            &self,
+            _title: String,
+            _near: Option<tabplayer_plugin_protocol::control::Rect>,
+        ) -> Result<u64, HelperError> {
+            Ok(1234)
+        }
+        fn close_editor(&self) -> Result<(), HelperError> {
+            Ok(())
+        }
+        fn take_editor_closed(&self) -> bool {
+            false
+        }
+        fn take_state_dirty(&self) -> bool {
+            false
+        }
+        fn pid(&self) -> Option<u32> {
+            None
+        }
+        fn heartbeat(&self) -> u64 {
+            0
         }
     }
 

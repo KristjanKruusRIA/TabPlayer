@@ -692,7 +692,7 @@
   - Each export launches fresh helpers in offline mode and shuts them down at the end.
   - A crash, hang or block timeout fails the export, naming the plug-in. A missing plug-in, or one without consent or support, exports the built-in tone with a warning.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `export_trims_latency_and_keeps_length`: with the test plug-in at `L` = 480, the frame count equals the built-in export's, and an impulse lands on the same frame as on a dry track;
   - `export_flushes_tail`: the last note comes out complete;
   - `stems_are_aligned_in_export`;
@@ -702,10 +702,10 @@
   - `needs_consent_exports_built_in_with_warning`: no helper is launched;
   - `segments_keep_streaming`: no gap at segment joins;
   - `export_uses_a_fresh_offline_helper`: the playback helper's state is untouched.
-- [ ] **Step 2:** Run `--test plugin_export` and `--lib export`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4:** Run the same commands, plus `--test audio_render` and the existing export tests (`--lib export`). Expected: PASS.
-- [ ] **Step 5:** Commit with the message `feat: export plug-in tracks through offline helpers (THE-71)`.
+- [x] **Step 2:** Run `--test plugin_export` and `--lib export`. Expected: FAIL.
+- [x] **Step 3: Implement.**
+- [x] **Step 4:** Run the same commands, plus `--test audio_render` and the existing export tests (`--lib export`). Expected: PASS.
+- [x] **Step 5:** Commit with the message `feat: export plug-in tracks through offline helpers (THE-71)`.
 
 ### Task 15: Editor sessions
 
@@ -726,7 +726,7 @@
   - A save encodes the container and stages it only if its hash differs from the slot's. In an edit-locked document it stages nothing, and on close it sends `SetState` with the document's state. Past the history cap it returns the error key `plugin.history_full`.
   - A slot state change while the editor is open (undo or redo) sends `SetState`, and the plug-in's controller updates the editor.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - `editor_session_is_one_edit`: the view bumps `edits`; on close the event carries a state and a token, and applying it adds one undo step;
   - `unchanged_editor_session_records_nothing`: with `TABPLAYER_TEST_PLUGIN_VIEW_NO_EDIT=1`, `state` is null;
   - `save_mid_session_then_close_is_one_edit_per_change`;
@@ -735,10 +735,10 @@
   - `history_full_refuses_save`;
   - `editor_window_is_unowned`: the window handle from `EditorOpened` has no owner and no parent;
   - `hung_editor_does_not_block_app`: with `TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS=10000`, `plugin_status` answers within 100 ms and the heartbeat keeps advancing, so the helper is not killed.
-- [ ] **Step 2:** Run `--test plugin_editor`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4:** Run the same command and `--test plugin_playback`. Expected: PASS.
-- [ ] **Step 5:** Commit with the message `feat: plug-in editor window with one edit per session (THE-71)`.
+- [x] **Step 2:** Run `--test plugin_editor`. Expected: FAIL.
+- [x] **Step 3: Implement.**
+- [x] **Step 4:** Run the same command and `--test plugin_playback`. Expected: PASS.
+- [x] **Step 5:** Commit with the message `feat: plug-in editor window with one edit per session (THE-71)`.
 
 ### Task 16: Sound panel, notices and i18n
 

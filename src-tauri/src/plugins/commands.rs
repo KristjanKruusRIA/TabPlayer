@@ -9,7 +9,7 @@ use crate::plugins::{
 };
 use crate::settings::PluginSlot;
 use crate::workspace::DocumentWorkspace;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tabplayer_plugin_protocol::{limits::PROBE_TIMEOUT, validate::valid_class_id};
@@ -240,6 +240,73 @@ pub async fn plugin_retry(
     let service = app.state::<Arc<PluginService>>();
     service.retry(&document_id, &track_id)?;
     Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginEditorSaveResult {
+    pub state: String,
+    pub asset_token: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginEditorClosedPayload {
+    pub document_id: String,
+    pub track_id: String,
+    pub state: Option<String>,
+    pub asset_token: Option<String>,
+}
+
+#[tauri::command]
+pub async fn plugin_editor_open(
+    app: tauri::AppHandle,
+    document_id: String,
+    track_id: String,
+    title: String,
+) -> Result<u64, String> {
+    let near =
+        app.get_webview_window("main")
+            .and_then(|w| match (w.outer_position(), w.outer_size()) {
+                (Ok(pos), Ok(size)) => Some((pos.x, pos.y, size.width, size.height)),
+                _ => None,
+            });
+    let service = app.state::<Arc<PluginService>>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.editor_open(&document_id, &track_id, &title, near)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn plugin_editor_save(
+    app: tauri::AppHandle,
+    document_id: String,
+    track_id: String,
+) -> Result<Option<PluginEditorSaveResult>, String> {
+    let service = app.state::<Arc<PluginService>>().inner().clone();
+    let workspace = app.state::<Arc<Mutex<DocumentWorkspace>>>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.editor_save(&document_id, &track_id, &workspace)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn plugin_editor_close(
+    app: tauri::AppHandle,
+    document_id: String,
+    track_id: String,
+) -> Result<PluginEditorClosedPayload, String> {
+    let service = app.state::<Arc<PluginService>>().inner().clone();
+    let workspace = app.state::<Arc<Mutex<DocumentWorkspace>>>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.editor_close(&document_id, &track_id, &workspace)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

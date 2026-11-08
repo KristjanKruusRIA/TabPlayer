@@ -513,6 +513,26 @@ impl ProjectSession {
         pairs
     }
 
+    pub fn track_plugin_slot(&self, track_id: &str) -> Option<crate::settings::PluginSlot> {
+        let edits = self
+            .project
+            .baseline_edits
+            .iter()
+            .chain(&self.project.edits[..self.cursor]);
+        for edit in edits.rev() {
+            if let EditCommand::SetTrackSound {
+                track_id: tid,
+                sound,
+            } = edit
+            {
+                if tid == track_id {
+                    return sound.plugin.clone();
+                }
+            }
+        }
+        None
+    }
+
     pub fn checkpoint(&self) -> ProjectCheckpoint {
         ProjectCheckpoint {
             project: self.project.clone(),
@@ -773,6 +793,28 @@ impl ProjectSession {
 
     pub fn lock(&self) -> Option<DocumentLock> {
         self.project.lock
+    }
+
+    pub fn set_document_lock(&mut self, lock: DocumentLock) {
+        self.project.lock = Some(lock);
+    }
+
+    pub fn check_plugin_state(&self, state_id: &str, asset: &StoredAsset) -> Result<(), String> {
+        let mut states = plugin_state_ids(
+            self.project
+                .baseline_edits
+                .iter()
+                .chain(&self.project.edits[..self.cursor])
+                .chain(&self.saved),
+        );
+        states.insert(state_id);
+        plugin_state::check_total(&states, &self.project.assets, Some((state_id, asset)))
+    }
+
+    pub fn inject_history_state(&mut self, id: String, asset: StoredAsset, edit: EditCommand) {
+        self.project.assets.insert(id, asset);
+        self.project.edits.push(edit);
+        self.cursor = self.project.edits.len();
     }
 
     /// A password to edit is set and has not been given in this session.

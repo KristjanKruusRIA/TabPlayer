@@ -967,6 +967,47 @@ impl DocumentWorkspace {
         self.entry(id)?.session.asset_bytes(asset_id)
     }
 
+    pub fn is_edit_locked(&self, id: &str) -> Result<bool, String> {
+        let entry = self.entry(id)?;
+        Ok(entry.session.lock().is_some() || entry.session.edit_locked())
+    }
+
+    pub fn track_plugin_slot(
+        &self,
+        id: &str,
+        track_id: &str,
+    ) -> Result<Option<crate::settings::PluginSlot>, String> {
+        let entry = self.entry(id)?;
+        Ok(entry.session.track_plugin_slot(track_id))
+    }
+
+    pub fn check_plugin_state(
+        &self,
+        id: &str,
+        state_id: &str,
+        asset: &StoredAsset,
+    ) -> Result<(), String> {
+        self.entry(id)?.session.check_plugin_state(state_id, asset)
+    }
+
+    pub fn set_document_lock(&mut self, id: &str, lock: DocumentLock) -> Result<(), String> {
+        let entry = self.entry_mut(id)?;
+        entry.session.set_document_lock(lock);
+        Ok(())
+    }
+
+    pub fn inject_history_state(
+        &mut self,
+        id: &str,
+        state_id: String,
+        asset: StoredAsset,
+        edit: EditCommand,
+    ) -> Result<(), String> {
+        let entry = self.entry_mut(id)?;
+        entry.session.inject_history_state(state_id, asset, edit);
+        Ok(())
+    }
+
     pub(crate) fn capture_export_backing(
         &self,
         document: &DocumentRevision,

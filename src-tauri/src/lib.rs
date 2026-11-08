@@ -1134,9 +1134,26 @@ pub fn run() {
                             serde_json::json!({ "documentId": document_id }),
                         );
                     }
+                    plugins::service::PluginEvent::EditorClosed {
+                        document_id,
+                        track_id,
+                        state,
+                        asset_token,
+                    } => {
+                        let _ = plugin_handle.emit(
+                            "plugin-editor-closed",
+                            serde_json::json!({
+                                "documentId": document_id,
+                                "trackId": track_id,
+                                "state": state,
+                                "assetToken": asset_token,
+                            }),
+                        );
+                    }
                 }),
             )
             .map_err(|e| e.to_string())?;
+            plugin_service.set_workspace(Arc::downgrade(&workspace));
             workspace
                 .lock()
                 .unwrap()
@@ -1256,6 +1273,9 @@ pub fn run() {
         plugins::commands::plugin_status,
         plugins::commands::plugin_consent_grant,
         plugins::commands::plugin_retry,
+        plugins::commands::plugin_editor_open,
+        plugins::commands::plugin_editor_save,
+        plugins::commands::plugin_editor_close,
         file_library_snapshot,
         file_library_retry,
         file_library_change,
@@ -1369,6 +1389,9 @@ pub fn run() {
         plugins::commands::plugin_status,
         plugins::commands::plugin_consent_grant,
         plugins::commands::plugin_retry,
+        plugins::commands::plugin_editor_open,
+        plugins::commands::plugin_editor_save,
+        plugins::commands::plugin_editor_close,
         file_library_snapshot,
         file_library_retry,
         file_library_change,

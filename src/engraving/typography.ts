@@ -1,5 +1,6 @@
 import { NotationElement,Settings } from '@coderline/alphatab';
 import type { EngravingOverrides,EngravingTypography,TextFamily } from './types';
+import { roleElements,TAB_NUMBER_FONTS } from './role-elements';
 
 /** The scale ranges Rust enforces too. Text and titles scale the renderer's own sizes; tab numbers stay inside the staff lines. */
 export const TEXT_SCALE_RANGE={min:.5,max:2} as const;
@@ -31,8 +32,9 @@ export function validateTypography(value:unknown):asserts value is EngravingTypo
   if(!inRange(typography.tabScale,TAB_SCALE_RANGE))throw new Error('Tab number size must be between 75% and 150%.');
 }
 
-const titleElements=new Set<NotationElement>([NotationElement.ScoreTitle,NotationElement.ScoreSubTitle,NotationElement.ScoreArtist,NotationElement.ScoreAlbum,NotationElement.ScoreWords,NotationElement.ScoreMusic,NotationElement.ScoreWordsAndMusic,NotationElement.ScoreCopyright]);
-const scaled=(size:number,scale:number|null)=>Math.round(size*(scale??1)*10)/10;
+const titleElements=new Set<NotationElement>(roleElements.titleBlock);
+/** `size` times `scale` (null is 1), rounded to a tenth of a pixel. */
+export const scaled=(size:number,scale:number|null)=>Math.round(size*(scale??1)*10)/10;
 /**
  * Rebuilds every text font from the renderer defaults, then applies `typography`. Always starting from the defaults
  * means a reused Settings never keeps a previous choice. Layout measures the final fonts and spaces the notation to
@@ -48,5 +50,5 @@ export function configureTypography(settings:Settings,typography:EngravingTypogr
     resources.elementFonts.set(element,next);
   }
   // Fret and staff numbers keep the default family: the chosen family may have old-style digits that sit unevenly on the lines.
-  for(const key of ['tablatureFont','graceFont','numberedNotationFont','numberedNotationGraceFont'] as const)resources[key]=defaults[key].withSize(scaled(defaults[key].size,typography.tabScale));
+  for(const key of TAB_NUMBER_FONTS)resources[key]=defaults[key].withSize(scaled(defaults[key].size,typography.tabScale));
 }

@@ -406,6 +406,21 @@ it('applies engraving and custom page edits once while keeping canonical music t
   click('Redo');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));expect(c.getState().score).toBe(original);
 });
 
+it('applies font roles as one edit, shows the font status from the score view, and follows undo and redo',async()=>{
+  const c=await setup();
+  change('Lyrics font','notoSerif');change('Music font','leland');click('Apply engraving');
+  await waitFor(()=>expect(c.getState().settings.engraving.fonts).toEqual({music:'leland',roles:{lyrics:{font:'notoSerif'}}}));
+  expect(c.getState().snapshot.project.edits).toHaveLength(1);
+  act(()=>engravingView.mock.lastCall![0].onFontStatus({failed:['NotoSerif-Italic.ttf'],substituted:['a','b']}));
+  expect(screen.getByText(/A font could not be loaded: Noto Serif Italic./)).toBeInTheDocument();
+  expect(screen.getByText('2 music symbols are not in Leland and are drawn from Bravura.')).toBeInTheDocument();
+  click('Undo');await waitFor(()=>expect(c.getState().settings.engraving.fonts).toBeUndefined());
+  await waitFor(()=>expect(screen.getByLabelText('Lyrics font')).toHaveValue('inherit'));expect(screen.getByLabelText('Music font')).toHaveValue('bravura');
+  click('Redo');await waitFor(()=>expect(screen.getByLabelText('Lyrics font')).toHaveValue('notoSerif'));expect(screen.getByLabelText('Music font')).toHaveValue('leland');
+  // Applying the form again with nothing changed records nothing.
+  const edits=c.getState().snapshot.project.edits.length;click('Apply engraving');await new Promise(resolve=>setTimeout(resolve,20));expect(c.getState().snapshot.project.edits).toHaveLength(edits);
+});
+
 it('keeps copied music and paste drafts across unrelated renders and New, with one repeated paste command',async()=>{
   const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));click('Select bar');
   const workspace=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});

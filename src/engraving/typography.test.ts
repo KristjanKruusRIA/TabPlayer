@@ -5,6 +5,8 @@ import { renderPdfPages } from '../export/pdf';
 import { configureEngraving,defaultEngraving,validateEngraving } from './projection';
 import { notationPresets,presetApplied } from './notation-presets';
 import type { EngravingOverrides,EngravingTypography } from './types';
+import { FALLBACK_FAMILIES,TAB_NUMBER_FONTS,configureRoleFonts,pageRoleFont,roleElements,type EngravingFonts } from './fonts';
+import { hasFace,textFonts } from './font-catalog';
 import { configureTypography,defaultTypography,isDefaultTypography,typographyOf,validateTypography,withTypography } from './typography';
 
 const typed=(over:Partial<EngravingTypography>):EngravingTypography=>({...defaultTypography(),...over});
@@ -92,4 +94,110 @@ it('presets_replace_style_choices_but_keep_spacing_and_profiles_and_validate',()
   expect(new Set(results).size).toBe(3);
   expect(current.stylesheet.hideDynamics).toBe(true);
   expect(presetApplied(notationPresets[2],current).notation.tabRhythm).toBe('beams');
+});
+
+// ---- D12 font roles on screen (Task 5) ----
+const elementFontsOf=(settings:Settings)=>settings.display.resources.elementFonts;
+const withRoles=(roles:EngravingFonts['roles']):EngravingFonts=>({roles});
+const FamilyOk=/^[A-Za-z]+( [A-Za-z]+)*$/;
+
+it('role_mapping_covers_every_element_once',()=>{
+  const all=Object.values(roleElements).flat(),keys=[...new Settings().display.resources.elementFonts.keys()];
+  expect(all).toHaveLength(36);
+  expect(new Set(all).size).toBe(all.length);
+  expect([...new Set(all)].sort((a,b)=>a-b)).toEqual([...keys].sort((a,b)=>a-b));
+  expect(TAB_NUMBER_FONTS).toEqual(['tablatureFont','graceFont','numberedNotationFont','numberedNotationGraceFont']);
+  expect(FALLBACK_FAMILIES).toEqual(['Noto Sans','Noto Sans CJK JP','Noto Emoji']);
+});
+
+it('role_families_have_no_digit_tokens',()=>{
+  const settings=new Settings();
+  const roles:NonNullable<EngravingFonts['roles']>={};
+  for(const role of ['titleBlock','chordNames','staffText','lyrics','trackNames','barNumbers','markers','tabNumbers'] as const)roles[role]={font:role==='markers'?'notoSansMono':role==='lyrics'?'notoSerif':'notoSans'};
+  configureRoleFonts(settings,withRoles(roles),defaultTypography());
+  const resources=settings.display.resources,written=[...resources.elementFonts.values(),...TAB_NUMBER_FONTS.map(key=>resources[key])].flatMap(font=>font.families);
+  expect(written.some(family=>family.startsWith('TabPlayer'))).toBe(true);
+  for(const family of [...written,...Object.values(textFonts).map(font=>font.alias),...Object.values(textFonts).map(font=>font.family),...FALLBACK_FAMILIES])expect(family).toMatch(FamilyOk);
+});
+
+it('chosen_role_sets_family_style_weight_size',()=>{
+  const settings=new Settings(),defaults=new Settings().display.resources.elementFonts,typography=typed({textScale:1.5});
+  configureTypography(settings,typography);
+  configureRoleFonts(settings,withRoles({lyrics:{font:'notoSerif',italic:false,bold:true,size:1.25},markers:{font:'notoSansMono',size:1.5}}),typography);
+  const lyrics=elementFontsOf(settings).get(NotationElement.EffectLyrics)!;
+  expect(lyrics.families).toEqual(['TabPlayer Serif','Noto Sans','Noto Sans CJK JP','Noto Emoji']);
+  expect(lyrics.isItalic).toBe(false);expect(lyrics.isBold).toBe(true);
+  expect(lyrics.size).toBe(Math.round(defaults.get(NotationElement.EffectLyrics)!.size*1.25*10)/10);
+  // The role size replaces the group scale (1.5 here); a flag left unset keeps the element's own style (markers are bold).
+  const marker=elementFontsOf(settings).get(NotationElement.EffectMarker)!;
+  expect(marker.families[0]).toBe('TabPlayer Mono');expect(marker.isBold).toBe(true);expect(marker.size).toBe(21);
+  const alternate=elementFontsOf(settings).get(NotationElement.EffectAlternateEndings)!;
+  expect(alternate.isBold).toBe(false);expect(alternate.families[0]).toBe('TabPlayer Mono');
+});
+
+it('role_size_replaces_the_group_scale_even_when_smaller',()=>{
+  const typography=typed({textScale:2}),settings=new Settings();
+  configureTypography(settings,typography);configureRoleFonts(settings,withRoles({lyrics:{font:'notoSans',size:.5}}),typography);
+  expect(elementFontsOf(settings).get(NotationElement.EffectLyrics)!.size).toBe(6);
+  expect(elementFontsOf(settings).get(NotationElement.EffectText)!.size).toBe(24);
+});
+
+it('chosen_tab_numbers_role_sets_all_four_number_fonts',()=>{
+  const settings=new Settings(),defaults=new Settings().display.resources;
+  configureRoleFonts(settings,withRoles({tabNumbers:{font:'notoSerif',bold:true,size:1.25}}),defaultTypography());
+  for(const key of TAB_NUMBER_FONTS){
+    const font=settings.display.resources[key];
+    expect(font.families).toEqual(['TabPlayer Serif','Noto Sans','Noto Sans CJK JP','Noto Emoji']);expect(font.isBold).toBe(true);expect(font.size).toBe(Math.round(defaults[key].size*1.25*10)/10);
+  }
+});
+
+it('unchosen_roles_keep_typography_result',()=>{
+  const typography=typed({family:'serif',textScale:1.2,titleScale:.8,tabScale:1.1}),alone=new Settings(),both=new Settings();
+  configureTypography(alone,typography);configureTypography(both,typography);
+  configureRoleFonts(both,withRoles({lyrics:{font:'notoSerif'}}),typography);
+  const a=alone.display.resources,b=both.display.resources;
+  for(const [element,font] of a.elementFonts)if(!roleElements.lyrics.includes(element))expect(b.elementFonts.get(element)).toEqual(font);
+  for(const key of TAB_NUMBER_FONTS)expect(b[key]).toEqual(a[key]);
+  // Fonts that choose nothing leave the earlier result alone: configureRoleFonts only touches roles that are present.
+  configureRoleFonts(both,undefined,typography);configureRoleFonts(both,{},typography);configureRoleFonts(both,{music:'petaluma'},typography);configureRoleFonts(both,withRoles({pageHeader:{font:'notoSerif'}}),typography);
+  expect(b.elementFonts.get(NotationElement.EffectText)).toEqual(a.elementFonts.get(NotationElement.EffectText));
+  expect(b.elementFonts.get(NotationElement.EffectLyrics)!.families[0]).toBe('TabPlayer Serif');
+});
+
+it('size_only_role_scales_without_family',()=>{
+  const typography=typed({family:'mono',textScale:2}),settings=new Settings(),defaults=new Settings().display.resources;
+  configureTypography(settings,typography);configureRoleFonts(settings,withRoles({trackNames:{size:.5},tabNumbers:{size:1.5}}),typography);
+  const track=settings.display.resources.elementFonts.get(NotationElement.TrackNames)!,original=defaults.elementFonts.get(NotationElement.TrackNames)!;
+  expect(track.size).toBe(6);expect(track.families).toEqual(['Consolas','Courier New','monospace']);expect(track.isItalic).toBe(original.isItalic);expect(track.isBold).toBe(original.isBold);
+  expect(settings.display.resources.tablatureFont.size).toBe(21);expect(settings.display.resources.tablatureFont.families).toEqual(defaults.tablatureFont.families);
+});
+
+it('reconfigure_restores_defaults',()=>{
+  const settings=new Settings(),defaults=new Settings().display.resources;
+  const chosen={...defaultEngraving(),fonts:withRoles({lyrics:{font:'notoSerif',italic:true,size:2},tabNumbers:{font:'notoSansMono',size:1.5}})};
+  configureEngraving(settings,chosen);
+  expect(settings.display.resources.elementFonts.get(NotationElement.EffectLyrics)!.families[0]).toBe('TabPlayer Serif');
+  expect(settings.display.resources.tablatureFont.families[0]).toBe('TabPlayer Mono');
+  configureEngraving(settings,defaultEngraving());
+  for(const [element,font] of defaults.elementFonts)expect(settings.display.resources.elementFonts.get(element)).toEqual(font);
+  for(const key of TAB_NUMBER_FONTS)expect(settings.display.resources[key]).toEqual(defaults[key]);
+});
+
+it('mono_role_draws_default_italic_elements_upright',()=>{
+  const settings=new Settings(),defaults=new Settings().display.resources.elementFonts;
+  expect(defaults.get(NotationElement.EffectLyrics)!.isItalic).toBe(true);
+  configureRoleFonts(settings,withRoles({lyrics:{font:'notoSansMono'},staffText:{font:'notoSansMono',bold:true},trackNames:{font:'notoSerif'}}),defaultTypography());
+  const fonts=elementFontsOf(settings);
+  expect(fonts.get(NotationElement.EffectLyrics)!.isItalic).toBe(false);
+  expect(fonts.get(NotationElement.EffectText)!.isItalic).toBe(false);expect(fonts.get(NotationElement.EffectText)!.isBold).toBe(true);
+  expect(fonts.get(NotationElement.TrackNames)!.isItalic).toBe(true);
+  expect(hasFace('notoSansMono',false,true)).toBe(false);
+});
+
+it('page_role_font_reads_family_flags_and_scale',()=>{
+  expect(pageRoleFont(undefined,'pageHeader')).toEqual({family:null,bold:false,italic:false,scale:null});
+  expect(pageRoleFont({roles:{pageHeader:{size:1.5}}},'pageHeader')).toEqual({family:null,bold:false,italic:false,scale:1.5});
+  expect(pageRoleFont({roles:{pageFooter:{font:'notoSerif',bold:true,italic:true}}},'pageFooter')).toEqual({family:'TabPlayer Serif',bold:true,italic:true,scale:null});
+  expect(pageRoleFont({roles:{pageFooter:{font:'notoSansMono',italic:true}}},'pageFooter')).toEqual({family:'TabPlayer Mono',bold:false,italic:false,scale:null});
+  expect(pageRoleFont({roles:{pageFooter:{font:'notoSerif'}}},'pageHeader')).toEqual({family:null,bold:false,italic:false,scale:null});
 });

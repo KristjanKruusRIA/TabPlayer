@@ -42,3 +42,4 @@ GP8 sets fonts, sizes and notation style. TabPlayer's fonts and sizes were fixed
 - **Vertical spill:** it is not measured on screen, because text boxes overhang stacked tiles at every size.
 - **Missing glyphs:** these rest on the font fallback stacks, and were exercised with CJK and emoji text.
 - **Older builds:** a version 2 library is refused by older builds, and left unchanged.
+- **Update 2026-11-08:** the fixed music font, the single text family and screen-only family limits above are changed by D12 font roles; its remaining limits are in [2026-11-08-gp8-font-roles.md](2026-11-08-gp8-font-roles.md).

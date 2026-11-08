@@ -10,10 +10,11 @@ use tauri::AppHandle;
 
 const FILENAME: &str = "style-library.json";
 const FORMAT: &str = "tabplayer-style-library";
-/// Version 2 added `engraving.typography` (omitted while default). Version 1 files are read as version 2. A write
-/// produces a version 2 file only while some stored style has typography, otherwise version 1, so older builds keep
-/// reading libraries that do not use it. Reading never rewrites a file.
-const VERSION: u32 = 2;
+/// Version 2 added `engraving.typography` and version 3 added `engraving.fonts` (both omitted while default). Files
+/// of version 1 and 2 are read as version 3 in memory. A write produces the lowest version that fits the content:
+/// 3 while some stored style has fonts, else 2 while some has typography, else 1, so older builds keep reading
+/// libraries that do not use the newer fields. Reading never rewrites a file.
+const VERSION: u32 = 3;
 static WRITES: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -21,7 +22,8 @@ static WRITES: Mutex<()> = Mutex::new(());
 pub struct SavedStyle {
     pub id: String,
     pub name: String,
-    /// The stylesheet, notation and system spacing. A style never names tracks, so `profiles` must be empty.
+    /// The stylesheet, notation, system spacing, typography and fonts. A style never names tracks or bars, so
+    /// `profiles`, `bar_widths` and `system_gaps` must be empty.
     pub engraving: EngravingOverrides,
 }
 
@@ -116,18 +118,27 @@ impl StyleLibrary {
     }
 }
 
-/// Reads either file version as the current one. A version 1 entry predates typography, so it must not carry it.
+/// Reads any file version as the current one. A version 1 entry predates typography and entries of version 1 and 2
+/// predate fonts, so they must not carry them: an older build would call such a file damaged.
 fn parse_library(bytes: &[u8]) -> Result<StyleLibrary, String> {
     let mut value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|error| format!("Invalid style library: {error}"))?;
-    if value.get("version").and_then(|version| version.as_u64()) == Some(1) {
-        let carries_typography = value["entries"].as_array().is_some_and(|entries| {
-            entries
-                .iter()
-                .any(|entry| entry["engraving"].get("typography").is_some())
-        });
-        if carries_typography {
+    let version = value.get("version").and_then(|version| version.as_u64());
+    if let Some(old @ (1 | 2)) = version {
+        let carries = |key: &str| {
+            value["entries"].as_array().is_some_and(|entries| {
+                entries
+                    .iter()
+                    .any(|entry| entry["engraving"].get(key).is_some())
+            })
+        };
+        if old == 1 && carries("typography") {
             return Err("Invalid style library: version 1 styles cannot hold typography.".into());
+        }
+        if carries("fonts") {
+            return Err(format!(
+                "Invalid style library: version {old} styles cannot hold fonts."
+            ));
         }
         value["version"] = VERSION.into();
     }
@@ -145,17 +156,22 @@ pub fn read_library(directory: &Path) -> Result<StyleLibrary, String> {
     Ok(library)
 }
 
+/// The lowest version that can hold the content: 3 with any fonts, else 2 with any typography, else 1.
+fn file_version(library: &StyleLibrary) -> u32 {
+    let any = |has: fn(&SavedStyle) -> bool| library.entries.iter().any(has);
+    if any(|entry| !entry.engraving.fonts.is_default()) {
+        3
+    } else if any(|entry| !entry.engraving.typography.is_default()) {
+        2
+    } else {
+        1
+    }
+}
+
 fn write_library(directory: &Path, library: &StyleLibrary) -> Result<(), String> {
     library.validate()?;
-    // A library with no typography is still a version 1 file, so older builds keep reading it.
     let mut file = library.clone();
-    if file
-        .entries
-        .iter()
-        .all(|entry| entry.engraving.typography.is_default())
-    {
-        file.version = 1;
-    }
+    file.version = file_version(library);
     let bytes = serde_json::to_vec_pretty(&file).map_err(|error| error.to_string())?;
     std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
     write_bytes(&directory.join(FILENAME), &bytes)
@@ -284,7 +300,7 @@ mod tests {
         assert!(!app_data.exists());
         assert_eq!(
             serde_json::to_value(&library).unwrap(),
-            json!({"format":"tabplayer-style-library","version":2,"entries":[]})
+            json!({"format":"tabplayer-style-library","version":3,"entries":[]})
         );
     }
 
@@ -403,6 +419,8 @@ mod tests {
             with(&|v| v["engraving"]["profiles"] = json!([{"trackId":"t","profile":"slash"}])),
             with(&|v| v["engraving"]["barWidths"] = json!([{"bar":1,"scale":2.0}])),
             with(&|v| v["engraving"]["systemGaps"] = json!([{"bar":1,"scale":2.0}])),
+            with(&|v| v["engraving"]["fonts"] = json!({"music":"petaluma"})),
+            with(&|v| v["engraving"]["fonts"] = json!({"roles":{"lyrics":{"font":"notoSerif"}}})),
             with(&|v| {
                 v["engraving"]["staffGroups"] = json!([{"trackIds":["a","b"],"kind":"brace"}])
             }),
@@ -416,7 +434,7 @@ mod tests {
             envelope(
                 json!([good, {"id": A.to_uppercase(), "name": "Dup", "engraving": good["engraving"]}]),
             ),
-            top(json!({"format":"tabplayer-style-library","version":3,"entries":[]})),
+            top(json!({"format":"tabplayer-style-library","version":4,"entries":[]})),
             top(json!({"format":"tabplayer-style-library","version":0,"entries":[]})),
             top(json!({"format":"tabplayer-tuning-library","version":2,"entries":[]})),
             top(json!({"format":"tabplayer-style-library","version":2})),
@@ -460,6 +478,135 @@ mod tests {
         entry
     }
 
+    fn wire_version(dir: &Path) -> u64 {
+        let wire: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(file(dir)).unwrap()).unwrap();
+        wire["version"].as_u64().unwrap()
+    }
+
+    fn fonted(id: &str, name: &str) -> SavedStyle {
+        use crate::engraving::{RoleFont, TextFont};
+        let mut entry = style(id, name);
+        entry.engraving.fonts.roles.lyrics = Some(RoleFont {
+            font: Some(TextFont::NotoSerif),
+            ..RoleFont::default()
+        });
+        entry
+    }
+
+    #[test]
+    fn write_picks_lowest_version_for_content() {
+        use crate::engraving::MusicFont;
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        put_entry(dir, style(A, "Plain")).unwrap();
+        assert_eq!(wire_version(dir), 1);
+        put_entry(dir, typed(B, "Typed")).unwrap();
+        assert_eq!(wire_version(dir), 2);
+        let c = "c90796a2-734f-4253-aa73-2baefb158b32";
+        put_entry(dir, fonted(c, "Fonts")).unwrap();
+        assert_eq!(wire_version(dir), 3);
+        let read = read_library(dir).unwrap();
+        assert_eq!(read.version, 3);
+        assert_eq!(read.entries.len(), 3);
+        remove_entry(dir, c).unwrap();
+        assert_eq!(wire_version(dir), 2);
+        remove_entry(dir, B).unwrap();
+        assert_eq!(wire_version(dir), 1);
+        // A music font alone counts, and an explicit default does not.
+        let mut music = style(B, "Petaluma");
+        music.engraving.fonts.music = MusicFont::Petaluma;
+        put_entry(dir, music).unwrap();
+        assert_eq!(wire_version(dir), 3);
+        let mut explicit = style(B, "Petaluma");
+        explicit.engraving.fonts.music = MusicFont::Bravura;
+        put_entry(dir, explicit).unwrap();
+        assert_eq!(wire_version(dir), 1);
+    }
+
+    #[test]
+    fn v2_entry_with_fonts_is_damaged() {
+        for version in [1, 2] {
+            let root = tempdir().unwrap();
+            let dir = root.path();
+            let bytes = serde_json::to_vec(&json!({
+                "format":"tabplayer-style-library","version":version,
+                "entries":[serde_json::to_value(fonted(A, "Odd")).unwrap()]
+            }))
+            .unwrap();
+            std::fs::write(file(dir), &bytes).unwrap();
+            assert!(read_library(dir).is_err());
+            assert!(put_entry(dir, style(B, "New")).is_err());
+            assert!(remove_entry(dir, A).is_err());
+            assert_eq!(std::fs::read(file(dir)).unwrap(), bytes);
+        }
+    }
+
+    #[test]
+    fn v1_entry_with_fonts_is_damaged() {
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        let mut music = style(A, "Odd");
+        music.engraving.fonts.music = crate::engraving::MusicFont::Leland;
+        let bytes = serde_json::to_vec(&json!({
+            "format":"tabplayer-style-library","version":1,
+            "entries":[serde_json::to_value(music).unwrap()]
+        }))
+        .unwrap();
+        std::fs::write(file(dir), &bytes).unwrap();
+        assert!(read_library(dir).is_err());
+        assert!(put_entry(dir, style(B, "New")).is_err());
+        assert_eq!(std::fs::read(file(dir)).unwrap(), bytes);
+    }
+
+    #[test]
+    fn v2_typography_file_reads_as_v3_without_rewrite() {
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        let bytes = serde_json::to_vec_pretty(&json!({
+            "format":"tabplayer-style-library","version":2,
+            "entries":[serde_json::to_value(typed(A, "Typed")).unwrap()]
+        }))
+        .unwrap();
+        std::fs::write(file(dir), &bytes).unwrap();
+        let read = read_library(dir).unwrap();
+        assert_eq!((read.version, read.entries), (3, vec![typed(A, "Typed")]));
+        assert_eq!(remove_entry(dir, B).unwrap().version, 3);
+        assert_eq!(std::fs::read(file(dir)).unwrap(), bytes);
+    }
+
+    #[test]
+    fn v3_read_without_rewrite() {
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        let bytes = serde_json::to_vec_pretty(&json!({
+            "format":"tabplayer-style-library","version":3,
+            "entries":[serde_json::to_value(fonted(A, "Fonts")).unwrap()]
+        }))
+        .unwrap();
+        std::fs::write(file(dir), &bytes).unwrap();
+        let read = read_library(dir).unwrap();
+        assert_eq!((read.version, read.entries), (3, vec![fonted(A, "Fonts")]));
+        assert_eq!(remove_entry(dir, B).unwrap().version, 3);
+        assert_eq!(std::fs::read(file(dir)).unwrap(), bytes);
+    }
+
+    #[test]
+    fn versions_0_and_4_damaged() {
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        for version in [0, 4] {
+            let bytes = serde_json::to_vec(&json!({
+                "format":"tabplayer-style-library","version":version,"entries":[]
+            }))
+            .unwrap();
+            std::fs::write(file(dir), &bytes).unwrap();
+            assert!(read_library(dir).is_err());
+            assert!(put_entry(dir, style(B, "New")).is_err());
+            assert_eq!(std::fs::read(file(dir)).unwrap(), bytes);
+        }
+    }
+
     #[test]
     fn typography_is_saved_and_default_typography_stays_off_the_wire() {
         let root = tempdir().unwrap();
@@ -498,9 +645,9 @@ mod tests {
         .unwrap();
         std::fs::write(file(dir), &old).unwrap();
         let read = read_library(dir).unwrap();
-        assert_eq!((read.version, read.entries), (2, vec![style(A, "Old")]));
+        assert_eq!((read.version, read.entries), (3, vec![style(A, "Old")]));
         assert_eq!(std::fs::read(file(dir)).unwrap(), old);
-        assert_eq!(remove_entry(dir, B).unwrap().version, 2);
+        assert_eq!(remove_entry(dir, B).unwrap().version, 3);
         assert_eq!(std::fs::read(file(dir)).unwrap(), old);
         put_entry(dir, style(B, "Plain")).unwrap();
         let wire: serde_json::Value =

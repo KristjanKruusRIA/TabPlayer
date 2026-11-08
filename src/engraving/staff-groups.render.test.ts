@@ -9,9 +9,10 @@ import { threeTrackScore } from './staff-fixtures';
 import { braceGlyphs,countText,exportPages,exportWithBounds,installTextMeasure,markBoxes,nameBoxes,pagesHash,stablePages,systemBoxes,trackNames,usableRight,withoutMarks } from './staff-render-helpers';
 import type { StaffGroupKind } from './types';
 
-// SHA-256 of JSON.stringify(stablePages(exportPages({engraving:defaultEngraving()}))), recorded at a04f3c3 before any export code changed.
+// SHA-256 of JSON.stringify(stablePages(exportPages({engraving:defaultEngraving()}))), first recorded at a04f3c3 before any export code changed,
+// and re-recorded when D12 merged: the export music font size went from 34px to 36px, and that one style rule is the only difference on every page.
 // stablePages only renumbers alphaTab's per-beat class names (a process-wide counter); the rest of every page is hashed as it is.
-const NO_GROUPS_SHA256='835470b6a122843f21a6bfd08659f6bbb75a9b629526b92386f7d0a5f6085113';
+const NO_GROUPS_SHA256='5c3925802b6cf45dbbeec710ed5fe90365ee736c8953e75b2653e721f285cb42';
 
 beforeEach(installTextMeasure);
 afterEach(()=>vi.restoreAllMocks());

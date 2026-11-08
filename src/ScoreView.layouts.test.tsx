@@ -1,20 +1,27 @@
 // @vitest-environment jsdom
 import {afterEach,expect,it,vi} from 'vitest';
-import {StrictMode} from 'react';
+import {Component,StrictMode,type ReactElement,type ReactNode} from 'react';
+import {readFileSync} from 'node:fs';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
-import {LayoutMode,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
+import {EngravingSettings,LayoutMode,NotationElement,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
 import {ScoreView} from './ScoreView';
 import {music} from './editor/fixtures';
 import type {EngravingOverrides,PageLayout} from './engraving/types';
+import type {EngravingFonts} from './engraving/fonts';
 import type {SystemSpan} from './engraving/system-gaps';
 import type {ScoreLayoutMode} from './engraving/screen-view';
-import {defaultEngraving,projectEngraving,type EngravingProjection} from './engraving/projection';
+import {configureEngraving,defaultEngraving,projectEngraving,type EngravingProjection} from './engraving/projection';
+import {mergeSmuflMetadata} from './engraving/smufl';
+import type {MusicFontData} from './engraving/font-loading';
 import {planAccolades} from './engraving/accolades';
 import {withStaffGaps,withStaffGroups} from './engraving/staff-groups';
 import {threeTrackScore} from './engraving/staff-fixtures';
 import {engravingRenderKey,withSystemGaps} from './engraving/system-gaps';
-const state=vi.hoisted(()=>({fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn(),chunkTops:[] as number[]}));
+const state=vi.hoisted(()=>({music:((_id:string)=>new Promise<unknown>(()=>{})) as (id:string)=>Promise<unknown>,loadedMusic:new Map<string,unknown>(),roles:((_fonts?:unknown)=>new Promise<{failed:string[]}>(()=>{})) as (fonts?:unknown)=>Promise<{failed:string[]}>,fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn(),chunkTops:[] as number[]}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
+vi.mock('./engraving/font-loading',async original=>({...await original<typeof import('./engraving/font-loading')>(),loadRoleFaces:(fonts?:unknown)=>state.roles(fonts),
+ loadMusicFont:(id:string)=>state.music(id).then(data=>{state.loadedMusic.set(id,data);return data;}),
+ loadedMusicFont:(id:string)=>id==='bravura'?{id,families:['Bravura'],metadata:null,substituted:[]}:state.loadedMusic.get(id)??null}));
 const boom=vi.hoisted(()=>({plan:false}));
 vi.mock('./engraving/accolades',async original=>{const real=await original<typeof import('./engraving/accolades')>();return {...real,planAccolades:(...args:Parameters<typeof real.planAccolades>)=>{if(boom.plan)throw new Error('plan failed');return real.planAccolades(...args);}};});
 vi.mock('./export/pdf',async original=>({...await original<typeof import('./export/pdf')>(),loadExportFonts:()=>state.fonts()}));
@@ -40,15 +47,16 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
  }this.postRenderFinished.emit();}
 }}));
 const page:PageLayout={widthMm:210,heightMm:210,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
-function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void;score?:model.Score;projection?:EngravingProjection;trackIds?:readonly string[];visibleTracks?:number[]}={}){
+function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void;onFontStatus?:(status:{failed:string[];substituted:string[]})=>void;wrap?:(node:ReactNode)=>ReactNode;score?:model.Score;projection?:EngravingProjection;trackIds?:readonly string[];visibleTracks?:number[]}={}){
+ const {wrap=(node:ReactNode)=>node,...rest}=extra;
  vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.width:0;});
  vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.height:0;});
  vi.stubGlobal('ResizeObserver',class {constructor(fn:()=>void){state.resize=fn;}observe(){}disconnect(){}});
- const props={score:music(),track:0,zoom,profile:'ScoreTab',playback:null,onSelect:vi.fn(),page,display:{layout,zoomMode:'manual' as const},onDisplayStatus:vi.fn(),...extra};
+ const props={score:music(),track:0,zoom,profile:'ScoreTab',playback:null,onSelect:vi.fn(),page,display:{layout,zoomMode:'manual' as const},onDisplayStatus:vi.fn(),...rest};
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
- const result=render(tree());return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
+ const result=render(wrap(tree()) as ReactElement);return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});state.music=()=>new Promise<unknown>(()=>{});state.loadedMusic.clear();});
 it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'] as const)('renders %s without a playback controller',layout=>{
  const {api}=setup(layout);expect(state.loads).toHaveBeenCalledTimes(1);
  expect(api.settings.display.layoutMode).toBe(layout==='horizontalScreen'?LayoutMode.Horizontal:layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment);
@@ -229,6 +237,278 @@ it('hit-tests the moved third block after a gap-only change',()=>{
  expect(props.onSelect).not.toHaveBeenCalled();
 });
 
+// ---- D12 role fonts: the first render waits for the chosen faces (Task 5) ----
+const withFonts=(fonts:EngravingFonts):EngravingOverrides=>({...defaultEngraving(),fonts});
+const serif:EngravingFonts={roles:{lyrics:{font:'notoSerif'}}},mono:EngravingFonts={roles:{lyrics:{font:'notoSansMono'}}};
+const lyricsFamily=(api:{settings:Settings})=>api.settings.display.resources.elementFonts.get(NotationElement.EffectLyrics)!.families[0];
+function deferred(){let resolve!:(value:{failed:string[]})=>void;const promise=new Promise<{failed:string[]}>(done=>{resolve=done;});return {promise,resolve};}
+it('render_waits_for_role_faces_before_first_render',async()=>{
+ const gate=deferred(),seen:unknown[]=[];state.roles=fonts=>{seen.push(fonts);return gate.promise;};
+ const {api}=setup('verticalPage',100,{engraving:withFonts(serif)});
+ expect(seen).toEqual([serif]);expect(state.loads).not.toHaveBeenCalled();expect(state.renders).not.toHaveBeenCalled();
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);
+ // The fonts were configured when the render ran, after the faces were in.
+ expect(lyricsFamily(api)).toBe('TabPlayer Serif');
+});
+it('default_documents_render_without_waiting_or_loading_roles',()=>{
+ const roles=vi.fn(()=>new Promise<{failed:string[]}>(()=>{}));state.roles=roles;
+ setup('verticalPage',100,{engraving:defaultEngraving()});
+ expect(roles).not.toHaveBeenCalled();expect(state.loads).toHaveBeenCalledTimes(1);
+ // A size-only role needs no face either.
+ cleanup();state.loads.mockClear();
+ setup('verticalPage',100,{engraving:withFonts({roles:{lyrics:{size:1.5}}})});
+ expect(roles).not.toHaveBeenCalled();expect(state.loads).toHaveBeenCalledTimes(1);
+});
+it('fonts_change_rerenders_once',async()=>{
+ const {props,tree,rerender,api}=setup('verticalPage',100,{engraving:defaultEngraving()});
+ const renders=state.renders.mock.calls.length,gate=deferred();state.roles=()=>gate.promise;
+ rerender(tree({...props,engraving:withFonts(serif)}));
+ expect(state.renders).toHaveBeenCalledTimes(renders);
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ expect(state.renders).toHaveBeenCalledTimes(renders+1);expect(state.loads).toHaveBeenCalledTimes(1);expect(lyricsFamily(api)).toBe('TabPlayer Serif');
+ // Choosing the same fonts again is the same render key, so nothing renders.
+ rerender(tree({...props,engraving:withFonts(serif)}));
+ await act(async()=>{await Promise.resolve();});
+ expect(state.renders).toHaveBeenCalledTimes(renders+1);
+});
+it('a_slow_font_load_never_paints_an_older_choice',async()=>{
+ const first=deferred(),second=deferred(),queue=[first,second];state.roles=()=>queue.shift()!.promise;
+ const {props,tree,rerender,api}=setup('verticalPage',100,{engraving:withFonts(serif)});
+ rerender(tree({...props,engraving:withFonts(mono)}));
+ await act(async()=>{second.resolve({failed:[]});await second.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);expect(lyricsFamily(api)).toBe('TabPlayer Mono');
+ const renders=state.renders.mock.calls.length;
+ await act(async()=>{first.resolve({failed:[]});await first.promise;});
+ expect(state.renders).toHaveBeenCalledTimes(renders);expect(lyricsFamily(api)).toBe('TabPlayer Mono');
+});
+it('a_load_that_ends_after_unmount_renders_nothing',async()=>{
+ const gate=deferred();state.roles=()=>gate.promise;
+ const {unmount}=setup('verticalPage',100,{engraving:withFonts(serif)});
+ unmount();
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ expect(state.loads).not.toHaveBeenCalled();expect(state.renders).not.toHaveBeenCalled();
+});
+it('font_failures_are_reported_and_the_render_still_happens',async()=>{
+ const gate=deferred(),status=vi.fn();state.roles=()=>gate.promise;
+ setup('verticalPage',100,{engraving:withFonts(serif),onFontStatus:status});
+ await act(async()=>{gate.resolve({failed:['NotoSerif-Italic.ttf']});await gate.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);expect(status).toHaveBeenLastCalledWith({failed:['NotoSerif-Italic.ttf'],substituted:[]});
+});
+it('page_overlay_uses_header_and_footer_role_fonts',async()=>{
+ const gate=deferred();state.roles=()=>gate.promise;
+ setup('verticalPage',100,{engraving:withFonts({roles:{pageHeader:{font:'notoSerif',bold:true,italic:true,size:1.5},pageFooter:{font:'notoSansMono'}}})});
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ const texts=[...screen.getAllByLabelText('Score page 1')[0].querySelectorAll('.score-page-text text')];
+ expect(texts).toHaveLength(2);
+ const [header,footer]=texts;
+ expect(header.getAttribute('font-family')).toBe('TabPlayer Serif, Noto Sans, Noto Sans CJK JP, Noto Emoji');
+ expect(header.getAttribute('font-weight')).toBe('700');expect(header.getAttribute('font-style')).toBe('italic');expect(header.getAttribute('font-size')).toBe('27');
+ expect(footer.getAttribute('font-family')).toBe('TabPlayer Mono, Noto Sans, Noto Sans CJK JP, Noto Emoji');expect(footer.getAttribute('font-weight')).toBeNull();
+});
+it('page_overlay_keeps_the_default_stack_without_role_fonts',()=>{
+ setup('verticalPage',100,{engraving:defaultEngraving()});
+ const [header,footer]=[...screen.getAllByLabelText('Score page 1')[0].querySelectorAll('.score-page-text text')];
+ for(const text of [header,footer]){expect(text.getAttribute('font-family')).toBe('Noto Sans, Noto Sans CJK JP, Noto Emoji');expect(text.getAttribute('font-weight')).toBeNull();expect(text.getAttribute('font-style')).toBeNull();}
+ expect(header.getAttribute('font-size')).toBe('18');expect(footer.getAttribute('font-size')).toBe('11');
+});
+
+// ---- fix round 1: overlay-only header fonts, gated draw errors, StrictMode ----
+it('a_header_or_footer_font_change_does_not_render_the_notation',async()=>{
+ const seen:unknown[]=[];state.roles=fonts=>{seen.push(fonts);return Promise.resolve({failed:[]});};
+ const {props,tree,rerender}=setup('verticalPage',100,{engraving:withFonts(serif)});
+ await act(async()=>{await Promise.resolve();});
+ const renders=state.renders.mock.calls.length,loads=state.loads.mock.calls.length;seen.length=0;
+ rerender(tree({...props,engraving:withFonts({roles:{...serif.roles,pageHeader:{font:'notoSerif',bold:true,size:1.5},pageFooter:{font:'notoSansMono'}}})}));
+ await act(async()=>{await Promise.resolve();});
+ expect(state.renders).toHaveBeenCalledTimes(renders);expect(state.loads).toHaveBeenCalledTimes(loads);
+ // Only the page roles' faces were requested, and the overlay now uses them.
+ expect(seen).toEqual([{roles:{pageHeader:{font:'notoSerif',bold:true,size:1.5},pageFooter:{font:'notoSansMono'}}}]);
+ const [header,footer]=[...screen.getAllByLabelText('Score page 1')[0].querySelectorAll('.score-page-text text')];
+ expect(header.getAttribute('font-family')).toBe('TabPlayer Serif, Noto Sans, Noto Sans CJK JP, Noto Emoji');expect(header.getAttribute('font-size')).toBe('27');
+ expect(footer.getAttribute('font-family')).toBe('TabPlayer Mono, Noto Sans, Noto Sans CJK JP, Noto Emoji');
+ // Changing a screen role still renders.
+ rerender(tree({...props,engraving:withFonts({roles:{lyrics:{font:'notoSansMono'},pageHeader:{font:'notoSerif',bold:true,size:1.5},pageFooter:{font:'notoSansMono'}}})}));
+ await act(async()=>{await Promise.resolve();});
+ expect(state.renders).toHaveBeenCalledTimes(renders+1);
+});
+it('an_overlay_font_load_that_ends_after_a_newer_choice_paints_nothing',async()=>{
+ const first=deferred(),second=deferred(),queue=[first,second];state.roles=()=>queue.shift()!.promise;
+ const {props,tree,rerender}=setup('verticalPage',100,{engraving:defaultEngraving()});
+ rerender(tree({...props,engraving:withFonts({roles:{pageHeader:{font:'notoSerif'}}})}));
+ rerender(tree({...props,engraving:withFonts({roles:{pageHeader:{font:'notoSansMono'}}})}));
+ await act(async()=>{second.resolve({failed:[]});await second.promise;});
+ const header=()=>screen.getAllByLabelText('Score page 1')[0].querySelector('.score-page-text text')!;
+ expect(header().getAttribute('font-family')).toMatch(/^TabPlayer Mono/);
+ await act(async()=>{first.resolve({failed:[]});await first.promise;});
+ expect(header().getAttribute('font-family')).toMatch(/^TabPlayer Mono/);
+});
+class Catch extends Component<{children:ReactNode},{error:Error|null}>{
+ state={error:null as Error|null};static getDerivedStateFromError(error:Error){return {error};}
+ render(){return this.state.error?<p role="alert">{this.state.error.message}</p>:this.props.children;}
+}
+it('a_draw_error_after_the_faces_load_reaches_the_error_boundary_like_a_synchronous_one',async()=>{
+ vi.spyOn(console,'error').mockImplementation(()=>{});
+ // Without role fonts the effect throws during commit: the boundary shows it.
+ state.loads.mockImplementationOnce(()=>{throw new Error('draw failed now');});
+ setup('verticalPage',100,{engraving:defaultEngraving(),wrap:node=><Catch>{node}</Catch>});
+ expect(screen.getByRole('alert').textContent).toBe('draw failed now');
+ cleanup();
+ // With role fonts the same throw happens after the load: it must not become an unhandled rejection.
+ const unhandled=vi.fn();process.on('unhandledRejection',unhandled);
+ const gate=deferred();state.roles=()=>gate.promise;
+ state.loads.mockImplementationOnce(()=>{throw new Error('draw failed later');});
+ setup('verticalPage',100,{engraving:withFonts(serif),wrap:node=><Catch>{node}</Catch>});
+ expect(screen.queryByRole('alert')).toBeNull();
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ await new Promise(resolve=>setTimeout(resolve,0));
+ process.off('unhandledRejection',unhandled);
+ expect(screen.getByRole('alert').textContent).toBe('draw failed later');expect(unhandled).not.toHaveBeenCalled();
+});
+it('strict_mode_loads_once_and_renders_once_after_the_faces_arrive',async()=>{
+ const gate=deferred();state.roles=()=>gate.promise;
+ setup('verticalPage',100,{engraving:withFonts(serif),wrap:node=><StrictMode>{node}</StrictMode>});
+ expect(state.loads).not.toHaveBeenCalled();expect(state.renders).not.toHaveBeenCalled();
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);expect(state.renders).toHaveBeenCalledTimes(1);
+});
+// ---- fix round 2: page header and footer face failures are reported ----
+it('a_failed_page_font_face_is_reported_and_a_later_load_clears_it',async()=>{
+ const first=deferred(),second=deferred(),queue=[first,second],status=vi.fn();state.roles=()=>queue.shift()!.promise;
+ const {props,tree,rerender}=setup('verticalPage',100,{engraving:defaultEngraving(),onFontStatus:status});
+ rerender(tree({...props,engraving:withFonts({roles:{pageHeader:{font:'notoSerif'}}})}));
+ await act(async()=>{first.resolve({failed:['NotoSerif-Regular.ttf']});await first.promise;});
+ expect(status).toHaveBeenLastCalledWith({failed:['NotoSerif-Regular.ttf'],substituted:[]});
+ const reports=status.mock.calls.length;
+ // The same choice again is not reported twice; a changed choice that loads clears the failure.
+ rerender(tree({...props,engraving:withFonts({roles:{pageHeader:{font:'notoSansMono'}}})}));
+ await act(async()=>{second.resolve({failed:[]});await second.promise;});
+ expect(status).toHaveBeenCalledTimes(reports+1);expect(status).toHaveBeenLastCalledWith({failed:[],substituted:[]});
+});
+it('notation_and_page_font_failures_are_reported_together_and_independently',async()=>{
+ const notation=deferred(),page=deferred(),status=vi.fn();
+ state.roles=fonts=>(fonts as EngravingFonts).roles?.lyrics?notation.promise:page.promise;
+ setup('verticalPage',100,{engraving:withFonts({roles:{...serif.roles,pageFooter:{font:'notoSansMono'}}}),onFontStatus:status});
+ await act(async()=>{page.resolve({failed:['NotoSansMono-Regular.ttf']});await page.promise;});
+ expect(status).toHaveBeenLastCalledWith({failed:['NotoSansMono-Regular.ttf'],substituted:[]});
+ await act(async()=>{notation.resolve({failed:['NotoSerif-Italic.ttf']});await notation.promise;});
+ expect(status).toHaveBeenLastCalledWith({failed:['NotoSerif-Italic.ttf','NotoSansMono-Regular.ttf'],substituted:[]});
+});
+
+// ---- Task 6: the music font on screen ----
+const withMusic=(music:'bravura'|'petaluma'|'leland',extra:Partial<EngravingOverrides>={}):EngravingOverrides=>({...defaultEngraving(),...extra,fonts:{music}});
+const petalumaData=():MusicFontData=>{
+ const {metadata,substituted}=mergeSmuflMetadata(JSON.parse(readFileSync('assets/fonts/petaluma_metadata.json','utf8')),EngravingSettings.bravuraMetadata);
+ return {id:'petaluma',families:['Petaluma','TabPlayer Bravura'],metadata,substituted};
+};
+const musicRoot=(container:HTMLElement)=>container.querySelector('.score-presentation')!;
+function deferredMusic(){let resolve!:(value:MusicFontData)=>void,reject!:(error:Error)=>void;const promise=new Promise<MusicFontData>((done,fail)=>{resolve=done;reject=fail;});return {promise,resolve,reject};}
+const noteheadWidth=(api:{settings:Settings})=>api.settings.display.resources.engravingSettings.glyphWidths.get(0xE0A4 as never) /* MusicFontSymbol.NoteheadBlack, which alphaTab does not export */;
+
+const musicRules=()=>{
+ const css=readFileSync('src/ScoreView.css','utf8').replace(/\/\*[\s\S]*?\*\//g,''),rules=new Map<string,{selector:string;body:string}>();
+ for(const match of css.matchAll(/([^{}]*\[data-music-font="(\w+)"\][^{}]*)\{([^}]*)\}/g))rules.set(match[2],{selector:match[1].trim(),body:match[3]});
+ return rules;
+};
+/** (ids, classes and attributes, elements) of a selector made of compound selectors and descendant combinators, enough for these rules. */
+const specificity=(selector:string)=>[(selector.match(/#/g)??[]).length,(selector.match(/\.[\w-]+|\[[^\]]+\]/g)??[]).length,(selector.replace(/\[[^\]]*\]/g,'').match(/(^|[\s>+~])[a-z][\w-]*/gi)??[]).length];
+it('music_font_css_rule_targets_surface_and_chunks',()=>{
+ const rules=musicRules();
+ expect([...rules.keys()].sort()).toEqual(['leland','petaluma']);
+ for(const [id,{selector,body}] of rules){
+  expect(body).toMatch(new RegExp(`font-family:\\s*${id[0].toUpperCase()+id.slice(1)},\\s*'TabPlayer Bravura'\\s*;`));
+  // alphaTab registers `.at-surface.at<N> .at` (0,3,0), once per API instance; the app rule has to win without !important.
+  const alphaTab=specificity('.at-surface.at3 .at'),mine=specificity(selector);
+  expect(alphaTab).toEqual([0,3,0]);
+  expect(mine[0]).toBe(0);expect(mine[1]).toBeGreaterThan(alphaTab[1]);
+  expect(selector).toBe(`.score-presentation[data-music-font="${id}"] .at-surface .at`);
+  expect(body).not.toMatch(/!important|font-size/);
+  // The same rule applies inside the live surface and inside the page chunks, which sit under the root with alphaTab's surface classes.
+  document.body.innerHTML=`<div class="score-presentation" data-music-font="${id}"><div class="at-surface at"><svg><g class="at"></g></svg></div><div class="score-pages at-surface at"><div class="score-svg-chunk at-surface-svg"><svg><g class="at"></g></svg></div></div></div>`;
+  const hits=[...document.querySelectorAll(selector)];
+  expect(hits).toHaveLength(2);expect(hits.every(node=>node.classList.contains('at')&&node.tagName.toLowerCase()==='g')).toBe(true);
+  // Another font id, and no choice at all, do not match.
+  document.body.innerHTML=`<div class="score-presentation" data-music-font="other"><div class="at-surface at"><g class="at"></g></div></div><div class="score-presentation"><div class="at-surface at"><g class="at"></g></div></div>`;
+  expect(document.querySelectorAll(selector)).toHaveLength(0);
+ }
+ document.body.innerHTML='';
+});
+it('the_root_names_the_music_font_only_after_it_is_drawn',async()=>{
+ const gate=deferredMusic();state.music=()=>gate.promise;
+ const {container}=setup('verticalPage',100,{engraving:withMusic('petaluma')});
+ // Nothing is drawn, and nothing claims Petaluma, until the metadata the layout needs is in.
+ expect(state.renders).not.toHaveBeenCalled();expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+ await act(async()=>{gate.resolve(petalumaData());await gate.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
+});
+it('bravura_documents_render_without_waiting_or_loading_music',()=>{
+ const music=vi.fn(()=>new Promise<unknown>(()=>{}));state.music=music;
+ const {container}=setup('verticalPage',100,{engraving:withMusic('bravura')});
+ expect(music).not.toHaveBeenCalled();expect(state.loads).toHaveBeenCalledTimes(1);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+});
+it('music_change_rerenders_after_load',async()=>{
+ const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:defaultEngraving()});
+ const renders=state.renders.mock.calls.length,gate=deferredMusic(),loadMusic=vi.fn(()=>gate.promise);state.music=loadMusic;
+ const bravuraWidth=noteheadWidth(api);
+ rerender(tree({...props,engraving:withMusic('petaluma')}));
+ expect(loadMusic).toHaveBeenCalledWith('petaluma');expect(state.renders).toHaveBeenCalledTimes(renders);
+ const data=petalumaData();
+ await act(async()=>{gate.resolve(data);await gate.promise;});
+ expect(state.renders).toHaveBeenCalledTimes(renders+1);expect(state.loads).toHaveBeenCalledTimes(1);
+ // Layout uses the merged metadata: the notehead is Petaluma's width, not Bravura's.
+ expect(noteheadWidth(api)).not.toBe(bravuraWidth);expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
+ // Back to Bravura renders at once and restores Bravura's metrics.
+ rerender(tree({...props,engraving:defaultEngraving()}));
+ expect(state.renders).toHaveBeenCalledTimes(renders+2);expect(noteheadWidth(api)).toBe(bravuraWidth);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+ expect(api.settings.display.resources.engravingSettings).toEqual(EngravingSettings.bravuraDefaults);
+ // A font that is already loaded is drawn without waiting or loading it again.
+ rerender(tree({...props,engraving:withMusic('petaluma')}));
+ expect(loadMusic).toHaveBeenCalledTimes(1);expect(state.renders).toHaveBeenCalledTimes(renders+3);expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
+});
+it('a_view_without_engraving_returns_to_bravura_metrics',async()=>{
+ const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:defaultEngraving()});
+ const gate=deferredMusic();state.music=()=>gate.promise;
+ rerender(tree({...props,engraving:withMusic('petaluma')}));
+ await act(async()=>{gate.resolve(petalumaData());await gate.promise;});
+ expect(api.settings.display.resources.engravingSettings).not.toEqual(EngravingSettings.bravuraDefaults);
+ // With no engraving at all configureEngraving is skipped, so the Petaluma metrics would stay behind unless they are reset here.
+ rerender(tree({...props,engraving:undefined}));
+ expect(api.settings.display.resources.engravingSettings).toEqual(EngravingSettings.bravuraDefaults);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+});
+it('a_slow_music_load_never_paints_an_older_choice',async()=>{
+ const slow=deferredMusic(),loads=[slow];state.music=()=>loads.shift()!.promise;
+ const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:withMusic('petaluma')});
+ rerender(tree({...props,engraving:withMusic('bravura',{systemSpacing:1.5})}));
+ expect(state.loads).toHaveBeenCalledTimes(1);
+ const renders=state.renders.mock.calls.length;
+ await act(async()=>{slow.resolve(petalumaData());await slow.promise;});
+ expect(state.renders).toHaveBeenCalledTimes(renders);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+ expect(api.settings.display.resources.engravingSettings).toEqual(EngravingSettings.bravuraDefaults);
+});
+it('music_substitutions_are_reported_with_the_font_status',async()=>{
+ const gate=deferredMusic(),status=vi.fn();state.music=()=>gate.promise;
+ setup('verticalPage',100,{engraving:withMusic('petaluma'),onFontStatus:status});
+ const data=petalumaData();
+ await act(async()=>{gate.resolve(data);await gate.promise;});
+ expect(data.substituted.length).toBeGreaterThan(0);expect(status).toHaveBeenLastCalledWith({failed:[],substituted:data.substituted});
+});
+it('music_load_failure_falls_back_to_bravura_and_is_reported',async()=>{
+ const status=vi.fn(),failing=deferredMusic();state.music=()=>failing.promise;
+ const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:withMusic('petaluma'),onFontStatus:status});
+ await act(async()=>{failing.reject(new Error('metadata missing'));await failing.promise.catch(()=>{});});
+ // The score still renders, with Bravura's metrics and no Petaluma claim, and the panel hears about it.
+ expect(state.loads).toHaveBeenCalledTimes(1);
+ expect(api.settings.display.resources.engravingSettings).toEqual(EngravingSettings.bravuraDefaults);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+ expect(status).toHaveBeenLastCalledWith({failed:['Petaluma.otf'],substituted:[]});
+ // The next change tries again, and a load that works clears the failure.
+ const retry=deferredMusic(),loadMusic=vi.fn(()=>retry.promise);state.music=loadMusic;
+ rerender(tree({...props,engraving:withMusic('petaluma',{systemSpacing:1.5})}));
+ expect(loadMusic).toHaveBeenCalledWith('petaluma');
+ const data=petalumaData();
+ await act(async()=>{retry.resolve(data);await retry.promise;});
+ expect(status).toHaveBeenLastCalledWith({failed:[],substituted:data.substituted});expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
+});
+
 // Staff groups and staff gaps on a three-track score (guitar, two-staff piano, drums).
 const {ids}=threeTrackScore();
 type Mount={projection?:EngravingProjection;trackIds?:readonly string[];score?:model.Score};
@@ -256,6 +536,26 @@ it('a group change renders again with no brackets and the reserve',()=>{
  const plan=planAccolades({engraving:e,trackIds:ids,rendered:[0,1,2],score:projection().score,nativeMode:projection().bracketMode,settings:view().settings})!;
  expect(renders()).toBe(before+1);expect(projection().score.stylesheet.bracketExtendMode).toBe(model.BracketExtendMode.NoBrackets);
  expect(view().settings.display.systemLabelPaddingRight).toBeCloseTo(3+plan.reserve);expect(view().settings.display.padding[0]).toBeCloseTo(plan.reserve);
+});
+it('accolades are planned with the configured music font',async()=>{
+ // The reserve is the room kept left of the staves for the drawn marks, so it has to come from the music font's own bracket thickness (Leland 0.45 staff spaces, Bravura 0.5).
+ const lelandSettings=()=>{
+  const settings=new Settings(),{metadata,substituted}=mergeSmuflMetadata(JSON.parse(readFileSync('assets/fonts/leland_metadata.json','utf8')),EngravingSettings.bravuraMetadata);
+  configureEngraving(settings,{...defaultEngraving(),fonts:{music:'leland'}},{id:'leland',families:['Leland','TabPlayer Bravura'],metadata,substituted});
+  return {settings,data:{id:'leland',families:['Leland','TabPlayer Bravura'],metadata,substituted} as MusicFontData};
+ };
+ const group=withStaffGroups(defaultEngraving(),[{trackIds:['base/0','base/1'],kind:'bracket'}]),withLeland={...group,fonts:{music:'leland' as const}};
+ const {rerender,view,projection}=mountPaged(group);
+ const bravuraReserve=view().settings.display.systemLabelPaddingRight-3;
+ const {settings,data}=lelandSettings(),gate=deferredMusic();state.music=()=>gate.promise;
+ rerender(withLeland);
+ await act(async()=>{gate.resolve(data);await gate.promise;});
+ const plan=planAccolades({engraving:withLeland,trackIds:ids,rendered:[0,1,2],score:projection().score,nativeMode:projection().bracketMode,settings})!;
+ expect(plan.reserve).toBeLessThan(bravuraReserve);
+ expect(view().settings.display.systemLabelPaddingRight).toBeCloseTo(3+plan.reserve,5);expect(view().settings.display.padding[0]).toBeCloseTo(plan.reserve,5);
+ // Back to Bravura plans from Bravura's metrics again.
+ rerender(group);
+ expect(view().settings.display.systemLabelPaddingRight-3).toBeCloseTo(bravuraReserve,5);
 });
 it('label padding stays absolute across group edits and returns to 3 when the last group goes',()=>{
  const {rerender,view}=mountPaged(defaultEngraving());

@@ -2,6 +2,7 @@ import { useEffect,useRef,useState } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { EngravingCommand,EngravingOverrides } from './types';
 import { validateEngravingTracks } from './projection';
+import { withFonts } from './fonts';
 import { defaultStyle,newStyleId,putStyleLibraryEntry,readStyleLibrary,removeStyleLibraryEntry,styleApplied,styleNameError,styleOf,subscribeStyleLibrary,type SavedStyle,type StyleEngraving } from './style-library';
 
 interface StylePresetsPanelProps {
@@ -14,6 +15,8 @@ interface StylePresetsPanelProps {
   onEdit:(command:Extract<EngravingCommand,{type:'setEngraving'}>)=>unknown;
 }
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
+/** A style as text for comparing: fonts reduced to what is actually chosen, so default-valued keys and key order make no difference. */
+const styleKey=(engraving:EngravingOverrides)=>JSON.stringify(withFonts(styleOf(engraving),engraving.fonts??{}));
 
 /** Saves the document's engraving style in the personal style library and applies a saved style to any document.
  * Applying is one `setEngraving` edit: it changes only engraving settings, never the music, and keeps the document's
@@ -41,7 +44,7 @@ export function StylePresetsPanel({score,trackIds,value,unapplied,busy,onEdit}:S
     const next=styleApplied(style,{...value,profiles:value.profiles.filter(entry=>trackIds.includes(entry.trackId))});
     setError('');setStatus('');
     // Staff profiles belong to the document, so only the style parts decide whether anything would change.
-    if(JSON.stringify(styleOf(next))===JSON.stringify(styleOf(value))){setStatus(`${label} already matches this document.`);return;}
+    if(styleKey(next)===styleKey(value)){setStatus(`${label} already matches this document.`);return;}
     try{
       validateEngravingTracks(score,trackIds,next);
       const accepted=await Promise.resolve<unknown>(onEdit({type:'setEngraving',engraving:next}));

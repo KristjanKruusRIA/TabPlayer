@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/core',()=>({invoke}));
 type Edit=Extract<EngravingCommand,{type:'setEngraving'}>;
 const idA='ca4af764-86e2-4ddd-9c26-a1be3368bdf7';
 let store:SavedStyle[]=[];
-const reply=()=>({format:'tabplayer-style-library',version:2,entries:structuredClone(store)});
+const reply=()=>({format:'tabplayer-style-library',version:3,entries:structuredClone(store)});
 const styled=(patch:(value:EngravingOverrides)=>void)=>{const value=defaultEngraving();patch(value);return value;};
 beforeEach(()=>{
   store=[];invoke.mockReset();
@@ -201,4 +201,25 @@ it('a_removed_tracks_profile_does_not_turn_an_identical_style_into_an_edit',asyn
   mount(styled(value=>{value.profiles=[{trackId:'removed',profile:'slash'}];}),commands);await open();
   fireEvent.change(await screen.findByLabelText('Saved style'),{target:{value:idA}});fireEvent.click(screen.getByRole('button',{name:'Apply saved style'}));
   expect(commands).toEqual([]);expect(screen.getByRole('status')).toHaveTextContent('already matches');
+});
+
+it('a_style_differing_only_by_default_valued_font_keys_already_matches',async()=>{
+  const commands:Edit[]=[];
+  store=[{id:idA,name:'Same',engraving:{...defaultEngraving(),fonts:{music:'bravura',roles:{}}}}];
+  mount(defaultEngraving(),commands);await open();
+  fireEvent.change(await screen.findByLabelText('Saved style'),{target:{value:idA}});fireEvent.click(screen.getByRole('button',{name:'Apply saved style'}));
+  expect(commands).toEqual([]);expect(screen.getByRole('status')).toHaveTextContent('already matches');
+});
+
+it('a_style_with_the_same_font_choices_in_another_key_order_already_matches_but_a_different_one_applies',async()=>{
+  const commands:Edit[]=[];
+  const document={...defaultEngraving(),fonts:{roles:{lyrics:{font:'notoSerif' as const,size:1.25}}}};
+  store=[{id:idA,name:'Reordered',engraving:{...defaultEngraving(),fonts:{roles:{lyrics:{size:1.25,font:'notoSerif' as const}},music:'bravura' as const}}}];
+  mount(document,commands);await open();
+  fireEvent.change(await screen.findByLabelText('Saved style'),{target:{value:idA}});fireEvent.click(screen.getByRole('button',{name:'Apply saved style'}));
+  expect(commands).toEqual([]);expect(screen.getByRole('status')).toHaveTextContent('already matches');
+  store=[{id:idA,name:'Other',engraving:{...defaultEngraving(),fonts:{roles:{lyrics:{font:'notoSerif',size:1.5}}}}}];
+  cleanup();mount(document,commands);await open();
+  fireEvent.change(await screen.findByLabelText('Saved style'),{target:{value:idA}});fireEvent.click(screen.getByRole('button',{name:'Apply saved style'}));
+  expect(commands).toHaveLength(1);expect(commands[0].engraving.fonts).toEqual({roles:{lyrics:{font:'notoSerif',size:1.5}}});
 });

@@ -1,6 +1,10 @@
+import { Settings } from '@coderline/alphatab';
 import type { PrintLayout,SvgPage,SvgSystem } from '../export/types';
 import type { PageLayout } from './types';
-import {measurePageText,pageTitleFontSize} from '../export/page-title';
+import { MUSIC_FONT_NAME } from './typography';
+import { FALLBACK_FAMILIES,fontStack } from './font-catalog';
+import type { PageRoleFont } from './fonts';
+import {measurePageText,pageTitleFontSize,type PageTextFont} from '../export/page-title';
 import {systemGapOffsets,type GapStacking} from './system-gaps';
 import {fillHeaderField,validateHeaderFooter,type HeaderFields,type PageBand,type PageBands} from './header-footer';
 
@@ -48,58 +52,74 @@ export function pageGeometry(layout:PageLayout):PageGeometry {
   return {widthMm,heightMm,width,height,left,top,right,bottom,usableWidth:width-(left+right),usableHeight:height-(top+bottom)-64};
 }
 
-export const pageTextFontFamily='Noto Sans, Noto Sans CJK JP, Noto Emoji';
+export const pageTextFontFamily=FALLBACK_FAMILIES.join(', ');
 const font=`font-family="${pageTextFontFamily}"`;
 const gap=12,minimumSize=5;
 /** Score metadata may hold line breaks or characters XML cannot carry; a page line prints them as spaces. */
 const printable=(text:string)=>text.replace(/[\t\n\r]+/g,' ').replace(/[^\t\n\r\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu,'');
 /** Fits text to a width: shrinks it, down to a legible floor, then shortens it with an ellipsis. */
-function fit(text:string,width:number,base:number):{text:string;size:number;width:number} {
-  const measured=measurePageText(text,base);
+function fit(text:string,width:number,base:number,font?:PageTextFont):{text:string;size:number;width:number} {
+  const measured=measurePageText(text,base,font);
   if(measured===null||measured<=width)return {text,size:base,width:measured??width};
   const size=Math.max(minimumSize,base*(width-1)/measured);
   if(measured*size/base<=width)return {text,size,width:measured*size/base};
   const characters=[...text];
-  while(characters.length&&(measurePageText(characters.join('')+'…',size)??0)>width)characters.pop();
+  while(characters.length&&(measurePageText(characters.join('')+'…',size,font)??0)>width)characters.pop();
   const shortened=characters.join('')+'…';
-  return {text:shortened,size,width:measurePageText(shortened,size)??width};
+  return {text:shortened,size,width:measurePageText(shortened,size,font)??width};
 }
-export interface PageTextItem {text:string;x:number;y:number;size:number;anchor:'start'|'middle'|'end'}
+/** `family` is a role alias; family, bold and italic are present only when a role chose them, so default items stay as they were. */
+export interface PageTextItem {text:string;x:number;y:number;size:number;anchor:'start'|'middle'|'end';family?:string;bold?:boolean;italic?:boolean}
+const itemFont=(font:PageRoleFont|undefined):Pick<PageTextItem,'family'|'bold'|'italic'>=>font?.family?{family:font.family,...font.bold?{bold:true}:{},...font.italic?{italic:true}:{}}:{};
 /** One header or footer line: left and right slots run from the margins toward a centered slot, never into it. */
-function band(texts:PageBand,fields:HeaderFields,page:number,pages:number,d:PageGeometry,y:number,base:number):PageTextItem[] {
+function band(texts:PageBand,fields:HeaderFields,page:number,pages:number,d:PageGeometry,y:number,base:number,font?:PageRoleFont):PageTextItem[] {
   const value=(slot:keyof PageBand)=>printable(fillHeaderField(texts[slot],fields,page,pages));
   const left=value('left'),center=value('center'),right=value('right'),start=d.left,end=d.width-d.right,middle=d.width/2;
-  const line=(x:number,anchor:PageTextItem['anchor'],fitted:{text:string;size:number}):PageTextItem=>({text:fitted.text,x,y,size:fitted.size,anchor});
+  const line=(x:number,anchor:PageTextItem['anchor'],fitted:{text:string;size:number}):PageTextItem=>({text:fitted.text,x,y,size:fitted.size,anchor,...itemFont(font)});
   let half=0,centered:PageTextItem[]=[];
   if(center){
     // The centered slot keeps a third of the line when side slots share it, and never crosses a margin.
-    const room=2*Math.min(middle-start,end-middle),fitted=fit(center,left||right?Math.min(room,d.usableWidth/3):room,base);
+    const room=2*Math.min(middle-start,end-middle),fitted=fit(center,left||right?Math.min(room,d.usableWidth/3):room,base,font);
     half=fitted.width/2;centered=[line(middle,'middle',fitted)];
   }
   const sides=left&&right&&!center?(d.usableWidth-gap)/2:null;
-  const leftLine=left?[line(start,'start',fit(left,sides??(center?middle-half-gap-start:d.usableWidth),base))]:[];
-  const rightLine=right?[line(end,'end',fit(right,sides??(center?end-(middle+half+gap):d.usableWidth),base))]:[];
+  const leftLine=left?[line(start,'start',fit(left,sides??(center?middle-half-gap-start:d.usableWidth),base,font))]:[];
+  const rightLine=right?[line(end,'end',fit(right,sides??(center?end-(middle+half+gap):d.usableWidth),base,font))]:[];
   return [...leftLine,...centered,...rightLine];
 }
-/** The header and footer lines of one page; `bands:null` is the default title and "page / pages" footer. Baselines come from the caller. */
-export function pageTextItems(input:{geometry:PageGeometry;bands:PageBands|null;title:string;fields:HeaderFields;page:number;pages:number;titleScale:number;headerY:number;footerY:number}):{header:PageTextItem[];footer:PageTextItem[]} {
-  const {geometry:d,bands,title,fields,page,pages,titleScale,headerY,footerY}=input;
-  if(bands)return {header:band(bands.header,fields,page,pages,d,headerY,18*titleScale),footer:band(bands.footer,fields,page,pages,d,footerY,11)};
-  return {header:[{text:title,x:d.left,y:headerY,size:pageTitleFontSize(title,d.usableWidth,titleScale),anchor:'start'}],footer:[{text:`${page} / ${pages}`,x:d.width/2,y:footerY,size:11,anchor:'middle'}]};
+/** The scale the header's 18 px is multiplied by: the Page header role's size when set, else the title scale. */
+export const headerScaleOf=(titleScale:number,headerFont?:PageRoleFont)=>headerFont?.scale??titleScale;
+/**
+ * The header and footer lines of one page; `bands:null` is the default title and "page / pages" footer. Baselines come from the caller.
+ * `headerFont` and `footerFont` are the Page header and Page footer roles; the header's effective scale is the role size, else `titleScale`.
+ */
+export function pageTextItems(input:{geometry:PageGeometry;bands:PageBands|null;title:string;fields:HeaderFields;page:number;pages:number;titleScale:number;headerY:number;footerY:number;headerFont?:PageRoleFont;footerFont?:PageRoleFont}):{header:PageTextItem[];footer:PageTextItem[]} {
+  const {geometry:d,bands,title,fields,page,pages,titleScale,headerY,footerY,headerFont,footerFont}=input;
+  const headerScale=headerScaleOf(titleScale,headerFont),footerSize=11*(footerFont?.scale??1);
+  if(bands)return {header:band(bands.header,fields,page,pages,d,headerY,18*headerScale,headerFont),footer:band(bands.footer,fields,page,pages,d,footerY,footerSize,footerFont)};
+  return {header:[{text:title,x:d.left,y:headerY,size:pageTitleFontSize(title,d.usableWidth,headerScale,headerFont),anchor:'start',...itemFont(headerFont)}],footer:[{text:`${page} / ${pages}`,x:d.width/2,y:footerY,size:footerSize,anchor:'middle',...itemFont(footerFont)}]};
 }
 const anchorAttribute={start:'',middle:' text-anchor="middle"',end:' text-anchor="end"'} as const;
 /** Renders text items as the SVG `<text>` elements export prints. */
 export function pageTextSvg(items:PageTextItem[]):string {
-  return items.map(i=>`<text x="${i.x}" y="${i.y}"${anchorAttribute[i.anchor]} ${font} font-size="${i.size}">${escaped(i.text)}</text>`).join('');
+  return items.map(i=>`<text x="${i.x}" y="${i.y}"${anchorAttribute[i.anchor]} ${i.family?`font-family="${fontStack(i.family).join(', ')}"`:font}${i.bold?' font-weight="700"':''}${i.italic?' font-style="italic"':''} font-size="${i.size}">${escaped(i.text)}</text>`).join('');
 }
 /** Screen baselines sit inside the page margins, since the screen keeps no 64 px reservation for the lines. */
 export function screenPageBaselines(d:PageGeometry,titleScale:number):{headerY:number;footerY:number} {
   return {headerY:Math.max(18*titleScale*.8,d.top-8),footerY:Math.min(d.height-4,d.height-d.bottom+15)};
 }
 
-/** `titleScale` enlarges the header line (base 18px) and still shrinks it to fit the page width; the footer keeps its size. */
-export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields,titleScale=1,gaps?:GapStacking):SvgPage[] {
-  const d=pageGeometry(layout),headerBase=18*titleScale,headerY=d.top+Math.min(31,Math.max(22,headerBase*.8)),footerY=d.height-d.bottom,groups:Array<Array<{system:SvgSystem;offset:number}>>=[[]];let height=0;
+export type MusicFont={size:number;families:readonly string[]};
+/** Export draws music glyphs at the size alphaTab laid the score out with (36 px), not a fixed literal. */
+export const defaultMusicFont:MusicFont={size:new Settings().display.resources.engravingSettings.musicFontSize,families:[MUSIC_FONT_NAME]};
+export function musicFontCss(size:number,families:readonly string[]):string {return `.at{font-family:${families.join(',')};font-size:${size}px}`;}
+
+/**
+ * `titleScale` enlarges the header line (base 18px) and still shrinks it to fit the page width; the footer keeps its size.
+ * `headerFont` and `footerFont` are the Page header and footer roles: the header role's size replaces `titleScale` (and sets the baseline) and the footer role's size scales the footer.
+ */
+export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields,titleScale=1,gaps?:GapStacking,music:MusicFont=defaultMusicFont,headerFont?:PageRoleFont,footerFont?:PageRoleFont):SvgPage[] {
+  const d=pageGeometry(layout),headerBase=18*headerScaleOf(titleScale,headerFont),headerY=d.top+Math.min(31,Math.max(22,headerBase*.8)),footerY=d.height-d.bottom,groups:Array<Array<{system:SvgSystem;offset:number}>>=[[]];let height=0;
   const spans=gaps?systems.flatMap(s=>s.firstBar===undefined||s.lastBar===undefined?[]:[{first:s.firstBar,last:s.lastBar}]):[],offsets=systemGapOffsets(gaps,spans),scoreFirst=spans[0]?.first;
   for(const system of systems) {
     // alphaTab may round the reported system width by one pixel, as in legacy export.
@@ -114,7 +134,7 @@ export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:
     let y=d.top+40;
     const content=group.map(({system,offset})=>{const at=y+offset;y=at+system.height;return `<g transform="translate(${d.left} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
     const bands=custom&&(index?custom.other:custom.first);
-    const text=pageTextItems({geometry:d,bands:bands??null,title,fields:values,page:index+1,pages:groups.length,titleScale,headerY,footerY}),header=pageTextSvg(text.header),footer=pageTextSvg(text.footer);
-    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style>${header}${content}${footer}</svg>`};
+    const text=pageTextItems({geometry:d,bands:bands??null,title,fields:values,page:index+1,pages:groups.length,titleScale,headerY,footerY,headerFont,footerFont}),header=pageTextSvg(text.header),footer=pageTextSvg(text.footer);
+    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>${musicFontCss(music.size,music.families)}text{fill:#111}</style>${header}${content}${footer}</svg>`};
   });
 }

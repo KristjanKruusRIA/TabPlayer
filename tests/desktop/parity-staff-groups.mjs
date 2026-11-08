@@ -260,12 +260,14 @@ try{
       near(out.bottom,reference.spikeBottom-lineSpacing(exportBracket.systems[index])/4,`export system ${index+1} brace bottom`,1);
     });
   });
-  {
-    // Not a pass or fail: the export page sets the music font to 34px, the screen's alphaTab stylesheet to engravingSettings.musicFontSize (36px here), so the same percentage draws a shorter glyph in the export pages.
+  // The export page style used to set the music font to 34px while alphaTab sets engravingSettings.musicFontSize (36px) on screen, which drew the same brace about 5.6% shorter in the export pages. D12 made export use the screen's size, so this now holds.
+  await check('music font size: the export pages draw glyphs at the screen size, so the group brace is not shorter in the export pages (within 1 px)',async()=>{
     const screenMark=screenBrace.systems[0].marks[0],exportMark=exportBrace.systems[0].marks[0],shortBy=braceHeight(screenMark)-braceHeight(exportMark);
     result.notes=[...(result.notes??[]),{musicFontPx:{screen:screenMark.basePx,exportPage:exportMark.basePx},braceHeightShortBy:round(shortBy),of:round(braceHeight(screenMark))}];
-    console.log(`NOTE music font size: screen ${screenMark.basePx}px, export page ${exportMark.basePx}px; the same group brace is ${round(shortBy)} px shorter in the export pages (${round(braceHeight(exportMark))} of ${round(braceHeight(screenMark))} px). Pre-existing: the export page style .at{font-size:34px} is not what alphaTab sets on screen.`);
-  }
+    assert.equal(exportMark.basePx,screenMark.basePx,`music font size: screen ${screenMark.basePx}px, export page ${exportMark.basePx}px`);
+    assert.ok(shortBy<=1,`the export brace is ${round(shortBy)} px shorter than the screen brace (${round(braceHeight(exportMark))} of ${round(braceHeight(screenMark))} px)`);
+    return `music font ${screenMark.basePx}px on screen and ${exportMark.basePx}px in the export pages; export brace ${round(braceHeight(exportMark))} px against ${round(braceHeight(screenMark))} px on screen`;
+  });
   await check('choosing the current group kind records nothing',async()=>{
     const before=await edits();await groupKind().selectOption('brace');await idle();assert.equal(await edits(),before);
   });

@@ -4,8 +4,9 @@ import { vi } from 'vitest';
 import { renderPdfPages } from '../export/pdf';
 import type { SvgPage } from '../export/types';
 import { defaultPrintLayout } from '../document-settings';
-import { accoladeMetrics } from './accolades';
+import { accoladeMetrics,type AccoladeMetrics } from './accolades';
 import { threeTrackScore } from './staff-fixtures';
+import type { MusicFontData } from './font-loading';
 import type { ScreenBounds } from './screen-pages';
 import type { EngravingOverrides,PageLayout } from './types';
 
@@ -19,12 +20,12 @@ const pxPerMm=96/25.4;
 /** A4, 15 mm margins, scale 1, notation profile as the document has it. */
 export const a4Page=():PageLayout=>({widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'});
 
-export interface ExportInput {engraving:EngravingOverrides;rendered?:number[];score?:model.Score;ids?:string[];page?:PageLayout}
+export interface ExportInput {engraving:EngravingOverrides;rendered?:number[];score?:model.Score;ids?:string[];page?:PageLayout;/** The loaded music font a non-Bravura `engraving.fonts.music` needs. */music?:MusicFontData}
 
 function exportOf(input:ExportInput):SvgPage[] {
   const fixture=input.score?{score:input.score,ids:input.ids??input.score.tracks.map((_,index)=>`base/${index}`)}:threeTrackScore();
   const rendered=input.rendered??fixture.score.tracks.map((_,index)=>index);
-  return renderPdfPages(fixture.score,{tracks:rendered,range:null},defaultPrintLayout(),{page:input.page??a4Page(),engraving:input.engraving,trackIds:fixture.ids});
+  return renderPdfPages(fixture.score,{tracks:rendered,range:null},defaultPrintLayout(),{page:input.page??a4Page(),engraving:input.engraving,trackIds:fixture.ids,music:input.music});
 }
 
 /** The pages `renderPdfPages` gives for the shared three-track score (or `score`), exported with `engraving` on A4 at scale 1. */
@@ -104,9 +105,12 @@ const pageY=(frame:Frame,y:number)=>frame.top+y+([...frame.bands].reverse().find
 export const systemBoxes=(svg:string):Array<{left:number;top:number;width:number;page:number}>=>framesOf(parse(svg)).map(({left,top,width,page})=>({left,top,width,page}));
 
 export interface MarkBox {system:number;role:string;kind:string;x:number;width:number;top:number;bottom:number}
-/** Every drawn accolade, in page pixels: a bracket from its rect, a brace from its translate, font-size and optional x compression. */
-export function markBoxes(svg:string):MarkBox[] {
-  const doc=parse(svg),metrics=accoladeMetrics(new Settings()),frames=framesOf(doc);
+/**
+ * Every drawn accolade, in page pixels: a bracket from its rect, a brace from its translate, font-size and optional x compression.
+ * `metrics` are those of the music font the pages were rendered with (Bravura's when omitted); a brace's size is read through them.
+ */
+export function markBoxes(svg:string,metrics:AccoladeMetrics=accoladeMetrics(new Settings())):MarkBox[] {
+  const doc=parse(svg),frames=framesOf(doc);
   return [...doc.querySelectorAll('[data-tp-accolade]')].map(node=>{
     const [role,kind]=node.getAttribute('data-tp-accolade')!.split('-'),system=frames.findIndex(frame=>frame.wrapper.contains(node)),[ox,oy]=offsetOf(node.parentElement);
     if(kind==='bracket') {

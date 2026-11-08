@@ -1,9 +1,15 @@
-import { useEffect,useState } from 'react';
+import { useEffect,useMemo,useState } from 'react';
 import { type model,Settings } from '@coderline/alphatab';
 import type { EngravingCommand,EngravingOverrides,InheritBool,TrackProfile } from './types';
 import { defaultEngraving,validateEngravingTracks } from './projection';
 import { StylePresetsPanel } from './StylePresetsPanel';
 import { TypographyFields } from './TypographyFields';
+import type { FontStatus } from './FontRolesFields';
+import { busyGuard,busyRegion } from '../ui';
+import { useI18n } from '../i18n';
+import { fontsOf,roleTexts,withFonts } from './fonts';
+import { headerFieldsOf } from './header-footer';
+import type { HeaderFooter } from './header-footer';
 import { notationPresets,presetApplied } from './notation-presets';
 import { typographyOf,withTypography } from './typography';
 import { withBarWidths } from './bar-widths';
@@ -13,6 +19,10 @@ import { withStaffGaps,withStaffGroups } from './staff-groups';
 export interface EngravingPanelProps {
   score:model.Score;trackIds:readonly string[];value:EngravingOverrides;busy:boolean;
   onEdit:(command:Extract<EngravingCommand,{type:'setEngraving'}>)=>unknown;
+  /** What the screen reported about the fonts it draws with (failed loads, music symbols taken from Bravura); null or absent before the first report. */
+  fontStatus?:FontStatus|null;
+  /** The document's page header and footer bands, which the missing-glyph warning reads; absent means the established page. */
+  headerFooter?:HeaderFooter;
 }
 type Options=ReadonlyArray<readonly [string,string]>;
 const boolOptions:Options=[['true','Yes'],['false','No']];
@@ -34,31 +44,42 @@ const yesNo=(value:boolean)=>value?'Yes':'No';
 function Choice({label,value,source,options,onChange}:{label:string;value:string;source:string;options:Options;onChange:(value:string)=>void}) {
   return <label>{label}<select value={value} onChange={e=>onChange(e.target.value)}><option value="inherit">Source/default ({source})</option>{options.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>;
 }
+/** The fonts as chosen, with every default explicit and every empty choice gone, so equal choices compare equal however they were built. */
+const canonFonts=(value:EngravingOverrides)=>fontsOf(withFonts(value,value.fonts??{}));
 /** Whether two engravings hold the same choices, ignoring the order of the staff profiles. */
 const sameEngraving=(a:EngravingOverrides,b:EngravingOverrides)=>{
-  const canon=(value:EngravingOverrides)=>JSON.stringify([value.stylesheet,value.notation,value.systemSpacing,value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([x],[y])=>x.localeCompare(y)),typographyOf(value)]);
+  const canon=(value:EngravingOverrides)=>JSON.stringify([value.stylesheet,value.notation,value.systemSpacing,value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([x],[y])=>x.localeCompare(y)),typographyOf(value),canonFonts(value)]);
   return canon(a)===canon(b);
 };
 const boolValue=(value:InheritBool)=>value===null?'inherit':String(value);
 const parseBool=(value:string):InheritBool=>value==='inherit'?null:value==='true';
-export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanelProps) {
-  const [draft,setDraft]=useState(()=>structuredClone(value)),[error,setError]=useState<string|null>(null),trackKey=JSON.stringify(trackIds);
+export function EngravingPanel({score,trackIds,value,busy,onEdit,fontStatus=null,headerFooter}:EngravingPanelProps) {
+  const {t}=useI18n(),[draft,setDraft]=useState(()=>structuredClone(value)),[error,setError]=useState<string|null>(null),trackKey=JSON.stringify(trackIds);
   const acceptedKey=JSON.stringify([
     Object.entries(value.stylesheet).sort(([a],[b])=>a.localeCompare(b)),Object.entries(value.notation).sort(([a],[b])=>a.localeCompare(b)),value.systemSpacing,
-    value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([a],[b])=>a.localeCompare(b)),typographyOf(value),
+    value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([a],[b])=>a.localeCompare(b)),typographyOf(value),canonFonts(value),
   ]);
   useEffect(()=>{setDraft(structuredClone(value));setError(null);},[score,acceptedKey,trackKey]);
+  // The score's own text per role, for the missing-glyph warning; it changes only with the score or the page bands.
+  const texts=useMemo(()=>roleTexts(score,headerFieldsOf(score),headerFooter),[score,headerFooter]);
+  // The substituted-symbol count describes the music font on screen, so it is not shown for a different, unapplied choice.
+  const status=fontStatus&&(draft.fonts?.music??'bravura')!==(value.fonts?.music??'bravura')?{...fontStatus,substituted:[]}:fontStatus;
   const defaults=new Settings(),style=score.stylesheet;
   const updateStyle=(key:keyof EngravingOverrides['stylesheet'],next:unknown)=>{setDraft({...draft,stylesheet:{...draft.stylesheet,[key]:next}});setError(null);};
   const updateNotation=(key:keyof EngravingOverrides['notation'],next:unknown)=>{setDraft({...draft,notation:{...draft.notation,[key]:next}});setError(null);};
   const keepStaffLayout=(engraving:EngravingOverrides)=>withStaffGaps(withStaffGroups(engraving,value.staffGroups??[]),value.staffGaps??[]);
   const apply=()=>{
     // Bar widths and system gaps are set elsewhere, not in this form: whatever the form holds, the applied ones stay.
-    const engraving=keepStaffLayout(withSystemGaps(withBarWidths(withTypography({...structuredClone(draft),profiles:trackIds.flatMap(id=>draft.profiles.filter(entry=>entry.trackId===id).map(entry=>({...entry})))},typographyOf(draft)),value.barWidths??[]),value.systemGaps??[]));
-    try{validateEngravingTracks(score,trackIds,engraving);onEdit({type:'setEngraving',engraving});setError(null);}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}
+    const engraving=keepStaffLayout(withFonts(withSystemGaps(withBarWidths(withTypography({...structuredClone(draft),profiles:trackIds.flatMap(id=>draft.profiles.filter(entry=>entry.trackId===id).map(entry=>({...entry})))},typographyOf(draft)),value.barWidths??[]),value.systemGaps??[]),draft.fonts??{}));
+    try{
+      validateEngravingTracks(score,trackIds,engraving);
+      // Choosing what the document already has records nothing.
+      if(sameEngraving(engraving,value)){setError(null);return;}
+      onEdit({type:'setEngraving',engraving});setError(null);
+    }catch(cause){setError(cause instanceof Error?cause.message:String(cause));}
   };
-  const reset=()=>{const engraving=keepStaffLayout(withSystemGaps(withBarWidths(defaultEngraving(),value.barWidths??[]),value.systemGaps??[]));setDraft(engraving);try{onEdit({type:'setEngraving',engraving});setError(null);}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}};
-  return <details><summary>Engraving</summary><fieldset disabled={busy}>
+  const reset=()=>{const engraving=keepStaffLayout(withSystemGaps(withBarWidths(defaultEngraving(),value.barWidths??[]),value.systemGaps??[]));setDraft(engraving);try{if(sameEngraving(engraving,value)){setError(null);return;}onEdit({type:'setEngraving',engraving});setError(null);}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}};
+  return <details><summary>Engraving</summary><fieldset {...busyRegion(busy)}>
     <p>Source/default keeps imported style and staff combinations. Notation choices use renderer defaults.</p>
     <details><summary>Staff profiles</summary>
       {score.tracks.map((track,index)=>{
@@ -83,8 +104,8 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanel
       {notationBooleans.map(([key,label,field])=><Choice key={key} label={label} value={boolValue(draft.notation[key])} source={yesNo(defaults.notation[field])} options={boolOptions} onChange={next=>updateNotation(key,parseBool(next))}/>)}
       {notationElements.map(([key,label,element])=><Choice key={key} label={label} value={boolValue(draft.notation[key])} source={yesNo(defaults.notation.isNotationElementVisible(element))} options={boolOptions} onChange={next=>updateNotation(key,parseBool(next))}/>)}
     </details>
-    <details><summary>Typography</summary>
-      <TypographyFields value={typographyOf(draft)} onChange={next=>{setDraft(withTypography(draft,next));setError(null);}} onInvalid={setError}/>
+    <details><summary>{t('typography.title')}</summary>
+      <TypographyFields value={typographyOf(draft)} onChange={next=>{setDraft(withTypography(draft,next));setError(null);}} onInvalid={setError} busy={busy} fonts={draft.fonts} onFonts={next=>{setDraft(withFonts(draft,next));setError(null);}} texts={texts} status={status}/>
     </details>
     <details><summary>Notation style presets</summary>
       <p>Presets fill the form; nothing changes until Apply engraving. System spacing and staff profiles are kept.</p>
@@ -93,7 +114,7 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanel
     <label>System spacing (%)<input type="number" min={25} max={400} step="any" placeholder="Source/default (100%)" value={draft.systemSpacing===null?'':draft.systemSpacing*100} onChange={e=>{setDraft({...draft,systemSpacing:e.target.value===''?null:Number(e.target.value)/100});setError(null);}}/></label>
     <p>Blank uses default system spacing.</p>
     {error&&<p role="alert">{error}</p>}
-    <button type="button" onClick={apply}>Apply engraving</button><button type="button" onClick={reset}>Reset to source/default</button>
+    <button type="button" {...busyGuard({busy,onClick:apply})}>Apply engraving</button><button type="button" {...busyGuard({busy,onClick:reset})}>Reset to source/default</button>
   </fieldset>
   <StylePresetsPanel score={score} trackIds={trackIds} value={value} unapplied={!sameEngraving(draft,value)} busy={busy} onEdit={onEdit}/>
   </details>;

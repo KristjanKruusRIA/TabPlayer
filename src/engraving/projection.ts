@@ -1,4 +1,4 @@
-import { model,Settings,StaveProfile,SystemsLayoutMode } from '@coderline/alphatab';
+import { EngravingSettings,model,Settings,StaveProfile,SystemsLayoutMode } from '@coderline/alphatab';
 import type { EngravingOverrides } from './types';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
@@ -6,6 +6,8 @@ import { copyGpInterchangeSource } from '../interchange/gp';
 import { configureTypography,typographyOf,validateTypography } from './typography';
 import { validateBarWidths } from './bar-widths';
 import { validateSystemGaps } from './system-gaps';
+import { configureRoleFonts,validateFonts } from './fonts';
+import type { MusicFontData } from './font-loading';
 import { validateStaffGaps,validateStaffGroups } from './staff-groups';
 
 export interface EngravingProjection {
@@ -37,7 +39,7 @@ function object(value:unknown,keys:string[]):Record<string,unknown> {
 const validBool=(value:unknown)=>value===null||typeof value==='boolean';
 function choice(value:unknown,choices:string[]):void {if(typeof value!=='string'||!choices.includes(value))throw new Error('Invalid engraving choice.');}
 export function validateEngraving(value:unknown):asserts value is EngravingOverrides {
-  const defaults=defaultEngraving(),hasTypography=!!value&&typeof value==='object'&&Object.hasOwn(value,'typography'),hasWidths=!!value&&typeof value==='object'&&Object.hasOwn(value,'barWidths'),hasGaps=!!value&&typeof value==='object'&&Object.hasOwn(value,'systemGaps'),hasStaffGroups=!!value&&typeof value==='object'&&Object.hasOwn(value,'staffGroups'),hasStaffGaps=!!value&&typeof value==='object'&&Object.hasOwn(value,'staffGaps'),root=object(value,[...Object.keys(defaults),...hasTypography?['typography']:[],...hasWidths?['barWidths']:[],...hasGaps?['systemGaps']:[],...hasStaffGroups?['staffGroups']:[],...hasStaffGaps?['staffGaps']:[]]),style=object(root.stylesheet,Object.keys(defaults.stylesheet)),notation=object(root.notation,Object.keys(defaults.notation));
+  const defaults=defaultEngraving(),hasTypography=!!value&&typeof value==='object'&&Object.hasOwn(value,'typography'),hasWidths=!!value&&typeof value==='object'&&Object.hasOwn(value,'barWidths'),hasGaps=!!value&&typeof value==='object'&&Object.hasOwn(value,'systemGaps'),hasFonts=!!value&&typeof value==='object'&&Object.hasOwn(value,'fonts'),hasStaffGroups=!!value&&typeof value==='object'&&Object.hasOwn(value,'staffGroups'),hasStaffGaps=!!value&&typeof value==='object'&&Object.hasOwn(value,'staffGaps'),root=object(value,[...Object.keys(defaults),...hasTypography?['typography']:[],...hasWidths?['barWidths']:[],...hasGaps?['systemGaps']:[],...hasFonts?['fonts']:[],...hasStaffGroups?['staffGroups']:[],...hasStaffGaps?['staffGaps']:[]]),style=object(root.stylesheet,Object.keys(defaults.stylesheet)),notation=object(root.notation,Object.keys(defaults.notation));
   for(const [section,keys]of [[style,Object.keys(styleBooleans)],[notation,[...Object.keys(notationBooleans),...Object.keys(elementKeys)]]] as const)for(const key of keys)if(!validBool(section[key]))throw new Error('Invalid engraving boolean.');
   for(const [section,mappings]of [[style,styleEnums],[notation,notationEnums]] as const)for(const [key,mapping]of Object.entries(mappings))choice(section[key],['inherit',...Object.keys(mapping.values)]);
   choice(style.chords,['inherit','hidden','top','inline','both']);choice(style.multiRests,['inherit','off','on']);
@@ -45,6 +47,7 @@ export function validateEngraving(value:unknown):asserts value is EngravingOverr
   if(hasTypography)validateTypography(root.typography);
   if(hasWidths)validateBarWidths(root.barWidths);
   if(hasGaps)validateSystemGaps(root.systemGaps);
+  if(hasFonts)validateFonts(root.fonts);
   if(hasStaffGroups)validateStaffGroups(root.staffGroups);
   if(hasStaffGaps)validateStaffGaps(root.staffGaps);
   if(!Array.isArray(root.profiles))throw new Error('Invalid engraving profiles.');
@@ -85,13 +88,21 @@ export function projectEngraving(source:model.Score,ids:readonly string[],value:
   for(const {bar,scale} of value.barWidths??[]){const master=score.masterBars[bar];if(!master)continue;master.displayScale=scale;for(const track of score.tracks)for(const staff of track.staves){const copy=staff.bars[bar];if(copy)copy.displayScale=scale;}}
   return {score,beats,notes,bracketMode:score.stylesheet.bracketExtendMode};
 }
-export function configureEngraving(settings:Settings,value:EngravingOverrides):void {
-  validateEngraving(value);const defaults=new Settings();
+/**
+ * Applies `value` to `settings`. The engraving settings always restart from Bravura's, so switching back from another music font leaves none of its
+ * metrics behind; a non-Bravura font then refills them from its merged SMuFL metadata, which has to be passed already loaded.
+ */
+export function configureEngraving(settings:Settings,value:EngravingOverrides,music?:MusicFontData|null):void {
+  validateEngraving(value);const defaults=new Settings(),musicId=value.fonts?.music??'bravura';
+  if(musicId!=='bravura'&&(music?.id!==musicId||!music.metadata))throw new Error('Music font is not loaded.');
+  const engravingSettings=EngravingSettings.bravuraDefaults;
+  if(musicId!=='bravura')engravingSettings.fillFromSmufl(music!.metadata!,engravingSettings.musicFontSize);
+  settings.display.resources.engravingSettings=engravingSettings;
   for(const [key,field]of Object.entries(notationBooleans)){const override=value.notation[key as keyof typeof notationBooleans];settings.notation[field as typeof notationBooleans[keyof typeof notationBooleans]]=override??defaults.notation[field as typeof notationBooleans[keyof typeof notationBooleans]];}
   for(const [key,mapping]of Object.entries(notationEnums)){const override=value.notation[key as keyof typeof notationEnums];Object.assign(settings.notation,{[mapping.field]:override==='inherit'?defaults.notation[mapping.field]:(mapping.values as Record<string,number>)[override]});}
   for(const [key,element]of Object.entries(elementKeys)){const override=value.notation[key as keyof typeof elementKeys];if(override!==null)settings.notation.elements.set(element,override);else if(defaults.notation.elements.has(element))settings.notation.elements.set(element,defaults.notation.elements.get(element)!);else settings.notation.elements.delete(element);}
   for(const field of ['systemPaddingTop','systemPaddingBottom','lastSystemPaddingBottom'] as const)settings.display[field]=defaults.display[field]*(value.systemSpacing??1);
-  configureTypography(settings,typographyOf(value));
+  const typography=typographyOf(value);configureTypography(settings,typography);configureRoleFonts(settings,value.fonts,typography);
   settings.display.staveProfile=StaveProfile.Default;settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
 }
 /** Gives the track inserted after `source` a copy of its per-track style and shifts later tracks. */

@@ -19,8 +19,13 @@
 //! The built-in chain's input is read from the insert's history some frames back: its *timing*. That is `D` once the
 //! insert has settled, so the stand-in lines up with the plug-in it stands in for. It changes only by a 10 ms crossfade
 //! between the two delayed signals, and only once the history reaches the new timing: an insert added to a playing
-//! track starts on the undelayed signal the track was playing (review C1), one replacing another starts on the timing
-//! the other had, and one leaving the board glides back to the undelayed signal (review I1).
+//! track starts on the undelayed signal the track was playing (review C1, [`start_undelayed`]), one replacing another
+//! starts on the timing the other had, and one leaving the board glides back to the undelayed signal (review I1). An
+//! insert that first plays at a play start starts as [`flush`] leaves it: on `D`, behind `D` frames of silence, so the
+//! stand-in and the plug-in share one timing from the first frame and the opening is heard once (re-review R1).
+//!
+//! [`start_undelayed`]: PluginInsert::start_undelayed
+//! [`flush`]: PluginInsert::flush
 //!
 //! A board with a plug-in splits where the plug-in sits: the stages before it feed the insert, and the stages after it
 //! take the insert's output. The inserts and their stand-in run once each a frame at that point. The stand-in runs
@@ -413,6 +418,16 @@ impl PluginInsert {
         self.timing_to = leaving.timing_to;
         self.timing_s = leaving.timing_s;
         self.built_in_input = leaving.built_in_input;
+    }
+
+    /// Starts the built-in chain's input on the undelayed signal, for an insert added to a track that is sounding: it
+    /// glides to `D` once the history holds it (review C1). Call it before the insert's first frame.
+    pub fn start_undelayed(&mut self) {
+        self.history = 0;
+        self.timing_from = 0;
+        self.timing_to = 0;
+        self.timing_s = 1.0;
+        self.timing_goal = self.delay;
     }
 
     /// Points the built-in chain's input timing at `frames` back: a leaving insert glides back to the undelayed signal

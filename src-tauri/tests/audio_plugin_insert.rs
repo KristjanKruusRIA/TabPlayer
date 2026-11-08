@@ -346,10 +346,8 @@ fn insert_output_is_plugin_output_delayed_by_d() {
             &format!("frame {m}"),
         );
     }
-    // Before `D`, the built-in chain (here: nothing) plays the input the track was playing, undelayed (review C1).
-    for (m, frame) in out[..d].iter().enumerate() {
-        assert_eq!(*frame, signal(m), "frame {m}");
-    }
+    // Before `D`, the built-in chain (here: nothing) plays the input delayed by `D`: silence.
+    assert!(out[..d].iter().all(|f| *f == [0.0; 2]));
     assert_eq!(track.plugin().unwrap().faulted(), None);
 }
 
@@ -1524,18 +1522,27 @@ fn a_block_straddling_d_does_not_dip() {
     // missing, the plug-in fades in only once a playable block plays, instead of ramping up held silence and stepping.
     let rig = rig(57, 1.0);
     rig.helper.controls.stale_below.store(1, Ordering::Relaxed);
+    // The plug-in is added to a track that plays.
+    let mut old = dsp(FxSettings::default());
+    let mut out = Vec::new();
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
     let mut track = dsp(FxSettings::default());
     track.attach_plugin(rig.insert(57, 0.0, 0.0));
+    track.transition_from(&mut old);
     let d = track.plugin_delay();
-    let mut out = Vec::new();
-    // The input is already sounding when the insert starts, as on a track that plays.
-    let input = |m: usize| signal(m + 10_037);
-    play(&mut track, &[&rig], 0, RATE as usize / 4, &input, &mut out);
+    play(
+        &mut track,
+        &[&rig],
+        SWAP,
+        RATE as usize / 4,
+        &signal,
+        &mut out,
+    );
     assert_eq!(track.plugin().unwrap().faulted(), None);
-    let end = d + 3 * RAMP;
+    let end = SWAP + d + 3 * RAMP;
     assert_smooth(
-        &out[d - 256..d],
-        &out[d - 1..end],
+        &out[SWAP - 4_800..SWAP],
+        &out[SWAP - 1..end],
         &out[end..end + 4_800],
         "block straddling D",
     );
@@ -1698,4 +1705,52 @@ fn a_second_change_inside_the_crossfade_does_not_step() {
     );
     assert_no_dropout(&out, SWAP, end, "two changes inside 10 ms");
     assert_eq!(third.plugin().unwrap().faulted(), None);
+}
+
+#[test]
+fn attaching_while_stopped_plays_the_opening_once() {
+    // Re-review R1: a plug-in added while stopped (or with a document that opens with one) starts its stand-in on `D`
+    // behind silence, as a stop leaves it, not on the undelayed input. So the opening is not played early and again.
+    let rig = rig(0, 0.5);
+    let mut old = dsp(driven());
+    let mut out = Vec::new();
+    play(&mut old, &[&rig], 0, SWAP, &signal, &mut out);
+    old.reset();
+    let mut new = dsp(driven());
+    new.attach_plugin(rig.insert(0, 0.0, 0.0));
+    new.transition_from(&mut old);
+    let mut opening = Vec::new();
+    play(
+        &mut new,
+        &[&rig],
+        0,
+        RATE as usize / 4,
+        &signal,
+        &mut opening,
+    );
+    let d = new.plugin_delay();
+    assert!(
+        rms(&opening[..d]) < 1e-6,
+        "the first D frames are silent, not the undelayed input: {}",
+        rms(&opening[..d])
+    );
+    // And the opening plays once, delayed: the plug-in from `D` on.
+    for m in d + RAMP..opening.len() {
+        let x = signal(m - d);
+        assert_close(
+            opening[m],
+            [0.5 * x[0], 0.5 * x[1]],
+            1e-6,
+            &format!("frame {m}"),
+        );
+    }
+    // A board built fresh, with no board before it, starts the same way.
+    let mut fresh = dsp(driven());
+    fresh.attach_plugin(rig.insert(0, 0.0, 0.0));
+    let mut first = Vec::new();
+    play(&mut fresh, &[&rig], 0, CALLBACK, &signal, &mut first);
+    assert!(
+        rms(&first) < 1e-6,
+        "a fresh board's first D frames are silent"
+    );
 }

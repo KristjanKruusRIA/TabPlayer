@@ -1835,6 +1835,10 @@ pub struct TrackDsp {
     fade_s: f32,
     leaving_part: [f32; 2],
     built_in_live: bool,
+    /// Whether the board has rendered since it was built or last reset: a plug-in added while it sounds starts its
+    /// stand-in on the undelayed signal the track plays; one added while stopped starts on `D` behind silence. A pause
+    /// renders silence and leaves it set, so a plug-in added while paused starts as one added mid-play.
+    sounding: bool,
     /// Samples the board had to replace because its state produced a non-finite value.
     non_finite: u32,
     max_delay_seconds: f64,
@@ -1890,6 +1894,7 @@ impl TrackDsp {
             fade_s: 1.0,
             leaving_part: [0.0; 2],
             built_in_live: true,
+            sounding: false,
             non_finite: 0,
             max_delay_seconds,
             previous: settings.clone(),
@@ -2263,6 +2268,7 @@ impl TrackDsp {
     /// `old`, which is dropped off the audio thread.
     fn plugin_from(&mut self, old: &mut Self) {
         self.built_in_live = old.built_in_live;
+        self.sounding = old.sounding;
         let same_link = match (&self.plugin, &old.plugin) {
             (Some(arriving), Some(running)) => arriving.same_link(running),
             _ => false,
@@ -2299,6 +2305,13 @@ impl TrackDsp {
         } else {
             self.carry_fade(old);
         }
+        // A first plug-in on a board that sounds: its stand-in starts on what the track plays (review C1). On one that
+        // does not, it stays as `attach_plugin` left it, on `D` behind silence (re-review R1).
+        if !self.leaving_live && self.sounding {
+            if let Some(arriving) = self.plugin.as_mut() {
+                arriving.start_undelayed();
+            }
+        }
         let live = self.leaving_live;
         if let Some(leaving) = self.plugin_leaving.as_mut().filter(|_| live) {
             match self.plugin.as_mut() {
@@ -2324,7 +2337,11 @@ impl TrackDsp {
     }
     /// Puts a plug-in in place of Drive, Amp and Cabinet. Call it off the audio thread, on a configuration that is not
     /// playing yet: an insert it displaces is dropped here. The second board never takes one.
-    pub fn attach_plugin(&mut self, insert: Box<PluginInsert>) {
+    ///
+    /// The insert starts as a stop leaves it, on `D` behind silence; `transition_from` moves it onto the signal the
+    /// track plays if the board it replaces is sounding.
+    pub fn attach_plugin(&mut self, mut insert: Box<PluginInsert>) {
+        insert.flush();
         self.plugin = Some(insert);
     }
     /// How far the track's output trails its input because of its plug-in: `D`, or 0 without one.
@@ -2369,7 +2386,8 @@ impl TrackDsp {
         self.flush_quiet = true;
     }
     /// Whether a settings change is still crossfading. A configuration that took over now would cut the fade short. A
-    /// second board's fade starts and ends with this one's, so this covers both.
+    /// second board's fade starts and ends with this one's, so this covers both. It does not count a leaving plug-in
+    /// insert's fade or timing glide: a configuration that takes over during either carries it on (`carry_fade`).
     pub fn ramping(&self) -> bool {
         self.ramp_left > 0
     }
@@ -2451,6 +2469,7 @@ impl TrackDsp {
         std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * self.second_gain)
     }
     fn process_board(&mut self, input: [f32; 2], ctx: &FrameContext) -> [f32; 2] {
+        self.sounding = true;
         let bpm = ctx.bpm;
         let mut x = input.map(|v| if v.is_finite() { v } else { 0.0 });
         let t = if self.ramp_left == 0 {
@@ -3643,6 +3662,7 @@ impl TrackDsp {
             insert.flush();
         }
         self.plugin_fade = 0;
+        self.sounding = false;
         self.leaving_live = false;
         self.fade_s = 1.0;
         self.leaving_part = [0.0; 2];

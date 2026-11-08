@@ -192,6 +192,7 @@ export const en = {
   'transport.loop_bars': 'Loop bars',
   'transport.loop_start': 'Loop start',
   'transport.loop_end': 'Loop end',
+  'transport.loop_range_hint': 'Loop bars {start} to {end}',
   'transport.click': 'Click',
   'transport.metronome': 'Metronome',
   'transport.speed': 'Speed',

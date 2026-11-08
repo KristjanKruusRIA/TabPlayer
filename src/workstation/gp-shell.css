@@ -63,6 +63,8 @@
 .app-shell .gp-toolbar .transport-loop .transport-row,.app-shell .gp-toolbar .transport-speed .transport-row { gap:1px; }
 .app-shell .gp-toolbar .transport .transport-loopbutton { min-width:0; width:34px; padding:0; font-size:0; gap:0; }
 .app-shell .gp-toolbar .transport :is(.transport-toggle,.transport-step,.transport-loopbutton) { min-height:28px; border:1px solid transparent; background:var(--ws-raised); }
+/* The running loop must stand out: the generic pressed colour is dark ink, which on the raised background above is unreadable. */
+.app-shell .gp-toolbar .transport .transport-loopbutton[aria-pressed=true] { border-color:var(--ws-accent); background:var(--ws-accent); color:var(--ws-accent-ink); }
 .app-shell .gp-toolbar .transport .transport-metronome { width:34px; padding:0; justify-content:center; }
 .app-shell .gp-toolbar .transport-bar-field input { width:38px; min-height:28px; font-size:12px; }
 .app-shell .gp-toolbar .transport-speedvalue { min-width:44px; font-size:13px; }
@@ -96,6 +98,11 @@
 @media (max-width:1339px) {
   .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'transport transport transport' 'left display right'; }
   .gp-toolbar>.gp-toolbar-display { padding-bottom:0; }
+}
+/* The score display controls need about 560px, more than is left between the edit and view buttons: below this they take a row of their own instead of spilling over the view buttons. */
+@media (max-width:1099px) {
+  .gp-toolbar { grid-template-areas:'transport transport transport' 'left left right' 'display display display'; }
+  .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
 }
 
 /* Editing palette: 232px, 8 cells of 26×30 per row, icons with tooltips. */

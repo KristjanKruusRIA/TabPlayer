@@ -95,6 +95,30 @@ it('loop_pressed_state_waits_for_native_acknowledgement_and_retains_failed_clear
   update(snapshot({loop:{startTick:0,endTick:3840},error:'Loop clear failed.'}));expect(screen.getByRole('alert')).toHaveTextContent('Loop clear failed.');expect(screen.getByRole('button',{name:'Clear loop'})).toHaveAttribute('aria-pressed','true');
   update(snapshot());expect(screen.getByRole('button',{name:'Loop'})).toHaveAttribute('aria-pressed','false');
 });
+const eightBars=Array.from({length:8},(_,bar)=>({bar,occurrence:0,startTick:bar*3840,endTick:(bar+1)*3840,startMs:bar*2000,endMs:(bar+1)*2000,meterNumerator:4,meterDenominator:4,clickTicks:[]}));
+it('the loop bar fields follow the selected bars, so Loop repeats the passage the player picked',()=>{
+  const {player}=playerFor();player.playbackOccurrences=()=>eightBars;
+  const fields=()=>[screen.getByLabelText('Loop start'),screen.getByLabelText('Loop end')];
+  const view=renderTransport(<Transport cursor={cursor} selection={{kind:'bars',tracks:[0],firstBar:4,lastBar:6}} player={player} measures={8} busy={false}/>);
+  expect(fields()).toEqual([expect.objectContaining({value:'5'}),expect.objectContaining({value:'7'})]);
+  fireEvent.click(screen.getByRole('button',{name:'Loop'}));expect(player.setLoop).toHaveBeenCalledWith(4,6);
+  expect(screen.getByRole('button',{name:'Loop'})).toHaveAttribute('title','Loop bars 5 to 7');
+  view.rerender(<Transport cursor={{...cursor,bar:2}} selection={null} player={player} measures={8} busy={false}/>);
+  expect(fields()).toEqual([expect.objectContaining({value:'3'}),expect.objectContaining({value:'3'})]);
+  view.rerender(<Transport cursor={{...cursor,bar:2}} selection={{kind:'range',range:{start:{bar:1,tick:0},end:{bar:3,tick:960},lanes:[]}}} player={player} measures={8} busy={false}/>);
+  expect(fields()).toEqual([expect.objectContaining({value:'2'}),expect.objectContaining({value:'4'})]);
+  expect(screen.getByLabelText('Loop start')).toHaveAttribute('title','Loop start');
+});
+it('the loop bar fields show the loop that is running, however it was set, and keep it while the selection moves',()=>{
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  const view=renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false}/>);
+  expect(screen.getByLabelText('Loop start')).toHaveValue(1);
+  update(snapshot({loop:{startTick:4*3840+480,endTick:7*3840}}));
+  expect(screen.getByLabelText('Loop start')).toHaveValue(5);expect(screen.getByLabelText('Loop end')).toHaveValue(7);
+  view.rerender(<Transport cursor={{...cursor,bar:0}} selection={{kind:'bars',tracks:[0],firstBar:1,lastBar:1}} player={player} measures={8} busy={false}/>);
+  expect(screen.getByLabelText('Loop start')).toHaveValue(5);expect(screen.getByLabelText('Loop end')).toHaveValue(7);
+  expect(screen.getByRole('button',{name:'Clear loop'})).toHaveAttribute('title','Clear loop');
+});
 it('custom_acknowledged_coefficients_and_full_relative_endpoints_are_displayed_without_dispatch',()=>{
   const state=snapshot({speed:123});state.practice.effectiveRatio=1.23;state.practice.currentBpm=147.6;state.practice.settings.tempo={kind:'relative',ratio:1.23};const {player,update}=playerFor(state);renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
   const speedGroup=()=>screen.getByRole('group',{name:'Speed'}),slower=()=>screen.getByRole('button',{name:'Slower'}),faster=()=>screen.getByRole('button',{name:'Faster'});expect(speedGroup()).toHaveTextContent('123%');expect(screen.getByRole('status',{name:'Practice playback'})).toHaveTextContent(/147.6 BPM.*123%/);expect(screen.getByLabelText('Practice passes')).toHaveTextContent('Completed passes 0');expect(screen.getByLabelText('Practice passes')).toBeVisible();

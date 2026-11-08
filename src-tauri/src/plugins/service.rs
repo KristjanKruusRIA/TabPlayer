@@ -461,6 +461,30 @@ struct StateRetry {
     state_id: String,
     at: Instant,
     attempts: u32,
+    /// The document was already asked for a prepare once `at` had passed, so the state is sent again without waiting for
+    /// an unrelated edit (review L1).
+    asked: bool,
+}
+
+/// A state a prepare asked for while another was being sent: it follows the one in flight (review M-B).
+struct PendingState {
+    state_id: String,
+    parts: StateParts,
+}
+
+/// How sending a slot's states ended.
+enum Delivery {
+    /// The entry was replaced or removed meanwhile; what that recorded stands.
+    Gone,
+    /// The last state sent was applied.
+    Applied,
+    /// The last state sent timed out; the slot keeps playing what it has.
+    TimedOut,
+    /// The helper failed on the last state sent; the caller marks the slot faulted.
+    Failed {
+        status: PluginStatus,
+        state_id: String,
+    },
 }
 
 fn state_retry_interval(attempts: u32) -> Duration {
@@ -487,6 +511,8 @@ enum SlotEntry {
         /// A `SetState` is in flight with the lock released: the entry stays, so editor commands and a second `ensure`
         /// still find the helper (review M2), and nobody sends another state meanwhile.
         busy: bool,
+        /// The latest state asked for while one was in flight. The sender applies it next, so the last state wins.
+        pending: Option<PendingState>,
         state_retry: Option<StateRetry>,
     },
     Faulted {
@@ -655,6 +681,7 @@ impl PluginService {
                 while !stop_clone.load(Ordering::Relaxed) {
                     if let Some(svc) = weak_service.upgrade() {
                         svc.poll_latencies();
+                        svc.poll_state_retries();
                         svc.prune_ended();
                         let ws_opt = lock(&svc.workspace).clone();
                         if let Some(ws_weak) = ws_opt {
@@ -840,10 +867,19 @@ impl PluginService {
                 continue;
             }
 
+            // A library that cannot be read is often a moment's trouble (another program holds the file): a helper that
+            // runs for this slot keeps running, and plays again once the library reads (review L4).
+            let keep_running = HelperKey {
+                document_id: document_id.to_string(),
+                track_id: track_id.clone(),
+                class_id: slot.class_id.clone(),
+            };
+
             // 4. library lookup without a probe (Missing or Unreadable)
             let mut library = match PluginLibrary::open(&self.paths.library_dir) {
                 Ok(lib) => lib,
                 Err(_) => {
+                    wanted.insert(keep_running);
                     self.record_status(document_id, &track_id, slot, PluginStatus::Unreadable);
                     results.push((track_id, Err(PluginStatus::Unreadable)));
                     continue;
@@ -881,6 +917,7 @@ impl PluginService {
                         continue;
                     }
                     _ => {
+                        wanted.insert(keep_running);
                         self.record_status(document_id, &track_id, slot, PluginStatus::Unreadable);
                         results.push((track_id, Err(PluginStatus::Unreadable)));
                         continue;
@@ -1023,12 +1060,36 @@ impl PluginService {
                         self.supervisor.unwatch(&key);
                         retired.push(session);
                         true
+                    } else if busy {
+                        // A state is in flight: this one follows it, and the last one asked for wins (review M-B).
+                        let plan = plan_of(&session, slot);
+                        if let Some(SlotEntry::Ready {
+                            pending,
+                            last_latency,
+                            ..
+                        }) = inner.slots.get_mut(&key)
+                        {
+                            *pending = Some(PendingState {
+                                state_id: slot.state.clone(),
+                                parts: state_parts.clone(),
+                            });
+                            *last_latency = plan.latency;
+                        }
+                        Self::record_status_inner(
+                            &mut inner,
+                            document_id,
+                            &track_id,
+                            slot,
+                            PluginStatus::Ready,
+                        );
+                        results.push((track_id, Ok(plan)));
+                        continue;
                     } else {
                         let needs_state = state_asset_id != slot.state;
                         let waiting = state_retry.as_ref().is_some_and(|retry| {
                             retry.state_id == slot.state && Instant::now() < retry.at
                         });
-                        if !needs_state || busy || waiting {
+                        if !needs_state || waiting {
                             let plan = plan_of(&session, slot);
                             if let Some(SlotEntry::Ready {
                                 last_latency,
@@ -1056,38 +1117,32 @@ impl PluginService {
                             *busy = true;
                         }
                         drop(inner);
-                        let set_res = session.set_state(state_parts.clone());
-                        let mut inner = lock(&self.inner);
-                        let still_ours = matches!(
-                            inner.slots.get(&key),
-                            Some(SlotEntry::Ready { session: current, .. }) if Arc::ptr_eq(current, &session)
+                        let (mut inner, delivery, busy_notice) = self.deliver(
+                            &key,
+                            &session,
+                            slot.state.clone(),
+                            state_parts.clone(),
+                            state_retry,
                         );
-                        if !still_ours {
-                            // A crash report, a retry or a shutdown came meanwhile: what it recorded stands.
-                            let status = inner
-                                .statuses
-                                .get(&(document_id.to_string(), track_id.clone()))
-                                .map_or(PluginStatus::Loading, |s| s.status);
-                            results.push((track_id, Err(status)));
-                            continue;
+                        if busy_notice {
+                            notices.push((track_id.clone(), NOTICE_BUSY));
                         }
-                        match set_res {
-                            Ok(()) => {
+                        match delivery {
+                            Delivery::Gone => {
+                                // A crash report, a retry or a shutdown came meanwhile: what it recorded stands.
+                                let status = inner
+                                    .statuses
+                                    .get(&(document_id.to_string(), track_id.clone()))
+                                    .map_or(PluginStatus::Loading, |s| s.status);
+                                results.push((track_id, Err(status)));
+                            }
+                            Delivery::Applied | Delivery::TimedOut => {
+                                // A timed-out state (RR7) leaves the plug-in playing the state it has.
                                 let plan = plan_of(&session, slot);
-                                if let Some(SlotEntry::Ready {
-                                    state_asset_id,
-                                    baseline_state_id,
-                                    last_latency,
-                                    busy,
-                                    state_retry,
-                                    ..
-                                }) = inner.slots.get_mut(&key)
+                                if let Some(SlotEntry::Ready { last_latency, .. }) =
+                                    inner.slots.get_mut(&key)
                                 {
-                                    *state_asset_id = slot.state.clone();
-                                    *baseline_state_id = Some(slot.state.clone());
                                     *last_latency = plan.latency;
-                                    *busy = false;
-                                    *state_retry = None;
                                 }
                                 Self::record_status_inner(
                                     &mut inner,
@@ -1098,63 +1153,26 @@ impl PluginService {
                                 );
                                 results.push((track_id, Ok(plan)));
                             }
-                            Err(e) => match e.status() {
-                                Some(status) => {
-                                    inner.slots.remove(&key);
-                                    self.supervisor.unwatch(&key);
-                                    retired.push(session);
-                                    inner.slots.insert(
-                                        key.clone(),
-                                        SlotEntry::Faulted {
-                                            status,
-                                            state_asset_id: slot.state.clone(),
-                                        },
-                                    );
-                                    Self::record_status_inner(
-                                        &mut inner,
-                                        document_id,
-                                        &track_id,
-                                        slot,
+                            Delivery::Failed { status, state_id } => {
+                                inner.slots.remove(&key);
+                                self.supervisor.unwatch(&key);
+                                retired.push(session);
+                                inner.slots.insert(
+                                    key.clone(),
+                                    SlotEntry::Faulted {
                                         status,
-                                    );
-                                    results.push((track_id, Err(status)));
-                                }
-                                None => {
-                                    // RR7: the plug-in's main thread did not take the state in time. It keeps playing the
-                                    // state it has; the user is told once, and the state is sent again after a back-off.
-                                    let attempts = state_retry
-                                        .filter(|retry| retry.state_id == slot.state)
-                                        .map_or(0, |retry| retry.attempts)
-                                        + 1;
-                                    let plan = plan_of(&session, slot);
-                                    if let Some(SlotEntry::Ready {
-                                        busy,
-                                        state_retry,
-                                        last_latency,
-                                        ..
-                                    }) = inner.slots.get_mut(&key)
-                                    {
-                                        *busy = false;
-                                        *last_latency = plan.latency;
-                                        *state_retry = Some(StateRetry {
-                                            state_id: slot.state.clone(),
-                                            at: Instant::now() + state_retry_interval(attempts),
-                                            attempts,
-                                        });
-                                    }
-                                    if attempts == 1 {
-                                        notices.push((track_id.clone(), NOTICE_BUSY));
-                                    }
-                                    Self::record_status_inner(
-                                        &mut inner,
-                                        document_id,
-                                        &track_id,
-                                        slot,
-                                        PluginStatus::Ready,
-                                    );
-                                    results.push((track_id, Ok(plan)));
-                                }
-                            },
+                                        state_asset_id: state_id,
+                                    },
+                                );
+                                Self::record_status_inner(
+                                    &mut inner,
+                                    document_id,
+                                    &track_id,
+                                    slot,
+                                    status,
+                                );
+                                results.push((track_id, Err(status)));
+                            }
                         }
                         continue;
                     }
@@ -1221,6 +1239,112 @@ impl PluginService {
         results
     }
 
+    /// Sends `state_id` to the slot's helper, which the caller marked busy, with the lock released; then each state a
+    /// prepare asked for meanwhile, the latest only, until none is left (review M-B). Returns with the lock held and the
+    /// slot no longer busy, and says whether the user should hear that the plug-in is busy (RR7, first attempt only).
+    fn deliver(
+        &self,
+        key: &HelperKey,
+        session: &Arc<dyn HelperSession>,
+        mut state_id: String,
+        mut parts: StateParts,
+        mut retry: Option<StateRetry>,
+    ) -> (MutexGuard<'_, Inner>, Delivery, bool) {
+        let mut busy_notice = false;
+        loop {
+            let result = session.set_state(parts);
+            let mut guard = lock(&self.inner);
+            let inner = &mut *guard;
+            let Some(SlotEntry::Ready {
+                session: current,
+                state_asset_id,
+                baseline_state_id,
+                busy,
+                pending,
+                state_retry,
+                ..
+            }) = inner.slots.get_mut(key)
+            else {
+                return (guard, Delivery::Gone, busy_notice);
+            };
+            if !Arc::ptr_eq(current, session) {
+                return (guard, Delivery::Gone, busy_notice);
+            }
+            // A state asked for meanwhile, unless it is the one just sent.
+            let next = pending.take().filter(|next| next.state_id != state_id);
+            let delivery = match result {
+                Ok(()) => {
+                    *state_asset_id = state_id.clone();
+                    *baseline_state_id = Some(state_id.clone());
+                    *state_retry = None;
+                    Delivery::Applied
+                }
+                Err(error) => match error.status() {
+                    Some(status) => {
+                        *busy = false;
+                        if next.is_some() {
+                            // The newer state is lost with the helper: the next prepare starts one with it.
+                            inner.reprepare.insert(key.document_id.clone());
+                        }
+                        return (guard, Delivery::Failed { status, state_id }, busy_notice);
+                    }
+                    None => {
+                        // RR7: the plug-in's main thread did not take the state in time. It keeps playing the state it
+                        // has; the user is told once, and the state is sent again after a back-off.
+                        let attempts = retry
+                            .as_ref()
+                            .filter(|retry| retry.state_id == state_id)
+                            .map_or(0, |retry| retry.attempts)
+                            + 1;
+                        busy_notice |= attempts == 1;
+                        *state_retry = Some(StateRetry {
+                            state_id: state_id.clone(),
+                            at: Instant::now() + state_retry_interval(attempts),
+                            attempts,
+                            asked: false,
+                        });
+                        Delivery::TimedOut
+                    }
+                },
+            };
+            match next {
+                Some(next) => {
+                    // Still busy: the newer state goes next.
+                    retry = state_retry.clone();
+                    state_id = next.state_id;
+                    parts = next.parts;
+                    drop(guard);
+                }
+                None => {
+                    *busy = false;
+                    return (guard, delivery, busy_notice);
+                }
+            }
+        }
+    }
+
+    /// Asks for a prepare of each document whose plug-in did not take a state in time, once the back-off has passed, so
+    /// the state is sent again without waiting for an unrelated edit (review L1).
+    fn poll_state_retries(&self) {
+        let now = Instant::now();
+        let mut inner = lock(&self.inner);
+        let mut documents = Vec::new();
+        for (key, entry) in inner.slots.iter_mut() {
+            if let SlotEntry::Ready {
+                busy: false,
+                state_retry: Some(retry),
+                ..
+            } = entry
+            {
+                if !retry.asked && now >= retry.at {
+                    retry.asked = true;
+                    documents.push(key.document_id.clone());
+                }
+            }
+        }
+        inner.reprepare.extend(documents);
+    }
+
     fn spawn_launch(
         &self,
         key: HelperKey,
@@ -1282,6 +1406,7 @@ impl PluginService {
                                     Some(slot.state.clone())
                                 },
                                 busy: false,
+                                pending: None,
                                 state_retry: None,
                             },
                         );
@@ -1698,6 +1823,19 @@ impl PluginService {
         retire(&self.inner, retired);
     }
 
+    /// Asks every helper to end, for the app's exit (review L2). It returns at once; the job object ends whatever is
+    /// left when the app does.
+    pub fn shutdown_all(&self) {
+        let documents: HashSet<String> = lock(&self.inner)
+            .slots
+            .keys()
+            .map(|key| key.document_id.clone())
+            .collect();
+        for document_id in documents {
+            self.shutdown_document(&document_id);
+        }
+    }
+
     pub fn set_workspace(&self, ws: std::sync::Weak<Mutex<DocumentWorkspace>>) {
         *lock(&self.workspace) = Some(ws);
     }
@@ -1951,12 +2089,13 @@ impl PluginService {
             }
         }
 
+        // Consent first: a grant that fails leaves no staged asset behind (review L6).
+        self.grant_consent(document_id, &[(key.class_id.clone(), state_id.clone())])?;
+
         let staged = {
             let mut ws = workspace.lock().map_err(|e| e.to_string())?;
             ws.stage_asset(document_id, asset)?
         };
-
-        self.grant_consent(document_id, &[(key.class_id.clone(), state_id.clone())])?;
 
         self.with_entry(&key, &session, |entry| {
             if let SlotEntry::Ready {
@@ -1989,13 +2128,29 @@ impl PluginService {
             .lock()
             .ok()
             .and_then(|ws| ws.asset_bytes(document_id, document_state_id).ok());
-        if let Some(bytes) = bytes {
-            if let Ok((comp, ctrl)) = decode_state(&bytes) {
-                let _ = session.set_state(StateParts {
-                    component: comp.into(),
-                    controller: ctrl.into(),
-                });
-            }
+        let parts = bytes.and_then(|bytes| {
+            decode_state(&bytes).ok().map(|(comp, ctrl)| StateParts {
+                component: comp.into(),
+                controller: ctrl.into(),
+            })
+        });
+        // Like `ensure`, it sends only while no other state is in flight (review L5). One in flight is the document's
+        // newer state and replaces the plug-in's whole state, edits included, so nothing is left to revert.
+        let free = self
+            .with_entry(key, session, |entry| match entry {
+                SlotEntry::Ready { busy, .. } if !*busy => {
+                    *busy = parts.is_some();
+                    true
+                }
+                _ => false,
+            })
+            .unwrap_or(false);
+        if !free {
+            return;
+        }
+        if let Some(parts) = parts {
+            // Errors reach the user when the plug-in is next prepared; the helper's fault is its supervisor's to report.
+            drop(self.deliver(key, session, document_state_id.to_string(), parts, None));
         }
         self.with_entry(key, session, |entry| {
             if let SlotEntry::Ready {
@@ -3100,35 +3255,76 @@ mod tests {
         assert_eq!(statuses[0].class_id, other);
     }
 
+    /// A request whose state's component is `component`, so the helper's state tells which request reached it.
+    fn request_holding(track_id: &str, slot: PluginSlot, component: &[u8]) -> SlotRequest {
+        SlotRequest {
+            track_id: track_id.into(),
+            slot,
+            state: encode_state(component, b"d").unwrap().into(),
+        }
+    }
+
+    /// Starts `ensure` with `requests` on another thread and returns once its `SetState` is in flight, held by a gate.
+    fn send_held(
+        rig: &TestRig,
+        session: &Arc<FakeSession>,
+        requests: Vec<SlotRequest>,
+    ) -> (
+        std::sync::mpsc::Sender<()>,
+        std::thread::JoinHandle<Vec<(String, Result<InsertPlan, PluginStatus>)>>,
+    ) {
+        let (release, gate) = std::sync::mpsc::channel();
+        *session.set_state_gate.lock().unwrap() = Some(gate);
+        let before = session.set_state_calls.load(Ordering::SeqCst);
+        let service = rig.service.clone();
+        let first = std::thread::spawn(move || service.ensure("doc1", Some(48_000), &requests));
+        let start = Instant::now();
+        while session.set_state_calls.load(Ordering::SeqCst) == before {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        (release, first)
+    }
+
+    fn component_of(session: &FakeSession) -> Vec<u8> {
+        session.current_state.lock().unwrap().component.clone()
+    }
+
     #[test]
     fn a_new_state_in_flight_keeps_the_slot_for_others() {
         let rig = test_rig();
         let state2 = "b".repeat(64);
+        let state3 = "f".repeat(64);
         rig.service
-            .grant_consent("doc1", &[(rig.class_id.clone(), state2.clone())])
+            .grant_consent(
+                "doc1",
+                &[
+                    (rig.class_id.clone(), state2.clone()),
+                    (rig.class_id.clone(), state3.clone()),
+                ],
+            )
             .unwrap();
         let session = ready(
             &rig,
             48_000,
             &[request("track_0", test_slot(&rig.class_id, &rig.state_id))],
         );
-        let (release, gate) = std::sync::mpsc::channel();
-        *session.set_state_gate.lock().unwrap() = Some(gate);
 
-        let req2 = vec![request("track_0", test_slot(&rig.class_id, &state2))];
-        let service = rig.service.clone();
-        let first = {
-            let req2 = req2.clone();
-            std::thread::spawn(move || service.ensure("doc1", Some(48_000), &req2))
-        };
-        let start = Instant::now();
-        while session.set_state_calls.load(Ordering::SeqCst) == 0 {
-            assert!(start.elapsed() < Duration::from_secs(2));
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        let req2 = vec![request_holding(
+            "track_0",
+            test_slot(&rig.class_id, &state2),
+            b"two",
+        )];
+        let req3 = vec![request_holding(
+            "track_0",
+            test_slot(&rig.class_id, &state3),
+            b"three",
+        )];
+        let (release, first) = send_held(&rig, &session, req2);
 
-        // A second prepare while the state is in flight neither launches another helper nor sends the state twice.
-        let plans = rig.service.ensure("doc1", Some(48_000), &req2);
+        // A second prepare, with another state, while the first is in flight neither launches another helper nor sends
+        // a state beside the one in flight.
+        let plans = rig.service.ensure("doc1", Some(48_000), &req3);
         assert!(plans[0].1.is_ok());
         assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 1);
         assert_eq!(session.set_state_calls.load(Ordering::SeqCst), 1);
@@ -3141,9 +3337,154 @@ mod tests {
         let plans = first.join().unwrap();
         assert!(plans[0].1.is_ok());
         assert_eq!(rig.service.statuses("doc1")[0].status, PluginStatus::Ready);
-        // The state was applied: the next prepare sends nothing.
-        rig.service.ensure("doc1", Some(48_000), &req2);
+        // The later state was not dropped: it follows the one in flight, and the helper ends on it (review M-B).
+        assert_eq!(session.set_state_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(component_of(&session), b"three");
+        // It was applied: the next prepare sends nothing.
+        rig.service.ensure("doc1", Some(48_000), &req3);
+        assert_eq!(session.set_state_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn an_undo_to_the_applied_state_while_another_is_in_flight_wins() {
+        let rig = test_rig();
+        let state2 = "b".repeat(64);
+        rig.service
+            .grant_consent("doc1", &[(rig.class_id.clone(), state2.clone())])
+            .unwrap();
+        let first_state =
+            request_holding("track_0", test_slot(&rig.class_id, &rig.state_id), b"one");
+        let session = ready(&rig, 48_000, std::slice::from_ref(&first_state));
+        let (release, first) = send_held(
+            &rig,
+            &session,
+            vec![request_holding(
+                "track_0",
+                test_slot(&rig.class_id, &state2),
+                b"two",
+            )],
+        );
+        // The undo names the state the helper held before: the slot's applied state, though not what is in flight.
+        rig.service
+            .ensure("doc1", Some(48_000), std::slice::from_ref(&first_state));
+        release.send(()).unwrap();
+        first.join().unwrap();
+        assert_eq!(component_of(&session), b"one", "the last state wins");
+        rig.service
+            .ensure("doc1", Some(48_000), std::slice::from_ref(&first_state));
+        assert_eq!(session.set_state_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn a_revert_waits_for_the_state_in_flight_instead_of_racing_it() {
+        let rig = test_rig();
+        let state2 = "b".repeat(64);
+        rig.service
+            .grant_consent("doc1", &[(rig.class_id.clone(), state2.clone())])
+            .unwrap();
+        let session = ready(
+            &rig,
+            48_000,
+            &[request("track_0", test_slot(&rig.class_id, &rig.state_id))],
+        );
+        let (release, first) = send_held(
+            &rig,
+            &session,
+            vec![request_holding(
+                "track_0",
+                test_slot(&rig.class_id, &state2),
+                b"two",
+            )],
+        );
+        let key = HelperKey {
+            document_id: "doc1".into(),
+            track_id: "track_0".into(),
+            class_id: rig.class_id.clone(),
+        };
+        let dyn_session: Arc<dyn HelperSession> = session.clone();
+        // A workspace that holds a state to revert to.
+        let mut ws = DocumentWorkspace::new().unwrap();
+        let document_id = ws.active_owner().document_id.clone();
+        let bytes = encode_state(b"one", b"d").unwrap();
+        let asset = StoredAsset::from_bytes(STATE_FILENAME.into(), STATE_MEDIA_TYPE.into(), &bytes);
+        let state_id = asset.id().unwrap();
+        let staged = ws.stage_asset(&document_id, asset).unwrap();
+        let rev = crate::workspace::DocumentRevision {
+            document_id: document_id.clone(),
+            revision: ws.document(&document_id).unwrap().revision,
+        };
+        ws.apply_edit(
+            &rev,
+            crate::edit_types::EditCommand::SetTrackSound {
+                track_id: "base/0".into(),
+                sound: crate::settings::TrackSound {
+                    plugin: Some(test_slot(&rig.class_id, &state_id)),
+                    ..crate::settings::TrackSound::default()
+                },
+            },
+            Some(&staged.token),
+        )
+        .unwrap();
+        assert!(ws.asset_bytes(&document_id, &state_id).is_ok());
+        let workspace = Mutex::new(ws);
+        rig.service
+            .revert_to_document(&document_id, &key, &dyn_session, &state_id, &workspace);
         assert_eq!(session.set_state_calls.load(Ordering::SeqCst), 1);
+        release.send(()).unwrap();
+        first.join().unwrap();
+        assert_eq!(component_of(&session), b"two");
+    }
+
+    #[test]
+    fn a_busy_plug_in_asks_for_a_prepare_once_its_back_off_has_passed() {
+        let rig = test_rig();
+        let state2 = "e".repeat(64);
+        rig.service
+            .grant_consent("doc1", &[(rig.class_id.clone(), state2.clone())])
+            .unwrap();
+        let session = ready(
+            &rig,
+            48_000,
+            &[request("track_0", test_slot(&rig.class_id, &rig.state_id))],
+        );
+        rig.service.take_reprepare("doc1");
+        session.always_time_out.store(true, Ordering::SeqCst);
+        let req2 = vec![request("track_0", test_slot(&rig.class_id, &state2))];
+        rig.service.ensure("doc1", Some(48_000), &req2);
+        assert!(
+            !rig.service.take_reprepare("doc1"),
+            "not before the back-off"
+        );
+        // The first back-off is a second; the monitor looks every 50 ms.
+        let start = Instant::now();
+        while !rig.service.take_reprepare("doc1") {
+            assert!(
+                start.elapsed() < Duration::from_secs(3),
+                "the plug-in is asked again without another edit"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(start.elapsed() >= Duration::from_millis(700));
+        // Once only, until the state is sent again.
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!rig.service.take_reprepare("doc1"));
+    }
+
+    #[test]
+    fn a_library_that_cannot_be_read_for_a_moment_keeps_the_running_helper() {
+        let rig = test_rig();
+        let req = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];
+        let session = ready(&rig, 48_000, &req);
+        let file = rig.library_dir.join(crate::plugins::library::LIBRARY_FILE);
+        let held = std::fs::read(&file).unwrap();
+        std::fs::write(&file, br#"{"version":9}"#).unwrap();
+        let plans = rig.service.ensure("doc1", Some(48_000), &req);
+        assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Unreadable));
+        assert!(!session.shutdown_called.load(Ordering::SeqCst));
+        std::fs::write(&file, held).unwrap();
+        let plans = rig.service.ensure("doc1", Some(48_000), &req);
+        assert!(plans[0].1.is_ok());
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 1);
     }
 
     #[test]
@@ -3509,6 +3850,46 @@ mod tests {
             };
             ws.apply_edit(&rev, edit, Some(&staged.token)).unwrap();
             (id, bytes)
+        }
+
+        #[test]
+        fn a_save_whose_consent_cannot_be_kept_stages_nothing() {
+            let rig = test_rig();
+            let mut ws = DocumentWorkspace::new().unwrap();
+            let document_id = ws.active_owner().document_id.clone();
+            let track = "base/0";
+            let (state_id, state_bytes) =
+                apply_state(&mut ws, &document_id, track, &rig.class_id, 1, 256);
+            let workspace = Mutex::new(ws);
+            rig.service
+                .grant_consent(&document_id, &[(rig.class_id.clone(), state_id.clone())])
+                .unwrap();
+            let req = SlotRequest {
+                track_id: track.into(),
+                slot: test_slot(&rig.class_id, &state_id),
+                state: state_bytes.into(),
+            };
+            rig.service
+                .ensure(&document_id, Some(48_000), std::slice::from_ref(&req));
+            assert_eq!(
+                wait_for_slot(&rig.service, &document_id, track),
+                PluginStatus::Ready
+            );
+            // The consent file cannot be written any more.
+            let consent_file = rig.library_dir.join("consent.json");
+            std::fs::remove_file(&consent_file).unwrap();
+            std::fs::create_dir(&consent_file).unwrap();
+
+            // The plug-in's state differs from the document's, so a save is attempted, and fails.
+            assert!(
+                rig.service
+                    .editor_save(&document_id, track, &workspace)
+                    .is_err()
+            );
+            assert_eq!(
+                workspace.lock().unwrap().staged_asset_count(&document_id),
+                0
+            );
         }
 
         #[test]

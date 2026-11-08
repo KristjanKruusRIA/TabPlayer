@@ -1130,6 +1130,11 @@ impl CandidateStore {
         }
         Ok(snapshot)
     }
+    /// How many staged assets wait for an edit.
+    #[cfg(test)]
+    pub(crate) fn staged_asset_count(&self) -> usize {
+        self.assets.len()
+    }
     pub fn cancel_asset(&mut self, token: &str) -> bool {
         self.assets.remove(token).is_some()
     }

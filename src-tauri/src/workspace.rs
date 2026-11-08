@@ -935,6 +935,13 @@ impl DocumentWorkspace {
         Ok(snapshot)
     }
 
+    /// How many staged assets of the document wait for an edit.
+    #[cfg(test)]
+    pub(crate) fn staged_asset_count(&self, id: &str) -> usize {
+        self.entry(id)
+            .map_or(0, |entry| entry.candidates.staged_asset_count())
+    }
+
     pub fn stage_asset(&mut self, id: &str, asset: StoredAsset) -> Result<StagedAsset, String> {
         let entry = self.entry_mut(id)?;
         if entry.session.lock().is_some() {

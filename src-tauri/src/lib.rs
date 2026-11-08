@@ -1193,9 +1193,11 @@ pub fn run() {
                 .name("plugin-reprepare".into())
                 .spawn(move || {
                     while let Some(workspace) = tick_workspace.upgrade() {
-                        tick_handle
-                            .state::<runtime::NativeAudio>()
-                            .plugin_tick(&workspace);
+                        let audio = tick_handle.state::<runtime::NativeAudio>();
+                        if audio.plugin_tick_stopped() {
+                            break;
+                        }
+                        audio.plugin_tick(&workspace);
                         drop(workspace);
                         std::thread::sleep(std::time::Duration::from_millis(100));
                     }
@@ -1489,6 +1491,11 @@ pub fn run() {
                 // Every note a port is holding is released and the ports are closed.
                 if let Some(audio) = app.try_state::<runtime::NativeAudio>() {
                     audio.service.midi_out().shutdown();
+                    // No tick starts a helper from here on, and the helpers are asked to end (review L2).
+                    audio.stop_plugin_tick();
+                    if let Some(plugins) = &audio.plugins {
+                        plugins.shutdown_all();
+                    }
                 }
             }
         });

@@ -133,13 +133,31 @@ pub struct AudioExportRender {
     stem_indices: Vec<usize>,
     stem_buffers: Vec<Vec<[f32; 2]>>,
     mix_buffer: Vec<[f32; 2]>,
+    d_max: usize,
+    trim_remaining: usize,
+    offline: Option<crate::plugins::service::OfflinePlugins>,
 }
 impl AudioExportRender {
     pub fn new(
-        mut renderer: Renderer,
+        renderer: Renderer,
         plan: &PlaybackPlan,
         request: AudioExportRequest,
     ) -> Result<Self, String> {
+        Self::new_with_plugins(renderer, plan, request, None)
+    }
+    pub fn new_with_plugins(
+        mut renderer: Renderer,
+        plan: &PlaybackPlan,
+        request: AudioExportRequest,
+        mut offline: Option<crate::plugins::service::OfflinePlugins>,
+    ) -> Result<Self, String> {
+        if let Some(offline) = &mut offline {
+            for (track_id, insert) in offline.inserts.drain(..) {
+                if let Some(index) = plan.tracks.iter().position(|t| t.id == track_id) {
+                    renderer.attach_plugin(index, insert);
+                }
+            }
+        }
         request.format.validate()?;
         renderer.set_speed(request.speed)?;
         renderer.set_metronome_settings(crate::audio::practice::MetronomeSettings {
@@ -187,6 +205,7 @@ impl AudioExportRender {
         if let Some(s) = schedule.segments.first() {
             renderer.seek_tick(s.start_tick);
         }
+        let d_max = renderer.plugin_delay_frames();
         Ok(Self {
             renderer,
             schedule,
@@ -197,6 +216,9 @@ impl AudioExportRender {
             stem_indices,
             stem_buffers: vec![vec![[0.0; 2]; BLOCK_FRAMES]; count],
             mix_buffer: vec![[0.0; 2]; BLOCK_FRAMES],
+            d_max,
+            trim_remaining: d_max,
+            offline,
         })
     }
     pub fn total_frames(&self) -> u64 {
@@ -261,12 +283,12 @@ impl AudioExportRender {
             if !self.tail_started && self.segment + 1 < self.schedule.segments.len() {
                 self.segment += 1;
                 let segment = &self.schedule.segments[self.segment];
-                self.renderer.seek_tick(segment.start_tick);
+                self.renderer.wrap_to_tick(segment.start_tick);
                 self.remaining = segment.frames;
             } else if !self.tail_started {
                 self.tail_started = true;
                 self.renderer.begin_tail();
-                self.remaining = self.schedule.tail_frames;
+                self.remaining = self.schedule.tail_frames + self.d_max as u64;
             } else {
                 return 0;
             }
@@ -275,7 +297,43 @@ impl AudioExportRender {
         self.remaining -= n as u64;
         n
     }
+    fn check_plugin_faults(&self) -> Result<(), String> {
+        if let Some(offline) = &self.offline {
+            offline.check_faults()?;
+        }
+        Ok(())
+    }
+    fn trim_pre_roll(&mut self) -> Result<(), String> {
+        if self.trim_remaining == 0 {
+            return Ok(());
+        }
+        let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
+        while self.trim_remaining > 0 {
+            let chunk = self.trim_remaining.min(BLOCK_FRAMES);
+            let n = self.next_count(chunk);
+            if n == 0 {
+                break;
+            }
+            let status = if self.tail_started {
+                self.renderer.render_into(&mut scratch[..n])
+            } else {
+                self.renderer.render_until(
+                    &mut scratch[..n],
+                    self.schedule.segments[self.segment].end_tick,
+                )
+            };
+            if status.frames != n {
+                return Err(
+                    "Native renderer returned an incomplete export block during pre-roll.".into(),
+                );
+            }
+            self.check_plugin_faults()?;
+            self.trim_remaining -= n;
+        }
+        Ok(())
+    }
     pub fn render_mix(&mut self, output: &mut [[f32; 2]]) -> Result<usize, String> {
+        self.trim_pre_roll()?;
         let n = self.next_count(output.len());
         if n == 0 {
             return Ok(0);
@@ -291,9 +349,11 @@ impl AudioExportRender {
         if status.frames != n {
             return Err("Native renderer returned an incomplete export block.".into());
         }
+        self.check_plugin_faults()?;
         Ok(n)
     }
     pub fn render_stems(&mut self, outputs: &mut [Vec<[f32; 2]>]) -> Result<usize, String> {
+        self.trim_pre_roll()?;
         let expected = self.stem_indices.len() + usize::from(self.request.include_mix);
         if outputs.len() != expected || outputs.iter().any(|b| b.len() < BLOCK_FRAMES) {
             return Err("Stem output buffers do not match the prepared export.".into());
@@ -316,6 +376,7 @@ impl AudioExportRender {
         if status.frames != n {
             return Err("Native renderer returned an incomplete stem block.".into());
         }
+        self.check_plugin_faults()?;
         for (output, &index) in outputs.iter_mut().zip(&self.stem_indices) {
             output[..n].copy_from_slice(&self.stem_buffers[index][..n]);
         }
@@ -660,5 +721,219 @@ mod tests {
         .unwrap();
         assert_eq!(schedule.segments[0].start_tick, 0.0);
         assert_eq!(schedule.total_frames, 99000);
+    }
+
+    #[test]
+    fn missing_plugin_exports_built_in_with_warning() {
+        use crate::plugins::service::{PluginPaths, PluginService, SlotRequest};
+        use crate::plugins::status::PluginStatus;
+        use crate::settings::{PluginFormat, PluginSlot};
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let service = PluginService::new(
+            PluginPaths {
+                helper: dir.path().join("helper.exe"),
+                library_dir: dir.path().join("library"),
+                consent_file: dir.path().join("consent.json"),
+            },
+            Box::new(|_| {}),
+        )
+        .unwrap();
+
+        let req = SlotRequest {
+            track_id: "t1".into(),
+            slot: PluginSlot {
+                active: true,
+                format: PluginFormat::Vst3,
+                class_id: "missing-class-id".into(),
+                name: "Missing Plug".into(),
+                vendor: "Test".into(),
+                state: "state".into(),
+                input_db: 0.0,
+                output_db: 0.0,
+            },
+            state: Arc::new([]),
+        };
+
+        let result = service.offline_inserts("doc1", &[req], 48000).unwrap();
+        assert!(result.inserts.is_empty());
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].status, PluginStatus::Missing);
+    }
+
+    #[test]
+    fn needs_consent_exports_built_in_with_warning() {
+        use crate::plugins::library::PluginLibrary;
+        use crate::plugins::service::{PluginPaths, PluginService, SlotRequest};
+        use crate::plugins::status::PluginStatus;
+        use crate::settings::{PluginFormat, PluginSlot};
+        use std::sync::Arc;
+        use tabplayer_plugin_protocol::control::ClassInfo;
+
+        let dir = tempfile::tempdir().unwrap();
+        let lib_dir = dir.path().join("library");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        let fake_bundle = dir.path().join("test.vst3");
+        std::fs::write(&fake_bundle, b"module").unwrap();
+
+        let class_id = "A".repeat(32);
+        let mut lib = PluginLibrary::open(&lib_dir).unwrap();
+        lib.add(&fake_bundle, |_| {
+            Ok(vec![ClassInfo {
+                class_id: class_id.clone(),
+                name: "Test Class".into(),
+                vendor: "Vendor".into(),
+                version: "1.0".into(),
+                subcategories: "Fx".into(),
+            }])
+        })
+        .unwrap();
+
+        let service = PluginService::new(
+            PluginPaths {
+                helper: dir.path().join("helper.exe"),
+                library_dir: lib_dir,
+                consent_file: dir.path().join("consent.json"),
+            },
+            Box::new(|_| {}),
+        )
+        .unwrap();
+
+        let req = SlotRequest {
+            track_id: "t1".into(),
+            slot: PluginSlot {
+                active: true,
+                format: PluginFormat::Vst3,
+                class_id: class_id.clone(),
+                name: "Unconsented Plug".into(),
+                vendor: "Test".into(),
+                state: "unconsented_state".into(),
+                input_db: 0.0,
+                output_db: 0.0,
+            },
+            state: Arc::new([]),
+        };
+
+        let result = service.offline_inserts("doc1", &[req], 48000).unwrap();
+        assert!(result.inserts.is_empty());
+        assert_eq!(result.warnings.len(), 1);
+        assert_eq!(result.warnings[0].status, PluginStatus::NeedsConsent);
+    }
+
+    #[test]
+    fn segments_keep_streaming() {
+        use crate::audio::plugin_insert::{InsertMode, PluginInsert};
+        use crate::audio::resources::AudioResources;
+        use crate::plugins::bridge::{BridgeLink, InsertShared};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        use std::time::Duration;
+        use tabplayer_plugin_protocol::ring::{Block, OwnedRing};
+
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({
+            "generation": 1, "ppq": 960, "durationTick": 7680, "durationMs": 4000,
+            "tracks": [{"id": "t1", "program": 24, "percussion": false}],
+            "tempos": [{"tick": 0, "bpm": 120}],
+            "occurrences": [
+                {"bar": 0, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 0, "endTick": 3840, "startMs": 0, "endMs": 2000},
+                {"bar": 1, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 3840, "endTick": 7680, "startMs": 2000, "endMs": 4000}
+            ],
+            "notes": [],
+            "midi": []
+        }))
+        .unwrap();
+
+        let resources = Arc::new(
+            AudioResources::load_for_requests(
+                &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+                &[],
+            )
+            .unwrap(),
+        );
+
+        let mut settings = crate::settings::DocumentSettings::default();
+        settings.sounds.insert(
+            "t1".into(),
+            crate::settings::TrackSound {
+                voice_id: Some("gm".into()),
+                ..Default::default()
+            },
+        );
+
+        let mut renderer =
+            Renderer::new(Arc::new(plan.clone()), resources, settings, 48000).unwrap();
+
+        let owned = OwnedRing::new(48000);
+        let mut helper = owned.helper();
+        let link = BridgeLink::in_process(owned);
+        let input_ev = link.input_event().clone();
+        let output_ev = link.output_event().clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = stop.clone();
+        let thread_input_ev = input_ev.clone();
+        let helper_thread = std::thread::spawn(move || {
+            let mut block: Block = [[0.0; 2]; 128];
+            let mut seq = 0;
+            while !stop_clone.load(Ordering::Relaxed) {
+                thread_input_ev.wait(Duration::from_millis(2));
+                while let Some(input) = helper.read_input(seq, &mut block).block() {
+                    helper.publish_output(seq, input.epoch, &block, &input.meta);
+                    output_ev.signal();
+                    seq = seq.wrapping_add(1);
+                }
+            }
+        });
+
+        let insert = PluginInsert::new(
+            link,
+            InsertMode::Offline {
+                timeout: Duration::from_secs(5),
+            },
+            0,
+            0.0,
+            0.0,
+            48000,
+            Arc::new(InsertShared::default()),
+        )
+        .unwrap();
+
+        renderer.attach_plugin(0, Box::new(insert));
+
+        let request = AudioExportRequest {
+            tracks: vec![StemTrack {
+                id: "t1".into(),
+                name: "t1".into(),
+                preset: "clean".into(),
+                kind: StemKind::Score,
+            }],
+            range: None,
+            format: AudioFormat::wav(48000, 24),
+            speed: 1.0,
+            metronome: false,
+            metronome_sound: Default::default(),
+            tail_seconds: 0.1,
+            include_backing: false,
+            include_mix: true,
+            normalize_rms_db: None,
+        };
+
+        let mut render =
+            AudioExportRender::new_with_plugins(renderer, &plan, request, None).unwrap();
+        let mut buffer = vec![[0.0f32; 2]; 4096];
+        let mut total = 0;
+        loop {
+            let n = render.render_mix(&mut buffer).unwrap();
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        assert_eq!(total as u64, render.total_frames());
+        stop.store(true, Ordering::Relaxed);
+        input_ev.signal();
+        let _ = helper_thread.join();
     }
 }

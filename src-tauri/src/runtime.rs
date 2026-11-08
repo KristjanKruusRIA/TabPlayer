@@ -1112,25 +1112,54 @@ pub async fn export_audio(
     let launch_path = path.clone();
     let launch_settings = settings.clone();
     let include_backing = request.include_backing;
-    let (mut capture, root) = tauri::async_runtime::spawn_blocking(move || {
-        let audio = launch_app.state::<NativeAudio>();
-        if stems {
-            audio
-                .protect_destination(launch_path.parent().ok_or("Choose a new stem directory.")?)?;
-        }
-        let captured = audio.launch_export(
-            &launch_app.state::<ExportJobs>(),
-            &launch_app.state::<Arc<Mutex<DocumentWorkspace>>>(),
-            &document,
-            Some(&launch_path),
-            export_source_settings(include_backing, &launch_settings),
-            embedded_bytes,
-            0,
-        )?;
-        Ok::<_, String>((captured, audio.root.clone()))
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    let document_id = document.document_id.clone();
+    let export_doc_id = document.document_id.clone();
+    let selected_track_ids: Vec<String> = request.tracks.iter().map(|t| t.id.clone()).collect();
+    let plan_tracks_for_slots = plan.tracks.clone();
+    let (mut capture, root, slot_requests, plugin_service) =
+        tauri::async_runtime::spawn_blocking(move || {
+            let audio = launch_app.state::<NativeAudio>();
+            if stems {
+                audio.protect_destination(
+                    launch_path.parent().ok_or("Choose a new stem directory.")?,
+                )?;
+            }
+            let captured = audio.launch_export(
+                &launch_app.state::<ExportJobs>(),
+                &launch_app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+                &document,
+                Some(&launch_path),
+                export_source_settings(include_backing, &launch_settings),
+                embedded_bytes,
+                0,
+            )?;
+            let plugin_service = audio.plugins.clone().or_else(|| {
+                launch_app
+                    .try_state::<Arc<crate::plugins::service::PluginService>>()
+                    .map(|s| s.inner().clone())
+            });
+            let workspace_state = launch_app.state::<Arc<Mutex<DocumentWorkspace>>>();
+            let ws = workspace_state.lock().map_err(|e| e.to_string())?;
+            let slot_requests = plan_tracks_for_slots
+                .iter()
+                .filter(|t| selected_track_ids.iter().any(|id| id == &t.id))
+                .filter_map(|track| {
+                    let sound = launch_settings.sounds.get(&track.id)?;
+                    let slot = sound.plugin.clone()?;
+                    let bytes = ws
+                        .asset_bytes(&document_id, &slot.state)
+                        .unwrap_or_default();
+                    Some(crate::plugins::service::SlotRequest {
+                        track_id: track.id.clone(),
+                        slot,
+                        state: bytes.into(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok::<_, String>((captured, audio.root.clone(), slot_requests, plugin_service))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
     // Keep plan indices stable; only the selected tracks participate in its mixer.
     for track in &plan.tracks {
         if !request
@@ -1146,6 +1175,19 @@ pub async fn export_audio(
     let id = capture.job.id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = (|| {
+            let offline_plugins = if let Some(plugins) = &plugin_service {
+                if !slot_requests.is_empty() {
+                    let offline = plugins
+                        .offline_inserts(&export_doc_id, &slot_requests, request.format.sample_rate)
+                        .map_err(|e| e.to_string())?;
+                    capture.job.warnings(offline.warnings.clone());
+                    Some(offline)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             let backing_audio = prepare_export_backing(
                 &plan,
                 &settings,
@@ -1186,7 +1228,8 @@ pub async fn export_audio(
             }
             let format = request.format;
             let normalize = request.normalize_rms_db;
-            let mut render = AudioExportRender::new(renderer, &plan, request)?;
+            let mut render =
+                AudioExportRender::new_with_plugins(renderer, &plan, request, offline_plugins)?;
             let job = &capture.job;
             // Normalizing renders the audio and then writes it, so its progress counts both passes.
             job.total_frames(render.total_frames() * if normalize.is_some() { 2 } else { 1 });

@@ -65,6 +65,62 @@ pub struct TrackPluginStatus {
     pub status: PluginStatus,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExportPluginError {
+    Failed { name: String, status: PluginStatus },
+}
+
+impl std::fmt::Display for ExportPluginError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExportPluginError::Failed { name, status } => {
+                write!(f, "Plug-in \"{name}\" failed during export ({status:?}).")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ExportPluginError {}
+
+#[derive(Clone)]
+pub struct OfflinePluginDescriptor {
+    pub track_id: String,
+    pub name: String,
+    pub shared: Arc<InsertShared>,
+    pub session: Arc<dyn HelperSession>,
+}
+
+pub struct OfflinePlugins {
+    pub inserts: Vec<(String, Box<crate::audio::plugin_insert::PluginInsert>)>,
+    pub warnings: Vec<TrackPluginStatus>,
+    pub sessions: Vec<Arc<dyn HelperSession>>,
+    pub descriptors: Vec<OfflinePluginDescriptor>,
+    monitor_stop: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl OfflinePlugins {
+    pub fn check_faults(&self) -> Result<(), String> {
+        for desc in &self.descriptors {
+            if desc.shared.fault.load(Ordering::Acquire) != 0 {
+                return Err(format!("Plug-in \"{}\" failed during export.", desc.name));
+            }
+            if desc.shared.disconnected.load(Ordering::Acquire) || !desc.session.is_alive() {
+                return Err(format!("Plug-in \"{}\" failed during export.", desc.name));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for OfflinePlugins {
+    fn drop(&mut self) {
+        self.monitor_stop.store(true, Ordering::Relaxed);
+        for session in &self.sessions {
+            session.shutdown();
+        }
+    }
+}
+
 pub trait HelperSession: Send + Sync {
     fn link(&self) -> BridgeLink;
     fn latency(&self) -> u32;
@@ -87,6 +143,15 @@ pub trait Launcher: Send + Sync {
         state: StateParts,
         supervisor: &Supervisor,
         key: HelperKey,
+    ) -> Result<Arc<dyn HelperSession>, HelperError>;
+
+    fn launch_offline(
+        &self,
+        exe: &Path,
+        bundle: &Path,
+        class_id: &str,
+        rate: u32,
+        state: StateParts,
     ) -> Result<Arc<dyn HelperSession>, HelperError>;
 
     fn probe(
@@ -184,6 +249,33 @@ impl Launcher for RealLauncher {
         let loaded = process.load(req)?;
         let shared = Arc::new(InsertShared::default());
         supervisor.watch(key, process.clone(), shared.clone());
+        Ok(Arc::new(RealSession {
+            process,
+            latency: AtomicU32::new(loaded.latency),
+            mono: loaded.mono,
+            shared,
+        }))
+    }
+
+    fn launch_offline(
+        &self,
+        exe: &Path,
+        bundle: &Path,
+        class_id: &str,
+        rate: u32,
+        state: StateParts,
+    ) -> Result<Arc<dyn HelperSession>, HelperError> {
+        let process = Arc::new(HelperProcess::launch(exe, &self.job)?);
+        let req = LoadRequest {
+            bundle: bundle.to_path_buf(),
+            class_id: class_id.to_string(),
+            sample_rate: rate,
+            mode: Mode::Offline,
+            component: state.component,
+            controller: state.controller,
+        };
+        let loaded = process.load(req)?;
+        let shared = Arc::new(InsertShared::default());
         Ok(Arc::new(RealSession {
             process,
             latency: AtomicU32::new(loaded.latency),
@@ -890,6 +982,223 @@ impl PluginService {
         Ok(encoded)
     }
 
+    pub fn offline_inserts(
+        &self,
+        _document_id: &str,
+        slots: &[SlotRequest],
+        rate: u32,
+    ) -> Result<OfflinePlugins, ExportPluginError> {
+        let mut inserts = Vec::new();
+        let mut warnings = Vec::new();
+        let mut sessions = Vec::new();
+        let mut descriptors = Vec::new();
+        let mut active_count = 0;
+
+        for request in slots {
+            let slot = &request.slot;
+            if !slot.active {
+                continue;
+            }
+            active_count += 1;
+
+            #[cfg(not(windows))]
+            {
+                warnings.push(TrackPluginStatus {
+                    track_id: request.track_id.clone(),
+                    class_id: slot.class_id.clone(),
+                    name: slot.name.clone(),
+                    vendor: slot.vendor.clone(),
+                    status: PluginStatus::UnsupportedPlatform,
+                });
+                continue;
+            }
+
+            if active_count > MAX_ACTIVE_SLOTS_PER_DOCUMENT {
+                warnings.push(TrackPluginStatus {
+                    track_id: request.track_id.clone(),
+                    class_id: slot.class_id.clone(),
+                    name: slot.name.clone(),
+                    vendor: slot.vendor.clone(),
+                    status: PluginStatus::TooMany,
+                });
+                continue;
+            }
+
+            let mut library = match PluginLibrary::open(&self.paths.library_dir) {
+                Ok(lib) => lib,
+                Err(_) => {
+                    return Err(ExportPluginError::Failed {
+                        name: slot.name.clone(),
+                        status: PluginStatus::Unreadable,
+                    });
+                }
+            };
+
+            let resolved = library.resolve(&slot.class_id);
+            let is_changed = matches!(resolved, Resolved::Changed(_));
+            let entry = match resolved {
+                Resolved::Missing => {
+                    warnings.push(TrackPluginStatus {
+                        track_id: request.track_id.clone(),
+                        class_id: slot.class_id.clone(),
+                        name: slot.name.clone(),
+                        vendor: slot.vendor.clone(),
+                        status: PluginStatus::Missing,
+                    });
+                    continue;
+                }
+                Resolved::Found(entry) | Resolved::Changed(entry) => entry,
+            };
+
+            let consent = ConsentStore::open(&self.paths.consent_file).unwrap_or_else(|_| {
+                ConsentStore::open(self.paths.library_dir.join("consent.json")).unwrap()
+            });
+            if !consent.allowed(&slot.class_id, &slot.state) {
+                warnings.push(TrackPluginStatus {
+                    track_id: request.track_id.clone(),
+                    class_id: slot.class_id.clone(),
+                    name: slot.name.clone(),
+                    vendor: slot.vendor.clone(),
+                    status: PluginStatus::NeedsConsent,
+                });
+                continue;
+            }
+
+            let bundle = if is_changed {
+                let reprobed = library.reprobe(&slot.class_id, |b| {
+                    self.launcher.probe(&self.paths.helper, b, PROBE_TIMEOUT)
+                });
+                match reprobed {
+                    Ok(Resolved::Found(reprobed_entry)) => reprobed_entry.bundle,
+                    Ok(Resolved::Missing) => {
+                        warnings.push(TrackPluginStatus {
+                            track_id: request.track_id.clone(),
+                            class_id: slot.class_id.clone(),
+                            name: slot.name.clone(),
+                            vendor: slot.vendor.clone(),
+                            status: PluginStatus::Missing,
+                        });
+                        continue;
+                    }
+                    _ => {
+                        return Err(ExportPluginError::Failed {
+                            name: slot.name.clone(),
+                            status: PluginStatus::Unreadable,
+                        });
+                    }
+                }
+            } else {
+                entry.bundle
+            };
+
+            if !self.paths.helper.exists() {
+                return Err(ExportPluginError::Failed {
+                    name: slot.name.clone(),
+                    status: PluginStatus::HostMissing,
+                });
+            }
+
+            let decoded = decode_state(&request.state);
+            let (comp, ctrl) = match decoded {
+                Ok((comp, ctrl)) => (comp, ctrl),
+                Err(_) => {
+                    return Err(ExportPluginError::Failed {
+                        name: slot.name.clone(),
+                        status: PluginStatus::RejectedState,
+                    });
+                }
+            };
+            let state_parts = StateParts {
+                component: comp.to_vec(),
+                controller: ctrl.to_vec(),
+            };
+
+            let session = match self.launcher.launch_offline(
+                &self.paths.helper,
+                &bundle,
+                &slot.class_id,
+                rate,
+                state_parts,
+            ) {
+                Ok(session) => session,
+                Err(err) => {
+                    let status = err.status().unwrap_or(PluginStatus::Unreadable);
+                    return Err(ExportPluginError::Failed {
+                        name: slot.name.clone(),
+                        status,
+                    });
+                }
+            };
+
+            let link = session.link();
+            let latency = session.latency();
+            let shared = session.shared();
+            let insert = match crate::audio::plugin_insert::PluginInsert::new(
+                link,
+                crate::audio::plugin_insert::InsertMode::Offline {
+                    timeout: tabplayer_plugin_protocol::limits::REQUEST_TIMEOUT,
+                },
+                latency,
+                slot.input_db,
+                slot.output_db,
+                rate,
+                shared.clone(),
+            ) {
+                Ok(insert) => insert,
+                Err(crate::audio::plugin_insert::InsertError::TooMuchLatency) => {
+                    session.shutdown();
+                    return Err(ExportPluginError::Failed {
+                        name: slot.name.clone(),
+                        status: PluginStatus::TooMuchLatency,
+                    });
+                }
+                Err(_) => {
+                    session.shutdown();
+                    return Err(ExportPluginError::Failed {
+                        name: slot.name.clone(),
+                        status: PluginStatus::Unreadable,
+                    });
+                }
+            };
+
+            descriptors.push(OfflinePluginDescriptor {
+                track_id: request.track_id.clone(),
+                name: slot.name.clone(),
+                shared: shared.clone(),
+                session: session.clone(),
+            });
+            sessions.push(session);
+            inserts.push((request.track_id.clone(), Box::new(insert)));
+        }
+
+        let monitor_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if !descriptors.is_empty() {
+            let stop_clone = monitor_stop.clone();
+            let descriptors_clone = descriptors.clone();
+            std::thread::Builder::new()
+                .name("offline-plugin-monitor".into())
+                .spawn(move || {
+                    while !stop_clone.load(Ordering::Relaxed) {
+                        for desc in &descriptors_clone {
+                            if !desc.session.is_alive() {
+                                desc.shared.disconnected.store(true, Ordering::Release);
+                            }
+                        }
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                })
+                .ok();
+        }
+
+        Ok(OfflinePlugins {
+            inserts,
+            warnings,
+            sessions,
+            descriptors,
+            monitor_stop,
+        })
+    }
+
     pub fn shutdown_document(&self, document_id: &str) {
         let mut inner = self.inner.lock().unwrap();
         let keys_to_remove: Vec<HelperKey> = inner
@@ -1006,6 +1315,27 @@ mod tests {
             _state: StateParts,
             _supervisor: &Supervisor,
             _key: HelperKey,
+        ) -> Result<Arc<dyn HelperSession>, HelperError> {
+            self.launch_count.fetch_add(1, Ordering::SeqCst);
+            let delay = self.launch_delay_ms.load(Ordering::SeqCst);
+            if delay > 0 {
+                std::thread::sleep(Duration::from_millis(delay));
+            }
+            if let Some(err) = self.fail_next.lock().unwrap().take() {
+                return Err(err);
+            }
+            let session = Arc::new(FakeSession::new());
+            *self.last_session.lock().unwrap() = Some(session.clone());
+            Ok(session)
+        }
+
+        fn launch_offline(
+            &self,
+            _exe: &Path,
+            _bundle: &Path,
+            _class_id: &str,
+            _rate: u32,
+            _state: StateParts,
         ) -> Result<Arc<dyn HelperSession>, HelperError> {
             self.launch_count.fetch_add(1, Ordering::SeqCst);
             let delay = self.launch_delay_ms.load(Ordering::SeqCst);

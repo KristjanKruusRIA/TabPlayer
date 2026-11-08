@@ -1886,6 +1886,18 @@ impl Renderer {
     pub fn plugin_delay_frames(&self) -> usize {
         self.mix.compensation.as_ref().map_or(0, |c| c.d_max())
     }
+    /// Attaches an insert to track `track` and updates delay compensation.
+    pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
+        self.mix.attach_plugin(track, insert);
+    }
+    /// Attaches offline plug-in inserts to matching track IDs and updates delay compensation.
+    pub fn attach_offline_plugins(&mut self, inserts: Vec<(String, Box<PluginInsert>)>) {
+        for (track_id, insert) in inserts {
+            if let Some(index) = self.plan.tracks.iter().position(|t| t.id == track_id) {
+                self.mix.attach_plugin(index, insert);
+            }
+        }
+    }
     /// Advances plug-in inserts and compensation lines with silent input during a count-in,
     /// returning the delayed audio and click. With no compensation, returns `[click, click]`.
     pub fn count_in_frame(&mut self, click: f32) -> [f32; 2] {

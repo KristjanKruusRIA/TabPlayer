@@ -675,6 +675,9 @@ impl PluginInsert {
             if now >= deadline {
                 return OutputRead::NotReady;
             }
+            if self.shared.disconnected.load(Ordering::Relaxed) {
+                return OutputRead::NotReady;
+            }
             self.link
                 .output_event()
                 .wait((deadline - now).min(Duration::from_millis(20)));

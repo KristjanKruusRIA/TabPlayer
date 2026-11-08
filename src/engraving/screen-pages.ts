@@ -31,12 +31,14 @@ function validBeatRealRect(rect:ScreenRect,bar:ScreenRect):void {
 }
 type BeatBox={beat:model.Beat;realBounds:ScreenRect};
 /**
- * The stretch of a bar a beat owns: from its own x to the x of the next beat of the same voice, or to the bar's right edge for the last one.
+ * The stretch of a bar a beat owns: from its own x to the x of the next beat of the same voice, or, for the last one, its own end (the bar's right edge only when that width is negative).
  * alphaTab's real width cannot be used for this when beats are crowded: it is negative for some beats and overshoots the next beat for others.
  */
 export function beatSpan(bar:{realBounds:ScreenRect;beats:readonly BeatBox[]},bound:BeatBox):ScreenRect {
   const lane=bar.beats.filter(item=>item.beat.voice===bound.beat.voice),index=lane.indexOf(bound),next=index>=0?lane[index+1]:undefined;
-  const right=next?next.realBounds.x:bar.realBounds.x+bar.realBounds.w,box=bound.realBounds;
+  const box=bound.realBounds;
+  // The last beat keeps alphaTab's own end (short of the barline) unless that width is negative.
+  const right=next?next.realBounds.x:box.w>=0?box.x+box.w:bar.realBounds.x+bar.realBounds.w;
   return {x:box.x,y:box.y,w:Math.max(0,right-box.x),h:box.h};
 }
 /** `beatSpan` for a beat found through the bounds lookup; a beat without a bar keeps its own box with the width kept non-negative. */

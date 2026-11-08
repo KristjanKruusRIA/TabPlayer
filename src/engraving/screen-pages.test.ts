@@ -196,6 +196,16 @@ describe('crowded beats',()=>{
       for(let i=0;i<spans.length-1;i++)expect(spans[i].x+spans[i].w).toBeCloseTo(spans[i+1].x);
     }
   });
+  it('keeps alphaTab\'s own box for a last beat whose width is not negative, so the gap before the barline stays unowned',()=>{
+    let checked=0;
+    for(const {bar} of barsOf()){
+      const last=[...bar.beats].reverse().find(beat=>beat.beat.voice===bar.beats[0].beat.voice);
+      if(!last||last.realBounds.w<0)continue;
+      const span=beatSpan(bar,last);
+      expect(span.x).toBe(last.realBounds.x);expect(span.w).toBeCloseTo(last.realBounds.w,9);checked++;
+    }
+    expect(checked).toBeGreaterThan(0);
+  });
   it('picks the crowded beat, not its neighbour, for a click in its column away from any notehead',()=>{
     const pagination=paginateScreenScore(crowded.chunks,crowded.bounds,wide),arranged=arrangeScreenPages(pagination,'verticalPage',1,pagination.paper.width);
     let checked=0;

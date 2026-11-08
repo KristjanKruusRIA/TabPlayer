@@ -153,13 +153,13 @@ describe('whole renderer blocks',()=>{
 describe('crowded beats',()=>{
   // alphaTab gives a beat a negative real width when forced systems pack beats tighter than their natural width.
   it('paginates when a beat reports a negative real width, and still rejects a non-finite one',()=>{
-    const beat=fixture.bounds.staffSystems[0].bars[0].bars[0].beats[0],original=beat.realBounds;
+    const beat=fixture.bounds.staffSystems[0].bars[0].bars[0].beats[0],original=beat.realBounds,withChange=(change:Partial<ScreenRect>)=>Object.assign(Object.create(Object.getPrototypeOf(original)),original,change);
     try{
-      beat.realBounds={...original,w:-6.4};
+      beat.realBounds=withChange({w:-6.4});
       expect(()=>paginateScreenScore(fixture.chunks,fixture.bounds,page)).not.toThrow();
-      beat.realBounds={...original,w:NaN};
+      beat.realBounds=withChange({w:NaN});
       expect(()=>paginateScreenScore(fixture.chunks,fixture.bounds,page)).toThrow(/bounds|geometry/i);
-      beat.realBounds={...original,h:-1};
+      beat.realBounds=withChange({h:-1});
       expect(()=>paginateScreenScore(fixture.chunks,fixture.bounds,page)).toThrow(/bounds|geometry/i);
     }finally{beat.realBounds=original;}
   });

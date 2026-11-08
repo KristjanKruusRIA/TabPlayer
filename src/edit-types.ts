@@ -87,9 +87,13 @@ export interface FxSettings {
   second?: FxSettings;
 }
 export type EffectBlock = Exclude<keyof FxSettings, 'order'|'second'>;
+/** A VST3 plug-in in a track's chain. `state` is the id (a lowercase SHA-256 digest) of the asset that holds the plug-in's saved state. */
+export interface PluginSlot { format: 'vst3'; classId: string; name: string; vendor: string; active: boolean; inputDb: number; outputDb: number; state: string }
 export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings; locked?: boolean;
   /** The drum kit a percussion track plays, as the program that selects it in the sound bank (8, 32 or 40); left out for the Standard kit. */
-  drumKit?: number }
+  drumKit?: number;
+  /** The plug-in after the track's pedalboard; left out for a track with none. */
+  plugin?: PluginSlot }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }
 export interface ReferenceSyncBounds { entryAudioMs: number; exitAudioMs: number }
 export type BackingFilter = 'none'|'bassEnhance'|'bassAttenuation'|'mediumEnhance'|'mediumAttenuation'|'highEnhance'|'highAttenuation';

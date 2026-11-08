@@ -6,6 +6,8 @@ import type { SyncAnchor } from './edit-types';
 import { buildPlaybackPlan } from './audio/plan';
 import { completeSound, defaultEffects, laterFields, soundProblem } from './document-settings';
 import { soundPreset } from './audio/sound-model';
+import type { TrackSound } from './edit-types';
+import pluginProtocol from '../tests/plugin-slot-protocol.json';
 
 afterEach(()=>vi.restoreAllMocks());
 
@@ -146,4 +148,31 @@ it('accepts the amp captures the native player accepts and refuses the rest',()=
   const good={id:'ab'.repeat(16),name:'Plexi',levelDb:0};
   for(const value of [good,{...good,levelDb:-12},{...good,levelDb:12},{...good,name:'x'.repeat(64)},null])expect(soundProblem(ampSound(value)),JSON.stringify(value)).toBeNull();
   for(const value of [{...good,id:'zz'},{...good,id:'A'.repeat(32)},{...good,name:'x'.repeat(65)},{...good,name:''},{...good,levelDb:12.5},{...good,levelDb:-12.5},{...good,levelDb:Number.NaN},{...good,extra:1},{id:good.id,name:good.name},'text',[]])expect(soundProblem(ampSound(value)),JSON.stringify(value)).toBe('Invalid effect parameter.');
+});
+
+// A sound carrying this plug-in value, whatever it is.
+const withPlugin=(plugin:unknown)=>({...soundPreset('lead'),plugin}) as unknown as TrackSound;
+const pluginCases=pluginProtocol.cases as {name:string;valid:boolean;set?:Record<string,unknown>;remove?:string[]}[];
+it('accepts a valid plug-in slot and keeps it through completion',()=>{
+  const sound=withPlugin(pluginProtocol.base);
+  expect(soundProblem(sound)).toBeNull();
+  expect(completeSound(sound).plugin).toEqual(pluginProtocol.base);
+  // A track without one is as it was: no key, no problem, and an undefined key is not written back.
+  expect(soundProblem(soundPreset('lead'))).toBeNull();
+  expect('plugin' in soundPreset('lead')).toBe(false);
+  expect('plugin' in completeSound({...soundPreset('lead'),plugin:undefined})).toBe(false);
+});
+it('holds plug-in slots to the rules the native player holds them to, case for case',()=>{
+  expect(pluginCases.length).toBeGreaterThan(60);
+  for(const {name,valid,set,remove} of pluginCases){
+    const slot:Record<string,unknown>={...pluginProtocol.base,...set};
+    for(const key of remove??[])delete slot[key];
+    const problem=soundProblem(withPlugin(slot));
+    expect(problem===null,`${name}: ${problem}`).toBe(valid);
+  }
+});
+it('refuses a malformed plug-in slot and an unknown key beside it',()=>{
+  for(const bad of [null,'vst3',[],{},{...pluginProtocol.base,extra:true},{...pluginProtocol.base,inputDb:Number.NaN},{...pluginProtocol.base,outputDb:Infinity},{...pluginProtocol.base,outputDb:-Infinity}])
+    expect(soundProblem(withPlugin(bad)),JSON.stringify(bad)).toMatch(/^Invalid plug-in/);
+  expect(soundProblem({...withPlugin(pluginProtocol.base),pluginX:{}} as unknown as TrackSound)).toBe('Invalid sound.');
 });

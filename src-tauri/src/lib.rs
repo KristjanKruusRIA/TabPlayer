@@ -18,6 +18,7 @@ pub mod line_in;
 pub mod midi_out;
 pub mod password_crypto;
 pub mod password_lock;
+pub mod plugins;
 pub mod project;
 pub mod recovery;
 pub mod reveal;

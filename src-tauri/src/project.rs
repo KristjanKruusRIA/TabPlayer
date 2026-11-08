@@ -2,11 +2,12 @@ use crate::assets::{AssetInfo, StoredAsset};
 pub use crate::edit_types::{EditCommand, NoteTarget};
 use crate::edit_types::{ScoreMetadata, validate_tempo, validate_tuning};
 use crate::password_crypto::{OpenLock, PasswordVerifier, Salt, present};
+use crate::plugins::state as plugin_state;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -58,6 +59,23 @@ pub struct Project {
     /// that is written as JSON (a recovery backup, say) can never carry it, and saving it to a file seals the file.
     #[serde(skip)]
     pub open_lock: Option<OpenLock>,
+}
+
+/// What an edit says when the project lacks the asset it names.
+fn missing_asset_message(edit: &EditCommand) -> &'static str {
+    if edit.plugin_state_id().is_some() {
+        plugin_state::MISSING_MESSAGE
+    } else {
+        "Backing asset is missing from this project."
+    }
+}
+
+/// The distinct plug-in state ids a run of edits names.
+fn plugin_state_ids<'a>(edits: impl IntoIterator<Item = &'a EditCommand>) -> BTreeSet<&'a str> {
+    edits
+        .into_iter()
+        .filter_map(EditCommand::plugin_state_id)
+        .collect()
 }
 
 fn is_false(value: &bool) -> bool {
@@ -322,9 +340,15 @@ impl Project {
                 .asset_id()
                 .is_some_and(|id| !self.assets.contains_key(id))
             {
-                return Err("Backing asset is missing from this project.".into());
+                return Err(missing_asset_message(edit).into());
             }
         }
+        // Plug-in state is capped from its base64 length, before any asset is decoded (preflight ruling P17).
+        let states = plugin_state_ids(self.baseline_edits.iter().chain(&self.edits));
+        for (id, asset) in &self.assets {
+            plugin_state::check_size_before_decode(asset, states.contains(id.as_str()))?;
+        }
+        plugin_state::check_total(&states, &self.assets, None)?;
         for (id, asset) in &self.assets {
             asset.validate(id)?;
         }
@@ -493,7 +517,12 @@ impl ProjectSession {
                 .asset_id()
                 .is_some_and(|id| !value.project.assets.contains_key(id))
             {
-                return Err("Saved backing asset is missing from recovery.".into());
+                return Err(if edit.plugin_state_id().is_some() {
+                    plugin_state::MISSING_FROM_RECOVERY_MESSAGE
+                } else {
+                    "Saved backing asset is missing from recovery."
+                }
+                .into());
             }
         }
         let asset_info = value.project.view().assets;
@@ -595,7 +624,9 @@ impl ProjectSession {
             return Err(EDIT_LOCKED_MESSAGE.into());
         }
         command.validate()?;
+        let state_id = command.plugin_state_id();
         let staged = if let Some((id, asset)) = asset {
+            plugin_state::check_size_before_decode(&asset, state_id == Some(id.as_str()))?;
             asset.validate(&id)?;
             if command.asset_id() != Some(id.as_str()) {
                 return Err("The edit must reference its staged asset.".into());
@@ -611,20 +642,59 @@ impl ProjectSession {
                     .as_ref()
                     .is_none_or(|(staged_id, _, _)| staged_id != id)
             {
-                return Err("Backing asset is missing from this project.".into());
+                return Err(missing_asset_message(&command).into());
             }
+        }
+        if let Some(id) = state_id {
+            // What the log holds after this edit: the redo tail is about to go, and this edit's state is about to join.
+            let mut states = plugin_state_ids(
+                self.project
+                    .baseline_edits
+                    .iter()
+                    .chain(&self.project.edits[..self.cursor]),
+            );
+            states.insert(id);
+            let staged_asset = staged.as_ref().map(|(id, asset, _)| (id.as_str(), asset));
+            plugin_state::check_total(&states, &self.project.assets, staged_asset)?;
         }
         if let Some((id, asset, info)) = staged {
             self.asset_info.entry(id.clone()).or_insert(info);
             self.project.assets.entry(id).or_insert(asset);
         }
+        let truncates = self.project.edits.len() > self.cursor;
         // A mixer edit on a finalized document clears the redo stack like any edit. List positions are
         // persisted identity (added tracks are keyed by the edit's position
         // in the replay, where a `sequence` counts once per step), so they must never shift.
         self.project.edits.truncate(self.cursor);
         self.project.edits.push(command);
         self.cursor += 1;
+        if truncates {
+            self.drop_unnamed_plugin_states();
+        }
         Ok(self.snapshot())
+    }
+
+    /// Forgets the plug-in state that only the dropped redo tail named, so it cannot pile up past the cap in memory.
+    fn drop_unnamed_plugin_states(&mut self) {
+        let states = plugin_state_ids(
+            self.project
+                .baseline_edits
+                .iter()
+                .chain(&self.project.edits),
+        );
+        let dropped: Vec<String> = self
+            .project
+            .assets
+            .iter()
+            .filter(|(id, asset)| {
+                plugin_state::is_state_asset(asset) && !states.contains(id.as_str())
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in dropped {
+            self.project.assets.remove(&id);
+            self.asset_info.remove(&id);
+        }
     }
 
     pub fn undo(&mut self) -> Result<ProjectSnapshot, ProjectError> {
@@ -943,6 +1013,7 @@ impl CandidateStore {
         self.documents.remove(token).is_some()
     }
     pub fn stage_asset(&mut self, asset: StoredAsset) -> Result<StagedAsset, ProjectError> {
+        plugin_state::check_size_before_decode(&asset, false)?;
         let asset_id = asset.id()?;
         asset.validate(&asset_id)?;
         let token = candidate_token();
@@ -979,3 +1050,6 @@ impl CandidateStore {
         self.assets.remove(token).is_some()
     }
 }
+
+#[cfg(test)]
+mod plugin_state_tests;

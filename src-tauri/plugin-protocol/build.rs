@@ -1,9 +1,9 @@
-//! Writes `TABPLAYER_PLUGIN_BUILD_ID`: the crate version, the git commit when there is one, and a hash of the protocol
-//! and helper sources. The app and the helper both compile this crate, so a helper rebuilt from different sources, or an
+//! Writes `TABPLAYER_PLUGIN_BUILD_ID`: the crate version and a hash of the protocol and helper sources and the lock file.
+//! The git commit is left out on purpose: Cargo reruns this script per profile and target folder, and only when a watched
+//! file changes, so a commit stamped into one build goes stale and would split identical sources into different ids. The app and the helper both compile this crate, so a helper rebuilt from different sources, or an
 //! old one left in `binaries/` or `target/`, cannot present the id the app expects (preflight ruling P33).
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 mod build_id;
 
@@ -26,19 +26,6 @@ fn collect(dir: &Path, root: &Path, out: &mut Vec<(String, Vec<u8>)>) {
     }
 }
 
-fn git(manifest_dir: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(manifest_dir)
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|text| !text.is_empty())
-}
-
 fn main() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     let workspace = manifest_dir.parent().unwrap().to_path_buf();
@@ -51,22 +38,15 @@ fn main() {
         "plugin-protocol/build.rs",
         "plugin-protocol/build_id.rs",
         "plugin-host/Cargo.toml",
+        "Cargo.lock",
     ] {
         let path = workspace.join(file);
         println!("cargo:rerun-if-changed={}", path.display());
         files.push((file.to_string(), fs::read(&path).unwrap_or_default()));
     }
-    let commit =
-        git(&manifest_dir, &["rev-parse", "--short=12", "HEAD"]).unwrap_or_else(|| "nogit".into());
-    if let Some(head) = git(&manifest_dir, &["rev-parse", "--git-path", "HEAD"]) {
-        println!(
-            "cargo:rerun-if-changed={}",
-            manifest_dir.join(head).display()
-        );
-    }
     let version = std::env::var("CARGO_PKG_VERSION").unwrap();
     println!(
-        "cargo:rustc-env=TABPLAYER_PLUGIN_BUILD_ID={version}+{commit}-{}",
+        "cargo:rustc-env=TABPLAYER_PLUGIN_BUILD_ID={version}+{}",
         build_id::fingerprint(&files)
     );
 }

@@ -146,10 +146,8 @@ mod build_id_tests {
 
     #[test]
     fn the_build_id_is_a_generated_fingerprint_not_a_typed_version() {
-        let (version, rest) = BUILD_ID.split_once('+').expect("version+fingerprint");
+        let (version, hash) = BUILD_ID.split_once('+').expect("version+fingerprint");
         assert!(!version.is_empty(), "{BUILD_ID}");
-        let (commit, hash) = rest.rsplit_once('-').expect("commit-hash");
-        assert!(!commit.is_empty(), "{BUILD_ID}");
         assert_eq!(hash.len(), 16, "{BUILD_ID}");
         assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()), "{BUILD_ID}");
         assert_ne!(BUILD_ID, "0.2.0");

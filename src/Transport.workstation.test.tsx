@@ -78,3 +78,11 @@ it('stylesheet rules that jsdom cannot apply: the bar stays one row, the popover
   expect(css).not.toMatch(/\.transport[^{}]*output\s*\{[^}]*min-width:135px/);
   expect(shell).toMatch(/\.toolbar\s*\{[^}]*grid-template-columns:minmax\(0,1fr\) auto minmax\(0,1fr\)/);
 });
+it('the toolbar feedback line reserves its height so the More playback panel opens below it (THE-187)',()=>{
+  const {player,update}=fixture(),height=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){return {height:this.classList.contains('transport-messages')?16.2:0} as DOMRect;});
+  const real=window.getComputedStyle.bind(window),style=vi.spyOn(window,'getComputedStyle').mockImplementation((node,pseudo)=>(node as HTMLElement).classList?.contains('transport-messages')?({position:'absolute'}) as CSSStyleDeclaration:real(node,pseudo));
+  try{render(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);const root=screen.getByRole('group',{name:'Transport'});expect(root.style.getPropertyValue('--transport-messages-h')).toBe('0px');
+    update(playback({error:'Loop end must follow its start.'}));expect(root.style.getPropertyValue('--transport-messages-h')).toBe('17px');
+    update(playback());expect(root.style.getPropertyValue('--transport-messages-h')).toBe('0px');}
+  finally{height.mockRestore();style.mockRestore();}
+});

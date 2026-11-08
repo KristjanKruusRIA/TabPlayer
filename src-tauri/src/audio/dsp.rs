@@ -3667,15 +3667,25 @@ impl TrackDsp {
         second | (std::mem::take(&mut self.non_finite) > 0)
     }
     pub fn reset(&mut self) {
-        // A stop or seek: the plug-in's stream starts again, primed; a fade-out in progress ends.
-        if let Some(insert) = &mut self.plugin {
-            insert.flush();
+        self.reset_common(false);
+    }
+    /// A loop wrap: built-in effects are reset, but the plug-in insert, its delay lines,
+    /// and any active crossfade keep streaming without interruption.
+    pub fn reset_for_wrap(&mut self) {
+        self.reset_common(true);
+    }
+    fn reset_common(&mut self, is_wrap: bool) {
+        if !is_wrap {
+            // A stop or seek: the plug-in's stream starts again, primed; a fade-out in progress ends.
+            if let Some(insert) = &mut self.plugin {
+                insert.flush();
+            }
+            self.plugin_fade = 0;
+            self.sounding = false;
+            self.leaving_live = false;
+            self.fade_s = 1.0;
+            self.leaving_part = [0.0; 2];
         }
-        self.plugin_fade = 0;
-        self.sounding = false;
-        self.leaving_live = false;
-        self.fade_s = 1.0;
-        self.leaving_part = [0.0; 2];
         self.gate_envelope = 1.0;
         self.compressor_envelope = 0.0;
         self.amp_dc = [0.0; 2];
@@ -3754,7 +3764,11 @@ impl TrackDsp {
             .as_mut()
             .filter(|_| self.settings.second.is_some())
         {
-            second.reset();
+            if is_wrap {
+                second.reset_for_wrap();
+            } else {
+                second.reset();
+            }
         }
         self.second_gain = if self.settings.second.is_some() {
             1.0

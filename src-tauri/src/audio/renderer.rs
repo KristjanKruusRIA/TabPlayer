@@ -1,11 +1,13 @@
 //! Shared device/offline renderer. Buffers and sample mappings are prepared off the audio thread.
 use super::{
     backing::{BackingMap, BackingVoice},
+    compensation::{Compensation, compensation_capacity},
     decode::DecodedAudio,
     dsp::{FrameContext, FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
     master::MasterBus,
     midi_out::MidiTap,
     plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
+    plugin_insert::PluginInsert,
     practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
     resources::{AudioResources, Region},
     voices::{
@@ -109,8 +111,9 @@ struct PreparedChannel {
 pub struct PreparedMix {
     channels: Vec<PreparedChannel>,
     backing: Gain,
-    master: MasterBus,
+    pub(crate) master: MasterBus,
     rate: u32,
+    pub(crate) compensation: Option<Box<Compensation>>,
 }
 fn validate_mix(mix: &ChannelMix) -> Result<(), String> {
     if !mix.gain.is_finite()
@@ -167,7 +170,47 @@ impl PreparedMix {
             backing: Gain::new(&backing, !backing.mute && (!any_solo || backing.solo)),
             master: MasterBus::new(settings.master.as_ref(), sample_rate)?,
             rate: sample_rate,
+            compensation: None,
         })
+    }
+    /// Accessor for delay compensation.
+    pub fn compensation(&self) -> Option<&Compensation> {
+        self.compensation.as_deref()
+    }
+    /// Maximum delay among all stems in this mix.
+    pub fn plugin_delay_frames(&self) -> usize {
+        self.compensation.as_ref().map_or(0, |c| c.d_max())
+    }
+    /// Attaches plug-in inserts to the corresponding channels and computes delay compensation.
+    pub fn with_inserts(mut self, inserts: Vec<Option<Box<PluginInsert>>>) -> Self {
+        for (i, insert) in inserts.into_iter().enumerate() {
+            if let Some(insert) = insert {
+                if i < self.channels.len() {
+                    self.channels[i].dsp.attach_plugin(insert);
+                }
+            }
+        }
+        self.update_compensation();
+        self
+    }
+    /// Attaches an insert to track `track` and updates delay compensation.
+    pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
+        if track < self.channels.len() {
+            self.channels[track].dsp.attach_plugin(insert);
+            self.update_compensation();
+        }
+    }
+    fn update_compensation(&mut self) {
+        let delays: Vec<usize> = self.channels.iter().map(|c| c.dsp.plugin_delay()).collect();
+        let d_max = *delays.iter().max().unwrap_or(&0);
+        if d_max > 0 {
+            let cap = compensation_capacity(self.rate);
+            self.compensation = Some(Box::new(Compensation::new_with_rate(
+                &delays, cap, self.rate,
+            )));
+        } else {
+            self.compensation = None;
+        }
     }
 }
 #[derive(Clone, Copy, Debug)]
@@ -463,10 +506,19 @@ impl Renderer {
         settings: DocumentSettings,
         sample_rate: u32,
     ) -> Result<Self, String> {
+        let mix = PreparedMix::prepare(&settings, &plan, sample_rate)?;
+        Self::new_with_mix(plan, resources, mix, settings, sample_rate)
+    }
+    pub fn new_with_mix(
+        plan: Arc<PlaybackPlan>,
+        resources: Arc<AudioResources>,
+        mix: PreparedMix,
+        settings: DocumentSettings,
+        sample_rate: u32,
+    ) -> Result<Self, String> {
         let plan = with_drum_kits(with_locked_articulations(plan, &settings), &settings);
         let settings = without_missing_kit(settings, &plan, &resources);
         let timeline = Timeline::new(&plan)?;
-        let mix = PreparedMix::prepare(&settings, &plan, sample_rate)?;
         let track_indices: HashMap<_, _> = plan
             .tracks
             .iter()
@@ -773,7 +825,7 @@ impl Renderer {
         let slots = (0..capacity).map(|_| None).collect();
         let scratch = vec![[0.0; 2]; plan.tracks.len() + 2];
         let kit_scratch = vec![[[0.0; 2]; KIT_ELEMENTS]; plan.tracks.len()];
-        Ok(Self {
+        let mut renderer = Self {
             plan,
             timeline,
             _resources: resources,
@@ -813,7 +865,12 @@ impl Renderer {
             },
             last_click: None,
             click: ClickVoice::new(sample_rate),
-        })
+        };
+        let d_max = renderer.plugin_delay_frames() as u64;
+        if let Some(tap) = &mut renderer.midi {
+            tap.set_delay_frames(d_max);
+        }
+        Ok(renderer)
     }
     fn spawn(
         &mut self,
@@ -1284,6 +1341,9 @@ impl Renderer {
                 self.scratch[index] =
                     [self.scratch[index][0] * gain, self.scratch[index][1] * gain];
             }
+            if let Some(comp) = &mut self.mix.compensation {
+                self.scratch[index] = comp.track(index, self.scratch[index]);
+            }
         }
         let backing_index = self.plan.tracks.len();
         if let Some(backing) = &mut self.backing {
@@ -1291,6 +1351,9 @@ impl Renderer {
                 self.scratch[backing_index] =
                     self.mix.backing.process(backing.next_frame(self.seconds));
             }
+        }
+        if let Some(comp) = &mut self.mix.compensation {
+            self.scratch[backing_index] = comp.backing(self.scratch[backing_index]);
         }
         let mut pulse = None;
         if self.metronome.enabled || self.metronome.visual {
@@ -1313,8 +1376,23 @@ impl Renderer {
             } else {
                 0.0
             });
-            if self.metronome.enabled {
-                self.scratch[backing_index + usize::from(self.backing.is_some())] = [click; 2];
+            let click_in = if self.metronome.enabled {
+                [click; 2]
+            } else {
+                [0.0; 2]
+            };
+            let click_out = match &mut self.mix.compensation {
+                Some(comp) => comp.click(click_in),
+                None => click_in,
+            };
+            let click_index = backing_index + usize::from(self.backing.is_some());
+            if self.metronome.enabled || click_out != [0.0; 2] {
+                self.scratch[click_index] = click_out;
+            }
+        }
+        if let Some(comp) = &mut self.mix.compensation {
+            if !self.metronome.enabled && !self.metronome.visual {
+                comp.click([0.0; 2]);
             }
         }
         // The tracks and backing go through the master's effects and level. The metronome is added after them, so
@@ -1405,6 +1483,9 @@ impl Renderer {
         let mut last_pulse = None;
         for frame in 0..frames {
             let (_, pulse) = self.frame(f64::INFINITY);
+            if let Some(tap) = &mut self.midi {
+                tap.advance_cursor();
+            }
             if pulse.is_some() {
                 pulse_count = pulse_count.saturating_add(1);
                 last_pulse = pulse;
@@ -1438,6 +1519,9 @@ impl Renderer {
         let mut last_pulse = None;
         for frame in 0..frames {
             let (value, pulse) = self.frame(end_tick);
+            if let Some(tap) = &mut self.midi {
+                tap.advance_cursor();
+            }
             mix[frame] = value;
             if pulse.is_some() {
                 pulse_count = pulse_count.saturating_add(1);
@@ -1450,6 +1534,13 @@ impl Renderer {
         self.status(frames, pulse_count, last_pulse)
     }
     pub fn seek_tick(&mut self, tick: f64) {
+        self.seek_tick_internal(tick, false);
+    }
+    /// A loop wrap: repositions playback, but keeps inserts, compensation lines and master bus continuous.
+    pub fn wrap_to_tick(&mut self, tick: f64) {
+        self.seek_tick_internal(tick, true);
+    }
+    fn seek_tick_internal(&mut self, tick: f64, is_wrap: bool) {
         let tick = if tick.is_finite() {
             tick.clamp(0.0, self.duration_tick())
         } else {
@@ -1466,7 +1557,11 @@ impl Renderer {
         }
         self.active.clear();
         for channel in &mut self.mix.channels {
-            channel.dsp.reset();
+            if is_wrap {
+                channel.dsp.reset_for_wrap();
+            } else {
+                channel.dsp.reset();
+            }
         }
         // Everything sounding is cut, so nothing needs the old level to fade from, and held notes struck again below
         // already go where the effective kit sends them.
@@ -1474,7 +1569,12 @@ impl Renderer {
             track.kit_rendered = false;
         }
         self.settle_idle_kit();
-        self.mix.master.reset();
+        if !is_wrap {
+            self.mix.master.reset();
+            if let Some(comp) = &mut self.mix.compensation {
+                comp.flush();
+            }
+        }
         self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);
         self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
@@ -1635,6 +1735,8 @@ impl Renderer {
         }
         let mut old = self.midi.take();
         tap.adopt(old.as_deref_mut());
+        let d_max = self.plugin_delay_frames() as u64;
+        tap.set_delay_frames(d_max);
         self.midi = Some(tap);
         old
     }
@@ -1723,6 +1825,66 @@ impl Renderer {
             (measure.meter_numerator, measure.meter_denominator)
         })
     }
+    /// Delay in frames from plug-in compensation: `D_max`, or 0 without plug-ins.
+    pub fn plugin_delay_frames(&self) -> usize {
+        self.mix.compensation.as_ref().map_or(0, |c| c.d_max())
+    }
+    /// Advances plug-in inserts and compensation lines with silent input during a count-in,
+    /// returning the delayed audio and click. With no compensation, returns `[click, click]`.
+    pub fn count_in_frame(&mut self, click: f32) -> [f32; 2] {
+        if self.mix.compensation.is_none() {
+            return [click, click];
+        }
+        let tick = self.timeline.seconds_to_tick(self.seconds);
+        let bpm = match self.tempo {
+            RenderTempo::Relative { ratio } => self.authored_bpm_at(tick) * ratio,
+            RenderTempo::Fixed { bpm } => bpm,
+        };
+        let (sig_num, sig_den) = self.meter_at(tick);
+        let comp = self.mix.compensation.as_mut().unwrap();
+        let context = FrameContext {
+            bpm,
+            sig_num: sig_num.min(u16::MAX as u32) as u16,
+            sig_den: sig_den.min(u16::MAX as u32) as u16,
+            playing: false,
+            project_frame: (self.seconds * self.rate as f64).round() as i64,
+            project_quarters: tick / self.plan.ppq.max(1) as f64,
+        };
+        for (index, channel) in self.mix.channels.iter_mut().enumerate() {
+            let board = if channel.dsp.has_plugin() {
+                channel.dsp.process_at([0.0; 2], &context)
+            } else {
+                channel.dsp.process([0.0; 2], bpm)
+            };
+            let gained = channel.gain.process(board);
+            self.scratch[index] = comp.track(index, gained);
+        }
+        let backing_index = self.plan.tracks.len();
+        self.scratch[backing_index] = comp.backing([0.0; 2]);
+        let click_index = backing_index + usize::from(self.backing.is_some());
+        self.scratch[click_index] = comp.click([click; 2]);
+
+        let program = self.plan.tracks.len() + usize::from(self.backing.is_some());
+        let mut sum = [0.0; 2];
+        for sample in self.scratch.iter().take(program) {
+            for c in 0..2 {
+                sum[c] += sample[c];
+            }
+        }
+        sum = self.mix.master.bus(sum, bpm);
+        let click_out = self.scratch[click_index];
+        sum[0] += click_out[0];
+        sum[1] += click_out[1];
+        sum = self.mix.master.limit(sum);
+        sum
+    }
+    /// Drains the delay lines and plug-in inserts with silence after playback ends.
+    pub fn drain_frame(&mut self) -> [f32; 2] {
+        if self.mix.compensation.is_none() {
+            return [0.0; 2];
+        }
+        self.count_in_frame(0.0)
+    }
     pub fn has_backing(&self) -> bool {
         self.configured_backing || self.backing.is_some()
     }
@@ -1806,8 +1968,17 @@ impl Renderer {
         settings.backing.current = self.mix.backing.current;
         settings.backing.remaining = (self.rate as f64 * 0.01) as u32;
         settings.master.transition_from(&mut self.mix.master);
+        if let (Some(new_comp), Some(old_comp)) =
+            (&mut settings.compensation, &mut self.mix.compensation)
+        {
+            new_comp.transition_from(old_comp);
+        }
         for (track, channel) in self.tracks.iter_mut().zip(&settings.channels) {
             track.kit_active = channel.kit_active;
+        }
+        let d_max = settings.compensation.as_ref().map_or(0, |c| c.d_max()) as u64;
+        if let Some(tap) = &mut self.midi {
+            tap.set_delay_frames(d_max);
         }
         std::mem::replace(&mut self.mix, settings)
     }

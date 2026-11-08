@@ -141,6 +141,7 @@ pub struct NativeAudioStatus {
     /// Peak absolute sample of the latest clip's own samples, before summing with
     /// playback, clamping or downmix.
     pub audition_peak: f64,
+    pub plugin_delay_frames: usize,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(
@@ -498,6 +499,7 @@ struct SharedStatus {
     /// The system rerouted the live stream (`DeviceChanged`), so the cached name may
     /// be wrong until the next open. A plain flag: the stream's error callback sets it.
     name_stale: AtomicU64,
+    plugin_delay_frames: AtomicU64,
 }
 impl SharedStatus {
     fn new() -> Self {
@@ -548,6 +550,7 @@ impl SharedStatus {
             max_callback_frames: AtomicU32::new(0),
             stream_name: Mutex::new(None),
             name_stale: AtomicU64::new(0),
+            plugin_delay_frames: AtomicU64::new(0),
         }
     }
     fn read(&self) -> NativeAudioStatus {
@@ -641,6 +644,7 @@ impl SharedStatus {
             }),
             audition_serial,
             audition_peak: f64::from_bits(self.audition_peak.load(Ordering::Relaxed)),
+            plugin_delay_frames: self.plugin_delay_frames.load(Ordering::Relaxed) as usize,
         };
         (status, snapshot)
     }
@@ -786,6 +790,7 @@ pub struct CallbackTransport {
     device_frames: usize,
     /// Frames of it already rendered.
     callback_pos: usize,
+    draining: usize,
 }
 impl CallbackTransport {
     pub fn headless(rate: u32) -> Self {
@@ -890,6 +895,7 @@ impl CallbackTransport {
             midi_cursor: 0,
             device_frames: 0,
             callback_pos: 0,
+            draining: 0,
         }
     }
     pub fn status(&self) -> NativeAudioStatus {
@@ -1027,6 +1033,12 @@ impl CallbackTransport {
         self.shared
             .peak
             .store(self.peak.to_bits(), Ordering::Relaxed);
+        self.shared.plugin_delay_frames.store(
+            self.renderer
+                .as_ref()
+                .map_or(0, |r| r.plugin_delay_frames() as u64),
+            Ordering::Relaxed,
+        );
         self.shared.sequence.store(version + 2, Ordering::Release);
     }
     pub fn install(
@@ -1064,8 +1076,9 @@ impl CallbackTransport {
         }
         renderer.set_metronome_settings(accepted.metronome);
         if preserve && generation == self.generation {
-            renderer.seek_tick(self.tick);
+            renderer.wrap_to_tick(self.tick);
         } else {
+            self.draining = 0;
             self.playing = false;
             self.tick = 0.0;
             self.seconds = 0.0;
@@ -1367,9 +1380,18 @@ impl CallbackTransport {
         Ok(())
     }
     fn seek(&mut self, tick: f64) {
+        self.draining = 0;
         if let Some(renderer) = &mut self.renderer {
             renderer.midi_set_cursor(self.midi_cursor);
             renderer.seek_tick(tick);
+            self.seconds = renderer.tick_to_seconds(tick);
+        }
+        self.tick = tick;
+    }
+    fn wrap_to_tick(&mut self, tick: f64) {
+        if let Some(renderer) = &mut self.renderer {
+            renderer.midi_set_cursor(self.midi_cursor);
+            renderer.wrap_to_tick(tick);
             self.seconds = renderer.tick_to_seconds(tick);
         }
         self.tick = tick;
@@ -1398,7 +1420,7 @@ impl CallbackTransport {
     fn wrap(&mut self, start: f64) {
         self.passes = self.passes.saturating_add(1);
         self.resolve_renderer();
-        self.seek(start);
+        self.wrap_to_tick(start);
         if self.practice.count_in.between_loops {
             self.start_count();
         }
@@ -1442,7 +1464,29 @@ impl CallbackTransport {
         let mut offset = 0;
         let mut rendered = 0;
         let was_playing = self.playing;
-        while self.playing && offset < output.len() {
+        while (self.playing || self.draining > 0) && offset < output.len() {
+            if self.draining > 0 {
+                let Some(renderer) = &mut self.renderer else {
+                    self.draining = 0;
+                    self.playing = false;
+                    self.phase = PracticePhase::Ended;
+                    break;
+                };
+                let count = (output.len() - offset).min(self.draining);
+                for frame in 0..count {
+                    output[offset + frame] = renderer.drain_frame();
+                }
+                offset += count;
+                self.draining -= count;
+                if self.draining == 0 {
+                    self.playing = false;
+                    self.phase = PracticePhase::Ended;
+                    self.cancel_count();
+                    self.pulse = None;
+                    break;
+                }
+                continue;
+            }
             self.midi_cursor = self.midi.frames() + offset as u64;
             if let Some(clock) = &mut self.count {
                 let frame = clock.next_frame();
@@ -1458,7 +1502,11 @@ impl CallbackTransport {
                     self.add_pulse(pulse, true, 1);
                 }
                 let click = self.click.frame(self.practice.metronome.volume);
-                output[offset] = [click, click];
+                output[offset] = if let Some(renderer) = &mut self.renderer {
+                    renderer.count_in_frame(click)
+                } else {
+                    [click, click]
+                };
                 offset += 1;
                 continue;
             }
@@ -1479,12 +1527,17 @@ impl CallbackTransport {
             let end = ceiling.unwrap_or_else(|| renderer.duration_tick());
             let remaining = renderer.output_frames_until(end);
             let count = (output.len() - offset).min(BLOCK).min(remaining);
+            let d_max = renderer.plugin_delay_frames();
             if count == 0 {
-                self.seek(end);
                 if let Some((start, _)) = self.loop_range {
                     self.wrap(start);
                     continue;
                 }
+                if d_max > 0 {
+                    self.draining = d_max;
+                    continue;
+                }
+                self.seek(end);
                 self.playing = false;
                 self.phase = PracticePhase::Ended;
                 self.cancel_count();
@@ -1507,10 +1560,12 @@ impl CallbackTransport {
                 self.add_pulse(pulse, false, status.pulse_count);
             }
             if count == remaining || (ceiling.is_none() && status.ended) {
-                self.seek(end);
                 if let Some((start, _)) = self.loop_range {
                     self.wrap(start);
+                } else if d_max > 0 {
+                    self.draining = d_max;
                 } else {
+                    self.seek(end);
                     self.playing = false;
                     self.phase = PracticePhase::Ended;
                     self.cancel_count();

@@ -645,6 +645,8 @@ pub struct MidiTap {
     staging: Vec<MidiRecord>,
     /// The output frame events are stamped with.
     cursor: u64,
+    /// Delay in frames from plug-in delay compensation.
+    delay_frames: u64,
     faults: u32,
     idle: bool,
     resync_due: bool,
@@ -689,6 +691,7 @@ impl MidiTap {
             start_programs: programs.to_vec(),
             staging: Vec::with_capacity(STAGE_CAPACITY),
             cursor: 0,
+            delay_frames: 0,
             faults: 0,
             idle: false,
             resync_due: false,
@@ -751,6 +754,10 @@ impl MidiTap {
     }
     pub fn set_cursor(&mut self, frame: u64) {
         self.cursor = frame;
+    }
+    /// Sets the plug-in compensation delay in frames, added to message timestamps.
+    pub fn set_delay_frames(&mut self, frames: u64) {
+        self.delay_frames = frames;
     }
     pub fn advance_cursor(&mut self) {
         self.cursor += 1;
@@ -825,7 +832,7 @@ impl MidiTap {
             return false;
         }
         self.staging.push(MidiRecord::Message {
-            frame: self.cursor,
+            frame: self.cursor.saturating_add(self.delay_frames),
             slot,
             generation: generation as u16,
             len,
@@ -1030,6 +1037,7 @@ impl MidiTap {
             return;
         };
         self.cursor = old.cursor;
+        self.delay_frames = old.delay_frames;
         self.faults = old.faults;
         self.idle = old.idle;
         for j in 0..old.lanes.len() {

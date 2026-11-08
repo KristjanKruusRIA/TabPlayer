@@ -1,6 +1,7 @@
 pub mod audition;
 pub mod backing;
 pub mod cabinet_ir;
+pub mod compensation;
 pub mod decode;
 pub mod device;
 #[cfg(test)]

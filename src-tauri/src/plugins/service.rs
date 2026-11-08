@@ -171,6 +171,7 @@ pub trait HelperSession: Send + Sync {
         near: Option<tabplayer_plugin_protocol::control::Rect>,
     ) -> Result<u64, HelperError>;
     fn close_editor(&self) -> Result<(), HelperError>;
+    fn set_parameter(&self, id: u32, value: f64) -> Result<(), HelperError>;
     fn take_editor_closed(&self) -> bool;
     fn take_state_dirty(&self) -> bool;
     fn pid(&self) -> Option<u32>;
@@ -280,6 +281,9 @@ impl HelperSession for RealSession {
     }
     fn close_editor(&self) -> Result<(), HelperError> {
         self.process.close_editor()
+    }
+    fn set_parameter(&self, id: u32, value: f64) -> Result<(), HelperError> {
+        self.process.set_parameter(id, value)
     }
     fn take_editor_closed(&self) -> bool {
         let _ = self.drain_events();
@@ -1008,7 +1012,20 @@ impl PluginService {
         status: PluginStatus,
     ) {
         let mut inner = self.inner.lock().unwrap();
+        let changed = match inner
+            .statuses
+            .get(&(document_id.to_string(), track_id.to_string()))
+        {
+            Some(existing) => existing.status != status,
+            None => true,
+        };
         Self::record_status_inner(&mut inner, document_id, track_id, slot, status);
+        drop(inner);
+        if changed {
+            (self.events)(PluginEvent::StatusChanged {
+                document_id: document_id.to_string(),
+            });
+        }
     }
 
     fn record_status_inner(
@@ -1432,6 +1449,28 @@ impl PluginService {
         session.get_state().map_err(|e| e.to_string())
     }
 
+    pub fn set_parameter(
+        &self,
+        document_id: &str,
+        track_id: &str,
+        id: u32,
+        value: f64,
+    ) -> Result<(), String> {
+        let session = {
+            let inner = self.inner.lock().unwrap();
+            let (_, entry) = inner
+                .slots
+                .iter()
+                .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)
+                .ok_or_else(|| "No active plug-in session for track.".to_string())?;
+            match entry {
+                SlotEntry::Ready { session, .. } => session.clone(),
+                _ => return Err("Plug-in session is not ready.".to_string()),
+            }
+        };
+        session.set_parameter(id, value).map_err(|e| e.to_string())
+    }
+
     pub fn editor_open(
         &self,
         document_id: &str,
@@ -1784,6 +1823,7 @@ mod tests {
         alive: AtomicBool,
         shared: Arc<InsertShared>,
         fail_set_state: Mutex<Option<HelperError>>,
+        set_params: Mutex<Vec<(u32, f64)>>,
     }
 
     impl FakeSession {
@@ -1794,6 +1834,7 @@ mod tests {
                 alive: AtomicBool::new(true),
                 shared: Arc::new(InsertShared::default()),
                 fail_set_state: Mutex::new(None),
+                set_params: Mutex::new(Vec::new()),
             }
         }
     }
@@ -1842,6 +1883,10 @@ mod tests {
             Ok(1234)
         }
         fn close_editor(&self) -> Result<(), HelperError> {
+            Ok(())
+        }
+        fn set_parameter(&self, id: u32, value: f64) -> Result<(), HelperError> {
+            self.set_params.lock().unwrap().push((id, value));
             Ok(())
         }
         fn take_editor_closed(&self) -> bool {
@@ -2407,5 +2452,33 @@ mod tests {
         // RR7: slot remains Ready, and returns Ok(InsertPlan)
         assert!(plans2[0].1.is_ok());
         assert_eq!(service.statuses("doc1")[0].status, PluginStatus::Ready);
+    }
+
+    #[test]
+    fn set_parameter_forwards_to_ready_session() {
+        let (service, launcher, _dir, class_id, state_id) = test_service();
+        let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
+
+        // Unknown session fails
+        let err = service.set_parameter("doc1", "track_0", 2, 0.125);
+        assert!(err.is_err());
+
+        let req = vec![SlotRequest {
+            track_id: "track_0".into(),
+            slot: test_slot(&class_id, &state_id),
+            state: state_bytes,
+        }];
+        service.ensure("doc1", &req);
+        assert_eq!(
+            wait_for_slot(&service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+
+        let ok = service.set_parameter("doc1", "track_0", 2, 0.125);
+        assert!(ok.is_ok());
+
+        let session = launcher.last_session.lock().unwrap().clone().unwrap();
+        let params = session.set_params.lock().unwrap().clone();
+        assert_eq!(params, vec![(2, 0.125)]);
     }
 }

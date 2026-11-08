@@ -71,17 +71,17 @@ What the columns mean:
 
 ## Measurements for Task 5 and later
 
-| Plug-in | Component state | Controller state | TabPlayer container (16 + both) | Latency (samples / ms) | Load: module + instantiate + configure, ms (first run; warm) | Process per block, µs: mean / p99 / max | Mean CPU of a 2,667 µs block |
+| Plug-in | Component state | Controller state | TabPlayer container (20 + both) | Latency (samples / ms) | Load: module + instantiate + configure, ms (first run; warm) | Process per block, µs: mean / p99 / max | Mean CPU of a 2,667 µs block |
 |---|---|---|---|---|---|---|---|
-| Gain | 0 B | 0 B | 16 B | 0 / 0 | 0.4; 0.3 | 0.1 / 0.1 / 0.7 | 0.0 % |
-| Emissary | 6,889 B | 0 B | 6,905 B | 6 / 0.125 (7 with oversampling) | 106; 14 | 33.6 / 43.3 / 379 | 1.3 % |
-| DI Crank | 1,110 B | 0 B | 1,126 B | 256 / 5.333 | 40; 9 | 7.4 / 8.1 / 21 | 0.3 % |
-| SLAMP | 987 B | 0 B | 1,003 B | 0 / 0 | 60; 22 | 89.9 / 114.8 / 464 | 3.4 % |
-| Gojira X | 4,606 B | 0 B | 4,622 B | 36 / 0.750 | 4,739; 4,886 | 205.0 / 257.1 / 613 | 7.7 % |
-| Amped ML5 | 3,160 B | 0 B | 3,176 B | 0 / 0 | 172; 47 | 292.4 / 387.2 / 739 | 11.0 % |
-| Toneforge Menace | 2,241 B | 0 B | 2,257 B | 0 / 0 | 62; 25 | 53.3 / 70.6 / 394 | 2.0 % |
+| Gain | 0 B | 0 B | 20 B | 0 / 0 | 0.4; 0.3 | 0.1 / 0.1 / 0.7 | 0.0 % |
+| Emissary | 6,889 B | 0 B | 6,909 B | 6 / 0.125 (7 with oversampling) | 106; 14 | 33.6 / 43.3 / 379 | 1.3 % |
+| DI Crank | 1,110 B | 0 B | 1,130 B | 256 / 5.333 | 40; 9 | 7.4 / 8.1 / 21 | 0.3 % |
+| SLAMP | 987 B | 0 B | 1,007 B | 0 / 0 | 60; 22 | 89.9 / 114.8 / 464 | 3.4 % |
+| Gojira X | 4,606 B | 0 B | 4,626 B | 36 / 0.750 | 4,739; 4,886 | 205.0 / 257.1 / 613 | 7.7 % |
+| Amped ML5 | 3,160 B | 0 B | 3,180 B | 0 / 0 | 172; 47 | 292.4 / 387.2 / 739 | 11.0 % |
+| Toneforge Menace | 2,241 B | 0 B | 2,261 B | 0 / 0 | 62; 25 | 53.3 / 70.6 / 394 | 2.0 % |
 
-- **Largest state:** 6,905 bytes with the container. That is far under the 1 MiB review mark and the 8 MiB cap. All controller states were empty.
+- **Largest state:** 6,909 bytes with the container. That is far under the 1 MiB review mark and the 8 MiB cap. All controller states were empty.
 - **Largest latency:** 256 samples (5.3 ms). That is far under 100 ms.
 - **Get and set state timing:** getting a state took at most 1.35 ms. Setting one took at most 0.91 ms, except Gojira X: 1,626 ms on its first run and 2.7–2.8 ms on later runs.
 - **Dependent DLLs:** none failed to load. `libloading` 0.9 calls `LoadLibraryExW(path, NULL, 0)`, with no extra search directory.
@@ -99,7 +99,7 @@ What the columns mean:
    - Consider having the helper apply the state it just read once, right after a new plug-in is added, so both paths go through `setState`.
 4. **Vendored code to adjust in Task 8.**
    - SoundCraft's `MAX_STATE_BYTES` is 64 MiB and its stream accepts up to that. Lower it to TabPlayer's 8 MiB (P10).
-   - Its state container is `SCV3` with a 12-byte header, not TabPlayer's 16-byte one.
+   - Its state container is `SCV3` with a 12-byte header, not TabPlayer's 20-byte one.
    - Its editor window takes `GetActiveWindow()` as its owner. In the helper that is null, but pass null explicitly, because the spec forbids an owner link.
    - `on_main_thread` relies on Rust naming the first thread "main".
 5. **Bus layouts seen.**

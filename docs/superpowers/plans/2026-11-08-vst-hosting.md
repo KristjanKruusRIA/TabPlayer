@@ -761,7 +761,7 @@
   - `<PluginNotices statuses trackNames onAllow onRetry className?/>`;
   - i18n keys under `plugin.*`: a status text and a notice per status, plus the editor focus hint and `plugin.history_full`.
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   - the library list shows entries, and "Add plug-in…" calls `plugin_library_add` and refreshes the list;
   - choosing a plug-in calls `plugin_choose` and writes one `setTrackSound` with `plugin` and the asset token;
   - choosing the current plug-in records nothing;
@@ -781,10 +781,10 @@
   - busy goes through `busyGuard`, never `disabled` on a focused control;
   - "VST3" is plain text with no logo;
   - the i18n catalog test passes for the new keys in `en`, `et` and `de`.
-- [ ] **Step 2:** Run `npx vitest run src/audio/plugin-slot.test.tsx src/rig src/export/ExportDialog.test.tsx src/i18n src/audio/sound-library-ui.test.tsx src/audio/factory-sounds.test.tsx`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4:** Run the same command, then `npm run typecheck` and `npx vitest run src/App.test.tsx src/audio/SoundPanel.test.tsx`. Expected: PASS.
-- [ ] **Step 5:** Commit with the message `feat: plug-in slot in the sound panel, with notices in en, et and de (THE-71)`.
+- [x] **Step 2:** Run `npx vitest run src/audio/plugin-slot.test.tsx src/rig src/export/ExportDialog.test.tsx src/i18n src/audio/sound-library-ui.test.tsx src/audio/factory-sounds.test.tsx`. Expected: FAIL.
+- [x] **Step 3: Implement.**
+- [x] **Step 4:** Run the same command, then `npm run typecheck` and `npx vitest run src/App.test.tsx src/audio/SoundPanel.test.tsx`. Expected: PASS.
+- [x] **Step 5:** Commit with the message `feat: plug-in slot in the sound panel, with notices in en, et and de (THE-71)`.
 
 ### Task 17: Packaging, CI, notices and docs
 
@@ -810,23 +810,23 @@
     5. the packaged-resources check.
   - If Task 1 chose C++, the Windows job needs CMake and MSVC, which `windows-latest` provides; pin them by version in the workflow.
 
-- [ ] **Step 1: Write the failing script tests:**
+- [x] **Step 1: Write the failing script tests:**
   - `build-plugin-host` names the target-triple file and refuses a missing build;
   - `verify-packaged-resources` fails a package without the helper.
-- [ ] **Step 2:** Run `node --test scripts/build-plugin-host.test.mjs scripts/verify-packaged-resources.test.mjs`. Expected: FAIL.
-- [ ] **Step 3: Implement.**
+- [x] **Step 2:** Run `node --test scripts/build-plugin-host.test.mjs scripts/verify-packaged-resources.test.mjs`. Expected: FAIL.
+- [x] **Step 3: Implement.**
   - `THIRD_PARTY_NOTICES.md` gains Steinberg's VST3 SDK MIT notice, the `vst3` crate's notice and, if Rust was chosen, Soundcraft's MIT notice with its copyright line.
   - `CLAUDE.md` gains:
     - the workspace members, and `--workspace` and `--all`;
     - `npm run prepare:plugin-host` before `npm run tauri -- dev --config src-tauri/tauri.plugin-host.conf.json` for plug-in work;
     - the end-to-end build prerequisite;
     - the fact that the desktop test build copies the helper.
-- [ ] **Step 4:** Run the script tests, `npm test`, and a local Windows `npm run tauri -- build --config src-tauri/tauri.plugin-host.conf.json -- --locked` followed by the packaged check. Expected: PASS.
-- [ ] **Step 5:** Hot-path review of the CI and packaging changes. Commit with the message `build: ship the plug-in host helper, with CI and notices (THE-71)`.
+- [x] **Step 4:** Run the script tests, `npm test`, and a local Windows `npm run tauri -- build --config src-tauri/tauri.plugin-host.conf.json -- --locked` followed by the packaged check. Expected: PASS.
+- [x] **Step 5:** Hot-path review of the CI and packaging changes. Commit with the message `build: ship the plug-in host helper, with CI and notices (THE-71)`.
 
 ### Task 18: Desktop proof, acceptance script and validation doc (controller)
 
-- [ ] **Step 1:** Add `tests/desktop/parity-vst-plugin.mjs`, based on `tests/desktop/parity-cabinet-ir.mjs`. It uses `TABPLAYER_TEST_PLUGIN_BUNDLE`, pointing at a test plug-in bundle laid out under `.analysis/desktop-smoke/plugins/`, and `TABPLAYER_TEST_APP_DATA_DIR`. It must:
+- [x] **Step 1:** Add `tests/desktop/parity-vst-plugin.mjs`, based on `tests/desktop/parity-cabinet-ir.mjs`. It uses `TABPLAYER_TEST_PLUGIN_BUNDLE`, pointing at a test plug-in bundle laid out under `.analysis/desktop-smoke/plugins/`, and `TABPLAYER_TEST_APP_DATA_DIR`. It must:
   - add the plug-in and choose it on a track;
   - play, and check that the status is `ready` and `pluginDelayFrames > 0`;
   - open and close the editor, and check that exactly one undo step was added;
@@ -836,9 +836,9 @@
   - clear the consent file and reopen, check the `needsConsent` notice, allow, and check `ready`;
   - remove the library entry and reopen, and check the `missing` notice with an unchanged document;
   - export WAV, and check that it is not silent and has the same frame count as a built-in-only export.
-- [ ] **Step 2:** Add `tests/desktop/acceptance-vst-real-plugin.mjs`. It is not run in CI. It reads `TABPLAYER_ACCEPT_PLUGIN_BUNDLE` for a real amp plug-in installed locally, then loads it, plays, opens the editor, saves, reopens and exports. It prints the results for the doc.
-- [ ] **Step 3:** Build with `scripts/build-desktop-test.ps1`, run both drivers from the checkout root, and keep their outputs.
-- [ ] **Step 4:** Write `docs/validation/YYYY-MM-DD-vst-hosting.md` with the behaviour, the evidence (commands, outputs, spike numbers and the real plug-ins tested, by name and version) and these limits:
+- [x] **Step 2:** Add `tests/desktop/acceptance-vst-real-plugin.mjs`. It is not run in CI. It reads `TABPLAYER_ACCEPT_PLUGIN_BUNDLE` for a real amp plug-in installed locally, then loads it, plays, opens the editor, saves, reopens and exports. It prints the results for the doc.
+- [x] **Step 3:** Build with `scripts/build-desktop-test.ps1`, run both drivers from the checkout root, and keep their outputs.
+- [x] **Step 4:** Write `docs/validation/YYYY-MM-DD-vst-hosting.md` with the behaviour, the evidence (commands, outputs, spike numbers and the real plug-ins tested, by name and version) and these limits:
   - Windows x64 and VST3 only; one plug-in per track; none on the second board;
   - a file picker only, with no scanning;
   - the cursor is not compensated;
@@ -851,8 +851,8 @@
   - consent is per (plug-in, state);
   - older builds refuse documents with a plug-in;
   - CI cannot test vendor plug-ins, real devices or cross-process focus.
-- [ ] **Step 5:** Update `docs/backlog.md` ("Load VST plug-ins on a track") to point at the spec and this doc, keeping slices 3 to 6 open.
-- [ ] **Step 6:** Run the full checks:
+- [x] **Step 5:** Update `docs/backlog.md` ("Load VST plug-ins on a track") to point at the spec and this doc, keeping slices 3 to 6 open.
+- [x] **Step 6:** Run the full checks:
   - `npm test` and `npm run typecheck`;
   - the build of the helper and the test plug-in;
   - `cargo test --locked --manifest-path src-tauri/Cargo.toml --workspace`, in the background;

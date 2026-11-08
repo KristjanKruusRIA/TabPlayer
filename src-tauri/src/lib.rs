@@ -1428,6 +1428,7 @@ pub fn run() {
         midi_out::midi_out_set_delay,
         midi_out::midi_out_status,
         midi_out::midi_out_test_log,
+        plugins::commands::plugin_test_set_parameter,
         desktop_test_io
     ]);
     builder

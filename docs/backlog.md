@@ -4,13 +4,10 @@ Product ideas that sit outside the GP8 parity tracker. Nothing here is scheduled
 
 ## Load VST plug-ins on a track (requested 2026-10-30)
 
-Let the user load a VST onto a track, so a full guitar amp plug-in can run on top of the clean tone instead of the built-in drive and cabinet.
+Slice 1 (spikes) and Slice 2 (first shippable slice for Windows x64, VST3) are complete under Linear THE-71. See the design specification in `docs/superpowers/specs/2026-11-07-vst-hosting-design.md` and the validation report in `docs/validation/2026-11-08-vst-hosting.md`.
 
-To settle at design time:
-- **Crashes:** a plug-in is third-party native code. Hosting it in a separate process keeps a crash from taking down the app and its audio callback, at the cost of extra latency.
-- **Format and licence:** VST3 first. Check the current SDK licence, and whether a hosting crate is good enough or a new dependency needs writing. Any new dependency gets a hot-path review.
-- **Signal path:** where the plug-in sits in the track's chain, and which built-in stages it bypasses.
-- **Editor:** opening the plug-in's own window from the app.
-- **Latency:** reporting plug-in latency and keeping playback, the backing track and the metronome in sync.
-- **Documents:** storing the plug-in reference and its state, and what happens when another machine does not have the plug-in. The fallback is the built-in tone with a notice, as for a missing user cabinet IR.
-- **Export:** whether rendered audio includes plug-ins.
+Remaining slices open for future development:
+- **Slice 3: Folder scanning.** Scanning the standard VST3 folders, with a per-file probe timeout, a persistent cache, and a blocklist.
+- **Slice 4: macOS and Linux helpers.** macOS out-of-process helper (NSWindow, library-validation entitlement, notarisation) and Linux helper (X11 and `IRunLoop`).
+- **Slice 5: CLAP hosting.** CLAP support through `clack-host`, using the same helper IPC protocol.
+- **Slice 6: Extended features.** Macro knobs and parameter automation, `.vstpreset` exchange, A/B auditioning against the built-in tone, Line-In live monitoring through a plug-in, shared helpers, multiple plug-in slots per track, and track freeze to audio.

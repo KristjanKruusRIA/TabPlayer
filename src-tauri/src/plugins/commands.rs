@@ -309,6 +309,26 @@ pub async fn plugin_editor_close(
     .map_err(|e| e.to_string())?
 }
 
+#[cfg(feature = "desktop-test")]
+#[tauri::command]
+pub async fn plugin_test_set_parameter(
+    app: tauri::AppHandle,
+    document_id: String,
+    track_id: String,
+    id: u32,
+    value: f64,
+) -> Result<(), String> {
+    if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() != Ok("1") {
+        return Err("Test hook is disabled.".into());
+    }
+    let service = app.state::<Arc<PluginService>>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        service.set_parameter(&document_id, &track_id, id, value)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

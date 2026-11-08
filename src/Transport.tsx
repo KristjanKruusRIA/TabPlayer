@@ -14,6 +14,8 @@ import { loopFractions,loopText } from './audio/loop-passage';
 import './shell/transport.css';
 const clock=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000)%60<10?'0':''}${Math.floor(ms/1000)%60}`;
 const display=(value:number)=>Number(value.toFixed(2));
+/** How long the loop must stay gone before the status line says it is off. */
+const loopOffDelayMs=500;
 /** A whole-number field. The label is for assistive technology and the dialogs' tests; the transport's caption says what the pair is. */
 function BarField({label,value,min,max,onValue}:{label:string;value:number;min:number;max:number;onValue:(value:number)=>void}) {
   const [draft,setDraft]=useState(String(value));
@@ -60,8 +62,15 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
   const [loopSaid,setLoopSaid]=useState('');
   const loopStatus=loopNumbers?t(loopNumbers.first===loopNumbers.last?'transport.loop_status_one':'transport.loop_status',{first:String(loopNumbers.first),last:String(loopNumbers.last)}):null;
   // A status line a screen reader speaks when the loop starts, changes or ends.
-  // Not while the plan is being rebuilt after an edit: the loop is restored on it (or reported by the loop notice), and "off" then "on" again would be said for nothing.
-  useEffect(()=>{if(!state.ready)return;setLoopSaid(previous=>loopStatus??(previous?t('transport.loop_status_off'):''));},[loopStatus,state.ready]);
+  // An edit rebuilds the plan: the controller says ready with no loop for a moment before it sends the loop again. "Off" is therefore said only after the loop has stayed gone for a moment (or at once when the loop notice says an edit ended it), and not at all while the plan is not ready.
+  const loopEnded=state.loopNotice==='cleared';
+  useEffect(()=>{
+    if(!state.ready)return;
+    if(loopStatus){setLoopSaid(loopStatus);return;}
+    if(loopEnded){setLoopSaid(previous=>previous?t('transport.loop_status_off'):'');return;}
+    const timer=setTimeout(()=>setLoopSaid(previous=>previous?t('transport.loop_status_off'):''),loopOffDelayMs);
+    return()=>clearTimeout(timer);
+  },[loopStatus,state.ready,loopEnded]);
   const selectedBars=useMemo(()=>{
     const bars=selection?.kind==='range'?[selection.range.start.bar,selection.range.end.bar]:selection?.kind==='bars'?[selection.firstBar,selection.lastBar]:selection?.kind==='notes'?selection.notes.map(note=>note.target.bar):[];
     if(!bars.length)bars.push(cursor.bar);

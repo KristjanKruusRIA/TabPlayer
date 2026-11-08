@@ -120,6 +120,7 @@ it('the loop bar fields show the loop that is running, however it was set, and k
   expect(screen.getByRole('button',{name:'Clear loop'})).toHaveAttribute('title','Clear loop');
 });
 it('the position display shows the bars a running loop plays and says so in text, then says when it is off',()=>{
+  vi.useFakeTimers();
   const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
   renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
   const lcd=screen.getByRole('group',{name:'Song position'});
@@ -134,6 +135,7 @@ it('the position display shows the bars a running loop plays and says so in text
   expect(screen.getByText('Looping bar 3')).toBeInTheDocument();
   update(snapshot());
   expect(lcd).not.toHaveAttribute('data-loop');expect(lcd).not.toHaveTextContent('Loop');
+  act(()=>{vi.advanceTimersByTime(600);});
   expect(screen.getByText('Loop off')).toBeInTheDocument();
 });
 it('says nothing about the loop while an edit rebuilds the plan, then says it is off only when it is cleared',()=>{
@@ -152,6 +154,38 @@ it('says nothing about the loop while an edit rebuilds the plan, then says it is
   // The loop could not be restored: the player is told once the plan is ready.
   update(snapshot({loop:null,loopNotice:'cleared'}));
   expect(screen.getByText('Loop off')).toBeInTheDocument();
+});
+it('does not say the loop is off in the moment between the plan being ready and the loop being sent again',()=>{
+  vi.useFakeTimers();
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  // The edit: rebuilt, then ready with no loop yet, then the loop is restored.
+  update(snapshot({ready:false,loop:null}));
+  update(snapshot({ready:true,loop:null}));
+  act(()=>{vi.advanceTimersByTime(300);});
+  expect(screen.queryByText('Loop off')).toBeNull();
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  act(()=>{vi.advanceTimersByTime(2000);});
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+});
+it('says the loop is off after a short delay when the player clears it, and at once when an edit ended it',()=>{
+  vi.useFakeTimers();
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  const view=renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  update(snapshot({loop:null}));
+  act(()=>{vi.advanceTimersByTime(300);});expect(screen.queryByText('Loop off')).toBeNull();
+  act(()=>{vi.advanceTimersByTime(300);});expect(screen.getByText('Loop off')).toBeInTheDocument();
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  update(snapshot({loop:null,loopNotice:'cleared'}));
+  expect(screen.getByText('Loop off')).toBeInTheDocument();
+  // A timer left over from a loop that went away is cancelled with the component.
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));update(snapshot({loop:null}));
+  view.unmount();
+  expect(()=>act(()=>{vi.advanceTimersByTime(1000);})).not.toThrow();
 });
 it('a loop across a repeat is named by its first and last bar, and a clock tick that hands over an equal loop changes nothing',()=>{
   const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;

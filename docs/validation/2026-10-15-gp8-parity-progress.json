@@ -4740,7 +4740,7 @@
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
       "current_behavior": "Double-click edits the title, tempo, chord name and clef on the score, and a right-click or keyboard menu offers the actions that fit, each as one undoable edit; the desktop driver passes on the merged build.",
-      "remaining_gap": "The Menu key was not pressed in the real app; symbols are found from clicked text, so matching text can open the wrong one and an empty title cannot be clicked; clef changes one measure; the paper layout hit path has no automated test.",
+      "remaining_gap": "The Menu key was not pressed in the real app; symbols are found from clicked text, so matching text can open the wrong one and an empty title cannot be clicked; clef changes one measure; the paper layout hit path is now covered by automated tests (title, tempo, chord and clef hits on later pages at four zoom levels, vertical and grid, with real alphaTab output) but not by a real-app run, and staff-gap shifts and multi-track systems are not covered.",
       "current_evidence": [
         "symbol_editing_behavior",
         "symbol_editing_evidence",

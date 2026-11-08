@@ -34,6 +34,6 @@ n- A tempo mark written in another unit is edited on the score in quarter notes 
 - **Clef is per measure.** `setBarNotation` changes one measure of one staff, so the next measure shows its own clef again; the menu names the measure.
 - **Renaming a chord changes that beat only.** `setHarmonyChord` gives the beat its own chord, so other beats that shared the old chord keep their name.
 - **Not offered here.** Rewriting a measure whose tempo mark is between beats, labelled, hidden or beside a marker-only section stays in the inspector's Measure panel; a chord that carries only a name (some imports) is renamed in the chord editor.
-- **Page-layout hit path.** The paper-layout branch is checked by hand in a browser and in the desktop run's default layout only; no automated test covers it.
+- **Page-layout hit path.** The paper-layout branch is checked by hand in a browser and in the desktop run's default layout only; 2026-11-08 (THE-52): `src/editor/symbol-hit.page.test.ts` now covers title, tempo, chord and clef hits on a later page at several zooms in the vertical-page and grid arrangements, using real alphaTab output; staff-gap shifts, multi-track systems and a real-app run are not covered.
 - **Closing on resize** compares with the area when the popover opened and tolerates 24 px, so a very small resize does not close it.
 - The lock message is English because it is the app's existing constant. Fixture tests that read `.analysis/compatibility` fail here with ENOENT, as expected for a worktree.

@@ -13,13 +13,16 @@ const BAR=3840;
 function fixture(){
   const project=blankProject(),built=buildDocument(project);
   let receive:(status:NativeAudioStatus)=>void=()=>{},floor=0;
+  // `loop` holds the next setLoop command before native answers it; `prepare` holds the next prepare. Each is used once.
+  const gate:{loop:Promise<void>|null;prepare:Promise<void>|null}={loop:null,prepare:null};
   let status:NativeAudioStatus={generation:0,desiredGeneration:0,ready:false,playing:false,tick:0,seconds:0,durationSeconds:8,speed:1,metronome:false,error:null,deviceId:null,range:null,loop:null,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null}};
   const emit=(patch:Partial<NativeAudioStatus>)=>{status={...status,...patch};receive(status);};
   // Like the native renderer, a prepared plan starts with no loop, and a loop is acknowledged as a status.
   const bridge:NativeAudioBridge={
-    prepare:vi.fn(async(plan,_settings,_embedded,_sourceKey,practice)=>{floor=plan.generation;emit({generation:floor,desiredGeneration:floor,ready:true,playing:false,tick:0,range:null,loop:null,practice:{...status.practice,settings:structuredClone(practice!),phase:'idle'}});}),
+    prepare:vi.fn(async(plan,_settings,_embedded,_sourceKey,practice)=>{const held=gate.prepare;gate.prepare=null;if(held)await held;floor=plan.generation;emit({generation:floor,desiredGeneration:floor,ready:true,playing:false,tick:0,range:null,loop:null,practice:{...status.practice,settings:structuredClone(practice!),phase:'idle'}});}),
     command:vi.fn(async command=>{
       if(command.type==='invalidate'){floor=Math.max(floor,command.generation);return;}
+      if(command.type==='setLoop'){const held=gate.loop;gate.loop=null;if(held)await held;}
       if(command.generation!==floor||command.generation!==status.generation)throw new Error('Stale transport generation.');
       if(command.type==='setLoop')emit({loop:{startTick:command.startTick,endTick:command.endTick},tick:command.startTick});
       else if(command.type==='clearLoop')emit({loop:null});
@@ -35,7 +38,8 @@ function fixture(){
   };
   const setLoops=()=>vi.mocked(bridge.command).mock.calls.map(([command])=>command).filter(command=>command.type==='setLoop');
   const looping=()=>vi.waitFor(()=>expect(player.getState().loop).not.toBeNull());
-  return {project,built,bridge,player,emit,apply,setLoops,looping};
+  const hold=()=>{let release!:()=>void;const promise=new Promise<void>(done=>{release=done;});return {promise,release};};
+  return {project,built,bridge,player,emit,apply,setLoops,looping,gate,hold};
 }
 
 it('keeps a loop through an edit inside its bars, on the new plan',async()=>{
@@ -127,4 +131,66 @@ it('clears the notice when a loop is set again, and keeps that loop through the 
   f.player.setLoop(0,0);await f.looping();
   expect(f.player.getState().loopNotice).toBeNull();
   await f.apply(note,next);expect(f.player.getState().loop).toEqual({startTick:0,endTick:BAR});
+});
+
+it('keeps the loop the player just set, not the one native still echoes, when an edit lands before the echo',async()=>{
+  const f=fixture();await f.player.loadDocument(f.project,f.built);
+  f.player.setLoop(0,1);await vi.waitFor(()=>expect(f.player.getState().loop).toEqual({startTick:0,endTick:2*BAR}));
+  const held=f.hold();f.gate.loop=held.promise;
+  f.player.setLoop(2,2);
+  vi.mocked(f.bridge.command).mockClear();
+  await f.apply(note,f.project);held.release();
+  expect(f.setLoops()).toEqual([{type:'setLoop',generation:f.player.generation,startTick:2*BAR,endTick:3*BAR}]);
+  expect(f.player.getState().loop).toEqual({startTick:2*BAR,endTick:3*BAR});
+});
+
+it('does not let a late status with the old loop undo a loop that was just set',async()=>{
+  const f=fixture();await f.player.loadDocument(f.project,f.built);
+  f.player.setLoop(0,1);await vi.waitFor(()=>expect(f.player.getState().loop).not.toBeNull());
+  const held=f.hold();f.gate.loop=held.promise;
+  f.player.setLoop(2,2);
+  f.emit({loop:{startTick:0,endTick:2*BAR}});
+  vi.mocked(f.bridge.command).mockClear();
+  await f.apply(note,f.project);held.release();
+  expect(f.player.getState().loop).toEqual({startTick:2*BAR,endTick:3*BAR});
+});
+
+it('keeps a loop set while the rebuilt plan is still being prepared',async()=>{
+  const f=fixture();await f.player.loadDocument(f.project,f.built);
+  f.player.setLoop(0,1);await vi.waitFor(()=>expect(f.player.getState().loop).not.toBeNull());
+  const held=f.hold();f.gate.prepare=held.promise;
+  const prepares=vi.mocked(f.bridge.prepare).mock.calls.length;
+  const next=previewEdit(f.project,note).project;
+  f.player.beforeScoreChange(true);const loading=f.player.loadDocument(next,buildDocument(next));
+  await vi.waitFor(()=>expect(f.bridge.prepare).toHaveBeenCalledTimes(prepares+1));
+  f.player.setLoop(2,2);
+  held.release();await loading;
+  expect(f.player.getState().loop).toEqual({startTick:2*BAR,endTick:3*BAR});
+  // And it is still the kept one for the next edit.
+  await f.apply(note,next);
+  expect(f.player.getState().loop).toEqual({startTick:2*BAR,endTick:3*BAR});
+});
+
+it('a clear before the echo keeps nothing for the next edit',async()=>{
+  const f=fixture();await f.player.loadDocument(f.project,f.built);
+  f.player.setLoop(0,1);await vi.waitFor(()=>expect(f.player.getState().loop).not.toBeNull());
+  f.player.clearLoop();
+  vi.mocked(f.bridge.command).mockClear();
+  await f.apply(note,f.project);
+  expect(f.setLoops()).toEqual([]);expect(f.player.getState()).toMatchObject({loop:null,loopNotice:null});
+});
+
+it('does not lose the kept loop to a status without a loop that arrives while the loop is being sent again',async()=>{
+  const f=fixture();await f.player.loadDocument(f.project,f.built);
+  f.player.setLoop(0,1);await vi.waitFor(()=>expect(f.player.getState().loop).not.toBeNull());
+  const held=f.hold();f.gate.loop=held.promise;
+  const first=f.apply(note,f.project);
+  await vi.waitFor(()=>expect(f.setLoops().length).toBeGreaterThan(1));
+  // Native has not answered the restore yet and reports no loop; a second edit lands in that gap.
+  f.emit({loop:null});
+  const afterFirst=previewEdit(f.project,note).project;
+  const second=f.apply({...note,fret:5},afterFirst);
+  held.release();await Promise.all([first,second]);
+  expect(f.player.getState().loop).toEqual({startTick:0,endTick:2*BAR});
+  expect(f.setLoops().at(-1)).toEqual({type:'setLoop',generation:f.player.generation,startTick:0,endTick:2*BAR});
 });

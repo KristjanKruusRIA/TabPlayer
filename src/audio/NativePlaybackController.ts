@@ -11,7 +11,7 @@ import type { AuditionSource } from './audition';
 import { preparePlan,preparePlanFromScore } from './plan';
 import { interpretationsOf } from './interpretation';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
-import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
+import { DEFAULT_PRACTICE,type PracticeLoop,type PracticeSettings,type PracticeStatus } from './practice-types';
 import { practiceForBacking,validatePractice } from './practice';
 import { cursorPlaybackChoices,selectionPlaybackChoices,requireCursorChoice,requirePassageChoice } from './selection-playback';
 import type { ScheduledNotes } from '../instruments/focus';
@@ -41,7 +41,7 @@ export class NativePlaybackController {
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private planInterpretationKey='';private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private hasBacking=false;
   /** The running loop by bars, so it can follow an edit that rebuilds the plan. `awaitingRestore` holds off reading the loop back from native while the rebuilt plan has none yet; `loopLost` is an edit that took the loop's bars with it. */
-  private keptLoop:KeptLoop|null=null;private loopLost=false;private awaitingRestore=false;
+  private keptLoop:KeptLoop|null=null;private loopLost=false;private awaitingRestore=false;private loopsSending=0;
   private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
   private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
   private bridge:NativeAudioBridge;private options:Options;generation=++nextGeneration;
@@ -73,7 +73,7 @@ export class NativePlaybackController {
   private receive(status:NativeAudioStatus){
     if(status.generation!==this.generation || this.destroyed)return;
     this.lastStatus=status;
-    if(!this.awaitingRestore&&this.plan&&this.built&&status.ready&&!status.error)this.keptLoop=status.loop?keptLoopOf(status.loop,this.plan.occurrences,this.built.score.masterBars.length):null;
+    if(!this.awaitingRestore&&this.loopsSending===0&&this.plan&&this.built&&status.ready&&!status.error)this.keptLoop=status.loop?keptLoopOf(status.loop,this.plan.occurrences,this.built.score.masterBars.length):null;
     if(!status.ready || status.error){this.noteMode='stopped';this.pendingNoteTick=undefined;}
     else if((this.noteMode==='waiting' && status.playing)
       || (this.noteMode==='seeking' && (status.playing || Math.abs(status.tick-this.pendingNoteTick!)<1e-6))
@@ -135,7 +135,7 @@ export class NativePlaybackController {
   }
   playFromCursor(cursor:BeatTarget,choice:CursorPlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requireCursorChoice(cursorPlaybackChoices(score,plan,cursor),choice);this.startRange(selected.startTick,null);}
   playSelection(selection:MusicSelection,choice:PassagePlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requirePassageChoice(selectionPlaybackChoices(score,plan,selection),choice);this.startRange(selected.startTick,selected.endTick);}
-  loopSelection(selection:MusicSelection,choice:PassagePlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requirePassageChoice(selectionPlaybackChoices(score,plan,selection),choice);this.loopSet();this.send({type:'setLoop',generation:this.generation,startTick:selected.startTick,endTick:selected.endTick});}
+  loopSelection(selection:MusicSelection,choice:PassagePlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requirePassageChoice(selectionPlaybackChoices(score,plan,selection),choice);this.loopSet({startTick:selected.startTick,endTick:selected.endTick});this.sendLoop({type:'setLoop',generation:this.generation,startTick:selected.startTick,endTick:selected.endTick});}
   pause(){this.send({type:'pause',generation:this.generation});}stop(){this.noteMode='stopped';this.pendingNoteTick=undefined;this.update({});this.send({type:'stop',generation:this.generation});}
   private occurrence(bar:number){const found=this.plan?.occurrences.find(o=>o.bar===bar);if(!Number.isInteger(bar)||!found)throw new Error('Select a measure after playback is ready.');return found;}
   private seekToTick(tick:number){this.noteMode='seeking';this.pendingNoteTick=tick;this.operationError=null;this.update({error:this.lastStatus?.error??null});this.send({type:'seekTick',tick,generation:this.generation});}
@@ -149,10 +149,12 @@ export class NativePlaybackController {
   }
   exportPracticeRatio():number|null{return this.practice.tempo.kind==='fixed'?null:this.state.practice.effectiveRatio;}
   setSpeed(percent:number){this.setPractice({...this.practice,tempo:{kind:'relative',ratio:percent/100}});}
-  setLoop(start:number,end:number){if(end<start)throw new Error('Loop end must follow its start.');const startTick=this.occurrence(start).startTick,endTick=this.occurrence(end).endTick;this.loopSet();this.send({type:'setLoop',startTick,endTick,generation:this.generation});}
+  setLoop(start:number,end:number){if(end<start)throw new Error('Loop end must follow its start.');const startTick=this.occurrence(start).startTick,endTick=this.occurrence(end).endTick;this.loopSet({startTick,endTick});this.sendLoop({type:'setLoop',startTick,endTick,generation:this.generation});}
   /** A loop the player asked for replaces whatever an edit left behind, and its notice. */
-  private loopSet(){this.loopLost=false;this.awaitingRestore=false;this.update({loopNotice:null});}
-  clearLoop(){this.keptLoop=null;this.loopSet();this.send({type:'clearLoop',generation:this.generation});}
+  private loopSet(loop:PracticeLoop|null){this.loopLost=false;this.keptLoop=loop&&this.plan&&this.built?keptLoopOf(loop,this.plan.occurrences,this.built.score.masterBars.length):null;this.update({loopNotice:null});}
+  /** Native's own statuses are not read back as the kept loop while a loop command is on its way, since they can still describe the loop before it. */
+  private sendLoop(command:TransportCommand){this.loopsSending++;return this.send(command).finally(()=>{this.loopsSending--;});}
+  clearLoop(){this.loopSet(null);this.sendLoop({type:'clearLoop',generation:this.generation});}
   setMetronome(volume:number){this.setPractice({...this.practice,metronome:{...this.practice.metronome,enabled:volume>0,volume}});}
   selectDevice(deviceId:string|null){return this.send({type:'selectDevice',deviceId,generation:this.generation});}
   devices(){return this.bridge.devices();}
@@ -338,11 +340,12 @@ export class NativePlaybackController {
   }
   /** Arms the loop again on the rebuilt plan, or says it could not be placed. Native playback still owns the loop; this only sends the same command a person would. */
   private async restoreLoop(generation:number){
-    const kept=this.keptLoop,lost=this.loopLost;this.awaitingRestore=false;this.loopLost=false;
-    if(!kept&&!lost)return;
+    const kept=this.keptLoop,lost=this.loopLost;this.loopLost=false;
+    if(!kept&&!lost){this.awaitingRestore=false;return;}
     const plan=this.plan,built=this.built,loop=kept&&plan&&built?resolveKeptLoop(kept,plan.occurrences,built.score.masterBars.length):null;
-    if(!loop){this.keptLoop=null;this.update({loopNotice:'cleared'});return;}
-    await this.send({type:'setLoop',generation,startTick:loop.startTick,endTick:loop.endTick});
+    if(!loop){this.awaitingRestore=false;this.keptLoop=null;this.update({loopNotice:'cleared'});return;}
+    // Statuses stay unread until native has answered, so one that still shows no loop cannot drop the kept one.
+    try{await this.send({type:'setLoop',generation,startTick:loop.startTick,endTick:loop.endTick});if(generation===this.generation&&this.keptLoop===kept&&plan&&built)this.keptLoop=keptLoopOf(loop,plan.occurrences,built.score.masterBars.length)??kept;}finally{if(generation===this.generation)this.awaitingRestore=false;}
   }
   attachView(api:AlphaTabApi){
     this.cleanupView();this.view=api;this.viewPlaying=false;const controller=this;

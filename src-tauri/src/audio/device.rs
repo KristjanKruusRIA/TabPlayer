@@ -1076,7 +1076,13 @@ impl CallbackTransport {
         }
         renderer.set_metronome_settings(accepted.metronome);
         if preserve && generation == self.generation {
+            // An edit while playing: the new renderer carries on where the old one is. With a plug-in it keeps the
+            // old compensation lines streaming (a wrap, and the lines handed over); with none it is the plain seek
+            // it always was.
             renderer.wrap_to_tick(self.tick);
+            if let Some(old) = self.renderer.as_mut() {
+                renderer.continue_from(old);
+            }
         } else {
             self.draining = 0;
             self.playing = false;
@@ -1539,7 +1545,13 @@ impl CallbackTransport {
             let remaining = renderer.output_frames_until(end);
             let count = (output.len() - offset).min(BLOCK).min(remaining);
             let d_max = renderer.plugin_delay_frames();
+            // With no plug-in active, the end of a pass seeks to the end and then wraps or stops, exactly as before
+            // plug-ins. With one, a wrap keeps everything streaming and the end drains the compensation delay first.
+            let plugins = renderer.plugins_active();
             if count == 0 {
+                if !plugins {
+                    self.seek(end);
+                }
                 if let Some((start, _)) = self.loop_range {
                     self.wrap(start);
                     continue;
@@ -1548,7 +1560,9 @@ impl CallbackTransport {
                     self.draining = d_max;
                     continue;
                 }
-                self.seek(end);
+                if plugins {
+                    self.seek(end);
+                }
                 self.playing = false;
                 self.phase = PracticePhase::Ended;
                 self.cancel_count();
@@ -1571,12 +1585,17 @@ impl CallbackTransport {
                 self.add_pulse(pulse, false, status.pulse_count);
             }
             if count == remaining || (ceiling.is_none() && status.ended) {
+                if !plugins {
+                    self.seek(end);
+                }
                 if let Some((start, _)) = self.loop_range {
                     self.wrap(start);
                 } else if d_max > 0 {
                     self.draining = d_max;
                 } else {
-                    self.seek(end);
+                    if plugins {
+                        self.seek(end);
+                    }
                     self.playing = false;
                     self.phase = PracticePhase::Ended;
                     self.cancel_count();

@@ -108,6 +108,38 @@ struct PreparedChannel {
     /// Whether the kit mix changes anything. A kit of elements all at their defaults sounds as the track does without one.
     kit_active: bool,
 }
+/// Hands the compensation over from the mix or renderer that is playing (`old`) to the one taking over (`new`).
+/// - Both delay: the new lines take over the old history and crossfade to their own taps.
+/// - Only the new one delays: it starts undelayed while the old board sounds, and glides to its delay.
+/// - Only the old one delays: while it sounds, it glides to zero and stays with the new mix until the glide ends.
+///
+/// An old compensation that no longer does anything (`active` is false) counts as none, and stays with `old` to be
+/// retired off the audio thread with it. Moves boxes and buffers; does not allocate.
+fn carry_compensation(
+    new: &mut Option<Box<Compensation>>,
+    old: &mut Option<Box<Compensation>>,
+    old_sounding: bool,
+) {
+    let old_active = old.as_ref().is_some_and(|c| c.active());
+    match new.as_deref_mut() {
+        Some(new_comp) => match old.as_deref_mut() {
+            Some(old_comp) if old_active => new_comp.transition_from(old_comp),
+            _ => {
+                if old_sounding {
+                    new_comp.start_undelayed();
+                }
+            }
+        },
+        None => {
+            if old_sounding && old_active {
+                if let Some(old_comp) = old.as_deref_mut() {
+                    old_comp.retime_to_zero();
+                }
+                *new = old.take();
+            }
+        }
+    }
+}
 pub struct PreparedMix {
     channels: Vec<PreparedChannel>,
     backing: Gain,
@@ -1598,6 +1630,8 @@ impl Renderer {
         self.seek_tick_internal(tick, true);
     }
     fn seek_tick_internal(&mut self, tick: f64, is_wrap: bool) {
+        // With no plug-in, a wrap is the seek it was before plug-ins, so playback and export stay bit-identical.
+        let is_wrap = is_wrap && self.plugins_active();
         let tick = if tick.is_finite() {
             tick.clamp(0.0, self.duration_tick())
         } else {
@@ -1886,6 +1920,47 @@ impl Renderer {
     pub fn plugin_delay_frames(&self) -> usize {
         self.mix.compensation.as_ref().map_or(0, |c| c.d_max())
     }
+    /// Whether a plug-in insert, or a compensation still gliding after the last one left, is active. Only then does a
+    /// wrap keep the inserts, the compensation lines and the master bus streaming; otherwise it is a plain seek.
+    pub fn plugins_active(&self) -> bool {
+        self.mix.channels.iter().any(|c| c.dsp.has_plugin()) || self.compensation_active()
+    }
+    fn compensation_active(&self) -> bool {
+        self.mix.compensation.as_ref().is_some_and(|c| c.active())
+    }
+    /// An edit while playing: this renderer replaces `old` at the same place. It takes over `old`'s plug-in inserts and
+    /// compensation lines the way a mix change does, so the plug-in tracks and the delayed stems keep streaming instead
+    /// of dropping D frames. Lines and inserts pair by position, so a renderer for other tracks, or the same tracks in
+    /// another order, takes over nothing and starts as a plain install. Moves buffers; does not allocate. `old` is
+    /// retired off the audio thread with whatever it keeps.
+    pub fn continue_from(&mut self, old: &mut Renderer) {
+        let same_tracks = self.plan.tracks.len() == old.plan.tracks.len()
+            && self
+                .plan
+                .tracks
+                .iter()
+                .zip(&old.plan.tracks)
+                .all(|(new, old)| new.id == old.id);
+        if self.rate != old.rate
+            || !same_tracks
+            || self.mix.channels.len() != old.mix.channels.len()
+        {
+            return;
+        }
+        let old_sounding = old.mix.channels.iter().any(|c| c.dsp.sounding());
+        for (new, old) in self.mix.channels.iter_mut().zip(&mut old.mix.channels) {
+            new.dsp.continue_plugin_from(&mut old.dsp);
+        }
+        carry_compensation(
+            &mut self.mix.compensation,
+            &mut old.mix.compensation,
+            old_sounding,
+        );
+        let d_max = self.plugin_delay_frames() as u64;
+        if let Some(tap) = &mut self.midi {
+            tap.set_delay_frames(d_max);
+        }
+    }
     /// Attaches an insert to track `track` and updates delay compensation.
     pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
         self.mix.attach_plugin(track, insert);
@@ -1905,7 +1980,7 @@ impl Renderer {
     /// Advances plug-in inserts and compensation lines with silent input during a count-in,
     /// returning the delayed audio and click. With no compensation, returns `[click, click]`.
     pub fn count_in_frame(&mut self, click: f32) -> [f32; 2] {
-        if self.mix.compensation.is_none() {
+        if !self.compensation_active() {
             return [click, click];
         }
         let tick = self.timeline.seconds_to_tick(self.seconds);
@@ -1929,7 +2004,19 @@ impl Renderer {
             } else {
                 channel.dsp.process([0.0; 2], bpm)
             };
-            let gained = channel.gain.process(board);
+            let mut gained = channel.gain.process(board);
+            // A track sent to a MIDI port stays silent here too, as in a played frame.
+            let routed = self.midi.as_ref().is_some_and(|tap| tap.silences(index));
+            if let Some(fade) = self.midi_fade.get_mut(index) {
+                *fade = if routed {
+                    (*fade - self.midi_fade_step).max(0.0)
+                } else {
+                    (*fade + self.midi_fade_step).min(1.0)
+                };
+                if *fade != 1.0 {
+                    gained = [gained[0] * *fade, gained[1] * *fade];
+                }
+            }
             self.scratch[index] = comp.track(index, gained);
         }
         let backing_index = self.plan.tracks.len();
@@ -1953,7 +2040,7 @@ impl Renderer {
     }
     /// Drains the delay lines and plug-in inserts with silence after playback ends.
     pub fn drain_frame(&mut self) -> [f32; 2] {
-        if self.mix.compensation.is_none() {
+        if !self.compensation_active() {
             return [0.0; 2];
         }
         self.count_in_frame(0.0)
@@ -2044,23 +2131,11 @@ impl Renderer {
         settings.backing.remaining = (self.rate as f64 * 0.01) as u32;
         settings.master.transition_from(&mut self.mix.master);
         let old_sounding = self.mix.channels.iter().any(|c| c.dsp.sounding());
-        match (&mut settings.compensation, &mut self.mix.compensation) {
-            (Some(new_comp), Some(old_comp)) => {
-                new_comp.transition_from(old_comp);
-            }
-            (Some(new_comp), None) => {
-                if old_sounding {
-                    new_comp.start_undelayed();
-                }
-            }
-            (None, Some(old_comp)) => {
-                if old_sounding {
-                    old_comp.retime_to_zero();
-                    settings.compensation = self.mix.compensation.take();
-                }
-            }
-            (None, None) => {}
-        }
+        carry_compensation(
+            &mut settings.compensation,
+            &mut self.mix.compensation,
+            old_sounding,
+        );
         for (track, channel) in self.tracks.iter_mut().zip(&settings.channels) {
             track.kit_active = channel.kit_active;
         }

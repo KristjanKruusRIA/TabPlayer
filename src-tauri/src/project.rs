@@ -345,6 +345,7 @@ impl Project {
         }
         // Plug-in state is capped from its base64 length, before any asset is decoded (preflight ruling P17).
         let states = plugin_state_ids(self.baseline_edits.iter().chain(&self.edits));
+        plugin_state::check_types(&states, &self.assets)?;
         for (id, asset) in &self.assets {
             plugin_state::check_size_before_decode(asset, states.contains(id.as_str()))?;
         }
@@ -525,6 +526,18 @@ impl ProjectSession {
                 .into());
             }
         }
+        // The saved list can name state that the edits no longer do (undo past a save, then edit): it is held, counted
+        // and typed like any other.
+        let states = plugin_state_ids(
+            value
+                .project
+                .baseline_edits
+                .iter()
+                .chain(&value.project.edits)
+                .chain(&value.saved),
+        );
+        plugin_state::check_types(&states, &value.project.assets)?;
+        plugin_state::check_total(&states, &value.project.assets, None)?;
         let asset_info = value.project.view().assets;
         Ok(Self {
             project: value.project,
@@ -625,6 +638,23 @@ impl ProjectSession {
         }
         command.validate()?;
         let state_id = command.plugin_state_id();
+        if let Some(state) = state_id {
+            // Everything that needs only the base64 length and the type comes before the first decode, so a refused
+            // state costs nothing: the size, the type and the total of what the history would then hold.
+            let staged_asset = asset.as_ref().map(|(id, asset)| (id.as_str(), asset));
+            if let Some((_, asset)) = staged_asset {
+                plugin_state::check_size_before_decode(asset, true)?;
+            }
+            let mut states = plugin_state_ids(
+                self.project
+                    .baseline_edits
+                    .iter()
+                    .chain(&self.project.edits[..self.cursor])
+                    .chain(&self.saved),
+            );
+            states.insert(state);
+            plugin_state::check_total(&states, &self.project.assets, staged_asset)?;
+        }
         let staged = if let Some((id, asset)) = asset {
             plugin_state::check_size_before_decode(&asset, state_id == Some(id.as_str()))?;
             asset.validate(&id)?;
@@ -646,16 +676,16 @@ impl ProjectSession {
             }
         }
         if let Some(id) = state_id {
-            // What the log holds after this edit: the redo tail is about to go, and this edit's state is about to join.
-            let mut states = plugin_state_ids(
-                self.project
-                    .baseline_edits
-                    .iter()
-                    .chain(&self.project.edits[..self.cursor]),
-            );
-            states.insert(id);
-            let staged_asset = staged.as_ref().map(|(id, asset, _)| (id.as_str(), asset));
-            plugin_state::check_total(&states, &self.project.assets, staged_asset)?;
+            // A held asset wins over a staged one of the same id (`or_insert` below), so it is the one that is typed.
+            let effective = self.project.assets.get(id).or_else(|| {
+                staged
+                    .as_ref()
+                    .filter(|(staged_id, _, _)| staged_id == id)
+                    .map(|(_, asset, _)| asset)
+            });
+            if effective.is_some_and(|asset| !plugin_state::is_state_asset(asset)) {
+                return Err(plugin_state::WRONG_TYPE_MESSAGE.into());
+            }
         }
         if let Some((id, asset, info)) = staged {
             self.asset_info.entry(id.clone()).or_insert(info);
@@ -675,19 +705,23 @@ impl ProjectSession {
     }
 
     /// Forgets the plug-in state that only the dropped redo tail named, so it cannot pile up past the cap in memory.
+    /// Anything a baseline edit, a remaining edit or the saved list still names stays, whatever its type: the saved
+    /// list is what a recovery checkpoint and the saved file are rebuilt from.
     fn drop_unnamed_plugin_states(&mut self) {
-        let states = plugin_state_ids(
-            self.project
-                .baseline_edits
-                .iter()
-                .chain(&self.project.edits),
-        );
+        let named: BTreeSet<&str> = self
+            .project
+            .baseline_edits
+            .iter()
+            .chain(&self.project.edits)
+            .chain(&self.saved)
+            .filter_map(EditCommand::asset_id)
+            .collect();
         let dropped: Vec<String> = self
             .project
             .assets
             .iter()
             .filter(|(id, asset)| {
-                plugin_state::is_state_asset(asset) && !states.contains(id.as_str())
+                plugin_state::is_state_asset(asset) && !named.contains(id.as_str())
             })
             .map(|(id, _)| id.clone())
             .collect();

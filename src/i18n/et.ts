@@ -1222,6 +1222,7 @@ export const et: MessageCatalog = {
   'engine.invalid_original_score_data': "Vigased algse partituuri andmed.",
   'engine.invalid_project_asset_metadata': "Vigased projektimeedia metaandmed.",
   'engine.backing_asset_missing': "Taustaheli meediafail puudub.",
+  'engine.plugin_state_missing': "Pistikprogrammi oleku meediafail puudub.",
   'engine.free_time_fill': "Vabamõõdulises taktis pole pikkust, mida täita.",
   'engine.voice_unused_fill': "See hääl on kasutamata; pole midagi täita.",
   'engine.voice_complete_fill': "See hääl on juba täielik.",

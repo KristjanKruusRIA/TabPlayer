@@ -351,7 +351,12 @@ pub struct TrackSound {
     pub drum_kit: Option<u8>,
     /// A VST3 plug-in inserted after the track's pedalboard. Left out for a track with none, so a file that never
     /// used one is unchanged, and an older build, which does not know the key, refuses a file that has it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// A `null` is refused rather than read as none, so the key is present exactly when there is a plug-in.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::password_crypto::present"
+    )]
     pub plugin: Option<PluginSlot>,
 }
 

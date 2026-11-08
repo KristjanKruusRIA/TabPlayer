@@ -1222,6 +1222,7 @@ export const de: MessageCatalog = {
   'engine.invalid_original_score_data': "Ungültige Originalpartitur-Daten.",
   'engine.invalid_project_asset_metadata': "Ungültige Projekt-Asset-Metadaten.",
   'engine.backing_asset_missing': "Backing-Audio-Asset fehlt.",
+  'engine.plugin_state_missing': "Plug-in-Zustands-Asset fehlt.",
   'engine.free_time_fill': "Ein Takt in freier Taktart hat keine zu füllende Länge.",
   'engine.voice_unused_fill': "Diese Stimme wird nicht verwendet; es gibt nichts zu füllen.",
   'engine.voice_complete_fill': "Diese Stimme ist bereits vollständig.",

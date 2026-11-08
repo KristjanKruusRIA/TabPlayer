@@ -26,6 +26,8 @@ pub const MAX_STATE_BASE64_LEN: usize = MAX_STATE_BYTES.div_ceil(3) * 4;
 pub const MISSING_MESSAGE: &str = "Plug-in settings are missing from this project.";
 pub const MISSING_FROM_RECOVERY_MESSAGE: &str = "Saved plug-in settings are missing from recovery.";
 pub const TOO_LARGE_MESSAGE: &str = "Plug-in settings are too large.";
+/// A slot names an asset that is not typed as a plug-in state.
+pub const WRONG_TYPE_MESSAGE: &str = "Plug-in settings are not a plug-in state.";
 /// The history already holds all the plug-in state it may; the interface shows this as `plugin.history_full`.
 pub const HISTORY_FULL_MESSAGE: &str = "The undo history holds as much plug-in state as it can.";
 
@@ -37,8 +39,29 @@ pub fn is_state_asset(asset: &StoredAsset) -> bool {
 /// Refuses an asset that is, or is named as, a plug-in state when its base64 text is longer than a state can be. It reads
 /// no bytes, so an oversized asset costs nothing to refuse: call it before `StoredAsset::bytes`, `id` or `validate`.
 pub fn check_size_before_decode(asset: &StoredAsset, named_by_slot: bool) -> Result<(), String> {
-    if (named_by_slot || is_state_asset(asset)) && asset.bytes_base64.len() > MAX_STATE_BASE64_LEN {
+    // The text bound is cheap; the raw bound, read from the padding, is exact. Unpadded text of the longest length
+    // decodes to one byte more than a state may hold, which the protocol's `decode_state` would refuse.
+    if (named_by_slot || is_state_asset(asset))
+        && (asset.bytes_base64.len() > MAX_STATE_BASE64_LEN
+            || decoded_len(&asset.bytes_base64) > MAX_STATE_BYTES)
+    {
         return Err(TOO_LARGE_MESSAGE.into());
+    }
+    Ok(())
+}
+
+/// Refuses a slot-named asset that the project holds but that is not typed [`STATE_MEDIA_TYPE`]. Absent assets are
+/// refused on their own, as missing.
+pub fn check_types(
+    ids: &BTreeSet<&str>,
+    assets: &BTreeMap<String, StoredAsset>,
+) -> Result<(), String> {
+    if ids
+        .iter()
+        .filter_map(|id| assets.get(*id))
+        .any(|asset| !is_state_asset(asset))
+    {
+        return Err(WRONG_TYPE_MESSAGE.into());
     }
     Ok(())
 }

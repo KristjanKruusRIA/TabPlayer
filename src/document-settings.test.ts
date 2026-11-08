@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { importer, model } from '@coderline/alphatab';
-import { buildDocument, buildScore, effectiveAudioSettings, previewEdit, replayDocumentSettings } from './engine';
+import { buildDocument, buildScore, effectiveAudioSettings, previewEdit, replayDocumentSettings, validateProject } from './engine';
 import { blankProject, type EditCommand } from './project';
 import type { SyncAnchor } from './edit-types';
 import { buildPlaybackPlan } from './audio/plan';
@@ -175,4 +175,11 @@ it('refuses a malformed plug-in slot and an unknown key beside it',()=>{
   for(const bad of [null,'vst3',[],{},{...pluginProtocol.base,extra:true},{...pluginProtocol.base,inputDb:Number.NaN},{...pluginProtocol.base,outputDb:Infinity},{...pluginProtocol.base,outputDb:-Infinity}])
     expect(soundProblem(withPlugin(bad)),JSON.stringify(bad)).toMatch(/^Invalid plug-in/);
   expect(soundProblem({...withPlugin(pluginProtocol.base),pluginX:{}} as unknown as TrackSound)).toBe('Invalid sound.');
+});
+it('refuses a project whose plug-in slot names state it does not hold, as it does for backing audio',()=>{
+  const project=blankProject();
+  project.edits=[{type:'setTrackSound',trackId:'base/0',sound:withPlugin(pluginProtocol.base)}] as unknown as EditCommand[];
+  expect(()=>validateProject(project)).toThrow('Plug-in state asset is missing.');
+  project.assets[pluginProtocol.base.state]={filename:'plugin-state.tpstate',mediaType:'application/x-tabplayer-plugin-state',byteLength:30};
+  expect(validateProject(project).edits).toHaveLength(1);
 });

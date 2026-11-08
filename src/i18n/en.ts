@@ -1220,6 +1220,7 @@ export const en = {
   'engine.invalid_original_score_data': "Invalid original score data.",
   'engine.invalid_project_asset_metadata': "Invalid project asset metadata.",
   'engine.backing_asset_missing': "Backing audio asset is missing.",
+  'engine.plugin_state_missing': "Plug-in state asset is missing.",
   'engine.free_time_fill': "A free-time measure has no length to fill.",
   'engine.voice_unused_fill': "This voice is unused; there is nothing to fill.",
   'engine.voice_complete_fill': "This voice is already complete.",

@@ -230,12 +230,10 @@ fn unknown_sound_keys_stay_refused() {
     let mut sound = sound_json(Some(slot_json()));
     sound["pluginX"] = json!({});
     assert!(serde_json::from_value::<TrackSound>(sound).is_err());
-    // A `null` plug-in is no plug-in; it is not written back.
+    // A `null` plug-in is refused, as the TypeScript check refuses it: the key is present exactly when there is a plug-in.
     let mut sound = sound_json(None);
     sound["plugin"] = Value::Null;
-    let read: TrackSound = serde_json::from_value(sound).unwrap();
-    assert!(read.plugin.is_none());
-    assert!(!serde_json::to_string(&read).unwrap().contains("plugin"));
+    assert!(serde_json::from_value::<TrackSound>(sound).is_err());
 }
 
 #[test]
@@ -272,8 +270,13 @@ fn plugin_edit_without_its_asset_is_refused() {
     assert_eq!(snapshot.project.edits.len(), 1);
     assert!(snapshot.project.assets.contains_key(&id));
     let undone = session.undo().unwrap();
-    assert!(undone.project.edits.is_empty() || undone.can_redo);
-    assert!(session.redo().unwrap().project.edits.len() == 1);
+    assert!(undone.project.edits.is_empty());
+    assert!(undone.can_redo);
+    // Redo needs the state, so undo keeps it.
+    assert!(undone.project.assets.contains_key(&id));
+    let redone = session.redo().unwrap();
+    assert_eq!(redone.project.edits.len(), 1);
+    assert!(redone.project.assets.contains_key(&id));
 }
 
 #[test]

@@ -117,7 +117,10 @@ Run 42486198722, at develop `528b40d`:
 - The MSI looks for an existing NSIS install folder first. On a machine with an NSIS install it could install over that folder without removing the NSIS entry.
 - The MSI puts everything in one embedded cabinet. At about 2.08 GB it may meet the cabinet's own limit of about 2 GB as the audio grows. That is a judgement, not a test.
 
-**Not yet verified:** the MSI verify step on CI with the current audio, and the MSI's size.
+**Result:** run 42491990087, at develop `194becb`, passed every job on Windows, macOS and Linux.
+- The Windows MSI is 1.72 GiB (`TabPlayer_0.2.0_x64_en-US.msi`, SHA-256 `a01b40c6…`).
+- The extracted MSI passed the offline resource check: 4,449 samples, 1,849,535,358 encoded bytes.
+- The MSI has not been installed on a real machine. The installer differences above remain unverified by install.
 
 ## `batch/convert.test.ts` killed on macOS ("JavaScript heap out of memory")
 

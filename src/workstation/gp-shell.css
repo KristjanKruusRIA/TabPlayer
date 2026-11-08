@@ -67,6 +67,8 @@
 .app-shell .gp-toolbar .transport .transport-loopbutton[aria-pressed=true] { border-color:var(--ws-accent); background:var(--ws-accent); color:var(--ws-accent-ink); }
 .app-shell .gp-toolbar .transport .transport-metronome { width:34px; padding:0; justify-content:center; }
 .app-shell .gp-toolbar .transport-bar-field input { width:38px; min-height:28px; font-size:12px; }
+.app-shell .gp-toolbar .transport-speed-field input { width:38px; min-width:38px; min-height:28px; font-size:12px; border:1px solid transparent; background:var(--ws-raised); }
+.app-shell .gp-toolbar .transport-speed-field .transport-speed-unit { font-size:11px; }
 .app-shell .gp-toolbar .transport-speedvalue { min-width:44px; font-size:13px; }
 .app-shell .gp-toolbar .transport-more { margin-left:0; }
 .app-shell .gp-toolbar .transport-more>summary { font-size:0; gap:0; width:24px; padding:0; justify-content:center; }

@@ -51,9 +51,9 @@ it('speed steps through the preset list and stops at its ends',()=>{
   const high=fixture(playback({speed:300}));render(<Transport player={high.player} measures={4} busy={false} cursor={cursor} selection={null}/>);
   expect(screen.getByRole('button',{name:'Faster'})).toHaveAttribute('aria-disabled','true');fireEvent.click(screen.getByRole('button',{name:'Faster'}));expect(high.player.setSpeed).not.toHaveBeenCalled();
 });
-it('a focused Loop, Slower or Metronome keeps focus when the document goes busy and refuses until it is idle',()=>{
+it('a focused Loop, Slower, Speed or Metronome keeps focus when the document goes busy and refuses until it is idle',()=>{
   const {player}=fixture(),view=render(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);
-  for(const control of [screen.getByRole('button',{name:'Loop'}),screen.getByRole('button',{name:'Slower'}),screen.getByLabelText('Metronome')]){
+  for(const control of [screen.getByRole('button',{name:'Loop'}),screen.getByRole('button',{name:'Slower'}),screen.getByLabelText('Metronome'),screen.getByLabelText('Speed percentage')]){
     control.focus();view.rerender(<Transport player={player} measures={4} busy cursor={cursor} selection={null}/>);
     expect(control).not.toBeDisabled();expect(control).toHaveFocus();fireEvent.click(control);
     view.rerender(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);

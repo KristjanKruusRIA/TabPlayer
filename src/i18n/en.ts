@@ -203,6 +203,8 @@ export const en = {
   'transport.click': 'Click',
   'transport.metronome': 'Metronome',
   'transport.speed': 'Speed',
+  'transport.speed_field': 'Speed percentage',
+  'transport.speed_range_error': 'Speed must be a number from 10% to 300%.',
   'transport.practice_playback': 'Practice playback',
   'transport.tempo_unavailable': 'Tempo unavailable',
   'transport.slower': 'Slower',

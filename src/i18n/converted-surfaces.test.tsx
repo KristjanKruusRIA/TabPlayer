@@ -14,6 +14,8 @@ import { DocumentTabs } from '../workspace/DocumentTabs';
 import { BarWidthsPanel } from '../engraving/BarWidthsPanel';
 import { withBarScale } from '../engraving/bar-widths';
 import { defaultEngraving } from '../engraving/projection';
+import { Transport } from '../Transport';
+import { DEFAULT_PRACTICE } from '../audio/practice-types';
 import { setLanguagePreference, type SupportedLanguage } from './index';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => []) }));
@@ -59,6 +61,11 @@ const occurrences = [
 const choices = { cursor: [{ generation: 1, occurrenceIndex: 0, startTick: 0 }, { generation: 1, occurrenceIndex: 1, startTick: 3840 }],
   passage: [{ generation: 1, startOccurrence: 0, endOccurrence: 1, startTick: 0, endTick: 7680 }, { generation: 1, startOccurrence: 1, endOccurrence: 1, startTick: 3840, endTick: 7680 }] };
 
+const playbackState = { ready: true, playing: false, time: 1000, endTime: 6000, measure: 0, speed: 100, metronome: false, practice: { settings: structuredClone(DEFAULT_PRACTICE), phase: 'paused', countInRemaining: 0, completedPasses: 0, effectiveRatio: 1, currentBpm: 120, pulse: null },
+  practicePending: false, practiceNotice: null, loopNotice: null, range: null, loop: null, error: null };
+const transportPlayer = { generation: 1, getState: () => playbackState as never, subscribe: () => noop, play: noop, pause: noop, stop: noop, setSpeed: noop, setLoop: noop, clearLoop: noop, seekToMeasure: noop, setPractice: noop,
+  cursorPlaybackChoices: () => choices.cursor, selectionPlaybackChoices: () => choices.passage, playbackOccurrences: () => occurrences, playFromCursor: noop, playSelection: noop, loopSelection: noop };
+
 const surfaces: Array<{ title: string; mount: () => ReturnType<typeof render> }> = [
   { title: 'InterpretationPanel', mount: () => render(<InterpretationPanel trackId="t" mix={{ gain: .5, pan: 0, mute: false, solo: false }} stringed onEdit={noop} />) },
   { title: 'CabinetResponse', mount: () => render(<CabinetResponse ir={{ id: 'a'.repeat(32), name: 'Mesa', gainDb: 0 } as never} model="british crunch" label={text => text} onChange={noop} />) },
@@ -72,6 +79,7 @@ const surfaces: Array<{ title: string; mount: () => ReturnType<typeof render> }>
   { title: 'AsciiTabImportDialog', mount: () => render(<AsciiTabImportDialog busy={false} onImport={async () => true} onClose={noop} />) },
   { title: 'DocumentTabs', mount: () => render(<DocumentTabs tabs={[tab('a', 'Untitled', true), tab('b', 'Untitled', false)]} activeId="a" disabled={false} onActivate={noop} onClose={noop} />) },
   { title: 'BarWidthsPanel', mount: () => render(<BarWidthsPanel value={withBarScale(defaultEngraving(), 1, 1.5)} design={false} onDesign={noop} busy={false} honoured onEdit={noop} />) },
+  { title: 'Transport', mount: () => render(<Transport player={transportPlayer} measures={4} busy={false} cursor={{ track: 0, staff: 0, bar: 0, voice: 0, beat: 0 }} selection={null} />) },
 ];
 
 describe('converted surfaces show no unchanged English', () => {

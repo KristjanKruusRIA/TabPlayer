@@ -45,7 +45,7 @@ vi.mock('./bridge',async original=>({...await original<typeof import('./bridge')
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),setSpeed:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
 // No MIDI service in jsdom: the inspector's MIDI output panel finds no ports instead of showing a listing error.
 vi.mock('./audio/midi-out',async original=>({...await original<typeof import('./audio/midi-out')>(),nativeMidiOut:{ports:async()=>[],setDelay:async()=>{},status:async()=>({ports:[],sent:0,dropped:0,late:0,maxLateMs:0}),testLog:async()=>[]}}));
@@ -67,7 +67,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   audition=integration.audition;
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
-  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=vi.fn();setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
+  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=integration.setSpeed;setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
   setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
   mix=(track:{index:number})=>{const value=this.built?.settings.mixes[this.identity(track.index)];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan,...(value.drumKit?{drumKit:value.drumKit}:{})}:undefined;};
@@ -518,6 +518,18 @@ it('edits song metadata and measure directions through the integrated inspector'
 it.each([25,50,100,200])('passes %i percent practice speed to export as a render ratio',async speed=>{
   integration.practiceSpeed=speed;await setup();
   await waitFor(()=>expect(integration.exportOptions).toHaveBeenLastCalledWith(expect.objectContaining({currentSpeed:speed/100})));
+});
+
+it('typing a practice speed in transport updates speed without adding undo history',async()=>{
+  const c=await setup();
+  const before=c.getState().snapshot.project.edits.length;
+  expect(c.getState().snapshot.canUndo).toBe(false);
+  const input=screen.getByLabelText('Speed percentage');
+  fireEvent.change(input,{target:{value:'60'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(integration.setSpeed).toHaveBeenLastCalledWith(60);
+  expect(c.getState().snapshot.project.edits.length).toBe(before);
+  expect(c.getState().snapshot.canUndo).toBe(false);
 });
 
 it('selects rendered notes and enters frets on empty strings to form chords',async()=>{

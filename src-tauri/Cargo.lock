@@ -4378,6 +4378,7 @@ dependencies = [
  "subtle",
  "svg2pdf",
  "symphonia",
+ "tabplayer-plugin-protocol",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
@@ -4385,6 +4386,15 @@ dependencies = [
  "tempfile",
  "vorbis_rs",
  "zeroize",
+]
+
+[[package]]
+name = "tabplayer-plugin-protocol"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

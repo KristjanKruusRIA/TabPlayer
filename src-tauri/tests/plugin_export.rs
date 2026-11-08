@@ -399,6 +399,39 @@ mod windows_tests {
             let export_first = first_nonzero_frame(&path);
             assert_ne!(baseline_first, usize::MAX);
             assert_eq!(export_first, baseline_first);
+
+            // The dry track t2 starts with t1, so the mix's onset holds even with t1 misplaced. The plug-in track's own
+            // stem must match the same track rendered without the plug-in, frame for frame.
+            let req = SlotRequest {
+                track_id: "t1".into(),
+                slot: test_slot(TEST_CLASS_ID, &state_id),
+                state: encode_state(&comp, &[]).unwrap().into(),
+            };
+            let offline = rig.service.offline_inserts("doc1", &[req], RATE).unwrap();
+            let settings = dry_settings_for_tracks(&["t1", "t2"]);
+            let mut dry = AudioExportRender::new(
+                Renderer::new(plan.clone(), resources(), settings.clone(), RATE).unwrap(),
+                &plan,
+                request.clone(),
+            )
+            .unwrap();
+            let mut plugged = AudioExportRender::new_with_plugins(
+                Renderer::new(plan.clone(), resources(), settings, RATE).unwrap(),
+                &plan,
+                request,
+                Some(offline),
+            )
+            .unwrap();
+            let expected = render_all_stems(&mut dry, 3);
+            let actual = render_all_stems(&mut plugged, 3);
+            assert!(expected[0].iter().any(|f| f[0].abs() > 0.01), "t1 must sound");
+            assert_eq!(actual[0].len(), expected[0].len());
+            for (i, (a, e)) in actual[0].iter().zip(&expected[0]).enumerate() {
+                assert!(
+                    (a[0] - e[0]).abs() < 1e-6 && (a[1] - e[1]).abs() < 1e-6,
+                    "frame {i}: the plug-in stem {a:?} is not where the dry render of t1 {e:?} is"
+                );
+            }
         }
 
         fn export_flushes_tail() {

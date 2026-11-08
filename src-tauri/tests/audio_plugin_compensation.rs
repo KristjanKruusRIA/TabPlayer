@@ -355,6 +355,55 @@ fn add_note(plan: &mut PlaybackPlan, track: usize, tick: f64) {
         .sort_by(|a, b| a.tick().partial_cmp(&b.tick()).unwrap());
 }
 
+fn add_note_span(plan: &mut PlaybackPlan, track: usize, start_tick: f64, end_tick: f64) {
+    let bar = (start_tick / 3840.0) as u32;
+    plan.notes.push(
+        serde_json::from_value(serde_json::json!({
+            "id": format!("n-{track}-{start_tick}"),
+            "trackId": format!("track-{track}"),
+            "occurrence": 0,
+            "startTick": start_tick,
+            "endTick": end_tick,
+            "key": 60,
+            "velocity": 100,
+            "channel": 0,
+            "articulation": "picked",
+            "pitch": [{"tick": start_tick, "semitones": 0.0}],
+            "source": {
+                "target": {
+                    "track": track as u32,
+                    "staff": 0,
+                    "bar": bar,
+                    "voice": 0,
+                    "beat": 0
+                },
+                "string": 0
+            }
+        }))
+        .unwrap(),
+    );
+    plan.midi.push(PlanMidiEvent::NoteOn {
+        track_id: format!("track-{track}"),
+        tick: start_tick,
+        channel: 0,
+        key: 60,
+        velocity: 100,
+        kit_element: None,
+    });
+    plan.midi.push(PlanMidiEvent::NoteOff {
+        track_id: format!("track-{track}"),
+        tick: end_tick,
+        channel: 0,
+        key: 60,
+        velocity: 0,
+        kit_element: None,
+    });
+    plan.notes
+        .sort_by(|a, b| a.start_tick.partial_cmp(&b.start_tick).unwrap());
+    plan.midi
+        .sort_by(|a, b| a.tick().partial_cmp(&b.tick()).unwrap());
+}
+
 fn practice_settings(bars: u8, between_loops: bool) -> PracticeSettings {
     PracticeSettings {
         tempo: PracticeTempo::Relative { ratio: 1.0 },
@@ -573,12 +622,11 @@ fn midi_out_stamps_are_delayed_by_d_max() {
 
 #[test]
 fn loop_wrap_keeps_streaming() {
-    // Spike 3 reference test: loop one bar (ticks 3840 to 7680, 96,000 frames).
-    // Wraps keep streaming continuous audio across wraps without silence gaps.
+    // Spike 3 reference test: ten wraps of a one-bar loop (ticks 3840 to 7680, 96,000 frames).
+    // Wraps keep streaming continuous audio across wraps without runs of 32 or more zero frames.
     let mut plan = test_plan(2);
-    add_note(&mut plan, 0, 3840.0);
-    add_note(&mut plan, 1, 3840.0);
-    add_note(&mut plan, 0, 7600.0); // pickup near end
+    add_note_span(&mut plan, 0, 3840.0, 7680.0);
+    add_note_span(&mut plan, 1, 3840.0, 7680.0);
 
     let resources = base_resources();
     let settings = DocumentSettings::default();
@@ -594,8 +642,33 @@ fn loop_wrap_keeps_streaming() {
         .unwrap()
         .with_inserts(vec![Some(insert_a), None]);
 
-    let renderer =
-        Renderer::new_with_mix(Arc::new(plan), Arc::new(resources), prep, settings, RATE).unwrap();
+    let mut renderer = Renderer::new_with_mix(
+        Arc::new(plan.clone()),
+        Arc::new(resources),
+        prep,
+        settings,
+        RATE,
+    )
+    .unwrap();
+
+    // Continuous backing tone
+    let backing_frames: Vec<[f32; 2]> = (0..192_000)
+        .map(|i| {
+            let phase = std::f64::consts::TAU * 220.0 * i as f64 / RATE as f64;
+            [phase.sin() as f32 * 0.3; 2]
+        })
+        .collect();
+    renderer
+        .install_backing(
+            Arc::new(DecodedAudio {
+                sample_rate: RATE,
+                channels: 2,
+                frames: Arc::new(backing_frames),
+            }),
+            tabplayer_lib::audio::backing::BackingMap::new(&[], 0.0, &plan).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
 
     let mut transport = CallbackTransport::headless(RATE);
     let practice = practice_settings(0, false);
@@ -612,22 +685,43 @@ fn loop_wrap_keeps_streaming() {
         .unwrap();
 
     let pass_frames = 96_000;
-    let total_frames = pass_frames * 3;
+    let num_passes = 10;
+    let total_frames = pass_frames * num_passes;
     let mut rendered = vec![[0.0f32; 2]; total_frames];
 
-    // Render in 480-frame blocks
+    // Render all 10 passes in 480-frame blocks
     for chunk in rendered.chunks_mut(CALLBACK) {
         transport.render_into(chunk);
         rig_a.settle();
     }
 
-    assert_eq!(transport.status().practice.completed_passes, 3);
-    // Verify audio exists in the wrap transition zone (frames 96000..96000 + d_max)
-    let wrap1_tail = &rendered[pass_frames..pass_frames + d_max + 100];
-    assert!(
-        wrap1_tail.iter().any(|f| f[0].abs() > 0.001),
-        "pass 1 tail must sound across wrap"
+    assert_eq!(
+        transport.status().practice.completed_passes,
+        num_passes as u64
     );
+
+    // Verify: across all wraps, no run of 32 or more zero frames appears where signal is sounding
+    for pass in 1..num_passes {
+        let wrap_frame = pass * pass_frames;
+        let window_start = wrap_frame.saturating_sub(480);
+        let window_end = (wrap_frame + d_max + 480).min(total_frames);
+        let window = &rendered[window_start..window_end];
+
+        let mut consecutive_zeros = 0;
+        let mut max_consecutive_zeros = 0;
+        for f in window {
+            if f[0].abs() < 1e-6 && f[1].abs() < 1e-6 {
+                consecutive_zeros += 1;
+                max_consecutive_zeros = max_consecutive_zeros.max(consecutive_zeros);
+            } else {
+                consecutive_zeros = 0;
+            }
+        }
+        assert!(
+            max_consecutive_zeros < 32,
+            "pass {pass} wrap has {max_consecutive_zeros} consecutive zeros (>= 32 limit)"
+        );
+    }
 }
 
 #[test]
@@ -803,7 +897,10 @@ fn end_of_score_plays_out_the_compensation_delay() {
 
 #[test]
 fn changing_d_max_while_playing_crossfades_taps() {
-    let plan = test_plan(2);
+    let mut plan = test_plan(2);
+    add_note_span(&mut plan, 0, 0.0, 7680.0);
+    add_note_span(&mut plan, 1, 0.0, 7680.0);
+
     let settings = DocumentSettings::default();
 
     let l_1 = 128;
@@ -812,37 +909,127 @@ fn changing_d_max_while_playing_crossfades_taps() {
     let rig_1 = rig(l_1, 1.0);
     let rig_2 = rig(l_2, 1.0);
 
+    // prep_0: no plugins (D = 0)
+    let prep_0 = PreparedMix::prepare(&settings, &plan, RATE).unwrap();
+
+    // prep_1: plugin on track 0 (D = 1024 + 128 = 1152)
     let prep_1 = PreparedMix::prepare(&settings, &plan, RATE)
         .unwrap()
         .with_inserts(vec![Some(rig_1.insert(l_1 as u32)), None]);
+
+    // prep_2: plugin on track 0 with different latency (D = 1024 + 512 = 1536)
     let prep_2 = PreparedMix::prepare(&settings, &plan, RATE)
         .unwrap()
         .with_inserts(vec![Some(rig_2.insert(l_2 as u32)), None]);
 
-    let resources = base_resources();
-    let mut renderer =
-        Renderer::new_with_mix(Arc::new(plan), Arc::new(resources), prep_1, settings, RATE)
-            .unwrap();
+    // prep_3: no plugins again (D = 0)
+    let prep_3 = PreparedMix::prepare(&settings, &plan, RATE).unwrap();
 
-    // Play some frames
-    let mut out = vec![[0.0f32; 2]; 1920];
-    for chunk in out.chunks_mut(CALLBACK) {
+    let resources = base_resources();
+    let mut renderer = Renderer::new_with_mix(
+        Arc::new(plan.clone()),
+        Arc::new(resources),
+        prep_0,
+        settings,
+        RATE,
+    )
+    .unwrap();
+
+    // Install backing with continuous 220Hz tone
+    let backing_len = 192_000;
+    let backing_frames: Vec<[f32; 2]> = (0..backing_len)
+        .map(|i| {
+            let phase = std::f64::consts::TAU * 220.0 * i as f64 / RATE as f64;
+            [phase.sin() as f32 * 0.25; 2]
+        })
+        .collect();
+    renderer
+        .install_backing(
+            Arc::new(DecodedAudio {
+                sample_rate: RATE,
+                channels: 2,
+                frames: Arc::new(backing_frames),
+            }),
+            tabplayer_lib::audio::backing::BackingMap::new(&[], 0.0, &plan).unwrap(),
+            Default::default(),
+        )
+        .unwrap();
+
+    // Play initial frames with D = 0
+    let mut initial = vec![[0.0f32; 2]; 1920];
+    for chunk in initial.chunks_mut(CALLBACK) {
+        renderer.render_into(chunk);
+    }
+    let init_rms = (initial
+        .iter()
+        .map(|f| (f[0] * f[0] + f[1] * f[1]) * 0.5)
+        .sum::<f32>()
+        / initial.len() as f32)
+        .sqrt();
+    assert!(init_rms > 0.05, "initial playback must be sounding");
+
+    let verify_seamless = |frames: &[[f32; 2]], label: &str| {
+        // 1. No 64-frame window drops to silence (RMS dropout)
+        for (i, win) in frames.windows(64).enumerate() {
+            let win_rms = (win
+                .iter()
+                .map(|f| (f[0] * f[0] + f[1] * f[1]) * 0.5)
+                .sum::<f32>()
+                / 64.0)
+                .sqrt();
+            assert!(
+                win_rms > 0.005,
+                "{label}: 64-frame dropout at frame {i} (rms {win_rms})"
+            );
+        }
+        // 2. No sample-to-sample step > 0.25
+        for i in 1..frames.len() {
+            let step_0 = (frames[i][0] - frames[i - 1][0]).abs();
+            let step_1 = (frames[i][1] - frames[i - 1][1]).abs();
+            assert!(
+                step_0 < 0.25 && step_1 < 0.25,
+                "{label}: step at frame {i} exceeds threshold: {step_0}, {step_1}"
+            );
+        }
+    };
+
+    // (a) Transition 0 -> D_max mid-play
+    let _ = renderer.replace_mix(prep_1);
+    let mut trans_a = vec![[0.0f32; 2]; 4800];
+    for chunk in trans_a.chunks_mut(CALLBACK) {
+        let _ = renderer.settle_mix();
         renderer.render_into(chunk);
         rig_1.settle();
     }
+    verify_seamless(&trans_a, "transition 0 -> D_max");
+    assert_eq!(
+        renderer.plugin_delay_frames(),
+        pipeline_frames(CALLBACK) + l_1
+    );
 
-    // Now install prep_2 with changed D_max
-    renderer.set_mix(prep_2);
-
-    // Render across the 10 ms (480-frame) crossfade
-    let mut transition = vec![[0.0f32; 2]; 480];
-    renderer.render_into(&mut transition);
-
-    // Verify no sample step exceeds 0.043 threshold
-    for i in 1..transition.len() {
-        let step = (transition[i][0] - transition[i - 1][0]).abs();
-        assert!(step < 0.043, "step {step} at frame {i} exceeds threshold");
+    // (b) Transition D_1 -> D_2 mid-play
+    let _ = renderer.replace_mix(prep_2);
+    let mut trans_b = vec![[0.0f32; 2]; 4800];
+    for chunk in trans_b.chunks_mut(CALLBACK) {
+        let _ = renderer.settle_mix();
+        renderer.render_into(chunk);
+        rig_2.settle();
     }
+    verify_seamless(&trans_b, "transition D_1 -> D_2");
+    assert_eq!(
+        renderer.plugin_delay_frames(),
+        pipeline_frames(CALLBACK) + l_2
+    );
+
+    // (c) Transition D_2 -> 0 mid-play
+    let _ = renderer.replace_mix(prep_3);
+    let mut trans_c = vec![[0.0f32; 2]; 4800];
+    for chunk in trans_c.chunks_mut(CALLBACK) {
+        let _ = renderer.settle_mix();
+        renderer.render_into(chunk);
+    }
+    verify_seamless(&trans_c, "transition D_2 -> 0");
+    assert_eq!(renderer.plugin_delay_frames(), 0);
 }
 
 #[test]
@@ -882,17 +1069,23 @@ fn compensation_stays_off_the_heap() {
     let plan = test_plan(2);
     let settings = DocumentSettings::default();
 
-    let l = 100;
-    let rig_a = rig(l, 1.0);
+    let l_1 = 100;
+    let l_2 = 200;
+    let rig_1 = rig(l_1, 1.0);
+    let rig_2 = rig(l_2, 1.0);
 
-    let prep = PreparedMix::prepare(&settings, &plan, RATE)
+    let prep_1 = PreparedMix::prepare(&settings, &plan, RATE)
         .unwrap()
-        .with_inserts(vec![Some(rig_a.insert(l as u32)), None]);
+        .with_inserts(vec![Some(rig_1.insert(l_1 as u32)), None]);
+
+    let prep_2 = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(rig_2.insert(l_2 as u32)), None]);
 
     let mut renderer = Renderer::new_with_mix(
         Arc::new(plan),
         Arc::new(base_resources()),
-        prep,
+        prep_1,
         settings,
         RATE,
     )
@@ -907,20 +1100,27 @@ fn compensation_stays_off_the_heap() {
     HEAP_OPERATIONS.with(|n| n.set(0));
     COUNT_HEAP.with(|f| f.set(true));
 
-    // 48,000 frames rendered
+    // 1. 48,000 frames rendered
     renderer.render_into(&mut buffer);
 
-    // wrap_to_tick
+    // 2. wrap_to_tick
     renderer.wrap_to_tick(0.0);
 
-    // count_in_frame
+    // 3. count_in_frame
     let _ = renderer.count_in_frame(0.5);
 
-    // drain_frame
+    // 4. drain_frame
     let _ = renderer.drain_frame();
 
-    // seek_tick
+    // 5. seek_tick
     renderer.seek_tick(100.0);
+
+    // 6. change of D through replace_mix and settle_mix
+    let retired = renderer.replace_mix(prep_2);
+    let _ = renderer.settle_mix();
+
+    // Render crossfade frames
+    renderer.render_into(&mut buffer[..960]);
 
     COUNT_HEAP.with(|f| f.set(false));
     let ops = HEAP_OPERATIONS.with(|n| n.get());
@@ -928,6 +1128,9 @@ fn compensation_stays_off_the_heap() {
         ops, 0,
         "audio thread methods must perform 0 heap allocations, got {ops}"
     );
+
+    // Drop retired off the audio thread
+    drop(retired);
 }
 
 #[test]
@@ -1019,7 +1222,8 @@ fn no_plugin_is_bit_identical() {
 
 #[test]
 fn spike_3_configurations() {
-    // Tests D_max values of 0, 64, 1024, 4800 and mixed latencies, with count-in on and off
+    // Tests D_max values of 0, 64, 1024, 4800 and mixed latencies, with count-in on and off.
+    // Renders across loop wraps and verifies seamless streaming and stem alignment.
     let configs = [
         (0, 0, false),
         (64, 0, false),
@@ -1031,8 +1235,8 @@ fn spike_3_configurations() {
 
     for (lat_a, lat_b, count_in_between) in configs {
         let mut plan = test_plan(2);
-        add_note(&mut plan, 0, 3840.0);
-        add_note(&mut plan, 1, 3840.0);
+        add_note_span(&mut plan, 0, 3840.0, 7680.0);
+        add_note_span(&mut plan, 1, 3840.0, 7680.0);
 
         let settings = DocumentSettings::default();
         let mut prep = PreparedMix::prepare(&settings, &plan, RATE).unwrap();
@@ -1051,8 +1255,8 @@ fn spike_3_configurations() {
         };
         assert_eq!(prep.plugin_delay_frames(), expected_d);
 
-        let renderer = Renderer::new_with_mix(
-            Arc::new(plan),
+        let mut renderer = Renderer::new_with_mix(
+            Arc::new(plan.clone()),
             Arc::new(base_resources()),
             prep,
             settings,
@@ -1060,8 +1264,32 @@ fn spike_3_configurations() {
         )
         .unwrap();
 
+        // Install continuous backing audio
+        let backing_frames: Vec<[f32; 2]> = (0..192_000)
+            .map(|i| {
+                let phase = std::f64::consts::TAU * 220.0 * i as f64 / RATE as f64;
+                [phase.sin() as f32 * 0.25; 2]
+            })
+            .collect();
+        renderer
+            .install_backing(
+                Arc::new(DecodedAudio {
+                    sample_rate: RATE,
+                    channels: 2,
+                    frames: Arc::new(backing_frames),
+                }),
+                tabplayer_lib::audio::backing::BackingMap::new(&[], 0.0, &plan).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+
         let mut transport = CallbackTransport::headless(RATE);
-        let practice = practice_settings(if count_in_between { 1 } else { 0 }, count_in_between);
+        let mut practice =
+            practice_settings(if count_in_between { 1 } else { 0 }, count_in_between);
+        if count_in_between {
+            practice.metronome.enabled = true;
+            practice.metronome.volume = 1.0;
+        }
         transport.install_with_practice(Box::new(renderer), 1, false, practice);
         transport
             .command(TransportCommand::SetLoop {
@@ -1074,8 +1302,73 @@ fn spike_3_configurations() {
             .command(TransportCommand::Play { generation: 1 })
             .unwrap();
 
-        let mut buf = vec![[0.0f32; 2]; 480];
-        transport.render_into(&mut buf);
-        assert!(transport.status().playing);
+        // 1 bar loop = 96,000 frames. If count-in is on: initial count-in (96k) + pass 1 (96k) + wrap count-in (96k) + pass 2 (96k).
+        let total_frames = if count_in_between {
+            96_000 * 4
+        } else {
+            96_000 * 2
+        };
+        let mut rendered = vec![[0.0f32; 2]; total_frames];
+        for chunk in rendered.chunks_mut(CALLBACK) {
+            transport.render_into(chunk);
+            if let Some(r) = &rig_a {
+                r.settle();
+            }
+            if let Some(r) = &rig_b {
+                r.settle();
+            }
+        }
+
+        assert!(
+            transport.status().practice.completed_passes >= 2,
+            "must complete at least 2 passes"
+        );
+
+        if !count_in_between {
+            // Verify no 32-consecutive-zero dropout in rendered output across wraps
+            let mut consecutive_zeros = 0;
+            let mut max_zeros = 0;
+            for f in &rendered[expected_d + 480..] {
+                if f[0].abs() < 1e-6 && f[1].abs() < 1e-6 {
+                    consecutive_zeros += 1;
+                    max_zeros = max_zeros.max(consecutive_zeros);
+                } else {
+                    consecutive_zeros = 0;
+                }
+            }
+            assert!(
+                max_zeros < 32,
+                "config ({lat_a}, {lat_b}, {count_in_between}) had {max_zeros} consecutive zeros across wraps"
+            );
+        } else {
+            // When count-in is on between loops:
+            // 1. Initial count-in (0..96k) has clicks
+            assert!(
+                rendered[..96_000].iter().any(|f| f[0].abs() > 0.1),
+                "initial count-in must have clicks"
+            );
+            // 2. Pass 1 plays (96k..192k)
+            assert!(
+                rendered[96_000 + expected_d + 480..192_000]
+                    .iter()
+                    .any(|f| f[0].abs() > 0.05),
+                "pass 1 must play"
+            );
+            // 3. Loop wrap count-in (192k..288k) drains previous pass tail
+            if expected_d > 0 {
+                let drain_tail = &rendered[192_000..192_000 + expected_d];
+                assert!(
+                    drain_tail.iter().any(|f| f[0].abs() > 0.001),
+                    "pass 1 tail must drain into count-in"
+                );
+            }
+            // 4. Pass 2 plays after loop wrap count-in
+            assert!(
+                rendered[288_000 + expected_d + 480..]
+                    .iter()
+                    .any(|f| f[0].abs() > 0.05),
+                "pass 2 must play"
+            );
+        }
     }
 }

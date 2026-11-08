@@ -1934,7 +1934,9 @@ impl Renderer {
             .collect()
     }
     fn mix_ramping(&self) -> bool {
-        self.mix.channels.iter().any(|c| c.dsp.ramping()) || self.mix.master.ramping()
+        self.mix.channels.iter().any(|c| c.dsp.ramping())
+            || self.mix.master.ramping()
+            || self.mix.compensation.as_ref().is_some_and(|c| c.gliding())
     }
     /// Takes `settings` now, or parks it until the current crossfade ends, when `settle_mix` installs it. A newer mix
     /// replaces a parked one, because only the latest settings still matter. Callback callers retire whatever comes
@@ -1968,10 +1970,23 @@ impl Renderer {
         settings.backing.current = self.mix.backing.current;
         settings.backing.remaining = (self.rate as f64 * 0.01) as u32;
         settings.master.transition_from(&mut self.mix.master);
-        if let (Some(new_comp), Some(old_comp)) =
-            (&mut settings.compensation, &mut self.mix.compensation)
-        {
-            new_comp.transition_from(old_comp);
+        let old_sounding = self.mix.channels.iter().any(|c| c.dsp.sounding());
+        match (&mut settings.compensation, &mut self.mix.compensation) {
+            (Some(new_comp), Some(old_comp)) => {
+                new_comp.transition_from(old_comp);
+            }
+            (Some(new_comp), None) => {
+                if old_sounding {
+                    new_comp.start_undelayed();
+                }
+            }
+            (None, Some(old_comp)) => {
+                if old_sounding {
+                    old_comp.retime_to_zero();
+                    settings.compensation = self.mix.compensation.take();
+                }
+            }
+            (None, None) => {}
         }
         for (track, channel) in self.tracks.iter_mut().zip(&settings.channels) {
             track.kit_active = channel.kit_active;

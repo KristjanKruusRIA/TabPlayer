@@ -10,16 +10,18 @@ pub fn compensation_capacity(rate: u32) -> usize {
     MAX_PIPELINE_FRAMES + max_latency_frames(rate) as usize + 64
 }
 
-/// A stereo delay line with preallocated circular buffer and tap crossfade.
+/// A stereo delay line with preallocated circular buffer and smooth tap crossfade.
 #[derive(Clone, Debug)]
 pub struct DelayLine {
     buf: Vec<[f32; 2]>,
     write_pos: usize,
+    history: usize,
+    timing_from: usize,
+    timing_to: usize,
+    timing_s: f32,
+    timing_goal: usize,
+    ramp_frames: usize,
     delay: usize,
-    old_delay: usize,
-    crossfading: bool,
-    fade_frames: usize,
-    fade_remaining: usize,
 }
 
 impl DelayLine {
@@ -28,11 +30,13 @@ impl DelayLine {
         Self {
             buf: vec![[0.0; 2]; cap],
             write_pos: 0,
+            history: delay + 1,
+            timing_from: delay,
+            timing_to: delay,
+            timing_s: 1.0,
+            timing_goal: delay,
+            ramp_frames: ramp_frames.max(1),
             delay,
-            old_delay: delay,
-            crossfading: false,
-            fade_frames: ramp_frames.max(1),
-            fade_remaining: 0,
         }
     }
 
@@ -40,78 +44,89 @@ impl DelayLine {
         self.delay
     }
 
+    pub fn gliding(&self) -> bool {
+        self.timing_from != self.timing_to || self.timing_to != self.timing_goal
+    }
+
     pub fn flush(&mut self) {
         self.buf.fill([0.0; 2]);
         self.write_pos = 0;
-        self.crossfading = false;
-        self.fade_remaining = 0;
+        self.history = self.delay + 1;
+        self.timing_from = self.delay;
+        self.timing_to = self.delay;
+        self.timing_s = 1.0;
+        self.timing_goal = self.delay;
+    }
+
+    /// Prepares the line to start undelayed when introduced mid-play while the board is sounding.
+    pub fn start_undelayed(&mut self) {
+        self.history = 0;
+        self.timing_from = 0;
+        self.timing_to = 0;
+        self.timing_s = 1.0;
+        self.timing_goal = self.delay;
+    }
+
+    /// Retimes the line to a new delay, starting a crossfade as soon as enough history exists.
+    pub fn retime_to(&mut self, delay: usize) {
+        self.delay = delay;
+        self.timing_goal = delay;
+        if self.timing_from == self.timing_to && self.timing_goal < self.history {
+            self.timing_to = self.timing_goal;
+            self.timing_s = 0.0;
+        }
+    }
+
+    /// Takes over buffer history from `old` and retimes to `self.delay`.
+    pub fn transition_from(&mut self, old: &mut Self) {
+        std::mem::swap(&mut self.buf, &mut old.buf);
+        self.write_pos = old.write_pos;
+        self.history = old.history;
+        self.timing_from = old.timing_from;
+        self.timing_to = old.timing_to;
+        self.timing_s = old.timing_s;
+        self.timing_goal = self.delay;
+        if self.timing_from == self.timing_to && self.timing_goal < self.history {
+            self.timing_to = self.timing_goal;
+            self.timing_s = 0.0;
+        }
+    }
+
+    /// The input `back` frames before the current one (0: the current one).
+    fn sample_at(&self, back: usize) -> [f32; 2] {
+        let span = self.buf.len();
+        let index = (self.write_pos + span - 1 - back.min(span - 1)) % span;
+        self.buf.get(index).copied().unwrap_or([0.0; 2])
     }
 
     #[inline]
     pub fn process(&mut self, x: [f32; 2]) -> [f32; 2] {
-        let cap = self.buf.len();
-        let out = if !self.crossfading {
-            if self.delay == 0 {
-                x
-            } else {
-                let read_idx = if self.write_pos >= self.delay {
-                    self.write_pos - self.delay
-                } else {
-                    self.write_pos + cap - self.delay
-                };
-                self.buf[read_idx]
-            }
-        } else {
-            let old_sample = if self.old_delay == 0 {
-                x
-            } else {
-                let read_idx = if self.write_pos >= self.old_delay {
-                    self.write_pos - self.old_delay
-                } else {
-                    self.write_pos + cap - self.old_delay
-                };
-                self.buf[read_idx]
-            };
-            let new_sample = if self.delay == 0 {
-                x
-            } else {
-                let read_idx = if self.write_pos >= self.delay {
-                    self.write_pos - self.delay
-                } else {
-                    self.write_pos + cap - self.delay
-                };
-                self.buf[read_idx]
-            };
-            let alpha = self.fade_remaining as f32 / self.fade_frames as f32;
-            let sample = [
-                old_sample[0] * alpha + new_sample[0] * (1.0 - alpha),
-                old_sample[1] * alpha + new_sample[1] * (1.0 - alpha),
-            ];
-            self.fade_remaining -= 1;
-            if self.fade_remaining == 0 {
-                self.crossfading = false;
-            }
-            sample
-        };
-
-        self.buf[self.write_pos] = x;
-        self.write_pos += 1;
-        if self.write_pos >= cap {
-            self.write_pos = 0;
+        let span = self.buf.len();
+        if let Some(slot) = self.buf.get_mut(self.write_pos) {
+            *slot = x;
         }
-        out
-    }
+        self.write_pos = (self.write_pos + 1) % span;
+        self.history = (self.history + 1).min(span);
 
-    pub fn transition_from(&mut self, old: &mut Self) {
-        std::mem::swap(&mut self.buf, &mut old.buf);
-        self.write_pos = old.write_pos;
-        if self.delay != old.delay {
-            self.old_delay = old.delay;
-            self.crossfading = true;
-            self.fade_remaining = self.fade_frames;
+        if self.timing_s >= 1.0 {
+            self.timing_from = self.timing_to;
+        }
+        if self.timing_from == self.timing_to
+            && self.timing_to != self.timing_goal
+            && self.timing_goal < self.history
+        {
+            self.timing_to = self.timing_goal;
+            self.timing_s = 0.0;
+        }
+
+        if self.timing_from == self.timing_to {
+            self.sample_at(self.timing_to)
         } else {
-            self.crossfading = false;
-            self.fade_remaining = 0;
+            self.timing_s = (self.timing_s + 1.0 / self.ramp_frames as f32).min(1.0);
+            let a = self.sample_at(self.timing_from);
+            let b = self.sample_at(self.timing_to);
+            let s = self.timing_s;
+            [a[0] + (b[0] - a[0]) * s, a[1] + (b[1] - a[1]) * s]
         }
     }
 }
@@ -123,8 +138,6 @@ pub struct Compensation {
     backing_line: DelayLine,
     click_line: DelayLine,
     d_max: usize,
-    _capacity: usize,
-    _ramp_frames: usize,
 }
 
 impl Compensation {
@@ -150,14 +163,19 @@ impl Compensation {
             backing_line,
             click_line,
             d_max,
-            _capacity: cap,
-            _ramp_frames: ramp_frames,
         }
     }
 
     /// The maximum delay `D_max` among all stems.
     pub fn d_max(&self) -> usize {
         self.d_max
+    }
+
+    /// Whether any delay line is currently crossfading or waiting to crossfade to a new tap.
+    pub fn gliding(&self) -> bool {
+        self.track_lines.iter().any(|l| l.gliding())
+            || self.backing_line.gliding()
+            || self.click_line.gliding()
     }
 
     /// Delays track `i` by `D_max - D_i`.
@@ -186,6 +204,25 @@ impl Compensation {
         }
         self.backing_line.flush();
         self.click_line.flush();
+    }
+
+    /// Prepares all lines to start undelayed and glide to `delay` once history is accumulated.
+    pub fn start_undelayed(&mut self) {
+        for line in &mut self.track_lines {
+            line.start_undelayed();
+        }
+        self.backing_line.start_undelayed();
+        self.click_line.start_undelayed();
+    }
+
+    /// Retimes all lines to 0 delay, crossfading back to real-time.
+    pub fn retime_to_zero(&mut self) {
+        self.d_max = 0;
+        for line in &mut self.track_lines {
+            line.retime_to(0);
+        }
+        self.backing_line.retime_to(0);
+        self.click_line.retime_to(0);
     }
 
     /// Takes over running history from `old` and crossfades taps over 10 ms for any changed delay.

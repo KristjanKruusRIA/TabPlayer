@@ -1341,6 +1341,7 @@ impl CallbackTransport {
                 end_tick,
                 ..
             } => {
+                self.draining = 0;
                 self.range = None;
                 self.cancel_count();
                 self.reset_passes();
@@ -1397,6 +1398,10 @@ impl CallbackTransport {
         self.tick = tick;
     }
     fn fault(&mut self) {
+        self.draining = 0;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.pause();
+        }
         self.interrupted_count =
             self.interrupted_count || self.count.is_some() || self.resume_count;
         self.cancel_count_after_fault();
@@ -1464,7 +1469,7 @@ impl CallbackTransport {
         let mut offset = 0;
         let mut rendered = 0;
         let was_playing = self.playing;
-        while (self.playing || self.draining > 0) && offset < output.len() {
+        while self.playing && offset < output.len() {
             if self.draining > 0 {
                 let Some(renderer) = &mut self.renderer else {
                     self.draining = 0;
@@ -1479,6 +1484,12 @@ impl CallbackTransport {
                 offset += count;
                 self.draining -= count;
                 if self.draining == 0 {
+                    let ceiling = self
+                        .loop_range
+                        .map(|r| r.1)
+                        .or(self.range.map(|r| r.end_tick));
+                    let end = ceiling.unwrap_or_else(|| renderer.duration_tick());
+                    self.seek(end);
                     self.playing = false;
                     self.phase = PracticePhase::Ended;
                     self.cancel_count();

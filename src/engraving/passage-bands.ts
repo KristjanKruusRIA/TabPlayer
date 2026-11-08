@@ -1,5 +1,5 @@
 import type {model} from '@coderline/alphatab';
-import type {ScreenBounds,ScreenSystem} from './screen-pages';
+import {beatSpanOf,type ScreenBounds,type ScreenSystem} from './screen-pages';
 
 /** One bar of a passage. `from` is the first beat of the bar the passage includes and `to` the last; left out, the passage takes the bar's own edge. */
 export interface PassageBar {bar:number;from?:model.Beat|null;to?:model.Beat|null}
@@ -23,7 +23,7 @@ export function passageBands(lookup:ScreenBounds,bars:readonly PassageBar[]):Pas
   for(const bar of [...wanted.values()].sort((a,b)=>a.bar-b.bar)){
     const master=lookup.findMasterBarByIndex(bar.bar),system=master?.staffSystemBounds;
     if(!master||!system){open=null;continue;}
-    const beatBox=(beat:model.Beat|null|undefined)=>beat?lookup.findBeats(beat)?.find(bounds=>bounds.beat===beat)?.realBounds:undefined;
+    const beatBox=(beat:model.Beat|null|undefined)=>beat?(()=>{const found=lookup.findBeats(beat)?.find(bounds=>bounds.beat===beat);return found?beatSpanOf(found):undefined;})():undefined;
     const startBox=beatBox(bar.from),endBox=beatBox(bar.to);
     let left=master.realBounds.x,right=master.realBounds.x+master.realBounds.w,innerStart=false,innerEnd=false;
     if(bar.from&&startBox&&bar.from.index>0){left=startBox.x;innerStart=true;}

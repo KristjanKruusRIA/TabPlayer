@@ -1,7 +1,8 @@
 import {beforeAll,describe,expect,it} from 'vitest';
 import {LayoutMode,Settings,SystemsLayoutMode,model,rendering} from '@coderline/alphatab';
 import type {PageLayout} from './types';
-import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,SCREEN_PAGE_GAP,unmapScreenPoint} from './screen-pages';
+import {passageBands} from './passage-bands';
+import {arrangeScreenPages,beatSpan,beatSpanOf,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,SCREEN_PAGE_GAP,unmapScreenPoint} from './screen-pages';
 import type {ScreenPagination,ScreenRect,ScreenRenderChunk} from './screen-pages';
 
 const page:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1.13,profile:'document'};
@@ -150,18 +151,84 @@ describe('whole renderer blocks',()=>{
   });
 });
 
+// A real render: eight eighth-note bars forced on each system make alphaTab report negative real widths for some beats.
+function crowdedFixture(){
+  const settings=new Settings();
+  settings.core.engine='svg';settings.core.enableLazyLoading=false;settings.core.includeNoteBounds=true;
+  settings.display.layoutMode=LayoutMode.Parchment;settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;settings.display.padding=[0,0,0,0];
+  const score=new model.Score();score.defaultSystemsLayout=8;score.systemsLayout=[];
+  for(let i=0;i<16;i++)score.addMasterBar(new model.MasterBar());
+  const track=new model.Track();track.defaultSystemsLayout=8;track.systemsLayout=[];score.addTrack(track);
+  const staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];staff.showTablature=true;staff.showStandardNotation=true;track.addStaff(staff);
+  for(let b=0;b<16;b++){
+    const bar=new model.Bar();staff.addBar(bar);const voice=new model.Voice();bar.addVoice(voice);
+    for(let q=0;q<8;q++){
+      const beat=new model.Beat();beat.duration=model.Duration.Eighth;voice.addBeat(beat);
+      if(q===3)continue;
+      const note=new model.Note();note.string=1+(b+q)%6;note.fret=10+(b*5+q*3)%12;beat.addNote(note);
+    }
+  }
+  score.finish(settings);
+  const renderer=new rendering.ScoreRenderer(settings);renderer.width=1100;
+  const chunks:ScreenRenderChunk[]=[];
+  renderer.partialRenderFinished.on(e=>{
+    if(typeof e.renderResult!=='string')throw new Error('Fixture must produce eager SVG strings');
+    chunks.push(Object.freeze({id:e.id,x:e.x,y:e.y,width:e.width,height:e.height,firstMasterBarIndex:e.firstMasterBarIndex,lastMasterBarIndex:e.lastMasterBarIndex,svg:e.renderResult}));
+  });
+  renderer.error.on(error=>{throw error;});renderer.renderScore(score,[0]);
+  const bounds=renderer.boundsLookup;if(!bounds?.isFinished)throw new Error('Fixture did not finish');
+  renderer.destroy();return {chunks:Object.freeze(chunks),bounds};
+}
+
 describe('crowded beats',()=>{
-  // alphaTab gives a beat a negative real width when forced systems pack beats tighter than their natural width.
-  it('paginates when a beat reports a negative real width, and still rejects a non-finite one',()=>{
-    const beat=fixture.bounds.staffSystems[0].bars[0].bars[0].beats[0],original=beat.realBounds,withChange=(change:Partial<ScreenRect>)=>Object.assign(Object.create(Object.getPrototypeOf(original)),original,change);
+  const crowded=crowdedFixture(),wide:PageLayout={widthMm:420,heightMm:594,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
+  const barsOf=()=>crowded.bounds.staffSystems.flatMap(system=>system.bars.flatMap(master=>master.bars.map(bar=>({system,bar}))));
+  const negative=barsOf().flatMap(({system,bar})=>bar.beats.filter(beat=>beat.realBounds.w<0).map(beat=>({system,bar,beat})));
+  it('is a genuinely crowded render: alphaTab reports negative real widths, none below the bar width',()=>{
+    expect(negative.length).toBeGreaterThan(10);
+    for(const {bar,beat} of negative)expect(beat.realBounds.w).toBeGreaterThanOrEqual(-bar.realBounds.w);
+  });
+  it('paginates the crowded render and keeps every beat span non-negative and in order',()=>{
+    expect(()=>paginateScreenScore(crowded.chunks,crowded.bounds,wide)).not.toThrow();
+    for(const {bar} of barsOf()){
+      const spans=bar.beats.map(beat=>beatSpan(bar,beat));
+      spans.forEach((span,i)=>{expect(span.w).toBeGreaterThanOrEqual(0);if(i>0)expect(span.x).toBeGreaterThanOrEqual(spans[i-1].x);});
+      for(let i=0;i<spans.length-1;i++)expect(spans[i].x+spans[i].w).toBeCloseTo(spans[i+1].x);
+    }
+  });
+  it('picks the crowded beat, not its neighbour, for a click in its column away from any notehead',()=>{
+    const pagination=paginateScreenScore(crowded.chunks,crowded.bounds,wide),arranged=arrangeScreenPages(pagination,'verticalPage',1,pagination.paper.width);
+    let checked=0;
+    for(const {system,bar,beat} of negative){
+      const span=beatSpan(bar,beat);if(span.w<1)continue;
+      const mapped=mapScreenRect(pagination,arranged,system,{x:span.x+span.w/2,y:bar.realBounds.y+0.5,w:0,h:0});if(!mapped)continue;
+      const hit=hitTestScreenPages(pagination,arranged,{x:mapped.x,y:mapped.y});
+      expect(hit?.beat).toBe(beat.beat);checked++;
+    }
+    expect(checked).toBeGreaterThan(5);
+  });
+  it('maps an overlay box for a crowded beat through its span, while the raw negative box stays rejected',()=>{
+    const pagination=paginateScreenScore(crowded.chunks,crowded.bounds,wide),arranged=arrangeScreenPages(pagination,'verticalPage',1,pagination.paper.width);
+    const {system,beat}=negative[0];
+    expect(()=>mapScreenRect(pagination,arranged,system,beat.realBounds)).toThrow(/geometry/i);
+    const box=beatSpanOf(beat);expect(box.w).toBeGreaterThanOrEqual(0);
+    expect(mapScreenRect(pagination,arranged,system,box)).not.toBeNull();
+  });
+  it('draws a passage band over a single crowded beat instead of dropping it',()=>{
+    const inner=negative.find(({bar,beat})=>beat.beat.index>0&&beat.beat.index<bar.beats.length-1)!;
+    const bands=passageBands(crowded.bounds,[{bar:inner.beat.beat.voice.bar.index,from:inner.beat.beat,to:inner.beat.beat}]);
+    const span=beatSpan(inner.bar,inner.beat);
+    expect(bands).toHaveLength(1);expect(bands[0].x).toBeCloseTo(span.x);expect(bands[0].w).toBeCloseTo(span.w);expect(bands[0].w).toBeGreaterThan(0);
+  });
+  it('bounds a negative width by the bar, keeps the beat inside its bar, and rejects non-finite values',()=>{
+    const {system,bar,beat}=negative[0],original=beat.realBounds,withChange=(change:Partial<ScreenRect>)=>Object.assign(Object.create(Object.getPrototypeOf(original)),original,change);
     try{
-      beat.realBounds=withChange({w:-6.4});
-      expect(()=>paginateScreenScore(fixture.chunks,fixture.bounds,page)).not.toThrow();
-      beat.realBounds=withChange({w:NaN});
-      expect(()=>paginateScreenScore(fixture.chunks,fixture.bounds,page)).toThrow(/bounds|geometry/i);
-      beat.realBounds=withChange({h:-1});
-      expect(()=>paginateScreenScore(fixture.chunks,fixture.bounds,page)).toThrow(/bounds|geometry/i);
+      for(const change of [{w:NaN},{h:-1},{w:-bar.realBounds.w-1},{x:bar.realBounds.x+bar.realBounds.w+50},{x:bar.realBounds.x-50}]){
+        beat.realBounds=withChange(change);
+        expect(()=>paginateScreenScore(crowded.chunks,crowded.bounds,wide),JSON.stringify(change)).toThrow(/bounds|geometry/i);
+      }
     }finally{beat.realBounds=original;}
+    expect(system).toBeDefined();
   });
 });
 

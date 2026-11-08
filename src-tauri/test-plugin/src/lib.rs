@@ -106,7 +106,7 @@ pub const PARAM_EDITS: u32 = 3;
 /// The number of parameters.
 pub const PARAM_COUNT: u32 = 4;
 
-/// The number of steps of the mode parameter: eight modes, so seven steps.
+/// The number of steps of the mode parameter: nine modes, so eight steps.
 const MODE_STEPS: u32 = 8;
 
 /// How much state a `setState` reads before giving up on the stream. The helper's cap is 8 MiB; this leaves room for

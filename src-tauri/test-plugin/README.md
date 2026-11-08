@@ -30,7 +30,7 @@ Slow takes 50 ms through the parameter. To choose another length, set the state:
 - **Hang on load**: `setState` never returns once it has read a state with this mode.
 - **Reject state**: `setState` returns `kResultFalse`, and so does a state that carries this mode.
 - **Fail process**: every `process` call returns `kResultFalse` and writes nothing.
-- **Fault**: the next `process` call crashes for real, with an access violation (`0xC0000005` on Windows), so the system's own crash handling runs: Windows Error Reporting, with its dialog switched off by a host that hardened its process. Use it to prove that a host's hardening keeps a crash from raising a dialog or stalling the exit; use **Crash** where a test needs the process gone at once.
+- **Fault**: the next `process` call crashes for real, with an access violation (`0xC0000005` on Windows), so the system's own crash handling runs: Windows Error Reporting, with its dialog switched off by a host that hardened its process. Use it to show that a crash ends a hardened host promptly with the real exception code, rather than raising a dialog or stalling the exit. It does not by itself prove the hardening is the cause, since no test runs the host unhardened; use **Crash** where a test needs the process gone at once.
 
 ## State
 

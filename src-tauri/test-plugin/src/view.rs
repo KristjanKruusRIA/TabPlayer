@@ -3,7 +3,9 @@
 //! On `attached` it reports one edit to the host through `beginEdit`, `performEdit` and `endEdit` on the `edits`
 //! parameter, so a test can see that the editor opened without clicking anything. `TABPLAYER_TEST_PLUGIN_VIEW_NO_EDIT=1`
 //! turns that off. `TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS=<n>` then blocks the calling thread (the host's UI thread) for `n`
-//! milliseconds, to show a slow or stuck editor.
+//! milliseconds, to show a slow or stuck editor. `TABPLAYER_TEST_PLUGIN_VIEW_MODAL_MS=<n>` instead runs a nested message
+//! loop on that thread for `n` milliseconds, as a modal licence dialog does: the thread keeps dispatching window
+//! messages, and drops thread messages.
 #![allow(non_snake_case)]
 #![allow(unsafe_op_in_unsafe_fn)]
 
@@ -16,11 +18,13 @@ use std::time::Duration;
 use vst3::{Class, Steinberg::*};
 use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, WS_CHILD, WS_VISIBLE,
+    CreateWindowExW, DestroyWindow, DispatchMessageW, MSG, PM_REMOVE, PeekMessageW,
+    TranslateMessage, WS_CHILD, WS_VISIBLE,
 };
 
 use crate::{
-    EDITOR_HEIGHT, EDITOR_WIDTH, ENV_VIEW_HANG_MS, ENV_VIEW_NO_EDIT, Shared, TEST_PLUGIN_NAME,
+    EDITOR_HEIGHT, EDITOR_WIDTH, ENV_VIEW_HANG_MS, ENV_VIEW_MODAL_MS, ENV_VIEW_NO_EDIT, Shared,
+    TEST_PLUGIN_NAME,
 };
 
 /// The static control style that centres its text; `windows-sys` does not define the `SS_*` styles.
@@ -57,6 +61,23 @@ impl Drop for TestView {
 
 impl Class for TestView {
     type Interfaces = (IPlugView,);
+}
+
+/// A nested message loop for `ms` milliseconds: window messages are dispatched, thread messages (no window) are dropped.
+fn modal_loop(ms: u64) {
+    let end = std::time::Instant::now() + Duration::from_millis(ms);
+    // SAFETY: the standard peek-dispatch loop on the calling thread; `msg` is writable.
+    unsafe {
+        let mut msg: MSG = std::mem::zeroed();
+        while std::time::Instant::now() < end {
+            if PeekMessageW(&mut msg, ptr::null_mut(), 0, 0, PM_REMOVE) != 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            } else {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
 }
 
 fn wide(text: &str) -> Vec<u16> {
@@ -106,6 +127,12 @@ impl IPlugViewTrait for TestView {
             .and_then(|text| text.trim().parse::<u64>().ok())
         {
             std::thread::sleep(Duration::from_millis(ms));
+        }
+        if let Some(ms) = std::env::var(ENV_VIEW_MODAL_MS)
+            .ok()
+            .and_then(|text| text.trim().parse::<u64>().ok())
+        {
+            modal_loop(ms);
         }
         kResultOk
     }

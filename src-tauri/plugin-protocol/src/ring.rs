@@ -82,8 +82,11 @@ pub struct BlockHeader {
     project_quarters: AtomicU64,
 }
 
+/// `BlockMeta::flags` bit 0: the transport is playing (VST3's `kPlaying`). Task 8 assigned it; the other bits are free.
+pub const BLOCK_FLAG_PLAYING: u32 = 1 << 0;
+
 /// What travels with a block besides its samples. The epoch is stamped by the ring. The bits of `flags` are assigned by
-/// the tasks that use them. The other side's copy is untrusted data: the consumer sanitizes tempo and position before a
+/// the tasks that use them ([`BLOCK_FLAG_PLAYING`] so far). The other side's copy is untrusted data: the consumer sanitizes tempo and position before a
 /// plug-in sees them.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BlockMeta {

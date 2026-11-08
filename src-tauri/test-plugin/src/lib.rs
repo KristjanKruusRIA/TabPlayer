@@ -33,7 +33,11 @@
 //!
 //! The helper, the client and the end-to-end tests drive it through ordinary VST3 means only: four parameters
 //! (see [`PARAM_GAIN`] and its siblings), the component state ([`encode_test_state`]) and, on Windows, an editor.
-//! Four environment variables, read inside the process that hosts the plug-in, add the rest:
+//! Six environment variables, read inside the process that hosts the plug-in, add the rest:
+//! `TABPLAYER_TEST_PLUGIN_PRINT=1` makes it print to the console (Rust's and the C runtime's) when it loads and on every
+//! block, to show that a host keeps plug-in output off its control pipe,
+//! `TABPLAYER_TEST_PLUGIN_VIEW_MODAL_MS=<n>` makes the editor run a nested message loop for `n` milliseconds after it
+//! attaches, as a licence dialog would,
 //! `TABPLAYER_TEST_PLUGIN_HANG_FACTORY=1` blocks `GetPluginFactory` forever,
 //! `TABPLAYER_TEST_PLUGIN_STATE_PADDING=<bytes>` makes `getState` pad the state to at least that many bytes of padding
 //! (at most [`MAX_ENV_STATE_PADDING`]), `TABPLAYER_TEST_PLUGIN_VIEW_NO_EDIT=1` stops the editor from reporting an edit
@@ -113,6 +117,9 @@ pub const EDITOR_WIDTH: i32 = 300;
 pub const EDITOR_HEIGHT: i32 = 200;
 
 const ENV_HANG_FACTORY: &str = "TABPLAYER_TEST_PLUGIN_HANG_FACTORY";
+const ENV_PRINT: &str = "TABPLAYER_TEST_PLUGIN_PRINT";
+#[cfg_attr(not(windows), allow(dead_code))]
+const ENV_VIEW_MODAL_MS: &str = "TABPLAYER_TEST_PLUGIN_VIEW_MODAL_MS";
 const ENV_STATE_PADDING: &str = "TABPLAYER_TEST_PLUGIN_STATE_PADDING";
 #[cfg_attr(not(windows), allow(dead_code))]
 const ENV_VIEW_NO_EDIT: &str = "TABPLAYER_TEST_PLUGIN_VIEW_NO_EDIT";
@@ -666,6 +673,29 @@ const fn hex_digit(byte: u8) -> u8 {
 
 const CID: TUID = tuid_from_hex(TEST_CLASS_ID);
 
+/// With `TABPLAYER_TEST_PLUGIN_PRINT=1`, writes a line through Rust's standard output and one through the C runtime's, the
+/// two ways a plug-in's code usually prints. A host that keeps them off its control pipe is not disturbed; one that
+/// does not has its frames corrupted.
+fn print_noise(what: &str) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if !*ON.get_or_init(|| std::env::var(ENV_PRINT).as_deref() == Ok("1")) {
+        return;
+    }
+    println!("tabplayer test plug-in: {what}");
+    eprintln!("tabplayer test plug-in: {what} (stderr)");
+    unsafe extern "C" {
+        fn puts(text: *const c_char) -> i32;
+        fn fflush(stream: *mut c_void) -> i32;
+    }
+    if let Ok(line) = std::ffi::CString::new(format!("tabplayer test plug-in (C): {what}")) {
+        // SAFETY: `puts` takes a NUL-terminated string, which `line` is; `fflush(NULL)` flushes every open stream.
+        unsafe {
+            puts(line.as_ptr());
+            fflush(ptr::null_mut());
+        }
+    }
+}
+
 struct TestPlugin {
     shared: Arc<Shared>,
 }
@@ -689,6 +719,7 @@ impl TestPlugin {
 
 impl IPluginBaseTrait for TestPlugin {
     unsafe fn initialize(&self, _context: *mut FUnknown) -> tresult {
+        print_noise("initialize");
         kResultOk
     }
 
@@ -870,6 +901,7 @@ impl IAudioProcessorTrait for TestPlugin {
         if data.is_null() {
             return kInvalidArgument;
         }
+        print_noise("process");
         let process_data = &*data;
 
         // Take the last value of each parameter queue, then read the mode and latency they leave.

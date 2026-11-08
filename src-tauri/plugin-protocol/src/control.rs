@@ -131,6 +131,8 @@ pub enum ErrorCode {
     StateTooLarge,
     EditorFailed,
     Internal,
+    /// This platform has no plug-in host (the stub helper builds on every platform and refuses every request).
+    UnsupportedPlatform,
 }
 
 /// What the app sends. `Load` is the first message to an audio helper, `Probe` to a probing one.
@@ -563,6 +565,7 @@ mod tests {
             HelperMessage::EditorClosed,
             HelperMessage::StateDirty,
             HelperMessage::error(ErrorCode::Unreadable, "it did not load"),
+            HelperMessage::error(ErrorCode::UnsupportedPlatform, "no plug-in host here"),
         ]
     }
 

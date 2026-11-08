@@ -50,6 +50,8 @@ They are read inside the process that hosts the plug-in.
 - `TABPLAYER_TEST_PLUGIN_STATE_PADDING=<bytes>`: `getState` pads the state to at least this much padding, at most 16 MiB.
 - `TABPLAYER_TEST_PLUGIN_VIEW_NO_EDIT=1`: the editor does not report an edit when it attaches.
 - `TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS=<n>`: the editor blocks its thread for `n` milliseconds after it attaches.
+- `TABPLAYER_TEST_PLUGIN_VIEW_MODAL_MS=<n>`: the editor runs a nested message loop on its thread for `n` milliseconds after it attaches, as a modal licence dialog does: window messages are dispatched and thread messages are dropped.
+- `TABPLAYER_TEST_PLUGIN_PRINT=1`: the plug-in prints on load and on every block, through Rust's standard output and error and through the C runtime's `puts`. A host must keep that off its control pipe.
 
 ## Build
 

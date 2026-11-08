@@ -4,8 +4,9 @@ import { cleanup,fireEvent,render,screen,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { ViewDefaultsPanel } from './ViewDefaultsPanel';
 import { standardViewDefaults } from './view-defaults';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); setLanguagePreference('en'); });
 const current={zoom:150,trackView:{kind:'all'} as const,scoreDisplay:{layout:'verticalPage',zoomMode:'fitWidth'} as const};
 
 it('edits and saves the default view without changing the open score view',()=>{
@@ -55,4 +56,15 @@ it('makes a typed zoom manual, as the score display controls do, and explains an
   expect(screen.getByLabelText('Default zoom (%)')).toHaveAccessibleDescription('Zoom must be 25–300%.');
   fireEvent.click(within(screen.getByRole('radiogroup',{name:'Default layout'})).getByRole('radio',{name:'Parchment'}));
   expect(screen.getByLabelText('Default zoom mode')).toHaveAccessibleDescription('Fit page is available in page layouts.');
+});
+
+it('translates view defaults panel when language preference changes', () => {
+  try {
+    setLanguagePreference('et');
+    render(<ViewDefaultsPanel current={current} load={() => standardViewDefaults} onSave={vi.fn()} />);
+    expect(screen.getByRole('button', { name: 'Salvesta vaikevaade' })).toBeInTheDocument();
+    expect(screen.getByRole('radiogroup', { name: 'Vaikepaigutus' })).toBeInTheDocument();
+  } finally {
+    setLanguagePreference('en');
+  }
 });

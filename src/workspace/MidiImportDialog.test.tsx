@@ -5,8 +5,9 @@ import '@testing-library/jest-dom/vitest';
 import { Settings } from '@coderline/alphatab';
 import { MidiImportDialog } from './MidiImportDialog';
 import { loadInterchangeScore } from '../interchange/gp';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); setLanguagePreference('en'); });
 // One format 0 track: 100 BPM, an E3 quarter note on a guitar program.
 const midi=new Uint8Array([0x4d,0x54,0x68,0x64,0,0,0,6,0,0,0,1,0x01,0xe0,0x4d,0x54,0x72,0x6b,0,0,0,23,0,0xc0,25,0,0xff,0x51,3,0x09,0x27,0xc0,0,0x90,0x34,0x5a,0x83,0x60,0x80,0x34,0,0,0xff,0x2f,0]);
 const setup=(busy=false,result:()=>Promise<boolean>=async()=>true)=>{
@@ -104,4 +105,15 @@ it('closes from the backdrop, refuses presses while opening without losing focus
   await waitFor(()=>expect(status()).toHaveTextContent('The score was not opened.'));
   expect(importButton).toHaveFocus();
   fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('translates MIDI import dialog when language preference changes', () => {
+  try {
+    setLanguagePreference('et');
+    render(<MidiImportDialog busy={false} onImport={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByRole('radiogroup', { name: 'Kvantimine' })).toBeInTheDocument();
+    expect(screen.getByText('Faili pole valitud')).toBeInTheDocument();
+  } finally {
+    setLanguagePreference('en');
+  }
 });

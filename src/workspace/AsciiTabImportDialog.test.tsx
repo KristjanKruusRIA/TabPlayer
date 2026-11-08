@@ -5,8 +5,9 @@ import '@testing-library/jest-dom/vitest';
 import { Settings } from '@coderline/alphatab';
 import { AsciiTabImportDialog } from './AsciiTabImportDialog';
 import { loadInterchangeScore } from '../interchange/gp';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); setLanguagePreference('en'); });
 const riff=['e|----------------|','B|----------------|','G|----------------|','D|----------------|','A|----3-------3---|','E|0-------0-------|'].join('\n');
 const setup=(busy=false,result:()=>Promise<boolean>=async()=>true)=>{
   const onImport=vi.fn((_name:string,_bytes:Uint8Array)=>result()),onClose=vi.fn();
@@ -96,4 +97,15 @@ it('closes from the backdrop, but not while the score is opening, and keeps focu
   await waitFor(()=>expect(status()).toHaveTextContent('The score was not opened.'));
   expect(importButton).toHaveFocus();expect(importButton).not.toHaveAttribute('aria-disabled');
   fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('translates ASCII tab import dialog when language preference changes', () => {
+  try {
+    setLanguagePreference('et');
+    render(<AsciiTabImportDialog busy={false} onImport={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByRole('dialog', { name: 'Impordi ASCII tabulatuur' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Impordi' })).toBeInTheDocument();
+  } finally {
+    setLanguagePreference('en');
+  }
 });

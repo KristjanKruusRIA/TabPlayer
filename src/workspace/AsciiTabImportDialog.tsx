@@ -60,10 +60,10 @@ export function AsciiTabImportDialog({busy,onImport,onClose}:{busy:boolean;onImp
   return <Dialog title={t('ascii_import.title')} onClose={onClose} ariaDescribedBy={hint} busy={importing} closeDisabled={importing} dismissOnBackdrop className="ascii-import" onSubmit={event=>{event.preventDefault();void submit();}} actions={actions}>
     <div className="ascii-import-form">
       <p id={hint} className="muted">{t('ascii_import.hint')}</p>
-      <label>ASCII tab<textarea ref={area} data-autofocus value={text} rows={14} spellCheck={false} wrap="off" aria-describedby={status} aria-invalid={!!problem} readOnly={importing}
+      <label>{t('ascii_import.tab_label')}<textarea ref={area} data-autofocus value={text} rows={14} spellCheck={false} wrap="off" aria-describedby={status} aria-invalid={!!problem} readOnly={importing}
         onChange={event=>edit(event.target.value)}/></label>
       <input ref={file} type="file" accept=".txt,.tab,.text,text/plain" hidden onChange={event=>{load(event.target.files?.[0]);event.target.value='';}}/>
-      <p id={status} role="status" className={problem?'error':'muted'}>{problem??(importing?'Opening the score…':result?summary:text.trim()?'Reading the tab…':'Nothing to import yet.')}</p>
+      <p id={status} role="status" className={problem?'error':'muted'}>{problem??(importing?t('ascii_import.opening'):result?summary:text.trim()?t('ascii_import.reading'):t('ascii_import.nothing_yet'))}</p>
     </div>
   </Dialog>;
 }

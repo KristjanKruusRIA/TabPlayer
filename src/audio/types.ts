@@ -3,7 +3,8 @@ import type { PracticeLoop,PracticeStatus } from './practice-types';
 import type { PerformedBeat,PlaybackSpan } from './selection-playback-types';
 export type { PracticeSettings } from './practice-types';
 
-export interface PlaybackState {ready:boolean;playing:boolean;time:number;endTime:number;measure:number;speed:number;metronome:boolean;practice:PracticeStatus;practicePending:boolean;practiceNotice:string|null;loop:PracticeLoop|null;/** Why an edit ended the loop that was running, until the next edit or loop. */loopNotice:'cleared'|null;range:PlaybackSpan|null;error:string|null}
+export type PracticeNotice = 'fixed_tempo_disabled_backing';
+export interface PlaybackState {ready:boolean;playing:boolean;time:number;endTime:number;measure:number;speed:number;metronome:boolean;practice:PracticeStatus;practicePending:boolean;practiceNotice:PracticeNotice|(string & {})|null;loop:PracticeLoop|null;/** Why an edit ended the loop that was running, until the next edit or loop. */loopNotice:'cleared'|null;range:PlaybackSpan|null;error:string|null}
 export type Articulation = 'picked' | 'fingered' | 'muted' | 'dead' | 'ghost' | 'staccato' | 'legato' | 'tapped' | 'harmonic' | 'feedback' | 'slap' | 'pop';
 export interface PlanTrack { id: string; program: number; percussion: boolean }
 export interface PlanTempo { tick: number; bpm: number }

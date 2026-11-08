@@ -19,3 +19,10 @@ export function repairScoreDisplay(value:unknown):ScoreDisplayPreferences|undefi
 export function resolveScoreDisplay(value:unknown):ScoreDisplayPreferences {
   return repairScoreDisplay(value) ?? {layout:'parchment',zoomMode:'manual'};
 }
+
+/** A fitted zoom for display: a whole percent when it is one, else one decimal (87.81646825396825 shows as 87.8). */
+export function formatZoomPercent(percent:number):string {
+  if(!Number.isFinite(percent))return '';
+  const rounded=Math.round(percent*10)/10;
+  return Number.isInteger(rounded)?String(rounded):rounded.toFixed(1);
+}

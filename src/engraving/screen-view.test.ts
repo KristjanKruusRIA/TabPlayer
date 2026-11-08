@@ -1,5 +1,5 @@
 import { expect,it } from 'vitest';
-import { isPhysicalPageLayout,repairScoreDisplay,resolveScoreDisplay,type ScoreLayoutMode,type ScoreZoomMode } from './screen-view';
+import { formatZoomPercent,isPhysicalPageLayout,repairScoreDisplay,resolveScoreDisplay,type ScoreLayoutMode,type ScoreZoomMode } from './screen-view';
 
 const layouts:ScoreLayoutMode[]=['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'];
 const policies:ScoreZoomMode[]=['manual','fitWidth','fitPage'];
@@ -45,4 +45,13 @@ it('does not mutate a frozen endless preference when repairing fit page',()=>{
   const supplied=Object.freeze({layout:'parchment',zoomMode:'fitPage'});
   expect(resolveScoreDisplay(supplied)).toEqual({layout:'parchment',zoomMode:'fitWidth'});
   expect(supplied).toEqual({layout:'parchment',zoomMode:'fitPage'});
+});
+
+it('rounds a fitted zoom for display to a whole percent or one decimal',()=>{
+  expect(formatZoomPercent(87.81646825396825)).toBe('87.8');
+  expect(formatZoomPercent(100)).toBe('100');
+  expect(formatZoomPercent(99.96)).toBe('100');
+  expect(formatZoomPercent(25.04)).toBe('25');
+  expect(formatZoomPercent(137.5)).toBe('137.5');
+  expect(formatZoomPercent(Number.NaN)).toBe('');
 });

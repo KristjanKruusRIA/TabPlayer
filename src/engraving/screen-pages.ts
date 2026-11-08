@@ -23,6 +23,28 @@ function positive(value:number):boolean {return Number.isFinite(value)&&value>0;
 function validRect(rect:ScreenRect,nonempty=false):void {
   if(![rect.x,rect.y,rect.w,rect.h,rect.x+rect.w,rect.y+rect.h].every(Number.isFinite)||rect.w<0||rect.h<0||(nonempty&&(rect.w===0||rect.h===0)))throw new Error('Invalid screen bounds geometry.');
 }
+/** alphaTab reports a beat's real width as negative when beats are crowded closer than their natural width (forced systems of six or more bars). The rest of its geometry is still sound, so only the width may be negative. */
+function validBeatRealRect(rect:ScreenRect,bar:ScreenRect):void {
+  if(![rect.x,rect.y,rect.w,rect.h,rect.y+rect.h].every(Number.isFinite)||rect.h<0)throw new Error('Invalid screen bounds geometry.');
+  // Negative, but only as far as the bar is wide, and the beat starts inside its bar (one pixel of slack for rounding).
+  if(rect.w<-bar.w||rect.x<bar.x-1||rect.x>bar.x+bar.w+1)throw new Error('Invalid screen bounds geometry.');
+}
+type BeatBox={beat:model.Beat;realBounds:ScreenRect};
+/**
+ * The stretch of a bar a beat owns: from its own x to the x of the next beat of the same voice, or, for the last one, its own end (the bar's right edge only when that width is negative).
+ * alphaTab's real width cannot be used for this when beats are crowded: it is negative for some beats and overshoots the next beat for others.
+ */
+export function beatSpan(bar:{realBounds:ScreenRect;beats:readonly BeatBox[]},bound:BeatBox):ScreenRect {
+  const lane=bar.beats.filter(item=>item.beat.voice===bound.beat.voice),index=lane.indexOf(bound),next=index>=0?lane[index+1]:undefined;
+  const box=bound.realBounds;
+  // The last beat keeps alphaTab's own end (short of the barline) unless that width is negative.
+  const right=next?next.realBounds.x:box.w>=0?box.x+box.w:bar.realBounds.x+bar.realBounds.w;
+  return {x:box.x,y:box.y,w:Math.max(0,right-box.x),h:box.h};
+}
+/** `beatSpan` for a beat found through the bounds lookup; a beat without a bar keeps its own box with the width kept non-negative. */
+export function beatSpanOf(bound:{beat:model.Beat;realBounds:ScreenRect;barBounds?:{realBounds:ScreenRect;beats:readonly BeatBox[]}|null}):ScreenRect {
+  return bound.barBounds?beatSpan(bound.barBounds,bound):{...bound.realBounds,w:Math.max(0,bound.realBounds.w)};
+}
 function contains(rect:ScreenRect,point:ScreenPoint):boolean {
   return point.x>=rect.x&&point.x<rect.x+rect.w&&point.y>=rect.y&&point.y<rect.y+rect.h;
 }
@@ -40,7 +62,7 @@ export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:S
     for(const master of system.bars)for(const bar of master.bars) {
       validRect(bar.realBounds);validRect(bar.visualBounds);
       for(const beat of bar.beats) {
-        validRect(beat.realBounds);validRect(beat.visualBounds);
+        validBeatRealRect(beat.realBounds,bar.realBounds);validRect(beat.visualBounds);
         for(const note of beat.notes??[])validRect(note.noteHeadBounds);
       }
     }
@@ -123,7 +145,8 @@ export function hitTestScreenPages(pagination:ScreenPagination,arrangement:Scree
   // Actual noteheads take precedence over the broad beat rectangles of another voice.
   for(const master of system.bars)for(const bar of master.bars)for(const beat of bar.beats) {
     for(const note of beat.notes??[])if(contains(note.noteHeadBounds,source))notes.push({system,beat:beat.beat,note:note.note});
-    if(contains(bar.realBounds,source)&&source.x>=beat.realBounds.x&&source.x<beat.realBounds.x+beat.realBounds.w)beats.push({system,beat:beat.beat,note:null});
+    const span=beatSpan(bar,beat);
+    if(contains(bar.realBounds,source)&&source.x>=span.x&&source.x<span.x+span.w)beats.push({system,beat:beat.beat,note:null});
   }
   const preferred=(hit:ScreenPageHit)=>{
     const voice=hit.beat.voice,staff=voice.bar.staff;

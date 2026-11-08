@@ -25,6 +25,34 @@ Date: 2026-11-07. Run 42396511098, at develop `4baa4fe`, the first CI run since 
 - **Not reproduced:** the Windows failure of "drops a key that waited more than two seconds". It passed in eight runs alone, under full CPU load. Before the change, that test switched to a mocked clock months behind real time only after setup had stamped times with the real clock. The frozen clock now covers setup too, so that mismatch is gone. Whether this was the Windows cause is unconfirmed until CI runs again.
 - **Evidence:** the 22 queue tests pass locally (22/22).
 
+### Second run: the queue tests still failed (2026-11-08)
+
+Run 42467609586, at develop `703cecf`, had the two fixes above and the memory fix below. The MIDI alert and the macOS crash were gone (352 of 356 files passed, none missing). The queue describe still failed on every platform, with a different subset each time:
+
+| Platform | Failed queue tests |
+|---|---|
+| macOS | three fast letters; refused-edit discard count; "key" singular; two-second drop |
+| Windows | refused-edit discard count; "key" singular; the key that threw |
+| Linux | two-second drop |
+
+- **The first diagnosis was incomplete.** The frozen clock removed one way for keys to age, but most failures were the queue's notice not being found by `findByText`, which waits at most 1 s by default.
+- **Reproduction:** run alone, the describe passes (22/22). In a full run of `App.test.tsx`, five of its tests failed locally: the refused-edit discard count, a refused queued key, "key" singular, the two-second drop and the key that threw.
+- **Cause:** each whole-workspace render in jsdom is slow, and gets slower later in the file. The notice for a refused key comes three renders after the refusal:
+
+  | Run | Time from refusal to notice |
+  |---|---|
+  | the test alone | 615 ms |
+  | late in the full file | 1,131 ms |
+
+  At 1,131 ms the notice was already on screen, but `findByText` had given up at 1 s. CI runners are slower again, so more waits missed. The entry queue behaved correctly; only the test's waiting limit was too short.
+- **Fix:** `src/App.test.tsx` sets `configure({asyncUtilTimeout:10000})` beside its 30 s test hang guard (THE-173). No wait in that file expects to time out, so passing tests take no longer. The frozen clock stays, so queued keys still cannot age during a slow test.
+- **Evidence:**
+  - the full file passed 214/214 twice with the fix, in 301 s and 276 s;
+  - the whole suite with CI's settings (`npm test -- --maxWorkers=2 --testTimeout=15000`): Node resource tests 44/44, Vitest 357 files passed and 2 skipped (5,924 tests passed, 4 skipped) in 598 s;
+  - `npm run typecheck` is clean.
+- **Review:** an independent reviewer found nothing blocking. It confirmed that the setting reaches every `waitFor` and `findBy` in the file, stays within the file, and that no wait there expects to time out.
+- **Not fixed here:** after a key is dropped, several queue tests wait only 30 ms before checking that no further edit landed, which is shorter than one render. These checks were already weak before this change.
+
 ## `batch/convert.test.ts` killed on macOS ("JavaScript heap out of memory")
 
 - **Symptom:** Vitest reported the crash as an unhandled error, and the file was missing from the totals (329 of 330). The 1 November macOS run was also one file short (313 of 314), so it has probably crashed since the test was added on 2026-10-30.

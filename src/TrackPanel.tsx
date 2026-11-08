@@ -4,6 +4,7 @@ import type { BeatTarget } from './project';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
 import { projectScoreOverview } from './workstation/overview';
 import { ScoreOverview } from './workstation/ScoreOverview';
+import type { LoopPassage } from './audio/loop-passage';
 import { trackColorHex } from './track-color';
 import { trackIdentity } from './engine';
 import { DockMasterControls, MasterPanel } from './audio/MasterPanel';
@@ -62,8 +63,10 @@ function TrackMixRow({track:index}:{track:number}){
   </span>;
 }
 
-export function TrackPanel({score,selected,busy,view,target,onExitOverview,onSelect,onSelectPosition,player,shown=[],onToggleShown,onAddTrack}: {
+export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,onSelect,onSelectPosition,player,shown=[],onToggleShown,onAddTrack}: {
   score:model.Score;selected:number;busy:boolean;view:'overview'|'mixer';target:BeatTarget;onExitOverview:()=>void;
+  /** The bars a running loop plays, marked on the overview. */
+  loop?:LoopPassage|null;
   onSelect:(track:number)=>void;onSelectPosition:(track:number,bar:number)=>void;
   /** Tracks shown in the score; with `onToggleShown`, each dock row gets an eye that shows or hides its track. */
   shown?:readonly number[];onToggleShown?:(track:number)=>void;
@@ -98,7 +101,7 @@ export function TrackPanel({score,selected,busy,view,target,onExitOverview,onSel
   const phase=state?.practice?.phase;
   const playbackBar=state?.ready&&!state.error&&(phase==='playing'||phase==='paused')&&!state.practice.countInRemaining&&Number.isInteger(state.measure)&&state.measure>=0&&state.measure<score.masterBars.length?state.measure:null;
   return <section className="track-panel" aria-label="Tracks">
-    <div className="track-panel-view" hidden={view!=='overview'}><PlaybackTick.Provider value={state}><DockRows.Provider value={dockRows}><DockShown.Provider value={dockShown}><ScoreOverview model={overview} colors={colors} controls={controls} target={target} playbackBar={playbackBar} onSelect={onSelectPosition} onExit={onExitOverview}/></DockShown.Provider></DockRows.Provider></PlaybackTick.Provider>
+    <div className="track-panel-view" hidden={view!=='overview'}><PlaybackTick.Provider value={state}><DockRows.Provider value={dockRows}><DockShown.Provider value={dockShown}><ScoreOverview model={overview} colors={colors} controls={controls} target={target} loop={loop} playbackBar={playbackBar} onSelect={onSelectPosition} onExit={onExitOverview}/></DockShown.Provider></DockRows.Provider></PlaybackTick.Provider>
       <div className="score-overview-master" role="group" aria-label={t('audio.master')}><span className="score-overview-master-name">{t('audio.master')}</span><span className="score-overview-mix score-overview-master-mix"><DockMasterControls master={player?.master?.()} disabled={busy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/></span></div></div>
     <div className="track-panel-view track-mixer" role="region" aria-label="Mixer" hidden={view!=='mixer'}>
       <section className="track-channel track-focus" aria-label="Focus">

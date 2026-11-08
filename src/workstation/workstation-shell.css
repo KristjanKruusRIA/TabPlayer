@@ -3,7 +3,9 @@
   --ws-bg:var(--tp-base); --ws-panel:var(--tp-panel); --ws-raised:var(--tp-raised); --ws-input:var(--tp-input);
   --ws-border:var(--tp-line-strong); --ws-text:var(--tp-text); --ws-muted:var(--tp-muted);
   --ws-accent:var(--tp-edit); --ws-accent-ink:#0F1C33; --ws-paper:#fffdf5; --ws-paper-surround:#66625b;
-  --ws-edit:#245cb2; --ws-playback:var(--tp-on); --ws-error:#ffd2c7; --ws-error-surface:#5b2c2b; --ws-warning:var(--tp-warning);
+  --ws-edit:#245cb2; --ws-playback:var(--tp-on);
+  /* The selected passage and the running loop. On the dark shell the loop is a light violet (8:1 on the panel); the score paper is always light, so there they use darker twins (loop 8.4:1, selection edge 6.2:1 on the paper). Neither is blue (edit target) or green (playback). */
+  --ws-loop:#c4a2ff; --ws-loop-on-paper:#5a2db3; --ws-select-on-paper:#9a4a00; --ws-select-wash-on-paper:#f5a623; --ws-error:#ffd2c7; --ws-error-surface:#5b2c2b; --ws-warning:var(--tp-warning);
   color:var(--ws-text); background:var(--ws-bg); line-height:1.35;
 }
 body { overflow:hidden; }

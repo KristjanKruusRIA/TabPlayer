@@ -120,6 +120,84 @@ it('the loop bar fields show the loop that is running, however it was set, and k
   expect(screen.getByLabelText('Loop start')).toHaveValue(5);expect(screen.getByLabelText('Loop end')).toHaveValue(7);
   expect(screen.getByRole('button',{name:'Clear loop'})).toHaveAttribute('title','Clear loop');
 });
+it('the position display shows the bars a running loop plays and says so in text, then says when it is off',()=>{
+  vi.useFakeTimers();
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  const lcd=screen.getByRole('group',{name:'Song position'});
+  expect(lcd).not.toHaveAttribute('data-loop');expect(lcd).not.toHaveTextContent('Loop');
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(lcd).toHaveAttribute('data-loop','true');
+  expect(lcd).toHaveTextContent('Loop 5–7');
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  expect(lcd.style.getPropertyValue('--lcd-loop-from')).toBe('50%');expect(lcd.style.getPropertyValue('--lcd-loop-size')).toBe('37.5%');
+  update(snapshot({loop:{startTick:2*3840+960,endTick:3*3840}}));
+  expect(lcd).toHaveTextContent('Loop 3');expect(lcd).not.toHaveTextContent('Loop 3–');
+  expect(screen.getByText('Looping bar 3')).toBeInTheDocument();
+  update(snapshot());
+  expect(lcd).not.toHaveAttribute('data-loop');expect(lcd).not.toHaveTextContent('Loop');
+  act(()=>{vi.advanceTimersByTime(600);});
+  expect(screen.getByText('Loop off')).toBeInTheDocument();
+});
+it('says nothing about the loop while an edit rebuilds the plan, then says it is off only when it is cleared',()=>{
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  // The edit: not ready, no loop, no occurrences.
+  player.playbackOccurrences=()=>[];
+  update(snapshot({ready:false,loop:null}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+  // The plan is back with the loop restored on it: still the same words.
+  player.playbackOccurrences=()=>eightBars;
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+  // The loop could not be restored: the player is told once the plan is ready.
+  update(snapshot({loop:null,loopNotice:'cleared'}));
+  expect(screen.getByText('Loop off')).toBeInTheDocument();
+});
+it('does not say the loop is off in the moment between the plan being ready and the loop being sent again',()=>{
+  vi.useFakeTimers();
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  // The edit: rebuilt, then ready with no loop yet, then the loop is restored.
+  update(snapshot({ready:false,loop:null}));
+  update(snapshot({ready:true,loop:null}));
+  act(()=>{vi.advanceTimersByTime(300);});
+  expect(screen.queryByText('Loop off')).toBeNull();
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  act(()=>{vi.advanceTimersByTime(2000);});
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();expect(screen.queryByText('Loop off')).toBeNull();
+});
+it('says the loop is off after a short delay when the player clears it, and at once when an edit ended it',()=>{
+  vi.useFakeTimers();
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  const view=renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  update(snapshot({loop:null}));
+  act(()=>{vi.advanceTimersByTime(300);});expect(screen.queryByText('Loop off')).toBeNull();
+  act(()=>{vi.advanceTimersByTime(300);});expect(screen.getByText('Loop off')).toBeInTheDocument();
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));
+  expect(screen.getByText('Looping bars 5 to 7')).toBeInTheDocument();
+  update(snapshot({loop:null,loopNotice:'cleared'}));
+  expect(screen.getByText('Loop off')).toBeInTheDocument();
+  // A timer left over from a loop that went away is cancelled with the component.
+  update(snapshot({loop:{startTick:4*3840,endTick:7*3840}}));update(snapshot({loop:null}));
+  view.unmount();
+  expect(()=>act(()=>{vi.advanceTimersByTime(1000);})).not.toThrow();
+});
+it('a loop across a repeat is named by its first and last bar, and a clock tick that hands over an equal loop changes nothing',()=>{
+  const {player,update}=playerFor();player.playbackOccurrences=()=>eightBars;
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={8} busy={false} display={{track:'1. Guitar',signatureAt:()=>'4/4'}}/>);
+  const lcd=screen.getByRole('group',{name:'Song position'});
+  update(snapshot({loop:{startTick:3840,endTick:3*3840}}));
+  const before=lcd.getAttribute('style');
+  update(snapshot({time:2000,loop:{startTick:3840,endTick:3*3840}}));
+  expect(lcd).toHaveTextContent('Loop 2–3');
+  expect(lcd.style.getPropertyValue('--lcd-loop-from')).toBe(before!.match(/--lcd-loop-from:\s*([^;]+)/)![1]);
+});
 it('custom_acknowledged_coefficients_and_full_relative_endpoints_are_displayed_without_dispatch',()=>{
   const state=snapshot({speed:123});state.practice.effectiveRatio=1.23;state.practice.currentBpm=147.6;state.practice.settings.tempo={kind:'relative',ratio:1.23};const {player,update}=playerFor(state);renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
   const speedGroup=()=>screen.getByRole('group',{name:'Speed'}),slower=()=>screen.getByRole('button',{name:'Slower'}),faster=()=>screen.getByRole('button',{name:'Faster'});expect(speedGroup()).toHaveTextContent('123%');expect(screen.getByRole('status',{name:'Practice playback'})).toHaveTextContent(/147.6 BPM.*123%/);expect(screen.getByLabelText('Practice passes')).toHaveTextContent('Completed passes 0');expect(screen.getByLabelText('Practice passes')).toBeVisible();

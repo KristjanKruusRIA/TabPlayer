@@ -102,6 +102,12 @@
 .transport-lcd-completion[data-kind="long"] { background:var(--tp-error); }
 @media (forced-colors:active) { .transport-lcd-completion { forced-color-adjust:none; background:CanvasText; color:Canvas; } }
 @media (forced-colors:active) { .transport-lcd::after { background:Highlight; } }
+/* The running loop: its bars as text at the top right of the display, where the track name leaves room, and its extent along the piece as a violet strip under the lime progress line. */
+.transport-lcd-loop { position:absolute; top:3px; right:12px; display:inline-flex; align-items:center; gap:3px; color:var(--ws-loop,#c4a2ff); font:600 11px/16px var(--tp-font-mono); white-space:nowrap; pointer-events:none; }
+.transport-lcd[data-loop] .transport-lcd-track { max-width:calc(100% - 76px); }
+.transport-lcd-loop svg { width:12px; height:12px; flex:0 0 auto; }
+.transport-lcd[data-loop]::before { content:''; position:absolute; left:var(--lcd-loop-from,0%); width:var(--lcd-loop-size,0%); bottom:0; height:4px; background:var(--ws-loop,#c4a2ff); pointer-events:none; }
+@media (forced-colors:active) { .transport-lcd-loop { color:CanvasText; } .transport-lcd[data-loop]::before { background:CanvasText; } }
 .transport-lcd+.transport-group { border-left:0; }
 .transport-lcd .transport-lcd-track { grid-area:track; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tp-text); font:600 13px/16px var(--tp-font-ui); }
 .transport-lcd .transport-bar-number { grid-area:bar; align-self:baseline; color:var(--tp-on); }

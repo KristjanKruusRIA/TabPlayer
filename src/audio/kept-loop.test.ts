@@ -70,6 +70,32 @@ describe('resolveKeptLoop',()=>{
     const second=keptLoopOf({startTick:11520,endTick:19200},repeated,4)!;
     expect(resolveKeptLoop(second,plain,4)).toEqual({startTick:3840,endTick:11520});
   });
+  it('keeps a loop across a repeat when removing the repeat leaves its passes unambiguous',()=>{
+    // Loop across the whole repeated section (bar 0 before repeat to bar 3 after repeat)
+    const acrossAll=keptLoopOf({startTick:0,endTick:23040},repeated,4)!;
+    expect(resolveKeptLoop(acrossAll,plain,4)).toEqual({startTick:0,endTick:15360});
+    // Loop from before repeat to the second pass of bar 2
+    const acrossToPass2=keptLoopOf({startTick:0,endTick:19200},repeated,4)!;
+    expect(resolveKeptLoop(acrossToPass2,plain,4)).toEqual({startTick:0,endTick:11520});
+    // Loop from the first pass of bar 1 across the repeat to bar 3
+    const fromPass1ToAfter=keptLoopOf({startTick:3840,endTick:23040},repeated,4)!;
+    expect(resolveKeptLoop(fromPass1ToAfter,plain,4)).toEqual({startTick:3840,endTick:15360});
+    // Loop spanning both passes of the repeated bars (bar 1 pass 0 to bar 2 pass 1)
+    const bothPasses=keptLoopOf({startTick:3840,endTick:19200},repeated,4)!;
+    expect(resolveKeptLoop(bothPasses,plain,4)).toEqual({startTick:3840,endTick:11520});
+  });
+  it('clears a loop across a repeat when removing the repeat inverts order or leaves passes ambiguous',()=>{
+    // Loop across the repeat turnaround (from pass 0 of bar 2 to pass 1 of bar 1)
+    const turnaround=keptLoopOf({startTick:7680,endTick:15360},repeated,4)!;
+    expect(resolveKeptLoop(turnaround,plain,4)).toBeNull();
+    // Partial-bar turnaround across the repeat jump
+    const partialTurnaround=keptLoopOf({startTick:7680+1920,endTick:11520+1920},repeated,4)!;
+    expect(resolveKeptLoop(partialTurnaround,plain,4)).toBeNull();
+    // A 3rd pass loop when repeat is reduced to 2 passes (still multiple passes, so pass is ambiguous)
+    const thrice=[occ(0,0,0),occ(1,0,3840),occ(2,0,7680),occ(1,1,11520),occ(2,1,15360),occ(1,2,19200),occ(2,2,23040),occ(3,0,26880)];
+    const thirdPass=keptLoopOf({startTick:19200,endTick:26880},thrice,4)!;
+    expect(resolveKeptLoop(thirdPass,repeated,4)).toBeNull();
+  });
   it('refuses when a bar has several passes and the one it was set on is gone',()=>{
     const third:KeptLoop={start:{bar:1,occurrence:2,at:'start'},end:{bar:2,occurrence:2,at:'end'},barCount:4};
     expect(resolveKeptLoop(third,repeated,4)).toBeNull();

@@ -30,6 +30,10 @@
 .score-overview-occupancy { position:absolute; left:7px; right:7px; top:8px; height:10px; }
 .score-overview-cell[data-content="music"] .score-overview-occupancy { background:var(--ws-muted); }
 .score-overview-cell[data-content="rest"] .score-overview-occupancy { border-bottom:1px solid var(--ws-muted); height:5px; }
+/* The running loop: its bars on the ruler, and a bracket from the ruler down through every track. It ignores the pointer and slides under the sticky name column. */
+.score-overview-bar-label[data-loop] { color:var(--ws-text); font-weight:600; background:color-mix(in srgb,var(--ws-loop) 24%,var(--ws-raised)); box-shadow:inset 0 -3px var(--ws-loop); }
+.score-overview-loop { position:absolute; top:28px; box-sizing:border-box; pointer-events:none; z-index:2; border-left:2px solid var(--ws-loop); border-right:2px solid var(--ws-loop); border-bottom:3px solid var(--ws-loop); background:color-mix(in srgb,var(--ws-loop) 12%,transparent); }
+@media (forced-colors:active) { .score-overview-bar-label[data-loop] { forced-color-adjust:none; background:Highlight; color:HighlightText; } .score-overview-loop { border-color:Highlight; background:transparent; } }
 .score-overview-playhead {
   position:absolute; top:28px; width:28px; box-sizing:border-box; border-left:2px solid var(--ws-playback);
   border-right:1px solid var(--ws-playback); pointer-events:none; z-index:1;

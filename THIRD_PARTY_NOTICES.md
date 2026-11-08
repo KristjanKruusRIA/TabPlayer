@@ -24,9 +24,10 @@ TabPlayer is an independent application. It contains no Guitar Pro application c
   Steinberg VST3 pluginterfaces (https://github.com/steinbergmedia/vst3_pluginterfaces), MIT licence. The `vst3` crate 0.3.0 generates its bindings from the VST 3 SDK 3.8.0 interface headers, and the plug-in helper and the test plug-in link those bindings. The text below is the LICENSE.txt of that repository at tag v3.8.0_build_66 (commit 31d6eeba6daaa3e2a8bfbe3e7a90ca0b7fbfbc1c), verbatim:
 
   ```text
+  //-----------------------------------------------------------------------------
   MIT License
 
-  Copyright (c) 2025, Steinberg Media Technologies GmbH
+  Copyright (c) 2025, Steinberg Media Technologies GmbH
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +46,8 @@ TabPlayer is an independent application. It contains no Guitar Pro application c
   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
   SOFTWARE.
+
+  //---------------------------------------------------------------------------------
   ```
 
   SoundCraft vst3-host (https://github.com/storytold/soundcraft, commit b6f9f15), MIT OR Apache-2.0, used here under MIT. TabPlayer's plug-in host helper vendors a Windows extract of its FFI (src-tauri/plugin-host/src/vst3/). SoundCraft's licence:

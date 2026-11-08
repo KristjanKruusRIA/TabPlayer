@@ -80,15 +80,26 @@ describe('compose a system SVG',()=>{
     const out=composeSystemSvg({svg:'<svg width="500" height="400" viewBox="0 0 500 400"><rect y="20"/></svg>',id:'export-s4',left:0,top:100,width:500,height:400,shift:{cuts:[180],offsets:[40]},marks:[]});
     expect(out.height).toBe(440);expect(out.svg).toMatch(/^<svg\b[^>]*height="440"[^>]*viewBox="0 0 500 440"/);
     expect(out.svg.match(/<use\b/g)).toHaveLength(2);expect(out.svg).toContain('id="export-s4-content"');
-    expect(out.svg).toContain('<rect x="0" y="80" width="500"');expect(out.svg).toContain('translate(0 40)');
+    expect(out.svg).toContain('<rect x="-100000" y="80" width="200000"');expect(out.svg).toContain('translate(0 40)');
   });
-  it('clips the first band from -1 and the last to the height plus 1, and keeps the pixel unit of alphaTab roots',()=>{
+  it('only the cut lines clip: the outer edges of the first and last band are effectively unbounded and keep the pixel unit of alphaTab roots',()=>{
     const out=composeSystemSvg({svg:'<svg xmlns="http://www.w3.org/2000/svg" width="500px" height="400px" class="at-surface-svg"><rect/></svg>',id:'c',left:0,top:0,width:500,height:400,shift:{cuts:[180],offsets:[-30]},marks:[]});
     expect(out.height).toBe(370);expect(out.svg).toContain('height="370px"');
-    const clips=[...out.svg.matchAll(/<clipPath id="c-c(\d)"><rect x="0" y="([-\d.]+)" width="500" height="([-\d.]+)"/g)].map(m=>[m[1],Number(m[2]),Number(m[3])]);
-    expect(clips).toEqual([['0',-1,181],['1',180,221]]);
+    const clips=[...out.svg.matchAll(/<clipPath id="c-c(\d)"><rect x="([-\d.e+]+)" y="([-\d.e+]+)" width="([-\d.e+]+)" height="([-\d.e+]+)"/g)].map(m=>[m[1],Number(m[2]),Number(m[3]),Number(m[4]),Number(m[5])]);
+    expect(clips).toEqual([['0',-1e5,-1e5,2e5,1e5+180],['1',-1e5,180,2e5,220+1e5]]);
     expect(out.svg).toContain('clip-path="url(#c-c0)"');expect(out.svg).toContain('<use href="#c-content"');
     expect(out.svg).toContain('translate(0 0)');expect(out.svg).toContain('translate(0 -30)');
+  });
+  it('keeps content past the right edge, above the top and below the bottom of the system when a gap composes it',()=>{
+    const out=composeSystemSvg({svg:'<svg width="500" height="400"><text x="520" y="100">past the right edge</text><text x="10" y="-20">above</text><text x="10" y="430">below</text></svg>',id:'e',left:0,top:0,width:500,height:400,shift:{cuts:[180],offsets:[40]},marks:[]});
+    const doc=new DOMParser().parseFromString(out.svg,'image/svg+xml'),rects=[...doc.querySelectorAll('clipPath > rect')].map(rect=>({x:Number(rect.getAttribute('x')),y:Number(rect.getAttribute('y')),right:Number(rect.getAttribute('x'))+Number(rect.getAttribute('width')),bottom:Number(rect.getAttribute('y'))+Number(rect.getAttribute('height'))}));
+    expect(rects).toHaveLength(2);
+    // Text at x=520 (20 past the system's width) is inside both bands horizontally.
+    for(const rect of rects){expect(rect.x).toBeLessThanOrEqual(-1000);expect(rect.right).toBeGreaterThanOrEqual(1520);}
+    // Text above the top (y=-20) is in the first band and text below the bottom (y=430) in the last.
+    expect(rects[0].y).toBeLessThanOrEqual(-20);expect(rects[1].bottom).toBeGreaterThanOrEqual(430);
+    // The bands still meet exactly at the cut.
+    expect(rects[0].bottom).toBe(rects[1].y);expect(rects[1].y).toBe(180);
   });
   it('rewrites only the real root attributes, whatever the quotes and values hold',()=>{
     const tricky=composeSystemSvg({svg:`<svg data-x="a>b" data-height="1" title='height="9"' height='400' viewBox='0 0 500 400'><rect/></svg>`,id:'q',left:0,top:0,width:500,height:400,shift:{cuts:[180],offsets:[40]},marks:[]});

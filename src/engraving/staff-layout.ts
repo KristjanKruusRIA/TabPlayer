@@ -63,6 +63,8 @@ export const shiftTotal=(shift:StaffShift|null|undefined):number=>shift&&shift.o
 
 export interface ComposeSvgInput {svg:string;id:string;left:number;top:number;width:number;height:number;shift:StaffShift|null;marks:readonly AccoladeMark[];marksShifted?:boolean}
 
+/** Only the cuts between bands clip. The outer edges of the first and last band, and both sides, are unbounded in practice, so content that overhangs the system (as it does without a gap) is not cut off. */
+const OUTER_CLIP=1e5;
 const OPEN_SVG=/^\s*<svg\b(?:[^>"']|"[^"]*"|'[^']*')*>/;
 const ATTRIBUTE=/(\s)([^\s=\/>"']+)(\s*=\s*)("[^"]*"|'[^']*'|[^\s"'>]+)/g;
 const unquoted=(value:string)=>/^["']/.test(value)?value.slice(1,-1):value;
@@ -88,7 +90,7 @@ function withRootHeight(open:string,height:number):string {
  * final `</svg>`; with neither the string is returned unchanged. `marksShifted` says the marks are already in shifted pixels.
  */
 export function composeSystemSvg(input:ComposeSvgInput):{svg:string;height:number} {
-  const {svg,id,left,top,width,height,shift,marks}=input;
+  const {svg,id,left,top,height,shift,marks}=input;
   if(!shift&&!marks.length)return {svg,height};
   const moved=input.marksShifted?marks:marks.map(mark=>({...mark,top:shiftY(shift,mark.top,'top'),bottom:shiftY(shift,mark.bottom,'bottom')}));
   const drawn=accoladeSvg(moved,{left,top}),close=svg.lastIndexOf('</svg>');
@@ -96,8 +98,8 @@ export function composeSystemSvg(input:ComposeSvgInput):{svg:string;height:numbe
   if(!shift)return {svg:`${svg.slice(0,close)}${drawn}${svg.slice(close)}`,height};
   const open=OPEN_SVG.exec(svg);
   if(!open||open[0].endsWith('/>'))throw new Error('Cannot compose a system without an svg root.');
-  const total=shiftTotal(shift),newHeight=height+total,edges=[-1,...shift.cuts.map(cut=>cut-top),height+1];
-  const clips=edges.slice(0,-1).map((start,k)=>`<clipPath id="${id}-c${k}"><rect x="0" y="${start}" width="${width}" height="${edges[k+1]-start}"/></clipPath>`).join('');
+  const total=shiftTotal(shift),newHeight=height+total,edges=[-OUTER_CLIP,...shift.cuts.map(cut=>cut-top),height+OUTER_CLIP];
+  const clips=edges.slice(0,-1).map((start,k)=>`<clipPath id="${id}-c${k}"><rect x="${-OUTER_CLIP}" y="${start}" width="${2*OUTER_CLIP}" height="${edges[k+1]-start}"/></clipPath>`).join('');
   const uses=edges.slice(0,-1).map((_start,k)=>`<g transform="translate(0 ${k?shift.offsets[k-1]:0})"><use href="#${id}-content" clip-path="url(#${id}-c${k})"/></g>`).join('');
   return {svg:`${withRootHeight(open[0],newHeight)}<defs><g id="${id}-content">${svg.slice(open[0].length,close)}</g>${clips}</defs>${uses}${drawn}</svg>`,height:newHeight};
 }

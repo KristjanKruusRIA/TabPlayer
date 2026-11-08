@@ -7,9 +7,12 @@ import {
   noticeMessageKey,
   pluginChoose,
   pluginConsentGrant,
+  onPluginEditorClosed,
   pluginEditorOpen,
+  pluginEditorSave,
   pluginLibrary,
   pluginRetry,
+  replacedByAdd,
   statusLabelKey,
   type PluginLibraryEntry,
   type PluginStatus,
@@ -23,8 +26,19 @@ export interface PluginSlotPanelProps {
   busy?: boolean;
   documentId?: string;
   onChange: (slot: PluginSlot | undefined, assetToken?: string) => void;
-  onAllow?: () => void;
-  onRetry?: () => void;
+  /** May return a promise; a rejection is shown here. */
+  onAllow?: () => void | Promise<unknown>;
+  onRetry?: () => void | Promise<unknown>;
+}
+
+/** The library holds at most this many plug-ins (`MAX_ENTRIES` in `plugins/library.rs`). */
+const LIBRARY_LIMIT = 256;
+
+/** Reads a trim field: nothing for an empty or non-numeric field (which reverts), else the value held to -12..12 dB. */
+function parseTrim(text: string): number | null {
+  if (text.trim() === '') return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? Math.max(-12, Math.min(12, value)) : null;
 }
 
 /**
@@ -44,6 +58,8 @@ export function PluginSlotPanel({
   const { t } = useI18n();
   const [entries, setEntries] = useState<PluginLibraryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [replacedNotes, setReplacedNotes] = useState<string[]>([]);
+  const [editorOpen, setEditorOpen] = useState(false);
 
   // Local state for trims while typing before committing on blur or Enter
   const [inputVal, setInputVal] = useState<string>(() => String(slot?.inputDb ?? 0));
@@ -63,22 +79,11 @@ export function PluginSlotPanel({
     pluginLibrary
       .list()
       .then(items => {
-        if (alive) {
-          setEntries(items);
-          setError(null);
-        }
+        // The first list must not wipe an error an action has shown meanwhile.
+        if (alive) setEntries(items);
       })
       .catch(err => {
-        if (alive) {
-          const str = String(err?.message ?? err);
-          if (
-            !str.includes("reading 'invoke'") &&
-            !str.includes('__TAURI_INTERNALS__') &&
-            !str.includes('unexpected plugin_')
-          ) {
-            setError(localizePluginError(err, t));
-          }
-        }
+        if (alive) setError(localizePluginError(err, t));
       });
     return () => {
       alive = false;
@@ -90,12 +95,26 @@ export function PluginSlotPanel({
   }, []);
 
   const handleAdd = () => {
+    if (entries.length >= LIBRARY_LIMIT) {
+      setError(t('plugin.error.too_many'));
+      return;
+    }
+    const before = entries;
     pluginLibrary
       .add()
       .then(result => {
         if (result) {
           setEntries(result);
           setError(null);
+          setReplacedNotes(
+            replacedByAdd(before, result).map(entry =>
+              t('plugin.replaced_by_add', {
+                name: entry.name,
+                previous: entry.previousBundle ?? '',
+                bundle: entry.bundle,
+              })
+            )
+          );
         }
       })
       .catch(err => {
@@ -103,17 +122,20 @@ export function PluginSlotPanel({
       });
   };
 
-  const handleRemove = () => {
-    if (!slot) return;
+  const removeFromLibrary = (classId: string) => {
     pluginLibrary
-      .remove(slot.classId)
+      .remove(classId)
       .then(() => {
-        setEntries(prev => prev.filter(e => e.classId !== slot.classId));
+        setEntries(prev => prev.filter(e => e.classId !== classId));
         setError(null);
       })
       .catch(err => {
         setError(localizePluginError(err, t));
       });
+  };
+
+  const handleRemove = () => {
+    if (slot) removeFromLibrary(slot.classId);
   };
 
   const handleSelect = (classId: string) => {
@@ -137,44 +159,100 @@ export function PluginSlotPanel({
     onChange({ ...slot, active });
   };
 
-  const commitInputTrim = () => {
+  const commitTrim = (
+    field: 'inputDb' | 'outputDb',
+    text: string,
+    committed: { current: number },
+    revert: (text: string) => void,
+  ) => {
     if (!slot) return;
-    const val = Number(inputVal);
-    if (!Number.isFinite(val)) {
-      setInputVal(String(lastCommittedInput.current));
+    const value = parseTrim(text);
+    if (value === null) {
+      revert(String(committed.current));
       return;
     }
-    const clamped = Math.max(-12, Math.min(12, val));
-    if (clamped !== lastCommittedInput.current) {
-      lastCommittedInput.current = clamped;
-      onChange({ ...slot, inputDb: clamped });
+    if (value !== committed.current) {
+      committed.current = value;
+      onChange({ ...slot, [field]: value });
     }
   };
+  const commitInputTrim = () => commitTrim('inputDb', inputVal, lastCommittedInput, setInputVal);
+  const commitOutputTrim = () => commitTrim('outputDb', outputVal, lastCommittedOutput, setOutputVal);
 
-  const commitOutputTrim = () => {
-    if (!slot) return;
-    const val = Number(outputVal);
-    if (!Number.isFinite(val)) {
-      setOutputVal(String(lastCommittedOutput.current));
-      return;
+  // A blur that arrives while busy is refused, so a trim typed then is committed when busy ends.
+  const pendingTrims = useRef({ commitInputTrim, commitOutputTrim });
+  pendingTrims.current = { commitInputTrim, commitOutputTrim };
+  const wasBusy = useRef(busy);
+  useEffect(() => {
+    if (wasBusy.current && !busy) {
+      pendingTrims.current.commitInputTrim();
+      pendingTrims.current.commitOutputTrim();
     }
-    const clamped = Math.max(-12, Math.min(12, val));
-    if (clamped !== lastCommittedOutput.current) {
-      lastCommittedOutput.current = clamped;
-      onChange({ ...slot, outputDb: clamped });
-    }
-  };
+    wasBusy.current = busy;
+  }, [busy]);
+
+  // The editor counts as open from a successful open until the native side reports it closed.
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    onPluginEditorClosed(payload => {
+      if (payload.trackId === trackId && payload.documentId === documentId) setEditorOpen(false);
+    }).then(
+      fn => {
+        if (alive) unlisten = fn;
+        else fn();
+      },
+      () => {}
+    );
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [trackId, documentId]);
 
   const handleEditorOpen = () => {
     if (!slot) return;
     const title = t('plugin.editor_title', { name: slot.name });
-    pluginEditorOpen(documentId, trackId, title, slot.classId).catch(err => {
+    pluginEditorOpen(documentId, trackId, title, slot.classId).then(
+      () => {
+        setError(null);
+        setEditorOpen(true);
+      },
+      err => {
+        setError(localizePluginError(err, t));
+      }
+    );
+  };
+
+  const handleEditorSave = () => {
+    if (!slot) return;
+    pluginEditorSave(documentId, trackId).then(
+      result => {
+        // Nothing came back, or the same state came back: nothing changed, so nothing is recorded.
+        if (!result || result.state === slot.state) return;
+        setError(null);
+        onChange({ ...slot, state: result.state }, result.assetToken);
+      },
+      err => {
+        setError(localizePluginError(err, t));
+      }
+    );
+  };
+
+  const report = (action: () => void | Promise<unknown>) => {
+    setError(null);
+    try {
+      const result = action();
+      if (result && typeof (result as Promise<unknown>).then === 'function') {
+        (result as Promise<unknown>).then(undefined, err => setError(localizePluginError(err, t)));
+      }
+    } catch (err) {
       setError(localizePluginError(err, t));
-    });
+    }
   };
 
   const handleAllowConsent = () => {
-    if (onAllow) onAllow();
+    if (onAllow) report(onAllow);
     else if (documentId) {
       pluginConsentGrant(documentId).catch(err => {
         setError(localizePluginError(err, t));
@@ -183,7 +261,7 @@ export function PluginSlotPanel({
   };
 
   const handleRetrySlot = () => {
-    if (onRetry) onRetry();
+    if (onRetry) report(onRetry);
     else if (documentId) {
       pluginRetry(documentId, trackId).catch(err => {
         setError(localizePluginError(err, t));
@@ -307,40 +385,79 @@ export function PluginSlotPanel({
                 >
                   {t('plugin.edit')}
                 </button>
+                {editorOpen && (
+                  <button
+                    type="button"
+                    {...busyGuard({ busy, onClick: handleEditorSave })}
+                  >
+                    {t('plugin.save')}
+                  </button>
+                )}
                 <p className="muted plugin-focus-hint">{t('plugin.editor_focus_hint')}</p>
               </div>
             </>
           )}
 
           {status && (
-            <div className="plugin-status-line" role="status">
-              <span className="plugin-status-badge">{t(statusLabelKey(status))}</span>
-              {showNotice && (
-                <div className="plugin-status-notice">
-                  <p>{t(noticeMessageKey(status), { name: slot?.name ?? '' })}</p>
-                  {status === 'needsConsent' && (
-                    <button
-                      type="button"
-                      {...busyGuard({ busy, onClick: handleAllowConsent })}
-                    >
-                      {t('plugin.allow')}
-                    </button>
-                  )}
-                  {(status === 'crashed' ||
-                    status === 'hung' ||
-                    status === 'underrun' ||
-                    status === 'nonFinite') && (
-                    <button
-                      type="button"
-                      {...busyGuard({ busy, onClick: handleRetrySlot })}
-                    >
-                      {t('plugin.try_again')}
-                    </button>
-                  )}
-                </div>
+            <div className="plugin-status-line">
+              <div role="status">
+                <span className="plugin-status-badge">{t(statusLabelKey(status))}</span>
+                {showNotice && (
+                  <div className="plugin-status-notice">
+                    <p>{t(noticeMessageKey(status), { name: slot?.name ?? '' })}</p>
+                  </div>
+                )}
+              </div>
+              {showNotice && status === 'needsConsent' && (
+                <button
+                  type="button"
+                  {...busyGuard({ busy, onClick: handleAllowConsent })}
+                >
+                  {t('plugin.allow')}
+                </button>
               )}
+              {showNotice &&
+                (status === 'crashed' ||
+                  status === 'hung' ||
+                  status === 'underrun' ||
+                  status === 'nonFinite') && (
+                  <button
+                    type="button"
+                    {...busyGuard({ busy, onClick: handleRetrySlot })}
+                  >
+                    {t('plugin.try_again')}
+                  </button>
+                )}
             </div>
           )}
+
+          {entries.length > 0 && (
+            <details className="plugin-library-manage">
+              <summary>{t('plugin.manage_library')}</summary>
+              <ul>
+                {entries.map(entry => (
+                  <li key={entry.classId}>
+                    <span>
+                      {entry.name}
+                      {entry.vendor ? ` (${entry.vendor})` : ''}
+                    </span>
+                    <button
+                      type="button"
+                      {...busyGuard({ busy, onClick: () => removeFromLibrary(entry.classId) })}
+                    >
+                      {t('plugin.remove_named', { name: entry.name })}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {replacedNotes.map(note => (
+            <p key={note} role="alert" className="error">
+              {note}
+            </p>
+          ))}
 
           {error && (
             <p role="alert" className="error">

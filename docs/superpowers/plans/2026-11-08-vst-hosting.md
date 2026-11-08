@@ -821,7 +821,7 @@
     - `npm run prepare:plugin-host` before `npm run tauri -- dev --config src-tauri/tauri.plugin-host.conf.json` for plug-in work;
     - the end-to-end build prerequisite;
     - the fact that the desktop test build copies the helper.
-- [x] **Step 4:** Run the script tests, `npm test`, and a local Windows `npm run tauri -- build --config src-tauri/tauri.plugin-host.conf.json -- --locked` followed by the packaged check. Expected: PASS.
+- [ ] **Step 4:** Run the script tests, `npm test`, and a local Windows `npm run tauri -- build --config src-tauri/tauri.plugin-host.conf.json -- --locked` followed by the packaged check. Expected: PASS. *Not yet run: the script tests pass, but no local `tauri build` or packaged check has been run (fix pass THE-71 review 17-3). CI is the first place the installer is built.*
 - [x] **Step 5:** Hot-path review of the CI and packaging changes. Commit with the message `build: ship the plug-in host helper, with CI and notices (THE-71)`.
 
 ### Task 18: Desktop proof, acceptance script and validation doc (controller)

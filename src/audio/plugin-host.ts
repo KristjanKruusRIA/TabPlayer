@@ -11,6 +11,7 @@ export function makePluginStateCandidate(stateId: string, token: string): AssetC
     info: {
       filename: 'plugin-state.tpstate',
       mediaType: 'application/x-tabplayer-plugin-state',
+      // A placeholder: the native side does not return the asset's real size, and nothing in the UI shows this number.
       byteLength: 20,
     },
   };
@@ -96,16 +97,22 @@ export const pluginConsentGrant = (documentId: string) =>
 export const pluginRetry = (documentId: string, trackId: string) =>
   invoke<void>('plugin_retry', { documentId, trackId });
 
-let openedEditor: { documentId: string; trackId: string; classId?: string } | null = null;
+interface OpenedEditor { documentId: string; trackId: string; classId?: string }
 
-export const setOpenedEditor = (editor: { documentId: string; trackId: string; classId?: string } | null) => {
-  openedEditor = editor;
+/** The editors open now, one per track, so that closing one track's editor never judges it by another's. */
+const openedEditors = new Map<string, OpenedEditor>();
+const editorKey = (documentId: string, trackId: string) => `${documentId}/${trackId}`;
+
+/** Remembers which plug-in class an editor was opened for. `null` forgets every editor. */
+export const setOpenedEditor = (editor: OpenedEditor | null) => {
+  if (!editor) openedEditors.clear();
+  else openedEditors.set(editorKey(editor.documentId, editor.trackId), editor);
 };
 
-export const getOpenedEditor = () => openedEditor;
+export const getOpenedEditor = (documentId: string, trackId: string) => openedEditors.get(editorKey(documentId, trackId)) ?? null;
 
 export const pluginEditorOpen = (documentId: string, trackId: string, title: string, classId?: string) => {
-  openedEditor = { documentId, trackId, classId };
+  setOpenedEditor({ documentId, trackId, classId });
   return invoke<number>('plugin_editor_open', { documentId, trackId, title });
 };
 
@@ -133,17 +140,17 @@ export function handlePluginEditorClosed(
   controller: EditorCloseController
 ): void {
   if (payload.documentId !== currentDocumentId) return;
-  if (!payload.assetToken || !payload.state) return;
+  if (!payload.assetToken || !payload.state) {
+    openedEditors.delete(editorKey(payload.documentId, payload.trackId));
+    return;
+  }
 
   const currentSound = controller.getState().settings.sounds[payload.trackId];
   const currentPlugin = currentSound?.plugin;
+  const opened = getOpenedEditor(payload.documentId, payload.trackId);
+  openedEditors.delete(editorKey(payload.documentId, payload.trackId));
   const changedMeanwhile =
-    !currentPlugin ||
-    (openedEditor &&
-      openedEditor.documentId === payload.documentId &&
-      openedEditor.trackId === payload.trackId &&
-      Boolean(openedEditor.classId) &&
-      currentPlugin.classId !== openedEditor.classId);
+    !currentPlugin || Boolean(opened?.classId && currentPlugin.classId !== opened.classId);
 
   if (changedMeanwhile) {
     void controller.cancelAsset?.(payload.assetToken);
@@ -159,6 +166,34 @@ export function handlePluginEditorClosed(
   };
   const candidate = makePluginStateCandidate(payload.state, payload.assetToken);
   void controller.edit({ type: 'setTrackSound', trackId: payload.trackId, sound: nextSound }, candidate);
+}
+
+export interface MovedPlugin {
+  trackId: string;
+  name: string;
+  bundle: string;
+  previousBundle: string;
+}
+
+/** Every track whose plug-in class now loads from another file than before, so none is overlooked because it is not selected. */
+export function movedPlugins(statuses: readonly TrackPluginStatus[], entries: readonly PluginLibraryEntry[]): MovedPlugin[] {
+  const out: MovedPlugin[] = [];
+  for (const status of statuses) {
+    const entry = entries.find(held => held.classId === status.classId);
+    if (entry?.previousBundle) {
+      out.push({ trackId: status.trackId, name: entry.name || status.name, bundle: entry.bundle, previousBundle: entry.previousBundle });
+    }
+  }
+  return out;
+}
+
+/** The entries an add just took over: a class that was in the library from another file and now comes from the new one. */
+export function replacedByAdd(before: readonly PluginLibraryEntry[], after: readonly PluginLibraryEntry[]): PluginLibraryEntry[] {
+  return after.filter(entry => {
+    if (!entry.previousBundle) return false;
+    const held = before.find(old => old.classId === entry.classId);
+    return Boolean(held && held.bundle !== entry.bundle);
+  });
 }
 
 /** Maps status to its short label message key. */
@@ -206,6 +241,9 @@ export function noticeMessageKey(status: PluginStatus): MessageKey {
   }
 }
 
+/** The English text the native side sends when a plug-in's state would overflow the undo history (`HISTORY_FULL_MESSAGE` in `plugins/state.rs`). */
+const HISTORY_FULL_MESSAGE = 'The undo history holds as much plug-in state as it can.';
+
 /** Translates known English errors from the helper and library into localized text. */
 export function localizePluginError(
   error: unknown,
@@ -246,7 +284,16 @@ export function localizePluginError(
   if (msg.includes('plug-in helper was ended by the app')) return t('plugin.error.ended');
   if (msg.includes('the plug-in helper ended')) return t('plugin.error.exited');
   if (msg.includes('over the limit of')) return t('plugin.error.too_much_latency');
-  if (msg.includes("state is too large to keep undo steps")) return t('plugin.history_full');
+  if (msg === 'plugin.history_full' || msg.includes(HISTORY_FULL_MESSAGE)) return t('plugin.history_full');
+  if (msg.includes('Plug-in class not found in library.')) return t('plugin.error.not_in_library');
+  if (msg.includes('Plug-in session is not ready.')) return t('plugin.error.not_ready');
+  if (msg.includes('Invalid plug-in class ID.')) return t('plugin.error.bad_class_id');
+  const reported = msg.match(/the plug-in helper reported [^:]*:\s*([\s\S]*)$/);
+  if (reported) return t('plugin.error.helper_reported', { detail: reported[1] });
+  const broke = msg.match(/the plug-in helper broke the protocol:\s*([\s\S]*)$/);
+  if (broke) return t('plugin.error.protocol', { detail: broke[1] });
+  const refused = msg.match(/request refused:\s*([\s\S]*)$/);
+  if (refused) return t('plugin.error.refused', { detail: refused[1] });
 
   return msg;
 }

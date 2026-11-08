@@ -11,6 +11,9 @@
 //!
 //! The app depends on this crate only. It never links a plug-in and never loads one.
 
+#[cfg(test)]
+#[path = "../build_id.rs"]
+mod build_id;
 pub mod bundle;
 pub mod control;
 pub mod limits;

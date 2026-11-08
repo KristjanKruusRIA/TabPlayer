@@ -114,3 +114,15 @@ it('copies a whole sound or one pedal as an independent snapshot',()=>{
   copyPedal('delay',{...lead.effects.delay});lead.effects.delay.mix=.1;
   expect(copiedPedal()).toEqual({block:'delay',settings:{...soundPreset('lead').effects.delay,mix:.9}});
 });
+
+it('does not store a plug-in slot in a saved sound, even in the session copy',()=>{
+  const plug={format:'vst3' as const,classId:'A'.repeat(32),name:'Amp',vendor:'V',active:true,inputDb:0,outputDb:0,state:'a'.repeat(64)};
+  for(const refuse of [false,true]){
+    const storage=memory(refuse);
+    expect(saveSoundPreset('With plug',{...soundPreset('lead'),plugin:plug},storage).ok).toBe(true);
+    const saved=readSoundLibrary(storage).find(entry=>entry.name==='With plug');
+    expect(saved).toBeDefined();
+    expect(saved!.sound.plugin).toBeUndefined();
+    forgetSessionSoundLibrary();
+  }
+});

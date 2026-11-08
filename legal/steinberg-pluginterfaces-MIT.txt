@@ -1,10 +1,12 @@
 Steinberg VST3 pluginterfaces (https://github.com/steinbergmedia/vst3_pluginterfaces), MIT licence.
-The `vst3` crate (below) generates its bindings from these interface headers (VST3 SDK 3.8), and the plug-in
-helper and the test plug-in link those bindings. The text is the upstream LICENSE.txt of that repository.
+The `vst3` crate 0.3.0 generates its bindings from the VST 3 SDK 3.8.0 interface headers, and the plug-in helper and the
+test plug-in link those bindings. The text below is the LICENSE.txt of that repository at tag v3.8.0_build_66 (commit
+31d6eeba6daaa3e2a8bfbe3e7a90ca0b7fbfbc1c), verbatim. (Its master, SDK 3.8.1 at commit 4f547e8e102b, gives the year as 2026.)
 
+//-----------------------------------------------------------------------------
 MIT License
 
-Copyright (c) 2026, Steinberg Media Technologies GmbH
+Copyright (c) 2025, Steinberg Media Technologies GmbH
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,3 +26,4 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+//---------------------------------------------------------------------------------

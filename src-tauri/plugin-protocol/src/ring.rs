@@ -1158,11 +1158,16 @@ mod tests {
         // host reads block t in a loop. A read that overlaps the reuse must be Torn, never accepted; one that does not
         // is accepted, and then must hold exactly the answer. Sequences only grow, so a slot never returns to a value it
         // had.
+        //
+        // A handshake keeps a trial from being missed: the helper holds the reuse back until the host has read the answer
+        // once (`seen`), so a host that is descheduled for a while cannot find the slot already reused. The race that
+        // matters stays: the host keeps reading after that first read while the helper pauses a random time and reuses.
         let ring = OwnedRing::new(48_000);
         let (mut host, mut helper) = (ring.host(), ring.helper());
         let announced = AtomicU64::new(0);
+        let seen = AtomicU64::new(0);
         let stop = AtomicBool::new(false);
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(60);
         let (mut accepted, mut torn, mut trials) = (0u64, 0u64, 0u64);
         std::thread::scope(|scope| {
             let _stop = Stop(&stop);
@@ -1176,6 +1181,13 @@ mod tests {
                     }
                     let answer = [[t as f32; 2]; BLOCK_FRAMES];
                     assert!(helper.publish_output(t, 0, &answer, &BlockMeta::default()));
+                    // Wait until the host has read the answer once.
+                    while seen.load(Ordering::Acquire) <= t {
+                        if stop.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        std::hint::spin_loop();
+                    }
                     // A pause of random length, so the reuse lands at varying points of the host's loop.
                     jitter ^= jitter << 13;
                     jitter ^= jitter >> 17;
@@ -1199,18 +1211,21 @@ mod tests {
             });
             let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
             let frames = [[0.0; 2]; BLOCK_FRAMES];
-            'trials: while trials < 20_000 && !(torn >= 25 && accepted > 0) {
+            while trials < 20_000 && !(torn >= 25 && accepted > 0) {
                 let t = trials;
                 assert!(host.send_input(t, &frames, &BlockMeta::default()));
                 announced.store(t + 1, Ordering::Release);
-                let mut seen = false;
+                let mut first_read = false;
                 loop {
-                    if Instant::now() > deadline {
-                        break 'trials;
-                    }
+                    assert!(
+                        Instant::now() < deadline,
+                        "trial {t} is stuck (seen = {seen_first}): {accepted} accepted, {torn} torn so far",
+                        seen_first = seen.load(Ordering::Relaxed),
+                    );
                     match host.read_output_status(t, 0, &mut scratch) {
                         OutputRead::Ready => {
-                            seen = true;
+                            first_read = true;
+                            seen.store(t + 1, Ordering::Release);
                             accepted += 1;
                             assert!(
                                 scratch.iter().all(|frame| *frame == [t as f32; 2]),
@@ -1221,7 +1236,7 @@ mod tests {
                             torn += 1;
                             break;
                         }
-                        OutputRead::NotReady if seen => break,
+                        OutputRead::NotReady if first_read => break,
                         OutputRead::NotReady => std::hint::spin_loop(),
                         OutputRead::NonFinite => panic!("a finite answer read as non-finite"),
                     }

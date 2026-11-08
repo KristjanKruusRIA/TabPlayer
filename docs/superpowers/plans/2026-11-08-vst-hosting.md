@@ -85,7 +85,7 @@
 | One state asset (container) | 8 MiB raw; base64 length checked before decoding |
 | Plug-in state assets per project | 64 MiB in total |
 | One control frame | 12 MiB, from the length prefix, before allocating |
-| Plug-in name and vendor | 64 characters, XML-safe (the `CabinetIr` name rule) |
+| Plug-in name and vendor | 64 characters, XML-safe, stricter than the `CabinetIr` name rule: no control character (`char::is_control`, so tab, line feed, carriage return, C1 and DEL are refused too) and no bidi control (U+061C, U+200E, U+200F, U+202A-U+202E, U+2066-U+2069); equal to its own trim, with U+FEFF and U+0085 refused at either end. One implementation in `tabplayer-plugin-protocol::validate` (`valid_name`, `valid_vendor`); Task 5 mirrors it in `src/document-settings.ts` with a shared test case. The helper cleans names the way `cabinet_ir::display_name` does before sending |
 | Classes per bundle | 64 |
 | Library | 256 entries; `library.json` read up to 1 MiB |
 | Consent store | 4,096 pairs; file read up to 1 MiB |

@@ -154,7 +154,10 @@ impl std::fmt::Display for LibraryError {
             }
             LibraryError::NoEffects => f.write_str("This file holds no audio effect."),
             LibraryError::TooMany => {
-                write!(f, "The plug-in library is full ({MAX_ENTRIES} plug-ins).")
+                write!(
+                    f,
+                    "The plug-in library is full ({MAX_ENTRIES} plug-ins). Remove a plug-in first."
+                )
             }
             LibraryError::Damaged => f.write_str(
                 "The plug-in library file is damaged. Adding a plug-in starts a new library.",
@@ -504,15 +507,18 @@ pub struct PluginLibrary {
 }
 
 impl PluginLibrary {
-    /// The library in `dir` (`<app_data>/plugins`). A missing, damaged, newer or unreadable file lists nothing, and is left
-    /// as it is: [`add`](Self::add) may replace a damaged one, and nothing replaces the others.
-    pub fn open(dir: impl AsRef<Path>) -> PluginLibrary {
+    /// The library in `dir` (`<app_data>/plugins`). A missing or damaged file is an empty library, and is left as it is:
+    /// [`add`](Self::add) may replace a damaged one. A file that cannot be read (another program holds it, the folder is
+    /// unreachable) is `Io`, and one written by a newer TabPlayer is `NewerVersion`: neither is an empty library, and
+    /// showing it as one would hide why nothing can be listed or removed.
+    pub fn open(dir: impl AsRef<Path>) -> Result<PluginLibrary, LibraryError> {
         let file = dir.as_ref().join(LIBRARY_FILE);
-        let entries = match read_stored(&file) {
-            Ok(Stored::Entries(entries)) => entries,
-            _ => Vec::new(),
+        let entries = match read_stored(&file)? {
+            Stored::Entries(entries) => entries,
+            Stored::Missing | Stored::Damaged => Vec::new(),
+            Stored::Newer => return Err(LibraryError::NewerVersion),
         };
-        PluginLibrary { file, entries }
+        Ok(PluginLibrary { file, entries })
     }
 
     pub fn entries(&self) -> &[LibraryEntry] {
@@ -655,12 +661,9 @@ impl PluginLibrary {
         )
     }
 
-    /// Removes a class. Nothing is written when the library does not hold it, and a damaged, newer or unreadable file is
-    /// never replaced here.
+    /// Removes a class. The file is read again first, so a damaged, newer or unreadable one is reported (`Damaged`,
+    /// `NewerVersion`, `Io`) and never replaced here. Nothing is written when the library does not hold the class.
     pub fn remove(&mut self, class_id: &str) -> Result<Vec<LibraryEntry>, LibraryError> {
-        if !self.entries.iter().any(|held| held.class_id == class_id) {
-            return Ok(self.entries.clone());
-        }
         self.commit(false, |entries| {
             entries.retain(|held| held.class_id != class_id);
             Ok(())
@@ -720,7 +723,7 @@ mod tests {
             .join(own_arch_dirs()[0])
             .join("Amp.vst3");
         let probed = std::cell::RefCell::new(None);
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let entries = library
             .add(&inner, |path| {
                 *probed.borrow_mut() = Some(path.to_path_buf());
@@ -751,7 +754,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let single = dir.path().join("Single.VST3");
         std::fs::write(&single, b"0123456789").unwrap();
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let entries = library
             .add(&single, ok(vec![class('B', "Single")]))
             .unwrap();
@@ -771,7 +774,7 @@ mod tests {
             called.set(true);
             Ok(vec![class('C', "C")])
         };
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let text = dir.path().join("notes.txt");
         std::fs::write(&text, b"x").unwrap();
         assert_eq!(
@@ -815,7 +818,7 @@ mod tests {
     #[test]
     fn caps_library_at_256() {
         let dir = tempfile::tempdir().unwrap();
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         for group in 0..4 {
             let root = bundle(dir.path(), &format!("Pack{group}"), b"x");
             let classes = (0..MAX_CLASSES)
@@ -897,22 +900,25 @@ mod tests {
             &b"{ not json"[..],
             b"",
             b"[]",
-            br#"{"version":2,"entries":[]}"#,
+            br#"{"version":0,"entries":[]}"#,
         ] {
             std::fs::write(&file, junk).unwrap();
-            let mut library = PluginLibrary::open(&data);
+            let mut library = PluginLibrary::open(&data).unwrap();
             assert!(library.entries().is_empty());
             assert_eq!(library.resolve(&"A".repeat(32)), Resolved::Missing);
-            // Neither opening nor removing something that is not there touches the file.
-            library.remove(&"A".repeat(32)).unwrap();
+            // Opening does not touch the file, and a removal says the library is damaged instead of writing over it.
+            assert_eq!(
+                library.remove(&"A".repeat(32)).unwrap_err(),
+                LibraryError::Damaged
+            );
             assert_eq!(std::fs::read(&file).unwrap(), junk);
         }
         // The next successful add replaces it.
         std::fs::write(&file, b"{ not json").unwrap();
         let root = bundle(dir.path(), "Amp", b"x");
-        let mut library = PluginLibrary::open(&data);
+        let mut library = PluginLibrary::open(&data).unwrap();
         library.add(&root, ok(vec![class('A', "Amp")])).unwrap();
-        assert_eq!(PluginLibrary::open(&data).entries().len(), 1);
+        assert_eq!(PluginLibrary::open(&data).unwrap().entries().len(), 1);
         assert!(
             serde_json::from_slice::<serde_json::Value>(&std::fs::read(&file).unwrap()).is_ok()
         );
@@ -935,7 +941,7 @@ mod tests {
         lower["classId"] = "d".repeat(32).into();
         let mut not_vst3 = good('F');
         not_vst3["bundle"] = dir.path().join("payload.dll").to_str().unwrap().into();
-        let mut parent = good('G');
+        let mut parent = good('1');
         parent["bundle"] = dir
             .path()
             .join("a")
@@ -944,7 +950,7 @@ mod tests {
             .to_str()
             .unwrap()
             .into();
-        let mut huge = good('H');
+        let mut huge = good('2');
         huge["bundle"] = dir
             .path()
             .join("\u{1F600}".repeat(MAX_BUNDLE_JSON_BYTES / 4))
@@ -955,6 +961,7 @@ mod tests {
         let file = serde_json::json!({"version": 1, "entries": [good('A'), relative, bidi, lower, good('A'), 7, {"classId": 1}, not_vst3, parent, huge, good('E')]});
         std::fs::write(data.join(LIBRARY_FILE), serde_json::to_vec(&file).unwrap()).unwrap();
         let ids: Vec<char> = PluginLibrary::open(&data)
+            .unwrap()
             .entries()
             .iter()
             .map(|e| e.class_id.chars().next().unwrap())
@@ -991,13 +998,13 @@ mod tests {
         text.resize(MAX_FILE_BYTES + 1, b' ');
         let file = data.join(LIBRARY_FILE);
         std::fs::write(&file, &text).unwrap();
-        assert!(PluginLibrary::open(&data).entries().is_empty());
+        assert!(PluginLibrary::open(&data).unwrap().entries().is_empty());
         assert_eq!(std::fs::read(&file).unwrap(), text, "and it is left alone");
         // Exactly at the cap it is read.
         let mut exact = valid;
         exact.resize(MAX_FILE_BYTES, b' ');
         std::fs::write(&file, &exact).unwrap();
-        assert_eq!(PluginLibrary::open(&data).entries().len(), 1);
+        assert_eq!(PluginLibrary::open(&data).unwrap().entries().len(), 1);
     }
 
     #[test]
@@ -1008,7 +1015,7 @@ mod tests {
             .join("Contents")
             .join(own_arch_dirs()[0])
             .join("Amp.vst3");
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let entry = library
             .add(&root, ok(vec![class('A', "Amp"), class('B', "Amp 2")]))
             .unwrap()[0]
@@ -1069,7 +1076,9 @@ mod tests {
         );
         // It was saved.
         assert_eq!(
-            PluginLibrary::open(dir.path().join("data")).resolve(&entry.class_id),
+            PluginLibrary::open(dir.path().join("data"))
+                .unwrap()
+                .resolve(&entry.class_id),
             Resolved::Found(updated)
         );
 
@@ -1094,7 +1103,7 @@ mod tests {
             .join("Contents")
             .join(own_arch_dirs()[0])
             .join("Amp.vst3");
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let entry = library.add(&root, ok(vec![class('A', "Amp")])).unwrap()[0].clone();
         std::fs::write(&module, b"another plug-in altogether").unwrap();
         let gone = library
@@ -1121,6 +1130,7 @@ mod tests {
         assert!(library.remove(&entry.class_id).unwrap().is_empty());
         assert!(
             PluginLibrary::open(dir.path().join("data"))
+                .unwrap()
                 .entries()
                 .is_empty()
         );
@@ -1130,7 +1140,7 @@ mod tests {
     fn failed_probe_leaves_library_unchanged() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
-        let mut library = PluginLibrary::open(&data);
+        let mut library = PluginLibrary::open(&data).unwrap();
         library
             .add(
                 &bundle(dir.path(), "One", b"x"),
@@ -1166,7 +1176,10 @@ mod tests {
         );
         assert_eq!(std::fs::read(&file).unwrap(), before);
         assert_eq!(library.entries().len(), 1);
-        assert_eq!(PluginLibrary::open(&data).entries(), library.entries());
+        assert_eq!(
+            PluginLibrary::open(&data).unwrap().entries(),
+            library.entries()
+        );
     }
 
     #[test]
@@ -1207,7 +1220,7 @@ mod tests {
                 ..class('1', "")
             },
         ];
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let entries = library.add(&root, ok(hostile)).unwrap();
         let by_id = |c: char| {
             entries
@@ -1237,7 +1250,9 @@ mod tests {
         }
         // And what was saved reads back whole.
         assert_eq!(
-            PluginLibrary::open(dir.path().join("data")).entries(),
+            PluginLibrary::open(dir.path().join("data"))
+                .unwrap()
+                .entries(),
             &entries[..]
         );
     }
@@ -1247,7 +1262,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = bundle(dir.path(), "Pack", b"x");
         let other = bundle(dir.path(), "Other", b"x");
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         library.add(&other, ok(vec![class('C', "Keep")])).unwrap();
         library
             .add(&root, ok(vec![class('A', "A"), class('B', "B")]))
@@ -1261,7 +1276,7 @@ mod tests {
     fn the_file_is_replaced_whole_and_leaves_no_temporary_file() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
-        let mut library = PluginLibrary::open(&data);
+        let mut library = PluginLibrary::open(&data).unwrap();
         library
             .add(
                 &bundle(dir.path(), "One", b"x"),
@@ -1303,7 +1318,7 @@ mod tests {
             .join("Contents")
             .join(own_arch_dirs()[0])
             .join("Amp.vst3");
-        let mut library = PluginLibrary::open(&data);
+        let mut library = PluginLibrary::open(&data).unwrap();
         let entry = library
             .add(&root, ok(vec![class('A', "Amp")]))
             .unwrap()
@@ -1331,20 +1346,25 @@ mod tests {
         library
             .add(&root, ok(vec![class('A', "Amp renamed")]))
             .unwrap();
-        assert_eq!(PluginLibrary::open(&data).entries().len(), 1);
+        assert_eq!(PluginLibrary::open(&data).unwrap().entries().len(), 1);
     }
 
     #[test]
-    fn a_library_made_by_a_newer_version_lists_nothing_and_is_never_written() {
+    fn a_library_made_by_a_newer_version_is_an_error_and_is_never_written() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
         std::fs::create_dir_all(&data).unwrap();
         let file = data.join(LIBRARY_FILE);
-        let newer = br#"{"version":2,"entries":[{"somethingNew":true}],"extra":1}"#;
-        std::fs::write(&file, newer).unwrap();
         let root = bundle(dir.path(), "Amp", b"x");
-        let mut library = PluginLibrary::open(&data);
-        assert!(library.entries().is_empty());
+        let newer = br#"{"version":2,"entries":[{"somethingNew":true}],"extra":1}"#;
+        // Opened before the newer version wrote it.
+        let mut library = PluginLibrary::open(&data).unwrap();
+        std::fs::write(&file, newer).unwrap();
+        // Opened after: it is not an empty library, it is one this version cannot read.
+        assert_eq!(
+            PluginLibrary::open(&data).err(),
+            Some(LibraryError::NewerVersion)
+        );
         let scanned = Cell::new(false);
         let error = library
             .add(&root, |_| {
@@ -1354,8 +1374,10 @@ mod tests {
             .unwrap_err();
         assert_eq!(error, LibraryError::NewerVersion);
         assert!(!scanned.get(), "and nothing is scanned for it");
-        assert_eq!(std::fs::read(&file).unwrap(), newer);
-        assert!(library.remove(&"A".repeat(32)).unwrap().is_empty());
+        assert_eq!(
+            library.remove(&"A".repeat(32)).unwrap_err(),
+            LibraryError::NewerVersion
+        );
         assert_eq!(std::fs::read(&file).unwrap(), newer);
         // Version 0 is not a newer version: it is damaged.
         assert_eq!(parse(br#"{"version":0,"entries":[]}"#), Stored::Damaged);
@@ -1376,7 +1398,7 @@ mod tests {
             .join(own_arch_dirs()[0])
             .join("Amp.vst3");
         let other = bundle(dir.path(), "Other", b"x");
-        let mut library = PluginLibrary::open(&data);
+        let mut library = PluginLibrary::open(&data).unwrap();
         library
             .add(&root, ok(vec![class('A', "Amp"), class('B', "Amp 2")]))
             .unwrap();
@@ -1399,6 +1421,11 @@ mod tests {
             !scanned.get(),
             "an unreadable library is found before the scan"
         );
+        // Opening it is an error as well: an unreadable library is not an empty one.
+        assert!(matches!(
+            PluginLibrary::open(&data),
+            Err(LibraryError::Io(_))
+        ));
         let again = library.reprobe(&"A".repeat(32), ok(vec![class('A', "Amp renamed")]));
         assert!(matches!(again, Err(LibraryError::Io(_))), "{again:?}");
         let removed = library.remove(&"B".repeat(32));
@@ -1410,7 +1437,7 @@ mod tests {
             2,
             "the list in memory is unchanged"
         );
-        assert_eq!(PluginLibrary::open(&data).entries().len(), 2);
+        assert_eq!(PluginLibrary::open(&data).unwrap().entries().len(), 2);
     }
 
     #[test]
@@ -1420,7 +1447,7 @@ mod tests {
         const FILE_SHARE_READ: u32 = 1;
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
-        let mut library = PluginLibrary::open(&data);
+        let mut library = PluginLibrary::open(&data).unwrap();
         library
             .add(
                 &bundle(dir.path(), "One", b"x"),
@@ -1447,7 +1474,7 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, [LIBRARY_FILE], "no temporary file is left");
-        assert_eq!(PluginLibrary::open(&data).entries().len(), 1);
+        assert_eq!(PluginLibrary::open(&data).unwrap().entries().len(), 1);
     }
 
     #[test]
@@ -1513,6 +1540,8 @@ mod tests {
             r"\\?\C:\a<b\Amp.vst3",
             r"\\?\C:\a:b\Amp.vst3",
             r"\\?\C:\a|b\Amp.vst3",
+            "\\\\?\\C:\\a\u{1}b\\Amp.vst3",
+            "\\\\?\\C:\\a\u{1}b\\Amp.vst3",
             r"\\?\C:\Amp.vst3\",
             r"\\?\C:\",
             r"\\?\C:",
@@ -1558,7 +1587,7 @@ mod tests {
             located.bundle
         );
         assert_eq!(stat(&located.module).unwrap().0, 6);
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let entries = library.add(&dotted, ok(vec![class('A', "Amp")])).unwrap();
         assert_eq!(entries[0].module_len, 6);
         assert_eq!(
@@ -1571,7 +1600,7 @@ mod tests {
     fn names_are_cleaned_by_the_rule_the_helper_uses() {
         let dir = tempfile::tempdir().unwrap();
         let root = bundle(dir.path(), "Amp", b"x");
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let entries = library
             .add(
                 &root,
@@ -1602,7 +1631,7 @@ mod tests {
         let inner = root.join("Contents").join(own_arch_dirs()[0]);
         std::fs::write(inner.join("Other.vst3"), b"20 bytes of other....").unwrap();
         let scanned = Cell::new(false);
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let error = library
             .add(&inner.join("Other.vst3"), |_| {
                 scanned.set(true);
@@ -1621,7 +1650,7 @@ mod tests {
     #[test]
     fn a_full_library_is_refused_before_the_scan() {
         let dir = tempfile::tempdir().unwrap();
-        let mut library = PluginLibrary::open(dir.path().join("data"));
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
         let packs: Vec<PathBuf> = (0..4)
             .map(|group| bundle(dir.path(), &format!("Pack{group}"), b"x"))
             .collect();

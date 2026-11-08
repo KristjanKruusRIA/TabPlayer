@@ -4,7 +4,7 @@ use crate::plugins::{
     helper::{HelperError, probe},
     library::{LibraryEntry, PluginLibrary},
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tabplayer_plugin_protocol::{limits::PROBE_TIMEOUT, validate::valid_class_id};
 
 /// The helper program's file name. The installer puts it next to the app's own program, and so does a development build.
@@ -55,12 +55,27 @@ fn test_selection() -> Option<PathBuf> {
     std::env::var_os("TABPLAYER_TEST_PLUGIN_BUNDLE").map(PathBuf::from)
 }
 
+/// The library in `directory`. A library that cannot be read, or that a newer TabPlayer wrote, is an error that says so,
+/// not an empty list.
+fn list_entries(directory: &Path) -> Result<Vec<LibraryEntry>, String> {
+    let library = PluginLibrary::open(directory).map_err(String::from)?;
+    Ok(library.entries().to_vec())
+}
+
+/// Removes a class from the library in `directory`, or says why it cannot.
+fn remove_entry(directory: &Path, class_id: &str) -> Result<(), String> {
+    PluginLibrary::open(directory)
+        .and_then(|mut library| library.remove(class_id))
+        .map(|_| ())
+        .map_err(String::from)
+}
+
 #[tauri::command]
 pub async fn plugin_library_list(app: tauri::AppHandle) -> Result<Vec<LibraryEntry>, String> {
     let directory = library_directory(&app)?;
-    tauri::async_runtime::spawn_blocking(move || PluginLibrary::open(directory).entries().to_vec())
+    tauri::async_runtime::spawn_blocking(move || list_entries(&directory))
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?
 }
 
 /// Asks for a `.vst3` file, scans it in a helper of its own and adds its effect classes to the library. `None` when the
@@ -92,7 +107,7 @@ pub async fn plugin_library_add(
     tauri::async_runtime::spawn_blocking(move || {
         let exe = helper_exe().map_err(|error| error.to_string())?;
         PluginLibrary::open(directory)
-            .add(&path, |bundle| probe(&exe, bundle, PROBE_TIMEOUT))
+            .and_then(|mut library| library.add(&path, |bundle| probe(&exe, bundle, PROBE_TIMEOUT)))
             .map(Some)
             .map_err(String::from)
     })
@@ -106,12 +121,120 @@ pub async fn plugin_library_remove(app: tauri::AppHandle, class_id: String) -> R
         return Err("Invalid plug-in class ID.".into());
     }
     let directory = library_directory(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        PluginLibrary::open(directory)
-            .remove(&class_id)
-            .map(|_| ())
-            .map_err(String::from)
-    })
-    .await
-    .map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || remove_entry(&directory, &class_id))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::library::{LIBRARY_FILE, LibraryEntry};
+
+    fn entry(id: char, dir: &Path) -> LibraryEntry {
+        LibraryEntry {
+            class_id: id.to_string().repeat(32),
+            name: format!("Plug-in {id}"),
+            vendor: String::new(),
+            version: String::new(),
+            bundle: dir.join(format!("{id}.vst3")),
+            module_len: 1,
+            module_modified: 2,
+        }
+    }
+
+    /// A library folder holding the plug-ins `ids`.
+    fn library_with(dir: &Path, ids: &[char]) -> PathBuf {
+        let folder = dir.join("plugins");
+        std::fs::create_dir_all(&folder).unwrap();
+        let entries: Vec<_> = ids.iter().map(|id| entry(*id, dir)).collect();
+        let file = serde_json::json!({"version": 1, "entries": entries});
+        std::fs::write(
+            folder.join(LIBRARY_FILE),
+            serde_json::to_vec(&file).unwrap(),
+        )
+        .unwrap();
+        folder
+    }
+
+    #[test]
+    fn list_and_remove_work_on_a_readable_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = library_with(dir.path(), &['A', 'B']);
+        assert_eq!(list_entries(&folder).unwrap().len(), 2);
+        remove_entry(&folder, &"A".repeat(32)).unwrap();
+        let left = list_entries(&folder).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].class_id, "B".repeat(32));
+        // No library yet is an empty one; removing from it removes nothing and succeeds.
+        let none = dir.path().join("nothing");
+        assert!(list_entries(&none).unwrap().is_empty());
+        remove_entry(&none, &"A".repeat(32)).unwrap();
+        assert!(!none.exists());
+    }
+
+    #[test]
+    fn a_library_made_by_a_newer_version_is_reported_not_shown_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("plugins");
+        std::fs::create_dir_all(&folder).unwrap();
+        let newer = br#"{"version":2,"entries":[]}"#;
+        std::fs::write(folder.join(LIBRARY_FILE), newer).unwrap();
+        let listed = list_entries(&folder).unwrap_err();
+        assert!(listed.contains("newer TabPlayer"), "{listed}");
+        let removed = remove_entry(&folder, &"A".repeat(32)).unwrap_err();
+        assert!(removed.contains("newer TabPlayer"), "{removed}");
+        assert_eq!(std::fs::read(folder.join(LIBRARY_FILE)).unwrap(), newer);
+    }
+
+    #[test]
+    fn a_damaged_library_lists_nothing_and_a_removal_says_why_it_cannot_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("plugins");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join(LIBRARY_FILE), b"{ not json").unwrap();
+        assert!(list_entries(&folder).unwrap().is_empty());
+        let removed = remove_entry(&folder, &"A".repeat(32)).unwrap_err();
+        assert!(removed.contains("damaged"), "{removed}");
+        assert_eq!(
+            std::fs::read(folder.join(LIBRARY_FILE)).unwrap(),
+            b"{ not json"
+        );
+    }
+
+    /// Another program holds the library file without sharing it for reading, so it cannot be read.
+    #[test]
+    #[cfg(windows)]
+    fn an_unreadable_library_is_reported_by_both_commands_and_left_alone() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_DELETE: u32 = 4;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = library_with(dir.path(), &['A', 'B']);
+        let file = folder.join(LIBRARY_FILE);
+        let before = std::fs::read(&file).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_DELETE)
+            .open(&file)
+            .unwrap();
+        let listed = list_entries(&folder).unwrap_err();
+        assert!(
+            listed.contains("Could not use the plug-in library file"),
+            "{listed}"
+        );
+        let removed = remove_entry(&folder, &"A".repeat(32)).unwrap_err();
+        assert!(
+            removed.contains("Could not use the plug-in library file"),
+            "{removed}"
+        );
+        // A class that is not in the library is reported too: the removal did not look.
+        let absent = remove_entry(&folder, &"F".repeat(32)).unwrap_err();
+        assert!(
+            absent.contains("Could not use the plug-in library file"),
+            "{absent}"
+        );
+        drop(held);
+        assert_eq!(std::fs::read(&file).unwrap(), before);
+        assert_eq!(list_entries(&folder).unwrap().len(), 2);
+    }
 }

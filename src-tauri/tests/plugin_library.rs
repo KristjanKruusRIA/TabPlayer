@@ -63,7 +63,7 @@ mod windows_tests {
         let bundle = make_bundle(dir.path());
         let exe = helper_exe();
         let data = dir.path().join("data");
-        let mut library = PluginLibrary::open(&data);
+        let mut library = PluginLibrary::open(&data).unwrap();
         let entries = library
             .add(&bundle, |path| probe(&exe, path, Duration::from_secs(60)))
             .expect("the test plug-in is added");
@@ -83,7 +83,7 @@ mod windows_tests {
         );
 
         // What was saved is what a new session reads, and the inner module stands for the same bundle.
-        let mut reopened = PluginLibrary::open(&data);
+        let mut reopened = PluginLibrary::open(&data).unwrap();
         assert_eq!(reopened.entries(), &entries[..]);
         let inner = bundle
             .join("Contents")
@@ -109,7 +109,7 @@ mod windows_tests {
             panic!("{error:?}")
         };
         assert!(probe_error.status().is_some(), "{probe_error:?}");
-        assert_eq!(PluginLibrary::open(&data).entries(), &entries[..]);
+        assert_eq!(PluginLibrary::open(&data).unwrap().entries(), &entries[..]);
     }
 
     /// How many processes run from the program named `image`.
@@ -147,7 +147,7 @@ mod windows_tests {
             args: Vec::new(),
         };
         let data = dir.path().join("data");
-        let mut library = PluginLibrary::open(&data);
+        let mut library = PluginLibrary::open(&data).unwrap();
 
         let started = Instant::now();
         let watched = image.clone();

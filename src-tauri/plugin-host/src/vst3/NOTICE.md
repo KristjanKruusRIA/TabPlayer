@@ -4,7 +4,7 @@ The files `editor.rs`, `host.rs`, `instance.rs`, `mod.rs`, `module.rs`, `process
 derived from the `vst3-host` crate of SoundCraft, <https://github.com/storytold/soundcraft>, commit `b6f9f15`
 (`crates/vst3-host/src/ffi.rs`, `ffi/*.rs`, `ffi/window/windows.rs` and the bundle resolution of `scan.rs`). SoundCraft
 is licensed MIT OR Apache-2.0; TabPlayer uses it under the MIT licence, whose text follows. The bundle resolution of `scan.rs`
-now lives in `src-tauri/plugin-protocol/src/bundle.rs` (so the app and the helper share it), with the same attribution.
+now lives in `src-tauri/plugin-protocol/src/bundle.rs` (so the app and the helper share it, and the app binary links it), with the same attribution. There, TabPlayer's changes and own code are marked `TabPlayer:` as well.
 
 `queue.rs` is TabPlayer's own, under the licence of this crate.
 

@@ -46,7 +46,8 @@ await copyFile(new URL('../legal/integrated-notices.txt',import.meta.url),new UR
 // The vorbis-rs crates publish no licence file, so their upstream BSD-3-Clause text is kept in the repository.
 await copyFile(new URL('../legal/vorbis-rs-BSD-3-Clause.txt',import.meta.url),new URL('vorbis-rs-BSD-3-Clause.txt',output));
 // VST3 hosting: the `vst3` crate's licences are packaged with the crate; `com-scrape-types` publishes no licence file, the
-// Steinberg interfaces the bindings are generated from are MIT, and the plug-in helper vendors a part of SoundCraft's FFI.
+// Steinberg interfaces the bindings are generated from are MIT, and the plug-in helper vendors a part of SoundCraft's FFI
+// (its bundle resolution is in the protocol crate, so the app binary links that part too).
 for(const name of ['steinberg-pluginterfaces-MIT.txt','com-scrape-types-MIT.txt','soundcraft-vst3-host-MIT.txt'])await copyFile(new URL(`../legal/${name}`,import.meta.url),new URL(name,output));
 // The LGPL-3.0 of mp3lame-sys asks for the GNU GPL 3.0 text to travel with it.
 await copyFile(new URL('../legal/GPL-3.0.txt',import.meta.url),new URL('GPL-3.0.txt',output));

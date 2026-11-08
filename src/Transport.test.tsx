@@ -18,7 +18,7 @@ function renderTransport(element:Parameters<typeof render>[0]) {
   const view=render(element),summary=screen.queryByText(/^More playback/,{selector:'summary'});
   if(summary&&!summary.closest('details')!.open)fireEvent.click(summary);return view;
 }
-function snapshot(patch:Partial<PlaybackState>={}):PlaybackState {return {ready:true,playing:false,time:1000,endTime:6000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'paused',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null,...patch};}
+function snapshot(patch:Partial<PlaybackState>={}):PlaybackState {return {ready:true,playing:false,time:1000,endTime:6000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'paused',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loopNotice:null,range:null,loop:null,error:null,...patch};}
 function playerFor(initial=snapshot()) {
   let state=initial;const listeners=new Set<()=>void>();
   const player={generation:7,getState:()=>state,subscribe:(listener:()=>void)=>{listeners.add(listener);return ()=>{listeners.delete(listener);};},play:vi.fn(),pause:vi.fn(),stop:vi.fn(),setSpeed:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),seekToMeasure:vi.fn(),setMetronome:vi.fn(),setPractice:vi.fn(),cursorPlaybackChoices:vi.fn(()=>cursorChoices),selectionPlaybackChoices:vi.fn(()=>[passage]),playbackOccurrences:()=>occurrences,playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn()};
@@ -140,6 +140,10 @@ it('count_paused_count_and_pulses_render_only_acknowledged_native_state',()=>{
   act(()=>{vi.advanceTimersByTime(5000);});expect(document.querySelector('.transport-time')).toHaveTextContent('0:01 / 0:06');expect(screen.getByText('Bar 1')).toBeInTheDocument();expect(screen.getByRole('status',{name:'Count-in'})).toHaveTextContent(/3.*remaining/);expect(player.setSpeed).not.toHaveBeenCalled();expect(player.setPractice).not.toHaveBeenCalled();
   update({...state,playing:false,practice:{...state.practice,phase:'paused'}});expect(screen.getByRole('status',{name:'Count-in'})).toHaveTextContent(/Count-in paused.*3.*remaining/);expect(screen.getByRole('button',{name:'Play'})).toBeEnabled();expect(screen.getByLabelText('Metronome pulse')).toHaveAttribute('data-pulse-serial','42');
   update(snapshot());expect(screen.queryByLabelText('Metronome pulse')).not.toBeInTheDocument();expect(screen.queryByRole('status',{name:'Count-in'})).not.toBeInTheDocument();
+});
+it('says so in the transport message line when an edit ended the loop',()=>{
+  const {player}=playerFor(snapshot({loopNotice:'cleared'}));renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  expect(screen.getByText('The loop was removed because your edit changed the bars it covered.')).toBeInTheDocument();
 });
 it('practice_notices_are_visible_and_control_errors_stay_inline',()=>{
   const {player}=playerFor(snapshot({practiceNotice:'Fixed tempo disabled because this score has backing audio.'}));player.setSpeed.mockImplementation(()=>{throw new Error('Practice change rejected.');});renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);

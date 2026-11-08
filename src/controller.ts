@@ -18,6 +18,11 @@ import {backingProcessingKey} from './audio/backing-processing';
 import {referenceSyncTiming,referenceTimingKey} from './audio/reference-sync';
 import {scoreUsesTempoUnits,tempoUnitOf} from './editor/tempo-unit';
 import {projectGpDocument} from './interchange/backing-projection';
+import {barMapOfEdit,barMapOfUndo} from './editor/edit-bar-map';
+import type {BarIndexMap} from './editor/measures-types';
+
+/** Called before a score change the player must rebuild for; `bars` says where the bars went when the change moved some and that is known. */
+export type BeforeChange=(bars?:BarIndexMap)=>void;
 
 type ReferenceWaveformBinding={bridge:NativeBackingWaveformBridge};
 const tempoState=(score:model.Score)=>JSON.stringify(score.masterBars.map(bar=>bar.tempoAutomations.map(tempo=>[
@@ -39,11 +44,11 @@ export class DocumentController {
   private referenceBinding:ReferenceWaveformBinding|null=null;
   private referenceMetadata:{binding:ReferenceWaveformBinding;assetId:string;durationMs:number}|null=null;
 
-  private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: () => void, private isWorkspaceTransitioning:()=>boolean) {
+  private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: BeforeChange, private isWorkspaceTransitioning:()=>boolean) {
     this.verifyRecord(record);
     this.state={...record,...buildDocument(record.snapshot.project,record.snapshot.canRedo),documentEpoch:0,busy:false,error:null};
   }
-  static async create(bridge: NativeBridge, beforeChange: () => void = () => {},initial?:DocumentSnapshot,isWorkspaceTransitioning:()=>boolean=()=>false) {
+  static async create(bridge: NativeBridge, beforeChange: BeforeChange = () => {},initial?:DocumentSnapshot,isWorkspaceTransitioning:()=>boolean=()=>false) {
     const record=initial ?? await bridge.snapshot();
     await admitDocumentBase(record.snapshot.project);
     return new DocumentController(bridge,record,beforeChange,isWorkspaceTransitioning);
@@ -54,7 +59,7 @@ export class DocumentController {
   hasPendingActions() { return this.pendingActions>0; }
   whenIdle():Promise<void> { return this.tail; }
   getState = () => this.state;
-  setBeforeChange(handler: () => void) { this.beforeChange=handler; }
+  setBeforeChange(handler: BeforeChange) { this.beforeChange=handler; }
   setReferenceWaveformBridge(bridge:NativeBackingWaveformBridge):()=>void {
     const binding={bridge};this.referenceBinding=binding;this.referenceMetadata=null;
     return ()=>{if(this.referenceBinding===binding){this.referenceBinding=null;this.referenceMetadata=null;}};
@@ -106,7 +111,7 @@ export class DocumentController {
       if(asset) {try {await this.bridge.cancelAsset?.(asset.token);} catch {}}
       throw error;
     }
-    if(!isSettingsEdit(command))this.beforeChange();
+    if(!isSettingsEdit(command))this.beforeChange(barMapOfEdit(command,this.state.score.masterBars.length)??undefined);
     this.undone=[];this.update({...record,score:candidate.score,settings:candidate.settings,embeddedBacking:candidate.embeddedBacking,embeddedBackingSettings:candidate.embeddedBackingSettings,sourceMixes:candidate.sourceMixes});
   }
   private async admitReferenceTiming(candidate:BuiltDocument) {
@@ -150,7 +155,7 @@ export class DocumentController {
     const project=this.state.snapshot.project,removed=project.edits.at(-1);if(!removed)return;
     const settingsOnly=isSettingsEdit(removed),previous={...project,edits:project.edits.slice(0,-1)};
     const built=settingsOnly?replayDocumentSettings(previous,this.state):buildDocument(previous,true);
-    const record=await this.bridge.undo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange();
+    const record=await this.bridge.undo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange(barMapOfUndo(removed,this.state.score.masterBars.length)??undefined);
     this.undone.push(removed);this.update({...record,...built});
   }); }
   redo() { return this.run(async()=>{
@@ -158,7 +163,7 @@ export class DocumentController {
     if(!restored){if(this.state.snapshot.canRedo)throw new Error('The next redo command is unavailable; reopen the document.');return;}
     const project={...this.state.snapshot.project,edits:[...this.state.snapshot.project.edits,restored]},settingsOnly=isSettingsEdit(restored);
     const built=settingsOnly?replayDocumentSettings(project,this.state):buildDocument(project);
-    const record=await this.bridge.redo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange();
+    const record=await this.bridge.redo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange(barMapOfEdit(restored,this.state.score.masterBars.length)??undefined);
     this.undone.pop();this.update({...record,...built});
   }); }
   /** Finalizes or unfinalizes the document. A lock change is not an edit, so history and the redo stack stay as they are. */

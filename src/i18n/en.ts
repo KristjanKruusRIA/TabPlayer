@@ -1688,7 +1688,7 @@ export const en = {
   'typography.blank_note': "Blank keeps the renderer size. Tab number size also scales numbered-notation digits; fret and staff numbers keep the default font.",
   'typography.export_note': "Exports set text in the bundled Noto fonts and ignore Text font; Text size and Tab number size apply, and Title size scales the page header line, shrunk to fit the page width. An export is refused, naming the text, if enlarged text would run past the page width. On screen the renderer draws the score title as one centred line, so a very long title at a large Title size can run past the page edge. A role with its own font below is drawn in that font on screen and in exports.",
   'font_roles.music': "Music font",
-  'font_roles.music_note': "Every notation symbol is drawn from the music font; a symbol it lacks is drawn from Bravura. Text fonts fall back to a system face for any missing character.",
+  'font_roles.music_note': "Every notation symbol is drawn from the music font; a symbol it lacks is drawn from Bravura. On screen, a character a text font lacks is drawn from a system face; in exports it is drawn from Bravura, Noto Sans, Noto Sans CJK JP or Noto Emoji.",
   'font_roles.roles_heading': "Fonts by role",
   'font_roles.roles_note': "A role without a font keeps the look above. Bold and italic need a chosen font, because only the bundled fonts draw the same glyph shapes on screen and in exports (spacing can still differ slightly); Source/default keeps each element’s own style.",
   'font_roles.role_titleBlock': "Title block",
@@ -1744,6 +1744,9 @@ export const en = {
   'staff_groups.names_long_first': "Long names first, short after",
   'staff_groups.names_long_first_help': "Full track names on the first system, short names on every later system.",
   'staff_groups.names_already': "Names already show long first and short after.",
+  'export.text_overflow': "The text \"{text}\" does not fit the page width. Reduce {textSize} or {tabSize}, or the print scale, or use a wider page.",
+  'export.text_overflow_roles': " A font size chosen for {roles} also enlarges text: lower it.",
+  'export.roles_joiner': " and ",
 } as const;
 
 export type MessageKey = keyof typeof en;

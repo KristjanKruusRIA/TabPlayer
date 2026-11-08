@@ -58,3 +58,13 @@ export function covers(file:string,codePoint:number):boolean {
   }
   return false;
 }
+
+/** A bundled font file as a person would name it ("Noto Serif Italic"); a file the catalog does not know keeps its file name. */
+export function fileLabel(file:string):string {
+  for(const font of Object.values(textFonts)){
+    const face=font.faces.find(candidate=>candidate.file===file);
+    if(face)return `${font.label} ${face.bold&&face.italic?'Bold Italic':face.bold?'Bold':face.italic?'Italic':'Regular'}`;
+  }
+  for(const font of Object.values(musicFonts))if(font.file===file||font.metadata===file)return font.family;
+  return file;
+}

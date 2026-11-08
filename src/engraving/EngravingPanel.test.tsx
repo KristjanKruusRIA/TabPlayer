@@ -252,7 +252,7 @@ it('apply and reset keep staff groups and gaps',()=>{
   for(const command of commands){expect(command.engraving.staffGroups).toEqual(value.staffGroups);expect(command.engraving.staffGaps).toEqual(value.staffGaps);}
 });
 
-it('apply sends the latest staff groups when only they changed',()=>{
+it('apply sends the staff groups and gaps changed elsewhere together with a change made in the form',()=>{
   const commands:Edit[]=[],first=defaultEngraving();first.staffGroups=[{trackIds:['source/guitar','b'],kind:'brace'}];
   const props={score:music(),trackIds:['source/guitar'],busy:false,onEdit:(edit:Edit)=>commands.push(edit)},view=render(<EngravingPanel {...props} value={first}/>);
   const next=defaultEngraving();next.staffGroups=[{trackIds:['source/guitar','c'],kind:'bracket'}];next.staffGaps=[{trackId:'source/guitar',scale:3}];
@@ -260,4 +260,16 @@ it('apply sends the latest staff groups when only they changed',()=>{
   fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'true'}});
   fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
   expect(commands).toHaveLength(1);expect(commands[0].engraving.staffGroups).toEqual(next.staffGroups);expect(commands[0].engraving.staffGaps).toEqual(next.staffGaps);
+});
+
+it('apply records nothing when only the staff groups or gaps changed outside the panel',()=>{
+  const commands:Edit[]=[],first=defaultEngraving();first.staffGroups=[{trackIds:['source/guitar','b'],kind:'brace'}];
+  const props={score:music(),trackIds:['source/guitar'],busy:false,onEdit:(edit:Edit)=>commands.push(edit)},view=render(<EngravingPanel {...props} value={first}/>);
+  const next=defaultEngraving();next.staffGroups=[{trackIds:['source/guitar','c'],kind:'bracket'}];next.staffGaps=[{trackId:'source/guitar',scale:3}];
+  view.rerender(<EngravingPanel {...props} value={next}/>);
+  // Nothing in the form differs from the document, and the groups and gaps are not part of the form, so neither Apply nor Reset has anything to record.
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toEqual([]);
+  fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));
+  expect(commands).toEqual([]);
 });

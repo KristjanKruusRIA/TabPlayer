@@ -101,6 +101,18 @@ test('licence_and_metadata_files_exist',()=>{
   }
 });
 
+test('smufl_metadata_entries_name_their_pinned_source',()=>{
+  const withMetadata=sources.filter(entry=>entry.smuflMetadata);
+  assert.deepEqual(withMetadata.map(entry=>entry.filename).sort(),['Leland.otf','Petaluma.otf']);
+  for(const entry of withMetadata){
+    const {filename,sha256,source,revision}=entry.smuflMetadata;
+    assert.match(sha256,/^[0-9a-f]{64}$/,filename);assert.match(revision,/^[0-9a-f]{40}$/,filename);
+    // The same upstream commit as the font file, and a raw URL for exactly this file at that commit.
+    assert.equal(revision,entry.revision,filename);
+    assert.ok(source.startsWith(`https://raw.githubusercontent.com/`)&&source.includes(`/${revision}/`)&&source.endsWith(`/${filename}`),`${filename}: ${source}`);
+  }
+});
+
 // Fonts are untrusted input: the reader must stop with a clear error, never read out of range or loop.
 function sfnt(cmap,version=0x00010000){
   const bytes=new Uint8Array(28+cmap.length);

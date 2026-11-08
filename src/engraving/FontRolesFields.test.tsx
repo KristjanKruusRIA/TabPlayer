@@ -5,6 +5,7 @@ import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { EngravingFonts,FontRole } from './fonts';
 import { FontRolesFields } from './FontRolesFields';
+import { catalogs } from '../i18n';
 
 afterEach(cleanup);
 type Status={failed:string[];substituted:string[]}|null;
@@ -191,4 +192,15 @@ it('the_load_failure_and_substitution_notes_are_status_messages',()=>{
   setup({value:{music:'petaluma'},status:{failed:['Petaluma.otf'],substituted:['a']}});
   expect(screen.getByText(/A font could not be loaded/)).toHaveAttribute('role','status');
   expect(screen.getByText(/1 music symbol is not in Petaluma/)).toHaveAttribute('role','status');
+});
+
+it('the_music_note_says_where_a_missing_character_comes_from_on_screen_and_in_exports',()=>{
+  // On screen a text font falls back to a system face; in exports only the bundled faces are used, so the note must not claim a system fallback there.
+  for(const language of ['en','et','de'] as const){
+    const note=catalogs[language]['font_roles.music_note'];
+    for(const name of ['Bravura','Noto Sans','Noto Sans CJK JP','Noto Emoji'])expect(note,`${language} names ${name}`).toContain(name);
+  }
+  expect(catalogs.en['font_roles.music_note']).toMatch(/on screen[^.]*system face[^.]*exports[^.]*Bravura, Noto Sans, Noto Sans CJK JP or Noto Emoji/i);
+  setup();
+  expect(screen.getByText(/in exports it is drawn from Bravura, Noto Sans, Noto Sans CJK JP or Noto Emoji/)).toBeInTheDocument();
 });

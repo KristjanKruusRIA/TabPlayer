@@ -3,7 +3,7 @@ import type { ChangeEvent,KeyboardEvent,MouseEvent } from 'react';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n';
 import { busySelect } from '../ui';
-import { hasFace,musicFonts,textFonts } from './font-catalog';
+import { fileLabel,hasFace,musicFonts,textFonts } from './font-catalog';
 import type { MusicFontId,TextFontId } from './font-catalog';
 import { FONT_ROLES,missingGlyphs,sizeRange } from './fonts';
 import type { EngravingFonts,FontRole,RoleFont } from './fonts';
@@ -25,15 +25,6 @@ const flagChoice=(flag:boolean|undefined)=>flag===undefined?'inherit':flag?'on':
 const flagValue=(choice:string)=>choice==='on'?true:choice==='off'?false:undefined;
 const roleKey=(role:FontRole)=>`font_roles.role_${role}` as MessageKey;
 
-/** A bundled font file as a person would name it ("Noto Serif Italic"); a file the catalog does not know keeps its file name. */
-function fileLabel(file:string):string {
-  for(const font of Object.values(textFonts)){
-    const face=font.faces.find(candidate=>candidate.file===file);
-    if(face)return `${font.label} ${face.bold&&face.italic?'Bold Italic':face.bold?'Bold':face.italic?'Italic':'Regular'}`;
-  }
-  for(const font of Object.values(musicFonts))if(font.file===file||font.metadata===file)return font.family;
-  return file;
-}
 
 /** A role's entry after one change: absent keys stay absent, a flag cannot outlive its font, and a font without the italic face loses an italic choice. */
 function changed(entry:RoleFont|undefined,change:Partial<Record<keyof RoleFont,RoleFont[keyof RoleFont]|null>>):RoleFont|undefined {

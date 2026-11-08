@@ -1690,7 +1690,7 @@ export const et: MessageCatalog = {
   'typography.blank_note': "Tühi väli jätab renderdaja suuruse. Tabulatuurinumbrite suurus skaleerib ka numbrilise noodikirja numbreid; astmetraatide ja noodiridade numbrid jäävad vaikefondi.",
   'typography.export_note': "Eksport kasutab tekstiks kaasasolevaid Noto fonte ja eirab teksti fondi valikut; teksti ja tabulatuurinumbrite suurus kehtivad ning pealkirja suurus skaleerib lehe päise rida, mis kahandatakse lehe laiusele. Kui suurendatud tekst ulatuks üle lehe laiuse, lükatakse eksport tagasi ja teade nimetab selle teksti. Ekraanil joonistab renderdaja partituuri pealkirja ühe keskele joondatud reana, nii et väga pikk pealkiri suure pealkirjasuurusega võib ulatuda üle lehe serva. Allpool oma fondi saanud roll joonistatakse ekraanil ja eksportides selle fondiga.",
   'font_roles.music': "Muusikafont",
-  'font_roles.music_note': "Iga noodimärk joonistatakse muusikafondist; märk, mida fondis pole, joonistatakse Bravurast. Tekstifondid kasutavad puuduva märgi jaoks süsteemifonti.",
+  'font_roles.music_note': "Iga noodimärk joonistatakse muusikafondist; märk, mida fondis pole, joonistatakse Bravurast. Märk, mida tekstifondil pole, joonistatakse ekraanil süsteemifondist, ekspordis aga fontidest Bravura, Noto Sans, Noto Sans CJK JP või Noto Emoji.",
   'font_roles.roles_heading': "Fondid rollide kaupa",
   'font_roles.roles_note': "Fondita roll säilitab ülaltoodud välimuse. Rasvane ja kursiiv vajavad valitud fonti, sest ainult kaasasolevad fondid joonistavad ekraanil ja eksportides samad märgikujud (vahed võivad siiski veidi erineda); „Allikas/vaikimisi“ jätab iga elemendi enda stiili.",
   'font_roles.role_titleBlock': "Pealkirjaplokk",
@@ -1746,4 +1746,7 @@ export const et: MessageCatalog = {
   'staff_groups.names_long_first': "Pikad nimed esimesena, lühikesed pärast",
   'staff_groups.names_long_first_help': "Esimesel süsteemil rajade täisnimed, kõigil hilisematel süsteemidel lühinimed.",
   'staff_groups.names_already': "Nimed on juba seatud: pikad esimesena, lühikesed pärast.",
+  'export.text_overflow': "Teksti „{text}“ ei mahu lehe laiusele. Vähenda suurust „{textSize}“ või „{tabSize}“ või printimise skaalat või kasuta laiemat lehte.",
+  'export.text_overflow_roles': " Teksti suurendab ka valitud fondisuurus ({roles}): vähenda seda.",
+  'export.roles_joiner': " ja ",
 };

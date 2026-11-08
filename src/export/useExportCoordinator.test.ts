@@ -15,6 +15,7 @@ import { loadInterchangeScore } from '../interchange/gp';
 import * as pdf from './pdf';
 import * as fontLoading from '../engraving/font-loading';
 import type { MusicFontData } from '../engraving/font-loading';
+import { setLanguagePreference } from '../i18n';
 
 function currentBacking(){return {assetId:'a'.repeat(64),offsetMs:120,anchors:[{bar:1,occurrence:0,ratio:0,audioMs:3120}],referenceSync:{entryAudioMs:1120,exitAudioMs:15120},mix:{gain:1,pan:0,mute:false,solo:false}};}
 it('exports current committed backing bytes and the original full route at the captured revision',async()=>{
@@ -488,8 +489,17 @@ describe('export_awaits_role_faces_and_music',()=>{
   it('a face that cannot be loaded stops the export before anything is rendered',async()=>{
     const api=native(),{result,render,gates}=fontsHook(music(),api);
     gates.fonts.resolve();gates.roles.resolve({failed:['NotoSerif-Italic.ttf']});gates.music.resolve(petalumaData);
-    await act(async()=>{await expect(result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout})).rejects.toThrow(/NotoSerif-Italic\.ttf/);});
+    await act(async()=>{await expect(result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout})).rejects.toThrow(/A font could not be loaded: Noto Serif Italic\./);});
     expect(render).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
+  });
+  it('the font failure message follows the language and names the faces as the panel does',async()=>{
+    try{
+      setLanguagePreference('de');
+      const api=native(),{result,render,gates}=fontsHook(music(),api);
+      gates.fonts.resolve();gates.roles.resolve({failed:['NotoSerif-Italic.ttf','Petaluma.otf']});gates.music.resolve(petalumaData);
+      await act(async()=>{await expect(result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout})).rejects.toThrow(/^Eine Schrift konnte nicht geladen werden: Noto Serif Italic, Petaluma\./);});
+      expect(render).not.toHaveBeenCalled();
+    }finally{setLanguagePreference('en');}
   });
   it('a music font that cannot be loaded stops every kind of export before anything is rendered',async()=>{
     const jobs:ExportOptions[]=[{format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout},{format:'svg',selection:{tracks:[0],range:null},layout:pageLayout,transparent:true},{format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout,perTrack:true}];

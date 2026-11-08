@@ -1,3 +1,4 @@
+import { getMessage,getResolvedLanguage } from '../i18n';
 import type { SvgSystem } from './types';
 
 /** A drawn text's horizontal extent, in system pixels from the system's left edge. */
@@ -26,6 +27,13 @@ export function measureSystemText(system:SvgSystem):TextBox[] {
   }finally{host.remove();}
 }
 
+/** The refusal text in the language of the interface; `sizedRoles` are role names already in that language. */
+function fitMessage(text:string,sizedRoles:readonly string[]):string {
+  const language=getResolvedLanguage(),shown=text.length>30?`${text.slice(0,29)}…`:text;
+  const message=getMessage(language,'export.text_overflow',{text:shown,textSize:getMessage(language,'typography.text_size'),tabSize:getMessage(language,'typography.tab_size')});
+  return sizedRoles.length?message+getMessage(language,'export.text_overflow_roles',{roles:sizedRoles.join(getMessage(language,'export.roles_joiner'))}):message;
+}
+
 /**
  * Refuses an export whose text would be clipped. The exporter only checks that bars fit, but enlarged annotations,
  * chord names and track names can run past the last bar. Refusing names the text and the settings that cause it.
@@ -33,6 +41,6 @@ export function measureSystemText(system:SvgSystem):TextBox[] {
 export function assertTextFits(systems:readonly SvgSystem[],width:number,margin=0,measure:(system:SvgSystem)=>TextBox[]=measureSystemText,sizedRoles:readonly string[]=[]):void {
   for(const system of systems){
     const [first]=overflowingText(measure(system),width,margin);
-    if(first!==undefined)throw new Error(`The text "${first.length>30?`${first.slice(0,29)}…`:first}" does not fit the page width. Reduce Text size or Tab number size, or the print scale, or use a wider page.${sizedRoles.length?` A font size chosen for ${sizedRoles.join(' and ')} also enlarges text: lower it.`:''}`);
+    if(first!==undefined)throw new Error(fitMessage(first,sizedRoles));
   }
 }

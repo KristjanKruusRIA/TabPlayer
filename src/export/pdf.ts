@@ -16,6 +16,7 @@ import {pageTitleFontSize} from './page-title';
 import {headerFieldsOf} from '../engraving/header-footer';
 import {isDefaultTypography,typographyOf} from '../engraving/typography';
 import {assertTextFits} from './text-bounds';
+import {getMessage,getResolvedLanguage} from '../i18n';
 const pxPerMm=96/25.4;
 const escaped=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]!));
 function dimensions(layout:PrintLayout) {
@@ -78,8 +79,8 @@ export function applyExportFamilies(settings:Settings,fonts:EngravingFonts|undef
   for(const [element,font] of settings.display.resources.elementFonts)if(!kept.has(element))font.families=[...FALLBACK_FAMILIES];
   if(!chosen('tabNumbers'))for(const key of TAB_NUMBER_FONTS)settings.display.resources[key].families=[...FALLBACK_FAMILIES];
 }
-/** How a role is named in the message that tells the user which size to lower. */
-const roleNames:Record<FontRole,string>={titleBlock:'Title block',pageHeader:'Page header',pageFooter:'Page footer',chordNames:'Chord names',staffText:'Staff text',lyrics:'Lyrics',trackNames:'Track names',barNumbers:'Bar numbers',markers:'Markers',tabNumbers:'Tab numbers'};
+/** The role's name in the language of the interface, for the fit-check message. */
+const roleName=(role:FontRole)=>getMessage(getResolvedLanguage(),`font_roles.role_${role}`);
 /** The page music CSS for a loaded music font: the native names, with Bravura behind a font that may lack a symbol (the screen's alias stack is webview-only). */
 const exportMusicFont=(id:MusicFontId):MusicFont=>id==='bravura'?defaultMusicFont:{size:defaultMusicFont.size,families:[musicFonts[id].family,musicFonts.bravura.family]};
 export function renderPdfPages(score:model.Score,selection:ExportSelection,layout:PrintLayout,options?:{page:PageLayout;engraving:EngravingOverrides;trackIds:string[];music?:MusicFontData}):SvgPage[] {
@@ -121,7 +122,7 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
     if(frozen){
       // Only roles that touch the notation can push text past the page: the page header and footer are placed and fitted separately.
       const roles=fontsOf(frozen.engraving).roles,notation=FONT_ROLES.filter(role=>role!=='pageHeader'&&role!=='pageFooter'&&roles[role]!==undefined);
-      if(!isDefaultTypography(typographyOf(frozen.engraving))||notation.length>0){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right),undefined,notation.filter(role=>roles[role]!.size!==undefined).map(role=>roleNames[role]));}
+      if(!isDefaultTypography(typographyOf(frozen.engraving))||notation.length>0){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right),undefined,notation.filter(role=>roles[role]!.size!==undefined).map(roleName));}
     }
     if(!frozen)return paginateSystems(systems,score.title,layout);
     // Staff gaps and group marks are composed after the checks above, which need the text outside <defs>, and before pagination, which needs the composed heights.

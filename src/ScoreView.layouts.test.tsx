@@ -10,7 +10,7 @@ import type {EngravingOverrides,PageLayout} from './engraving/types';
 import type {EngravingFonts} from './engraving/fonts';
 import type {SystemSpan} from './engraving/system-gaps';
 import type {ScoreLayoutMode} from './engraving/screen-view';
-import {defaultEngraving,projectEngraving,type EngravingProjection} from './engraving/projection';
+import {configureEngraving,defaultEngraving,projectEngraving,type EngravingProjection} from './engraving/projection';
 import {mergeSmuflMetadata} from './engraving/smufl';
 import type {MusicFontData} from './engraving/font-loading';
 import {planAccolades} from './engraving/accolades';
@@ -536,6 +536,26 @@ it('a group change renders again with no brackets and the reserve',()=>{
  const plan=planAccolades({engraving:e,trackIds:ids,rendered:[0,1,2],score:projection().score,nativeMode:projection().bracketMode,settings:view().settings})!;
  expect(renders()).toBe(before+1);expect(projection().score.stylesheet.bracketExtendMode).toBe(model.BracketExtendMode.NoBrackets);
  expect(view().settings.display.systemLabelPaddingRight).toBeCloseTo(3+plan.reserve);expect(view().settings.display.padding[0]).toBeCloseTo(plan.reserve);
+});
+it('accolades are planned with the configured music font',async()=>{
+ // The reserve is the room kept left of the staves for the drawn marks, so it has to come from the music font's own bracket thickness (Leland 0.45 staff spaces, Bravura 0.5).
+ const lelandSettings=()=>{
+  const settings=new Settings(),{metadata,substituted}=mergeSmuflMetadata(JSON.parse(readFileSync('assets/fonts/leland_metadata.json','utf8')),EngravingSettings.bravuraMetadata);
+  configureEngraving(settings,{...defaultEngraving(),fonts:{music:'leland'}},{id:'leland',families:['Leland','TabPlayer Bravura'],metadata,substituted});
+  return {settings,data:{id:'leland',families:['Leland','TabPlayer Bravura'],metadata,substituted} as MusicFontData};
+ };
+ const group=withStaffGroups(defaultEngraving(),[{trackIds:['base/0','base/1'],kind:'bracket'}]),withLeland={...group,fonts:{music:'leland' as const}};
+ const {rerender,view,projection}=mountPaged(group);
+ const bravuraReserve=view().settings.display.systemLabelPaddingRight-3;
+ const {settings,data}=lelandSettings(),gate=deferredMusic();state.music=()=>gate.promise;
+ rerender(withLeland);
+ await act(async()=>{gate.resolve(data);await gate.promise;});
+ const plan=planAccolades({engraving:withLeland,trackIds:ids,rendered:[0,1,2],score:projection().score,nativeMode:projection().bracketMode,settings})!;
+ expect(plan.reserve).toBeLessThan(bravuraReserve);
+ expect(view().settings.display.systemLabelPaddingRight).toBeCloseTo(3+plan.reserve,5);expect(view().settings.display.padding[0]).toBeCloseTo(plan.reserve,5);
+ // Back to Bravura plans from Bravura's metrics again.
+ rerender(group);
+ expect(view().settings.display.systemLabelPaddingRight-3).toBeCloseTo(bravuraReserve,5);
 });
 it('label padding stays absolute across group edits and returns to 3 when the last group goes',()=>{
  const {rerender,view}=mountPaged(defaultEngraving());

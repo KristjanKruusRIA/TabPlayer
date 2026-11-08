@@ -5,6 +5,7 @@ import { defaultEngraving } from '../engraving/projection';
 import { paginateEngravedSystems } from '../engraving/page';
 import { withTypography } from '../engraving/typography';
 import type { EngravingTypography } from '../engraving/types';
+import { setLanguagePreference } from '../i18n';
 import { renderPdfPages } from './pdf';
 import { assertTextFits,measureSystemText,overflowingText } from './text-bounds';
 
@@ -91,4 +92,19 @@ it('export_refuses_an_enlarged_role_and_names_it',()=>{
   const fonts=(size:number)=>({...defaultEngraving(),fonts:{roles:{staffText:{size}}}});
   expect(()=>renderPdfPages(long,{tracks:[0],range:null},layout,{page,engraving:fonts(2),trackIds:['base/0']})).toThrow(/does not fit the page width.*size chosen for Staff text/);
   expect(()=>renderPdfPages(withText('Short'),{tracks:[0],range:null},layout,{page,engraving:fonts(2),trackIds:['base/0']})).not.toThrow();
+});
+
+it('the_fit_check_message_and_role_names_follow_the_language',()=>{
+  const systems=[{svg:'<svg/>',width:700,height:50}],over=()=>[{text:'Cmaj7',left:650,right:760}];
+  try{
+    setLanguagePreference('de');
+    expect(()=>assertTextFits(systems,700,0,over)).toThrow('Der Text „Cmaj7“ passt nicht in die Seitenbreite. Verringere „Textgröße“ oder „Größe der Tabulaturzahlen“, den Druckmaßstab, oder verwende eine breitere Seite.');
+    setLanguagePreference('et');
+    expect(()=>assertTextFits(systems,700,0,over)).toThrow('Teksti „Cmaj7“ ei mahu lehe laiusele. Vähenda suurust „Teksti suurus“ või „Tabulatuurinumbrite suurus“ või printimise skaalat või kasuta laiemat lehte.');
+    // The role names are the font role labels, joined in the language.
+    const long=withText('A long annotation line that surely needs more than the room left at the end of the bar, and then some more words');
+    setLanguagePreference('de');
+    const fonts={...defaultEngraving(),fonts:{roles:{staffText:{size:2},lyrics:{size:2}}}};
+    expect(()=>renderPdfPages(long,{tracks:[0],range:null},layout,{page,engraving:fonts,trackIds:['base/0']})).toThrow(/passt nicht in die Seitenbreite.*gewählte Schriftgröße [(]Notensystemtext und Songtext[)]/);
+  }finally{setLanguagePreference('en');}
 });

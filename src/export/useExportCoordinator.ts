@@ -26,6 +26,8 @@ import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { effectivePageLayout } from '../engraving/page';
 import { loadMusicFont,loadRoleFaces,type MusicFontData } from '../engraving/font-loading';
 import { fontsOf } from '../engraving/fonts';
+import { fileLabel } from '../engraving/font-catalog';
+import { getMessage,getResolvedLanguage } from '../i18n';
 import type { EngravingOverrides } from '../engraving/types';
 /**
  * Everything a page render needs loaded: the export fonts, the faces of the roles the document chose, and the music font. alphaTab caches a width
@@ -35,7 +37,7 @@ import type { EngravingOverrides } from '../engraving/types';
 async function loadExportResources(engraving:EngravingOverrides):Promise<MusicFontData> {
   await loadExportFonts();
   const {failed}=await loadRoleFaces(engraving.fonts);
-  if(failed.length)throw new Error(`A font could not be loaded: ${failed.join(', ')}.`);
+  if(failed.length)throw new Error(getMessage(getResolvedLanguage(),'font_roles.load_failed',{files:failed.map(fileLabel).join(', ')}));
   return await loadMusicFont(fontsOf(engraving).music);
 }
 export type ExportSource={score:model.Score;settings:DocumentSettings;embeddedBacking?:Uint8Array|null;revision:number};

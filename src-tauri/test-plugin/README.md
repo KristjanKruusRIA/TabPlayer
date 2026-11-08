@@ -65,7 +65,7 @@ The COM plumbing (the class, the factory, the entry points and the bus code) is 
 
 ## Tests and their limits
 
-`cargo test -p tabplayer-test-plugin` runs the pure unit tests and an in-process COM test (`com_tests`) that drives the factory, a plug-in instance, a Rust `IBStream` and a Rust `IComponentHandler`, with no library loaded. It is written for Windows, macOS and Linux and covers the restart, `RejectState`, the padding size, `setProcessing(0)` and `setComponentState`. It has only been run on Windows; the one platform difference known in the bindings, the width of the seek-mode enum, is cast to its own type in the test.
+`cargo test -p tabplayer-test-plugin` runs the pure unit tests and an in-process COM test (`com_tests`) that drives the factory, a plug-in instance, a Rust `IBStream` and a Rust `IComponentHandler`, with no library loaded. It is written for Windows, macOS and Linux and covers the restart, `RejectState`, the padding size, `setProcessing(0)` and `setComponentState`. It has only been run on Windows. The bindings differ by platform in three ways: the enum type (which sets the width of every enum, including the seek mode), the byte order of class IDs, and result-code values. The test casts the seek mode to its own type and uses only named constants, so it depends on none of these.
 
 The tests read the process environment through the plug-in, so they expect `TABPLAYER_TEST_PLUGIN_HANG_FACTORY` and `TABPLAYER_TEST_PLUGIN_STATE_PADDING` to be unset: the first hangs every COM test, the second changes the state sizes they check.
 

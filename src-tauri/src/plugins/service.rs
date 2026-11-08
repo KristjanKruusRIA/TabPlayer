@@ -96,6 +96,7 @@ pub struct OfflinePlugins {
     pub sessions: Vec<Arc<dyn HelperSession>>,
     pub descriptors: Vec<OfflinePluginDescriptor>,
     monitor_stop: Arc<std::sync::atomic::AtomicBool>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 impl OfflinePlugins {
@@ -115,8 +116,15 @@ impl OfflinePlugins {
 impl Drop for OfflinePlugins {
     fn drop(&mut self) {
         self.monitor_stop.store(true, Ordering::Relaxed);
-        for session in &self.sessions {
-            session.shutdown();
+        if let Ok(mut inner) = self.inner.lock() {
+            for session in &self.sessions {
+                session.shutdown();
+                PluginService::retire_session_locked(&mut inner, session.clone());
+            }
+        } else {
+            for session in &self.sessions {
+                session.shutdown();
+            }
         }
     }
 }
@@ -994,6 +1002,19 @@ impl PluginService {
         let mut descriptors = Vec::new();
         let mut active_count = 0;
 
+        let retire_sessions = |inner_arc: &Arc<Mutex<Inner>>, list: &[Arc<dyn HelperSession>]| {
+            if let Ok(mut inner) = inner_arc.lock() {
+                for s in list {
+                    s.shutdown();
+                    PluginService::retire_session_locked(&mut inner, s.clone());
+                }
+            } else {
+                for s in list {
+                    s.shutdown();
+                }
+            }
+        };
+
         for request in slots {
             let slot = &request.slot;
             if !slot.active {
@@ -1027,6 +1048,7 @@ impl PluginService {
             let mut library = match PluginLibrary::open(&self.paths.library_dir) {
                 Ok(lib) => lib,
                 Err(_) => {
+                    retire_sessions(&self.inner, &sessions);
                     return Err(ExportPluginError::Failed {
                         name: slot.name.clone(),
                         status: PluginStatus::Unreadable,
@@ -1081,6 +1103,7 @@ impl PluginService {
                         continue;
                     }
                     _ => {
+                        retire_sessions(&self.inner, &sessions);
                         return Err(ExportPluginError::Failed {
                             name: slot.name.clone(),
                             status: PluginStatus::Unreadable,
@@ -1092,6 +1115,7 @@ impl PluginService {
             };
 
             if !self.paths.helper.exists() {
+                retire_sessions(&self.inner, &sessions);
                 return Err(ExportPluginError::Failed {
                     name: slot.name.clone(),
                     status: PluginStatus::HostMissing,
@@ -1102,6 +1126,7 @@ impl PluginService {
             let (comp, ctrl) = match decoded {
                 Ok((comp, ctrl)) => (comp, ctrl),
                 Err(_) => {
+                    retire_sessions(&self.inner, &sessions);
                     return Err(ExportPluginError::Failed {
                         name: slot.name.clone(),
                         status: PluginStatus::RejectedState,
@@ -1122,6 +1147,7 @@ impl PluginService {
             ) {
                 Ok(session) => session,
                 Err(err) => {
+                    retire_sessions(&self.inner, &sessions);
                     let status = err.status().unwrap_or(PluginStatus::Unreadable);
                     return Err(ExportPluginError::Failed {
                         name: slot.name.clone(),
@@ -1147,6 +1173,8 @@ impl PluginService {
                 Ok(insert) => insert,
                 Err(crate::audio::plugin_insert::InsertError::TooMuchLatency) => {
                     session.shutdown();
+                    sessions.push(session);
+                    retire_sessions(&self.inner, &sessions);
                     return Err(ExportPluginError::Failed {
                         name: slot.name.clone(),
                         status: PluginStatus::TooMuchLatency,
@@ -1154,6 +1182,8 @@ impl PluginService {
                 }
                 Err(_) => {
                     session.shutdown();
+                    sessions.push(session);
+                    retire_sessions(&self.inner, &sessions);
                     return Err(ExportPluginError::Failed {
                         name: slot.name.clone(),
                         status: PluginStatus::Unreadable,
@@ -1196,6 +1226,7 @@ impl PluginService {
             sessions,
             descriptors,
             monitor_stop,
+            inner: self.inner.clone(),
         })
     }
 

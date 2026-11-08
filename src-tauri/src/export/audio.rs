@@ -301,6 +301,9 @@ impl AudioExportRender {
         if let Some(offline) = &self.offline {
             offline.check_faults()?;
         }
+        if self.renderer.plugin_faulted() {
+            return Err("Plug-in failed during export.".into());
+        }
         Ok(())
     }
     fn trim_pre_roll(&mut self) -> Result<(), String> {
@@ -764,11 +767,17 @@ mod tests {
 
     #[test]
     fn needs_consent_exports_built_in_with_warning() {
+        use crate::plugins::helper::{HelperError, StateParts};
         use crate::plugins::library::PluginLibrary;
-        use crate::plugins::service::{PluginPaths, PluginService, SlotRequest};
+        use crate::plugins::service::{
+            HelperSession, Launcher, PluginPaths, PluginService, SlotRequest,
+        };
         use crate::plugins::status::PluginStatus;
+        use crate::plugins::supervisor::{HelperKey, Supervisor};
         use crate::settings::{PluginFormat, PluginSlot};
         use std::sync::Arc;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::time::Duration;
         use tabplayer_plugin_protocol::control::ClassInfo;
 
         let dir = tempfile::tempdir().unwrap();
@@ -790,15 +799,54 @@ mod tests {
         })
         .unwrap();
 
-        let service = PluginService::new(
+        struct CountingLauncher(Arc<AtomicU32>);
+        impl Launcher for CountingLauncher {
+            fn launch_session(
+                &self,
+                _exe: &std::path::Path,
+                _bundle: &std::path::Path,
+                _class_id: &str,
+                _rate: u32,
+                _state: StateParts,
+                _supervisor: &Supervisor,
+                _key: HelperKey,
+            ) -> Result<Arc<dyn HelperSession>, HelperError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                panic!("launch_session called unexpectedly");
+            }
+
+            fn launch_offline(
+                &self,
+                _exe: &std::path::Path,
+                _bundle: &std::path::Path,
+                _class_id: &str,
+                _rate: u32,
+                _state: StateParts,
+            ) -> Result<Arc<dyn HelperSession>, HelperError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                panic!("launch_offline called unexpectedly");
+            }
+
+            fn probe(
+                &self,
+                _exe: &std::path::Path,
+                _bundle: &std::path::Path,
+                _timeout: Duration,
+            ) -> Result<Vec<ClassInfo>, HelperError> {
+                unreachable!()
+            }
+        }
+
+        let launch_count = Arc::new(AtomicU32::new(0));
+        let service = PluginService::new_with_launcher(
             PluginPaths {
                 helper: dir.path().join("helper.exe"),
                 library_dir: lib_dir,
                 consent_file: dir.path().join("consent.json"),
             },
             Box::new(|_| {}),
-        )
-        .unwrap();
+            Arc::new(CountingLauncher(launch_count.clone())),
+        );
 
         let req = SlotRequest {
             track_id: "t1".into(),
@@ -819,6 +867,11 @@ mod tests {
         assert!(result.inserts.is_empty());
         assert_eq!(result.warnings.len(), 1);
         assert_eq!(result.warnings[0].status, PluginStatus::NeedsConsent);
+        assert_eq!(
+            launch_count.load(Ordering::SeqCst),
+            0,
+            "no helper is launched when consent is missing"
+        );
     }
 
     #[test]

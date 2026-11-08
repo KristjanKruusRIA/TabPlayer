@@ -2354,6 +2354,10 @@ impl TrackDsp {
     pub fn plugin(&self) -> Option<&PluginInsert> {
         self.plugin.as_deref()
     }
+    /// Whether the attached plug-in has faulted.
+    pub fn plugin_faulted(&self) -> bool {
+        self.plugin.as_ref().is_some_and(|p| p.faulted().is_some())
+    }
     /// Whether the board has rendered since it was built, reset or paused (see the field).
     pub fn sounding(&self) -> bool {
         self.sounding

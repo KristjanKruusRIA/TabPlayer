@@ -1898,6 +1898,10 @@ impl Renderer {
             }
         }
     }
+    /// Whether any attached plug-in has faulted.
+    pub fn plugin_faulted(&self) -> bool {
+        self.mix.channels.iter().any(|c| c.dsp.plugin_faulted())
+    }
     /// Advances plug-in inserts and compensation lines with silent input during a count-in,
     /// returning the delayed audio and click. With no compensation, returns `[click, click]`.
     pub fn count_in_frame(&mut self, click: f32) -> [f32; 2] {

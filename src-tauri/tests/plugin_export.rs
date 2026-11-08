@@ -28,7 +28,7 @@ mod windows_tests {
             state::encode_state,
             status::PluginStatus,
         },
-        settings::{DocumentSettings, PluginFormat, PluginSlot},
+        settings::{DocumentSettings, PluginFormat, PluginSlot, TrackSound},
     };
     use tabplayer_test_plugin::{TEST_CLASS_ID, TestMode, TestState, encode_test_state};
 
@@ -221,6 +221,32 @@ mod windows_tests {
         }
     }
 
+    fn first_nonzero_frame(path: &Path) -> usize {
+        let mut reader = hound::WavReader::open(path).unwrap();
+        let samples: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
+        for (i, frame) in samples.chunks(2).enumerate() {
+            if frame.iter().any(|&s| s != 0) {
+                return i;
+            }
+        }
+        usize::MAX
+    }
+
+    fn dry_settings_for_tracks(tracks: &[&str]) -> DocumentSettings {
+        let mut settings = DocumentSettings::default();
+        for id in tracks {
+            let mut sound = TrackSound {
+                voice_id: Some("gm".into()),
+                ..Default::default()
+            };
+            sound.effects.drive.enabled = false;
+            sound.effects.amp.enabled = false;
+            sound.effects.cabinet.enabled = false;
+            settings.sounds.insert((*id).into(), sound);
+        }
+        settings
+    }
+
     needs_build! {
         fn export_trims_latency_and_keeps_length() {
             let rig = Rig::new();
@@ -249,21 +275,33 @@ mod windows_tests {
 
             let plan = Arc::new(plan_2_tracks());
             let request = make_request(vec!["t1", "t2"], None, 0.5);
+            let settings = dry_settings_for_tracks(&["t1", "t2"]);
+
+            let dir = tempfile::tempdir().unwrap();
 
             // Baseline export without plug-ins
-            let baseline_render = AudioExportRender::new(
-                Renderer::new(plan.clone(), resources(), DocumentSettings::default(), RATE).unwrap(),
+            let mut baseline_render = AudioExportRender::new(
+                Renderer::new(plan.clone(), resources(), settings.clone(), RATE).unwrap(),
                 &plan,
                 request.clone(),
             )
             .unwrap();
             let baseline_frames = baseline_render.total_frames();
+            let baseline_path = dir.path().join("baseline.wav");
+            write_wav(
+                &baseline_path,
+                request.format,
+                |b| baseline_render.render_mix(b),
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap();
 
             // Export with plug-in
             let plugin_renderer = Renderer::new(
                 plan.clone(),
                 resources(),
-                DocumentSettings::default(),
+                settings,
                 RATE,
             )
             .unwrap();
@@ -278,7 +316,6 @@ mod windows_tests {
 
             assert_eq!(export.total_frames(), baseline_frames);
 
-            let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("export.wav");
             let written = write_wav(
                 &path,
@@ -294,6 +331,11 @@ mod windows_tests {
             // Check onset in wav file
             let reader = hound::WavReader::open(&path).unwrap();
             assert_eq!(reader.duration() as u64, baseline_frames);
+
+            let baseline_first = first_nonzero_frame(&baseline_path);
+            let export_first = first_nonzero_frame(&path);
+            assert_ne!(baseline_first, usize::MAX);
+            assert_eq!(export_first, baseline_first);
         }
 
         fn export_flushes_tail() {
@@ -363,8 +405,15 @@ mod windows_tests {
             .unwrap();
 
             assert_eq!(written, export.total_frames());
-            let reader = hound::WavReader::open(&path).unwrap();
+            let mut reader = hound::WavReader::open(&path).unwrap();
             assert_eq!(reader.duration() as u64, export.total_frames());
+
+            let samples: Vec<i32> = reader.samples::<i32>().map(|s| s.unwrap()).collect();
+            let score_samples = 96000 * 2;
+            assert!(samples.len() > score_samples);
+            let tail_samples = &samples[score_samples..];
+            let tail_energy: i64 = tail_samples.iter().map(|&s| (s as i64).abs()).sum();
+            assert!(tail_energy > 0, "Tail frames must have non-zero audio energy");
         }
 
         fn stems_are_aligned_in_export() {
@@ -392,8 +441,9 @@ mod windows_tests {
             let offline = rig.service.offline_inserts("doc1", &[req], RATE).unwrap();
             let plan = Arc::new(plan_2_tracks());
             let request = make_request(vec!["t1", "t2"], None, 0.5);
+            let settings = dry_settings_for_tracks(&["t1", "t2"]);
 
-            let renderer = Renderer::new(plan.clone(), resources(), DocumentSettings::default(), RATE).unwrap();
+            let renderer = Renderer::new(plan.clone(), resources(), settings, RATE).unwrap();
 
             let mut export = AudioExportRender::new_with_plugins(
                 renderer,
@@ -419,6 +469,13 @@ mod windows_tests {
             let t1_reader = hound::WavReader::open(stem_dir.join(&manifest.tracks[0].filename)).unwrap();
             let t2_reader = hound::WavReader::open(stem_dir.join(&manifest.tracks[1].filename)).unwrap();
             assert_eq!(t1_reader.duration(), t2_reader.duration());
+
+            let t1_path = stem_dir.join(&manifest.tracks[0].filename);
+            let t2_path = stem_dir.join(&manifest.tracks[1].filename);
+            let t1_first = first_nonzero_frame(&t1_path);
+            let t2_first = first_nonzero_frame(&t2_path);
+            assert_ne!(t1_first, usize::MAX);
+            assert_eq!(t1_first, t2_first);
         }
 
         fn export_is_deterministic() {

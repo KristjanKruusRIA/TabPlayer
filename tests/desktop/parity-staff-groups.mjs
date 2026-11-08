@@ -561,6 +561,45 @@ try{
     });
   }
 
+  // ---- parchment: the overlay draws the groups where the screen layout has no composed chunks ----
+  await check('parchment: the overlay draws one group brace per system and it lines up with the staves within 1 px of the page view',async()=>{
+    await button('Presentation');
+    await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('parchment');
+    // The overlay (svg[data-tp-accolades]) shares its origin with alphaTab's own surface: each surface chunk sits at its wrapper's left/top.
+    const read=()=>page.evaluate(()=>{
+      const overlay=document.querySelector('svg[data-tp-accolades]');if(!overlay)return null;
+      const pattern=/translate\(\s*([-\d.e]+)[\s,]+([-\d.e]+)\s*\)/;
+      const marks=[...overlay.querySelectorAll('[data-tp-accolade]')].map(node=>{
+        const holder=node.querySelector('g'),found=pattern.exec(holder.getAttribute('transform')),text=node.querySelector('text');
+        return {name:node.getAttribute('data-tp-accolade'),bottom:Number(found[2]),pct:Number(/font-size: ([-\d.e]+)%/.exec(text.getAttribute('style'))[1]),basePx:parseFloat(getComputedStyle(holder).fontSize)};
+      });
+      const lines=[];
+      for(const svg of document.querySelectorAll('[aria-label="Music notation"] svg')){
+        if(overlay.contains(svg)||svg===overlay)continue;
+        const top=parseFloat(svg.parentElement.style.top)||0;
+        for(const rect of svg.querySelectorAll('rect'))if(Number(rect.getAttribute('height'))<3&&Number(rect.getAttribute('width'))>20)lines.push(top+Number(rect.getAttribute('y')));
+      }
+      return {marks,lines:[...new Set(lines.map(y=>Math.round(y*100)/100))].sort((a,b)=>a-b)};
+    });
+    let live=null;
+    for(let attempt=0;attempt<100;attempt++){live=await read();if(live&&live.marks.length===SYSTEM_COUNT&&live.marks.every(mark=>mark.name==='group-brace'))break;await page.waitForTimeout(150);live=null;}
+    assert.ok(live,'the overlay did not draw one group brace per system');
+    // The same distances in the page view: from the brace's top to the first staff line inside it, and from the last staff line inside it to its bottom.
+    const inside=(lines,top,bottom)=>lines.filter(y=>y>=top-5&&y<=bottom+5);
+    const reference=screenBrace.systems.map(system=>{const mark=system.marks[0],top=mark.bottom-braceHeight(mark),lines=inside(system.lines,top,mark.bottom);return {top:lines[0]-top,bottom:mark.bottom-lines.at(-1)};});
+    const worst=[];
+    live.marks.forEach((mark,index)=>{
+      const top=mark.bottom-braceHeight(mark),lines=inside(live.lines,top,mark.bottom);
+      assert.ok(lines.length>=10,`system ${index+1}: ${lines.length} staff lines inside the brace`);
+      near(lines[0]-top,reference[index].top,`system ${index+1} brace top to its first staff line`,1);
+      near(mark.bottom-lines.at(-1),reference[index].bottom,`system ${index+1} brace bottom to its last staff line`,1);
+      worst.push(round(Math.max(Math.abs(lines[0]-top-reference[index].top),Math.abs(mark.bottom-lines.at(-1)-reference[index].bottom))));
+    });
+    await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
+    await settle('screen','back to the vertical page view',m=>m.systems.every(system=>markNames(system).join()===GROUP_BRACE.join()));
+    return `${live.marks.length} overlay braces, music font ${live.marks[0].basePx}px, largest difference from the page view ${Math.max(...worst)} px`;
+  });
+
   // ---- save, reopen ----
   const storedBefore=await snapshot();
   await button('Save');const stored=await snapshot();

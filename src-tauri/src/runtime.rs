@@ -286,6 +286,12 @@ impl NativeAudio {
         let Some(memo) = self.plugin_memo.lock().unwrap().clone() else {
             return false;
         };
+        // During a session transition nothing can be built: a request stays for the tick after it.
+        let active = match workspace.lock() {
+            Ok(workspace) if workspace.is_frozen() => return false,
+            Ok(workspace) => workspace.active_owner() == &memo.owner,
+            Err(_) => return false,
+        };
         let asked = plugins.take_reprepare(&memo.owner.document_id);
         if !memo.has_plugins {
             return false;
@@ -298,9 +304,8 @@ impl NativeAudio {
         }
         // Nothing for a document that is no longer the active one (switched or closed): it would start helpers that
         // nothing shuts down (review M-A).
-        match workspace.lock() {
-            Ok(workspace) if workspace.active_owner() == &memo.owner && !workspace.is_frozen() => {}
-            _ => return false,
+        if !active {
+            return false;
         }
         #[cfg(test)]
         if let Some(pause) = self.tick_pause.lock().unwrap().take() {
@@ -2048,6 +2053,20 @@ mod plugin_tick_tests {
                 .service
                 .statuses(&tick.owner.document_id)
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_request_made_during_a_workspace_freeze_waits_for_it_to_end() {
+        let tick = tick_rig(Some(48_000), 512);
+        tick.record_mixes();
+        tick.rig.service.request_reprepare(&tick.owner.document_id);
+        tick.workspace.lock().unwrap().freeze().unwrap();
+        assert!(!tick.audio.plugin_tick(&tick.workspace));
+        tick.workspace.lock().unwrap().unfreeze();
+        assert!(
+            tick.audio.plugin_tick(&tick.workspace),
+            "the request is still there once the freeze ends"
         );
     }
 

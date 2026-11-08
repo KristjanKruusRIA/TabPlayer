@@ -867,8 +867,9 @@ impl PluginService {
                 continue;
             }
 
-            // A library that cannot be read is often a moment's trouble (another program holds the file): a helper that
-            // runs for this slot keeps running, and plays again once the library reads (review L4).
+            // A library file that cannot be opened is often a moment's trouble (another program holds it): a helper that
+            // runs for this slot keeps running, and plays again once the library reads (review L4). Only then: the
+            // module itself is unchanged.
             let keep_running = HelperKey {
                 document_id: document_id.to_string(),
                 track_id: track_id.clone(),
@@ -917,7 +918,8 @@ impl PluginService {
                         continue;
                     }
                     _ => {
-                        wanted.insert(keep_running);
+                        // The module changed and its scan failed: a running helper holds the old code, so it is not
+                        // kept, and a later scan that works starts one for the new module.
                         self.record_status(document_id, &track_id, slot, PluginStatus::Unreadable);
                         results.push((track_id, Err(PluginStatus::Unreadable)));
                         continue;
@@ -2452,6 +2454,8 @@ pub(crate) mod fakes {
         pub last_session: Mutex<Option<Arc<FakeSession>>>,
         pub sessions: Mutex<Vec<Arc<FakeSession>>>,
         pub rates: Mutex<Vec<u32>>,
+        /// Every probe fails.
+        pub fail_probe: AtomicBool,
     }
 
     impl FakeLauncher {
@@ -2464,6 +2468,7 @@ pub(crate) mod fakes {
                 last_session: Mutex::new(None),
                 sessions: Mutex::new(Vec::new()),
                 rates: Mutex::new(Vec::new()),
+                fail_probe: AtomicBool::new(false),
             }
         }
 
@@ -2516,6 +2521,9 @@ pub(crate) mod fakes {
             _timeout: Duration,
         ) -> Result<Vec<ClassInfo>, HelperError> {
             self.probe_count.fetch_add(1, Ordering::SeqCst);
+            if self.fail_probe.load(Ordering::SeqCst) {
+                return Err(HelperError::Timeout);
+            }
             Ok(vec![ClassInfo {
                 class_id: "A".repeat(32),
                 name: "Test Class".into(),
@@ -3468,6 +3476,30 @@ mod tests {
         // Once only, until the state is sent again.
         std::thread::sleep(Duration::from_millis(300));
         assert!(!rig.service.take_reprepare("doc1"));
+    }
+
+    #[test]
+    fn a_changed_bundle_whose_scan_fails_does_not_keep_the_old_code_running() {
+        let rig = test_rig();
+        let req = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];
+        let old = ready(&rig, 48_000, &req);
+        // The plug-in's module changes on disk, and the scan of the new one fails.
+        std::fs::write(rig.dir.path().join("test.vst3"), b"a newer module").unwrap();
+        rig.launcher.fail_probe.store(true, Ordering::SeqCst);
+        let plans = rig.service.ensure("doc1", Some(48_000), &req);
+        assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Unreadable));
+        assert!(
+            old.shutdown_called.load(Ordering::SeqCst),
+            "the helper running the old module is shut down"
+        );
+        // A scan that works later starts a helper for the new module.
+        rig.launcher.fail_probe.store(false, Ordering::SeqCst);
+        rig.service.ensure("doc1", Some(48_000), &req);
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 2);
     }
 
     #[test]

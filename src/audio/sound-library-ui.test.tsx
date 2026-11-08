@@ -2,6 +2,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import './plugin-test-support';
 import {SoundPanel,soundPreset} from './SoundPanel';
 import {forgetSessionSoundLibrary,forgetSoundClipboard,readSoundLibrary} from './sound-library';
 beforeEach(()=>localStorage.clear());

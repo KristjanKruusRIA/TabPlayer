@@ -17,6 +17,7 @@ const native=async(command:string,args?:{id?:string;ids?:string[]})=>{
   if(command==='cabinet_ir_status'){library.asked.push(args!.ids!);return (args!.ids!).map(id=>library.status[id]??{id,state:library.entries.some(e=>e.id===id)?'ready':'missing',message:null});}
   if(command==='cabinet_ir_import'){await library.gate;const importing=library.importing;if(importing instanceof Error)throw importing;if(importing&&!library.entries.some(entry=>entry.id===importing.id))library.entries.push(importing);return importing;}
   if(command==='cabinet_ir_remove'){calls.remove.push(args!.id!);library.entries=library.entries.filter(e=>e.id!==args!.id);return;}
+  if(command==='plugin_library_list'||command==='plugin_status')return [];
   throw new Error(`unexpected ${command}`);
 };
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn((command:string,args?:{id?:string;ids?:string[]})=>native(command,args))}));

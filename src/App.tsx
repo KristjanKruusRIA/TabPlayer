@@ -30,7 +30,7 @@ import { readMidiOutDelay } from './audio/midi-out-preferences';
 import { CabinetNotices } from './audio/CabinetNotices';
 import { CaptureNotices } from './audio/CaptureNotices';
 import { PluginNotices } from './audio/PluginNotices';
-import { usePluginStatus } from './audio/usePluginStatus';
+import { usePluginMoves, usePluginStatus } from './audio/usePluginStatus';
 import { onPluginStatus, onPluginEditorClosed, pluginConsentGrant, pluginRetry, handlePluginEditorClosed } from './audio/plugin-host';
 import { AmpCapture } from './audio/AmpCapture';
 import { BackingPanel } from './audio/BackingPanel';
@@ -151,6 +151,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const pluginStatuses = usePluginStatus(state.documentId);
+  const pluginMoves = usePluginMoves(pluginStatuses);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     onPluginStatus(payload => {
@@ -880,9 +881,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     <CaptureNotices sounds={state.settings.sounds} trackNames={trackNames}/>
     <PluginNotices
       statuses={pluginStatuses}
+      moved={pluginMoves}
       trackNames={trackNames}
-      onAllow={() => void pluginConsentGrant(state.documentId)}
-      onRetry={retryTrackId => void pluginRetry(state.documentId, retryTrackId)}
+      onAllow={() => pluginConsentGrant(state.documentId)}
+      onRetry={retryTrackId => pluginRetry(state.documentId, retryTrackId)}
     />
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
@@ -900,7 +902,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
         <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3><TrackSettingsPanel key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></section>
-        <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>void pluginConsentGrant(state.documentId)} onRetrySlot={()=>void pluginRetry(state.documentId,trackId)}/>}</section>
+        <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}</section>
         <section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
         <section className="inspector-section" aria-labelledby="inspector-track-midi-out"><h3 id="inspector-track-midi-out">{t('inspector.midi_out')}</h3><MidiOutPanel key={trackId} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
       </div>

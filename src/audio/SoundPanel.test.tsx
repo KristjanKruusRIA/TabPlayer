@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
+import './plugin-test-support';
 import { SoundPanel, soundPreset } from './SoundPanel';
 import { NativePlaybackController } from './NativePlaybackController';
 import { useSoundEditing } from './useSoundEditing';

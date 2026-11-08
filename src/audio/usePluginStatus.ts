@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { onPluginStatus, pluginStatus, type TrackPluginStatus } from './plugin-host';
+import { movedPlugins, onPluginStatus, pluginLibrary, pluginStatus, type MovedPlugin, type TrackPluginStatus } from './plugin-host';
 
 /**
  * Loads and tracks the plug-in status of all tracks in `documentId`.
@@ -41,4 +41,22 @@ export function usePluginStatus(documentId: string | undefined): TrackPluginStat
   }, [documentId]);
 
   return statuses;
+}
+
+/** The tracks whose plug-in now loads from another file than before, found by joining the statuses to the library. */
+export function usePluginMoves(statuses: readonly TrackPluginStatus[]): MovedPlugin[] {
+  const [moved, setMoved] = useState<MovedPlugin[]>([]);
+  useEffect(() => {
+    if (!statuses.length) {
+      setMoved([]);
+      return;
+    }
+    let alive = true;
+    pluginLibrary.list().then(
+      entries => { if (alive) setMoved(movedPlugins(statuses, entries)); },
+      () => { if (alive) setMoved([]); },
+    );
+    return () => { alive = false; };
+  }, [statuses]);
+  return moved;
 }

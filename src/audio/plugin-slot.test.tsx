@@ -11,6 +11,9 @@ import {
   handlePluginEditorClosed,
   makePluginStateCandidate,
   setOpenedEditor,
+  localizePluginError,
+  movedPlugins,
+  replacedByAdd,
   type PluginLibraryEntry,
   type TrackPluginStatus,
 } from './plugin-host';
@@ -19,6 +22,7 @@ import { useSoundEditing } from './useSoundEditing';
 import { copySound, soundClipboard, forgetSoundClipboard } from './sound-library';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
+import { setLanguagePreference, getMessage } from '../i18n';
 
 const mockCalls: Array<[string, unknown]> = [];
 let invokeHandler: (command: string, args?: any) => Promise<any> = async () => [];
@@ -609,5 +613,322 @@ describe('Sound editing preserves plug-in', () => {
       const built = previewEdit(projectWithAsset, edit);
       expect(built.settings.sounds['base/0']?.plugin?.state).toBe(stateId);
     });
+  });
+});
+
+describe('review fixes: errors are shown, never filtered', () => {
+  afterEach(() => setLanguagePreference('en'));
+
+  it.each([
+    "Cannot read properties of undefined (reading 'invoke')",
+    'window.__TAURI_INTERNALS__ is missing',
+    'unexpected plugin_library_list call',
+  ])('shows a library failure whose text is %s', async message => {
+    invokeHandler = async (command: string) => {
+      if (command === 'plugin_library_list') throw new Error(message);
+      return null;
+    };
+    render(<PluginSlotPanel trackId="track-1" slot={undefined} onChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(message));
+  });
+
+  it('maps both strings the backend sends for a full undo history, in every language', () => {
+    for (const lang of ['en', 'et', 'de'] as const) {
+      const t = (key: any, params?: any) => getMessage(lang, key, params);
+      const expected = t('plugin.history_full');
+      expect(expected).not.toMatch(/^plugin\./);
+      expect(localizePluginError('plugin.history_full', t)).toBe(expected);
+      expect(localizePluginError(new Error('plugin.history_full'), t)).toBe(expected);
+      expect(localizePluginError('The undo history holds as much plug-in state as it can.', t)).toBe(expected);
+    }
+    expect(getMessage('en', 'plugin.history_full')).not.toMatch(/Close the window/);
+  });
+
+  it('translates the remaining backend errors under et and de', () => {
+    const raw = [
+      'Plug-in class not found in library.',
+      'Plug-in session is not ready.',
+      'Invalid plug-in class ID.',
+      'the plug-in helper reported Crashed: boom',
+      'the plug-in helper broke the protocol: bad frame',
+      'request refused: no room',
+    ];
+    for (const lang of ['et', 'de'] as const) {
+      const t = (key: any, params?: any) => getMessage(lang, key, params);
+      for (const message of raw) {
+        const out = localizePluginError(message, t);
+        expect(out, `${lang}: ${message}`).not.toBe(message);
+        expect(out).not.toMatch(/^plugin\./);
+      }
+    }
+  });
+
+  it('shows the translated library error under et, not the English text', async () => {
+    setLanguagePreference('et');
+    invokeHandler = async (command: string) => {
+      if (command === 'plugin_library_list') throw new Error('This plug-in library was made by a newer TabPlayer.');
+      return null;
+    };
+    render(<PluginSlotPanel trackId="track-1" slot={undefined} onChange={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument());
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/newer TabPlayer/);
+  });
+});
+
+describe('review fixes: Save plug-in settings', () => {
+  const open = async () => {
+    fireEvent.click(screen.getByRole('button', { name: /Edit plug-in/i }));
+    await waitFor(() => expect(mockCalls.some(([c]) => c === 'plugin_editor_open')).toBe(true));
+  };
+
+  it('is offered only while the editor is open, and commits the returned state with its token', async () => {
+    invokeHandler = async (command: string) => {
+      if (command === 'plugin_library_list') return [mockEntry];
+      if (command === 'plugin_editor_open') return 7;
+      if (command === 'plugin_editor_save') return { state: 'n'.repeat(64), assetToken: 'tok-1' };
+      return null;
+    };
+    const onChange = vi.fn();
+    render(<PluginSlotPanel trackId="track-1" documentId="doc-1" slot={mockSlot} onChange={onChange} />);
+    expect(screen.queryByRole('button', { name: 'Save plug-in settings' })).toBeNull();
+    await open();
+    const save = await screen.findByRole('button', { name: 'Save plug-in settings' });
+    fireEvent.click(save);
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(onChange).toHaveBeenCalledWith({ ...mockSlot, state: 'n'.repeat(64) }, 'tok-1');
+    expect(mockCalls).toContainEqual(['plugin_editor_save', { documentId: 'doc-1', trackId: 'track-1' }]);
+  });
+
+  it('records nothing when the state is unchanged', async () => {
+    invokeHandler = async (command: string) => {
+      if (command === 'plugin_library_list') return [mockEntry];
+      if (command === 'plugin_editor_open') return 7;
+      if (command === 'plugin_editor_save') return null;
+      return null;
+    };
+    const onChange = vi.fn();
+    render(<PluginSlotPanel trackId="track-1" documentId="doc-1" slot={mockSlot} onChange={onChange} />);
+    await open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Save plug-in settings' }));
+    await waitFor(() => expect(mockCalls.some(([c]) => c === 'plugin_editor_save')).toBe(true));
+    invokeHandler = async command => (command === 'plugin_editor_save' ? { state: mockSlot.state, assetToken: 't' } : null);
+    fireEvent.click(screen.getByRole('button', { name: 'Save plug-in settings' }));
+    await waitFor(() => expect(mockCalls.filter(([c]) => c === 'plugin_editor_save').length).toBe(2));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('goes away when the editor closes, and shows a save failure (full history) translated', async () => {
+    invokeHandler = async (command: string) => {
+      if (command === 'plugin_library_list') return [mockEntry];
+      if (command === 'plugin_editor_open') return 7;
+      if (command === 'plugin_editor_save') throw 'plugin.history_full';
+      return null;
+    };
+    render(<PluginSlotPanel trackId="track-1" documentId="doc-1" slot={mockSlot} onChange={vi.fn()} />);
+    await open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Save plug-in settings' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(getMessage('en', 'plugin.history_full')));
+    await waitFor(() => expect(eventListeners['plugin-editor-closed']?.length).toBeGreaterThan(0));
+    act(() => {
+      for (const h of eventListeners['plugin-editor-closed']) h({ payload: { documentId: 'doc-1', trackId: 'track-1', state: null, assetToken: null } });
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Save plug-in settings' })).toBeNull());
+  });
+});
+
+describe('review fixes: moved classes and replaced plug-ins', () => {
+  const moved = (classId: string, name: string): PluginLibraryEntry => ({
+    ...mockEntry, classId, name, bundle: String.raw`C:\New\${name}.vst3`, previousBundle: String.raw`C:\Old\${name}.vst3`,
+  });
+
+  it('movedPlugins lists every track that uses a moved class, not only the current one', () => {
+    const entries = [moved('A'.repeat(32), 'Amp'), moved('B'.repeat(32), 'Delay'), { ...mockEntry, classId: 'C'.repeat(32), name: 'Calm' }];
+    const statuses: TrackPluginStatus[] = [
+      { trackId: 't1', classId: 'A'.repeat(32), name: 'Amp', vendor: '', status: 'ready' },
+      { trackId: 't2', classId: 'B'.repeat(32), name: 'Delay', vendor: '', status: 'ready' },
+      { trackId: 't3', classId: 'C'.repeat(32), name: 'Calm', vendor: '', status: 'ready' },
+      { trackId: 't4', classId: 'A'.repeat(32), name: 'Amp', vendor: '', status: 'ready' },
+    ];
+    expect(movedPlugins(statuses, entries).map(m => m.trackId)).toEqual(['t1', 't2', 't4']);
+  });
+
+  it('PluginNotices shows a moved warning per affected track', () => {
+    render(
+      <PluginNotices
+        statuses={[]}
+        moved={[
+          { trackId: 't1', name: 'Amp', bundle: String.raw`C:\New\Amp.vst3`, previousBundle: String.raw`C:\Old\Amp.vst3` },
+          { trackId: 't2', name: 'Delay', bundle: String.raw`C:\New\Delay.vst3`, previousBundle: String.raw`C:\Old\Delay.vst3` },
+        ]}
+        trackNames={{ t1: 'Lead', t2: 'Bass' }}
+      />,
+    );
+    expect(screen.getByText(/Lead: .*Amp.*C:\\New\\Amp\.vst3.*C:\\Old\\Amp\.vst3/)).toBeInTheDocument();
+    expect(screen.getByText(/Bass: .*Delay/)).toBeInTheDocument();
+  });
+
+  it('replacedByAdd names the plug-ins whose file changed in this add only', () => {
+    const before = [
+      { ...mockEntry, classId: 'A'.repeat(32), bundle: String.raw`C:\Old\Amp.vst3` },
+      { ...mockEntry, classId: 'B'.repeat(32), name: 'Old news', previousBundle: 'x' },
+    ];
+    const after = [
+      { ...moved('A'.repeat(32), 'Super Amp'), bundle: String.raw`C:\New\Amp.vst3`, previousBundle: String.raw`C:\Old\Amp.vst3` },
+      { ...before[1] },
+      { ...mockEntry, classId: 'D'.repeat(32), name: 'Fresh' },
+    ];
+    const out = replacedByAdd(before, after);
+    expect(out.map(e => e.classId)).toEqual(['A'.repeat(32)]);
+  });
+
+  it('adding a bundle that takes over another plug-in shows an alert naming it and its old file', async () => {
+    const oldEntry = { ...mockEntry, bundle: String.raw`C:\Old\SuperAmp.vst3` };
+    const taken = { ...mockEntry, bundle: String.raw`C:\Hostile\Thing.vst3`, previousBundle: String.raw`C:\Old\SuperAmp.vst3` };
+    invokeHandler = async (command: string) => {
+      if (command === 'plugin_library_list') return [oldEntry];
+      if (command === 'plugin_library_add') return [taken];
+      return null;
+    };
+    render(<PluginSlotPanel trackId="track-1" slot={undefined} onChange={vi.fn()} />);
+    await screen.findByRole('option', { name: /Super Amp/ });
+    fireEvent.click(screen.getByRole('button', { name: /Add plug-in…/ }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Super Amp');
+    expect(alert).toHaveTextContent(String.raw`C:\Old\SuperAmp.vst3`);
+    expect(alert).toHaveTextContent(String.raw`C:\Hostile\Thing.vst3`);
+  });
+
+  it('a full library says so before the dialog opens', async () => {
+    const many = Array.from({ length: 256 }, (_, i) => ({ ...mockEntry, classId: i.toString(16).toUpperCase().padStart(32, '0'), name: `P${i}` }));
+    invokeHandler = async (command: string) => (command === 'plugin_library_list' ? many : null);
+    render(<PluginSlotPanel trackId="track-1" slot={undefined} onChange={vi.fn()} />);
+    await screen.findByRole('option', { name: /^P0 / });
+    fireEvent.click(screen.getByRole('button', { name: /Add plug-in…/ }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/library is full/i);
+    expect(mockCalls.some(([c]) => c === 'plugin_library_add')).toBe(false);
+  });
+
+  it('removes any library entry, not only the one on the current track', async () => {
+    const other = { ...mockEntry, classId: 'B'.repeat(32), name: 'Other FX' };
+    invokeHandler = async (command: string) => (command === 'plugin_library_list' ? [mockEntry, other] : null);
+    render(<PluginSlotPanel trackId="track-1" slot={undefined} onChange={vi.fn()} />);
+    await screen.findByRole('option', { name: /Other FX/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Other FX from library' }));
+    await waitFor(() => expect(mockCalls).toContainEqual(['plugin_library_remove', { classId: 'B'.repeat(32) }]));
+    await waitFor(() => expect(screen.queryByRole('option', { name: /Other FX/ })).toBeNull());
+  });
+});
+
+describe('review fixes: consent, retry, notices', () => {
+  it('PluginNotices shows a failed consent or retry instead of dropping it', async () => {
+    const statuses: TrackPluginStatus[] = [
+      { trackId: 't1', classId: 'A'.repeat(32), name: 'Amp', vendor: '', status: 'crashed' },
+      { trackId: 't2', classId: 'B'.repeat(32), name: 'Delay', vendor: '', status: 'needsConsent' },
+    ];
+    const onAllow = vi.fn(async () => { throw new Error('Could not use the plug-in library file: disk gone'); });
+    const onRetry = vi.fn(async () => { throw new Error('Plug-in session is not ready.'); });
+    render(<PluginNotices statuses={statuses} onAllow={onAllow} onRetry={onRetry} />);
+    fireEvent.click(screen.getByRole('button', { name: /Allow plug-ins/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/disk gone/);
+    fireEvent.click(screen.getByRole('button', { name: /Try again/i }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/not ready/i));
+  });
+
+  it('PluginSlotPanel shows a failed onAllow or onRetry', async () => {
+    const onRetry = vi.fn(async () => { throw new Error('Plug-in session is not ready.'); });
+    render(<PluginSlotPanel trackId="t" slot={mockSlot} status="crashed" onChange={vi.fn()} onRetry={onRetry} />);
+    fireEvent.click(screen.getByRole('button', { name: /Try again/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/not ready/i);
+    cleanup();
+    const onAllow = vi.fn(async () => { throw new Error('Could not use the plug-in library file: denied'); });
+    render(<PluginSlotPanel trackId="t" slot={mockSlot} status="needsConsent" onChange={vi.fn()} onAllow={onAllow} />);
+    fireEvent.click(screen.getByRole('button', { name: /Allow plug-ins/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/denied/);
+  });
+
+  it.each(['crashed', 'hung', 'underrun', 'nonFinite'] as const)('offers Try again on %s', status => {
+    const onRetry = vi.fn();
+    render(<PluginSlotPanel trackId="t" slot={mockSlot} status={status} onChange={vi.fn()} onRetry={onRetry} />);
+    fireEvent.click(screen.getByRole('button', { name: /Try again/i }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a single live region for all notices, with the buttons outside it', () => {
+    const statuses: TrackPluginStatus[] = [
+      { trackId: 't1', classId: 'A'.repeat(32), name: 'Amp', vendor: '', status: 'crashed' },
+      { trackId: 't2', classId: 'B'.repeat(32), name: 'Delay', vendor: '', status: 'hung' },
+    ];
+    const { container } = render(<PluginNotices statuses={statuses} onRetry={vi.fn()} />);
+    const regions = container.querySelectorAll('[role="status"]');
+    expect(regions).toHaveLength(1);
+    expect(regions[0].querySelector('button')).toBeNull();
+    expect(regions[0]).toHaveTextContent('Amp');
+    expect(regions[0]).toHaveTextContent('Delay');
+    expect(screen.getAllByRole('button', { name: /Try again/i })).toHaveLength(2);
+  });
+
+  it('keeps the panel buttons outside its status live region', () => {
+    const { container } = render(<PluginSlotPanel trackId="t" slot={mockSlot} status="crashed" onChange={vi.fn()} onRetry={vi.fn()} />);
+    for (const region of container.querySelectorAll('[role="status"]')) expect(region.querySelector('button')).toBeNull();
+  });
+});
+
+describe('review fixes: trims and busy', () => {
+  it('an emptied trim field reverts and records nothing', () => {
+    const onChange = vi.fn();
+    render(<PluginSlotPanel trackId="t" slot={{ ...mockSlot, inputDb: 3 }} onChange={onChange} />);
+    const input = screen.getByLabelText('Input trim') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.value).toBe('3');
+    const output = screen.getByLabelText('Output trim') as HTMLInputElement;
+    fireEvent.change(output, { target: { value: '' } });
+    fireEvent.keyDown(output, { key: 'Enter' });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(output.value).toBe('0');
+  });
+
+  it('busy refuses the trims without disabling a focused control', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<PluginSlotPanel trackId="t" slot={mockSlot} onChange={onChange} busy={false} />);
+    const check = screen.getByRole('checkbox', { name: 'Active' });
+    check.focus();
+    rerender(<PluginSlotPanel trackId="t" slot={mockSlot} onChange={onChange} busy={true} />);
+    expect(check).not.toBeDisabled();
+    expect(check.closest('fieldset')).not.toBeDisabled();
+    const input = screen.getByLabelText('Input trim') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '5' } });
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('a trim typed just before busy began, whose blur was refused, is committed once busy ends', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(<PluginSlotPanel trackId="t" slot={mockSlot} onChange={onChange} busy={false} />);
+    const input = screen.getByLabelText('Input trim') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: '5' } });
+    rerender(<PluginSlotPanel trackId="t" slot={mockSlot} onChange={onChange} busy={true} />);
+    fireEvent.blur(input);
+    expect(onChange).not.toHaveBeenCalled();
+    rerender(<PluginSlotPanel trackId="t" slot={mockSlot} onChange={onChange} busy={false} />);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({ ...mockSlot, inputDb: 5 });
+  });
+});
+
+describe('review fixes: one opened editor per track', () => {
+  it('closing track A after changing its plug-in does not apply old-class state, even with B open', () => {
+    setOpenedEditor({ documentId: 'doc-1', trackId: 'A', classId: 'A'.repeat(32) });
+    setOpenedEditor({ documentId: 'doc-1', trackId: 'B', classId: 'B'.repeat(32) });
+    const controller = {
+      getState: () => ({ settings: { sounds: { A: { ...soundPreset('lead'), plugin: { ...mockSlot, classId: 'C'.repeat(32) } } } as Record<string, any> } }),
+      edit: vi.fn(),
+      cancelAsset: vi.fn(),
+    };
+    handlePluginEditorClosed({ documentId: 'doc-1', trackId: 'A', assetToken: 'tok', state: 'new' }, 'doc-1', controller);
+    expect(controller.edit).not.toHaveBeenCalled();
+    expect(controller.cancelAsset).toHaveBeenCalledWith('tok');
+    setOpenedEditor(null);
   });
 });

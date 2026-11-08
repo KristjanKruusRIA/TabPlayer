@@ -1439,7 +1439,7 @@ impl PluginService {
         title: &str,
         near: Option<(i32, i32, u32, u32)>,
     ) -> Result<u64, String> {
-        let (session, pid) = {
+        let (session, pid, was_open) = {
             let inner = self.inner.lock().unwrap();
             let (_, entry) = inner
                 .slots
@@ -1447,21 +1447,32 @@ impl PluginService {
                 .find(|(k, _)| k.document_id == document_id && k.track_id == track_id)
                 .ok_or_else(|| "No active plug-in session for track.".to_string())?;
             match entry {
-                SlotEntry::Ready { session, .. } => (session.clone(), session.pid()),
+                SlotEntry::Ready {
+                    session,
+                    editor_open,
+                    ..
+                } => (session.clone(), session.pid(), *editor_open),
                 _ => return Err("Plug-in session is not ready.".to_string()),
             }
         };
 
-        let baseline_id = match session.get_state() {
-            Ok(parts) => {
-                let bytes = encode_state(&parts.component, &parts.controller).ok();
-                bytes.and_then(|b| {
-                    let asset =
-                        StoredAsset::from_bytes(STATE_FILENAME.into(), STATE_MEDIA_TYPE.into(), &b);
-                    asset.id().ok()
-                })
+        let baseline_id = if !was_open {
+            match session.get_state() {
+                Ok(parts) => {
+                    let bytes = encode_state(&parts.component, &parts.controller).ok();
+                    bytes.and_then(|b| {
+                        let asset = StoredAsset::from_bytes(
+                            STATE_FILENAME.into(),
+                            STATE_MEDIA_TYPE.into(),
+                            &b,
+                        );
+                        asset.id().ok()
+                    })
+                }
+                Err(_) => None,
             }
-            Err(_) => None,
+        } else {
+            None
         };
 
         #[cfg(windows)]
@@ -1535,7 +1546,7 @@ impl PluginService {
                 {
                     *editor_open = true;
                     *opened_hwnd = Some(hwnd);
-                    if baseline_id.is_some() {
+                    if !was_open && baseline_id.is_some() {
                         *baseline_state_id = baseline_id;
                     }
                 }
@@ -1590,10 +1601,11 @@ impl PluginService {
             return Ok(None);
         }
 
-        let is_unchanged = current_slot_state.as_deref() == Some(&state_id)
-            || baseline_state_id.as_deref() == Some(&state_id)
-            || current_state_asset_id == state_id;
-        if is_unchanged {
+        let expected_id = baseline_state_id
+            .as_deref()
+            .or(current_slot_state.as_deref())
+            .unwrap_or(&current_state_asset_id);
+        if expected_id == state_id {
             return Ok(None);
         }
 

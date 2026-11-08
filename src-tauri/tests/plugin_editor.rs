@@ -397,7 +397,12 @@ mod windows_tests {
             // Lock document editing
             {
                 let mut ws = rig.workspace.lock().unwrap();
-                ws.set_document_lock(&rig.document_id, DocumentLock::Finalized).unwrap();
+                let doc = ws.document(&rig.document_id).unwrap();
+                let rev = DocumentRevision {
+                    document_id: rig.document_id.clone(),
+                    revision: doc.revision,
+                };
+                ws.set_lock(&rev, Some(DocumentLock::Finalized)).unwrap();
             }
 
             let _hwnd = rig
@@ -619,6 +624,8 @@ mod windows_tests {
         }
 
         fn hung_editor_does_not_block_app() {
+            // Hang the editor's attached() call by 10s (set before child process spawns)
+            let _guard = EnvGuard::set("TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS", "10000");
             let rig = Rig::new();
 
             // Set up audio streaming to advance heartbeat
@@ -669,9 +676,6 @@ mod windows_tests {
             std::thread::sleep(Duration::from_millis(50));
             let beat_before = rig.service.heartbeat(&rig.document_id, "base/0").unwrap();
 
-            // Hang the editor's attached() call by 10s
-            let _guard = EnvGuard::set("TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS", "10000");
-
             let service_clone = rig.service.clone();
             let doc_id_clone = rig.document_id.clone();
             let open_handle = std::thread::spawn(move || {
@@ -695,10 +699,12 @@ mod windows_tests {
 
             let statuses2 = rig.service.statuses(&rig.document_id);
             assert_eq!(statuses2[0].status, PluginStatus::Ready, "helper was not killed by supervisor");
+            assert!(!open_handle.is_finished(), "editor_open should still be blocked in the hung view while status and audio proceed");
 
-            // Stop audio and join threads
+            // Stop audio and shut down document session so open_handle returns promptly
             audio_stop.store(true, Ordering::Relaxed);
             audio_thread.join().unwrap();
+            rig.service.shutdown_document(&rig.document_id);
             let _ = open_handle.join().unwrap();
         }
     }

@@ -990,12 +990,6 @@ impl DocumentWorkspace {
         self.entry(id)?.session.check_plugin_state(state_id, asset)
     }
 
-    pub fn set_document_lock(&mut self, id: &str, lock: DocumentLock) -> Result<(), String> {
-        let entry = self.entry_mut(id)?;
-        entry.session.set_document_lock(lock);
-        Ok(())
-    }
-
     pub fn inject_history_state(
         &mut self,
         id: &str,

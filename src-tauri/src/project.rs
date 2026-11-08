@@ -795,10 +795,6 @@ impl ProjectSession {
         self.project.lock
     }
 
-    pub fn set_document_lock(&mut self, lock: DocumentLock) {
-        self.project.lock = Some(lock);
-    }
-
     pub fn check_plugin_state(&self, state_id: &str, asset: &StoredAsset) -> Result<(), String> {
         let mut states = plugin_state_ids(
             self.project

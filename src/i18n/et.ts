@@ -1676,7 +1676,7 @@ export const et: MessageCatalog = {
   'font_roles.music': "Muusikafont",
   'font_roles.music_note': "Iga noodimärk joonistatakse muusikafondist; märk, mida fondis pole, joonistatakse Bravurast. Tekstifondid kasutavad puuduva märgi jaoks süsteemifonti.",
   'font_roles.roles_heading': "Fondid rollide kaupa",
-  'font_roles.roles_note': "Fondita roll säilitab ülaltoodud välimuse. Rasvane ja kursiiv vajavad valitud fonti, sest ainult kaasasolevad fondid näevad ekraanil ja eksportides ühesugused välja; Allikas/vaikimisi jätab iga elemendi enda stiili.",
+  'font_roles.roles_note': "Fondita roll säilitab ülaltoodud välimuse. Rasvane ja kursiiv vajavad valitud fonti, sest ainult kaasasolevad fondid joonistavad ekraanil ja eksportides samad märgikujud (vahed võivad siiski veidi erineda); „Allikas/vaikimisi“ jätab iga elemendi enda stiili.",
   'font_roles.role_titleBlock': "Pealkirjaplokk",
   'font_roles.role_pageHeader': "Lehe päis",
   'font_roles.role_pageFooter': "Lehe jalus",

@@ -1674,7 +1674,7 @@ export const en = {
   'font_roles.music': "Music font",
   'font_roles.music_note': "Every notation symbol is drawn from the music font; a symbol it lacks is drawn from Bravura. Text fonts fall back to a system face for any missing character.",
   'font_roles.roles_heading': "Fonts by role",
-  'font_roles.roles_note': "A role without a font keeps the look above. Bold and italic need a chosen font, because only the bundled fonts look the same on screen and in exports; Source/default keeps each element’s own style.",
+  'font_roles.roles_note': "A role without a font keeps the look above. Bold and italic need a chosen font, because only the bundled fonts draw the same glyph shapes on screen and in exports (spacing can still differ slightly); Source/default keeps each element’s own style.",
   'font_roles.role_titleBlock': "Title block",
   'font_roles.role_pageHeader': "Page header",
   'font_roles.role_pageFooter': "Page footer",

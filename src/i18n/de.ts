@@ -1676,7 +1676,7 @@ export const de: MessageCatalog = {
   'font_roles.music': "Musikschrift",
   'font_roles.music_note': "Jedes Notationssymbol wird aus der Musikschrift gezeichnet; ein Symbol, das ihr fehlt, kommt aus Bravura. Textschriften greifen für fehlende Zeichen auf eine Systemschrift zurück.",
   'font_roles.roles_heading': "Schriften nach Rolle",
-  'font_roles.roles_note': "Eine Rolle ohne Schrift behält das Aussehen von oben. Fett und Kursiv brauchen eine gewählte Schrift, weil nur die mitgelieferten Schriften auf dem Bildschirm und in Exporten gleich aussehen; Quelle/Standard behält den Stil des jeweiligen Elements.",
+  'font_roles.roles_note': "Eine Rolle ohne Schrift behält das Aussehen von oben. Fett und Kursiv brauchen eine gewählte Schrift, weil nur die mitgelieferten Schriften auf dem Bildschirm und in Exporten dieselben Zeichenformen zeichnen (Abstände können trotzdem leicht abweichen); Quelle/Standard behält den Stil des jeweiligen Elements.",
   'font_roles.role_titleBlock': "Titelblock",
   'font_roles.role_pageHeader': "Kopfzeile",
   'font_roles.role_pageFooter': "Fußzeile",

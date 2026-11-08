@@ -941,12 +941,26 @@ mod windows_helper {
             let mut helper = Helper::spawn(&[("TABPLAYER_TEST_PLUGIN_ANNOUNCE_EVERY_BLOCK", "1")]);
             helper.loaded(state(1.0, 0, TestMode::Normal));
             let started = Instant::now();
+            // The time spent waiting for answers, apart from the test's own sleeps: a helper that made every block wait
+            // would show here (Task 8 re-review N2).
+            let mut waiting = Duration::ZERO;
+            let mut slowest = Duration::ZERO;
             for _ in 0..1000 {
+                let asked = Instant::now();
                 helper.ring().round_trip(&block_of(0.5), &meta());
+                let took = asked.elapsed();
+                waiting += took;
+                slowest = slowest.max(took);
                 std::thread::sleep(Duration::from_millis(3));
             }
             let seconds = started.elapsed().as_secs_f64();
             assert!(seconds > 3.0, "the run is long enough to mean something: {seconds}");
+            assert!(
+                waiting < Duration::from_secs(5),
+                "{waiting:?} waiting for 1,000 blocks"
+            );
+            // A reconfigure parks the audio loop briefly; no block waits anywhere near a second.
+            assert!(slowest < Duration::from_secs(1), "the slowest block took {slowest:?}");
             let limit = seconds.ceil() as u32 + 2;
             // Count the reports first: asking for the state discards the unsolicited messages it passes.
             let reports = helper

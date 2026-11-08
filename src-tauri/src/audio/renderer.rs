@@ -2,7 +2,7 @@
 use super::{
     backing::{BackingMap, BackingVoice},
     decode::DecodedAudio,
-    dsp::{FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
+    dsp::{FrameContext, FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
     master::MasterBus,
     midi_out::MidiTap,
     plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
@@ -1216,6 +1216,24 @@ impl Renderer {
             RenderTempo::Relative { ratio } => self.authored_bpm_at(tick) * ratio,
             RenderTempo::Fixed { bpm } => bpm,
         };
+        // A plug-in hears the frame's tempo, meter and place (preflight ruling P11); without one, only the tempo is
+        // needed, and nothing more is worked out.
+        let context = self
+            .mix
+            .channels
+            .iter()
+            .any(|channel| channel.dsp.has_plugin())
+            .then(|| {
+                let (sig_num, sig_den) = self.meter_at(tick);
+                FrameContext {
+                    bpm,
+                    sig_num: sig_num.min(u16::MAX as u32) as u16,
+                    sig_den: sig_den.min(u16::MAX as u32) as u16,
+                    playing: true,
+                    project_frame: (self.seconds * self.rate as f64).round() as i64,
+                    project_quarters: tick / self.plan.ppq.max(1) as f64,
+                }
+            });
         for (index, track) in self.tracks.iter_mut().enumerate() {
             if let Some(synth) = &mut track.synth {
                 let mut left = [0.0];
@@ -1244,9 +1262,13 @@ impl Renderer {
                 }
             }
             let channel = &mut self.mix.channels[index];
-            self.scratch[index] = channel
-                .gain
-                .process(channel.dsp.process(self.scratch[index], bpm));
+            let board = match &context {
+                Some(context) if channel.dsp.has_plugin() => {
+                    channel.dsp.process_at(self.scratch[index], context)
+                }
+                _ => channel.dsp.process(self.scratch[index], bpm),
+            };
+            self.scratch[index] = channel.gain.process(board);
             let routed = self.midi.as_ref().is_some_and(|tap| tap.silences(index));
             let fade = &mut self.midi_fade[index];
             let target = if routed { 0.0 } else { 1.0 };

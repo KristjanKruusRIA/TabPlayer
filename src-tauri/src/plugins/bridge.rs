@@ -418,8 +418,9 @@ pub struct InsertShared {
     /// Written by the audio thread when the insert faults (one of the [`fault`] codes); the supervisor reads it and turns
     /// it into a status.
     pub fault: AtomicU8,
-    /// The largest callback, in frames, the audio thread has seen, for sizing the pipeline. Preflight ruling P32 keeps
-    /// the device-level maximum in the audio service; this is the insert's copy, written by the audio thread.
+    /// Unused: preflight ruling P32 keeps the largest callback at device level, where the output callback writes it
+    /// (`AudioService::max_callback_frames`), since an insert sees frames, not callbacks. Task 13 sizes pipelines from
+    /// that one and may drop this field.
     pub max_callback_frames: AtomicU32,
     /// Set by the supervisor once the helper is gone (exited, hung or killed), so the insert faults as disconnected at the
     /// next block (preflight ruling P32).

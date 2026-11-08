@@ -488,6 +488,10 @@ struct SharedStatus {
     audition_rate: AtomicU32,
     /// Frames per callback of the open stream; zero until its first callback.
     buffer_size: AtomicU32,
+    /// The largest callback, in frames, the open stream has asked for; zero until its first callback. A plug-in's
+    /// pipeline is sized from it, not from the steady period: a shared-mode stream's first callback can be twice the
+    /// period (preflight ruling P32).
+    max_callback_frames: AtomicU32,
     /// Name of the device the open stream was built on; set when the stream opens,
     /// so diagnostics never probe the backend.
     stream_name: Mutex<Option<String>>,
@@ -541,6 +545,7 @@ impl SharedStatus {
             audition_peak: AtomicU64::new(0),
             audition_rate: AtomicU32::new(0),
             buffer_size: AtomicU32::new(0),
+            max_callback_frames: AtomicU32::new(0),
             stream_name: Mutex::new(None),
             name_stale: AtomicU64::new(0),
         }
@@ -1685,10 +1690,15 @@ impl OutputCallback {
         // Only the live stream reports its size; a retired callback must not
         // overwrite the replacement's field.
         if channels > 0 {
+            let frames = (output.len() / channels) as u32;
             self.transport
                 .shared
                 .buffer_size
-                .store((output.len() / channels) as u32, Ordering::Relaxed);
+                .store(frames, Ordering::Relaxed);
+            self.transport
+                .shared
+                .max_callback_frames
+                .fetch_max(frames, Ordering::Relaxed);
         }
         // Reserve a retirement slot before consuming an owning command.
         for _ in 0..CONTROL_CAPACITY {
@@ -2288,6 +2298,12 @@ impl AudioService {
             buffer_size: (buffer != 0).then_some(buffer),
         })
     }
+    /// The largest callback, in frames, the open stream has asked for so far, or `None` before its first callback. A
+    /// plug-in insert's pipeline is `limits::pipeline_frames` of it.
+    pub fn max_callback_frames(&self) -> Option<u32> {
+        let frames = self.shared.max_callback_frames.load(Ordering::Relaxed);
+        (frames != 0).then_some(frames)
+    }
     /// Plays a quiet 440 Hz tone through the open stream. The refusal is a stable
     /// code (`AUDIO_ERROR_*`); the interface words it.
     pub fn test_tone(&self) -> Result<(), String> {
@@ -2780,6 +2796,7 @@ impl AudioService {
         let (epoch, snapshot) = self.shared.next_epoch_snapshot();
         // The replacement stream reports its own size on its first callback.
         self.shared.buffer_size.store(0, Ordering::Relaxed);
+        self.shared.max_callback_frames.store(0, Ordering::Relaxed);
         let preserve_position = preserve
             && document
                 .as_ref()
@@ -4173,6 +4190,28 @@ mod tests {
             serde_json::to_value(callback.transport.status()).unwrap(),
             before_mix
         );
+    }
+
+    #[test]
+    fn output_callback_records_the_largest_callback_for_plugin_pipelines() {
+        let transport = CallbackTransport::headless(48_000);
+        let shared = transport.shared.clone();
+        let (_producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, _retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        // A shared-mode stream's first callback can be twice its period (preflight ruling P32).
+        for frames in [1056usize, 480, 480] {
+            callback.render(&mut vec![0.0f32; frames * 2], 2);
+        }
+        assert_eq!(shared.max_callback_frames.load(Ordering::Relaxed), 1056);
+        assert_eq!(shared.buffer_size.load(Ordering::Relaxed), 480);
     }
 
     #[test]

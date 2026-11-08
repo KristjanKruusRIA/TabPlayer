@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial. 2026-10-24: A10 and A11 modulation tempo sync re-audited; both stay partial. 2026-10-24: A06 amp and cabinet controls re-audited with a new tone stack; stays partial. 2026-10-24: A04 factory sound catalog re-audited; partial to implemented. 2026-10-24: A37 duplicate pedals re-audited; partial to implemented. 2026-10-24: A13 wah models re-audited; stays partial. 2026-10-24: F22 AIFF audio export re-audited; missing to implemented. 2026-10-24: F23 normalized audio export re-audited; missing to partial. 2026-10-24: F21 FLAC audio export re-audited; missing to implemented. 2026-10-24: S14 string count change re-audited; missing to implemented. 2026-10-24: S15 saved personal tunings re-audited; missing to implemented. 2026-10-24: S16 tuning audition and E17 edit audition re-audited; missing to implemented. 2026-10-24: U12 instrument view note entry re-audited; missing to implemented. 2026-10-30: W15 finalize and unfinalize re-audited; missing to implemented. 2026-10-30: D13 personal styles re-audited; missing to implemented. 2026-10-30: F02 MIDI import re-audited; missing to implemented. 2026-10-30: U05 scale diagram authoring re-audited; missing to partial. 2026-10-30: L08 input preferences re-audited; missing to partial. 2026-10-30: E05 notation pitch entry re-audited; missing to partial. 2026-10-30: D12 typography and style presets re-audited; missing to partial. 2026-10-30: S18 partial capo re-audited; missing to partial. 2026-10-30: L01 library browsing re-audited; partial. 2026-10-30: S20 banjo drone re-audited; partial. 2026-10-30: S22 and S23 re-audited; partial. 2026-10-30: A30 re-audited; partial. 2026-10-30: F10 re-audited; partial. 2026-10-30: A06 re-audited; partial. 2026-10-30: A18 re-audited; partial. 2026-10-31: F08 re-audited; partial. 2026-10-31: N22 re-audited; partial. 2026-10-31: A32 re-audited; implemented. 2026-10-31: D06 re-audited; partial. 2026-10-31: A35 re-audited; partial. 2026-10-31: A23 re-audited; partial. 2026-10-31: F06 re-audited; partial. 2026-10-31: F07 re-audited; partial. 2026-10-31: E15 and E18 re-audited; E15 partial, E18 implemented. 2026-10-31: F07 re-audited on real files; partial. 2026-10-31: W20 re-audited; partial. 2026-10-31: N09 and T26 re-audited; N09 implemented, T26 partial. 2026-10-31: W16 and W17 re-audited; partial. 2026-10-31: S13 re-audited; partial. 2026-10-31: P12 re-audited; partial. 2026-10-31: T07, T09 and T10 re-audited; partial. 2026-10-31: F27 re-audited; partial. 2026-10-31: E19 re-audited; partial. 2026-10-31: T17 re-audited; partial. 2026-11-06: E05 and W19 stay partial; notes are entered on the rendered score with one undo per gesture (2026-11-06-gp8-score-entry.md). 2026-11-08 (THE-51): no status changed; W20, T17 and F27 text brought up to their 2026-10-31 records; Library search speed added to L01 and W08; S14 cross-voice placement; A06 NAM captures; W12, D01 and D02 gain the THE-50 sweep limits; S19 stays carried (not re-audited); D08, D11 and D12 checked and unchanged.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial. 2026-10-24: A10 and A11 modulation tempo sync re-audited; both stay partial. 2026-10-24: A06 amp and cabinet controls re-audited with a new tone stack; stays partial. 2026-10-24: A04 factory sound catalog re-audited; partial to implemented. 2026-10-24: A37 duplicate pedals re-audited; partial to implemented. 2026-10-24: A13 wah models re-audited; stays partial. 2026-10-24: F22 AIFF audio export re-audited; missing to implemented. 2026-10-24: F23 normalized audio export re-audited; missing to partial. 2026-10-24: F21 FLAC audio export re-audited; missing to implemented. 2026-10-24: S14 string count change re-audited; missing to implemented. 2026-10-24: S15 saved personal tunings re-audited; missing to implemented. 2026-10-24: S16 tuning audition and E17 edit audition re-audited; missing to implemented. 2026-10-24: U12 instrument view note entry re-audited; missing to implemented. 2026-10-30: W15 finalize and unfinalize re-audited; missing to implemented. 2026-10-30: D13 personal styles re-audited; missing to implemented. 2026-10-30: F02 MIDI import re-audited; missing to implemented. 2026-10-30: U05 scale diagram authoring re-audited; missing to partial. 2026-10-30: L08 input preferences re-audited; missing to partial. 2026-10-30: E05 notation pitch entry re-audited; missing to partial. 2026-10-30: D12 typography and style presets re-audited; missing to partial. 2026-10-30: S18 partial capo re-audited; missing to partial. 2026-10-30: L01 library browsing re-audited; partial. 2026-10-30: S20 banjo drone re-audited; partial. 2026-10-30: S22 and S23 re-audited; partial. 2026-10-30: A30 re-audited; partial. 2026-10-30: F10 re-audited; partial. 2026-10-30: A06 re-audited; partial. 2026-10-30: A18 re-audited; partial. 2026-10-31: F08 re-audited; partial. 2026-10-31: N22 re-audited; partial. 2026-10-31: A32 re-audited; implemented. 2026-10-31: D06 re-audited; partial. 2026-10-31: A35 re-audited; partial. 2026-10-31: A23 re-audited; partial. 2026-10-31: F06 re-audited; partial. 2026-10-31: F07 re-audited; partial. 2026-10-31: E15 and E18 re-audited; E15 partial, E18 implemented. 2026-10-31: F07 re-audited on real files; partial. 2026-10-31: W20 re-audited; partial. 2026-10-31: N09 and T26 re-audited; N09 implemented, T26 partial. 2026-10-31: W16 and W17 re-audited; partial. 2026-10-31: S13 re-audited; partial. 2026-10-31: P12 re-audited; partial. 2026-10-31: T07, T09 and T10 re-audited; partial. 2026-10-31: F27 re-audited; partial. 2026-10-31: E19 re-audited; partial. 2026-10-31: T17 re-audited; partial. 2026-11-06: E05 and W19 stay partial; notes are entered on the rendered score with one undo per gesture (2026-11-06-gp8-score-entry.md). 2026-11-08 (THE-51): no status changed; W20, T17 and F27 text brought up to their 2026-10-31 records; Library search speed added to L01 and W08; S14 cross-voice placement; A06 NAM captures; W12, D01 and D02 gain the THE-50 sweep limits; S19 was carried at that point; D08, D11 and D12 checked and unchanged. 2026-11-08 (THE-189): S19 and L09 re-audited; both partial. E05, T22, T23, P08, D05, A23 and A35 JSON text brought into line with the Markdown, T27 and T28 compared (pipe escaping only), T28 wah wording corrected; no status changed.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -82,17 +82,17 @@
       "missing": 7,
       "unverified": 6
     },
-    "evidence_reviewed_total": 196,
+    "evidence_reviewed_total": 198,
     "evidence_reviewed": {
       "implemented": 60,
-      "partial": 133,
+      "partial": 135,
       "missing": 0,
       "unverified": 3
     },
-    "baseline_not_reaudited_total": 62,
+    "baseline_not_reaudited_total": 60,
     "baseline_not_reaudited": {
       "implemented": 42,
-      "partial": 10,
+      "partial": 8,
       "missing": 7,
       "unverified": 3
     },
@@ -3961,11 +3961,14 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Keeps frets and changes pitch; pitch-preserving re-fingering option absent.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "GP8 asks, once a new tuning and/or capo is chosen, whether to keep the fingering (frets unchanged, so the pitch changes) or adjust it (frets changed so the notes keep their pitch). TabPlayer has both. In Track settings and in Staff settings (tuning, capo, partial capo and banjo drone) a Keep pitch checkbox chooses: off keeps the frets and changes the pitch, as before; on refrets every note to the same sounding pitch under the new tuning and capo. Each note of a beat gets its own string and avoids the strings other voices use at the same moment; ties, slides and hammer-ons keep their next-note link; a trill keeps its pitch; chord diagrams follow their strings. A note no string can reach (up to fret 24), a harmonic or linked note that would have to move, or a beat that does not fit is listed by staff, voice, bar, beat, string and pitch in the interface language, and the whole edit is refused with nothing dropped. One gesture is one undo, and old projects replay unchanged. Re-run 2026-11-08 (THE-189): 117 Vitest tests pass in the refinger (32, including a seeded fuzz), panel, Track settings and command-validation files, and cargo +1.90.0 test --locked --test protocol passes (12), which round-trips the flag.",
+      "remaining_gap": "Not driven in the desktop app: the checkbox, its focus behaviour and the messages have only unit and component coverage. A change of string count in Track settings always keeps the pitch, hides the Keep pitch box and offers no keep-fingering choice. The choice is a checkbox applied with the tuning, not GP8's two confirm choices. What happens to an unreachable note is TabPlayer's own refusal rule: the GP8 manual says only that Adjust fingering keeps the note pitches, and no original-GP8 comparison was made. A change of sounding transposition in the same edit is not compensated; finger marks on a chord diagram are cleared when its strings move by different amounts, and an unused diagram that cannot follow keeps its old frets; a relocated fret goes no higher than 24 (or the note's own higher fret); voices are placed in index order, so a crowded case another order would fit can be refused.",
+      "current_evidence": [
+        "2026-10-31-gp8-refinger.md",
+        "2026-10-24-gp8-string-count.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -4280,7 +4283,7 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Note entry on the rendered score: clicking a staff line or space, or typing A to G, writes the pitch on the beat with a hover preview, Shift for chords, Guitar Pro duration, dot, triplet and rest keys, step, semitone and octave moves that keep the note, and an automatic-advance preference that inserts a rest at a bar with room. Each gesture, including the inspector staff's off-key notes, is one undo through a validated `sequence` edit. Slice 2 adds double accidentals in entry and GP8's accidental keys (Ctrl+7/8/9, Ctrl+Alt+7/9, Ctrl+Alt+8): a pending accidental makes an off-key note one gesture and one undo, and over a note the key re-spells it. Keys typed while a note records wait in an ordered, bounded queue instead of being dropped; the desktop driver checked a pending sharp, a double sharp and a fast three-letter burst.",
+      "current_behavior": "Note entry on the rendered score: clicking a staff line or space, or typing A to G, writes the pitch on the beat with a hover preview, Shift for chords, Guitar Pro duration, dot, triplet and rest keys, step, semitone and octave moves that keep the note, and an automatic-advance preference that inserts a rest at a bar with room. Each gesture, including the inspector staff's off-key notes, is one undo through a validated `sequence` edit. The inspector staff keeps its accidental and octave keys. Slice 2 adds double accidentals in entry and GP8's accidental keys (Ctrl+7/8/9, Ctrl+Alt+7/9, Ctrl+Alt+8): a pending accidental makes an off-key note one gesture and one undo, and over a note the key re-spells it. Keys typed while a note records wait in an ordered, bounded queue instead of being dropped; the desktop driver checked a pending sharp, a double sharp and a fast three-letter burst.",
       "remaining_gap": "AltGr chords were not tried on real German or Estonian keyboards; whether GP8's accidental keys change pitch is unchecked (TabPlayer re-spells); the GP7 writer stores mismatched Step/Accidental for forced spellings and no export was opened in GP8; the hit test reads alphaTab 1.8.4 internals; no MIDI input or nested tuplets.",
       "current_evidence": [
         "notation_entry_behavior",
@@ -6409,13 +6412,14 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Beat tap/slap/pop, finger/thumb golpe and dead-slap flags are authored without fabricated pitched notes; dead-slap and retrigger behavior have literal MIDI coverage.",
-      "remaining_gap": "2026-11-06: slap and pop beats play recorded bass sounds from a pinned CC BY 3.0 pack (2026-11-06-gp8-slap-pop.md); levels approved by ear. One velocity layer, no round robin; notes beyond A1-Eb2 (slap) and A2-Eb3 (pop) are transposed from the end samples.",
+      "current_behavior": "Beat tap/slap/pop, finger/thumb golpe and dead-slap flags are authored without fabricated pitched notes; dead-slap and retrigger behavior have literal MIDI coverage. 2026-11-06: slap and pop beats play their own recorded sounds on both bass voices, from a pinned CC BY 3.0 slap bass pack; guitars fall back to their ordinary voice; the user approved the levels by ear.",
+      "remaining_gap": "One velocity layer and no round robin; notes beyond A1–Eb2 (slap) and A2–Eb3 (pop) are transposed from the end samples; no slap score has been played in the desktop app.",
       "current_evidence": [
         "lyrics_notation",
         "lyrics_validation",
         "notation_limits",
-        "gesture_source"
+        "gesture_source",
+        "2026-11-06-gp8-slap-pop.md"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -6442,13 +6446,14 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Beat tap/slap/pop, finger/thumb golpe and dead-slap flags are authored without fabricated pitched notes; dead-slap and retrigger behavior have literal MIDI coverage.",
-      "remaining_gap": "2026-11-06: slap and pop have recorded bass sounds; dead slap keeps the dead-note voice (2026-11-06-gp8-slap-pop.md). Golpe has no sound of its own, and target audible acceptance is open.",
+      "current_behavior": "Beat tap/slap/pop, finger/thumb golpe and dead-slap flags are authored without fabricated pitched notes; dead-slap and retrigger behavior have literal MIDI coverage. 2026-11-06: slap and pop now have recorded bass sounds; dead slap keeps the dead-note voice.",
+      "remaining_gap": "Golpe has no sound of its own, and target audible acceptance is open.",
       "current_evidence": [
         "lyrics_notation",
         "lyrics_validation",
         "notation_limits",
-        "gesture_source"
+        "gesture_source",
+        "2026-11-06-gp8-slap-pop.md"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -6604,7 +6609,7 @@
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
       "current_behavior": "Beat notation has a Wah pedal choice (None/Open/Closed) recorded in the replayed setBeatGestures patch as wahPedal 0-2, validated identically in TS and Rust and refused on percussion and notation-only staves. alphaTab draws the wah mark on standard notation, GP export writes and re-imports <Wah>Open|Closed</Wah>, MusicXML export refuses it explicitly and clipboard paste range-checks it. A Windows desktop-test run applies a closed wah to the four-track fixture, re-imports the GP export and undoes it.",
-      "remaining_gap": "The wah gesture is a score mark only: there is no wah DSP or wah automation (A13), the mark is hidden on tab-only staves, and there is no original-GP8 comparison.",
+      "remaining_gap": "The wah gesture is a score mark only: it does not drive the Wah block (A13), whose pedal position cannot be automated over the score, the mark is hidden on tab-only staves, and there is no original-GP8 comparison.",
       "current_evidence": [
         "wah_behavior",
         "wah_evidence",
@@ -7380,12 +7385,13 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "The Mixer has per-piece drum volume, pan, mute and solo that apply during playback, stopped or paused, with one drag as one edit and no change to tracks without a kit mix.",
-      "remaining_gap": "2026-11-06: the recorded Standard kit takes the same element mix (2026-11-06-gp8-recorded-drums.md). The element mix is checked by measured audio tests, not by ear or on a real audio device; no real GP drum file was tested; a paused drag then resume leaks about 21 ms and a count-in edit about 10 ms, matching track faders.",
+      "current_behavior": "The Mixer has per-piece drum volume, pan, mute and solo that apply during playback, stopped or paused, with one drag as one edit and no change to tracks without a kit mix. 2026-11-06: the recorded Standard kit takes the same element mix.",
+      "remaining_gap": "The element mix is checked by measured audio tests, not by ear or on a real audio device; no real GP drum file was tested; a paused drag then resume leaks about 21 ms and a count-in edit about 10 ms, matching track faders.",
       "current_evidence": [
         "drum_element_mix_behavior",
         "drum_element_mix_evidence",
-        "drum_element_mix_limits"
+        "drum_element_mix_limits",
+        "2026-11-06-gp8-recorded-drums.md"
       ],
       "runtime_rechecked_by_this_audit": false
     },
@@ -7907,11 +7913,12 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "current_behavior": "Metronome level and silent visual mode are configurable through the native acknowledged practice state.",
-      "remaining_gap": "Alternative metronome sound/timbre selection is not delivered.",
+      "current_behavior": "Metronome level and silent visual mode are configurable through the native acknowledged practice state. 2026-11-06: the metronome sound can be chosen (Beep, Woodblock, Cowbell, Stick) under Practice settings, for playback, count-in and audio export; old settings keep the beep.",
+      "remaining_gap": "The three new sounds are measured but not yet judged by ear, the sound is not stored with the score, and there is no GP8 comparison of its sound set.",
       "current_evidence": [
         "practice",
-        "practice_validation"
+        "practice_validation",
+        "2026-11-06-gp8-metronome-sound.md"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -9360,12 +9367,14 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "View controls show/hide task panes, Inspector and bottom dock; narrow windows switch one detail pane without discarding mounted tuning/edit drafts. Recorded 960×720/1280×900/1600×1000 views retain readable controls and contained pane/dock scrolling, and Ctrl+Shift+V reveals/focuses the hidden or replaced Inspector while preserving drafts and native playback state.",
-      "remaining_gap": "2026-11-06: the edition palette now offers Guitar Pro 8's palette controls: clef, key, triplet feel, free time, double bar, simile, repeats, endings, directions and ottava; tuplets, fermata, grace notes, accidental spelling and string moves; hairpins; articulations, slides, harmonics, whammy, strokes, ornaments, fades and wah; chord and scale diagrams, barre, timer, text, section, beaming and stems. Each is one undoable edit, greyed only when the selection makes it meaningless (2026-11-06-gp8-edition-palette.md). Volume and pan automation, the multivoice toggle and palette collapse are absent. User-draggable panel splitters/resizing and persisted panel widths remain absent. Responsive switching, local instrument scrolling and show/hide do not satisfy the row resize requirement. Other-OS runtime is not established by the Windows viewport batch.",
+      "current_behavior": "View controls show/hide task panes, Inspector and bottom dock; narrow windows switch one detail pane without discarding mounted tuning/edit drafts. Recorded 960×720/1280×900/1600×1000 views retain readable controls and contained pane/dock scrolling, and Ctrl+Shift+V reveals/focuses the hidden or replaced Inspector while preserving drafts and native playback state. 2026-11-06: the inspector's left edge and the dock's top edge can be dragged or moved with the keyboard, and both sizes are kept between runs, clamped to the window. 2026-11-06: the edition palette offers Guitar Pro 8's palette controls (bar, rhythm, accidentals, hairpins, effects, articulations, strokes, ornaments, chord, text and beaming), each one undoable edit and greyed only when the selection makes it meaningless.",
+      "remaining_gap": "Only the inspector and the bottom dock are resizable, not the edition palette or the panes inside the inspector; the edition palette is a fixed tool column without volume or pan automation, a multivoice toggle or collapse; sizes are kept per machine, not per score. Other-OS runtime is not established by the Windows viewport batch.",
       "current_evidence": [
         "workstation_scope_limits",
         "workstation_navigation",
-        "workstation_visual"
+        "workstation_visual",
+        "2026-11-06-gp8-edition-palette.md",
+        "2026-11-06-gp8-panel-sizes.md"
       ],
       "runtime_rechecked_by_this_audit": false
     },
@@ -10744,11 +10753,14 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Output device list exists; no test tone/input meter/buffer diagnostics.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "GP8's Audio preferences let the user check the output with a test sound, show the input signal on a VU meter, and set the buffer size. TabPlayer has the output check and a read-only device readout. The Sound panel of the inspector's Track tab (score view) has an audio output chooser, a Test tone button and a readout of the current device, sample rate and buffer size. The button plays a 440 Hz tone at -22 dBFS for 500 ms with 20 ms fades through the open output; playback or count-in cuts a sounding tone over 5 ms, and a tone is refused during playback and when the output has failed, each with a plain message in en, et and de. The readout uses values cached when the stream opened plus the live callback's buffer size, shows Unknown instead of a guessed default, and follows a device change. The Line-In section of the Practice tools (A28) lists inputs and shows an input level meter while monitoring runs. Re-run 2026-11-08 (THE-189): cargo +1.90.0 test --locked --lib audio:: passes (263, 1 ignored), including the 12 diagnostics and test-tone tests; Vitest passes for the Sound panel, bridge and Line-In panel files (44).",
+      "remaining_gap": "Input activity is only the Line-In meter, which runs only while monitoring is on; the audio settings have no input chooser or meter of their own, and the Line-In evidence is a synthetic tone on one Windows machine with no real interface. The buffer size is shown but cannot be chosen. The test tone is the same on both channels, so one channel or output cannot be checked alone. The tone and readout sit in the per-track Sound panel, not in a preferences page. Not driven in the desktop app and no tone was heard on a real device; the Rust tests ran on Windows only, and macOS and Linux were not run. After a system output change the readout updates at its next read (window focus, a device switch, a tone), not at once.",
+      "current_evidence": [
+        "2026-10-31-gp8-diagnostics.md",
+        "2026-11-07-gp8-line-in.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -10967,12 +10979,13 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Drum tracks can choose the Standard, Room, Jazz or Brush kit in the rig, and percussion playing styles are named and shown with what each one plays.",
-      "remaining_gap": "2026-11-06: the Standard kit plays recorded Virtuosity Drums (CC0) with its own rim shot and half-open hi-hat, chokes, ringing one-shots and hi-hat cuts (2026-11-06-gp8-recorded-drums.md); the kit demo was approved by ear. Room, Jazz and Brush kits change only a few General MIDI keys; cowbell tip, bongo and conga mute and slap, tambourine return and roll play the plain hit; china, clap, timbales, woodblocks, cuica, castanets and surdo stay General MIDI; no brush sweep; a mid-song kit change is unsupported.",
+      "current_behavior": "Drum tracks can choose the Standard, Room, Jazz or Brush kit in the rig, and percussion playing styles are named and shown with what each one plays. 2026-11-06: the Standard kit plays recorded Virtuosity Drums (CC0); the rim shot and half-open hi-hat have their own recordings, chokes stop 0.06 s after the note ends, drums ring past their notes, and a closed hi-hat cuts an open one; the user approved the kit demo by ear.",
+      "remaining_gap": "The Room, Jazz and Brush kits change only a few General MIDI keys; cowbell tip, bongo and conga mute and slap, tambourine return and roll play the plain hit; china, clap, timbales, woodblocks, cuica, castanets and surdo stay General MIDI; no brush sweep; a mid-song kit change is unsupported; the cymbals and percussion have no recorded choke, so a choke fades the ringing recording; no real GP drum file was checked against Guitar Pro 8.",
       "current_evidence": [
         "percussion_styles_behavior",
         "percussion_styles_evidence",
-        "percussion_styles_limits"
+        "percussion_styles_limits",
+        "2026-11-06-gp8-recorded-drums.md"
       ],
       "runtime_rechecked_by_this_audit": false
     },

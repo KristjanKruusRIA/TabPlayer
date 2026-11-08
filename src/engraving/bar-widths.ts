@@ -1,3 +1,4 @@
+import { mapSystemGaps } from './system-gaps';
 import type { BarWidth,EngravingOverrides } from './types';
 
 /** The weights Rust enforces too. alphaTab shares a system's width between its bars in proportion to these weights (an unset bar counts 1). */
@@ -45,7 +46,11 @@ export function withBarScale(engraving:EngravingOverrides,bar:number,scale:numbe
 export function mapBarWidths(engraving:EngravingOverrides,oldToNew:ReadonlyArray<number|null>):EngravingOverrides {
   if(!engraving.barWidths?.length)return engraving;
   const moved=engraving.barWidths.flatMap(({bar,scale})=>{const to=oldToNew[bar];return to===null||to===undefined?[]:[{bar:to,scale}];}).sort((a,b)=>a.bar-b.bar);
-  return withBarWidths(engraving,moved);
+  return moved.length===engraving.barWidths.length&&moved.every((entry,index)=>entry.bar===engraving.barWidths![index].bar&&entry.scale===engraving.barWidths![index].scale)?engraving:withBarWidths(engraving,moved);
+}
+/** `engraving` after measures moved, with both the bar widths and the system gaps remapped through `oldToNew`. Returns the same object when nothing changes. */
+export function mapEngravingBars(engraving:EngravingOverrides,oldToNew:ReadonlyArray<number|null>):EngravingOverrides {
+  return mapSystemGaps(mapBarWidths(engraving,oldToNew),oldToNew);
 }
 /** The weight a bar of `width` px and weight `scale` takes when its right edge is dragged by `delta` px. Fixed clef and signature widths are not
  * known here, so the result is an estimate that the next layout corrects. */

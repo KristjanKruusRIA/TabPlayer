@@ -57,3 +57,12 @@ it('names follow the same rules as the native store',()=>{
   for(const bad of ['',' ',' pad','pad ','﻿x','x\u0085','x'.repeat(81),'a\u0001b'])expect(styleNameError(bad)).not.toBeNull();
   expect(styleNameError('🎸'.repeat(80))).toBeNull();
 });
+
+it('a saved style neither carries nor clears staff groups and gaps',async()=>{
+  const document=defaultEngraving();document.staffGroups=[{trackIds:['a','b'],kind:'brace'}];document.staffGaps=[{trackId:'a',scale:2}];
+  const saved=styleOf(document);expect('staffGroups' in saved).toBe(false);expect('staffGaps' in saved).toBe(false);
+  const applied=styleApplied(style(),document);expect(applied.staffGroups).toEqual(document.staffGroups);expect(applied.staffGaps).toEqual(document.staffGaps);
+  await expect(putStyleLibraryEntry(entry({engraving:{...style(),staffGroups:[{trackIds:['a','b'],kind:'brace'}]}}))).rejects.toThrow('A saved style cannot hold staff groups.');
+  await expect(putStyleLibraryEntry(entry({engraving:{...style(),staffGaps:[{trackId:'a',scale:2}]}}))).rejects.toThrow('A saved style cannot hold staff gaps.');
+  expect(invoke).not.toHaveBeenCalled();
+});

@@ -5,11 +5,15 @@ import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { copyGpInterchangeSource } from '../interchange/gp';
 import { configureTypography,typographyOf,validateTypography } from './typography';
 import { validateBarWidths } from './bar-widths';
+import { validateSystemGaps } from './system-gaps';
+import { validateStaffGaps,validateStaffGroups } from './staff-groups';
 
 export interface EngravingProjection {
   score:model.Score;
   beats:Map<number,{source:model.Beat;rendered:model.Beat}>;
   notes:Map<number,{source:model.Note;rendered:model.Note}>;
+  /** The rendered score's `stylesheet.bracketExtendMode` after overrides. */
+  bracketMode:number;
 }
 export function defaultEngraving():EngravingOverrides {
   return {stylesheet:{hideDynamics:null,brackets:'inherit',extendBarLines:null,systemSeparators:null,tuning:null,chords:'inherit',singleNames:'inherit',multiNames:'inherit',firstNames:'inherit',otherNames:'inherit',firstNameDirection:'inherit',otherNameDirection:'inherit',barNumbers:'inherit',multiRests:'inherit',hideEmptyStaves:null,hideEmptyFirstSystem:null,singleStaffBrackets:null},notation:{tabRhythm:'inherit',fingering:'inherit',smallGraceTab:null,extendBendArrows:null,extendLineEffects:null,parenthesizeTiedBends:null,showTiedBendNumbers:null,showDiveWhammyZeros:null},systemSpacing:null,profiles:[]};
@@ -33,13 +37,16 @@ function object(value:unknown,keys:string[]):Record<string,unknown> {
 const validBool=(value:unknown)=>value===null||typeof value==='boolean';
 function choice(value:unknown,choices:string[]):void {if(typeof value!=='string'||!choices.includes(value))throw new Error('Invalid engraving choice.');}
 export function validateEngraving(value:unknown):asserts value is EngravingOverrides {
-  const defaults=defaultEngraving(),hasTypography=!!value&&typeof value==='object'&&Object.hasOwn(value,'typography'),hasWidths=!!value&&typeof value==='object'&&Object.hasOwn(value,'barWidths'),root=object(value,[...Object.keys(defaults),...hasTypography?['typography']:[],...hasWidths?['barWidths']:[]]),style=object(root.stylesheet,Object.keys(defaults.stylesheet)),notation=object(root.notation,Object.keys(defaults.notation));
+  const defaults=defaultEngraving(),hasTypography=!!value&&typeof value==='object'&&Object.hasOwn(value,'typography'),hasWidths=!!value&&typeof value==='object'&&Object.hasOwn(value,'barWidths'),hasGaps=!!value&&typeof value==='object'&&Object.hasOwn(value,'systemGaps'),hasStaffGroups=!!value&&typeof value==='object'&&Object.hasOwn(value,'staffGroups'),hasStaffGaps=!!value&&typeof value==='object'&&Object.hasOwn(value,'staffGaps'),root=object(value,[...Object.keys(defaults),...hasTypography?['typography']:[],...hasWidths?['barWidths']:[],...hasGaps?['systemGaps']:[],...hasStaffGroups?['staffGroups']:[],...hasStaffGaps?['staffGaps']:[]]),style=object(root.stylesheet,Object.keys(defaults.stylesheet)),notation=object(root.notation,Object.keys(defaults.notation));
   for(const [section,keys]of [[style,Object.keys(styleBooleans)],[notation,[...Object.keys(notationBooleans),...Object.keys(elementKeys)]]] as const)for(const key of keys)if(!validBool(section[key]))throw new Error('Invalid engraving boolean.');
   for(const [section,mappings]of [[style,styleEnums],[notation,notationEnums]] as const)for(const [key,mapping]of Object.entries(mappings))choice(section[key],['inherit',...Object.keys(mapping.values)]);
   choice(style.chords,['inherit','hidden','top','inline','both']);choice(style.multiRests,['inherit','off','on']);
   if(root.systemSpacing!==null&&(typeof root.systemSpacing!=='number'||!Number.isFinite(root.systemSpacing)||root.systemSpacing<.25||root.systemSpacing>4))throw new Error('System spacing must be between 25% and 400%.');
   if(hasTypography)validateTypography(root.typography);
   if(hasWidths)validateBarWidths(root.barWidths);
+  if(hasGaps)validateSystemGaps(root.systemGaps);
+  if(hasStaffGroups)validateStaffGroups(root.staffGroups);
+  if(hasStaffGaps)validateStaffGaps(root.staffGaps);
   if(!Array.isArray(root.profiles))throw new Error('Invalid engraving profiles.');
   const ids=new Set<string>();for(const entry of root.profiles){const profile=object(entry,['trackId','profile']);if(typeof profile.trackId!=='string'||!profile.trackId.trim()||ids.has(profile.trackId))throw new Error('Engraving track IDs must be nonempty and unique.');ids.add(profile.trackId);choice(profile.profile,['source','standard','tablature','standardTab','slash','numbered']);}
 }
@@ -76,7 +83,7 @@ export function projectEngraving(source:model.Score,ids:readonly string[],value:
   if(overrides.multiRests!=='inherit'){style.multiTrackMultiBarRest=overrides.multiRests==='on';style.perTrackMultiBarRest=new Set(overrides.multiRests==='on'?score.tracks.map((_,i)=>i):[]);}
   // A bar's width is its weight in the system: master bars decide it when several staves show, each bar when one does. Only the copy changes, so playback and MIDI read the unchanged source.
   for(const {bar,scale} of value.barWidths??[]){const master=score.masterBars[bar];if(!master)continue;master.displayScale=scale;for(const track of score.tracks)for(const staff of track.staves){const copy=staff.bars[bar];if(copy)copy.displayScale=scale;}}
-  return {score,beats,notes};
+  return {score,beats,notes,bracketMode:score.stylesheet.bracketExtendMode};
 }
 export function configureEngraving(settings:Settings,value:EngravingOverrides):void {
   validateEngraving(value);const defaults=new Settings();

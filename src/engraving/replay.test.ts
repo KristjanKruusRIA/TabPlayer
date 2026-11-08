@@ -80,3 +80,9 @@ it('rejects a missing track or inapplicable staff profile before changing settin
   command.engraving.profiles=[{trackId:id,profile:'tablature'}];expect(()=>previewEdit(piano.project,command,piano)).toThrow(/tablature|tuning|stringed|untuned/i);
   expect(built.settings).toEqual(before);
 });
+
+it('an old log without staff groups or gaps replays and serializes without the keys',()=>{
+  const {engraving}=buildDocument(authored().project).settings;
+  expect('staffGroups' in engraving).toBe(false);expect('staffGaps' in engraving).toBe(false);
+  const json=JSON.stringify(engraving);expect(json).not.toContain('"staffGroups"');expect(json).not.toContain('"staffGaps"');
+});

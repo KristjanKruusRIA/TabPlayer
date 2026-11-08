@@ -1,13 +1,17 @@
 import type {AlphaTabApi,model} from '@coderline/alphatab';
 import {pageGeometry} from './page';
 import type {PageLayout} from './types';
+import {systemGapOffsets,type GapStacking} from './system-gaps';
 import type {ScoreLayoutMode,ScoreZoomMode} from './screen-view';
+import {shiftY,unshiftY,type StaffShift} from './staff-layout';
 
 export type ScreenRect={x:number;y:number;w:number;h:number};
 export type ScreenPoint={x:number;y:number};
 export type ScreenBounds=NonNullable<AlphaTabApi['boundsLookup']>;
 export type ScreenSystem=ScreenBounds['staffSystems'][number];
-export type ScreenRenderChunk={id:string;x:number;y:number;width:number;height:number;firstMasterBarIndex:number;lastMasterBarIndex:number;svg:string};
+/** `height` is the render-space height. `shift` (render coordinates) opens staff gaps in the composed SVG, whose height is `height + shiftTotal(shift)`. */
+export type ScreenRenderChunk={id:string;x:number;y:number;width:number;height:number;firstMasterBarIndex:number;lastMasterBarIndex:number;svg:string;shift?:StaffShift};
+/** `sourceBounds` x and w are render pixels. With `chunk.shift`, y and h are composed pixels (the opened gaps are included); the DOM box must be `chunk.height + shiftTotal(chunk.shift)` tall. */
 export type ScreenPageBlock={chunk:ScreenRenderChunk;system:ScreenSystem|null;page:number;sourceBounds:ScreenRect;x:number;y:number};
 export type ScreenPagination={paper:{width:number;height:number;left:number;top:number;right:number;bottom:number};pageCount:number;blocks:ScreenPageBlock[]};
 export type ScreenPageArrangement={scale:number;width:number;height:number;pages:Array<{index:number;x:number;y:number;width:number;height:number}>};
@@ -26,7 +30,7 @@ function overlaps(a:ScreenRect,b:ScreenRect):boolean {
   return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
 }
 
-export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:ScreenBounds,page:PageLayout):ScreenPagination {
+export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:ScreenBounds,page:PageLayout,gaps?:GapStacking):ScreenPagination {
   const {width,height,left,top,right,bottom}=pageGeometry(page);
   const paper={width,height,left,top,right,bottom},blocks:ScreenPageBlock[]=[],ids=new Set<string>(),positions=new Set<string>(),matched=new Set<ScreenSystem>();
   for(const system of bounds.staffSystems) {
@@ -41,6 +45,7 @@ export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:S
       }
     }
   }
+  const spans=gaps?chunks.filter(c=>Number.isInteger(c.firstMasterBarIndex)&&Number.isInteger(c.lastMasterBarIndex)&&c.firstMasterBarIndex>=0&&c.lastMasterBarIndex>=c.firstMasterBarIndex).map(c=>({first:c.firstMasterBarIndex,last:c.lastMasterBarIndex})).sort((a,b)=>a.first-b.first):[],offsets=systemGapOffsets(gaps,spans),scoreFirst=spans[0]?.first;
   let pageIndex=0,used=0,lastBar=-1;
   for(const chunk of [...chunks].sort((a,b)=>a.y-b.y||a.x-b.x)) {
     const rect={x:chunk.x,y:chunk.y,w:chunk.width,h:chunk.height};validRect(rect,true);
@@ -52,16 +57,22 @@ export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:S
     if(typeof chunk.svg!=='string'||!/^\s*<svg\b[^>]*>[\s\S]*<\/svg>\s*$/.test(chunk.svg))throw new Error('A screen chunk is missing its SVG string.');
     const first=chunk.firstMasterBarIndex,last=chunk.lastMasterBarIndex;
     if(!Number.isInteger(first)||!Number.isInteger(last)||first< -1||last<first||(first===-1&&last!==-1))throw new Error('Invalid screen chunk bar interval.');
-    const candidates=first===-1?[]:bounds.staffSystems.filter(s=>s.bars[0].index===first&&s.bars.at(-1)!.index===last);
+    // A multi-bar rest closing a system makes the chunk end at the rest's last bar while the bounds record the rest under its first bar.
+    const candidates=first===-1?[]:bounds.staffSystems.filter(s=>s.bars[0].index===first&&s.bars.at(-1)!.index<=last);
     if(first!==-1&&(candidates.length!==1||matched.has(candidates[0])))throw new Error('Missing, duplicate or ambiguous screen system chunk association.');
     const system=candidates[0]??null;
     if(system&&(!overlaps(rect,system.realBounds)||!overlaps(rect,system.visualBounds)||first<=lastBar))throw new Error('Invalid screen system chunk geometry or musical order.');
     if(system){matched.add(system);lastBar=last;}
     const envelopes=system?[rect,system.realBounds,system.visualBounds]:[rect];
-    const x=Math.min(...envelopes.map(r=>r.x)),y=Math.min(...envelopes.map(r=>r.y));
-    const sourceBounds={x,y,w:Math.max(...envelopes.map(r=>r.x+r.w))-x,h:Math.max(...envelopes.map(r=>r.y+r.h))-y};
+    // With a staff-gap shift the bounds live in composed pixels: the top and every bottom (the chunk's and the system's) go through the shift,
+    // so the block is exactly as tall as the composed SVG even when the chunk rect extends below the system bounds.
+    const x=Math.min(...envelopes.map(r=>r.x)),y=shiftY(chunk.shift,Math.min(...envelopes.map(r=>r.y)),'top');
+    const sourceBounds={x,y,w:Math.max(...envelopes.map(r=>r.x+r.w))-x,h:Math.max(...envelopes.map(r=>shiftY(chunk.shift,r.y+r.h,'bottom')))-y};
     if(sourceBounds.w>width-left-right||sourceBounds.h>height-top-bottom)throw new Error(oversize);
-    if(used+sourceBounds.h>height-top-bottom){pageIndex++;used=0;}
+    // A gap goes before a system only inside a page, never before the score's first system; a system pushed to a new page drops it.
+    let offset=first===-1||first===scoreFirst||used===0?0:offsets.get(first)??0;
+    if(used+offset+sourceBounds.h>height-top-bottom){pageIndex++;used=0;offset=0;}
+    used+=offset;
     blocks.push({chunk,system,page:pageIndex,sourceBounds,x:left,y:top+used});used+=sourceBounds.h;
   }
   if(matched.size!==bounds.staffSystems.length)throw new Error('Missing or duplicate screen system chunks.');
@@ -83,8 +94,10 @@ export function mapScreenRect(pagination:ScreenPagination,arrangement:ScreenPage
   validRect(rect);
   const block=pagination.blocks.find(b=>b.system===system);
   if(!block)return null;
-  const sheet=arrangement.pages[block.page],scale=arrangement.scale;
-  return {x:sheet.x+(block.x+rect.x-block.sourceBounds.x)*scale,y:sheet.y+(block.y+rect.y-block.sourceBounds.y)*scale,w:rect.w*scale,h:rect.h*scale};
+  const sheet=arrangement.pages[block.page],scale=arrangement.scale,shift=block.chunk.shift;
+  // The top and the exclusive bottom move separately, so a rect spanning a cut stretches over the opened gap.
+  const top=shiftY(shift,rect.y,'top'),height=shift?Math.max(0,shiftY(shift,rect.y+rect.h,'bottom')-top):rect.h;
+  return {x:sheet.x+(block.x+rect.x-block.sourceBounds.x)*scale,y:sheet.y+(block.y+top-block.sourceBounds.y)*scale,w:rect.w*scale,h:height*scale};
 }
 
 export function unmapScreenPoint(pagination:ScreenPagination,arrangement:ScreenPageArrangement,point:ScreenPoint):{system:ScreenSystem;point:ScreenPoint}|null {
@@ -94,7 +107,12 @@ export function unmapScreenPoint(pagination:ScreenPagination,arrangement:ScreenP
     const sheet=arrangement.pages[block.page],scale=arrangement.scale;
     const left=sheet.x+block.x*scale,top=sheet.y+block.y*scale;
     const right=sheet.x+(block.x+block.sourceBounds.w)*scale,bottom=sheet.y+(block.y+block.sourceBounds.h)*scale;
-    if(point.x>=left&&point.x<right&&point.y>=top&&point.y<bottom)return {system:block.system,point:{x:(point.x-sheet.x)/scale-block.x+block.sourceBounds.x,y:(point.y-sheet.y)/scale-block.y+block.sourceBounds.y}};
+    if(point.x>=left&&point.x<right&&point.y>=top&&point.y<bottom) {
+      const composed=(point.y-sheet.y)/scale-block.y+block.sourceBounds.y,y=unshiftY(block.chunk.shift,composed);
+      // A point inside an opened staff gap belongs to no score position.
+      if(y===null)return null;
+      return {system:block.system,point:{x:(point.x-sheet.x)/scale-block.x+block.sourceBounds.x,y}};
+    }
   }
   return null;
 }

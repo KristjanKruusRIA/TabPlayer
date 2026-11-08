@@ -1,6 +1,7 @@
 import type { PrintLayout,SvgPage,SvgSystem } from '../export/types';
 import type { PageLayout } from './types';
 import {measurePageText,pageTitleFontSize} from '../export/page-title';
+import {systemGapOffsets,type GapStacking} from './system-gaps';
 import {fillHeaderField,validateHeaderFooter,type HeaderFields,type PageBand,type PageBands} from './header-footer';
 
 export interface PageGeometry {
@@ -97,18 +98,21 @@ export function screenPageBaselines(d:PageGeometry,titleScale:number):{headerY:n
 }
 
 /** `titleScale` enlarges the header line (base 18px) and still shrinks it to fit the page width; the footer keeps its size. */
-export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields,titleScale=1):SvgPage[] {
-  const d=pageGeometry(layout),headerBase=18*titleScale,headerY=d.top+Math.min(31,Math.max(22,headerBase*.8)),footerY=d.height-d.bottom,groups:SvgSystem[][]=[[]];let height=0;
+export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields,titleScale=1,gaps?:GapStacking):SvgPage[] {
+  const d=pageGeometry(layout),headerBase=18*titleScale,headerY=d.top+Math.min(31,Math.max(22,headerBase*.8)),footerY=d.height-d.bottom,groups:Array<Array<{system:SvgSystem;offset:number}>>=[[]];let height=0;
+  const spans=gaps?systems.flatMap(s=>s.firstBar===undefined||s.lastBar===undefined?[]:[{first:s.firstBar,last:s.lastBar}]):[],offsets=systemGapOffsets(gaps,spans),scoreFirst=spans[0]?.first;
   for(const system of systems) {
     // alphaTab may round the reported system width by one pixel, as in legacy export.
     if(!finite(system.height)||system.height<=0||system.height>d.usableHeight||!finite(system.width)||system.width<=0||system.width>d.usableWidth+1)throw new Error('A notation system does not fit this page. Reduce print scale, use landscape, or export fewer staves.');
-    if(height+system.height>d.usableHeight){groups.push([]);height=0;}
-    groups.at(-1)!.push(system);height+=system.height;
+    // A gap goes before a system only inside a page, never before the score's first system; a system pushed to a new page drops it.
+    let offset=system.firstBar===undefined||system.firstBar===scoreFirst||!groups.at(-1)!.length?0:offsets.get(system.firstBar)??0;
+    if(height+offset+system.height>d.usableHeight){groups.push([]);height=0;offset=0;}
+    groups.at(-1)!.push({system,offset});height+=offset+system.height;
   }
   const custom=layout.headerFooter,values:HeaderFields=fields??{TITLE:title,SUBTITLE:'',ARTIST:'',ALBUM:'',WORDS:'',MUSIC:'',COPYRIGHT:'',TABBER:'',INSTRUCTIONS:'',NOTICES:''};
   return groups.map((group,index)=>{
     let y=d.top+40;
-    const content=group.map(system=>{const at=y;y+=system.height;return `<g transform="translate(${d.left} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
+    const content=group.map(({system,offset})=>{const at=y+offset;y=at+system.height;return `<g transform="translate(${d.left} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
     const bands=custom&&(index?custom.other:custom.first);
     const text=pageTextItems({geometry:d,bands:bands??null,title,fields:values,page:index+1,pages:groups.length,titleScale,headerY,footerY}),header=pageTextSvg(text.header),footer=pageTextSvg(text.footer);
     return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style>${header}${content}${footer}</svg>`};

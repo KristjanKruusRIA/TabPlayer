@@ -7,6 +7,8 @@ import { TypographyFields } from './TypographyFields';
 import { notationPresets,presetApplied } from './notation-presets';
 import { typographyOf,withTypography } from './typography';
 import { withBarWidths } from './bar-widths';
+import { withSystemGaps } from './system-gaps';
+import { withStaffGaps,withStaffGroups } from './staff-groups';
 
 export interface EngravingPanelProps {
   score:model.Score;trackIds:readonly string[];value:EngravingOverrides;busy:boolean;
@@ -49,12 +51,13 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanel
   const defaults=new Settings(),style=score.stylesheet;
   const updateStyle=(key:keyof EngravingOverrides['stylesheet'],next:unknown)=>{setDraft({...draft,stylesheet:{...draft.stylesheet,[key]:next}});setError(null);};
   const updateNotation=(key:keyof EngravingOverrides['notation'],next:unknown)=>{setDraft({...draft,notation:{...draft.notation,[key]:next}});setError(null);};
+  const keepStaffLayout=(engraving:EngravingOverrides)=>withStaffGaps(withStaffGroups(engraving,value.staffGroups??[]),value.staffGaps??[]);
   const apply=()=>{
-    // Bar widths are set by dragging bars, not in this form: whatever the form holds, the applied widths stay.
-    const engraving=withBarWidths(withTypography({...structuredClone(draft),profiles:trackIds.flatMap(id=>draft.profiles.filter(entry=>entry.trackId===id).map(entry=>({...entry})))},typographyOf(draft)),value.barWidths??[]);
+    // Bar widths and system gaps are set elsewhere, not in this form: whatever the form holds, the applied ones stay.
+    const engraving=keepStaffLayout(withSystemGaps(withBarWidths(withTypography({...structuredClone(draft),profiles:trackIds.flatMap(id=>draft.profiles.filter(entry=>entry.trackId===id).map(entry=>({...entry})))},typographyOf(draft)),value.barWidths??[]),value.systemGaps??[]));
     try{validateEngravingTracks(score,trackIds,engraving);onEdit({type:'setEngraving',engraving});setError(null);}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}
   };
-  const reset=()=>{const engraving=withBarWidths(defaultEngraving(),value.barWidths??[]);setDraft(engraving);try{onEdit({type:'setEngraving',engraving});setError(null);}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}};
+  const reset=()=>{const engraving=keepStaffLayout(withSystemGaps(withBarWidths(defaultEngraving(),value.barWidths??[]),value.systemGaps??[]));setDraft(engraving);try{onEdit({type:'setEngraving',engraving});setError(null);}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}};
   return <details><summary>Engraving</summary><fieldset disabled={busy}>
     <p>Source/default keeps imported style and staff combinations. Notation choices use renderer defaults.</p>
     <details><summary>Staff profiles</summary>

@@ -64,8 +64,8 @@ export async function runLibraryBrowseAcceptance({buildPath}={}){
 
     // The score that is open before any browsing starts.
     const start=await workspace(),openId=start.active.documentId,clean=await record(openId);
-    // Every launch starts with one untouched blank document, and Open adds the score as a second tab beside it.
-    assert.equal(start.documents.length,2);const blank=await record(start.documents.find(entry=>entry.documentId!==openId).documentId);assert.equal(blank.snapshot.project.base.kind,'blank');assert.equal(blank.snapshot.dirty,false);assert.deepEqual(blank.snapshot.project.edits,[]);
+    // Every launch starts with one untouched blank document, and Open replaces it, so the score is the only document and no blank tab is left.
+    assert.equal(start.documents.length,1);assert.equal(start.documents[0].documentId,openId);
     assert.equal(clean.snapshot.project.base.title,first.title);assert.ok(samePath(clean.snapshot.path,state.sourcePath));assert.equal(clean.snapshot.dirty,false);
     // Leave it with unsaved edits and undo history: opening a result must keep all of that.
     await page.getByRole('combobox',{name:/^String/}).selectOption('5');await page.getByLabel('Fret',{exact:true}).fill('3');await button('Set note');

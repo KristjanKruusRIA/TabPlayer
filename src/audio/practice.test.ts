@@ -31,7 +31,7 @@ it('rejects_fixed_with_any_backing_and_detaches_normalized_copies',()=>{
   const fixed:PracticeSettings={tempo:{kind:'fixed',bpm:100.5},metronome:{enabled:false,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}};
   expect(()=>validatePractice(fixed,true)).toThrow('Fixed tempo is unavailable while a backing track is present.');
   const before=structuredClone(fixed),result=practiceForBacking(fixed,true);
-  expect(result).toEqual({settings:{tempo:{kind:'relative',ratio:1},metronome:{enabled:false,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}},notice:'Fixed tempo disabled because this score has backing audio.'});
+  expect(result).toEqual({settings:{tempo:{kind:'relative',ratio:1},metronome:{enabled:false,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}},notice:'fixed_tempo_disabled_backing'});
   expect(fixed).toEqual(before);result.settings.metronome.visual=false;result.settings.countIn.bars=0;expect(fixed).toEqual(before);
   for(const hasBacking of [false,true])for(const tempo of [{kind:'relative',ratio:1.23},{kind:'progressive',start:.5,end:1,step:.2,repetitions:2}] as const){const value={...settings(),tempo};const copy=practiceForBacking(value,hasBacking);expect(copy).toEqual({settings:value,notice:null});expect(copy.settings).not.toBe(value);expect(copy.settings.tempo).not.toBe(value.tempo);expect(copy.settings.metronome).not.toBe(value.metronome);expect(copy.settings.countIn).not.toBe(value.countIn);}
   expect(practiceForBacking(fixed,false)).toEqual({settings:fixed,notice:null});

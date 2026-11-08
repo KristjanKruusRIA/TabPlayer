@@ -9230,14 +9230,15 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "current_behavior": "The score toolbar offers Vertical page, Horizontal page, Grid, Parchment, Vertical screen and Horizontal screen, with per-document display preferences and mapped note/range interaction in source tests.",
-      "remaining_gap": "Desktop visual acceptance of the six modes (real fonts, pointer gestures, scrolling, cursor and restored per-document state) has not run. The 2026-11-08 desktop driver sweep did not run parity-score-layouts, which needs a reviewed build admission.",
+      "current_behavior": "The score toolbar offers Vertical page, Horizontal page, Grid, Parchment, Vertical screen and Horizontal screen, with per-document display preferences and mapped note/range interaction in source tests. THE-56 drove all six modes in the desktop app (2026-11-08): fonts load, a click on a tab digit selects that beat, the wheel and scrollbar scroll, the playback cursor is drawn and stays in view, and each document keeps its mode and zoom across tab switches, a reload and crash recovery.",
+      "remaining_gap": "One Windows machine and two scores; Horizontal screen ignores a plain vertical wheel and its fit width shrinks long scores to an unreadable size; not checked against Guitar Pro 8, on macOS or Linux, or with a saved and reopened project file. The 2026-11-08 desktop driver sweep did not run parity-score-layouts, which needs a reviewed build admission.",
       "current_evidence": [
         "engraving",
         "engraving_limits",
         "layout_scope",
         "layout_limits",
-        "2026-11-08-desktop-driver-sweep.md"
+        "2026-11-08-desktop-driver-sweep.md",
+        "2026-11-08-the-56-display-modes.md"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -9264,15 +9265,16 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "current_behavior": "Fractional zoom from 25% to 300% plus fit-width, and fit-page for physical page layouts only; the zoom policy is a per-document workspace view preference kept in recovery data, not in the score file.",
-      "remaining_gap": "Fit behaviour has source-level geometry tests only; desktop resize/legibility acceptance has not run, and dense forced systems can still crowd at narrow widths/high zoom. The 2026-11-08 desktop driver sweep did not run parity-score-layouts, which needs a reviewed build admission.",
+      "current_behavior": "Fractional zoom from 25% to 300% plus fit-width, and fit-page for physical page layouts only; the zoom policy is a per-document workspace view preference kept in recovery data, not in the score file. The fitted zoom is shown rounded (THE-56), and fit width and fit page were driven at emulated 1440x900, 1280x800 and 960x600.",
+      "remaining_gap": "The native window was not resized (the sizes were emulated); fit page gives digits under 6 px at every size (smallest 5.2 px at 1440x900, median under 6 px from 1280x800 down), Horizontal screen fit width is unreadable on long scores, and the score area is about 200 to 300 px high at 960x600. Forced systems of six or more bars made the page layouts fall back to a continuous view; fixed in THE-56. Sixteenth-note forced systems were not judged for legibility, and zoom above fit was not run, so dense systems can still crowd at high zoom. The 2026-11-08 desktop driver sweep did not run parity-score-layouts, which needs a reviewed build admission.",
       "current_evidence": [
         "engraving",
         "engraving_validation",
         "engraving_limits",
         "layout_scope",
         "layout_limits",
-        "2026-11-08-desktop-driver-sweep.md"
+        "2026-11-08-desktop-driver-sweep.md",
+        "2026-11-08-the-56-display-modes.md"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",

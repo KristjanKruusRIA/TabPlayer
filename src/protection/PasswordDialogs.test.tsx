@@ -5,8 +5,9 @@ import '@testing-library/jest-dom/vitest';
 import { OpenPasswordDialog,ProtectionDialog,UnlockEditingDialog } from './PasswordDialogs';
 import { PASSWORDS_DIFFER,PASSWORD_RULE,type ProtectionRequest } from './protection';
 import type { Protection } from '../project';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); setLanguagePreference('en'); });
 const WRONG='The password is incorrect, or this file is damaged.';
 const type=(label:string|RegExp,value:string,scope:HTMLElement|undefined=undefined)=>fireEvent.change((scope?within(scope):screen).getByLabelText(label),{target:{value}});
 const pending=()=>{let resolve!:()=>void,reject!:(error:unknown)=>void;const promise=new Promise<void>((done,fail)=>{resolve=done;reject=fail;});return {promise,resolve,reject};};
@@ -172,4 +173,16 @@ it('says that exports and prints are plain and that a Guitar Pro export loses th
   expect(edit).toHaveTextContent('a Guitar Pro export opened again in TabPlayer has no edit lock');
   expect(open).toHaveTextContent('Exports and printed copies are plain');
   expect(open).toHaveTextContent('a print leaves a temporary PDF that is removed when TabPlayer closes');
+});
+
+it('translates password dialogs when language preference changes', () => {
+  try {
+    setLanguagePreference('et');
+    render(<OpenPasswordDialog fileName="a.tabplayer" onTry={vi.fn()} onCancel={vi.fn()} />);
+    expect(screen.getByRole('dialog', { name: 'Vajalik parool' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ava' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Näita paroole')).toBeInTheDocument();
+  } finally {
+    setLanguagePreference('en');
+  }
 });

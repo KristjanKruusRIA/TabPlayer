@@ -1,4 +1,5 @@
 import { CLICK_SOUNDS,type ClickSound,type PracticeSettings } from './practice-types';
+import type { PracticeNotice } from './types';
 
 function object(value:unknown):Record<string,unknown> {
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid practice settings object.');
@@ -36,8 +37,8 @@ export function validatePractice(settings:PracticeSettings,hasBacking:boolean):v
   if(hasBacking&&tempo.kind==='fixed')throw new Error('Fixed tempo is unavailable while a backing track is present.');
 }
 
-export function practiceForBacking(settings:PracticeSettings,hasBacking:boolean):{settings:PracticeSettings;notice:string|null} {
+export function practiceForBacking(settings:PracticeSettings,hasBacking:boolean):{settings:PracticeSettings;notice:PracticeNotice|null} {
   validatePractice(settings,false);
   const disabled=hasBacking&&settings.tempo.kind==='fixed';
-  return {settings:{tempo:disabled?{kind:'relative',ratio:1}:{...settings.tempo},metronome:{...settings.metronome},countIn:{...settings.countIn}},notice:disabled?'Fixed tempo disabled because this score has backing audio.':null};
+  return {settings:{tempo:disabled?{kind:'relative',ratio:1}:{...settings.tempo},metronome:{...settings.metronome},countIn:{...settings.countIn}},notice:disabled?'fixed_tempo_disabled_backing':null};
 }

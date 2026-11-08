@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import {withSystemGaps} from './engraving/system-gaps';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act,cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { forgetSessionPanelSizes } from './workstation/panel-sizes';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
@@ -32,6 +32,10 @@ import type {ReferenceSyncControls} from './audio/reference-sync-types';
 // 4.4 to 7.4 s in full runs with 6 workers; before the worker cap, 12 of these tests timed out at 5.1 to 9.1 s in one run. A real
 // hang still stops at 30 s.
 vi.setConfig({testTimeout:30000});
+// For the same reason a `waitFor` or `findBy` here may wait up to 10 s, not Testing Library's 1 s. One render of the workspace takes about
+// 0.2 s alone and 0.37 s late in a full run of this file, so a refused entry key's notice, three renders after the refusal, showed after
+// 0.6 s alone but 1.1 s in the full file; CI's slower runners missed more such waits. No wait in this file expects to time out.
+configure({asyncUtilTimeout:10000});
 const engravingView=vi.hoisted(()=>vi.fn());
 const waveform=vi.hoisted(()=>({props:[] as BackingWaveformProps[],read:vi.fn(async(document:BackingWaveformProps['document'],source:WaveformSourceInput,buckets:number,owner:NativeBackingWaveformBridge['owner']):Promise<WaveformReceipt>=>({owner,document,source,durationMs:16000,sampleRate:1000,frameCount:16000,channels:1,bucketCount:buckets,peaks:Array.from({length:buckets},()=>({min:[0,0],max:[0,0]}))})),embedded:vi.fn(async(sourceKey:string,_bytes:Uint8Array):Promise<WaveformSourceInput>=>({kind:'embedded',sourceKey:sourceKey.toLowerCase(),sha256:'e'.repeat(64),bytesBase64:'UklGRg=='}))}));
 vi.mock('./audio/BackingWaveform',()=>({BackingWaveform:(props:BackingWaveformProps)=>{waveform.props.push(props);return <section aria-label="Backing waveform"><button onClick={()=>{}}>Waveform probe</button></section>;}}));

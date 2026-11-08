@@ -5,8 +5,9 @@ import { BarWidthsPanel } from './BarWidthsPanel';
 import { withBarScale } from './bar-widths';
 import { defaultEngraving } from './projection';
 import { withTypography } from './typography';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); setLanguagePreference('en'); });
 const open=()=>{for(const details of document.querySelectorAll('details'))details.open=true;};
 const setup=(props:Partial<Parameters<typeof BarWidthsPanel>[0]>={})=>{
   const onEdit=vi.fn(),onDesign=vi.fn(),value=props.value??withBarScale(withBarScale(defaultEngraving(),1,1.5),3,.5);
@@ -42,4 +43,14 @@ it('switches design mode and says when the chosen layout ignores widths',()=>{
   expect(screen.queryByText(/spaces bars by itself/)).toBeNull();
   rerender(<BarWidthsPanel value={value} design onDesign={onDesign} busy={false} honoured={false} onEdit={onEdit}/>);
   expect(screen.getByText(/spaces bars by itself/)).toBeTruthy();expect((screen.getByRole('checkbox',{name:/Design mode/}) as HTMLInputElement).checked).toBe(true);
+});
+
+it('translates bar widths panel when language preference changes', () => {
+  try {
+    setLanguagePreference('et');
+    setup();
+    expect(screen.getByRole('button', { name: 'Taasta vaikelaiused' })).toBeTruthy();
+  } finally {
+    setLanguagePreference('en');
+  }
 });

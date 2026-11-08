@@ -19,7 +19,7 @@ import {loadExportFonts} from './export/pdf';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
 import {passageBands,type PassageBar} from './engraving/passage-bands';
 import type {LoopBar,LoopPassage} from './audio/loop-passage';
-import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenBounds,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
+import {arrangeScreenPages,beatSpanOf,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenBounds,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
 import {accoladeMetrics,accoladeSvg,configureAccolades,planAccolades,systemAccoladeMarks,type AccoladeMetrics,type AccoladePlan} from './engraving/accolades';
 import {composeScreenChunks,shiftTotal,staffLeftOf,systemTrackBands} from './engraving/staff-layout';
@@ -319,7 +319,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const source=value.score.tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat],beat=source?renderedBeat(source):null;
       const bound=beat?(view.boundsLookup?.findBeats(beat)??[]).find(item=>item.beat===beat):null;
       if(!beat||!bound)return [];
-      const box=bound.realBounds,rect=mapped({x:box.x,y:box.y,w:box.w,h:box.h},beatSystem(beat));
+      const box=bound.realBounds,rect=mapped(beatSpanOf(bound),beatSystem(beat));
       if(!rect||![rect.x,rect.y].every(Number.isFinite))return [];
       return [{x:Math.max(0,rect.x),y:Math.max(0,rect.y-chipHeight-chipGap),w:chipWidth(diagram),diagram}];
     });
@@ -383,7 +383,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const startBeatBounds=view.boundsLookup?.findBeat(first),endBeatBounds=view.boundsLookup?.findBeat(last);
       if(startBeatBounds?.beat!==first||endBeatBounds?.beat!==last){clearHighlight(view);return;}
       view.highlightPlaybackRange(first,last);
-      if(first===last){const rect=mapped(startBeatBounds.realBounds,beatSystem(first));setMarkers(rect?[rect]:[]);if(selected.kind==='bars')setRangeBlocks(selectionBands(first,last));}else if(!presentation.current.physical)placeHandles({startBeat:first,endBeat:last,startBeatBounds,endBeatBounds});
+      if(first===last){const rect=mapped(beatSpanOf(startBeatBounds),beatSystem(first));setMarkers(rect?[rect]:[]);if(selected.kind==='bars')setRangeBlocks(selectionBands(first,last));}else if(!presentation.current.physical)placeHandles({startBeat:first,endBeat:last,startBeatBounds,endBeatBounds});
     } catch {clearHighlight(view);}
   };
   useEffect(()=>{

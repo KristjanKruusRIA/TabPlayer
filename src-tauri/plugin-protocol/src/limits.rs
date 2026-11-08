@@ -4,8 +4,8 @@ use std::time::Duration;
 /// Version of the control messages and of the ring layout. Both sides refuse anything else.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// Build identifier of the helper and the host, written by `build.rs`: `<crate version>+<git commit>-<hash of the protocol
-/// and helper sources>`. The app and the helper must match (preflight ruling P33). Both link this crate, so a helper built
+/// Build identifier of the helper and the host, written by `build.rs`: `<crate version>+<hash of the protocol and helper
+/// sources and Cargo.lock>`. The app and the helper must match (preflight ruling P33). Both link this crate, so a helper built
 /// from other sources, or left over from an earlier build, carries another id and is refused in the first reply.
 pub const BUILD_ID: &str = env!("TABPLAYER_PLUGIN_BUILD_ID");
 

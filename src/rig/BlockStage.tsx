@@ -78,13 +78,14 @@ function BlockOptions({editing,board,block}:{editing:SoundEditing;board:Board;bl
   </>;
 }
 
-function AmpStage({editing,board}:{editing:SoundEditing;board:Board}) {
+function AmpStage({editing,board,ampCapture}:{editing:SoundEditing;board:Board;ampCapture?:(board:Board)=>ReactNode}) {
   const model=board.effects.amp.model,look=ampLooks[model]??ampLooks.crunch;
   return <div className="rig-amp-stage">
     <div className="rig-art-slot"><div className="rig-amp" data-on={board.effects.amp.enabled} style={{'--knob-ink':look.ink} as React.CSSProperties}>
       <AmpArt look={look} on={board.effects.amp.enabled}/>
       <div className="rig-amp-knobs"><BlockKnobs editing={editing} board={board} block="amp" tone="amp"/></div>
     </div></div>
+    <div className="rig-slot" data-slot="amp-capture">{ampCapture?.(board)}</div>
   </div>;
 }
 
@@ -140,7 +141,7 @@ function PedalStage({editing,board,block}:{editing:SoundEditing;board:Board;bloc
 let stageFocusHandoff:{trackId:string;block:EffectBlock;role:string|null;className:string;label:string|null}|null=null;
 
 /** The selected block's controls: drawn as the gear it is, with its knobs, models and the actions every block shares. */
-export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:(board:Board)=>ReactNode}) {
+export function BlockStage({editing,selected,cabinetResponse,ampCapture}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:(board:Board)=>ReactNode;ampCapture?:(board:Board)=>ReactNode}) {
   const { lang, t } = useI18n();
   const {block}=selected,board=selected.second&&editing.second?editing.second:editing.first;
   const {order,busy,clipboard,second}=editing,index=order.indexOf(block);
@@ -168,7 +169,7 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
     };
   });
   let body:ReactNode;
-  if(block==='amp')body=<AmpStage editing={editing} board={board}/>;
+  if(block==='amp')body=<AmpStage editing={editing} board={board} ampCapture={ampCapture}/>;
   else if(block==='cabinet'||block==='microphone')body=<CabinetStage editing={editing} board={board} block={block} cabinetResponse={cabinetResponse}/>;
   else if(block==='graphicEq')body=<GraphicEqStage editing={editing} board={board}/>;
   else body=<PedalStage editing={editing} board={board} block={block}/>;

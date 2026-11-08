@@ -27,6 +27,8 @@ import { MidiOutPanel } from './audio/MidiOutPanel';
 import { nativeMidiOut } from './audio/midi-out';
 import { readMidiOutDelay } from './audio/midi-out-preferences';
 import { CabinetNotices } from './audio/CabinetNotices';
+import { CaptureNotices } from './audio/CaptureNotices';
+import { AmpCapture } from './audio/AmpCapture';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
 import { useReferenceSyncEdit } from './audio/useReferenceSyncEdit';
@@ -851,6 +853,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {finalized&&<div className="finalized-banner" role="status"><p>{t('status.finalized_banner')}</p><button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>{t('action.unfinalize')}</button></div>}
     {passwordLocked&&<div className="finalized-banner" role="status"><p>Locked for editing: you can play and read this score, but changes need its password.</p><button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('unlock')})}>Unlock editing…</button></div>}
     <CabinetNotices sounds={state.settings.sounds} trackNames={trackNames}/>
+    <CaptureNotices sounds={state.settings.sounds} trackNames={trackNames}/>
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
@@ -886,6 +889,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       {view==='sound'&&<SoundRig trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy}
         tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||`Track ${index+1}`,program:track.playbackInfo.program,percussion:track.staves.some(staff=>staff.isPercussion)}))}
         onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}
+        ampCapture={board=><AmpCapture value={board.effects.amp.capture} busy={editBusy} label={board.name} scope={`${trackId}:${board.name('Amp')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={capture=>{if(!editBusy)board.write(effects=>{if(capture)effects.amp.capture=capture;else delete effects.amp.capture;});}}/>}
         cabinetResponse={board=><CabinetResponse ir={board.effects.cabinet.ir} model={board.effects.cabinet.model} label={board.name} scope={`${trackId}:${board.name('Cabinet')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={ir=>{if(!editBusy)board.write(effects=>{if(ir)effects.cabinet.ir=ir;else delete effects.cabinet.ir;});}}/>}/>}
       {view==='mixer'&&<MixerView score={state.score} sounds={state.settings.sounds} selected={target.track} busy={controlsBusy} player={player} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}
       <section className="workstation-dock" aria-label="Bottom dock" hidden={!dockVisible}>

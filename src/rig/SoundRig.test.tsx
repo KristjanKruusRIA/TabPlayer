@@ -33,13 +33,13 @@ function playback() {
   return fake;
 }
 type Fake=ReturnType<typeof playback>;
-interface Options {busy?:boolean;player?:Fake|null;edit?:(command:EditCommand)=>void|Promise<void>;cabinetResponse?:()=>React.ReactNode;master?:React.ReactNode}
+interface Options {busy?:boolean;player?:Fake|null;edit?:(command:EditCommand)=>void|Promise<void>;cabinetResponse?:()=>React.ReactNode;ampCapture?:()=>React.ReactNode;master?:React.ReactNode}
 /** The rig over a sound it keeps, as the app does, recording every edit it is asked for. */
-function mount(initial:TrackSound=soundPreset('lead','green-guitar'),{busy=false,player=playback(),edit,cabinetResponse,master}:Options={}) {
+function mount(initial:TrackSound=soundPreset('lead','green-guitar'),{busy=false,player=playback(),edit,cabinetResponse,ampCapture,master}:Options={}) {
   const edits:EditCommand[]=[];
   function Host() {
     const [sound,setSound]=useState(initial),[track,setTrack]=useState('guitar');
-    return <SoundRig trackId={track} sound={sound} busy={busy} playback={player as unknown as NativePlaybackController|null} cabinetResponse={cabinetResponse} master={master}
+    return <SoundRig trackId={track} sound={sound} busy={busy} playback={player as unknown as NativePlaybackController|null} cabinetResponse={cabinetResponse} ampCapture={ampCapture} master={master}
       tracks={[{id:'guitar',name:'Lead Guitar',program:29},{id:'bass',name:'Bass',program:33},{id:'drums',name:'Drums',program:0,percussion:true},{id:'piano',name:'Piano',program:0}]} onTrack={setTrack}
       onEdit={async command=>{edits.push(command);await edit?.(command);if(command.type==='setTrackSound')setSound(command.sound);}}/>;
   }
@@ -399,6 +399,14 @@ it('keeps a clear place for the cabinet response and the master panel, and nothi
   mount(soundPreset('lead'),{cabinetResponse:()=><button>Load cabinet response</button>,master:<p>Master output</p>});await choose('cabinet');
   expect(within(document.querySelector<HTMLElement>('[data-slot="cabinet-response"]')!).getByRole('button',{name:'Load cabinet response'})).toBeInTheDocument();
   expect(within(document.querySelector<HTMLElement>('[data-slot="master"]')!).getByText('Master output')).toBeInTheDocument();
+});
+
+it('leaves a slot for the amp capture, empty until one is given',async()=>{
+  const first=mount();await choose('amp');
+  expect(document.querySelector('[data-slot="amp-capture"]')).toBeEmptyDOMElement();
+  first.view.unmount();
+  mount(soundPreset('lead'),{ampCapture:()=><button>Pick capture</button>});await choose('amp');
+  expect(within(document.querySelector<HTMLElement>('[data-slot="amp-capture"]')!).getByRole('button',{name:'Pick capture'})).toBeInTheDocument();
 });
 
 it('changes the track the rig edits', async()=>{

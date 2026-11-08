@@ -82,6 +82,19 @@ Run 42472305778, at develop `cd23cc7`, passed the frontend step on all three pla
   - The skip paths and the 100 ms MIDI bound were not run on a runner like CI's.
   - A controller with its sign inverted would also stay within the new Line-In limit. The simulated-clock test still catches that.
 
+### Fourth run: the integration tests (2026-11-08)
+
+Run 42479152487, at develop `18fe022`:
+- The library tests passed on all three platforms, so the four fixes above held there.
+- Windows passed every native test, then failed to build packages. The Tauri bundler's download of the WiX tools from GitHub returned HTTP 503, which is outside this code; a rerun should clear it.
+- macOS and Linux reached the integration tests, and one failed on both: `alias_convergence_coalesces_all_matching_records_without_losing_pin` in `src-tauri/tests/file_library_store.rs`, with "Library unavailable: duplicate recent paths."
+
+| | Detail |
+|---|---|
+| **Cause** | The test stores the same song as `music/song.gp` and `music/./song.gp`. `same_path` compares stored paths as text on Windows, but uses `Path` equality elsewhere, which drops `.`. So on macOS and Linux the catalog is refused as holding duplicates before the test's merge runs. The test and the check both date from 2026-10-15, so it has never passed there. |
+| **Change** | On macOS and Linux the alias goes through a symlinked folder: a second spelling the catalog keeps apart, which the store's merge resolves to the same file with `canonicalize`. Windows keeps the `.` spelling. |
+| **Evidence** | On Windows, `file_library_store` passes 27/27 and `cargo fmt` is clean. This machine has no Linux environment, so the macOS/Linux branch is checked only by CI. |
+
 ## `batch/convert.test.ts` killed on macOS ("JavaScript heap out of memory")
 
 - **Symptom:** Vitest reported the crash as an unhandled error, and the file was missing from the totals (329 of 330). The 1 November macOS run was also one file short (313 of 314), so it has probably crashed since the test was added on 2026-10-30.

@@ -1116,7 +1116,18 @@ fn alias_convergence_coalesces_all_matching_records_without_losing_pin() {
     let music = tempfile::tempdir().unwrap();
     let path = music.path().join("song.gp");
     score(&path);
+    // A second spelling the catalog keeps apart but that names the same file. Windows compares stored paths as text,
+    // so `.\` is one; elsewhere `Path` equality drops `.`, and a catalog holding both is refused as duplicates, so the
+    // alias goes through a symlinked folder instead.
+    #[cfg(windows)]
     let alias = music.path().join(".").join("song.gp");
+    #[cfg(unix)]
+    let links = tempfile::tempdir().unwrap();
+    #[cfg(unix)]
+    let alias = {
+        std::os::unix::fs::symlink(music.path(), links.path().join("music")).unwrap();
+        links.path().join("music").join("song.gp")
+    };
     let mut value = empty_catalog();
     value["recents"] = json!([
         {"id":"pinned-stable","path":alias,"digest":"a".repeat(64),"metadata":null,"pinned":true,"lastOpenedUnixMs":10},

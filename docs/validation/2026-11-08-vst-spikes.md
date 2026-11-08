@@ -128,3 +128,137 @@ cargo build --release --manifest-path .analysis/vst-spikes/gain-example/Cargo.to
 ```
 
 Logs and editor images are in `.analysis/vst-spikes/logs/` (not committed).
+
+# VST spike 2: IPC hand-off timing (THE-71), 2026-11-08
+
+Task 2 of `docs/superpowers/plans/2026-11-08-vst-hosting.md`, under pre-flight rulings P23 (8 helpers, stop rule), P9 (pipeline depth for small callbacks, ring size), P3 (copy results out, host-owned indices in app memory) and P21 (build location). Branch `feature/vst-hosting` at `f934a53`.
+
+## Result
+
+**PASS. `BLOCK_FRAMES = 128`, pipeline depth two callbacks, wake by event.**
+
+- At block 128 and `P` = 2 callbacks, 8 helpers ran for 10 minutes with zero underruns. The p99 hand-off was 1.28 ms with the synthetic load and 2.31 ms with a real amp plug-in (Amped ML5) in every helper. The limit is one callback, 10.67 ms.
+- Blocks 64 and 256 also passed. Block 128 stays because it is the spec's value and nothing argues for a change.
+- `P = 3` was not needed in any configuration.
+- **Pipeline depth.** It follows P9: `P = C + max(C, BLOCK_FRAMES)`, rounded up to a multiple of `BLOCK_FRAMES`. That is 2C whenever C ≥ 128. At 64-frame callbacks it gives 256 frames (5.33 ms), and that run passed.
+- **Wake method: events.** Each helper has an auto-reset event, and the app calls `SetEvent` after each published block. Events had the lower p99 at equal underruns (zero) in both pairs measured, and the lower total CPU:
+  - 512-frame callbacks: 1.28 ms with events, 2.25 ms with polling.
+  - 64-frame callbacks: 0.41 ms with events, 1.51 ms with polling. Polling fails the criterion there.
+
+## What was built
+
+All of it is under `.analysis/vst-spikes/ipc/`, which git ignores. None of it is committed.
+
+- **One binary, two roles.** `ipc.exe app …` spawns N copies of `ipc.exe helper …`.
+- **The prototype ring** (`ring.rs`) has Task 6's layout: `RingHeader`, then per-block `BlockHeader`s for input and output, then the input and output sample areas of `RING_BLOCKS × BLOCK_FRAMES × [f32; 2]`, all 64-byte aligned. It lives in a named page-file mapping.
+- **P9:** `RING_BLOCKS = ceil(8192 / BLOCK_FRAMES) + 2`, so 66 blocks at 128.
+- **P3:**
+  - The app copies each output block into preallocated scratch with volatile reads.
+  - It checks the block's sequence before and after the copy, seqlock style, and checks finiteness on the copy.
+  - It refuses an `output_write` above its own count of published inputs.
+  - The next input sequence and the epoch are app-memory counters that are only written to the mapping.
+  - The helper mirrors this for input blocks.
+- **The callback thread** joins MMCSS "Pro Audio" and is paced by a high-resolution waitable timer (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) on an absolute QPC grid. Each callback writes a 220 Hz sine frame by frame into every helper's current block, and publishes and signals each block as it fills. It reads the result for frame `f − P`, fetching each block at its first frame. It does not allocate or lock.
+- **The helpers** join MMCSS "Pro Audio" and run one of three modes:
+  - echo: input copied to output;
+  - synthetic: a busy-wait for a fixed share of block time, then echo;
+  - plug-in: the Spike 1 FFI, vendored again from `host-rust/`, with one VST3 instance at 48 kHz, the block size and a stereo main bus.
+- **Wake.** In event mode the helper waits on its event (50 ms timeout) and then drains every published block. In poll mode it sleeps 500 µs on a high-resolution waitable timer between checks.
+- **Measurements.**
+  - The hand-off runs from the app's QPC stamp just before it publishes `input_write` to the helper's QPC stamp just before it publishes `output_write`. It includes the wake, the queueing behind earlier blocks of the same callback, and the processing.
+  - The helper keeps 1 µs histograms of hand-off, wake and process time in the mapping.
+  - The app counts underruns: a block not ready, torn or non-finite when its first frame is due.
+  - The app also counts echo mismatches, bit-exact against the regenerated input, in echo and synthetic modes.
+  - CPU use is the kernel plus user time from `GetProcessTimes` and `GetThreadTimes` over the timed span, as a percentage of one core.
+- **Step 1 checks (10 s each).** Echo and the `vst3` gain example (`plugins/gain.vst3`) both ran on the ring with 8 helpers, with zero underruns and zero mismatches in echo.
+- **Build.** `RUSTUP_TOOLCHAIN=1.90.0`, `CARGO_TARGET_DIR=E:/cargo-target/slot-1`, release, `--offline`. Dependencies are the Spike 1 pins plus `cpal =0.18.2`, which the app already locks and which was already in the cache, for the device-paced run. Nothing was downloaded.
+
+## Load
+
+- **Synthetic per-block cost: 11 % of block time** (293 µs at block 128), the mean of Amped ML5, the heaviest plug-in in Spike 1.
+- **Real plug-in run:** Amped ML5 in all 8 helpers. Its process time per block was p50 356 µs, p99 979 µs and max 2.29 ms.
+  - That is heavier than Spike 1's in-process figures. 8 instances share the machine, and up to 29 % of a helper's blocks ran on E-cores.
+- **Machine:** i7-14700KF, 8 P-cores and 12 E-cores (28 threads), Windows 11 Pro 10.0.26300.
+- **Quiet runs.** The runner waited for no `cargo`, `rustc`, `link`, `cl` or `msbuild` process before each run, then sampled every 10 s.
+  - Another session's Cargo builds overlapped part of four runs. The table gives the share of samples with a build running.
+  - The headline runs (block 128, synthetic and ML5) and the quiet poll rerun saw none.
+
+## Runs: 8 helpers, 48 kHz, 10 minutes each
+
+| Configuration | P (frames) | Hand-off p50 / p99 / p99.9 / max (µs) | Underruns | Limit (1 callback, µs) | Min margin to deadline | CPU: app / per helper | Builds seen | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| C 512, B 128, event, synthetic | 1024 | 727 / 1,276 / 1,368 / 2,325 | 0 | 10,667 | 18.7 ms | 1.0 % / 11.1 % | 0/59 | **pass** |
+| C 512, B 128, event, **ML5 ×8** | 1024 | 1,135 / 2,310 / 2,761 / 3,909 | 0 | 10,667 | 17.1 ms | 0.8 % / 15.6 % | 0/58 | **pass** |
+| C 512, B 128, poll, synthetic (quiet rerun) | 1024 | 1,515 / 2,246 / 2,549 / 3,320 | 0 | 10,667 | 17.6 ms | 0.8 % / 11.6 % | 0/59 | pass |
+| C 512, B 128, poll, synthetic (first run) | 1024 | 1,512 / 2,235 / 2,578 / 6,484 | 0 | 10,667 | 14.8 ms | 0.7 % / 11.5 % | 21/59 | pass |
+| C 512, B 64, event, synthetic | 1024 | 654 / 1,184 / 1,359 / 2,234 | 0 | 10,667 | 18.7 ms | 1.2 % / 11.1 % | 12/58 | pass |
+| C 512, B 256, event, synthetic | 1024 | 859 / 1,231 / 1,416 / 2,029 | 0 | 10,667 | 18.5 ms | 1.1 % / 11.1 % | 7/58 | pass |
+| C 256, B 128, event, synthetic | 512 | 437 / 681 / 893 / 1,871 | 0 | 5,333 | 7.9 ms | 1.2 % / 11.0 % | 0/59 | pass |
+| C 64, B 128, event, synthetic (P9) | 256 | 306 / 408 / 618 / 1,391 | 0 | 1,333 | 1.69 ms | 2.1 % / 11.2 % | 9/58 | pass |
+| C 64, B 128, poll, synthetic (P9) | 256 | 814 / 1,512 / 1,775 / 2,816 | 0 | 1,333 | **0.20 ms** | 1.0 % / 11.4 % | 0/58 | **fail** (p99) |
+| Device-paced (WASAPI shared, cpal, 480-frame period), B 128, event, synthetic | 1024 | 605 / 1,183 / 1,331 / 2,526 | **8, all at start** | 10,000 | 8.0 ms | 3.2 % / 10.0 % | 0/59 | pass after start-up (finding 1) |
+
+What the columns mean:
+- **C** is the callback size and **B** the block size.
+- **Min margin** is the smallest gap between a result's publish and the moment its first frame was needed.
+- **Per-helper CPU** with the synthetic load is mostly the busy-wait itself. The wake cost is measured separately below.
+- No run had an echo mismatch or a helper error. Every hand-off quantile is over all 8 helpers: 1.8 million blocks at B 128, 3.6 million at B 64, 0.9 million at B 256.
+
+**Pass criterion (Step 3, with 8 helpers per P23):** at block 128, `P` = 2 callbacks, zero underruns in 10 minutes and a p99 hand-off of at most one callback. **Met**, with the synthetic load and with ML5, both on a quiet machine.
+
+## Events versus polling
+
+| C 512, B 128 | Wake p50 / p99 (µs) | Hand-off p99 (µs) | Underruns | CPU, echo helpers (2 min, quiet): app / all 8 helpers / total |
+|---|---|---|---|---|
+| Event (`SetEvent`, auto-reset) | 99 / 879 | 1,276 | 0 | 1.17 % / 1.64 % / **2.8 %** of one core |
+| Poll (500 µs high-resolution timer) | 890 / 1,252 | 2,246 | 0 | 0.68 % / 4.52 % / **5.2 %** of one core |
+
+- **Events win on p99 at equal underruns**, at 512-frame and 64-frame callbacks. They also cost about half the total CPU: each idle polling helper burns 0.56 % of a core against 0.21 % for an event-woken one.
+- **The cost of events.** `SetEvent` moves about 0.5 % of a core onto the app's callback thread with 8 helpers.
+- **Polling at a 500 µs period** wakes after about 0.9 ms in practice, which is timer granularity. At 64-frame callbacks that left a minimum margin of 0.20 ms, close to an underrun.
+
+## Findings for later tasks
+
+1. **The first WASAPI callback is the whole device buffer (Tasks 9, 11, 13; P8, P32).** In shared mode, cpal's first callback asked for 1,056 frames. Later ones were 480 frames, the 10 ms period.
+   - With `P` sized from the 480-frame period (2 × 480 = 960, rounded up to 1,024), block 0 was due inside the same first callback that published it. Each helper underran once, at frame 1,024. There were no underruns in the 10 minutes after that.
+   - So either size `P` from the largest callback seen, which is device-level `max_callback_frames` per P32 and includes this start-up fill, or treat the first callback after start or attach as priming under P8.
+   - Otherwise every play start reports a spurious underrun and crossfades to the built-in tone.
+2. **The app's real thread setup differs from the spike's.** cpal's WASAPI thread runs at `THREAD_PRIORITY_TIME_CRITICAL`. It does not join MMCSS. The device-paced run used it as is, and its steady state matched the MMCSS timer runs: p99 1.18 ms.
+3. **E-cores on hybrid CPUs (Task 8).** Between 10 % and 49 % of helper blocks ran on E-cores (logical CPU 16 and up) despite MMCSS "Pro Audio".
+   - In the ML5 run, the three helpers with the most blocks on E-cores (18–29 % of their blocks) had a hand-off p50 of 1.24–1.40 ms, against 1.02–1.08 ms for the other five. They also used 16.7–18.1 % of a core against 14.3–14.9 %.
+   - It did not cause underruns.
+   - Not tested: whether opting the helper's audio thread out of power throttling (`SetThreadInformation`, `ThreadPowerThrottling`) keeps it on P-cores.
+4. **The margin left for the app's own render.** The spike's callback publishes every block almost at once. In the app, the renderer publishes a block when it reaches that block's last frame, so a heavy render uses up part of the margin.
+   - The margin was at least 17 ms at 512-frame callbacks and 7.9 ms at 256.
+   - At 64-frame callbacks it was only 1.69 ms, and under partial build load. There a slow render or a late callback is the risk, more than the helper.
+   - 1,236 timer callbacks (0.3 %) started more than 1 ms late in that run.
+5. **Ring size (Task 6).** At block 128, P9's 66 blocks hold 2 × 66 × 128 × 8 B = 135 KB of samples per helper, plus headers.
+   - The spike's 1.2 MB of histograms are spike-only.
+   - The pipeline used at most 1,024 frames, 8 blocks, far below the 8,192-frame cap.
+6. **Handles (Task 6).** The spike opens the mapping and the event by name in `Local\`. The plan's `Load { ring, input_event, … }` passes handle values instead. Use inherited or duplicated handles so that no other process can open them by name.
+
+## Limits
+
+- **Timer pacing for most runs.** Callback sizes were exact, but callback start jitter came from the timer: p50 about 290 µs late and p99 about 600 µs. That is in the range of a real device, but it is not a device.
+  - Only one run was device-paced, at the device's own 480-frame period. Fixed 512, 256 and 64-frame device buffers were not tried.
+- **Partial build load in four runs.** Builds overlapped part of the 64-frame and 256-frame block runs, the 64-frame event callback run and the first poll run.
+  - Those runs passed anyway. The quiet poll rerun matched the first one: p99 2,246 against 2,235 µs.
+  - The headline numbers come from quiet runs.
+- **One real plug-in**, ML5 ×8, for one 10-minute run. Other plug-ins may have worse tails.
+- **Spike-only parts.** No watchdog, flush, epoch change, priming crossfade or helper crash was exercised. Named kernel objects were used instead of inherited handles. The app-side render is trivial.
+- **CPU percentages** come from Windows' process and thread time accounting over 120 s or 600 s. Treat sub-1 % differences as approximate.
+
+## Reproduce
+
+These commands assume `.analysis/vst-spikes/ipc/` as described above; it is not committed.
+
+```powershell
+$env:RUSTUP_TOOLCHAIN = '1.90.0'; $env:CARGO_TARGET_DIR = 'E:/cargo-target/slot-1'
+cargo build --release --offline --features device --manifest-path .analysis/vst-spikes/ipc/Cargo.toml
+# copy vst-spike-ipc.exe to .analysis/vst-spikes/ipc/ipc.exe, then:
+.analysis/vst-spikes/ipc/run-all.ps1 -Seconds 600
+# one configuration by hand:
+.analysis/vst-spikes/ipc/ipc.exe app --helpers 8 --callback 512 --block 128 --depth 2 --seconds 600 --wake event --mode synth:0.11
+```
+
+Logs per run (`app.log`, `monitor.log`, `helper-N.log`) are in `.analysis/vst-spikes/ipc/runs/` (not committed).

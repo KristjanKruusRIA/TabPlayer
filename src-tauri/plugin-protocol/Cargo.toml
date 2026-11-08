@@ -7,8 +7,8 @@ license = "MIT"
 publish = false
 description = "The wire protocol between TabPlayer and its VST3 helper process: a shared-memory audio ring, bounded control frames and the plug-in state container."
 
-# Exact pins at the versions the workspace lockfile already holds, so this crate adds no new third-party code.
+# Caret ranges, as in the app: the committed lockfile pins the exact versions, and `--locked` builds hold to it.
 [dependencies]
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
-base64 = "=0.22.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"

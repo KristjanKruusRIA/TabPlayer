@@ -8,7 +8,7 @@ use std::{
 };
 use tabplayer_plugin_protocol::{
     BLOCK_FRAMES, RING_BLOCKS,
-    ring::{BlockMeta, OwnedRing},
+    ring::{BlockMeta, InputRead, OwnedRing},
 };
 
 thread_local! {
@@ -59,7 +59,7 @@ fn host_side_never_allocates() {
     );
 
     let ring = OwnedRing::new(48_000);
-    let (mut host, helper) = (ring.host(), ring.helper());
+    let (mut host, mut helper) = (ring.host(), ring.helper());
     let stop = AtomicBool::new(false);
     let deadline = Instant::now() + Duration::from_secs(120);
 
@@ -76,7 +76,7 @@ fn host_side_never_allocates() {
                     std::thread::yield_now();
                     continue;
                 }
-                let Some(block) = helper.read_input(seq, &mut input) else {
+                let InputRead::Ready(block) = helper.read_input(seq, &mut input) else {
                     std::thread::yield_now();
                     continue;
                 };
@@ -91,6 +91,7 @@ fn host_side_never_allocates() {
         });
 
         let mut scratch = [[0.0f32; 2]; BLOCK_FRAMES];
+        let mut block = [[0.0f32; 2]; BLOCK_FRAMES];
         let meta = BlockMeta {
             tempo: 120.0,
             sig_num: 4,
@@ -101,11 +102,10 @@ fn host_side_never_allocates() {
         COUNT_HEAP.with(|flag| flag.set(true));
         for seq in 0..BLOCKS + IN_FLIGHT {
             if seq < BLOCKS {
-                let block = host.input_block_mut(seq).unwrap();
                 for (i, frame) in block.iter_mut().enumerate() {
                     *frame = [seq as f32 + i as f32, -(seq as f32)];
                 }
-                assert!(host.publish_input(seq, &meta));
+                assert!(host.send_input(seq, &block, &meta));
             }
             if seq >= IN_FLIGHT {
                 let wanted = seq - IN_FLIGHT;

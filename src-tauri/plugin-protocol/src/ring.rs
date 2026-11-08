@@ -19,10 +19,11 @@
 //!   ordinary memory, are only *written* to the mapping, and are never read back from it.
 //! - The geometry (block size, ring blocks, rate) is read once by `from_raw` and cached.
 //! - Every index read from the other side is checked against what this side knows before it is used to index anything.
-//! - Samples are never lent out as a Rust slice. They are copied with volatile reads into caller-owned scratch, seqlock
-//!   style: the block's sequence and epoch are checked before and after the copy, finiteness is checked on the copy, and
-//!   only the copy is played.
-//! - Header fields the other side can write are atomics.
+//! - Samples are never lent out as a Rust slice, in either direction. Every sample is an `AtomicU32` cell accessed with
+//!   Relaxed loads and stores (the same machine code as plain moves), so a concurrent rewrite by the other side, in or
+//!   out of this process, is not a data race. Blocks are copied in and out whole, seqlock style: the block's sequence and
+//!   epoch are checked before and after a read, finiteness is checked on the copy, and only the copy is played.
+//! - Header fields the other side can write are atomics too.
 //!
 //! The host side does not allocate, lock, log or wait: it touches atomics and the mapping only. A wake-up event is the
 //! caller's business, not the ring's.
@@ -31,7 +32,6 @@ use crate::limits::{
 };
 use std::{
     alloc::{Layout, alloc_zeroed, dealloc},
-    ptr,
     sync::{
         Arc,
         atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering, fence},
@@ -45,6 +45,8 @@ pub const EMPTY_SEQUENCE: u64 = u64::MAX;
 
 /// One block of stereo frames.
 pub type Block = [[f32; 2]; BLOCK_FRAMES];
+/// A block as it sits in the mapping: the bits of each `f32`, in atomic cells.
+type RawBlock = [[AtomicU32; 2]; BLOCK_FRAMES];
 
 #[repr(C, align(64))]
 pub struct RingHeader {
@@ -95,7 +97,7 @@ pub struct BlockMeta {
 
 const HEADER_BYTES: usize = size_of::<RingHeader>();
 const BLOCK_HEADERS_BYTES: usize = RING_BLOCKS * size_of::<BlockHeader>();
-const DATA_BYTES: usize = RING_BLOCKS * size_of::<Block>();
+const DATA_BYTES: usize = RING_BLOCKS * size_of::<RawBlock>();
 const IN_HEADERS: usize = HEADER_BYTES;
 const OUT_HEADERS: usize = IN_HEADERS + BLOCK_HEADERS_BYTES;
 const IN_DATA: usize = OUT_HEADERS + BLOCK_HEADERS_BYTES;
@@ -105,7 +107,8 @@ pub const RING_BYTES: usize = OUT_DATA + DATA_BYTES;
 
 const _: () = assert!(size_of::<RingHeader>() == 64 && align_of::<RingHeader>() == 64);
 const _: () = assert!(size_of::<BlockHeader>() == 64 && align_of::<BlockHeader>() == 64);
-const _: () = assert!(size_of::<Block>() % 64 == 0);
+const _: () = assert!(size_of::<RawBlock>() == size_of::<Block>() && align_of::<RawBlock>() == 4);
+const _: () = assert!(size_of::<RawBlock>() % 64 == 0);
 const _: () = assert!(IN_DATA % 64 == 0 && OUT_DATA % 64 == 0 && RING_BYTES % 64 == 0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -157,7 +160,7 @@ struct View {
 }
 
 // SAFETY: the pointer is to memory that is valid for the view's lifetime (the `from_raw` contract, or `_keep`), and all
-// shared access goes through atomics or the volatile copies below.
+// shared access goes through atomic cells.
 unsafe impl Send for View {}
 unsafe impl Sync for View {}
 
@@ -260,15 +263,15 @@ impl View {
         // SAFETY: as above.
         unsafe { &*(self.base.add(OUT_HEADERS) as *const BlockHeader).add(slot) }
     }
-    fn in_data(&self, slot: usize) -> *mut Block {
+    fn in_data(&self, slot: usize) -> &RawBlock {
         debug_assert!(slot < RING_BLOCKS);
         // SAFETY: as above.
-        unsafe { (self.base.add(IN_DATA) as *mut Block).add(slot) }
+        unsafe { &*(self.base.add(IN_DATA) as *const RawBlock).add(slot) }
     }
-    fn out_data(&self, slot: usize) -> *mut Block {
+    fn out_data(&self, slot: usize) -> &RawBlock {
         debug_assert!(slot < RING_BLOCKS);
         // SAFETY: as above.
-        unsafe { (self.base.add(OUT_DATA) as *mut Block).add(slot) }
+        unsafe { &*(self.base.add(OUT_DATA) as *const RawBlock).add(slot) }
     }
 }
 
@@ -276,21 +279,20 @@ fn slot_of(seq: u64) -> usize {
     (seq % RING_BLOCKS as u64) as usize
 }
 
-/// Copies a block out of the mapping with volatile reads, so the compiler can neither merge them with the checks around
-/// them nor assume the bytes are stable.
-unsafe fn copy_from_mapping(src: *const Block, dst: &mut Block) {
-    let src = src as *const [f32; 2];
-    for (i, frame) in dst.iter_mut().enumerate() {
-        // SAFETY: `i < BLOCK_FRAMES`, inside the block.
-        *frame = unsafe { ptr::read_volatile(src.add(i)) };
+/// Copies a block out of the mapping. Relaxed atomic loads: the seqlock's fences order them against the sequence checks.
+fn copy_from_mapping(src: &RawBlock, dst: &mut Block) {
+    for (frame, cells) in dst.iter_mut().zip(src) {
+        *frame = [
+            f32::from_bits(cells[0].load(Ordering::Relaxed)),
+            f32::from_bits(cells[1].load(Ordering::Relaxed)),
+        ];
     }
 }
 
-unsafe fn copy_to_mapping(src: &Block, dst: *mut Block) {
-    let dst = dst as *mut [f32; 2];
-    for (i, frame) in src.iter().enumerate() {
-        // SAFETY: as above.
-        unsafe { ptr::write_volatile(dst.add(i), *frame) };
+fn copy_to_mapping(src: &Block, dst: &RawBlock) {
+    for (frame, cells) in src.iter().zip(dst) {
+        cells[0].store(frame[0].to_bits(), Ordering::Relaxed);
+        cells[1].store(frame[1].to_bits(), Ordering::Relaxed);
     }
 }
 
@@ -349,33 +351,47 @@ impl HostControl {
         self.epoch.load(Ordering::Acquire)
     }
 
-    /// Starts a new epoch, so the helper resets the plug-in and discards what it holds for older ones. Returns it.
+    /// Starts a new epoch, so the helper resets the plug-in and discards what it holds for older ones. Returns the epoch
+    /// this call started. Callers on several threads are safe: the mapping is re-stored until it holds the newest epoch,
+    /// so it never ends up behind the counter.
     pub fn begin_flush(&self) -> u32 {
-        let epoch = self.epoch.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
-        self.view
-            .header()
-            .flush_epoch
-            .store(epoch, Ordering::Release);
-        epoch
+        let started = self.epoch.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
+        let mut publish = started;
+        loop {
+            self.view
+                .header()
+                .flush_epoch
+                .store(publish, Ordering::Release);
+            let newest = self.epoch.load(Ordering::Acquire);
+            if newest == publish {
+                return started;
+            }
+            publish = newest;
+        }
     }
 }
 
-/// The audio thread's end of the ring. One exists per mapping, and the thread that owns it is the only producer: the
-/// methods that write input take `&mut self`.
+/// The audio thread's end of the ring. One exists per mapping, and the thread that owns it is the only producer:
+/// [`HostRing::send_input`] takes `&mut self`.
+///
+/// It owns an `Arc` (the epoch counter, and the storage of an [`OwnedRing`]), so dropping the last reference on the audio
+/// thread would free heap memory. Retire it, and every [`HostControl`] clone, off the audio thread (Task 11 enforces
+/// this).
 pub struct HostRing {
     control: HostControl,
     next_input: u64,
 }
 
 impl HostRing {
-    /// Opens a mapping the host created with [`HostRing::initialize`].
+    /// Opens a mapping the host created with [`HostRing::initialize`]. A reused mapping restarts its sequences at 0, so
+    /// production code opens the mapping it just initialized and nothing else.
     ///
     /// # Safety
     /// `ptr` must be valid for reads and writes of `len` bytes for as long as the ring, and its clones, are used, and no
     /// other `HostRing` may exist on it.
     pub unsafe fn from_raw(ptr: *mut u8, len: usize) -> Result<HostRing, RingError> {
         // SAFETY: forwarded.
-        unsafe { Self::wrap(View::open(ptr, len, None)?) }
+        Ok(Self::wrap(unsafe { View::open(ptr, len, None)? }))
     }
 
     /// Writes a fresh header into a zeroed mapping and opens it. The helper maps the same region afterwards.
@@ -388,17 +404,19 @@ impl HostRing {
         sample_rate: u32,
     ) -> Result<HostRing, RingError> {
         // SAFETY: forwarded.
-        unsafe { Self::wrap(View::initialize(ptr, len, sample_rate, None)?) }
+        Ok(Self::wrap(unsafe {
+            View::initialize(ptr, len, sample_rate, None)?
+        }))
     }
 
-    unsafe fn wrap(view: View) -> Result<HostRing, RingError> {
-        Ok(HostRing {
+    fn wrap(view: View) -> HostRing {
+        HostRing {
             control: HostControl {
                 view,
                 epoch: Arc::new(AtomicU32::new(0)),
             },
             next_input: 0,
-        })
+        }
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -417,38 +435,25 @@ impl HostRing {
     pub fn begin_flush(&self) -> u32 {
         self.control.begin_flush()
     }
-    /// The sequence the next published input block must carry.
+    /// The sequence the next input block must carry.
     pub fn next_input(&self) -> u64 {
         self.next_input
     }
 
-    /// The samples of input block `seq`, to be filled and then published. Only the next unpublished block can be asked
-    /// for. The slice is write-only: the helper may read it at any time, so nothing here reads it back. Asking again
-    /// for the same block is fine.
-    pub fn input_block_mut(&mut self, seq: u64) -> Option<&mut Block> {
-        if seq != self.next_input {
-            return None;
-        }
-        let slot = slot_of(seq);
-        // The slot may still hold block `seq - RING_BLOCKS`, which a stalled helper could be reading: mark it invalid
-        // before the first sample is overwritten, so the helper's seqlock check fails instead of seeing a mix.
-        self.control
-            .view
-            .in_header(slot)
-            .sequence
-            .store(EMPTY_SEQUENCE, Ordering::Relaxed);
-        fence(Ordering::Release);
-        // SAFETY: in range, 64-aligned, and `&mut self` makes this the only producer slice.
-        Some(unsafe { &mut *self.control.view.in_data(slot) })
-    }
-
-    /// Publishes input block `seq` with `meta`, in the current epoch. Returns false when `seq` is not the next block.
-    pub fn publish_input(&mut self, seq: u64, meta: &BlockMeta) -> bool {
+    /// Copies `frames` into input block `seq` and publishes it with `meta`, in the current epoch. Only the next sequence
+    /// is accepted (false otherwise), and a block is only ever published whole: the slot, which may still hold the block
+    /// of a lap ago that a stalled helper is reading, is invalidated before the first sample is written, so the helper's
+    /// seqlock check fails instead of seeing a mix.
+    pub fn send_input(&mut self, seq: u64, frames: &Block, meta: &BlockMeta) -> bool {
         if seq != self.next_input {
             return false;
         }
         let view = &self.control.view;
-        let header = view.in_header(slot_of(seq));
+        let slot = slot_of(seq);
+        let header = view.in_header(slot);
+        header.sequence.store(EMPTY_SEQUENCE, Ordering::Relaxed);
+        fence(Ordering::Release);
+        copy_to_mapping(frames, view.in_data(slot));
         store_meta(header, self.control.epoch.load(Ordering::Acquire), meta);
         header.sequence.store(seq, Ordering::Release);
         view.header().input_write.store(seq + 1, Ordering::Release);
@@ -496,10 +501,9 @@ impl HostRing {
         self.read_output_with(seq, epoch, scratch, || {})
     }
 
-    /// `read_output_status` with a hook that runs between the copy and the second check. It exists so tests can rewrite
-    /// the block at that moment; the ring itself passes an empty closure.
-    #[doc(hidden)]
-    pub fn read_output_with(
+    /// `read_output_status` with a hook that runs between the copy and the second check, so tests can rewrite the block
+    /// at that moment.
+    fn read_output_with(
         &self,
         seq: u64,
         epoch: u32,
@@ -509,8 +513,7 @@ impl HostRing {
         let Some(header) = self.output_header(seq, epoch) else {
             return OutputRead::NotReady;
         };
-        // SAFETY: the slot is in range; the copy tolerates concurrent writes.
-        unsafe { copy_from_mapping(self.control.view.out_data(slot_of(seq)), scratch) };
+        copy_from_mapping(self.control.view.out_data(slot_of(seq)), scratch);
         between();
         fence(Ordering::Acquire);
         if header.sequence.load(Ordering::Relaxed) != seq
@@ -523,11 +526,6 @@ impl HostRing {
         }
         OutputRead::Ready
     }
-
-    /// The meta the helper published with output block `seq`. Call after a successful read.
-    pub fn output_meta(&self, seq: u64) -> BlockMeta {
-        load_meta(self.control.view.out_header(slot_of(seq)))
-    }
 }
 
 // ---- the helper side ---------------------------------------------------------------------------------------------
@@ -539,11 +537,34 @@ pub struct InputBlock {
     pub meta: BlockMeta,
 }
 
+/// The outcome of copying an input block out of the mapping.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum InputRead {
+    Ready(InputBlock),
+    /// The host has not published this block yet.
+    NotYet,
+    /// The host has published it, but has since written a newer block over its slot: the helper fell more than a ring
+    /// behind. Resynchronise at [`HelperRing::resync_point`], and answer every sequence skipped with silence (tagged with
+    /// [`HelperRing::flush_epoch`]), so the answers stay in order. The host sees those as underruns.
+    Lapped,
+    /// The host rewrote the block while it was being copied. Treat it as `Lapped`.
+    Torn,
+}
+
+impl InputRead {
+    pub fn block(self) -> Option<InputBlock> {
+        match self {
+            InputRead::Ready(block) => Some(block),
+            _ => None,
+        }
+    }
+}
+
 /// The helper's end of the ring: the mirror of [`HostRing`]. It owns the output sequence and the heartbeat and treats
 /// `input_write` and `flush_epoch` as the host's untrusted words.
 pub struct HelperRing {
     view: View,
-    next_output: AtomicU64,
+    next_output: u64,
     beats: AtomicU64,
 }
 
@@ -561,7 +582,7 @@ impl HelperRing {
     fn wrap(view: View) -> HelperRing {
         HelperRing {
             view,
-            next_output: AtomicU64::new(0),
+            next_output: 0,
             beats: AtomicU64::new(0),
         }
     }
@@ -577,40 +598,56 @@ impl HelperRing {
         written.saturating_sub(next_input).min(RING_BLOCKS as u64)
     }
 
+    /// The oldest sequence that is certain to still be intact: one ring's worth behind what the host claims to have
+    /// published, less the block whose slot the host may be overwriting. Where to resume after `Lapped`.
+    pub fn resync_point(&self) -> u64 {
+        let written = self.view.header().input_write.load(Ordering::Acquire);
+        written.saturating_sub(RING_BLOCKS as u64 - 1)
+    }
+
     /// The host's current epoch.
     pub fn flush_epoch(&self) -> u32 {
         self.view.header().flush_epoch.load(Ordering::Acquire)
     }
 
-    /// Copies input block `seq` into `scratch`. None when the host has not published it, or rewrote it while it was
-    /// being copied.
-    pub fn read_input(&self, seq: u64, scratch: &mut Block) -> Option<InputBlock> {
+    /// Copies input block `seq` into `scratch`.
+    pub fn read_input(&self, seq: u64, scratch: &mut Block) -> InputRead {
         if self.view.header().input_write.load(Ordering::Acquire) <= seq {
-            return None;
+            return InputRead::NotYet;
         }
         let header = self.view.in_header(slot_of(seq));
         if header.sequence.load(Ordering::Acquire) != seq {
-            return None;
+            return InputRead::Lapped;
         }
         let epoch = header.epoch.load(Ordering::Relaxed);
         let meta = load_meta(header);
-        // SAFETY: in range; the copy tolerates concurrent writes.
-        unsafe { copy_from_mapping(self.view.in_data(slot_of(seq)), scratch) };
+        copy_from_mapping(self.view.in_data(slot_of(seq)), scratch);
         fence(Ordering::Acquire);
-        (header.sequence.load(Ordering::Relaxed) == seq
-            && header.epoch.load(Ordering::Relaxed) == epoch)
-            .then_some(InputBlock { epoch, meta })
+        if header.sequence.load(Ordering::Relaxed) == seq
+            && header.epoch.load(Ordering::Relaxed) == epoch
+        {
+            InputRead::Ready(InputBlock { epoch, meta })
+        } else {
+            InputRead::Torn
+        }
     }
 
     /// The sequence the next answer must carry.
     pub fn next_output(&self) -> u64 {
-        self.next_output.load(Ordering::Relaxed)
+        self.next_output
     }
 
     /// Publishes the answer to input block `seq`, tagged with the epoch that block was sent in. Answers go out in order,
-    /// one per input block; false when `seq` is not the next.
-    pub fn publish_output(&self, seq: u64, epoch: u32, frames: &Block, meta: &BlockMeta) -> bool {
-        if seq != self.next_output.load(Ordering::Relaxed) {
+    /// one per input block; false when `seq` is not the next. `&mut self` keeps a second thread from interleaving writes
+    /// into one slot.
+    pub fn publish_output(
+        &mut self,
+        seq: u64,
+        epoch: u32,
+        frames: &Block,
+        meta: &BlockMeta,
+    ) -> bool {
+        if seq != self.next_output {
             return false;
         }
         let slot = slot_of(seq);
@@ -618,19 +655,19 @@ impl HelperRing {
         // Invalidate first, so a host mid-copy of the block this slot held a lap ago sees the change.
         header.sequence.store(EMPTY_SEQUENCE, Ordering::Relaxed);
         fence(Ordering::Release);
-        // SAFETY: in range.
-        unsafe { copy_to_mapping(frames, self.view.out_data(slot)) };
+        copy_to_mapping(frames, self.view.out_data(slot));
         store_meta(header, epoch, meta);
         header.sequence.store(seq, Ordering::Release);
         self.view
             .header()
             .output_write
             .store(seq + 1, Ordering::Release);
-        self.next_output.store(seq + 1, Ordering::Relaxed);
+        self.next_output = seq + 1;
         true
     }
 
-    /// Moves the heartbeat on. Returns the new value.
+    /// Moves the heartbeat on. Returns the new value. Call it from the thread that runs the plug-in, so a hung plug-in
+    /// stops it.
     pub fn beat(&self) -> u64 {
         let beats = self.beats.fetch_add(1, Ordering::Relaxed) + 1;
         self.view.header().heartbeat.store(beats, Ordering::Relaxed);
@@ -644,7 +681,7 @@ struct Storage {
     ptr: *mut u8,
 }
 
-// SAFETY: a plain allocation, used only through atomics and the volatile copies.
+// SAFETY: a plain allocation, used only through atomic cells.
 unsafe impl Send for Storage {}
 unsafe impl Sync for Storage {}
 
@@ -686,8 +723,7 @@ impl OwnedRing {
         // SAFETY: the storage outlives the view through `_keep`; the contract of a single host is the caller's.
         let view = unsafe { View::open(self.storage.ptr, RING_BYTES, Some(self.storage.clone())) }
             .expect("own ring");
-        // SAFETY: `wrap` has no further requirements.
-        unsafe { HostRing::wrap(view) }.expect("own ring")
+        HostRing::wrap(view)
     }
 
     /// The helper end. Call it once.
@@ -717,6 +753,7 @@ impl OwnedRing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{sync::atomic::AtomicBool, time::Duration, time::Instant};
 
     fn pattern(seq: u64, scale: f32) -> Block {
         let mut block = [[0.0; 2]; BLOCK_FRAMES];
@@ -741,16 +778,16 @@ mod tests {
     }
 
     fn send(host: &mut HostRing, seq: u64) {
-        host.input_block_mut(seq)
-            .unwrap()
-            .copy_from_slice(&pattern(seq, 1.0));
-        assert!(host.publish_input(seq, &meta(seq)));
+        assert!(host.send_input(seq, &pattern(seq, 1.0), &meta(seq)));
     }
 
     /// The fake helper for one block: reads input `seq` and answers with it doubled.
-    fn answer(helper: &HelperRing, seq: u64) {
+    fn answer(helper: &mut HelperRing, seq: u64) {
         let mut input = [[0.0; 2]; BLOCK_FRAMES];
-        let info = helper.read_input(seq, &mut input).expect("input block");
+        let info = helper
+            .read_input(seq, &mut input)
+            .block()
+            .expect("input block");
         assert_eq!(info.meta, meta(seq));
         let mut output = input;
         for frame in &mut output {
@@ -758,6 +795,13 @@ mod tests {
             frame[1] *= 2.0;
         }
         assert!(helper.publish_output(seq, info.epoch, &output, &info.meta));
+    }
+
+    struct Stop<'a>(&'a AtomicBool);
+    impl Drop for Stop<'_> {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
     }
 
     #[test]
@@ -769,19 +813,18 @@ mod tests {
     #[test]
     fn ring_round_trips_blocks_in_order() {
         let ring = OwnedRing::new(48_000);
-        let (mut host, helper) = (ring.host(), ring.helper());
+        let (mut host, mut helper) = (ring.host(), ring.helper());
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
         // Three laps, with a pipeline of four blocks in flight.
         let total = 3 * RING_BLOCKS as u64 + 5;
         for seq in 0..total {
             send(&mut host, seq);
             assert_eq!(helper.input_available(seq), 1);
-            answer(&helper, seq);
+            answer(&mut helper, seq);
             if seq >= 3 {
                 let wanted = seq - 3;
                 assert!(host.read_output(wanted, 0, &mut scratch), "block {wanted}");
                 assert_eq!(scratch, pattern(wanted, 2.0));
-                assert_eq!(host.output_meta(wanted), meta(wanted));
             }
         }
         assert_eq!(host.next_input(), total);
@@ -791,20 +834,40 @@ mod tests {
     #[test]
     fn blocks_must_go_out_in_order() {
         let ring = OwnedRing::new(44_100);
-        let (mut host, helper) = (ring.host(), ring.helper());
-        assert!(host.input_block_mut(1).is_none());
-        assert!(!host.publish_input(1, &meta(1)));
+        let (mut host, mut helper) = (ring.host(), ring.helper());
+        let frames = pattern(1, 1.0);
+        assert!(!host.send_input(1, &frames, &meta(1)), "skipping ahead");
         send(&mut host, 0);
-        assert!(host.input_block_mut(0).is_none(), "already published");
+        assert!(!host.send_input(0, &frames, &meta(0)), "already published");
         let block = [[0.0; 2]; BLOCK_FRAMES];
         assert!(!helper.publish_output(1, 0, &block, &meta(1)));
         assert!(helper.publish_output(0, 0, &block, &meta(0)));
+        assert!(!helper.publish_output(0, 0, &block, &meta(0)));
+    }
+
+    #[test]
+    fn a_published_slot_always_holds_the_samples_just_sent() {
+        // After a full lap the slot still holds the previous lap's samples until the next send overwrites them whole.
+        let ring = OwnedRing::new(48_000);
+        let (mut host, mut helper) = (ring.host(), ring.helper());
+        for seq in 0..RING_BLOCKS as u64 + 3 {
+            send(&mut host, seq);
+            let mut input = [[0.0; 2]; BLOCK_FRAMES];
+            let info = helper.read_input(seq, &mut input).block().unwrap();
+            assert_eq!(input, pattern(seq, 1.0), "block {seq}");
+            assert_eq!(info.meta, meta(seq));
+            answer_without_check(&mut helper, seq);
+        }
+    }
+
+    fn answer_without_check(helper: &mut HelperRing, seq: u64) {
+        assert!(helper.publish_output(seq, 0, &[[0.0; 2]; BLOCK_FRAMES], &BlockMeta::default()));
     }
 
     #[test]
     fn output_not_ready_until_published() {
         let ring = OwnedRing::new(48_000);
-        let (mut host, helper) = (ring.host(), ring.helper());
+        let (mut host, mut helper) = (ring.host(), ring.helper());
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
         // Nothing sent.
         assert!(!host.output_ready(0, 0));
@@ -814,7 +877,7 @@ mod tests {
         assert!(!host.output_ready(0, 0));
         assert!(!host.read_output(0, 0, &mut scratch));
         assert_eq!(helper.input_available(0), 1);
-        answer(&helper, 0);
+        answer(&mut helper, 0);
         assert!(host.output_ready(0, 0));
         assert!(host.read_output(0, 0, &mut scratch));
         // The next block is still not there.
@@ -825,11 +888,11 @@ mod tests {
     #[test]
     fn ring_reader_refuses_hostile_indices() {
         let ring = OwnedRing::new(48_000);
-        let (mut host, helper) = (ring.host(), ring.helper());
+        let (mut host, mut helper) = (ring.host(), ring.helper());
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
         for seq in 0..4 {
             send(&mut host, seq);
-            answer(&helper, seq);
+            answer(&mut helper, seq);
         }
         let seq = 2;
         assert!(host.read_output(seq, 0, &mut scratch));
@@ -851,17 +914,13 @@ mod tests {
         ring.header().output_write.store(real, Ordering::Release);
         assert!(host.read_output(seq, 0, &mut scratch));
 
-        // Sequences that were never sent, or are older than the ring.
+        // Sequences that were never sent.
         for asked in [u64::MAX, 4, 5, 1000] {
             assert!(!host.read_output(asked, 0, &mut scratch), "asked {asked}");
         }
 
         // A block whose own sequence is another one's (a stale lap, or a lie).
-        assert!(helper.publish_output(4, 0, &pattern(4, 2.0), &meta(4)));
-        ring.header().output_write.store(real, Ordering::Release);
         let other = seq + RING_BLOCKS as u64;
-        ring.header().output_write.store(real, Ordering::Release);
-        // Overwrite slot of `seq` with a block that claims to be `other`.
         let slot_header = host.control.view.out_header(slot_of(seq));
         slot_header.sequence.store(other, Ordering::Release);
         assert!(!host.read_output(seq, 0, &mut scratch));
@@ -882,6 +941,33 @@ mod tests {
         assert!(
             host.read_output(seq, 7, &mut scratch),
             "the block's own epoch is what the host compares against"
+        );
+    }
+
+    #[test]
+    fn a_block_older_than_the_ring_is_refused_even_if_forged_valid() {
+        let ring = OwnedRing::new(48_000);
+        let (mut host, mut helper) = (ring.host(), ring.helper());
+        let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
+        let total = RING_BLOCKS as u64 + 5;
+        for seq in 0..total {
+            send(&mut host, seq);
+            answer(&mut helper, seq);
+        }
+        // The oldest block still inside the window is readable.
+        let oldest = total - RING_BLOCKS as u64;
+        // Its slot was lapped by `oldest + 66`, which has not been sent; so it is intact.
+        assert!(host.read_output(oldest, 0, &mut scratch));
+        // One older is outside the window. Forge everything the other checks look at, so only the window can refuse it.
+        let stale = oldest - 1;
+        let header = host.control.view.out_header(slot_of(stale));
+        header.sequence.store(stale, Ordering::Release);
+        header.epoch.store(0, Ordering::Release);
+        ring.header().output_write.store(total, Ordering::Release);
+        assert!(!host.output_ready(stale, 0));
+        assert_eq!(
+            host.read_output_status(stale, 0, &mut scratch),
+            OutputRead::NotReady
         );
     }
 
@@ -966,7 +1052,6 @@ mod tests {
         // The host's own counters are unaffected, and it keeps publishing the right values.
         assert_eq!(host.next_input(), 1);
         assert_eq!(host.epoch(), 0);
-        assert!(host.input_block_mut(1).is_some());
         send(&mut host, 1);
         assert_eq!(ring.header().input_write.load(Ordering::Relaxed), 2);
         assert_eq!(host.begin_flush(), 1);
@@ -981,22 +1066,47 @@ mod tests {
         ring.header().input_write.store(u64::MAX, Ordering::Release);
         assert_eq!(helper.input_available(0), RING_BLOCKS as u64);
         assert_eq!(helper.input_available(u64::MAX), 0);
+        assert_eq!(helper.resync_point(), u64::MAX - (RING_BLOCKS as u64 - 1));
         ring.header().input_write.store(3, Ordering::Release);
         assert_eq!(helper.input_available(10), 0);
+        assert_eq!(helper.resync_point(), 0);
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
-        // Claimed published, but the block says otherwise.
-        assert!(helper.read_input(2, &mut scratch).is_none());
-        assert!(helper.read_input(u64::MAX, &mut scratch).is_none());
-        assert!(helper.read_input(5, &mut scratch).is_none());
+        // Claimed published, but the slot says otherwise.
+        assert_eq!(helper.read_input(2, &mut scratch), InputRead::Lapped);
+        // Not claimed.
+        assert_eq!(helper.read_input(3, &mut scratch), InputRead::NotYet);
+        assert_eq!(helper.read_input(u64::MAX, &mut scratch), InputRead::NotYet);
+    }
+
+    #[test]
+    fn a_lapped_helper_is_told_and_can_resynchronise() {
+        let ring = OwnedRing::new(48_000);
+        let (mut host, helper) = (ring.host(), ring.helper());
+        let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
+        // The host runs 71 blocks ahead of a helper that read nothing.
+        for seq in 0..71 {
+            send(&mut host, seq);
+        }
+        assert_eq!(helper.read_input(0, &mut scratch), InputRead::Lapped);
+        assert_eq!(helper.read_input(4, &mut scratch), InputRead::Lapped);
+        let resume = helper.resync_point();
+        assert_eq!(resume, 71 - (RING_BLOCKS as u64 - 1));
+        let info = helper.read_input(resume, &mut scratch).block().unwrap();
+        assert_eq!(scratch, pattern(resume, 1.0));
+        assert_eq!(info.meta, meta(resume));
+        assert_eq!(
+            helper.read_input(70, &mut scratch).block().unwrap().epoch,
+            0
+        );
     }
 
     #[test]
     fn helper_rewrite_during_read_is_refused() {
         let ring = OwnedRing::new(48_000);
-        let (mut host, helper) = (ring.host(), ring.helper());
+        let (mut host, mut helper) = (ring.host(), ring.helper());
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
         send(&mut host, 0);
-        answer(&helper, 0);
+        answer(&mut helper, 0);
         assert!(host.read_output(0, 0, &mut scratch));
         let header = host.control.view.out_header(0);
 
@@ -1029,82 +1139,106 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_rewrite_never_yields_a_torn_block() {
-        // A fast helper laps one slot over and over: block 0, then RING_BLOCKS, then 2 * RING_BLOCKS, and so on, each
-        // filled with one value (its lap number) and published with the helper's protocol. The host asks for whichever
-        // block the helper has reached. A copy that is accepted must be one whole block of that lap; a half-old,
-        // half-new copy must be caught by the seqlock.
-        // Lap numbers wrap, so the helper can run for as long as the host reads. A copy would have to span 1,000 laps to
-        // see the same number twice, which it cannot.
-        const LAPS: u64 = 1_000;
-        struct Stop<'a>(&'a std::sync::atomic::AtomicBool);
-        impl Drop for Stop<'_> {
-            fn drop(&mut self) {
-                self.0.store(true, Ordering::Relaxed);
-            }
-        }
+    fn an_invalidated_input_slot_reads_as_lapped() {
         let ring = OwnedRing::new(48_000);
         let (mut host, helper) = (ring.host(), ring.helper());
-        for seq in 0..LAPS * RING_BLOCKS as u64 {
-            assert!(host.input_block_mut(seq).is_some());
-            assert!(host.publish_input(seq, &BlockMeta::default()));
-        }
-        let stop = std::sync::atomic::AtomicBool::new(false);
-        let lap = AtomicU64::new(0);
-        let (mut accepted, mut refused) = (0u64, 0u64);
+        send(&mut host, 0);
+        // The helper reads block 0 while the host (a lap later, in this forged case) starts writing over its slot.
+        let header = host.control.view.in_header(0);
+        let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
+        assert!(helper.read_input(0, &mut scratch).block().is_some());
+        header.sequence.store(EMPTY_SEQUENCE, Ordering::Release);
+        assert_eq!(helper.read_input(0, &mut scratch), InputRead::Lapped);
+    }
+
+    #[test]
+    fn concurrent_rewrite_is_caught_by_the_seqlock() {
+        // A buggy or hostile helper answers block t, then, a moment later and out of protocol, reuses the slot for block
+        // t + RING_BLOCKS (invalidating it first, as a seqlock writer does) without waiting for the host to send it. The
+        // host reads block t in a loop. A read that overlaps the reuse must be Torn, never accepted; one that does not
+        // is accepted, and then must hold exactly the answer. Sequences only grow, so a slot never returns to a value it
+        // had.
+        let ring = OwnedRing::new(48_000);
+        let (mut host, mut helper) = (ring.host(), ring.helper());
+        let announced = AtomicU64::new(0);
+        let stop = AtomicBool::new(false);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let (mut accepted, mut torn, mut trials) = (0u64, 0u64, 0u64);
         std::thread::scope(|scope| {
             let _stop = Stop(&stop);
             scope.spawn(|| {
-                let (view, header) = (&helper.view, helper.view.out_header(0));
-                let (mut count, mut jitter) = (0u64, 0x9E37_79B9u32);
+                let mut jitter = 0x9E37_79B9u32;
+                let mut t = 0u64;
                 while !stop.load(Ordering::Relaxed) {
-                    // A pause of random length, so some host copies finish between laps and some are overlapped.
+                    if announced.load(Ordering::Acquire) <= t {
+                        std::hint::spin_loop();
+                        continue;
+                    }
+                    let answer = [[t as f32; 2]; BLOCK_FRAMES];
+                    assert!(helper.publish_output(t, 0, &answer, &BlockMeta::default()));
+                    // A pause of random length, so the reuse lands at varying points of the host's loop.
                     jitter ^= jitter << 13;
                     jitter ^= jitter >> 17;
                     jitter ^= jitter << 5;
-                    for _ in 0..jitter % 3000 {
+                    for _ in 0..jitter % 2000 {
                         std::hint::spin_loop();
                     }
-                    let n = count % LAPS;
-                    count += 1;
-                    let seq = n * RING_BLOCKS as u64;
+                    let slot = slot_of(t);
+                    let header = helper.view.out_header(slot);
                     header.sequence.store(EMPTY_SEQUENCE, Ordering::Relaxed);
                     fence(Ordering::Release);
-                    let block = [[n as f32; 2]; BLOCK_FRAMES];
-                    // SAFETY: slot 0 is in range.
-                    unsafe { copy_to_mapping(&block, view.out_data(0)) };
-                    header.epoch.store(0, Ordering::Relaxed);
-                    header.sequence.store(seq, Ordering::Release);
-                    view.header().output_write.store(seq + 1, Ordering::Release);
-                    lap.store(n, Ordering::Release);
+                    copy_to_mapping(
+                        &[[-1.0 - t as f32; 2]; BLOCK_FRAMES],
+                        helper.view.out_data(slot),
+                    );
+                    header
+                        .sequence
+                        .store(t + RING_BLOCKS as u64, Ordering::Release);
+                    t += 1;
                 }
             });
             let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
-            let started = std::time::Instant::now();
-            while started.elapsed() < std::time::Duration::from_millis(500) {
-                let n = lap.load(Ordering::Acquire);
-                match host.read_output_status(n * RING_BLOCKS as u64, 0, &mut scratch) {
-                    OutputRead::Ready => {
-                        accepted += 1;
-                        assert!(
-                            scratch.iter().all(|frame| *frame == [n as f32; 2]),
-                            "an accepted block was torn or from another lap"
-                        );
+            let frames = [[0.0; 2]; BLOCK_FRAMES];
+            'trials: while trials < 20_000 && !(torn >= 25 && accepted > 0) {
+                let t = trials;
+                assert!(host.send_input(t, &frames, &BlockMeta::default()));
+                announced.store(t + 1, Ordering::Release);
+                let mut seen = false;
+                loop {
+                    if Instant::now() > deadline {
+                        break 'trials;
                     }
-                    _ => refused += 1,
+                    match host.read_output_status(t, 0, &mut scratch) {
+                        OutputRead::Ready => {
+                            seen = true;
+                            accepted += 1;
+                            assert!(
+                                scratch.iter().all(|frame| *frame == [t as f32; 2]),
+                                "an accepted block was torn or not the answer"
+                            );
+                        }
+                        OutputRead::Torn => {
+                            torn += 1;
+                            break;
+                        }
+                        OutputRead::NotReady if seen => break,
+                        OutputRead::NotReady => std::hint::spin_loop(),
+                        OutputRead::NonFinite => panic!("a finite answer read as non-finite"),
+                    }
                 }
+                trials += 1;
             }
         });
         assert!(
-            accepted > 0 && refused > 0,
-            "accepted {accepted}, refused {refused}: the test must exercise both paths"
+            torn > 0 && accepted > 0,
+            "{trials} trials: {accepted} accepted, {torn} torn; the test must exercise both paths"
         );
     }
 
     #[test]
     fn non_finite_output_is_refused_on_the_copy() {
         let ring = OwnedRing::new(48_000);
-        let (mut host, helper) = (ring.host(), ring.helper());
+        let (mut host, mut helper) = (ring.host(), ring.helper());
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
         for (seq, bad) in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY]
             .into_iter()
@@ -1143,15 +1277,34 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_flushes_leave_the_mapping_at_the_newest_epoch() {
+        let ring = OwnedRing::new(48_000);
+        let host = ring.host();
+        let helper = ring.helper();
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                let control = host.control();
+                scope.spawn(move || {
+                    for _ in 0..2_000 {
+                        control.begin_flush();
+                    }
+                });
+            }
+        });
+        assert_eq!(host.epoch(), 8_000);
+        assert_eq!(helper.flush_epoch(), 8_000);
+    }
+
+    #[test]
     fn a_flush_tags_later_blocks_with_the_new_epoch() {
         let ring = OwnedRing::new(48_000);
-        let (mut host, helper) = (ring.host(), ring.helper());
+        let (mut host, mut helper) = (ring.host(), ring.helper());
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
         send(&mut host, 0);
         host.begin_flush();
         send(&mut host, 1);
-        answer(&helper, 0);
-        answer(&helper, 1);
+        answer(&mut helper, 0);
+        answer(&mut helper, 1);
         // The block sent before the flush answers in the old epoch, and is not playable in the new one.
         assert!(!host.read_output(0, 1, &mut scratch));
         assert!(host.read_output(0, 0, &mut scratch));

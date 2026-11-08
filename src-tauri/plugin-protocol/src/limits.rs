@@ -67,7 +67,9 @@ pub const OFFLINE_BLOCK_TIMEOUT: Duration = Duration::from_secs(10);
 pub const fn pipeline_frames(callback_frames: usize) -> usize {
     let c = callback_frames;
     let widest = if c > BLOCK_FRAMES { c } else { BLOCK_FRAMES };
-    (c + widest).div_ceil(BLOCK_FRAMES) * BLOCK_FRAMES
+    c.saturating_add(widest)
+        .div_ceil(BLOCK_FRAMES)
+        .saturating_mul(BLOCK_FRAMES)
 }
 
 /// The longest latency in frames at `sample_rate`: `ceil(0.1 × rate)`. A [`Loaded`](crate::control::HelperMessage)

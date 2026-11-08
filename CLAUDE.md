@@ -23,8 +23,8 @@ npm run prepare:audio        # first-time setup; downloads pinned public audio
 npm run tauri -- dev
 npm test                     # Node resource tests, then Vitest
 npm run typecheck
-cargo test --locked --manifest-path src-tauri/Cargo.toml
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml
+cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
 node scripts/prepare-audio.mjs --offline
 node tests/desktop/parity-<name>.mjs   # from the checkout root, after the desktop test build
 ```

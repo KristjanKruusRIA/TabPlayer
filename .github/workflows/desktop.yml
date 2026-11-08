@@ -103,9 +103,9 @@ jobs:
           npm run typecheck
       - name: Native core, rendering, persistence and export tests
         run: |
-          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml
           cargo test --locked --manifest-path src-tauri/Cargo.toml --test audio_resources selected_real_100bar_fourtrack_resource_budget -- --ignored --nocapture
-          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          cargo fmt --all --manifest-path src-tauri/Cargo.toml --check
       - name: Make room for Linux shipping packages
         if: runner.os == 'Linux'
         run: |

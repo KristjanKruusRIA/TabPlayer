@@ -134,9 +134,11 @@ pub enum ErrorCode {
 }
 
 /// What the app sends. `Load` is the first message to an audio helper, `Probe` to a probing one.
+///
+/// The JSON is externally tagged (`{"probe":{"bundle":".."}}`, and a bare string for a message with no fields), so
+/// serde reads a body in one pass and never buffers it as a generic value first.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
-    tag = "type",
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
     deny_unknown_fields
@@ -165,7 +167,7 @@ pub enum HostMessage {
         component: Bytes,
         controller: Bytes,
     },
-    GetState {},
+    GetState,
     /// Sets one normalized parameter. The value is clamped to 0..=1 by the receiver; the id is checked against the
     /// plug-in's own parameter list, because VST3 parameter IDs are arbitrary 32-bit numbers.
     SetParameter {
@@ -176,14 +178,13 @@ pub enum HostMessage {
         title: String,
         near: Option<Rect>,
     },
-    CloseEditor {},
-    Shutdown {},
+    CloseEditor,
+    Shutdown,
 }
 
 /// What the helper sends.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
-    tag = "type",
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
     deny_unknown_fields
@@ -209,8 +210,8 @@ pub enum HelperMessage {
     EditorOpened {
         window: u64,
     },
-    EditorClosed {},
-    StateDirty {},
+    EditorClosed,
+    StateDirty,
     Error {
         code: ErrorCode,
         /// At most [`MAX_DETAIL_CHARS`] characters.
@@ -228,8 +229,8 @@ impl HelperMessage {
     }
 }
 
-/// A message that can be read from a frame: it is checked as soon as it is parsed.
-pub trait Message: DeserializeOwned {
+/// A message that can travel in a frame: it is checked before it is written and as soon as it is parsed.
+pub trait Message: Serialize + DeserializeOwned {
     fn validate(&self) -> Result<(), String>;
 }
 
@@ -283,17 +284,13 @@ impl Message for HostMessage {
                 }
             }
             HostMessage::OpenEditor { title, .. } => {
-                if title.chars().count() <= MAX_TITLE_CHARS
-                    && valid_text(title, MAX_TITLE_CHARS, true)
-                {
+                if valid_text(title, MAX_TITLE_CHARS, true) {
                     Ok(())
                 } else {
                     Err("Invalid editor title.".into())
                 }
             }
-            HostMessage::GetState {} | HostMessage::CloseEditor {} | HostMessage::Shutdown {} => {
-                Ok(())
-            }
+            HostMessage::GetState | HostMessage::CloseEditor | HostMessage::Shutdown => Ok(()),
         }
     }
 }
@@ -329,8 +326,8 @@ impl Message for HelperMessage {
             }
             HelperMessage::LatencyChanged { .. }
             | HelperMessage::EditorOpened { .. }
-            | HelperMessage::EditorClosed {}
-            | HelperMessage::StateDirty {} => Ok(()),
+            | HelperMessage::EditorClosed
+            | HelperMessage::StateDirty => Ok(()),
         }
     }
 }
@@ -385,8 +382,14 @@ impl From<io::Error> for FrameError {
 /// How much of a body is read at a time. The buffer grows with the bytes that arrive, never to the announced length.
 const READ_CHUNK: usize = 64 << 10;
 
-/// Writes one frame. The prefix and body go out in a single `write_all`, so frames from one writer never interleave.
-pub fn write_frame<W: Write>(writer: &mut W, message: &impl Serialize) -> Result<(), FrameError> {
+/// Writes one frame, after validating the message, so a correct sender never produces a frame its peer refuses. The
+/// prefix and body go out in a single `write_all`, so frames from one writer never interleave.
+pub fn write_frame<W: Write, T: Message>(writer: &mut W, message: &T) -> Result<(), FrameError> {
+    message.validate().map_err(FrameError::Invalid)?;
+    write_unchecked(writer, message)
+}
+
+fn write_unchecked<W: Write>(writer: &mut W, message: &impl Serialize) -> Result<(), FrameError> {
     let body =
         serde_json::to_vec(message).map_err(|error| FrameError::Malformed(error.to_string()))?;
     if body.len() > MAX_FRAME_BYTES {
@@ -429,6 +432,11 @@ pub fn read_frame_limited<T: Message>(
     while body.len() < length {
         let start = body.len();
         let end = start + READ_CHUNK.min(length - start);
+        if body.capacity() < end {
+            // Grow geometrically but never past the announced length, so a 12 MiB frame does not reserve 16 MiB.
+            let target = (start * 2).max(end).min(length);
+            body.reserve_exact(target - start);
+        }
         body.resize(end, 0);
         reader.read_exact(&mut body[start..end]).map_err(|error| {
             if error.kind() == io::ErrorKind::UnexpectedEof {
@@ -442,6 +450,32 @@ pub fn read_frame_limited<T: Message>(
         serde_json::from_slice(&body).map_err(|error| FrameError::Malformed(error.to_string()))?;
     message.validate().map_err(FrameError::Invalid)?;
     Ok(message)
+}
+
+/// Reads and drops `length` bytes of a frame body, in a fixed buffer, so the stream stays aligned on the next frame.
+///
+/// After [`FrameError::TooLarge`] from [`read_frame_limited`], call it with the length in the error when that is at most
+/// [`MAX_FRAME_BYTES`] (a reply that outlived its request, say): the stream is usable again. A length past the cap is
+/// refused here as well, and then the stream cannot be resynchronised, so the helper is killed. The same goes for
+/// `Closed`, `Truncated` and `Io`. `Malformed` and `Invalid` consumed a whole frame, and the stream is fine.
+pub fn discard_frame(reader: &mut impl Read, length: usize) -> Result<(), FrameError> {
+    if length > MAX_FRAME_BYTES {
+        return Err(FrameError::TooLarge(length));
+    }
+    let mut buffer = [0u8; 8192];
+    let mut left = length;
+    while left > 0 {
+        let chunk = left.min(buffer.len());
+        reader.read_exact(&mut buffer[..chunk]).map_err(|error| {
+            if error.kind() == io::ErrorKind::UnexpectedEof {
+                FrameError::Truncated
+            } else {
+                FrameError::Io(error)
+            }
+        })?;
+        left -= chunk;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -482,7 +516,7 @@ mod tests {
                 component: vec![9; 100].into(),
                 controller: vec![8; 10].into(),
             },
-            HostMessage::GetState {},
+            HostMessage::GetState,
             HostMessage::SetParameter {
                 id: u32::MAX,
                 value: 0.25,
@@ -500,8 +534,8 @@ mod tests {
                 title: String::new(),
                 near: None,
             },
-            HostMessage::CloseEditor {},
-            HostMessage::Shutdown {},
+            HostMessage::CloseEditor,
+            HostMessage::Shutdown,
         ]
     }
 
@@ -526,8 +560,8 @@ mod tests {
             HelperMessage::EditorOpened {
                 window: 0xdead_beef,
             },
-            HelperMessage::EditorClosed {},
-            HelperMessage::StateDirty {},
+            HelperMessage::EditorClosed,
+            HelperMessage::StateDirty,
             HelperMessage::error(ErrorCode::Unreadable, "it did not load"),
         ]
     }
@@ -564,15 +598,12 @@ mod tests {
             controller: Vec::new().into(),
         })
         .unwrap();
-        assert_eq!(
-            json,
-            r#"{"type":"setState","component":"+/8=","controller":""}"#
-        );
+        assert_eq!(json, r#"{"setState":{"component":"+/8=","controller":""}}"#);
         let json = serde_json::to_string(&HelperMessage::EditorOpened { window: 7 }).unwrap();
-        assert_eq!(json, r#"{"type":"editorOpened","window":7}"#);
+        assert_eq!(json, r#"{"editorOpened":{"window":7}}"#);
         assert_eq!(
-            serde_json::to_string(&HostMessage::Shutdown {}).unwrap(),
-            r#"{"type":"shutdown"}"#
+            serde_json::to_string(&HostMessage::Shutdown).unwrap(),
+            r#""shutdown""#
         );
         let load = serde_json::to_value(&host_messages()[1]).unwrap();
         for key in [
@@ -582,41 +613,45 @@ mod tests {
             "outputEvent",
             "appPid",
         ] {
-            assert!(load.get(key).is_some(), "{key}");
+            assert!(load["load"].get(key).is_some(), "{key}");
         }
     }
 
     #[test]
     fn messages_refuse_unknown_fields_and_long_names() {
-        // Unknown fields, in struct variants, unit-like variants, nested structs and unknown variants.
+        // Unknown fields, in struct variants, unit variants, nested structs and unknown variants.
         for json in [
-            r#"{"type":"probe","bundle":"a","extra":1}"#,
-            r#"{"type":"shutdown","extra":1}"#,
-            r#"{"type":"getState","extra":true}"#,
-            r#"{"type":"openEditor","title":"","near":{"x":0,"y":0,"width":1,"height":1,"z":0}}"#,
-            r#"{"type":"setParameter","id":1,"value":0.5,"extra":0}"#,
-            r#"{"type":"nope"}"#,
+            r#"{"probe":{"bundle":"a","extra":1}}"#,
+            r#"{"shutdown":{"extra":1}}"#,
+            r#"{"getState":{}}"#,
+            r#"{"openEditor":{"title":"","near":{"x":0,"y":0,"width":1,"height":1,"z":0}}}"#,
+            r#"{"setParameter":{"id":1,"value":0.5,"extra":0}}"#,
+            r#"{"nope":{}}"#,
+            r#"{"probe":{"bundle":"a"},"shutdown":null}"#,
             r#"{"bundle":"a"}"#,
-            r#"{"type":"setState","component":"AAAA"}"#,
-            r#"{"type":"setState","component":"not base64!","controller":""}"#,
+            r#"{"setState":{"component":"AAAA"}}"#,
+            r#"{"setState":{"component":"not base64!","controller":""}}"#,
         ] {
             assert!(serde_json::from_str::<HostMessage>(json).is_err(), "{json}");
         }
         for json in [
-            r#"{"type":"editorClosed","extra":1}"#,
-            r#"{"type":"stateDirty","extra":1}"#,
-            r#"{"type":"error","code":"internal","detail":"","extra":1}"#,
-            r#"{"type":"error","code":"unknownCode","detail":""}"#,
-            r#"{"type":"latencyChanged","latency":-1}"#,
+            r#"{"editorClosed":{"extra":1}}"#,
+            r#"{"stateDirty":{"extra":1}}"#,
+            r#"{"error":{"code":"internal","detail":"","extra":1}}"#,
+            r#"{"error":{"code":"unknownCode","detail":""}}"#,
+            r#"{"latencyChanged":{"latency":-1}}"#,
         ] {
             assert!(
                 serde_json::from_str::<HelperMessage>(json).is_err(),
                 "{json}"
             );
         }
+        for json in [r#""shutdown""#, r#""getState""#, r#""closeEditor""#] {
+            assert!(serde_json::from_str::<HostMessage>(json).is_ok(), "{json}");
+        }
         let class_json = |extra: &str| {
             format!(
-                r#"{{"type":"loaded","latency":0,"mono":false,"class":{{"classId":"{CLASS}","name":"A","vendor":"","version":"","subcategories":""{extra}}}}}"#
+                r#"{{"loaded":{{"latency":0,"mono":false,"class":{{"classId":"{CLASS}","name":"A","vendor":"","version":"","subcategories":""{extra}}}}}}}"#
             )
         };
         assert!(serde_json::from_str::<HelperMessage>(&class_json("")).is_ok());
@@ -625,7 +660,7 @@ mod tests {
         // Long names and details, refused when a frame carries them.
         let frame = |message: &HelperMessage| {
             let mut wire = Vec::new();
-            write_frame(&mut wire, message).unwrap();
+            write_unchecked(&mut wire, message).unwrap();
             read_frame::<HelperMessage>(&mut &wire[..])
         };
         let mut long = class();
@@ -683,7 +718,7 @@ mod tests {
     fn host_messages_are_checked_on_arrival() {
         let frame = |message: &HostMessage| {
             let mut wire = Vec::new();
-            write_frame(&mut wire, message).unwrap();
+            write_unchecked(&mut wire, message).unwrap();
             read_frame::<HostMessage>(&mut &wire[..])
         };
         let load = |edit: &dyn Fn(&mut HostMessage)| {
@@ -823,10 +858,92 @@ mod tests {
             controller: Vec::new().into(),
         };
         let mut wire = Vec::new();
-        write_frame(&mut wire, &over).unwrap();
+        write_unchecked(&mut wire, &over).unwrap();
         assert!(matches!(
             read_frame::<HelperMessage>(&mut &wire[..]),
             Err(FrameError::Invalid(_))
+        ));
+    }
+
+    #[test]
+    fn write_frame_refuses_what_the_reader_would() {
+        let mut wire = Vec::new();
+        let bad = [
+            HostMessage::SetParameter {
+                id: 1,
+                value: f64::NAN,
+            },
+            HostMessage::Probe {
+                bundle: String::new(),
+            },
+            HostMessage::OpenEditor {
+                title: "t".repeat(MAX_TITLE_CHARS + 1),
+                near: None,
+            },
+        ];
+        for message in &bad {
+            assert!(matches!(
+                write_frame(&mut wire, message),
+                Err(FrameError::Invalid(_))
+            ));
+        }
+        let mut long = class();
+        long.name = "x".repeat(MAX_NAME_CHARS + 1);
+        assert!(matches!(
+            write_frame(
+                &mut wire,
+                &HelperMessage::Loaded {
+                    latency: 0,
+                    class: long,
+                    mono: false
+                }
+            ),
+            Err(FrameError::Invalid(_))
+        ));
+        assert!(matches!(
+            write_frame(
+                &mut wire,
+                &HelperMessage::Error {
+                    code: ErrorCode::Internal,
+                    detail: "d".repeat(MAX_DETAIL_CHARS + 1)
+                }
+            ),
+            Err(FrameError::Invalid(_))
+        ));
+        assert!(wire.is_empty(), "nothing is written for a refused message");
+    }
+
+    #[test]
+    fn a_refused_frame_can_be_discarded_to_keep_the_stream_aligned() {
+        let mut wire = Vec::new();
+        write_frame(
+            &mut wire,
+            &HostMessage::SetState {
+                component: vec![0; 5000].into(),
+                controller: Vec::new().into(),
+            },
+        )
+        .unwrap();
+        write_frame(&mut wire, &HostMessage::GetState).unwrap();
+        let mut reader = &wire[..];
+        let Err(FrameError::TooLarge(length)) =
+            read_frame_limited::<HostMessage>(&mut reader, 1000)
+        else {
+            panic!("expected TooLarge");
+        };
+        discard_frame(&mut reader, length).unwrap();
+        assert_eq!(
+            read_frame::<HostMessage>(&mut reader).unwrap(),
+            HostMessage::GetState
+        );
+        // A length past the cap cannot be drained, and a short stream is reported.
+        assert!(matches!(
+            discard_frame(&mut &b""[..], MAX_FRAME_BYTES + 1),
+            Err(FrameError::TooLarge(_))
+        ));
+        assert!(matches!(
+            discard_frame(&mut &[0u8; 10][..], 11),
+            Err(FrameError::Truncated)
         ));
     }
 }

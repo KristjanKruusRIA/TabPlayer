@@ -54,3 +54,11 @@ All runs on Windows 11, x86_64-pc-windows-msvc, `CARGO_TARGET_DIR=E:/cargo-targe
   - Other unit tests may still fail off Windows for other reasons. One example is the library's handling of the fake `.vst3` files the rigs write. Only the platform gate in the service was looked at.
 - **M2 relies on the track's last `SetTrackSound`.** A committed save that is undone before any prepare is not taken as the baseline. The next `ensure` sends the document's state back to the helper, as it did before.
 - **Not rerun:** `plugin_helper` and `plugin_library` ignored targets, the full `--workspace` test run, the desktop drivers, and the packaged Tauri build.
+
+### Re-review of these fixes
+
+A fresh re-review approved M1, M2, L1, L2 and L4. It found three low-severity edge cases in the pending save (M2):
+
+- **Fixed:** a Save that found nothing new left an old pending save behind. The next `ensure` then sent that state again, and a later redo naming it could be adopted while the helper held another. Save now drops the pending save when there is nothing to save.
+- **Limit:** a Save whose edit is refused, followed by any `ensure` (for example the mix change a revision conflict brings), loses the change made in the editor. `ensure` sends the document's state, and the next Save then offers nothing. The code before these fixes did the same. The check that causes it is needed for undo, so it stays.
+- **Limit:** after undoing a committed save, a close or Save in the few milliseconds before the undo's mix change runs records the undone state again.

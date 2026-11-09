@@ -2163,6 +2163,13 @@ impl PluginService {
             .as_deref()
             .unwrap_or(&current_state_asset_id);
         if expected_id == state_id {
+            // Nothing to save: a pending save the document never took is dropped, so `ensure` does not send its state again
+            // and a later redo naming it is not adopted while the helper holds another (final re-review Low 2).
+            self.with_entry(&key, &session, |entry| {
+                if let SlotEntry::Ready { saved_state_id, .. } = entry {
+                    *saved_state_id = None;
+                }
+            });
             return Ok(None);
         }
 

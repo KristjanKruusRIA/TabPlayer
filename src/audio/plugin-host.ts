@@ -118,6 +118,10 @@ export const pluginEditorOpen = (documentId: string, trackId: string, title: str
   return invoke<number>('plugin_editor_open', { documentId, trackId, title });
 };
 
+/** Drops a staged state the document will not take, as the controller does for a refused edit. */
+export const pluginCancelAsset = (documentId: string, token: string) =>
+  invoke<boolean>('cancel_asset', { documentId, token });
+
 export const pluginEditorSave = (documentId: string, trackId: string) =>
   invoke<PluginEditorSaveResult | null>('plugin_editor_save', { documentId, trackId });
 

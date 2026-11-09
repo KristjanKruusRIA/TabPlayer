@@ -5,6 +5,7 @@ import { BusyFieldset, busyGuard } from '../ui';
 import {
   localizePluginError,
   noticeMessageKey,
+  pluginCancelAsset,
   pluginChoose,
   pluginConsentGrant,
   onPluginEditorClosed,
@@ -228,8 +229,13 @@ export function PluginSlotPanel({
     if (!slot) return;
     pluginEditorSave(documentId, trackId).then(
       result => {
-        // Nothing came back, or the same state came back: nothing changed, so nothing is recorded.
-        if (!result || result.state === slot.state) return;
+        // Nothing came back, or the same state came back: nothing changed, so nothing is recorded. A staged state is
+        // dropped, or it stays until the document closes (final review L1).
+        if (!result) return;
+        if (result.state === slot.state) {
+          void pluginCancelAsset(documentId, result.assetToken).catch(() => {});
+          return;
+        }
         setError(null);
         onChange({ ...slot, state: result.state }, result.assetToken);
       },

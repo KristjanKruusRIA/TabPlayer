@@ -410,9 +410,12 @@ fn plain_drive_path(verbatim: &str) -> Option<&str> {
 
 /// A canonical Windows path without its `\\?\` prefix when that is safe ([`plain_drive_path`]).
 fn simplify(path: PathBuf) -> PathBuf {
-    #[cfg(windows)]
-    if let Some(plain) = path.to_str().and_then(plain_drive_path) {
-        return PathBuf::from(plain);
+    // A `cfg!` test, not a `#[cfg]`: off Windows `plain_drive_path` and `reserved_device` stay in use, so they build there
+    // without `dead_code` warnings (final review L4).
+    if cfg!(windows) {
+        if let Some(plain) = path.to_str().and_then(plain_drive_path) {
+            return PathBuf::from(plain);
+        }
     }
     path
 }

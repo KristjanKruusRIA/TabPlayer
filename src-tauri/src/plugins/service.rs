@@ -275,6 +275,13 @@ pub trait Launcher: Send + Sync {
         bundle: &Path,
         timeout: Duration,
     ) -> Result<Vec<ClassInfo>, HelperError>;
+
+    /// Whether this launcher can host plug-ins here. The real helper hosts them only on Windows, so elsewhere every active
+    /// slot is `UnsupportedPlatform` and nothing is launched. A launcher that runs no process (the tests' fake) can say
+    /// yes on every platform, so the service's own rules are tested on all of them (final review L4).
+    fn hosts_plugins(&self) -> bool {
+        cfg!(windows)
+    }
 }
 
 struct RealSession {
@@ -508,6 +515,10 @@ enum SlotEntry {
         editor_open: bool,
         opened_hwnd: Option<u64>,
         baseline_state_id: Option<String>,
+        /// A state the editor saved that the document has not yet been seen to hold (final review M2). The helper holds
+        /// it, but its edit commits later, in the frontend, and can be refused. `state_asset_id` and the baseline move to
+        /// it only once the document names it, so a refused save is offered again by the next save or the close.
+        saved_state_id: Option<String>,
         /// A `SetState` is in flight with the lock released: the entry stays, so editor commands and a second `ensure`
         /// still find the helper (review M2), and nobody sends another state meanwhile.
         busy: bool,
@@ -603,6 +614,7 @@ enum Found {
     Ready {
         session: Arc<dyn HelperSession>,
         state_asset_id: String,
+        saved_state_id: Option<String>,
         busy: bool,
         state_retry: Option<StateRetry>,
     },
@@ -847,9 +859,10 @@ impl PluginService {
             active_count += 1;
             active_tracks.insert(track_id.clone(), slot.class_id.clone());
 
-            // 2. not Windows: UnsupportedPlatform
-            #[cfg(not(windows))]
-            {
+            // 2. not Windows: UnsupportedPlatform. The launcher says so ([`Launcher::hosts_plugins`]): a run-time test, so the
+            // rest of the loop is reachable code off Windows too, and the tests' fake launcher hosts everywhere (final
+            // review L4).
+            if !self.launcher.hosts_plugins() {
                 self.record_status(
                     document_id,
                     &track_id,
@@ -976,12 +989,14 @@ impl PluginService {
                 Some(SlotEntry::Ready {
                     session,
                     state_asset_id,
+                    saved_state_id,
                     busy,
                     state_retry,
                     ..
                 }) => Found::Ready {
                     session: session.clone(),
                     state_asset_id: state_asset_id.clone(),
+                    saved_state_id: saved_state_id.clone(),
                     busy: *busy,
                     state_retry: state_retry.clone(),
                 },
@@ -1028,6 +1043,7 @@ impl PluginService {
                 Found::Ready {
                     session,
                     state_asset_id,
+                    saved_state_id,
                     busy,
                     state_retry,
                 } => {
@@ -1087,7 +1103,11 @@ impl PluginService {
                         results.push((track_id, Ok(plan)));
                         continue;
                     } else {
-                        let needs_state = state_asset_id != slot.state;
+                        // The document now names the state the editor saved: the helper holds it already (final
+                        // review M2). Any other state saved from the editor is one the document does not hold.
+                        let adopt = saved_state_id.as_deref() == Some(slot.state.as_str());
+                        let needs_state =
+                            !adopt && (state_asset_id != slot.state || saved_state_id.is_some());
                         let waiting = state_retry.as_ref().is_some_and(|retry| {
                             retry.state_id == slot.state && Instant::now() < retry.at
                         });
@@ -1096,12 +1116,20 @@ impl PluginService {
                             if let Some(SlotEntry::Ready {
                                 last_latency,
                                 state_retry,
+                                state_asset_id,
+                                baseline_state_id,
+                                saved_state_id,
                                 ..
                             }) = inner.slots.get_mut(&key)
                             {
                                 *last_latency = plan.latency;
                                 if !needs_state {
                                     *state_retry = None;
+                                }
+                                if adopt {
+                                    *state_asset_id = slot.state.clone();
+                                    *baseline_state_id = Some(slot.state.clone());
+                                    *saved_state_id = None;
                                 }
                             }
                             Self::record_status_inner(
@@ -1261,6 +1289,7 @@ impl PluginService {
                 session: current,
                 state_asset_id,
                 baseline_state_id,
+                saved_state_id,
                 busy,
                 pending,
                 state_retry,
@@ -1278,6 +1307,8 @@ impl PluginService {
                 Ok(()) => {
                     *state_asset_id = state_id.clone();
                     *baseline_state_id = Some(state_id.clone());
+                    // The helper no longer holds what the editor saved.
+                    *saved_state_id = None;
                     *state_retry = None;
                     Delivery::Applied
                 }
@@ -1407,6 +1438,7 @@ impl PluginService {
                                 } else {
                                     Some(slot.state.clone())
                                 },
+                                saved_state_id: None,
                                 busy: false,
                                 pending: None,
                                 state_retry: None,
@@ -1632,8 +1664,8 @@ impl PluginService {
             }
             active_count += 1;
 
-            #[cfg(not(windows))]
-            {
+            // Not Windows: as in `ensure`, the launcher says so (final review L4).
+            if !self.launcher.hosts_plugins() {
                 warnings.push(TrackPluginStatus {
                     track_id: request.track_id.clone(),
                     class_id: slot.class_id.clone(),
@@ -1915,6 +1947,56 @@ impl PluginService {
         }
     }
 
+    /// Makes a state the editor saved the slot's state and baseline once the document holds it (final review M2). The
+    /// save's edit is a `SetTrackSound` on this track, so the track's last one names the state exactly when the edit
+    /// was committed and is not undone. Neither lock is held while the other is taken.
+    fn confirm_saved(
+        &self,
+        document_id: &str,
+        track_id: &str,
+        workspace: &Mutex<DocumentWorkspace>,
+    ) {
+        let found = {
+            let inner = lock(&self.inner);
+            Self::current_key(&inner, document_id, track_id).and_then(|key| {
+                match inner.slots.get(&key) {
+                    Some(SlotEntry::Ready {
+                        session,
+                        saved_state_id: Some(saved),
+                        ..
+                    }) => Some((key.clone(), session.clone(), saved.clone())),
+                    _ => None,
+                }
+            })
+        };
+        let Some((key, session, saved)) = found else {
+            return;
+        };
+        let holds = workspace
+            .lock()
+            .ok()
+            .and_then(|ws| ws.track_plugin_slot(document_id, track_id).ok().flatten())
+            .is_some_and(|slot| slot.state == saved);
+        if !holds {
+            return;
+        }
+        self.with_entry(&key, &session, |entry| {
+            if let SlotEntry::Ready {
+                state_asset_id,
+                baseline_state_id,
+                saved_state_id,
+                ..
+            } = entry
+            {
+                if saved_state_id.as_deref() == Some(saved.as_str()) {
+                    *state_asset_id = saved.clone();
+                    *baseline_state_id = Some(saved);
+                    *saved_state_id = None;
+                }
+            }
+        });
+    }
+
     pub fn editor_open(
         &self,
         document_id: &str,
@@ -1958,7 +2040,7 @@ impl PluginService {
             None
         };
 
-        #[cfg(windows)]
+        // A no-op off Windows; called there too, so `pid` is used on every platform (final review L4).
         if let Some(p) = pid {
             allow_foreground(p);
         }
@@ -2018,12 +2100,14 @@ impl PluginService {
                 editor_open,
                 opened_hwnd,
                 baseline_state_id,
+                saved_state_id,
                 ..
             } = entry
             {
                 *editor_open = true;
                 *opened_hwnd = Some(hwnd);
-                if !was_open && baseline_id.is_some() {
+                // A saved state the document has not been seen to hold is not the document's: it stays a change.
+                if !was_open && baseline_id.is_some() && saved_state_id.is_none() {
                     *baseline_state_id = baseline_id;
                 }
             }
@@ -2038,6 +2122,7 @@ impl PluginService {
         track_id: &str,
         workspace: &Mutex<DocumentWorkspace>,
     ) -> Result<Option<PluginEditorSaveResult>, String> {
+        self.confirm_saved(document_id, track_id, workspace);
         let (key, session, current_state_asset_id, baseline_state_id) = {
             let inner = lock(&self.inner);
             let key = Self::current_key(&inner, document_id, track_id)
@@ -2078,6 +2163,13 @@ impl PluginService {
             .as_deref()
             .unwrap_or(&current_state_asset_id);
         if expected_id == state_id {
+            // Nothing to save: a pending save the document never took is dropped, so `ensure` does not send its state again
+            // and a later redo naming it is not adopted while the helper holds another (final re-review Low 2).
+            self.with_entry(&key, &session, |entry| {
+                if let SlotEntry::Ready { saved_state_id, .. } = entry {
+                    *saved_state_id = None;
+                }
+            });
             return Ok(None);
         }
 
@@ -2099,15 +2191,11 @@ impl PluginService {
             ws.stage_asset(document_id, asset)?
         };
 
+        // The edit commits later, in the frontend, and can be refused: the baseline moves only once the document is seen
+        // to hold this state (final review M2).
         self.with_entry(&key, &session, |entry| {
-            if let SlotEntry::Ready {
-                state_asset_id,
-                baseline_state_id,
-                ..
-            } = entry
-            {
-                *state_asset_id = state_id.clone();
-                *baseline_state_id = Some(state_id.clone());
+            if let SlotEntry::Ready { saved_state_id, .. } = entry {
+                *saved_state_id = Some(state_id.clone());
             }
         });
 
@@ -2170,6 +2258,8 @@ impl PluginService {
         track_id: &str,
         workspace: &Mutex<DocumentWorkspace>,
     ) -> Result<PluginEditorClosedPayload, String> {
+        // A revert goes back to what the document holds, which may be a save committed since.
+        self.confirm_saved(document_id, track_id, workspace);
         let (key, session, was_open, document_state_id) = {
             let mut inner = lock(&self.inner);
             let key = Self::current_key(&inner, document_id, track_id)
@@ -2456,6 +2546,8 @@ pub(crate) mod fakes {
         pub rates: Mutex<Vec<u32>>,
         /// Every probe fails.
         pub fail_probe: AtomicBool,
+        /// Whether it hosts plug-ins. It runs no process, so it does on every platform unless a test says otherwise.
+        pub hosts: AtomicBool,
     }
 
     impl FakeLauncher {
@@ -2469,6 +2561,7 @@ pub(crate) mod fakes {
                 sessions: Mutex::new(Vec::new()),
                 rates: Mutex::new(Vec::new()),
                 fail_probe: AtomicBool::new(false),
+                hosts: AtomicBool::new(true),
             }
         }
 
@@ -2531,6 +2624,10 @@ pub(crate) mod fakes {
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
             }])
+        }
+
+        fn hosts_plugins(&self) -> bool {
+            self.hosts.load(Ordering::SeqCst)
         }
     }
 
@@ -3747,6 +3844,30 @@ mod tests {
     }
 
     #[test]
+    fn a_launcher_that_cannot_host_here_reports_every_active_slot_unsupported() {
+        // Off Windows the real launcher says no; this runs that path on every platform (final review L4).
+        let rig = test_rig();
+        rig.launcher.hosts.store(false, Ordering::SeqCst);
+        let req = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];
+        let plans = rig.service.ensure("doc1", Some(48_000), &req);
+        assert_eq!(
+            plans[0].1.as_ref().err(),
+            Some(&PluginStatus::UnsupportedPlatform)
+        );
+        assert_eq!(
+            rig.service.statuses("doc1")[0].status,
+            PluginStatus::UnsupportedPlatform
+        );
+        let offline = rig.service.offline_inserts("doc1", &req, 48_000).unwrap();
+        assert!(offline.inserts.is_empty());
+        assert_eq!(
+            offline.warnings[0].status,
+            PluginStatus::UnsupportedPlatform
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
     fn grants_from_many_threads_are_all_kept() {
         let rig = test_rig();
         let threads: Vec<_> = (0..8)
@@ -4003,6 +4124,186 @@ mod tests {
                 .edits
                 .len();
             assert_eq!(edits, 8);
+        }
+
+        /// A ready helper on `base/0` whose document holds a state, and the user's change made in its editor.
+        fn edited_rig() -> (
+            TestRig,
+            Mutex<DocumentWorkspace>,
+            String,
+            String,
+            Vec<u8>,
+            Arc<FakeSession>,
+        ) {
+            let rig = test_rig();
+            let mut ws = DocumentWorkspace::new().unwrap();
+            let document_id = ws.active_owner().document_id.clone();
+            let (state_id, state_bytes) =
+                apply_state(&mut ws, &document_id, "base/0", &rig.class_id, 1, 1024);
+            let workspace = Mutex::new(ws);
+            rig.service
+                .grant_consent(&document_id, &[(rig.class_id.clone(), state_id.clone())])
+                .unwrap();
+            let req = SlotRequest {
+                track_id: "base/0".into(),
+                slot: test_slot(&rig.class_id, &state_id),
+                state: state_bytes.clone().into(),
+            };
+            rig.service.ensure(&document_id, Some(48_000), &[req]);
+            assert_eq!(
+                wait_for_slot(&rig.service, &document_id, "base/0"),
+                PluginStatus::Ready
+            );
+            let session = rig.launcher.last_session.lock().unwrap().clone().unwrap();
+            *session.current_state.lock().unwrap() = StateParts {
+                component: b"edited".to_vec(),
+                controller: b"controller".to_vec(),
+            };
+            (rig, workspace, document_id, state_id, state_bytes, session)
+        }
+
+        /// Commits a save as the frontend does.
+        fn commit(
+            workspace: &Mutex<DocumentWorkspace>,
+            document_id: &str,
+            class_id: &str,
+            saved: &PluginEditorSaveResult,
+        ) {
+            let mut ws = workspace.lock().unwrap();
+            let rev = DocumentRevision {
+                document_id: document_id.to_string(),
+                revision: ws.document(document_id).unwrap().revision,
+            };
+            ws.apply_edit(
+                &rev,
+                EditCommand::SetTrackSound {
+                    track_id: "base/0".into(),
+                    sound: TrackSound {
+                        plugin: Some(test_slot(class_id, &saved.state)),
+                        ..TrackSound::default()
+                    },
+                },
+                Some(&saved.asset_token),
+            )
+            .unwrap();
+        }
+
+        #[test]
+        fn a_save_the_document_refused_is_offered_again_on_the_next_save_and_the_close() {
+            // Final review M2: the edit that commits a save can be refused (a revision conflict, a busy rejection). The
+            // change must not be lost: the next save and the close offer it again.
+            let (rig, workspace, document_id, _, _, _) = edited_rig();
+            let first = rig
+                .service
+                .editor_save(&document_id, "base/0", &workspace)
+                .unwrap()
+                .expect("the change is offered");
+            // The frontend's edit is refused, and it cancels the staged state.
+            assert!(
+                workspace
+                    .lock()
+                    .unwrap()
+                    .cancel_asset(&document_id, &first.asset_token)
+                    .unwrap()
+            );
+
+            let again = rig
+                .service
+                .editor_save(&document_id, "base/0", &workspace)
+                .unwrap()
+                .expect("the refused change is offered again");
+            assert_eq!(again.state, first.state);
+            assert!(
+                workspace
+                    .lock()
+                    .unwrap()
+                    .cancel_asset(&document_id, &again.asset_token)
+                    .unwrap()
+            );
+
+            let closed = rig
+                .service
+                .editor_close(&document_id, "base/0", &workspace)
+                .unwrap();
+            assert_eq!(closed.state.as_deref(), Some(first.state.as_str()));
+            assert!(closed.asset_token.is_some());
+        }
+
+        #[test]
+        fn a_committed_save_is_not_offered_again() {
+            let (rig, workspace, document_id, _, _, _) = edited_rig();
+            let saved = rig
+                .service
+                .editor_save(&document_id, "base/0", &workspace)
+                .unwrap()
+                .expect("the change is offered");
+            commit(&workspace, &document_id, &rig.class_id, &saved);
+            // No prepare came between: the document is still seen to hold the save.
+            assert_eq!(
+                rig.service
+                    .editor_save(&document_id, "base/0", &workspace)
+                    .unwrap(),
+                None
+            );
+            let closed = rig
+                .service
+                .editor_close(&document_id, "base/0", &workspace)
+                .unwrap();
+            assert_eq!(closed.state, None);
+        }
+
+        #[test]
+        fn the_prepare_after_a_committed_save_takes_it_without_sending_it_again() {
+            let (rig, workspace, document_id, _, _, session) = edited_rig();
+            let saved = rig
+                .service
+                .editor_save(&document_id, "base/0", &workspace)
+                .unwrap()
+                .expect("the change is offered");
+            commit(&workspace, &document_id, &rig.class_id, &saved);
+            // The prepare that follows the commit does not send the helper the state it already holds.
+            session.last_state.lock().unwrap().take();
+            let bytes = workspace
+                .lock()
+                .unwrap()
+                .asset_bytes(&document_id, &saved.state)
+                .unwrap();
+            let req = SlotRequest {
+                track_id: "base/0".into(),
+                slot: test_slot(&rig.class_id, &saved.state),
+                state: bytes.into(),
+            };
+            rig.service.ensure(&document_id, Some(48_000), &[req]);
+            assert!(session.last_state.lock().unwrap().is_none());
+        }
+
+        #[test]
+        fn an_undo_of_a_committed_save_puts_the_document_state_back_in_the_helper() {
+            let (rig, workspace, document_id, state_id, state_bytes, session) = edited_rig();
+            let saved = rig
+                .service
+                .editor_save(&document_id, "base/0", &workspace)
+                .unwrap()
+                .expect("the change is offered");
+            commit(&workspace, &document_id, &rig.class_id, &saved);
+            {
+                let mut ws = workspace.lock().unwrap();
+                let rev = DocumentRevision {
+                    document_id: document_id.clone(),
+                    revision: ws.document(&document_id).unwrap().revision,
+                };
+                ws.undo(&rev).unwrap();
+            }
+            session.last_state.lock().unwrap().take();
+            let req = SlotRequest {
+                track_id: "base/0".into(),
+                slot: test_slot(&rig.class_id, &state_id),
+                state: state_bytes.clone().into(),
+            };
+            rig.service.ensure(&document_id, Some(48_000), &[req]);
+            let (component, _) = decode_state(&state_bytes).unwrap();
+            let sent = session.last_state.lock().unwrap().take().expect("sent");
+            assert_eq!(sent.component, component);
         }
 
         #[test]

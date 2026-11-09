@@ -178,7 +178,7 @@ REAL PLUG-IN ACCEPTANCE PROOF RESULTS:
 
 - **Spike 2 Measurements (IPC Timing & Ring Sizing):**
   - Block size: 128 frames (`BLOCK_FRAMES = 128`).
-  - Pipeline depth: `P = 2` callbacks (256 frames at 128 block size).
+  - Pipeline depth: `P = C + max(C, BLOCK_FRAMES)` frames for a device callback of `C` frames, rounded up to a whole block (`limits::pipeline_frames`). That is two callbacks whenever `C` is at least 128, so `P` follows the device callback and is not a fixed number of frames (see Behaviour). The spike ran at 64- and 512-frame callbacks; 64 frames gives 256 (`docs/validation/2026-11-08-vst-spikes.md`).
   - Win32 auto-reset events yielded a p99 IPC hand-off time of 1.28 ms for synthetic workloads and 2.31 ms with 8 real amp plug-ins (Amped ML5) running concurrently over a 10-minute continuous run with **zero underruns**.
 
 - **Resource Budget Verification:**
@@ -207,6 +207,6 @@ REAL PLUG-IN ACCEPTANCE PROOF RESULTS:
 17. **Untested Configurations & CI Bounds:** Live dynamic DPI scaling changes during active display, dragging editor windows across monitors with mismatched scaling factors, mono-only plug-ins without stereo bus negotiation, and cross-process OS focus switching remain outside CI automation. CI cannot test physical audio devices or proprietary vendor plug-in licensing. Offline WAV export with real plug-ins is **not** verified for alignment: the two acceptance runs checked that the export is not silent, has the baseline's frame count, and differs from the built-in baseline, and nothing more. Trim alignment is checked only by the test-plug-in driver's new gain step, which has not been run.
 18. **Drivers Need a Re-run:** Both desktop drivers changed in the review fix and have not been run since (another session held port 9223). All run numbers in this document are from the earlier drivers.
 19. **Placeholder Size in the Edit Preview:** The plug-in state asset candidate that the UI hands to the preview has a placeholder `byteLength` of 20, because the native commands do not return the asset's real size. Nothing in the UI shows that number.
-20. **Library Gaps (not part of this pass):** `previous_bundle` on a library entry is not validated and is not part of the library file's size budget (`plugins/library.rs`); library entries are not marked "missing" in the list; and the "moved to another file" note on an entry never clears. These are Rust-side and belong to the library owner.
+20. **Library Gaps (not part of this pass):** library entries are not marked "missing" in the list, and the "moved to another file" note on an entry never clears. These are Rust-side and belong to the library owner. (`previous_bundle` is now checked like the bundle, and a library that would not fit its 1 MiB file with it is written without it: commit 19fd9c2, `plugins/library.rs`, and `docs/validation/2026-11-09-vst-review-fixes.md`.)
 21. **Untested Status Change Behaviour:** `record_status` in `plugins/service.rs` now emits a status change event on every status change from `ensure` (shipped in the docs commit ff786b4). No test covers that it settles or that an unchanged status emits nothing. That belongs to the Rust service owner.
 22. **Device Fault Pause:** `renderer.pause()` in the device fault path (`audio/device.rs`) has no test of its own.

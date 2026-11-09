@@ -146,6 +146,143 @@ describe('MusicXML export',()=>{
     expect(music(staff,true)).toEqual(music(score.tracks[0].staves[0],true));
   });
 
+  it('writes a grand-staff piano track with two staves and round-trips it',()=>{
+    const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
+    const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
+    Object.assign(track.playbackInfo,{program:0,primaryChannel:0,secondaryChannel:1,volume:12,balance:8});
+    const [treble,bass]=track.staves;
+    treble.showStandardNotation=true;treble.showTablature=false;
+    bass.showStandardNotation=true;bass.showTablature=false;
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+    master.tempoAutomations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:120,ratioPosition:0}));
+
+    const bar1=new model.Bar();treble.addBar(bar1);bar1.clef=model.Clef.G2;
+    const voice1=new model.Voice();bar1.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=5;note1.tone=0;beat1.addNote(note1);
+
+    const bar2=new model.Bar();bass.addBar(bar2);bar2.clef=model.Clef.F4;
+    const voice2=new model.Voice();bar2.addVoice(voice2);
+    const beat2=new model.Beat();beat2.duration=model.Duration.Whole;voice2.addBeat(beat2);
+    const note2=new model.Note();note2.octave=3;note2.tone=0;beat2.addNote(note2);
+
+    score.finish(settings);
+
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    expect(texts(doc,'attributes > staves')).toEqual(['2']);
+    expect([...doc.querySelectorAll('attributes > clef')].map(c=>[c.getAttribute('number'),c.querySelector('sign')?.textContent])).toEqual([['1','G'],['2','F']]);
+    expect([...doc.querySelectorAll('note > staff')].map(s=>s.textContent)).toEqual(['1','2']);
+    expect(texts(doc,'backup > duration')).toEqual(['3840']);
+
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves).toHaveLength(2);
+    expect(back.tracks[0].staves[0].bars[0].clef).toBe(model.Clef.G2);
+    expect(back.tracks[0].staves[1].bars[0].clef).toBe(model.Clef.F4);
+    expect(content(back)).toEqual(content(score));
+  });
+
+  it('writes a 3-staff organ track and round-trips it',()=>{
+    const score=new model.Score();score.title='Organ Fugue';score.artist='J.S. Bach';
+    const track=new model.Track();track.name='Organ';score.addTrack(track);track.ensureStaveCount(3);
+    Object.assign(track.playbackInfo,{program:19,primaryChannel:0,secondaryChannel:1,volume:12,balance:8});
+    const [manual1,manual2,pedal]=track.staves;
+    manual1.showStandardNotation=true;manual1.showTablature=false;
+    manual2.showStandardNotation=true;manual2.showTablature=false;
+    pedal.showStandardNotation=true;pedal.showTablature=false;
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+    master.tempoAutomations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:100,ratioPosition:0}));
+
+    const bar1=new model.Bar();manual1.addBar(bar1);bar1.clef=model.Clef.G2;
+    const voice1=new model.Voice();bar1.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=5;note1.tone=7;beat1.addNote(note1);
+
+    const bar2=new model.Bar();manual2.addBar(bar2);bar2.clef=model.Clef.G2;
+    const voice2=new model.Voice();bar2.addVoice(voice2);
+    const beat2=new model.Beat();beat2.duration=model.Duration.Whole;voice2.addBeat(beat2);
+    const note2=new model.Note();note2.octave=4;note2.tone=7;beat2.addNote(note2);
+
+    const bar3=new model.Bar();pedal.addBar(bar3);bar3.clef=model.Clef.F4;
+    const voice3=new model.Voice();bar3.addVoice(voice3);
+    const beat3=new model.Beat();beat3.duration=model.Duration.Whole;voice3.addBeat(beat3);
+    const note3=new model.Note();note3.octave=2;note3.tone=7;beat3.addNote(note3);
+
+    score.finish(settings);
+
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    expect(texts(doc,'attributes > staves')).toEqual(['3']);
+    expect([...doc.querySelectorAll('attributes > clef')].map(c=>[c.getAttribute('number'),c.querySelector('sign')?.textContent])).toEqual([['1','G'],['2','G'],['3','F']]);
+    expect([...doc.querySelectorAll('note > staff')].map(s=>s.textContent)).toEqual(['1','2','3']);
+    expect(texts(doc,'backup > duration')).toEqual(['3840','3840']);
+
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves).toHaveLength(3);
+    expect(content(back)).toEqual(content(score));
+  });
+
+  it('writes measure rests on inactive staves of a multi-staff track',()=>{
+    const score=new model.Score();score.title='Piano Interlude';
+    const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
+    const [treble,bass]=track.staves;
+    treble.showStandardNotation=true;treble.showTablature=false;
+    bass.showStandardNotation=true;bass.showTablature=false;
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+
+    const bar1=new model.Bar();treble.addBar(bar1);bar1.clef=model.Clef.G2;
+    const voice1=new model.Voice();bar1.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=5;note1.tone=0;beat1.addNote(note1);
+
+    const bar2=new model.Bar();bass.addBar(bar2);bar2.clef=model.Clef.F4;
+    const voice2=new model.Voice();bar2.addVoice(voice2);
+
+    score.finish(settings);
+
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    const bassNotes=[...doc.querySelectorAll('note')].filter(note=>note.querySelector(':scope > staff')?.textContent==='2');
+    expect(bassNotes).toHaveLength(1);
+    expect(bassNotes[0].querySelector(':scope > rest')?.getAttribute('measure')).toBe('yes');
+    expect(bassNotes[0].querySelector(':scope > duration')?.textContent).toBe('3840');
+
+    // An empty staff bar reads back as one whole-note rest beat, not as an empty voice, so the
+    // content differs from the source only in that bass bar.
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves).toHaveLength(2);
+    const backBeats=back.tracks[0].staves[1].bars[0].voices[0].beats;
+    expect(backBeats).toHaveLength(1);
+    expect(backBeats[0].isRest).toBe(true);
+    expect(backBeats[0].duration).toBe(model.Duration.Whole);
+    expect(backBeats[0].notes).toHaveLength(0);
+    expect(score.tracks[0].staves[1].bars[0].voices[0].beats).toHaveLength(0);
+  });
+
+  it('refuses a bar whose staves disagree on the key signature',()=>{
+    const make=(bassKeyAtBar:number|null)=>{
+      const score=new model.Score();score.title='Keys';
+      const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
+      for(const staff of track.staves){staff.showStandardNotation=true;staff.showTablature=false;}
+      for(let index=0;index<2;index++){
+        const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+        track.staves.forEach((staff,s)=>{
+          const bar=new model.Bar();staff.addBar(bar);bar.clef=s?model.Clef.F4:model.Clef.G2;
+          bar.keySignature=(s&&bassKeyAtBar!==null&&index>=bassKeyAtBar?1:0) as model.KeySignature;
+          const voice=new model.Voice();bar.addVoice(voice);
+          const beat=new model.Beat();beat.duration=model.Duration.Whole;voice.addBeat(beat);
+          const note=new model.Note();note.octave=s?3:5;note.tone=0;beat.addNote(note);
+        });
+      }
+      score.finish(settings);
+      return score;
+    };
+    // Whole track in different keys, and a key change on the bass staff only.
+    for(const at of [0,1]){
+      const score=make(at);
+      expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/different key signatures on the staves/);
+    }
+    const same=make(null);
+    expect(()=>exportMusicXml(same,selectAll(same))).not.toThrow();
+  });
+
   it('writes tempo text, dynamics changes, forced accidentals and mix points',()=>{
     const score=piano(),voice=score.tracks[0].staves[0].bars[0].voices[0];
     score.masterBars[0].tempoAutomations[0].text='Moderate';

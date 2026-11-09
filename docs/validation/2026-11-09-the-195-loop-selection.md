@@ -21,7 +21,7 @@ Looping the exact selected passage previously required opening More playback, op
    - Slower: `[`. Faster: `]`. Both match the physical key (`event.code` `BracketLeft`/`BracketRight`) when `event.key` is `[`, `]` or a letter, and never once the event is already `defaultPrevented` (note entry takes it first). Estonian: the bracket keys type `ü` and `õ`, so both shortcuts work. German: the `[` position types `ü`, so Slower works; the `]` position types `+`, a note-entry key (shorter beat), so Faster does not fire there and the AltGr bracket (Ctrl+Alt) is excluded. Faster has no working plain key on a German layout; its button and the palette entry remain.
    - Ignored with Ctrl, Cmd or Alt held, on key repeat, inside text fields and while any dialog is open. They are not note-entry keys (`scoreEntryKey` takes only A-G letters, and no bracket).
    - They click the transport buttons through `data-action`, so `busyGuard` and unavailable states are respected, and they only call `player.*`, so they record no document edit.
-   - Command palette entries (Loop or clear loop, Slower, Faster) show the keys. The help topic Keyboard shortcuts has one line in en, et and de.
+   - Command palette entries (Loop, Slower, Faster; Loop also matches "clear") show the keys. The help topic Keyboard shortcuts has one line in en, et and de.
    - `aria-keyshortcuts` sits on one control per shortcut: Loop (`Shift+L`), Slower (`[`) and Faster (`]`). The Loop selection button carries none.
 3. **Closing More playback**:
    - Running `onLoopSelection` inside `More playback` automatically collapses `<details className="transport-more">` (`moreRef.current.open = false`).

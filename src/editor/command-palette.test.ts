@@ -69,7 +69,8 @@ it('builds edits the engine accepts on a real document',()=>{
 });
 
 it('offers the practice shortcuts with their keys as app commands',()=>{
-  expect(first('loop')).toMatchObject({title:'Loop or clear loop',keys:'Shift+L',action:{kind:'app',name:'loop'}});
+  expect(first('loop')).toMatchObject({title:'Loop',keys:'Shift+L',action:{kind:'app',name:'loop'}});
+  expect(first('clear')).toMatchObject({id:'loop'});
   expect(first('slower')).toMatchObject({keys:'[',action:{kind:'app',name:'slower'}});
   expect(first('faster')).toMatchObject({keys:']',action:{kind:'app',name:'faster'}});
 });

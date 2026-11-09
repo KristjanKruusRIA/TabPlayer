@@ -463,6 +463,43 @@ mod windows_tests {
             assert!(report.recv_timeout(Duration::from_millis(300)).is_err(), "and nothing follows it");
         }
 
+        fn an_underrun_from_a_slow_helper_is_reported_as_an_underrun() {
+            // Each block takes 150 ms, so eight owed blocks keep the helper owing for about 1.2 s while its heartbeat moves
+            // after each one: a late helper, not a stuck one. The underrun is reported once the heartbeat moves, well
+            // before the helper has caught up, and the helper is not killed.
+            let fixture = Fixture::new();
+            let helper = fixture.loaded(state(1.0, 0, TestMode::Slow { ms: 150 }));
+            let link = helper.link().unwrap();
+            let shared = Arc::new(InsertShared::default());
+            let (reports, report) = channel();
+            let supervisor = Supervisor::new(move |_, status| {
+                let _ = reports.send((status, Instant::now()));
+            });
+            supervisor.watch(key(), helper.clone(), shared.clone());
+            std::thread::sleep(Duration::from_millis(200));
+            for _ in 0..8 {
+                send_block(&link, 0.5);
+            }
+            std::thread::sleep(Duration::from_millis(20));
+            let faulted = Instant::now();
+            shared
+                .fault
+                .store(fault::UNDERRUN, std::sync::atomic::Ordering::Release);
+            let (status, at) = report
+                .recv_timeout(Duration::from_secs(2))
+                .expect("a report");
+            assert_eq!(status, PluginStatus::Underrun);
+            assert!(
+                at.duration_since(faulted) < Duration::from_millis(600),
+                "reported once the heartbeat moved, not after the helper caught up: {:?}",
+                at.duration_since(faulted)
+            );
+            assert!(helper.blocks_pending(), "the helper still owed blocks when the underrun was reported");
+            assert!(report.recv_timeout(Duration::from_millis(1_500)).is_err(), "and no hang follows");
+            assert!(helper.exited().is_none(), "a late helper is not killed");
+            assert_eq!(supervisor.watched(), 1);
+        }
+
         fn supervisor_reports_crashed() {
             let fixture = Fixture::new();
             let helper = fixture.loaded(state(1.0, 0, TestMode::Crash));

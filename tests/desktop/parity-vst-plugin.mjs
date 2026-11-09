@@ -507,20 +507,30 @@ export async function runVstPluginParity({ buildPath } = {}) {
 
     // 6. Hang mode, through the Rust side: plugin_status turns `hung`, the helper is killed, both commands keep answering
     // quickly while it happens, and the built-in tone keeps playing.
+    //
+    // The score lasts 4 s, less than the hang and its restarts take, so the whole score (bars 1 to 2) is looped and
+    // played once: Play is never clicked again, and playback that stops at any point in this step fails it.
+    const BAR = 3840;
+    const loopButton = page.getByRole('button', { name: /^(Loop|Clear loop)$/ });
+    await page.getByLabel('Loop start', { exact: true }).fill('1');
+    await page.getByLabel('Loop end', { exact: true }).fill('2');
+    await loopButton.click();
+    await poll(() => invoke('audio_status'), s => s.loop?.startTick === 0 && s.loop?.endTick === 2 * BAR, 'the whole score loops');
     await ui.clickWorkstationButton(page, 'Play', { waitForIdle: false });
     const beforeHang = await poll(() => invoke('audio_status'), s => s.playing && s.renderedFrames > 4096, 'playing before hang');
+    const stillPlaying = (s, when) => {
+      assert.ok(s.playing && !s.error, `playback stopped ${when}: ${JSON.stringify({ playing: s.playing, error: s.error, tick: s.tick, loop: s.loop })}`);
+      assert.ok(s.loop?.startTick === 0 && s.loop?.endTick === 2 * BAR, `the loop was lost ${when}: ${JSON.stringify(s.loop)}`);
+      return s;
+    };
     const helpersBeforeHang = (await helperRows()).map(row => row.pid);
     assert.ok(helpersBeforeHang.length >= 1, 'a helper runs for the plug-in before the hang');
 
     // Parameter 2 is Mode; 2.0 / 8.0 = 0.25 selects TestMode::Hang. As with the crash above, TabPlayer restarts a hung
     // helper up to MAX_CRASH_RETRIES (3) times, and a restarted helper is back in Normal mode. Its status can pass through
     // `hung`, `loading` and `ready` between two polls, so the hang is set again on every helper that was not yet given it,
-    // found by its process, until the retries are exhausted and the status stays `hung`. The score is short, so playback
-    // is started again whenever it ends: a hang happens only in `process`.
+    // found by its process, until the retries are exhausted and the status stays `hung`.
     const setHang = () => invoke('plugin_test_set_parameter', { documentId: docId2, trackId: trackId2, id: 2, value: 0.25 });
-    const keepPlaying = async () => {
-      if (!(await invoke('audio_status')).playing) await ui.clickWorkstationButton(page, 'Play', { waitForIdle: false });
-    };
     const hungPids = new Set(helpersBeforeHang);
     await setHang();
 
@@ -533,18 +543,19 @@ export async function runVstPluginParity({ buildPath } = {}) {
       // Each command is timed in the page: `invoke` also checks the app's process identity through PowerShell, which takes
       // about 250 ms on its own and is not the app's answer.
       owned();
-      const { statuses, slowestMs } = await page.evaluate(async documentId => {
+      const { statuses, audio, slowestMs } = await page.evaluate(async documentId => {
         const timed = async (command, args) => {
           const began = performance.now();
           const value = await window.__TAURI_INTERNALS__.invoke(command, args);
           return [value, performance.now() - began];
         };
         const [statuses, statusMs] = await timed('plugin_status', { documentId });
-        const [, audioMs] = await timed('audio_status', {});
-        return { statuses, slowestMs: Math.max(statusMs, audioMs) };
+        const [audio, audioMs] = await timed('audio_status', {});
+        return { statuses, audio, slowestMs: Math.max(statusMs, audioMs) };
       }, docId2);
       healthy();
       slowestCoreAnswerMs = Math.max(slowestCoreAnswerMs, slowestMs);
+      stillPlaying(audio, 'while the plug-in hung');
       const status = statuses[0]?.status;
       if (seenStatuses.at(-1) !== status) seenStatuses.push(status);
       const now = performance.now();
@@ -560,7 +571,6 @@ export async function runVstPluginParity({ buildPath } = {}) {
           fresh.forEach(pid => hungPids.add(pid));
           await setHang().catch(() => {});
         }
-        await keepPlaying();
       }
       return statuses;
     }, statuses => statuses[0]?.status === 'hung' && performance.now() - hungSince > 2000, 'plugin status became hung and stayed hung');
@@ -571,11 +581,12 @@ export async function runVstPluginParity({ buildPath } = {}) {
     assert.ok(hungAfterMs < 10000, `The Rust side reported hung after ${hungAfterMs.toFixed(0)} ms`);
     assert.ok(slowestCoreAnswerMs < 200, `plugin_status or audio_status took ${slowestCoreAnswerMs.toFixed(1)} ms to answer while the plug-in hung`);
 
-    await keepPlaying();
-    const killed = await poll(async () => (await helperRows()).map(row => row.pid), pids => !helpersBeforeHang.some(pid => pids.includes(pid)), 'the hung helper was killed');
-    const afterHang = await poll(async () => { await keepPlaying(); return invoke('audio_status'); }, s => s.playing && s.renderedFrames > beforeHang.renderedFrames + 2048 && s.outputPeak > 0.001 && !s.error, 'built-in tone keeps playing after the hang');
+    const killed = await poll(async () => { stillPlaying(await invoke('audio_status'), 'after the hang'); return (await helperRows()).map(row => row.pid); }, pids => !helpersBeforeHang.some(pid => pids.includes(pid)), 'the hung helper was killed');
+    const afterHang = await poll(async () => stillPlaying(await invoke('audio_status'), 'after the hang'), s => s.renderedFrames > beforeHang.renderedFrames + 2048 && s.outputPeak > 0.001, 'built-in tone keeps playing after the hang');
     assert.match(await page.locator('.plugin-status-notice, .plugin-notice-item').first().innerText(), /stopped responding.*built-in tone plays instead/i);
     await button('Stop');
+    await loopButton.click();
+    await poll(() => invoke('audio_status'), s => s.loop === null, 'the loop is cleared');
     step('6. Hang mode: Rust reports hung, helper killed, commands stay quick, built-in tone keeps playing', {
       hungAfterMs,
       statusesWhileHung: seenStatuses,
@@ -584,7 +595,9 @@ export async function runVstPluginParity({ buildPath } = {}) {
       helperPidsAfter: killed,
       renderedFramesBefore: beforeHang.renderedFrames,
       renderedFramesAfter: afterHang.renderedFrames,
-      outputPeakAfter: afterHang.outputPeak
+      outputPeakAfter: afterHang.outputPeak,
+      loop: afterHang.loop,
+      playClicks: 1
     });
 
     // 7. Clear the consent file and reopen, check the needsConsent notice, allow, and check ready

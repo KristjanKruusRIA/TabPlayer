@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import './audio/plugin-test-support';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';

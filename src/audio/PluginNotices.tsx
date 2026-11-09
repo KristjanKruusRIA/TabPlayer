@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { useI18n } from '../i18n';
-import { localizePluginError, noticeMessageKey, type MovedPlugin, type TrackPluginStatus } from './plugin-host';
+import { localizePluginError, noticeMessageKey, type MovedPlugin, type PluginNotice, type TrackPluginStatus } from './plugin-host';
 import './sound-panel.css';
 
 export interface PluginNoticesProps {
   statuses?: TrackPluginStatus[];
   /** Plug-ins that now load from another file than before, for every track that uses one. */
   moved?: MovedPlugin[];
+  /** Notices the native side sent about a track's plug-in, shown until dismissed. */
+  notices?: readonly PluginNotice[];
+  onDismiss?: (notice: PluginNotice) => void;
   trackNames?: Record<string, string>;
   /** May return a promise; a rejection is shown here instead of being dropped. */
   onAllow?: () => void | Promise<unknown>;
@@ -23,6 +26,8 @@ const retryable = (status: string) => status === 'crashed' || status === 'hung' 
 export function PluginNotices({
   statuses,
   moved,
+  notices,
+  onDismiss,
   trackNames,
   onAllow,
   onRetry,
@@ -32,7 +37,8 @@ export function PluginNotices({
   const [error, setError] = useState<string | null>(null);
   const warningStatuses = statuses?.filter(s => s.status !== 'ready' && s.status !== 'loading') ?? [];
   const movedList = moved ?? [];
-  if (!warningStatuses.length && !movedList.length) return null;
+  const noticeList = notices ?? [];
+  if (!warningStatuses.length && !movedList.length && !noticeList.length) return null;
 
   const run = (action: () => void | Promise<unknown>) => {
     setError(null);
@@ -67,8 +73,13 @@ export function PluginNotices({
             </p>
           </div>
         ))}
+        {noticeList.map(item => (
+          <div key={`notice:${item.trackId}:${item.key}`} className="plugin-notice-item">
+            <p className="sound-ir-notice">{withTrack(item.trackId, t(item.key))}</p>
+          </div>
+        ))}
       </div>
-      {(wantsConsent || retries.length > 0) && (
+      {(wantsConsent || retries.length > 0 || (onDismiss && noticeList.length > 0)) && (
         <div className="plugin-notice-actions">
           {wantsConsent && (
             <button type="button" className="plugin-notice-action" onClick={() => run(() => onAllow!())}>
@@ -86,6 +97,18 @@ export function PluginNotices({
               {t('plugin.try_again')}
             </button>
           ))}
+          {onDismiss &&
+            noticeList.map(item => (
+              <button
+                key={`dismiss:${item.trackId}:${item.key}`}
+                type="button"
+                className="plugin-notice-action"
+                aria-label={`${t('plugin.dismiss')}: ${trackNames?.[item.trackId] ?? t(item.key)}`}
+                onClick={() => onDismiss(item)}
+              >
+                {t('plugin.dismiss')}
+              </button>
+            ))}
         </div>
       )}
       {error && (

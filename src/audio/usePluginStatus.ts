@@ -1,5 +1,15 @@
-import { useEffect, useState } from 'react';
-import { movedPlugins, onPluginStatus, pluginLibrary, pluginStatus, type MovedPlugin, type TrackPluginStatus } from './plugin-host';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  movedPlugins,
+  onPluginNotice,
+  onPluginStatus,
+  pluginLibrary,
+  pluginNotices,
+  pluginStatus,
+  type MovedPlugin,
+  type PluginNotice,
+  type TrackPluginStatus,
+} from './plugin-host';
 
 /**
  * Loads and tracks the plug-in status of all tracks in `documentId`.
@@ -59,4 +69,28 @@ export function usePluginMoves(statuses: readonly TrackPluginStatus[]): MovedPlu
     return () => { alive = false; };
   }, [statuses]);
   return moved;
+}
+
+/**
+ * The plug-in notices for `documentId` (a plug-in that did not take new settings in time, or editor changes that could
+ * not be saved), from native `plugin-notice` events and from editor closes, until the user dismisses them.
+ */
+export function usePluginNotices(documentId: string | undefined): PluginNotice[] {
+  const all = useSyncExternalStore(pluginNotices.subscribe, pluginNotices.list);
+  useEffect(() => {
+    let alive = true;
+    let unlisten: (() => void) | undefined;
+    onPluginNotice(payload => pluginNotices.add(payload)).then(
+      fn => {
+        if (alive) unlisten = fn;
+        else fn();
+      },
+      () => {},
+    );
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, []);
+  return useMemo(() => (documentId ? all.filter(notice => notice.documentId === documentId) : []), [all, documentId]);
 }

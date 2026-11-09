@@ -75,6 +75,8 @@ export interface PluginEditorClosedPayload {
   trackId: string;
   state: string | null;
   assetToken: string | null;
+  /** Why the editor's changes were not kept (a notice key such as `plugin.history_full`); the plug-in went back to the score's settings. */
+  error?: string | null;
 }
 
 /** The plug-in library: the effects the user picked from `.vst3` files on this computer. A document names a class by its identity and never holds the plug-in. */
@@ -119,8 +121,63 @@ export const pluginEditorOpen = (documentId: string, trackId: string, title: str
 export const pluginEditorSave = (documentId: string, trackId: string) =>
   invoke<PluginEditorSaveResult | null>('plugin_editor_save', { documentId, trackId });
 
+/** Closes the editor. When its changes could not be kept, the payload's `error` joins the plug-in notices. */
 export const pluginEditorClose = (documentId: string, trackId: string) =>
-  invoke<PluginEditorClosedPayload>('plugin_editor_close', { documentId, trackId });
+  invoke<PluginEditorClosedPayload>('plugin_editor_close', { documentId, trackId }).then(payload => {
+    if (payload?.error) pluginNotices.add({ documentId, trackId, key: payload.error });
+    return payload;
+  });
+
+/** What the native side tells the user about one track's plug-in, beside its status. */
+export type PluginNoticeKey = 'plugin.busy' | 'plugin.save_failed' | 'plugin.history_full';
+const PLUGIN_NOTICE_KEYS: readonly string[] = ['plugin.busy', 'plugin.save_failed', 'plugin.history_full'];
+export const isPluginNoticeKey = (key: unknown): key is PluginNoticeKey => typeof key === 'string' && PLUGIN_NOTICE_KEYS.includes(key);
+
+export interface PluginNotice {
+  documentId: string;
+  trackId: string;
+  key: PluginNoticeKey;
+}
+
+/** The most notices kept; the oldest go first. */
+const MAX_PLUGIN_NOTICES = 32;
+let noticeList: readonly PluginNotice[] = [];
+const noticeSubscribers = new Set<() => void>();
+const sameNotice = (a: PluginNotice, b: { documentId: string; trackId: string; key: string }) =>
+  a.documentId === b.documentId && a.trackId === b.trackId && a.key === b.key;
+const setNotices = (next: readonly PluginNotice[]) => {
+  noticeList = next;
+  for (const subscriber of noticeSubscribers) subscriber();
+};
+
+/**
+ * The plug-in notices shown until the user dismisses them. The same notice for the same track is kept once, so a close
+ * whose error arrives both in the command's answer and as a `plugin-notice` event shows one notice. Keys this app does
+ * not know are dropped rather than shown raw.
+ */
+export const pluginNotices = {
+  list: (): readonly PluginNotice[] => noticeList,
+  add(notice: { documentId: string; trackId: string; key: string }) {
+    if (!isPluginNoticeKey(notice.key) || noticeList.some(item => sameNotice(item, notice))) return;
+    const added: PluginNotice = { documentId: notice.documentId, trackId: notice.trackId, key: notice.key };
+    setNotices([...noticeList, added].slice(-MAX_PLUGIN_NOTICES));
+  },
+  dismiss(notice: PluginNotice) {
+    if (noticeList.some(item => sameNotice(item, notice))) setNotices(noticeList.filter(item => !sameNotice(item, notice)));
+  },
+  clear() {
+    if (noticeList.length) setNotices([]);
+  },
+  subscribe(subscriber: () => void) {
+    noticeSubscribers.add(subscriber);
+    return () => {
+      noticeSubscribers.delete(subscriber);
+    };
+  },
+};
+
+export const onPluginNotice = (handler: (payload: { documentId: string; trackId: string; key: string }) => void) =>
+  listen<{ documentId: string; trackId: string; key: string }>('plugin-notice', event => handler(event.payload));
 
 export const onPluginStatus = (handler: (payload: { documentId: string }) => void) =>
   listen<{ documentId: string }>('plugin-status', event => handler(event.payload));

@@ -30,8 +30,8 @@ import { readMidiOutDelay } from './audio/midi-out-preferences';
 import { CabinetNotices } from './audio/CabinetNotices';
 import { CaptureNotices } from './audio/CaptureNotices';
 import { PluginNotices } from './audio/PluginNotices';
-import { usePluginMoves, usePluginStatus } from './audio/usePluginStatus';
-import { onPluginStatus, onPluginEditorClosed, pluginConsentGrant, pluginRetry, handlePluginEditorClosed } from './audio/plugin-host';
+import { usePluginMoves, usePluginNotices, usePluginStatus } from './audio/usePluginStatus';
+import { onPluginStatus, onPluginEditorClosed, pluginConsentGrant, pluginNotices, pluginRetry, handlePluginEditorClosed } from './audio/plugin-host';
 import { AmpCapture } from './audio/AmpCapture';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
@@ -152,6 +152,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const pluginStatuses = usePluginStatus(state.documentId);
   const pluginMoves = usePluginMoves(pluginStatuses);
+  const pluginNoticeList = usePluginNotices(state.documentId);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     onPluginStatus(payload => {
@@ -882,6 +883,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     <PluginNotices
       statuses={pluginStatuses}
       moved={pluginMoves}
+      notices={pluginNoticeList}
+      onDismiss={pluginNotices.dismiss}
       trackNames={trackNames}
       onAllow={() => pluginConsentGrant(state.documentId)}
       onRetry={retryTrackId => pluginRetry(state.documentId, retryTrackId)}

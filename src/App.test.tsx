@@ -2117,6 +2117,65 @@ describe('GP8 edit and cursor keys',()=>{
     await waitFor(()=>expect(edits(c)).toHaveLength(3));
     expect(edits(c)[2]).toMatchObject({type:'removeNote'});
   });
+  it('shows pending fret digits while typed and clears on Enter or Escape',async()=>{
+    const c=await setup(withNotes());
+    expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0);
+    press({key:'7'});
+    await waitFor(()=>expect(screen.getAllByText('Fret 7: Enter commits, Escape cancels')).toHaveLength(2));
+    expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBe('7');
+    press({key:'Escape'});
+    await waitFor(()=>expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0));
+    expect(edits(c)).toHaveLength(2);
+
+    press({key:'5'});
+    await waitFor(()=>expect(screen.getAllByText('Fret 5: Enter commits, Escape cancels')).toHaveLength(2));
+    press({key:'Enter'});
+    await waitFor(()=>expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0));
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+  });
+  const fretField=()=>(screen.getByLabelText('Fret') as HTMLInputElement).value;
+  it('Escape puts back the fret that stood before the first pending digit and records no edit',async()=>{
+    const c=await setup(withNotes());
+    expect(fretField()).toBe('3');
+    press({key:'1'});press({key:'2'});
+    await waitFor(()=>expect(fretField()).toBe('12'));
+    press({key:'Escape'});
+    await waitFor(()=>expect(fretField()).toBe('3'));
+    await quiet();expect(edits(c)).toHaveLength(2);
+    // A fret set before the digits (as the instrument view does) comes back too, not the note's.
+    change('Fret','9');expect(fretField()).toBe('9');
+    press({key:'1'});press({key:'2'});
+    await waitFor(()=>expect(fretField()).toBe('12'));
+    press({key:'Escape'});
+    await waitFor(()=>expect(fretField()).toBe('9'));
+    press({key:'Enter'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'setNote',string:6,fret:9});
+  });
+  it('Enter commits exactly the typed two-digit fret',async()=>{
+    const c=await setup(withNotes());
+    press({key:'1'});press({key:'2'});
+    await waitFor(()=>expect(screen.getAllByText('Fret 12: Enter commits, Escape cancels')).toHaveLength(2));
+    press({key:'Enter'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'setNote',string:6,fret:12});
+  });
+  it('announces the pending fret in one status region only',async()=>{
+    await setup(withNotes());
+    press({key:'7'});
+    await waitFor(()=>expect(screen.getAllByText('Fret 7: Enter commits, Escape cancels')).toHaveLength(2));
+    expect(screen.getAllByRole('status').filter(node=>node.textContent==='Fret 7: Enter commits, Escape cancels')).toHaveLength(1);
+  });
+  it('drops the pending hint when the digit window closes, and Backspace then deletes the note',async()=>{
+    const c=await setup(withNotes());
+    press({key:'7'});
+    await waitFor(()=>expect(screen.getAllByText('Fret 7: Enter commits, Escape cancels')).toHaveLength(2));
+    await waitFor(()=>expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0),{timeout:2500});
+    expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBeNull();
+    press({key:'Backspace'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'removeNote'});
+  });
   it('shows the hint for the swapped Plus/Minus preference',async()=>{
     await entryOn(JSON.stringify({swapPlusMinus:true}));
     expect(screen.getByText(/- and \+ make the beat shorter and longer/)).toBeInTheDocument();

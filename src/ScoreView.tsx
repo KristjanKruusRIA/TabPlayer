@@ -35,6 +35,7 @@ import { targetSymbols,type SymbolRef } from './editor/symbol-edit';
 import { resolveSymbol,systemAt } from './editor/symbol-hit';
 import { SymbolPopover,type SymbolView } from './SymbolPopover';
 import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score-entry-hit';
+import { useI18n } from './i18n';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
 const diagramScale=.45,chipHeight=16,chipGap=2;
@@ -80,7 +81,7 @@ const accoladeOverlay=(plan:AccoladePlan,metrics:AccoladeMetrics,systems:readonl
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -90,7 +91,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   /** The document's track identities, in track order. With `projection` they let staff groups and staff gaps be drawn; without either, neither is. */
   trackIds?:readonly string[];
   display?:ScoreDisplayPreferences;page?:PageLayout;onDisplayStatus?:(status:{zoomPercent:number;fitLimited:boolean;pageError:string|null})=>void;
-  editTarget?:BeatTarget;editString?:number;editNoteIndex?:number|null;
+  editTarget?:BeatTarget;editString?:number;editNoteIndex?:number|null;editPendingFret?:string|null;
   /** Measures to mark as score errors; empty when the viewer turned marking off. */
   errors?:readonly ScoreError[];
   /** Shows a handle on every bar's right edge for changing its width. Layouts that ignore widths show none. */
@@ -114,6 +115,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const staffGapKey=JSON.stringify(engravingProp?.staffGaps??null),idsKey=JSON.stringify(trackIds??null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const staffGaps=useMemo(()=>projection?resolveStaffGaps(engravingProp?.staffGaps,trackIds??[]):new Map<number,number>(),[staffGapKey,idsKey,!!projection]);
+  const {t}=useI18n();
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score,trackKey=tracks.join(',');
   // Headers and footers only print, so editing them keeps the on-screen pages as they are.
@@ -724,7 +726,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     })}
     {symbolUi&&symbols&&<SymbolPopover state={symbolUi} score={score} targets={symbolUi.ref||!editTarget?[]:targetSymbols(score,editTarget,tracks)} busy={symbols.busy} locked={symbols.locked} onEdit={symbols.onEdit} onChordEditor={ref=>symbols.onChordEditor(ref.target)} onView={next=>setSymbolUi(old=>({...next,id:old?.id}))} onClose={closeSymbol}/>}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
-    {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
+    {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{(caret.entry||editPendingFret)&&<span className="score-edit-entry" aria-hidden="true">{editPendingFret?t('score.pending_fret_label',{fret:editPendingFret}):(editString?t('score.edit_string',{string:editString}):t('score.edit_entry'))}</span>}</span>}
     {ghost&&<span className="score-entry-ghost" aria-hidden="true" style={{left:ghost.x,top:ghost.y,width:ghost.w,height:ghost.h}}><span className="score-entry-ghost-label">{ghost.label}</span></span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}
     {handles&&(['start','end'] as const).map(edge=><button key={edge} type="button" aria-label={`Resize selection ${edge}`} onMouseDown={event=>resize(edge,event)} style={{position:'absolute',left:handles[edge].x-6,top:handles[edge].y+handles[edge].h/2-12,width:12,height:24,padding:0,border:'2px solid #60712b',borderRadius:3,background:'#bccf6e',cursor:'ew-resize',zIndex:4}}/>)}

@@ -7,7 +7,7 @@ use super::{
     master::MasterBus,
     midi_out::MidiTap,
     plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
-    plugin_insert::PluginInsert,
+    plugin_insert::{InsertError, PluginInsert},
     practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
     resources::{AudioResources, Region},
     voices::{
@@ -146,6 +146,9 @@ pub struct PreparedMix {
     pub(crate) master: MasterBus,
     rate: u32,
     pub(crate) compensation: Option<Box<Compensation>>,
+    /// Tracks whose plug-in insert this mix refused, and why. Read on the control thread before the mix is sent; the
+    /// audio thread never touches it.
+    refused: Vec<(String, InsertError)>,
 }
 fn validate_mix(mix: &ChannelMix) -> Result<(), String> {
     if !mix.gain.is_finite()
@@ -190,6 +193,7 @@ impl PreparedMix {
             &str,
             &Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
         > = plans.iter().map(|(id, res)| (id.as_str(), res)).collect();
+        let mut refused = Vec::new();
 
         for (index, track) in plan.tracks.iter().enumerate() {
             let mix = settings.mixes.get(&track.id).cloned().unwrap_or_default();
@@ -203,7 +207,8 @@ impl PreparedMix {
             dsp.set_ir_index(index);
 
             if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
-                if let Ok(insert) = PluginInsert::new(
+                // A refusal leaves the track on its built-in sound and is named, so the slot can say why.
+                match PluginInsert::new(
                     plan.link.clone(),
                     crate::audio::plugin_insert::InsertMode::Realtime { pipeline_frames },
                     plan.latency,
@@ -212,7 +217,8 @@ impl PreparedMix {
                     sample_rate,
                     plan.shared.clone(),
                 ) {
-                    dsp.attach_plugin(Box::new(insert));
+                    Ok(insert) => dsp.attach_plugin(Box::new(insert)),
+                    Err(error) => refused.push((track.id.clone(), error)),
                 }
             }
 
@@ -237,9 +243,14 @@ impl PreparedMix {
             master: MasterBus::new(settings.master.as_ref(), sample_rate)?,
             rate: sample_rate,
             compensation: None,
+            refused,
         };
         mix.update_compensation();
         Ok(mix)
+    }
+    /// The tracks whose plug-in insert this mix refused, and why, in track order.
+    pub fn plugin_refusals(&self) -> &[(String, InsertError)] {
+        &self.refused
     }
     /// Accessor for delay compensation.
     pub fn compensation(&self) -> Option<&Compensation> {
@@ -1965,13 +1976,9 @@ impl Renderer {
     pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
         self.mix.attach_plugin(track, insert);
     }
-    /// Attaches offline plug-in inserts to matching track IDs and updates delay compensation.
-    pub fn attach_offline_plugins(&mut self, inserts: Vec<(String, Box<PluginInsert>)>) {
-        for (track_id, insert) in inserts {
-            if let Some(index) = self.plan.tracks.iter().position(|t| t.id == track_id) {
-                self.mix.attach_plugin(index, insert);
-            }
-        }
+    /// The tracks whose plug-in insert this renderer's mix refused, and why.
+    pub fn plugin_refusals(&self) -> &[(String, InsertError)] {
+        self.mix.plugin_refusals()
     }
     /// Whether any attached plug-in has faulted.
     pub fn plugin_faulted(&self) -> bool {

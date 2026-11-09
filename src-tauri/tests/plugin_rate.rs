@@ -129,6 +129,49 @@ fn a_mix_prepared_at_44_1_khz_with_a_48_khz_helper_plays_the_built_in_sound() {
 }
 
 #[test]
+fn a_mix_names_every_insert_it_refused_and_why() {
+    // The runtime checks each plan before the build, but the device can change between that check and the build; the
+    // mix then names what it refused, so the slot can say why instead of going quietly to the built-in sound.
+    let plans = vec![
+        (
+            "t1".to_string(),
+            Ok::<_, PluginStatus>(insert_plan(48_000, 64)),
+        ),
+        (
+            "t2".to_string(),
+            Ok::<_, PluginStatus>(insert_plan(44_100, 4_411)),
+        ),
+    ];
+    let mix = PreparedMix::prepare_with_plugins(
+        &DocumentSettings::default(),
+        &plan(),
+        44_100,
+        &plans,
+        CALLBACK,
+    )
+    .unwrap();
+    assert_eq!(
+        mix.plugin_refusals(),
+        &[
+            ("t1".to_string(), InsertError::RateMismatch),
+            ("t2".to_string(), InsertError::TooMuchLatency),
+        ]
+    );
+    let accepted = PreparedMix::prepare_with_plugins(
+        &DocumentSettings::default(),
+        &plan(),
+        44_100,
+        &[(
+            "t1".to_string(),
+            Ok::<_, PluginStatus>(insert_plan(44_100, 64)),
+        )],
+        CALLBACK,
+    )
+    .unwrap();
+    assert!(accepted.plugin_refusals().is_empty());
+}
+
+#[test]
 fn a_mix_prepared_at_44_1_khz_with_a_44_1_khz_helper_attaches_the_insert() {
     let plans = vec![(
         "t1".to_string(),

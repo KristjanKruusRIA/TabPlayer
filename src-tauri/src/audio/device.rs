@@ -2032,6 +2032,9 @@ pub struct AudioService {
     /// wait on the audio thread.
     midi: MidiOut,
     manager: mpsc::Sender<ManagerRequest>,
+    /// The plug-in inserts the last mix or renderer built refused, and why, until the runtime takes them to tell the
+    /// slots. A leaf lock, never held with anything else; the audio thread never touches it.
+    plugin_refusals: Mutex<Vec<(String, crate::audio::plugin_insert::InsertError)>>,
 }
 impl AudioService {
     pub fn new(
@@ -2070,6 +2073,7 @@ impl AudioService {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::default(),
             manager,
+            plugin_refusals: Mutex::default(),
         }
     }
     /// External MIDI output.
@@ -2106,6 +2110,7 @@ impl AudioService {
     ) -> Result<(Box<Renderer>, PendingRoute), String> {
         let callback_frames = self.max_callback_frames().unwrap_or(512) as usize;
         let mut renderer = Self::renderer_with_callback_frames(document, rate, callback_frames)?;
+        self.keep_plugin_refusals(renderer.plugin_refusals());
         let mut pending = self
             .midi
             .build_route(&document.plan, &document.settings, false);
@@ -2113,6 +2118,15 @@ impl AudioService {
             renderer.replace_midi(tap);
         }
         Ok((renderer, pending))
+    }
+    /// Remembers what the build just made refused, replacing what an earlier build refused.
+    fn keep_plugin_refusals(&self, refused: &[(String, crate::audio::plugin_insert::InsertError)]) {
+        *self.plugin_refusals.lock().unwrap() = refused.to_vec();
+    }
+    /// The plug-in inserts the last build refused, and why; empty once taken. The runtime tells the slots, as it does
+    /// for the refusals it finds itself before a build.
+    pub fn take_plugin_refusals(&self) -> Vec<(String, crate::audio::plugin_insert::InsertError)> {
+        std::mem::take(&mut *self.plugin_refusals.lock().unwrap())
     }
     /// Sample rate to render an audition for, or None when no output stream has ever
     /// opened or the device has failed. Reads atomics only.
@@ -2836,6 +2850,7 @@ impl AudioService {
                 &plugin_plans,
                 callback_frames,
             )?;
+            self.keep_plugin_refusals(mix.plugin_refusals());
             let mut route = self
                 .midi
                 .build_route(&old.plan, &settings, self.midi.routed());
@@ -3309,6 +3324,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::default(),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         let mut candidate = original.settings.clone();
         candidate.backing.as_mut().unwrap().processing = Some(crate::settings::BackingProcessing {
@@ -3473,6 +3489,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::with_backend(ports.clone()).with_retry_interval(Duration::ZERO),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         let route = |port: Option<&str>| {
             let mut settings = original.settings.clone();
@@ -3723,6 +3740,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::with_backend(backend),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         (service, commands)
     }
@@ -3805,6 +3823,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::with_backend(Arc::new(ListedPorts(Mutex::new(vec!["Synth".into()])))),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         let mut settings = original.settings.clone();
         settings.mixes.get_mut("gm").unwrap().gain = 0.5;
@@ -3857,6 +3876,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::default(),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         // Giving the track its first kit, changing it, and taking it away again: each is a mix, never an install, which
         // would cut every ringing note and strike the held ones again.
@@ -3893,6 +3913,82 @@ mod reference_tests {
             assert!(Arc::ptr_eq(&next.resources, &original.resources));
         }
     }
+    /// A plan whose helper ring runs at `ring_rate`, for a mix the service builds at 48 kHz.
+    fn plugin_plan_at(
+        track_id: &str,
+        ring_rate: u32,
+    ) -> Vec<(
+        String,
+        Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+    )> {
+        vec![(
+            track_id.to_string(),
+            Ok(crate::plugins::service::InsertPlan {
+                link: crate::plugins::bridge::BridgeLink::in_process(
+                    tabplayer_plugin_protocol::ring::OwnedRing::new(ring_rate),
+                ),
+                latency: 0,
+                input_db: 0.0,
+                output_db: 0.0,
+                shared: Arc::new(crate::plugins::bridge::InsertShared::default()),
+            }),
+        )]
+    }
+    #[test]
+    fn a_mix_change_reports_the_inserts_it_refused_once() {
+        use crate::audio::plugin_insert::InsertError;
+        let original = document();
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, _commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::default(),
+            manager,
+            plugin_refusals: Mutex::default(),
+        };
+        // A helper still at 44.1 kHz when the device has moved to 48 kHz.
+        service
+            .set_mix_with_plugins(original.settings.clone(), 1, plugin_plan_at("gm", 44_100))
+            .unwrap();
+        assert_eq!(
+            service.take_plugin_refusals(),
+            vec![("gm".to_string(), InsertError::RateMismatch)]
+        );
+        assert!(service.take_plugin_refusals().is_empty(), "taken once");
+        // A build that refuses nothing replaces an earlier refusal instead of keeping it.
+        service
+            .set_mix_with_plugins(original.settings.clone(), 1, plugin_plan_at("gm", 44_100))
+            .unwrap();
+        service
+            .set_mix_with_plugins(original.settings.clone(), 1, plugin_plan_at("gm", 48_000))
+            .unwrap();
+        assert!(service.take_plugin_refusals().is_empty());
+    }
+    #[test]
+    fn a_rebuilt_renderer_reports_the_inserts_it_refused() {
+        use crate::audio::plugin_insert::InsertError;
+        let mut document = document();
+        document.plugin_plans = plugin_plan_at("gm", 44_100);
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        service.routed_renderer(&document, 48_000).unwrap();
+        assert_eq!(
+            service.take_plugin_refusals(),
+            vec![("gm".to_string(), InsertError::RateMismatch)]
+        );
+    }
     #[test]
     fn same_plan_mix_rejects_reference_timing_before_queue_or_document_publication() {
         let original = document();
@@ -3916,6 +4012,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::default(),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         for change in 0..5 {
             let mut candidate = original.settings.clone();

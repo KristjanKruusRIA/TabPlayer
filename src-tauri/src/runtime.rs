@@ -248,6 +248,31 @@ impl NativeAudio {
             .collect();
         (plans, rate, frames)
     }
+    /// Tells the slots about the inserts the audio service's build refused, in the words `plugin_plans` uses for the same
+    /// refusals: the device can change between that check and the build. A helper at another rate is not the plug-in's
+    /// fault, so it asks for the mix to be built again at the device's rate instead.
+    pub(crate) fn report_insert_refusals(
+        &self,
+        document_id: &str,
+        refusals: Vec<(String, crate::audio::plugin_insert::InsertError)>,
+    ) {
+        use crate::audio::plugin_insert::InsertError;
+        use crate::plugins::status::PluginStatus;
+        let Some(plugins) = &self.plugins else {
+            return;
+        };
+        for (track_id, error) in refusals {
+            match error {
+                InsertError::RateMismatch => plugins.request_reprepare(document_id),
+                InsertError::TooMuchLatency => {
+                    plugins.record_refusal(document_id, &track_id, PluginStatus::TooMuchLatency)
+                }
+                InsertError::PipelineTooLong => {
+                    plugins.record_refusal(document_id, &track_id, PluginStatus::Underrun)
+                }
+            }
+        }
+    }
     /// Records what the mix was just built from. Called with the access lock held.
     fn remember_mix(
         &self,
@@ -461,6 +486,7 @@ impl NativeAudio {
             practice.unwrap_or_default(),
             plugin_plans,
         );
+        self.report_insert_refusals(&owner.document_id, self.service.take_plugin_refusals());
         if result.is_ok() {
             self.remember_mix(owner, memo_settings, generation, frames, rate);
         }
@@ -597,6 +623,7 @@ impl NativeAudio {
             )?;
             *current_backing = backing_id;
         }
+        self.report_insert_refusals(&owner.document_id, self.service.take_plugin_refusals());
         self.remember_mix(owner, memo_settings, generation, frames, rate);
         Ok(())
     }
@@ -1872,6 +1899,42 @@ mod plugin_tick_tests {
             tick.rig.service.statuses(&tick.owner.document_id)[0].status,
             PluginStatus::TooMuchLatency
         );
+    }
+
+    #[test]
+    fn an_insert_the_audio_service_refused_reaches_the_slot_status() {
+        use crate::audio::plugin_insert::InsertError;
+        let tick = tick_rig(Some(48_000), 512);
+        let document_id = tick.owner.document_id.clone();
+        tick.ready_helper();
+        assert_eq!(
+            wait_for_slot(&tick.rig.service, &document_id, "base/0"),
+            PluginStatus::Ready
+        );
+        // The device changed between the runtime's check and the build, and the build refused the insert.
+        tick.audio.report_insert_refusals(
+            &document_id,
+            vec![("base/0".to_string(), InsertError::TooMuchLatency)],
+        );
+        assert_eq!(
+            tick.rig.service.statuses(&document_id)[0].status,
+            PluginStatus::TooMuchLatency
+        );
+        tick.audio.report_insert_refusals(
+            &document_id,
+            vec![("base/0".to_string(), InsertError::PipelineTooLong)],
+        );
+        assert_eq!(
+            tick.rig.service.statuses(&document_id)[0].status,
+            PluginStatus::Underrun
+        );
+        // A helper at another rate is not the plug-in's fault: the mix is built again at the device's rate.
+        tick.rig.service.take_reprepare(&document_id);
+        tick.audio.report_insert_refusals(
+            &document_id,
+            vec![("base/0".to_string(), InsertError::RateMismatch)],
+        );
+        assert!(tick.rig.service.take_reprepare(&document_id));
     }
 
     /// A plan of the one track `base/0`, for building a mix by hand.

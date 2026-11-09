@@ -172,7 +172,7 @@ it('passes canonical paper targets and musical selections to transport only on e
   fireEvent.click(exposeFunctionalControl(screen.getByText('Selected playback',{selector:'summary'})));click('Play from cursor');
   expect(integration.playFromCursor).toHaveBeenCalledWith({track:0,staff:0,bar:0,voice:0,beat:1},{generation:7,occurrenceIndex:0,startTick:960});
   click('Play selection');expect(integration.playSelection).toHaveBeenCalledWith({kind:'bars',tracks:[0],firstBar:0,lastBar:0},{generation:7,startOccurrence:0,endOccurrence:0,startTick:0,endTick:960});
-  click('Loop selection');expect(integration.loopSelection).toHaveBeenCalledTimes(1);expect(c.getState().snapshot).toBe(before);
+  fireEvent.click(within(document.querySelector<HTMLElement>('.transport-more')!).getByRole('button',{name:'Loop selection',hidden:true}));expect(integration.loopSelection).toHaveBeenCalledTimes(1);expect(integration.loopSelection).toHaveBeenCalledWith({kind:'bars',tracks:[0],firstBar:0,lastBar:0},{generation:7,startOccurrence:0,endOccurrence:0,startTick:0,endTick:960});expect(c.getState().snapshot).toBe(before);
 });
 
 it('places practice and page controls inside their inspector task landmarks',async()=>{
@@ -202,6 +202,88 @@ it('routes save history and playback shortcuts through existing actions outside 
   save.mockClear();fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'s',ctrlKey:true});
   click('Export score');fireEvent.keyDown(screen.getByLabelText('Export format'),{key:'s',ctrlKey:true});
   expect(save).not.toHaveBeenCalled();expect(integration.play).toHaveBeenCalledTimes(1);
+});
+
+it('passes the exact passage to transport from More playback and from the loop row',async()=>{
+  const c=await setup(),before=c.getState().snapshot;click('Select rendered note');click('Select bar');
+  const passage={generation:7,startOccurrence:0,endOccurrence:0,startTick:0,endTick:960},selection={kind:'bars',tracks:[0],firstBar:0,lastBar:0};
+  const more=document.querySelector<HTMLElement>('.transport-more')!;
+  fireEvent.click(exposeFunctionalControl(within(more).getByText('Selected playback',{selector:'summary'})));
+  fireEvent.click(within(more).getByRole('button',{name:'Loop selection',hidden:true}));
+  expect(integration.loopSelection).toHaveBeenLastCalledWith(selection,passage);
+  fireEvent.click(within(screen.getByRole('group',{name:'Loop'})).getByRole('button',{name:'Loop selection'}));
+  expect(integration.loopSelection).toHaveBeenCalledTimes(2);expect(integration.loopSelection).toHaveBeenLastCalledWith(selection,passage);
+  expect(c.getState().snapshot).toBe(before);
+});
+
+it('routes Shift+L, [ and ] through transport controls outside fields and dialogs, without recording an edit',async()=>{
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'}),player=integration.players[0],before=c.getState().snapshot,canUndo=before.canUndo;
+  const mocks=[integration.setSpeed,integration.setLoop,integration.clearLoop,integration.loopSelection],reset=()=>mocks.forEach(mock=>mock.mockClear());
+  reset();
+  const shiftL=(extra:object={})=>fireEvent.keyDown(workspace,{key:'L',code:'KeyL',shiftKey:true,...extra});
+  fireEvent.keyDown(workspace,{key:'[',code:'BracketLeft'});expect(integration.setSpeed).toHaveBeenLastCalledWith(75);
+  fireEvent.keyDown(workspace,{key:']',code:'BracketRight'});expect(integration.setSpeed).toHaveBeenLastCalledWith(125);
+  // A layout that types the bracket as another character (German u-umlaut) still sends the physical key.
+  fireEvent.keyDown(workspace,{key:'ü',code:'BracketLeft'});expect(integration.setSpeed).toHaveBeenCalledTimes(3);
+
+  // Without a selection Shift+L loops the whole-bar fields, and clears the loop once it is active.
+  shiftL();expect(integration.setLoop).toHaveBeenCalledWith(0,0);expect(integration.loopSelection).not.toHaveBeenCalled();
+  act(()=>player.publish({loop:{startTick:0,endTick:3840}}));
+  shiftL();expect(integration.clearLoop).toHaveBeenCalledTimes(1);
+  act(()=>player.publish({loop:null}));
+
+  // With a selection it loops the passage; with the loop already active it clears instead.
+  click('Select rendered note');click('Select bar');reset();
+  shiftL();expect(integration.loopSelection).toHaveBeenCalledTimes(1);expect(integration.setLoop).not.toHaveBeenCalled();
+  act(()=>player.publish({loop:{startTick:0,endTick:960}}));
+  shiftL();expect(integration.clearLoop).toHaveBeenCalledTimes(1);expect(integration.loopSelection).toHaveBeenCalledTimes(1);
+  act(()=>player.publish({loop:null}));
+
+  // The old function keys and Ctrl+L, and unrelated chords, do nothing.
+  reset();
+  for(const event of [{key:'F9'},{key:'F7'},{key:'F8'},{key:'l',code:'KeyL',ctrlKey:true},{key:'l',code:'KeyL'},{key:'[',code:'BracketLeft',shiftKey:true},{key:'[',code:'BracketLeft',ctrlKey:true},{key:'L',code:'KeyL',shiftKey:true,altKey:true},{key:'L',code:'KeyL',shiftKey:true,repeat:true}])fireEvent.keyDown(workspace,event);
+  for(const mock of mocks)expect(mock).not.toHaveBeenCalled();
+
+  // Not inside a text field, nor while a dialog is open.
+  const field=screen.getByLabelText('Fret');
+  fireEvent.keyDown(field,{key:'[',code:'BracketLeft'});fireEvent.keyDown(field,{key:'L',code:'KeyL',shiftKey:true});
+  for(const mock of mocks)expect(mock).not.toHaveBeenCalled();
+  fireEvent.keyDown(workspace,{key:'P',code:'KeyP',ctrlKey:true,shiftKey:true});
+  const dialog=screen.getByRole('dialog');
+  fireEvent.keyDown(dialog,{key:']',code:'BracketRight'});fireEvent.keyDown(dialog,{key:'L',code:'KeyL',shiftKey:true});
+  for(const mock of mocks)expect(mock).not.toHaveBeenCalled();
+  fireEvent.keyDown(dialog,{key:'Escape'});
+
+  expect(c.getState().snapshot).toBe(before);expect(c.getState().snapshot.canUndo).toBe(canUndo);
+});
+
+it('leaves a bracket-position key to note entry or another handler (German + at the ] position)',async()=>{
+  await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});
+  // German types + at the ] position: during note entry that key shortens the beat and must not also speed up playback.
+  // Outside note entry nothing handles + first, so only the key filter keeps it from speeding up playback.
+  integration.setSpeed.mockClear();fireEvent.keyDown(workspace,{key:'+',code:'BracketRight'});expect(integration.setSpeed).not.toHaveBeenCalled();
+  fireEvent.keyDown(workspace,{key:'n'});integration.setSpeed.mockClear();
+  fireEvent.keyDown(workspace,{key:'+',code:'BracketRight'});
+  expect(integration.setSpeed).not.toHaveBeenCalled();
+  fireEvent.keyDown(workspace,{key:'n'});integration.setSpeed.mockClear();
+  // A key something else already handled is left alone, even when it is a letter at a bracket position.
+  const handled=(event:Event)=>event.preventDefault();workspace.addEventListener('keydown',handled);
+  fireEvent.keyDown(workspace,{key:'ü',code:'BracketLeft'});workspace.removeEventListener('keydown',handled);
+  expect(integration.setSpeed).not.toHaveBeenCalled();
+});
+
+it('Shift+L falls back to the Loop button while Loop selection is unavailable, and each shortcut has one announcing control',async()=>{
+  await setup();const workspace=screen.getByRole('region',{name:'Score workspace'}),player=integration.players[0] as unknown as {playbackOccurrences:()=>unknown[];publish:(patch:object)=>void};
+  click('Select rendered note');click('Select bar');
+  for(const shortcut of ['Shift+L','[',']'])expect(document.querySelectorAll(`[aria-keyshortcuts="${shortcut}"]`)).toHaveLength(1);
+  const original=player.playbackOccurrences;player.playbackOccurrences=()=>[];
+  act(()=>player.publish({time:1}));
+  const loopSelection=within(screen.getByRole('group',{name:'Loop'})).queryByRole('button',{name:'Loop selection'});
+  if(loopSelection)expect(loopSelection).toHaveAttribute('aria-disabled','true');
+  integration.setLoop.mockClear();integration.loopSelection.mockClear();
+  fireEvent.keyDown(workspace,{key:'L',code:'KeyL',shiftKey:true});
+  expect(integration.setLoop).toHaveBeenCalledWith(0,0);expect(integration.loopSelection).not.toHaveBeenCalled();
+  player.playbackOccurrences=original;
 });
 
 it('reveals paste options through a collapsed Edit task without changing history',async()=>{
@@ -2229,4 +2311,12 @@ describe('GP8 edit and cursor keys',()=>{
     press({key:'End'});expect(cursor()).toMatchObject({bar:lastBar});
     press({key:'Home',ctrlKey:true});expect(cursor()).toMatchObject({bar:0,beat:0});
   });
+});
+
+it('runs the practice shortcut commands from the command palette',async()=>{
+  await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});integration.setSpeed.mockClear();
+  fireEvent.keyDown(workspace,{key:'P',code:'KeyP',ctrlKey:true,shiftKey:true});
+  fireEvent.change(screen.getByRole('combobox',{name:'Command'}),{target:{value:'slower'}});
+  fireEvent.keyDown(screen.getByRole('combobox',{name:'Command'}),{key:'Enter'});
+  expect(integration.setSpeed).toHaveBeenCalledWith(75);
 });

@@ -373,6 +373,7 @@ export const en = {
   'help.topic.shortcuts.title': 'Keyboard shortcuts',
   'help.topic.shortcuts.p1': 'Ctrl/Cmd + N, O, S: New, Open, Save (add Shift for Save As). Ctrl/Cmd + W closes the score; Ctrl/Cmd + Tab moves between scores.',
   'help.topic.shortcuts.p2': 'Ctrl/Cmd + Z undoes and Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y redoes. Space plays or pauses.',
+  'help.topic.shortcuts.practice': 'Shift + L loops the selected passage, or the bars in the Loop fields when nothing is selected, and clears an active loop. [ plays slower and ] plays faster.',
   'help.topic.shortcuts.p3': 'Ctrl/Cmd + C, X, V copy, cut and paste music; add Shift to Copy or Cut for all selected tracks.',
   'help.topic.shortcuts.tie': 'Ctrl/Cmd + T ties the selected notes to the notes before them, giving each the earlier fret; Ctrl/Cmd + Shift + T unties them.',
   'help.topic.shortcuts.p4': 'Ctrl/Cmd + Shift + P opens the command palette. F1 opens this help.',

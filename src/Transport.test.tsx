@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { act,cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
+import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { Transport } from './Transport';
 import type { PlaybackState } from './audio/types';
@@ -35,7 +35,7 @@ it('fresh cursor Play requires an explicit repeated occurrence while paused Resu
 it('selection and choice changes are silent; explicit actions dispatch the canonical selection without optimistic range',()=>{
   const selection={kind:'bars' as const,tracks:[0],firstBar:0,lastBar:0},{player,update}=playerFor();const view=renderTransport(<Transport cursor={cursor} selection={selection} player={player} measures={4} busy={false}/>);
   expect(player.play).not.toHaveBeenCalled();expect(player.setLoop).not.toHaveBeenCalled();fireEvent.click(screen.getByText('Selected playback'));
-  fireEvent.click(screen.getByRole('button',{name:'Loop selection'}));expect(player.loopSelection).toHaveBeenCalledWith(selection,passage);expect(player.play).not.toHaveBeenCalled();
+  fireEvent.click(within(document.querySelector<HTMLElement>('.transport-more')!).getByRole('button',{name:'Loop selection'}));expect(player.loopSelection).toHaveBeenCalledWith(selection,passage);expect(player.play).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button',{name:'Play selection'}));expect(player.playSelection).toHaveBeenCalledWith(selection,passage);expect(screen.queryByLabelText('Selected playback range')).not.toBeInTheDocument();
   update(snapshot({range:{startTick:480,endTick:1920}}));expect(screen.getByLabelText('Selected playback range')).toBeInTheDocument();
   view.rerender(<Transport cursor={{...cursor,beat:1}} selection={null} player={player} measures={4} busy={false}/>);expect(screen.getByRole('button',{name:'Play selection'})).toBeDisabled();expect(player.playSelection).toHaveBeenCalledTimes(1);
@@ -443,4 +443,51 @@ it('typed practice speed: accepts a decimal comma and refuses hex, exponent and 
     expect(screen.getByRole('alert'),text).toHaveTextContent('Speed must be a number');
   }
   expect(player.setSpeed).not.toHaveBeenCalled();
+});
+
+it('offers Loop selection button in the loop row whenever a passage is selected, and clicking it loops the passage',()=>{
+  const selection={kind:'bars' as const,tracks:[0],firstBar:1,lastBar:2};
+  const {player}=playerFor();
+  const view=render(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const loopGroup=()=>screen.getByRole('group',{name:'Loop'});
+  expect(within(loopGroup()).queryByRole('button',{name:'Loop selection'})).toBeNull();
+
+  view.rerender(<Transport cursor={cursor} selection={selection} player={player} measures={4} busy={false}/>);
+  const loopSel=within(loopGroup()).getByRole('button',{name:'Loop selection'});
+  expect(loopSel).toBeInTheDocument();
+  expect(loopSel).toHaveAttribute('data-action','loop-selection');
+  expect(loopSel).not.toHaveAttribute('aria-keyshortcuts');
+
+  fireEvent.click(loopSel);
+  expect(player.loopSelection).toHaveBeenCalledWith(selection,passage);
+});
+
+it('closing More playback after Loop selection runs inside More playback',()=>{
+  const selection={kind:'bars' as const,tracks:[0],firstBar:1,lastBar:2};
+  const {player}=playerFor();
+  render(<Transport cursor={cursor} selection={selection} player={player} measures={4} busy={false}/>);
+  const moreDetails=screen.getByText(/^More playback/,{selector:'summary'}).closest('details')!;
+  moreDetails.open=true;
+  fireEvent.click(screen.getByText('Selected playback'));
+
+  const innerButton=within(moreDetails).getByRole('button',{name:'Loop selection'});
+  fireEvent.click(innerButton);
+  expect(player.loopSelection).toHaveBeenCalledWith(selection,passage);
+  expect(moreDetails.open).toBe(false);
+});
+
+it('Loop, Slower and Faster buttons carry their keyboard shortcuts and data-action attributes',()=>{
+  const {player}=playerFor();
+  render(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  const loop=screen.getByRole('button',{name:'Loop'});
+  expect(loop).toHaveAttribute('data-action','loop');
+  expect(loop).toHaveAttribute('aria-keyshortcuts','Shift+L');
+
+  const slower=screen.getByRole('button',{name:'Slower'});
+  expect(slower).toHaveAttribute('data-action','slower');
+  expect(slower).toHaveAttribute('aria-keyshortcuts','[');
+
+  const faster=screen.getByRole('button',{name:'Faster'});
+  expect(faster).toHaveAttribute('data-action','faster');
+  expect(faster).toHaveAttribute('aria-keyshortcuts',']');
 });

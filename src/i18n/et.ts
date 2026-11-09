@@ -375,6 +375,7 @@ export const et: MessageCatalog = {
   'help.topic.shortcuts.title': 'Kiirklahvid',
   'help.topic.shortcuts.p1': 'Ctrl/Cmd + N, O, S: Uus, Ava, Salvesta (koos Shiftiga Salvesta nimega). Ctrl/Cmd + W sulgeb partituuri; Ctrl/Cmd + Tab liigub partituuride vahel.',
   'help.topic.shortcuts.p2': 'Ctrl/Cmd + Z võtab tagasi ja Ctrl/Cmd + Shift + Z või Ctrl/Cmd + Y teeb uuesti. Tühik mängib või peatab.',
+  'help.topic.shortcuts.practice': 'Shift + L kordab valitud lõiku või kordusväljade taktide vahemikku, kui midagi pole valitud, ja lõpetab käiva kordamise. [ mängib aeglasemalt ja ] kiiremini.',
   'help.topic.shortcuts.p3': 'Ctrl/Cmd + C, X, V kopeerivad, lõikavad ja asetavad muusikat; lisa Shift kopeerimiseks/lõikamiseks kõigil valitud radadel.',
   'help.topic.shortcuts.tie': 'Ctrl/Cmd + T seob valitud noodid neile eelnevate nootidega ja annab igaühele eelmise noodi kriipsu; Ctrl/Cmd + Shift + T eemaldab sidemed.',
   'help.topic.shortcuts.p4': 'Ctrl/Cmd + Shift + P avab käsupaleti. F1 avab abi.',

@@ -4,7 +4,10 @@ import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { readFileSync } from 'node:fs';
 import { HelpDialog } from './HelpDialog';
-import { appVersion,helpTopics,topicFor,updateStatus } from './help-topics';
+import { appVersion,getHelpTopics,helpTopics,topicFor,updateStatus } from './help-topics';
+import { en as enMessages } from '../i18n/en';
+import { et as etMessages } from '../i18n/et';
+import { de as deMessages } from '../i18n/de';
 
 afterEach(cleanup);
 
@@ -57,4 +60,12 @@ it('describes the inspector tabs and the Track tab, not the old Track task',()=>
   unmount();render(<HelpDialog initial="inspector" onClose={vi.fn()}/>);
   const inspector=screen.getByRole('article',{name:'The inspector'});
   expect(inspector).toHaveTextContent('three tabs');expect(inspector).toHaveTextContent('Song holds');expect(inspector).toHaveTextContent('Track holds');expect(inspector).toHaveTextContent('Selection holds');expect(inspector).toHaveTextContent('Practice settings on the toolbar');
+});
+
+it('documents the Shift+L, [ and ] practice shortcuts in the shortcuts topic in every language',()=>{
+  const lines=(table:Record<string,string>)=>getHelpTopics(key=>table[key]).find(topic=>topic.id==='shortcuts')!.paragraphs;
+  const [en,et,de]=[enMessages,etMessages,deMessages].map(table=>lines(table as Record<string,string>).find(line=>line.includes('Shift + L'))!);
+  for(const line of [en,et,de])expect(line).toContain('[');
+  expect(new Set([en,et,de]).size).toBe(3);
+  expect(helpTopics.find(topic=>topic.id==='shortcuts')!.paragraphs).toContain(en);
 });

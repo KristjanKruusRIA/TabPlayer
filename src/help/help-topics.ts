@@ -74,6 +74,7 @@ export function getHelpTopics(t: (key: MessageKey, params?: Record<string, strin
       paragraphs: [
         t('help.topic.shortcuts.p1'),
         t('help.topic.shortcuts.p2'),
+        t('help.topic.shortcuts.practice'),
         t('help.topic.shortcuts.p3'),
         t('help.topic.shortcuts.tie'),
         t('help.topic.shortcuts.p4'),
@@ -142,6 +143,7 @@ export const helpTopics: readonly HelpTopic[] = [
     id: 'shortcuts', title: 'Keyboard shortcuts', paragraphs: [
       'Ctrl/Cmd + N, O, S: New, Open, Save (add Shift for Save As). Ctrl/Cmd + W closes the score; Ctrl/Cmd + Tab moves between scores.',
       'Ctrl/Cmd + Z undoes and Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y redoes. Space plays or pauses.',
+      'Shift + L loops the selected passage, or the bars in the Loop fields when nothing is selected, and clears an active loop. [ plays slower and ] plays faster.',
       'Ctrl/Cmd + C, X, V copy, cut and paste music; add Shift to Copy or Cut for all selected tracks.',
       'Ctrl/Cmd + T ties the selected notes to the notes before them, giving each the earlier fret; Ctrl/Cmd + Shift + T unties them.',
       'Ctrl/Cmd + Shift + P opens the command palette. F1 opens this help.',

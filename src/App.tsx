@@ -389,6 +389,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     else if(action.name==='undo'){if(state.snapshot.canUndo&&!editLocked)change(controller.undo());}
     else if(action.name==='redo'){if(state.snapshot.canRedo&&!editLocked)change(controller.redo());}
     else if(action.name==='play')shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();
+    else if(action.name==='loop'||action.name==='slower'||action.name==='faster')shell.current?.querySelector<HTMLButtonElement>(`[data-action="${action.name}"]`)?.click();
     else if(action.name==='new')documentAction(onNew());
     else if(action.name==='open')documentAction(onOpen());
     else if(action.name==='importAscii'){if(onImportConverted)openAscii();}
@@ -778,6 +779,18 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
     if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
       event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();return;
+    }
+    // Transport keys: Shift+L loops (the passage when one is selected and the loop is off), [ and ] step the speed. Brackets match the physical key when it types a bracket or a letter (German and Estonian put u-umlaut, and Estonian o-tilde, there), never a symbol such as the + that German types in the ] position, which note entry takes.
+    if(!event.defaultPrevented&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat){
+      const transport=(action:string)=>event.currentTarget.querySelector<HTMLButtonElement>(`[data-action="${action}"]`);
+      if(event.shiftKey&&key==='l'){
+        event.preventDefault();
+        const loopBtn=transport('loop'),loopActive=loopBtn?.getAttribute('aria-pressed')==='true',passageBtn=transport('loop-selection');
+        (!loopActive&&passageBtn&&passageBtn.getAttribute('aria-disabled')!=='true'?passageBtn:loopBtn)?.click();return;
+      }
+      if(!event.shiftKey&&(event.code==='BracketLeft'||event.code==='BracketRight')&&/^(\[|\]|\p{L})$/u.test(event.key)){
+        event.preventDefault();transport(event.code==='BracketLeft'?'slower':'faster')?.click();return;
+      }
     }
     if((event.ctrlKey||event.metaKey)&&['c','x','v'].includes(key)){
       event.preventDefault();if(controlsBusy)return;

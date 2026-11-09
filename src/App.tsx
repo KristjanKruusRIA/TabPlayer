@@ -768,6 +768,22 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
       event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();return;
     }
+    const ctrl=event.ctrlKey||event.metaKey;
+    if(!event.altKey&&!event.repeat){
+      if((!ctrl&&event.key==='F9')||(ctrl&&!event.shiftKey&&key==='l')){
+        event.preventDefault();
+        const loopBtn=event.currentTarget.querySelector<HTMLButtonElement>('[data-action="loop"]');
+        const loopActive=loopBtn?.getAttribute('aria-pressed')==='true';
+        const targetBtn=(!loopActive?event.currentTarget.querySelector<HTMLButtonElement>('[data-action="loop-selection"]'):null)??loopBtn;
+        targetBtn?.click();return;
+      }
+      if(!ctrl&&!event.shiftKey&&event.key==='F7'){
+        event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[data-action="slower"]')?.click();return;
+      }
+      if(!ctrl&&!event.shiftKey&&event.key==='F8'){
+        event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[data-action="faster"]')?.click();return;
+      }
+    }
     if((event.ctrlKey||event.metaKey)&&['c','x','v'].includes(key)){
       event.preventDefault();if(controlsBusy)return;
       if(editLocked&&(key==='x'||key==='v'))return;

@@ -151,7 +151,7 @@ function exposeFunctionalControl(element:HTMLElement){
   for(const details of ancestors)if(!details.open)fireEvent.click(details.querySelector('summary')!);
   return element;
 }
-function functionalButton(name:string|RegExp){return exposeFunctionalControl(screen.queryByRole('button',{name})??screen.getByRole('button',{name,hidden:true}));}
+function functionalButton(name:string|RegExp){const all=screen.queryAllByRole('button',{name});return exposeFunctionalControl(all.length?all[0]:screen.getByRole('button',{name,hidden:true}));}
 const change=(label:string,value:string)=>fireEvent.change(exposeFunctionalControl(screen.getByLabelText(label)),{target:{value}});
 const click=(name:string)=>{
   // Selecting a track is now reached through Mixer; return to the viewer when that was the active task.
@@ -202,6 +202,47 @@ it('routes save history and playback shortcuts through existing actions outside 
   save.mockClear();fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'s',ctrlKey:true});
   click('Export score');fireEvent.keyDown(screen.getByLabelText('Export format'),{key:'s',ctrlKey:true});
   expect(save).not.toHaveBeenCalled();expect(integration.play).toHaveBeenCalledTimes(1);
+});
+
+it('routes loop, slower and faster shortcuts through transport controls outside fields and dialogs',async()=>{
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'}),player=integration.players[0];
+  integration.setSpeed.mockClear();
+  integration.setLoop.mockClear();
+  integration.clearLoop.mockClear();
+  integration.loopSelection.mockClear();
+
+  // F7 slows down
+  fireEvent.keyDown(workspace,{key:'F7'});
+  expect(integration.setSpeed).toHaveBeenCalledWith(75);
+
+  // F8 speeds up
+  fireEvent.keyDown(workspace,{key:'F8'});
+  expect(integration.setSpeed).toHaveBeenCalledWith(125);
+
+  // F9 loops whole bar when no passage is selected
+  fireEvent.keyDown(workspace,{key:'F9'});
+  expect(integration.setLoop).toHaveBeenCalledWith(0,0);
+
+  // When loop is active, F9 or Ctrl+L clears loop
+  act(()=>player.publish({loop:{startTick:0,endTick:3840}}));
+  fireEvent.keyDown(workspace,{key:'F9'});
+  expect(integration.clearLoop).toHaveBeenCalledTimes(1);
+
+  integration.setLoop.mockClear();
+  act(()=>player.publish({loop:null}));
+  fireEvent.keyDown(workspace,{key:'l',ctrlKey:true});
+  expect(integration.setLoop).toHaveBeenCalledWith(0,0);
+
+  // When a passage is selected and loop is not active, F9 calls loopSelection
+  click('Select rendered note');
+  click('Select bar');
+  fireEvent.keyDown(workspace,{key:'F9'});
+  expect(integration.loopSelection).toHaveBeenCalledTimes(1);
+
+  // Shortcuts are ignored inside text fields
+  integration.setSpeed.mockClear();
+  fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'F7'});
+  expect(integration.setSpeed).not.toHaveBeenCalled();
 });
 
 it('reveals paste options through a collapsed Edit task without changing history',async()=>{

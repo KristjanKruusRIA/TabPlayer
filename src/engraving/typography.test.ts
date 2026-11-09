@@ -7,7 +7,7 @@ import { notationPresets,presetApplied } from './notation-presets';
 import type { EngravingOverrides,EngravingTypography } from './types';
 import { FALLBACK_FAMILIES,TAB_NUMBER_FONTS,configureRoleFonts,pageRoleFont,roleElements,type EngravingFonts } from './fonts';
 import { hasFace,textFonts } from './font-catalog';
-import { configureTypography,defaultTypography,isDefaultTypography,typographyOf,validateTypography,withTypography } from './typography';
+import { configureTypography,defaultTypography,isDefaultTypography,typographyOf,validateTypography,withTypography,tabDigitFloorPercent,MIN_TAB_DIGIT_PX,MIN_DIGIT_HEIGHT_RATIO } from './typography';
 
 const typed=(over:Partial<EngravingTypography>):EngravingTypography=>({...defaultTypography(),...over});
 const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
@@ -200,4 +200,21 @@ it('page_role_font_reads_family_flags_and_scale',()=>{
   expect(pageRoleFont({roles:{pageFooter:{font:'notoSerif',bold:true,italic:true}}},'pageFooter')).toEqual({family:'TabPlayer Serif',bold:true,italic:true,scale:null});
   expect(pageRoleFont({roles:{pageFooter:{font:'notoSansMono',italic:true}}},'pageFooter')).toEqual({family:'TabPlayer Mono',bold:false,italic:false,scale:null});
   expect(pageRoleFont({roles:{pageFooter:{font:'notoSerif'}}},'pageHeader')).toEqual({family:null,bold:false,italic:false,scale:null});
+});
+
+it('tabDigitFloorPercent_keeps_the_smallest_tab_digit_at_least_7_5_px_and_falls_for_larger_tab_fonts',()=>{
+  const font=new Settings().display.resources.tablatureFont.size;
+  expect(font).toBe(14);
+  expect(tabDigitFloorPercent(null)).toBe(63);
+  expect(tabDigitFloorPercent(1)).toBe(63);
+  for(const scale of [null,.75,1,1.25,1.5]){
+    const floor=tabDigitFloorPercent(scale),digit=Math.round(font*(scale??1)*10)/10*MIN_DIGIT_HEIGHT_RATIO;
+    expect(digit*floor/100,String(scale)).toBeGreaterThanOrEqual(MIN_TAB_DIGIT_PX);
+    expect(digit*(floor-1)/100,String(scale)).toBeLessThan(MIN_TAB_DIGIT_PX);
+  }
+  expect(tabDigitFloorPercent(1.5)).toBeLessThan(tabDigitFloorPercent(1));
+  expect(tabDigitFloorPercent(1)).toBeLessThan(tabDigitFloorPercent(.75));
+  expect(tabDigitFloorPercent(.75)).toBe(84);
+  expect(tabDigitFloorPercent(.1)).toBe(100);
+  expect(tabDigitFloorPercent(10)).toBe(25);
 });

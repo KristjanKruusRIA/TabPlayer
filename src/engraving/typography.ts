@@ -52,3 +52,17 @@ export function configureTypography(settings:Settings,typography:EngravingTypogr
   // Fret and staff numbers keep the default family: the chosen family may have old-style digits that sit unevenly on the lines.
   for(const key of TAB_NUMBER_FONTS)resources[key]=defaults[key].withSize(scaled(defaults[key].size,typography.tabScale));
 }
+
+/** The smallest tab digit, in screen pixels, that stays legible. */
+export const MIN_TAB_DIGIT_PX=7.5;
+/** Measured in the app (THE-56): the smallest drawn tab digit is 12 px tall at 100% zoom with the default 14 px tablature font. */
+export const MIN_DIGIT_HEIGHT_RATIO=12/14;
+/**
+ * The lowest zoom percent at which the smallest tab digit is still `MIN_TAB_DIGIT_PX` tall, from the tablature font
+ * size the renderer uses (its default scaled by the Tab numbers scale). A larger tab font gives a lower floor.
+ * Kept within the 25 to 100 percent zoom range.
+ */
+export function tabDigitFloorPercent(tabScale:number|null):number {
+  const digitAt100=scaled(new Settings().display.resources.tablatureFont.size,tabScale)*MIN_DIGIT_HEIGHT_RATIO;
+  return Math.min(100,Math.max(25,Math.ceil(100*MIN_TAB_DIGIT_PX/digitAt100)));
+}

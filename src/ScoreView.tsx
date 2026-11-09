@@ -15,7 +15,7 @@ import {pageRoleFont,withoutMusicFont,withoutPageFonts,type EngravingFonts} from
 import {loadedMusicFont,loadMusicFont,loadRoleFaces,roleFacesPending,type MusicFontData} from './engraving/font-loading';
 import {musicFonts,type MusicFontId} from './engraving/font-catalog';
 import {headerFieldsOf} from './engraving/header-footer';
-import {typographyOf} from './engraving/typography';
+import {tabDigitFloorPercent,typographyOf} from './engraving/typography';
 import {loadExportFonts} from './export/pdf';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
 import {passageBands,type PassageBar} from './engraving/passage-bands';
@@ -147,11 +147,11 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const baseWidth=natural?.score===renderedScore&&natural.tracks===trackKey&&natural.layout===display.layout&&natural.width===available.width&&natural.engraving===engraving&&natural.profile===profile?natural.value:null;
   const fitMode=pageError?'manual':display.zoomMode;
   const fit=fitMode==='manual'||!available.width||(fitMode==='fitPage'&&!available.height)?{percent:zoom,limited:false}:screenLayout?
-    baseWidth===null?{percent:100,limited:false}:resolveScreenZoom({zoomMode:'fitWidth',manualPercent:zoom,available:{...available,width:display.layout==='verticalScreen'?Math.min(available.width,baseWidth):available.width},natural:{width:baseWidth}}):
+    baseWidth===null?{percent:100,limited:false}:resolveScreenZoom({zoomMode:'fitWidth',manualPercent:zoom,available:{...available,width:display.layout==='verticalScreen'?Math.min(available.width,baseWidth):available.width},natural:{width:baseWidth},minPercent:display.layout==='horizontalScreen'?tabDigitFloorPercent(engraving?typographyOf(engraving).tabScale:null):25}):
     resolveScreenZoom({zoomMode:fitMode,manualPercent:zoom,available,natural:{width:geometry.width,height:geometry.height}});
   const measureBase=screenLayout&&fitMode!=='manual'&&baseWidth===null;
   const factor=fit.percent/100,sourcePhysical=physicalRequested&&!pageError;
-  const sourceWidth=sourcePhysical?geometry.usableWidth:screenLayout?available.width:geometry.width*factor;
+  const sourceWidth=sourcePhysical?geometry.usableWidth:display.layout==='horizontalScreen'?(baseWidth!==null?Math.max(available.width,baseWidth*factor):available.width):screenLayout?available.width:geometry.width*factor;
   const sourceScale=sourcePhysical?page.scale:screenLayout?factor:page.scale*factor;
   const arrangement=useMemo(()=>pagination?arrangeScreenPages(pagination,display.layout as 'verticalPage'|'horizontalPage'|'grid',factor,available.width):null,[pagination,display.layout,factor,available.width]);
   const [fontsReady,setFontsReady]=useState(0);
@@ -224,6 +224,13 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     return()=>host.removeEventListener('wheel',onWheel);
   },[display.layout]);
   useEffect(()=>{onDisplayStatus?.({zoomPercent:fit.percent,fitLimited:fit.limited,pageError});},[onDisplayStatus,fit.percent,fit.limited,pageError]);
+  // Horizontal screen only: entering fit mode (or arriving in it from another layout) starts the strip at bar 1, so a scroll offset left over from manual zoom cannot keep a phantom range.
+  const prevFit=useRef({mode:fitMode,layout:display.layout});
+  useLayoutEffect(()=>{
+    const host=scrollHost.current,prev=prevFit.current;
+    if(display.layout==='horizontalScreen'&&fitMode!=='manual'&&host&&(prev.mode==='manual'||prev.layout!==display.layout))host.scrollLeft=0;
+    prevFit.current={mode:fitMode,layout:display.layout};
+  },[fitMode,display.layout]);
   const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop};
   const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null);
   const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);

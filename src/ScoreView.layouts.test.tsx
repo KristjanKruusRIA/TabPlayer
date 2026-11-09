@@ -14,6 +14,7 @@ import type {ScoreLayoutMode} from './engraving/screen-view';
 import {configureEngraving,defaultEngraving,projectEngraving,type EngravingProjection} from './engraving/projection';
 import {mergeSmuflMetadata} from './engraving/smufl';
 import type {MusicFontData} from './engraving/font-loading';
+import {defaultTypography,tabDigitFloorPercent,withTypography} from './engraving/typography';
 import {planAccolades} from './engraving/accolades';
 import {withStaffGaps,withStaffGroups} from './engraving/staff-groups';
 import {threeTrackScore} from './engraving/staff-fixtures';
@@ -113,7 +114,7 @@ it('drags a range across page boundaries and ignores blank gutters',()=>{
 it.each(['verticalScreen','horizontalScreen'] as const)('retains the base fit measurement in %s across the final render',layout=>{
  const {props,tree,rerender}=setup(layout);state.width=300;act(()=>state.resize());const prior=state.renders.mock.calls.length;
  rerender(tree({...props,display:{layout,zoomMode:'fitWidth'} as never}));
- expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:56.00000000000001,fitLimited:false,pageError:null});
+ expect(props.onDisplayStatus).toHaveBeenLastCalledWith(layout==='horizontalScreen'?{zoomPercent:tabDigitFloorPercent(null),fitLimited:true,pageError:null}:{zoomPercent:56.00000000000001,fitLimited:false,pageError:null});
  expect(state.renders.mock.calls.length-prior).toBeLessThanOrEqual(2);expect(state.loads).toHaveBeenCalledTimes(1);
 });
 it('maps separate public range blocks and resizes a handle across page boundaries',()=>{
@@ -200,6 +201,34 @@ it('measures screen fit at base scale even when host height is not available yet
  state.height=0;const {props,tree,rerender}=setup('horizontalScreen',137.5);
  rerender(tree({...props,display:{layout:'horizontalScreen',zoomMode:'fitWidth'} as never}));
  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:176,fitLimited:false,pageError:null});
+});
+const staleScroll=(host:HTMLElement)=>{vi.spyOn(host,'scrollWidth','get').mockReturnValue(2000);host.scrollLeft=300;expect(host.scrollLeft).toBe(300);};
+it('stops horizontal screen fit width at the digit-size floor, which is 63% for the default tab font',()=>{
+ state.width=180;
+ const {props,tree,rerender,container}=setup('horizontalScreen',100);
+ rerender(tree({...props,display:{layout:'horizontalScreen',zoomMode:'fitWidth'} as never}));
+ expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:tabDigitFloorPercent(null),fitLimited:true,pageError:null});
+ expect(tabDigitFloorPercent(null)).toBe(63);
+ expect(parseFloat(container.querySelector<HTMLElement>('.score-live-paper')!.style.width)).toBe(500*.63);
+});
+it('lowers the horizontal screen floor when the tab numbers are larger',()=>{
+ state.width=180;
+ const {props,tree,rerender}=setup('horizontalScreen',100,{engraving:withTypography(defaultEngraving(),{...defaultTypography(),tabScale:1.5})});
+ rerender(tree({...props,display:{layout:'horizontalScreen',zoomMode:'fitWidth'} as never}));
+ expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:tabDigitFloorPercent(1.5),fitLimited:true,pageError:null});
+ expect(tabDigitFloorPercent(1.5)).toBeLessThan(63);
+});
+it('returns the Horizontal screen strip to bar 1 on entering fit width',()=>{
+ const {props,tree,rerender,container}=setup('horizontalScreen',100),host=container.querySelector<HTMLElement>('.paper-scroll')!;
+ staleScroll(host);
+ rerender(tree({...props,display:{layout:'horizontalScreen',zoomMode:'fitWidth'} as never}));
+ expect(host.scrollLeft).toBe(0);
+});
+it('keeps the scroll offset of a page layout when it enters fit width',()=>{
+ const {props,tree,rerender,container}=setup('verticalPage',100),host=container.querySelector<HTMLElement>('.paper-scroll')!;
+ staleScroll(host);
+ rerender(tree({...props,display:{layout:'verticalPage',zoomMode:'fitWidth'} as never}));
+ expect(host.scrollLeft).toBe(300);
 });
 const overlays=()=>Array.from(document.querySelectorAll<SVGSVGElement>('.score-page-text'));
 const texts=(svg:SVGSVGElement)=>Array.from(svg.querySelectorAll('text')).map(t=>t.textContent);

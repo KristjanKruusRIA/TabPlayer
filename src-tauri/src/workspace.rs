@@ -986,7 +986,8 @@ impl DocumentWorkspace {
     }
 
     /// The slot of the track's last `SetTrackSound`. It does not replay the settings (a duplicated track's slot comes
-    /// from `DuplicateTrack`, which this does not see), so the plug-in service does not use it; tests read it.
+    /// from `DuplicateTrack`, which this does not see). The plug-in service uses it only to see whether an editor save,
+    /// which is itself a `SetTrackSound` on the track, was committed; tests read it too.
     pub fn track_plugin_slot(
         &self,
         id: &str,

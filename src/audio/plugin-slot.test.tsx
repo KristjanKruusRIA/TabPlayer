@@ -717,6 +717,21 @@ describe('review fixes: Save plug-in settings', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('cancels the staged state when the same state comes back, so it is not kept until the document closes', async () => {
+    invokeHandler = async (command: string) => {
+      if (command === 'plugin_library_list') return [mockEntry];
+      if (command === 'plugin_editor_open') return 7;
+      if (command === 'plugin_editor_save') return { state: mockSlot.state, assetToken: 'tok-same' };
+      return null;
+    };
+    const onChange = vi.fn();
+    render(<PluginSlotPanel trackId="track-1" documentId="doc-1" slot={mockSlot} onChange={onChange} />);
+    await open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Save plug-in settings' }));
+    await waitFor(() => expect(mockCalls).toContainEqual(['cancel_asset', { documentId: 'doc-1', token: 'tok-same' }]));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('goes away when the editor closes, and shows a save failure (full history) translated', async () => {
     invokeHandler = async (command: string) => {
       if (command === 'plugin_library_list') return [mockEntry];

@@ -47,13 +47,20 @@ mod windows_tests {
     const NEEDS: &str = "cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin";
     const RATE: u32 = 48_000;
 
+    static SERIAL: Mutex<()> = Mutex::new(());
+
     macro_rules! needs_build {
         ($($(#[$meta:meta])* fn $name:ident() $body:block)*) => {
             $(
                 #[test]
                 #[ignore = "needs: cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin"]
                 $(#[$meta])*
-                fn $name() $body
+                fn $name() {
+                    // Tests set process-wide variables that every helper started meanwhile inherits, so they run one
+                    // at a time: a variable one test sets must not reach another test's helper.
+                    let _serial = SERIAL.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    $body
+                }
             )*
         };
     }

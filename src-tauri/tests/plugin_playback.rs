@@ -173,6 +173,14 @@ mod windows_tests {
         .unwrap()
     }
 
+    fn process_alive(pid: u32) -> bool {
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output()
+            .expect("tasklist runs");
+        String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
+    }
+
     fn test_slot(class_id: &str, state_id: &str) -> PluginSlot {
         PluginSlot {
             active: true,
@@ -393,6 +401,106 @@ mod windows_tests {
                 std::thread::sleep(Duration::from_millis(20));
             }
             assert!(reported, "status reported as Hung or Crashed within 1s");
+        }
+
+        /// The path the app takes (the desktop driver's step 6): a plug-in that plays, then hangs in `process` when its
+        /// Mode parameter is set to Hang during playback. The device keeps calling back, so the insert meets the missing
+        /// result and records an underrun long before the heartbeat rule's 500 ms. The app's re-prepare tick runs as it
+        /// does in the app (every 100 ms: `take_reprepare`, then `ensure`).
+        ///
+        /// The helper's audio thread is stuck, not late: the status must say `hung`, never `underrun`, and the helper must
+        /// be killed.
+        fn a_hang_during_playback_reports_hung_and_kills_the_helper() {
+            let rig = Rig::new();
+            let state_id = "4".repeat(64);
+            let comp = encode_test_state(&TestState {
+                gain: 1.0,
+                latency: 0,
+                mode: TestMode::Normal,
+                ..TestState::default()
+            });
+            let state_bytes: Arc<[u8]> = encode_state(&comp, &[]).unwrap().into();
+            rig.service
+                .grant_consent("doc1", &[(TEST_CLASS_ID.to_string(), state_id.clone())])
+                .unwrap();
+            let slot = test_slot(TEST_CLASS_ID, &state_id);
+            let mut settings = DocumentSettings::default();
+            settings.sounds.insert(
+                "t1".into(),
+                TrackSound {
+                    plugin: Some(slot.clone()),
+                    ..Default::default()
+                },
+            );
+            let requests = [SlotRequest {
+                track_id: "t1".into(),
+                slot,
+                state: state_bytes,
+            }];
+            let plans = rig.ensure_ready("doc1", &requests);
+            assert!(plans[0].1.is_ok(), "InsertPlan is ready");
+            let pid = rig.service.session_pid("doc1", "t1").expect("a helper runs");
+            let mut renderer = Renderer::new_with_plugins(
+                Arc::new(plan_2_tracks()),
+                resources(),
+                settings,
+                RATE,
+                &plans,
+                CALLBACK,
+            )
+            .unwrap();
+            // Drain the request the launch made, as the app's tick would have.
+            rig.service.take_reprepare("doc1");
+
+            let mut buf = [[0.0f32; 2]; CALLBACK];
+            // Play long enough for the plug-in to be heard: past the pipeline and the priming span.
+            for _ in 0..20 {
+                renderer.render_into(&mut buf);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(rig.service.statuses("doc1")[0].status, PluginStatus::Ready);
+
+            // Parameter 2 is Mode; 2.0 / 8.0 selects TestMode::Hang. Its next `process` never returns.
+            rig.service
+                .set_parameter("doc1", "t1", 2, 2.0 / 8.0)
+                .expect("the parameter is set");
+
+            let started = Instant::now();
+            let mut last_tick = Instant::now();
+            let mut faults = Vec::new();
+            let mut hung_after = None;
+            while started.elapsed() < Duration::from_secs(3) && hung_after.is_none() {
+                renderer.render_into(&mut buf);
+                std::thread::sleep(Duration::from_millis(10));
+                let status = rig.service.statuses("doc1")[0].status;
+                if status != PluginStatus::Ready && status != PluginStatus::Loading {
+                    faults.push(status);
+                }
+                if status == PluginStatus::Hung {
+                    hung_after = Some(started.elapsed());
+                }
+                if last_tick.elapsed() >= Duration::from_millis(100) {
+                    last_tick = Instant::now();
+                    if rig.service.take_reprepare("doc1") {
+                        let status = rig.service.statuses("doc1")[0].status;
+                        if status != PluginStatus::Ready && status != PluginStatus::Loading {
+                            faults.push(status);
+                        }
+                        rig.service.ensure("doc1", Some(RATE), &requests);
+                    }
+                }
+            }
+            assert!(
+                !faults.contains(&PluginStatus::Underrun),
+                "a stuck audio thread was reported as an underrun: {faults:?}"
+            );
+            let hung_after = hung_after.unwrap_or_else(|| panic!("never reported hung: {faults:?}"));
+            assert!(hung_after < Duration::from_secs(2), "hung after {hung_after:?}");
+            let killed = Instant::now();
+            while process_alive(pid) && killed.elapsed() < Duration::from_secs(2) {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            assert!(!process_alive(pid), "the hung helper {pid} was killed");
         }
 
         fn rejected_state_reports_rejected_state() {

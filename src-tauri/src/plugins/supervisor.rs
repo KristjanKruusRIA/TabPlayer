@@ -17,7 +17,9 @@
 //!   helper may have been stalled too and the kill cannot be undone, but the time before and after it still counts, so
 //!   recurring stalls cannot hide a hang for ever.
 //! - **The audio thread's fault code** in [`InsertShared`] is `Underrun` or `NonFinite`. A fault is reported again only
-//!   when the code changes.
+//!   when the code changes. An underrun while the helper owes blocks is held until its heartbeat moves: a helper stuck
+//!   in the plug-in misses its results within a callback, so without the hold every hang during playback would read as
+//!   an underrun, and the app would replace the helper before the heartbeat rule could find it.
 //!
 //! A terminal report (`Crashed`, `Hung` or a violation) ends the watch, and sets [`InsertShared::disconnected`] so the
 //! insert falls back to the built-in sound at its next block. A helper the app killed or shut down is dropped from the
@@ -65,6 +67,8 @@ struct Entry {
     /// When the heartbeat last moved, or blocks were last not pending.
     still_since: Instant,
     reported_fault: u8,
+    /// The heartbeat when an underrun was first seen with blocks owed, while that underrun is held (see `check`).
+    held_underrun: Option<u64>,
 }
 
 enum Verdict {
@@ -113,7 +117,19 @@ impl Entry {
         let code = self.shared.fault.load(Ordering::Acquire);
         if code == fault::NONE {
             self.reported_fault = fault::NONE;
+            self.held_underrun = None;
         } else if code != self.reported_fault {
+            // A missing result is what a hang looks like from the audio thread, and it is seen within a callback or two,
+            // long before the heartbeat rule's 500 ms. While the helper owes blocks and its heartbeat has not moved since
+            // the underrun was first seen, the underrun is held: the heartbeat rule above reports `Hung` and kills, or the
+            // heartbeat moves (a late helper, not a stuck one) and the underrun is reported then.
+            if code == fault::UNDERRUN && self.helper.blocks_pending() {
+                let first = *self.held_underrun.get_or_insert(beat);
+                if beat == first {
+                    return Verdict::Keep;
+                }
+            }
+            self.held_underrun = None;
             self.reported_fault = code;
             match code {
                 fault::UNDERRUN => return Verdict::Fault(PluginStatus::Underrun),
@@ -231,6 +247,7 @@ impl Supervisor {
             beat: helper.heartbeat(),
             still_since: Instant::now(),
             reported_fault: fault::NONE,
+            held_underrun: None,
             key,
             helper,
             shared,

@@ -438,6 +438,31 @@ mod windows_tests {
             assert!(report.recv_timeout(Duration::from_millis(300)).is_err(), "and nothing follows it");
         }
 
+        fn an_underrun_from_a_hung_helper_is_reported_as_hung() {
+            let fixture = Fixture::new();
+            let helper = fixture.loaded(state(1.0, 0, TestMode::Hang));
+            let link = helper.link().unwrap();
+            let shared = Arc::new(InsertShared::default());
+            let (reports, report) = channel();
+            let supervisor = Supervisor::new(move |_, status| {
+                let _ = reports.send(status);
+            });
+            supervisor.watch(key(), helper.clone(), shared.clone());
+            std::thread::sleep(Duration::from_millis(200));
+            send_block(&link, 0.5);
+            // The insert misses the result a callback later, as it does during playback.
+            std::thread::sleep(Duration::from_millis(20));
+            shared
+                .fault
+                .store(fault::UNDERRUN, std::sync::atomic::Ordering::Release);
+            assert_eq!(report.recv_timeout(Duration::from_secs(1)), Ok(PluginStatus::Hung));
+            assert!(
+                wait_until(Duration::from_secs(1), || helper.exited().is_some()),
+                "the hung helper was killed"
+            );
+            assert!(report.recv_timeout(Duration::from_millis(300)).is_err(), "and nothing follows it");
+        }
+
         fn supervisor_reports_crashed() {
             let fixture = Fixture::new();
             let helper = fixture.loaded(state(1.0, 0, TestMode::Crash));

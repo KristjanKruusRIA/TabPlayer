@@ -512,29 +512,73 @@ export async function runVstPluginParity({ buildPath } = {}) {
     const helpersBeforeHang = (await helperRows()).map(row => row.pid);
     assert.ok(helpersBeforeHang.length >= 1, 'a helper runs for the plug-in before the hang');
 
-    // Parameter 2 is Mode; 2.0 / 8.0 = 0.25 selects TestMode::Hang
-    await invoke('plugin_test_set_parameter', { documentId: docId2, trackId: trackId2, id: 2, value: 0.25 });
+    // Parameter 2 is Mode; 2.0 / 8.0 = 0.25 selects TestMode::Hang. As with the crash above, TabPlayer restarts a hung
+    // helper up to MAX_CRASH_RETRIES (3) times, and a restarted helper is back in Normal mode. Its status can pass through
+    // `hung`, `loading` and `ready` between two polls, so the hang is set again on every helper that was not yet given it,
+    // found by its process, until the retries are exhausted and the status stays `hung`. The score is short, so playback
+    // is started again whenever it ends: a hang happens only in `process`.
+    const setHang = () => invoke('plugin_test_set_parameter', { documentId: docId2, trackId: trackId2, id: 2, value: 0.25 });
+    const keepPlaying = async () => {
+      if (!(await invoke('audio_status')).playing) await ui.clickWorkstationButton(page, 'Play', { waitForIdle: false });
+    };
+    const hungPids = new Set(helpersBeforeHang);
+    await setHang();
 
     const hangStart = performance.now();
     let slowestCoreAnswerMs = 0;
+    let firstHungMs = null;
+    let hungSince = null;
+    const seenStatuses = [];
     const hungStatuses = await poll(async () => {
-      const began = performance.now();
-      const statuses = await invoke('plugin_status', { documentId: docId2 });
-      await invoke('audio_status');
-      slowestCoreAnswerMs = Math.max(slowestCoreAnswerMs, (performance.now() - began) / 2);
+      // Each command is timed in the page: `invoke` also checks the app's process identity through PowerShell, which takes
+      // about 250 ms on its own and is not the app's answer.
+      owned();
+      const { statuses, slowestMs } = await page.evaluate(async documentId => {
+        const timed = async (command, args) => {
+          const began = performance.now();
+          const value = await window.__TAURI_INTERNALS__.invoke(command, args);
+          return [value, performance.now() - began];
+        };
+        const [statuses, statusMs] = await timed('plugin_status', { documentId });
+        const [, audioMs] = await timed('audio_status', {});
+        return { statuses, slowestMs: Math.max(statusMs, audioMs) };
+      }, docId2);
+      healthy();
+      slowestCoreAnswerMs = Math.max(slowestCoreAnswerMs, slowestMs);
+      const status = statuses[0]?.status;
+      if (seenStatuses.at(-1) !== status) seenStatuses.push(status);
+      const now = performance.now();
+      if (status === 'hung') {
+        firstHungMs ??= now - hangStart;
+        hungSince ??= now;
+        return statuses;
+      }
+      hungSince = null;
+      if (status === 'ready') {
+        const fresh = (await helperRows()).map(row => row.pid).filter(pid => !hungPids.has(pid));
+        if (fresh.length) {
+          fresh.forEach(pid => hungPids.add(pid));
+          await setHang().catch(() => {});
+        }
+        await keepPlaying();
+      }
       return statuses;
-    }, statuses => statuses[0]?.status === 'hung', 'plugin status became hung');
-    const hungAfterMs = performance.now() - hangStart;
+    }, statuses => statuses[0]?.status === 'hung' && performance.now() - hungSince > 2000, 'plugin status became hung and stayed hung');
+    // No fault on the way may read as anything but a hang: a stuck audio thread is not an underrun.
+    assert.deepEqual([...new Set(seenStatuses)].filter(s => !['ready', 'loading', 'hung'].includes(s)), [], `statuses while hung: ${seenStatuses.join(' > ')}`);
+    const hungAfterMs = firstHungMs;
     assert.equal(hungStatuses[0].status, 'hung');
     assert.ok(hungAfterMs < 10000, `The Rust side reported hung after ${hungAfterMs.toFixed(0)} ms`);
-    assert.ok(slowestCoreAnswerMs < 200, `plugin_status and audio_status answered in ${slowestCoreAnswerMs.toFixed(1)} ms while the plug-in hung`);
+    assert.ok(slowestCoreAnswerMs < 200, `plugin_status or audio_status took ${slowestCoreAnswerMs.toFixed(1)} ms to answer while the plug-in hung`);
 
+    await keepPlaying();
     const killed = await poll(async () => (await helperRows()).map(row => row.pid), pids => !helpersBeforeHang.some(pid => pids.includes(pid)), 'the hung helper was killed');
-    const afterHang = await poll(() => invoke('audio_status'), s => s.playing && s.renderedFrames > beforeHang.renderedFrames + 2048 && s.outputPeak > 0.001 && !s.error, 'built-in tone keeps playing after the hang');
+    const afterHang = await poll(async () => { await keepPlaying(); return invoke('audio_status'); }, s => s.playing && s.renderedFrames > beforeHang.renderedFrames + 2048 && s.outputPeak > 0.001 && !s.error, 'built-in tone keeps playing after the hang');
     assert.match(await page.locator('.plugin-status-notice, .plugin-notice-item').first().innerText(), /stopped responding.*built-in tone plays instead/i);
     await button('Stop');
     step('6. Hang mode: Rust reports hung, helper killed, commands stay quick, built-in tone keeps playing', {
       hungAfterMs,
+      statusesWhileHung: seenStatuses,
       slowestCoreAnswerMs,
       helperPidsBefore: helpersBeforeHang,
       helperPidsAfter: killed,

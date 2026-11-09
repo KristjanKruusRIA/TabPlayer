@@ -317,6 +317,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   for(const [index,bar0] of staff0.bars.entries()){
     const master=bar0.masterBar;check('master',(scoreJson.masterbars as Json[])[master.index]);
     const length=master.calculateDuration();let content='';
+    // One unnumbered <key> applies to every staff on import, so staves that disagree cannot be written.
+    if(track.staves.some(s=>s.bars[index].keySignature!==bar0.keySignature||s.bars[index].keySignatureType!==bar0.keySignatureType))unsupported('different key signatures on the staves of one track');
     const attributes:string[]=[];
     if(!previous)attributes.push(element('divisions',divisions));
     if(!previous||previous.keySignature!==bar0.keySignature||previous.keySignatureType!==bar0.keySignatureType)attributes.push(element('key',element('fifths',bar0.keySignature)+element('mode',bar0.keySignatureType===model.KeySignatureType.Minor?'minor':'major')));

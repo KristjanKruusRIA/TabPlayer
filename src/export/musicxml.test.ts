@@ -239,11 +239,48 @@ describe('MusicXML export',()=>{
     score.finish(settings);
 
     const doc=parse(exportMusicXml(score,selectAll(score)));
-    expect(doc.querySelector('note:nth-of-type(2) rest')?.getAttribute('measure')).toBe('yes');
-    expect(doc.querySelector('note:nth-of-type(2) staff')?.textContent).toBe('2');
+    const bassNotes=[...doc.querySelectorAll('note')].filter(note=>note.querySelector(':scope > staff')?.textContent==='2');
+    expect(bassNotes).toHaveLength(1);
+    expect(bassNotes[0].querySelector(':scope > rest')?.getAttribute('measure')).toBe('yes');
+    expect(bassNotes[0].querySelector(':scope > duration')?.textContent).toBe('3840');
 
+    // An empty staff bar reads back as one whole-note rest beat, not as an empty voice, so the
+    // content differs from the source only in that bass bar.
     const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
     expect(back.tracks[0].staves).toHaveLength(2);
+    const backBeats=back.tracks[0].staves[1].bars[0].voices[0].beats;
+    expect(backBeats).toHaveLength(1);
+    expect(backBeats[0].isRest).toBe(true);
+    expect(backBeats[0].duration).toBe(model.Duration.Whole);
+    expect(backBeats[0].notes).toHaveLength(0);
+    expect(score.tracks[0].staves[1].bars[0].voices[0].beats).toHaveLength(0);
+  });
+
+  it('refuses a bar whose staves disagree on the key signature',()=>{
+    const make=(bassKeyAtBar:number|null)=>{
+      const score=new model.Score();score.title='Keys';
+      const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
+      for(const staff of track.staves){staff.showStandardNotation=true;staff.showTablature=false;}
+      for(let index=0;index<2;index++){
+        const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+        track.staves.forEach((staff,s)=>{
+          const bar=new model.Bar();staff.addBar(bar);bar.clef=s?model.Clef.F4:model.Clef.G2;
+          bar.keySignature=(s&&bassKeyAtBar!==null&&index>=bassKeyAtBar?1:0) as model.KeySignature;
+          const voice=new model.Voice();bar.addVoice(voice);
+          const beat=new model.Beat();beat.duration=model.Duration.Whole;voice.addBeat(beat);
+          const note=new model.Note();note.octave=s?3:5;note.tone=0;beat.addNote(note);
+        });
+      }
+      score.finish(settings);
+      return score;
+    };
+    // Whole track in different keys, and a key change on the bass staff only.
+    for(const at of [0,1]){
+      const score=make(at);
+      expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/different key signatures on the staves/);
+    }
+    const same=make(null);
+    expect(()=>exportMusicXml(same,selectAll(same))).not.toThrow();
   });
 
   it('writes tempo text, dynamics changes, forced accidentals and mix points',()=>{

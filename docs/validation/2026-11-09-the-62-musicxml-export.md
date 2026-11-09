@@ -1,10 +1,19 @@
-# THE-62: Finish MusicXML export (F13)
+# THE-62: MusicXML export, multi-staff tracks only (F13, partial)
 
 2026-11-09. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
+**Scope: only the multi-staff refusal was lifted.** THE-62 is not finished. These refusals still apply:
+- percussion staves
+- a stringed staff shown only as standard notation
+- more than one staff on a stringed track
+- sounding transposition
+- MIDI channels above 16
+- different key signatures on the staves of one track (new)
+- every feature outside the `written` allowlist in `musicxml.ts` (sections, alternate endings, beat text, ghost and dead notes, palm mute, let ring, harmonics, fingering, crescendo, chords, triplet feel, double bars and others), which this branch did not audit
+
 The backlog ticket THE-62 asked to treat the remaining refusals as the list of work, widening support where MusicXML and the importer faithfully express the notation, while continuing to refuse anything that cannot be written or round-tripped correctly:
 - Multi-staff tracks (e.g. keyboard / piano grand staff, organ).
 - Assessment of other refusal families: percussion staves, stringed staves shown only as standard notation, sounding transposition, and high MIDI channels.
@@ -20,7 +29,9 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
      - Between each voice and staff entry in a measure, `<backup><duration>...</duration></backup>` returns the cursor to the beginning of the measure.
      - Inactive staves receive explicit `<rest measure="yes"/>` entries.
    - alphaTab's MusicXML importer natively recognizes `<staves>`, `<clef number="...">`, and `<staff>` elements and reconstructs multi-staff tracks cleanly (`track.staves.length === N`).
-   - Round-trip fidelity is 100% verified across 2-staff piano and 3-staff organ fixtures.
+   - Round-trip is tested on a 2-staff piano and a 3-staff organ score and compared with `content()`. This is not a claim of full fidelity.
+   - An empty staff bar is written as a whole-measure rest (`<rest measure="yes"/>`) and reads back as one whole-note rest beat on that staff, not as an empty voice. The re-imported content therefore differs from the source in that bar.
+   - A bar whose staves disagree on key signature is refused ("different key signatures on the staves of one track"). One unnumbered `<key>` is applied to every staff on import, so the other staves' keys would be lost silently.
 
 2. **Percussion staves (`staff.isPercussion`)** (Kept refused):
    - While MusicXML can write unpitched notes and instrument names, alphaTab's MusicXML importer dynamically instantiates ad-hoc articulation records with blank staff lines and notehead symbols. This corrupts standard General MIDI drum maps, notehead displays (X noteheads for hi-hats/cymbals, triangles, rim shots), and vertical staff placement on import.
@@ -58,6 +69,6 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (159 tests): All passed.
+- `src/export/musicxml.test.ts` (160 tests): all passed, including the new key-disagreement refusal (it failed before the guard was added).
 - `npx tsc --noEmit`: 0 errors.
-- Full Vitest suite: 361 test files passed, 6092 tests passed, 0 failures.
+- The full Vitest suite was not re-run for this revision.

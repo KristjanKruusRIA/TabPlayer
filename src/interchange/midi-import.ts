@@ -1,4 +1,5 @@
 import { model,Settings } from '@coderline/alphatab';
+import type { MessageKey } from '../i18n';
 import { standardPercussionCatalog } from '../editor/percussion-catalog';
 import { midiPrograms } from '../midi-programs';
 import { stripCdataEnd,type MidiSong } from './midi-smf';
@@ -17,11 +18,19 @@ export interface MidiImportOptions {
 export const defaultMidiImportOptions:MidiImportOptions={quantization:16,tuplets:'triplets',voices:2,tablature:true};
 
 export type MidiTrackKind='guitar'|'bass'|'keys'|'drums';
+export type MidiImportNote=
+  |{code:'unsupported_meters'}
+  |{code:'deferred_meters';count:number}
+  |{code:'later_instruments';count:number}
+  |{code:'unplayable_tab';count:number}
+  |{code:'dropped_drum_notes';count:number}
+  |{code:'shortened_notes';count:number}
+  |{code:'merged_notes';count:number};
 export interface MidiImportSummary {
   title:string;format:0|1;measures:number;tempo:number;
   tracks:{name:string;kind:MidiTrackKind;program:number;notes:number;voices:number}[];
   /** Short sentences about what the import changed or left out. */
-  notes:string[];
+  notes:MidiImportNote[];
 }
 export interface MidiImport {score:model.Score;summary:MidiImportSummary}
 
@@ -44,10 +53,10 @@ interface Stats {shortened:number;merged:number}
 
 const tuplet=(step:number,n:number,m:number):Lattice=>({step,n,m});
 
-function buildBars(song:MidiSong,notes:string[]):Bar[] {
+function buildBars(song:MidiSong,notes:MidiImportNote[]):Bar[] {
   const wholeTicks=song.division*4,bars:Bar[]=[];
   const meters=song.meters.filter(meter=>meter.numerator>=1&&meter.numerator<=32&&meter.denominator>=1&&meter.denominator<=32);
-  if(meters.length<song.meters.length)notes.push('time signatures this import cannot write were skipped');
+  if(meters.length<song.meters.length)notes.push({code:'unsupported_meters'});
   let tick=0,start=0,next=0,numerator=4,denominator=4,deferred=0;
   do{
     // A time signature that starts inside a bar takes effect at the next bar line.
@@ -60,7 +69,7 @@ function buildBars(song:MidiSong,notes:string[]):Bar[] {
     if(bars.length>MEASURE_LIMIT)fail(`MIDI import is limited to ${MEASURE_LIMIT} measures.`);
     start+=length;tick=Math.round(start*wholeTicks/WHOLE);
   }while(tick<song.endTick);
-  if(deferred)notes.push(`${deferred} time signature ${deferred===1?'change that started':'changes that started'} inside a measure moved to the next bar line`);
+  if(deferred)notes.push({code:'deferred_meters',count:deferred});
   return bars;
 }
 
@@ -198,7 +207,7 @@ function splitAt(segments:Piece[],cuts:number[]):Piece[] {
 
 function programName(program:number,percussion:boolean){return percussion?'Drums':midiPrograms[program]??`Instrument ${program+1}`;}
 
-function plan(song:MidiSong,notes:string[]):Source[] {
+function plan(song:MidiSong,notes:MidiImportNote[]):Source[] {
   const sources:Source[]=[];
   for(const part of song.parts){
     const channels=[...new Set(part.notes.map(note=>note.channel))].sort((a,b)=>a-b);
@@ -213,7 +222,7 @@ function plan(song:MidiSong,notes:string[]):Source[] {
   }
   if(sources.length>TRACK_LIMIT)fail(`MIDI import is limited to ${TRACK_LIMIT} instrument parts; this file has ${sources.length}.`);
   const later=sources.reduce((sum,source)=>sum+source.laterPrograms,0);
-  if(later)notes.push(`${later} instrument ${later===1?'change':'changes'} after the start of a part ${later===1?'was':'were'} not imported`);
+  if(later)notes.push({code:'later_instruments',count:later});
   return sources;
 }
 
@@ -230,7 +239,7 @@ const emptyVoice=()=>{const voice=new model.Voice(),beat=new model.Beat();beat.i
 
 /** Converts a parsed MIDI file into an editable score: quantized rhythm, tuplets, voices, programs and tempo. */
 export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiImportOptions,fallbackTitle=''):MidiImport {
-  const notes:string[]=[],bars=buildBars(song,notes),wholeTicks=song.division*4,toUnits=(tick:number)=>tick*WHOLE/wholeTicks;
+  const notes:MidiImportNote[]=[],bars=buildBars(song,notes),wholeTicks=song.division*4,toUnits=(tick:number)=>tick*WHOLE/wholeTicks;
   const total=bars.at(-1)!.start+bars.at(-1)!.length,stats:Stats={shortened:0,merged:0};
   const sources=plan(song,notes);
   const score=new model.Score();score.title=stripCdataEnd(song.title||fallbackTitle);score.artist='';
@@ -345,10 +354,10 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     summary.push({name:source.name,kind,program:source.percussion?0:program,notes:hits.length,voices:voicesUsed});
   }
   if(!summary.length)fail('This MIDI file has no notes this import can read.');
-  if(unplayable)notes.push(`${unplayable} guitar or bass ${unplayable===1?'part has':'parts have'} notes that cannot be fingered on strings, so ${unplayable===1?'it was':'they were'} imported as notation only`);
-  if(dropped)notes.push(`${dropped} drum ${dropped===1?'note':'notes'} on sounds without a drum symbol ${dropped===1?'was':'were'} skipped`);
-  if(stats.shortened)notes.push(`${stats.shortened} ${stats.shortened===1?'note was':'notes were'} cut short where more notes overlapped than the voices allow`);
-  if(stats.merged)notes.push(`${stats.merged} ${stats.merged===1?'note was':'notes were'} given the length of the chord it starts with`);
+  if(unplayable)notes.push({code:'unplayable_tab',count:unplayable});
+  if(dropped)notes.push({code:'dropped_drum_notes',count:dropped});
+  if(stats.shortened)notes.push({code:'shortened_notes',count:stats.shortened});
+  if(stats.merged)notes.push({code:'merged_notes',count:stats.merged});
   // Key signatures carry on from the bar they start in. The setter reads the staves, so it runs once they exist.
   let key=0,minor=false,keyIndex=0;const keys=song.keys;
   for(const [index,master] of score.masterBars.entries()){
@@ -358,6 +367,26 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
 
   score.finish(settings);
   return {score,summary:{title:score.title,format:song.format,measures:bars.length,tempo:firstTempo,tracks:summary,notes}};
+}
+
+export function formatMidiImportNote(note:MidiImportNote|string,t:(key:MessageKey,params?:Record<string,string|number>)=>string):string {
+  if(typeof note==='string')return note.endsWith('.')?note:`${note[0]?.toUpperCase()??''}${note.slice(1)}.`;
+  switch(note.code){
+    case 'unsupported_meters':
+      return t('midi_import.note_unsupported_meters');
+    case 'deferred_meters':
+      return t(note.count===1?'midi_import.note_deferred_meters_one':'midi_import.note_deferred_meters_other',{count:note.count});
+    case 'later_instruments':
+      return t(note.count===1?'midi_import.note_later_instruments_one':'midi_import.note_later_instruments_other',{count:note.count});
+    case 'unplayable_tab':
+      return t(note.count===1?'midi_import.note_unplayable_tab_one':'midi_import.note_unplayable_tab_other',{count:note.count});
+    case 'dropped_drum_notes':
+      return t(note.count===1?'midi_import.note_dropped_drum_notes_one':'midi_import.note_dropped_drum_notes_other',{count:note.count});
+    case 'shortened_notes':
+      return t(note.count===1?'midi_import.note_shortened_notes_one':'midi_import.note_shortened_notes_other',{count:note.count});
+    case 'merged_notes':
+      return t(note.count===1?'midi_import.note_merged_notes_one':'midi_import.note_merged_notes_other',{count:note.count});
+  }
 }
 
 /** The score file name for an import: the MIDI file's name with a .gp extension, short enough for the native limit. */

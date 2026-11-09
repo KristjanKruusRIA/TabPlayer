@@ -13,7 +13,7 @@ const midi=new Uint8Array([0x4d,0x54,0x68,0x64,0,0,0,6,0,0,0,1,0x01,0xe0,0x4d,0x
 const setup=(busy=false,result:()=>Promise<boolean>=async()=>true)=>{
   const onImport=vi.fn((_name:string,_bytes:Uint8Array)=>result()),onClose=vi.fn();
   render(<MidiImportDialog busy={busy} onImport={onImport} onClose={onClose}/>);
-  return {onImport,onClose,input:document.querySelector<HTMLInputElement>('input[type="file"]')!,importButton:screen.getByRole('button',{name:'Import'})};
+  return {onImport,onClose,input:document.querySelector<HTMLInputElement>('input[type="file"]')!,importButton:document.querySelector<HTMLButtonElement>('button[type="submit"]')!};
 };
 const status=()=>screen.getByRole('status');
 const choose=(input:HTMLInputElement,bytes:Uint8Array,name='riff.mid')=>fireEvent.change(input,{target:{files:[new File([bytes as BlobPart],name)]}});
@@ -116,4 +116,32 @@ it('translates MIDI import dialog when language preference changes', () => {
   } finally {
     setLanguagePreference('en');
   }
+});
+
+
+it('translates MIDI import summary notes across supported languages', async () => {
+  const midiUnplayable = new Uint8Array([
+    0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, 0x01, 0xe0,
+    0x4d, 0x54, 0x72, 0x6b, 0, 0, 0, 23,
+    0, 0xc0, 25,
+    0, 0xff, 0x51, 3, 0x09, 0x27, 0xc0,
+    0, 0x90, 0x10, 0x5a,
+    0x83, 0x60, 0x80, 0x10, 0,
+    0, 0xff, 0x2f, 0,
+  ]);
+  const { input } = setup();
+  choose(input, midiUnplayable);
+  await waitFor(() => expect(screen.getByText('1 guitar or bass part has notes that cannot be fingered on strings, so it was imported as notation only.')).toBeInTheDocument());
+
+  cleanup();
+  setLanguagePreference('et');
+  const et = setup();
+  choose(et.input, midiUnplayable);
+  await waitFor(() => expect(screen.getByText('1 kitarri- või bassipartiil on noodid, mida ei saa keeltel sõrmitseda, seega imporditi see ainult noodikirjana.')).toBeInTheDocument());
+
+  cleanup();
+  setLanguagePreference('de');
+  const de = setup();
+  choose(de.input, midiUnplayable);
+  await waitFor(() => expect(screen.getByText('1 Gitarren- oder Bass-Part enthält Noten, die auf Saiten nicht gegriffen werden können, und wurde daher nur als Notation importiert.')).toBeInTheDocument());
 });

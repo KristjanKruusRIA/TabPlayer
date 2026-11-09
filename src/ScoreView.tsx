@@ -1,3 +1,4 @@
+import {applyEffectBandSpacing} from './engraving/effect-bands';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { AlphaTabApi, EngravingSettings, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
 import './tremolo-guard';
@@ -456,7 +457,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const view=api.current!;if(sourceWidth<=0)return;
     // `music` is the font the layout is drawn with: the chosen font's loaded data, or Bravura's (also when the chosen font failed to load).
     const draw=(music:MusicFontData,drawn=engraving)=>{
-      view.settings.display.scale=sourceScale;
+      view.settings.display.scale=sourceScale;applyEffectBandSpacing(view.settings);
       setMusicShown(music.id);musicSubstituted.current=music.substituted;
       if(drawn)configureEngraving(view.settings,drawn,music);
       // Without an engraving nothing runs configureEngraving, so a previous music font's metrics would stay: restore Bravura's.

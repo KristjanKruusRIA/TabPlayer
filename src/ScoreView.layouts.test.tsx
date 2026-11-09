@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import {EngravingSettings,LayoutMode,NotationElement,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
 import {ScoreView} from './ScoreView';
+import {EFFECT_BAND_PADDING_BOTTOM} from './engraving/effect-bands';
 import {music} from './editor/fixtures';
 import type {EngravingOverrides,PageLayout} from './engraving/types';
 import type {EngravingFonts} from './engraving/fonts';
@@ -62,6 +63,9 @@ it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','ho
  expect(api.settings.display.layoutMode).toBe(layout==='horizontalScreen'?LayoutMode.Horizontal:layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment);
  if(layout==='verticalScreen')expect(api.settings.display.systemsLayoutMode).toBe(SystemsLayoutMode.Automatic);
  if(['verticalPage','horizontalPage','grid'].includes(layout)){expect(screen.getAllByLabelText(/^Score page \d/)).toHaveLength(3);expect(screen.getByTestId('score-source').getAttribute('aria-hidden')).toBe('true');}
+});
+it.each(['verticalPage','parchment','verticalScreen','horizontalScreen'] as const)('spaces stacked effect bands with the shared padding in %s (THE-199)',layout=>{
+ const {api}=setup(layout);expect(api.settings.display.effectBandPaddingBottom).toBe(EFFECT_BAND_PADDING_BOTTOM);
 });
 it('changes physical zoom and arrangement without reloading or rerendering notation',()=>{
  const {props,tree,rerender}=setup();const calls=state.renders.mock.calls.length;

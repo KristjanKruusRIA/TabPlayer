@@ -11,8 +11,9 @@ import type { StaffGroupKind } from './types';
 
 // SHA-256 of JSON.stringify(stablePages(exportPages({engraving:defaultEngraving()}))), first recorded at a04f3c3 before any export code changed,
 // and re-recorded when D12 merged: the export music font size went from 34px to 36px, and that one style rule is the only difference on every page.
+// and re-recorded for THE-199: effectBandPaddingBottom went from 2 to 5, which moves the section name and everything below it on the first system down 3px (page 1 only; same tokens, no other page changed).
 // stablePages only renumbers alphaTab's per-beat class names (a process-wide counter); the rest of every page is hashed as it is.
-const NO_GROUPS_SHA256='5c3925802b6cf45dbbeec710ed5fe90365ee736c8953e75b2653e721f285cb42';
+const NO_GROUPS_SHA256='04f0579c2502a83cd363374873bdc322d951f1c41ca83d9cb9ca6e8560aa6632';
 
 beforeEach(installTextMeasure);
 afterEach(()=>vi.restoreAllMocks());

@@ -41,3 +41,17 @@ The typed speed half of THE-197 was merged previously (`18fe022`). The remaining
   - Verified `.score-edit-entry` renders `Fret {pendingFret}` on the score caret overlay when `editPendingFret` is provided, and reverts when cleared.
   - All 27 tests in `ScoreView.test.tsx` passed.
 - TypeScript: `npx tsc --noEmit` passed with 0 errors.
+
+## Review follow-up
+
+- The on-score labels ("Fret N", "String N", "Entry") now go through `src/i18n` (`score.pending_fret_label`, `score.edit_string`, `score.edit_entry`) in en, et and de.
+- Estonian uses "astmetraat" for fret, the term the catalog uses most (the new strings had "krihv"). Four older strings (`help.shortcut_fret`, `help.topic.editing.p1`, `refinger.*`) still say "krihv"; they were not touched.
+- Escape and Backspace restore the fret that stood before the first pending digit (a note's fret, or one set beforehand, such as from the instrument view), and record no edit.
+- Only the score hint carries `role="status"`; the status bar copy is plain text.
+- The hint ends when the one-second digit window closes, which is also when Backspace deletes the note again.
+
+## Limits
+
+- No desktop driver, WebView2 run or visual check was done. The on-score label placement, the overlay position and the screen-reader announcement were not seen in the real app.
+- Evidence is jsdom tests only (`src/App.test.tsx`, `src/ScoreView.test.tsx`, `src/i18n`).
+- The on-score "String N" and "Entry" labels are translated but have no test of their own.

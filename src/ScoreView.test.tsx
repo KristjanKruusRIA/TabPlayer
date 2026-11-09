@@ -7,6 +7,7 @@ import { ScoreView } from './ScoreView';
 import { music, target } from './editor/fixtures';
 import type { MusicSelection } from './editor/range-types';
 import {defaultEngraving,projectEngraving} from './engraving/projection';
+import { setLanguagePreference } from './i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { newMark,setScaleDiagram } from './harmony/scale-diagram';
 
@@ -260,4 +261,13 @@ it('renders pending fret digits on the score edit target caret overlay when prov
 
   rendered.rerender(<ScoreView {...props} editPendingFret={null}/>);
   expect(document.querySelector('.score-edit-entry')).toBeNull();
+});
+
+it.each([['et','Astmetraat 7'],['de','Bund 7']] as const)('translates the on-score pending fret label in %s',(language,fret)=>{
+  setLanguagePreference(language);
+  try{
+    const props={score:music(),track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
+    render(<ScoreView {...props} editPendingFret="7"/>);
+    expect(document.querySelector('.score-edit-entry')?.textContent).toBe(fret);
+  }finally{setLanguagePreference('en');}
 });

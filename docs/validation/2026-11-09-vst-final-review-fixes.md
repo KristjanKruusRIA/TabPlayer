@@ -62,3 +62,27 @@ A fresh re-review approved M1, M2, L1, L2 and L4. It found three low-severity ed
 - **Fixed:** a Save that found nothing new left an old pending save behind. The next `ensure` then sent that state again, and a later redo naming it could be adopted while the helper held another. Save now drops the pending save when there is nothing to save.
 - **Limit:** a Save whose edit is refused, followed by any `ensure` (for example the mix change a revision conflict brings), loses the change made in the editor. `ensure` sends the document's state, and the next Save then offers nothing. The code before these fixes did the same. The check that causes it is needed for undo, so it stays.
 - **Limit:** after undoing a committed save, a close or Save in the few milliseconds before the undo's mix change runs records the undone state again.
+
+## Real-app run (2026-11-09)
+
+The desktop test app was built with `scripts/build-desktop-test.ps1`, which also built the helper and the test plug-in, and `node tests/desktop/parity-vst-plugin.mjs` was run on Windows.
+
+- **First run:** steps 1 to 5 passed. Step 6 failed: a plug-in that hung during playback never reported `hung`.
+  - Its first underrun was reported as `underrun` before the 500 ms heartbeat rule could act.
+  - The helper was shut down gracefully and relaunched, so the status went back to `ready`. Nothing killed it.
+  - The Rust test of this case rendered too few callbacks to reach that path.
+- **Fix (`207ccfd`, `0ec2d2e`):** the supervisor holds an underrun while a helper still owes blocks and its heartbeat has not moved.
+  - A stuck helper is then reported `hung` and killed.
+  - A slow helper still reports `underrun`.
+  - New tests cover a hang during playback, a hung helper's underrun and a slow helper's underrun. Each failed under the matching mutation.
+- **Driver fix:** step 6 had never been run before.
+  - It now loops the score and clicks Play once.
+  - It sets the hang on each relaunched helper until `hung` holds for 2 s.
+  - It times each command inside the page against 200 ms.
+- **Final run:** all 9 steps passed, with 0 page errors and 0 fallbacks (run folder `vst-plugin-VToelJ`, not committed). In step 6:
+  - the first `hung` came 4.5 s after the hang began;
+  - the slowest command answered in 9 ms;
+  - the hung helper was killed;
+  - the built-in tone kept playing.
+- **Limit:** if a re-prepare for another reason lands inside the hold window (up to 500 ms), a hung helper's underrun is still reported as `underrun` and the helper is relaunched.
+- **Not run:** the real-plug-in acceptance driver, a packaged `tauri build` with the plug-in overlay, and Linux or macOS.

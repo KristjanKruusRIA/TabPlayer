@@ -678,6 +678,12 @@ impl DocumentWorkspace {
         }
         self.probe_document_id(&mut entry);
         entry.saved_file_sha256 = saved_file_sha256;
+        // The document left behind ends its helpers, as an activation does (final review M1).
+        if self.active.document_id != entry.id {
+            if let Some(plugins) = &self.plugins {
+                plugins.shutdown_document(&self.active.document_id);
+            }
+        }
         self.active = AudioOwner {
             document_id: entry.id.clone(),
             activation_id: identity("activation"),

@@ -2027,6 +2027,29 @@ mod plugin_tick_tests {
     }
 
     #[test]
+    fn opening_another_document_shuts_down_the_helpers_of_the_one_left() {
+        let tick = tick_rig(Some(48_000), 512);
+        let session = tick.ready_helper();
+        assert!(!session.shutdown_called.load(Ordering::SeqCst));
+        {
+            let mut ws = tick.workspace.lock().unwrap();
+            let fork = ws.stage_fork(crate::project::Project::blank()).unwrap();
+            ws.add_document(&fork.token).unwrap();
+            assert_ne!(ws.active_owner().document_id, tick.owner.document_id);
+        }
+        assert!(
+            session.shutdown_called.load(Ordering::SeqCst),
+            "the helper of the document left behind is shut down, as an activation does"
+        );
+        assert!(
+            tick.rig
+                .service
+                .statuses(&tick.owner.document_id)
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn a_document_switched_away_during_a_tick_has_the_helpers_it_started_shut_down() {
         let tick = tick_rig(Some(48_000), 512);
         tick.record_mixes();

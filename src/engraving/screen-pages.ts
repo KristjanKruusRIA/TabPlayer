@@ -155,7 +155,7 @@ export function hitTestScreenPages(pagination:ScreenPagination,arrangement:Scree
   return (notes.length?notes:beats).sort((a,b)=>preferred(a)-preferred(b)||a.beat.voice.index-b.beat.voice.index||(a.note?.index??0)-(b.note?.index??0)||a.beat.index-b.beat.index)[0]??null;
 }
 
-export function resolveScreenZoom(input:{zoomMode:ScoreZoomMode;manualPercent:number;available:{width:number;height:number};natural:{width:number;height?:number}}):{percent:number;limited:boolean} {
+export function resolveScreenZoom(input:{zoomMode:ScoreZoomMode;manualPercent:number;available:{width:number;height:number};natural:{width:number;height?:number};minPercent?:number;maxPercent?:number}):{percent:number;limited:boolean} {
   if(input.zoomMode==='manual') {
     if(!Number.isFinite(input.manualPercent)||input.manualPercent<25||input.manualPercent>300)throw new Error('Manual zoom must be between 25% and 300%.');
     return {percent:input.manualPercent,limited:false};
@@ -167,6 +167,7 @@ export function resolveScreenZoom(input:{zoomMode:ScoreZoomMode;manualPercent:nu
     if(!positive(available.height)||natural.height===undefined||!positive(natural.height))throw new Error('Fit page requires positive measured heights.');
     ratio=Math.min(ratio,available.height/natural.height);
   }
+  const minPercent=input.minPercent??25,maxPercent=input.maxPercent??300;
   const percent=ratio*100;
-  return {percent:Math.max(25,Math.min(300,percent)),limited:percent<25||percent>300};
+  return {percent:Math.max(minPercent,Math.min(maxPercent,percent)),limited:percent<minPercent||percent>maxPercent};
 }

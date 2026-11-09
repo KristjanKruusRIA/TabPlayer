@@ -364,6 +364,14 @@ describe('zoom arithmetic',()=>{
   ] as const)('resolves %s without changing manual zoom', (zoomMode,manualPercent,width,height,naturalWidth,naturalHeight,percent,limited)=>{
     expect(resolveScreenZoom({zoomMode,manualPercent,available:{width,height},natural:{width:naturalWidth,height:naturalHeight}})).toEqual({percent,limited});
   });
+  it('respects a custom legibility floor for endless layouts without weakening default limits', () => {
+    // Below 50% floor -> clamped to 50% and marked limited
+    expect(resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:300,height:600},natural:{width:1000},minPercent:50})).toEqual({percent:50,limited:true});
+    // At or above 50% floor -> uses natural ratio and not limited
+    expect(resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:600,height:600},natural:{width:1000},minPercent:50})).toEqual({percent:60,limited:false});
+    // Default minPercent stays 25%
+    expect(resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:300,height:600},natural:{width:1000}})).toEqual({percent:30,limited:false});
+  });
   it('rejects unmeasured or nonfinite required fit dimensions and invalid manual values',()=>{
     for(const value of [0,-1,NaN,Infinity]) {
       expect(()=>resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:value,height:600},natural:{width:800}})).toThrow();

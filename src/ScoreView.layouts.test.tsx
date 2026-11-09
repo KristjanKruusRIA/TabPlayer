@@ -197,6 +197,17 @@ it('measures screen fit at base scale even when host height is not available yet
  rerender(tree({...props,display:{layout:'horizontalScreen',zoomMode:'fitWidth'} as never}));
  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:176,fitLimited:false,pageError:null});
 });
+it('stops horizontal screen fit width at the 50% legibility floor and trims stale scroll range',()=>{
+ state.width=180;
+ const {props,tree,rerender,container}=setup('horizontalScreen',100);
+ const scrollHost=container.querySelector<HTMLElement>('.paper-scroll')!;
+ scrollHost.scrollLeft=300;
+ rerender(tree({...props,display:{layout:'horizontalScreen',zoomMode:'fitWidth'} as never}));
+ expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:50,fitLimited:true,pageError:null});
+ expect(scrollHost.scrollLeft).toBe(0);
+ const paper=container.querySelector<HTMLElement>('.score-live-paper')!;
+ expect(parseFloat(paper.style.width)).toBe(250);
+});
 const overlays=()=>Array.from(document.querySelectorAll<SVGSVGElement>('.score-page-text'));
 const texts=(svg:SVGSVGElement)=>Array.from(svg.querySelectorAll('text')).map(t=>t.textContent);
 function titled(layout:ScoreLayoutMode='verticalPage'){const s=setup(layout);s.props.score.title='Etude';s.rerender(s.tree({...s.props,score:s.props.score}));return s;}

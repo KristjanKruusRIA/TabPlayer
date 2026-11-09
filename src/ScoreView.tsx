@@ -146,11 +146,11 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const baseWidth=natural?.score===renderedScore&&natural.tracks===trackKey&&natural.layout===display.layout&&natural.width===available.width&&natural.engraving===engraving&&natural.profile===profile?natural.value:null;
   const fitMode=pageError?'manual':display.zoomMode;
   const fit=fitMode==='manual'||!available.width||(fitMode==='fitPage'&&!available.height)?{percent:zoom,limited:false}:screenLayout?
-    baseWidth===null?{percent:100,limited:false}:resolveScreenZoom({zoomMode:'fitWidth',manualPercent:zoom,available:{...available,width:display.layout==='verticalScreen'?Math.min(available.width,baseWidth):available.width},natural:{width:baseWidth}}):
+    baseWidth===null?{percent:100,limited:false}:resolveScreenZoom({zoomMode:'fitWidth',manualPercent:zoom,available:{...available,width:display.layout==='verticalScreen'?Math.min(available.width,baseWidth):available.width},natural:{width:baseWidth},minPercent:display.layout==='horizontalScreen'?50:25}):
     resolveScreenZoom({zoomMode:fitMode,manualPercent:zoom,available,natural:{width:geometry.width,height:geometry.height}});
   const measureBase=screenLayout&&fitMode!=='manual'&&baseWidth===null;
   const factor=fit.percent/100,sourcePhysical=physicalRequested&&!pageError;
-  const sourceWidth=sourcePhysical?geometry.usableWidth:screenLayout?available.width:geometry.width*factor;
+  const sourceWidth=sourcePhysical?geometry.usableWidth:display.layout==='horizontalScreen'?(baseWidth!==null?Math.max(available.width,baseWidth*factor):available.width):screenLayout?available.width:geometry.width*factor;
   const sourceScale=sourcePhysical?page.scale:screenLayout?factor:page.scale*factor;
   const arrangement=useMemo(()=>pagination?arrangeScreenPages(pagination,display.layout as 'verticalPage'|'horizontalPage'|'grid',factor,available.width):null,[pagination,display.layout,factor,available.width]);
   const [fontsReady,setFontsReady]=useState(0);
@@ -202,6 +202,21 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     return()=>{observer?.disconnect();window.removeEventListener('resize',measure);};
   },[]);
   useEffect(()=>{onDisplayStatus?.({zoomPercent:fit.percent,fitLimited:fit.limited,pageError});},[onDisplayStatus,fit.percent,fit.limited,pageError]);
+  const prevFitMode=useRef({mode:fitMode,layout:display.layout});
+  useLayoutEffect(()=>{
+    const host=scrollHost.current;
+    if(fitMode!=='manual'&&host){
+      if(prevFitMode.current.mode==='manual'||prevFitMode.current.layout!==display.layout){
+        host.scrollLeft=0;
+      }else{
+        const maxScroll=Math.max(0,host.scrollWidth-host.clientWidth);
+        if(host.scrollLeft>maxScroll){
+          host.scrollLeft=maxScroll;
+        }
+      }
+    }
+    prevFitMode.current={mode:fitMode,layout:display.layout};
+  },[fitMode,display.layout,fit.percent]);
   const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop};
   const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null);
   const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);

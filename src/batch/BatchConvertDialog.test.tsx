@@ -6,8 +6,9 @@ import { strToU8 } from 'fflate';
 import { BatchConvertDialog } from './BatchConvertDialog';
 import type { BatchBridge,BatchScan } from './convert';
 import type { Probe } from './probe';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(()=>{cleanup();setLanguagePreference('en');});
 const xml=strToU8('<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure></part></score-partwise>');
 const scan:BatchScan={files:[{index:0,relative:'old/a.gp3',bytes:3},{index:1,relative:'b.gp5',bytes:3}],skipped:[],truncated:false,totalBytes:6};
 const probe:Probe=async bytes=>bytes.length>10?{ok:true,tracks:1,bars:1}:{ok:false,error:'The file could not be read.'};
@@ -130,4 +131,16 @@ it('ends a file check under way when Cancel is used, and reports the file as not
   expect(within(report).getAllByText('Not converted')).toHaveLength(2);
   expect(within(report).queryByText('Failed')).not.toBeInTheDocument();
   expect(bridge.write).not.toHaveBeenCalled();
+});
+
+it('renders localized row details when language changes',async()=>{
+  const {convert}=setup();
+  await choose();
+  fireEvent.click(convert());
+  const report=await screen.findByRole('table',{name:'Conversion report'});
+  expect(within(report).getByText('1 track, 1 bar. Saved as old/a.gp.')).toBeInTheDocument();
+  setLanguagePreference('et');
+  await waitFor(()=>expect(within(report).getByText('1 rada, 1 takt. Salvestatud nimega old/a.gp.')).toBeInTheDocument());
+  setLanguagePreference('de');
+  await waitFor(()=>expect(within(report).getByText('1 Spur, 1 Takt. Gespeichert als old/a.gp.')).toBeInTheDocument());
 });

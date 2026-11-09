@@ -205,10 +205,19 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const host=scrollHost.current;
     if(!host||display.layout!=='horizontalScreen')return;
     const onWheel=(event:WheelEvent)=>{
-      if(Math.abs(event.deltaY)>=Math.abs(event.deltaX)&&event.deltaY!==0&&!event.shiftKey){
-        event.preventDefault();
-        host.scrollLeft+=event.deltaY;
+      if(event.defaultPrevented||event.ctrlKey||event.metaKey||event.altKey||event.shiftKey)return;
+      if(event.deltaY===0||Math.abs(event.deltaY)<Math.abs(event.deltaX))return;
+      const maxLeft=host.scrollWidth-host.clientWidth;
+      if(host.scrollHeight>host.clientHeight)return;
+      if(event.deltaY<0?host.scrollLeft<=0:host.scrollLeft>=maxLeft)return;
+      for(let node=event.target instanceof Element?event.target:null;node&&node!==host;node=node.parentElement){
+        if(node.matches('textarea,select,[data-wheel-native]'))return;
+        const overflowY=getComputedStyle(node).overflowY;
+        if((overflowY==='auto'||overflowY==='scroll')&&node.scrollHeight>node.clientHeight)return;
       }
+      const unit=event.deltaMode===1?16:event.deltaMode===2?host.clientWidth:1;
+      event.preventDefault();
+      host.scrollLeft+=event.deltaY*unit;
     };
     host.addEventListener('wheel',onWheel,{passive:false});
     return()=>host.removeEventListener('wheel',onWheel);

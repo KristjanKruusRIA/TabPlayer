@@ -12,6 +12,7 @@ In horizontal screen layout (`display.layout === 'horizontalScreen'`), vertical 
 
 ## 2. Implementation
 - In `src/ScoreView.tsx`, added a non-passive `wheel` event listener on `scrollHost` (`.paper-scroll`) active when `display.layout === 'horizontalScreen'`.
+- The wheel is left native (not prevented) when: Ctrl, Meta, Alt or Shift is held; the wheel is horizontal-dominant; the content overflows vertically; there is no horizontal overflow or the score is already at the edge in that direction; or the target is a `textarea`, `select`, `[data-wheel-native]` or a vertically scrollable child. Line and page deltas are scaled (16 px per line, one client width per page).
 - When vertical wheel delta (`event.deltaY !== 0`) dominates (`Math.abs(event.deltaY) >= Math.abs(event.deltaX)`) and Shift is not held (which platforms natively map to horizontal scroll):
   - Calls `event.preventDefault()` to prevent default page scrolling.
   - Updates `host.scrollLeft += event.deltaY`.
@@ -24,3 +25,7 @@ In horizontal screen layout (`display.layout === 'horizontalScreen'`), vertical 
 - Test runs:
   - `npx vitest run src/ScoreView.layouts.test.tsx` passes (87/87 tests).
   - `npx tsc --noEmit` passes with 0 errors.
+
+## 4. Limits
+- Checked only in jsdom with mocked scroll sizes. No real-app run, no desktop driver (`tests/desktop/display-modes.mjs`), no WebView2 and no trackpad or pinch run.
+- Real wheel feel, smooth-scroll interaction, and pinch delivery as `ctrlKey` wheel events are unverified.

@@ -1,7 +1,7 @@
 import { useEffect,useId,useState } from 'react';
 import { CLICK_SOUNDS,clickSoundOf,type ClickSound,type PracticeSettings } from './practice-types';
 import { useI18n } from '../i18n';
-import { validatePractice } from './practice';
+import { PracticeError,validatePractice } from './practice';
 
 export interface PracticePanelProps {settings:PracticeSettings;busy:boolean;hasBacking:boolean;onChange:(settings:PracticeSettings)=>void}
 type TempoDraft=
@@ -27,7 +27,7 @@ export function PracticePanel({settings,busy,hasBacking,onChange}:PracticePanelP
     const tempo=draft.tempo;
     const source=settings.tempo;
     const value:PracticeSettings={tempo:tempo.kind==='relative'?{kind:tempo.kind,ratio:percentage(tempo.ratio,source.kind==='relative'?source.ratio:undefined)}:tempo.kind==='fixed'?{kind:tempo.kind,bpm:numeric(tempo.bpm)}:{kind:tempo.kind,start:percentage(tempo.start,source.kind==='progressive'?source.start:undefined),end:percentage(tempo.end,source.kind==='progressive'?source.end:undefined),step:percentage(tempo.step,source.kind==='progressive'?source.step:undefined),repetitions:numeric(tempo.repetitions)},metronome:{enabled:draft.enabled,volume:percentage(draft.volume,settings.metronome.volume),visual:draft.visual,sound:draft.sound},countIn:{bars:numeric(draft.bars),betweenLoops:draft.betweenLoops}};
-    try {validatePractice(value,hasBacking);setError('');onChange(value);}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}
+    try {validatePractice(value,hasBacking);setError('');onChange(value);}catch(reason){setError(reason instanceof PracticeError?t(`practice.error_${reason.code}`):reason instanceof Error?reason.message:String(reason));}
   };
   return <details><summary>{t('practice.settings_summary')}</summary><fieldset disabled={busy}>
     <label>{t('practice.tempo_mode')}<select value={draft.tempo.kind} aria-describedby={hasBacking?backingReason:undefined} onChange={event=>changeTempo(event.target.value as TempoDraft['kind'])}><option value="relative">{t('practice.tempo_relative')}</option><option value="fixed" disabled={hasBacking}>{t('practice.tempo_fixed')}</option><option value="progressive">{t('practice.tempo_progressive')}</option></select></label>

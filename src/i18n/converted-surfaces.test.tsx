@@ -41,9 +41,9 @@ beforeEach(() => { localStorage.clear(); setLanguagePreference('en'); });
 
 /** Text that is legitimately the same as the English: file text from the test, and real cognates. Keep this short; each entry needs a reason. */
 const allowed: Record<'all' | SupportedLanguage, ReadonlySet<string>> = {
-  all: new Set(['Moonlight.tabplayer', 'Untitled', 'Intro', 'Verse', 'Guitar', 'Bass', 'Clicks.wav',
+  all: new Set([/* file and tab names the tests supply: user data, not UI text */ 'Moonlight.tabplayer', 'Untitled', 'Intro', 'Verse', 'Guitar', 'Bass', 'Clicks.wav',
     'Bravura', 'Petaluma', 'Leland', 'Noto Sans', 'Noto Serif', 'Noto Sans Mono',          // font family names
-    'Guitar Pro 6 (.gpx)', 'MusicXML (.xml .musicxml .mxl)', 'Simile']),   // file format names and a musical term, the same in every language   // a file name and a tab title the test supplies: user data, not UI text
+    'Guitar Pro 6 (.gpx)', 'MusicXML (.xml .musicxml .mxl)', 'Simile']),   // file format names and a musical term, the same in every language
   en: new Set(),
   et: new Set(['ASCII tab', 'Filter', 'Standard']),                     // the Estonian catalog keeps this format name as it is
   de: new Set(['Interpretation', 'Normal', 'Zoom (%)', 'Filter', 'Cents', 'Solo', 'Standard', 'Horizontal', 'Notation']),      // the German words are spelled the same

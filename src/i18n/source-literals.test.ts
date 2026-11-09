@@ -57,9 +57,10 @@ const quoted = /(['"`])((?:(?!\1)[^\\\n]|\\.)*)\1/g;
 /** An English sentence or phrase: a capital letter then lower-case words, as opposed to an id, a CSS class or a key. */
 const phrase = /^[A-Z][a-z]+(?:[ ,.'’:&/-]+[A-Za-z0-9…()]+)+[.…]?$|^[A-Z][a-z]{3,}[.…]?$/;
 
-function scan(file: string): Hit[] {
-  const source = readFileSync(resolve(process.cwd(), file), 'utf8');
-  const lines = source.split('\n');
+/** A template literal, with its `${...}` parts. */
+const template = /`((?:[^`\\]|\\.)*)`/g;
+
+export function scanSource(file: string, source: string): Hit[] {
   const hits: Hit[] = [];
   const at = (index: number) => source.slice(0, index).split('\n').length;
   const report = (index: number, text: string, where: string) => {
@@ -73,49 +74,72 @@ function scan(file: string): Hit[] {
     for (const text of match[2].matchAll(quoted)) if (phrase.test(text[2])) report(match.index!, text[2], 'attribute expression');
   }
   for (const match of source.matchAll(jsxText)) {
-    const before = source.slice(Math.max(0, match.index! - 1), match.index!);
-    if (/[A-Za-z0-9_)\]]$/.test(before) && /<[A-Za-z]+(?:\s[^<>]*)?$/.test(source.slice(Math.max(0, match.index! - 120), match.index! + 1)) === false) continue;
+    // `Promise<void>(...)` is a generic, not a tag: its `<` follows an identifier character.
+    const opening = source.lastIndexOf('<', match.index!);
+    if (opening > 0 && /[A-Za-z0-9_]/.test(source[opening - 1])) continue;
     report(match.index!, match[1], 'JSX text');
   }
   // Any quoted capitalised phrase of two or more words, or ending in an ellipsis, that is not an import path.
   for (const match of source.matchAll(quoted)) {
+    if (match[1] === '`') continue;
     const text = match[2];
     if (!/^[A-Z][a-z]+(?:[ ,.'’:&/-]+[A-Za-z0-9…()]+)+[.…]?$|^[A-Z][a-z]+…$/.test(text) || !/[a-z]{2,} [A-Za-z]|…$/.test(text)) continue;
     report(match.index!, text, 'string literal');
+  }
+  // English built in a template literal: `Measure ${n}, occurrence ${m}` reads as `Measure X, occurrence X`.
+  for (const match of source.matchAll(template)) {
+    const text = match[1].replace(/\$\{[^}]*\}/g, 'X');
+    if (!/^[A-Z][a-z]+(?:[ ,.'’:&/-]+[A-Za-z0-9…()]+)+[.…]?$/.test(text) || !/[a-z]{2,} [A-Za-z]|…$/.test(text)) continue;
+    report(match.index!, text, 'template literal');
   }
   for (const match of source.matchAll(errorMessage)) {
     // A message built from a variable (`${...}` only) or from a catalog call is fine.
     if (/^\$\{[^}]*\}$/.test(match[2]) || !/[A-Za-z]{3,}/.test(match[2])) continue;
     report(match.index!, match[2], 'Error message');
   }
-  void lines;
   return hits;
 }
 
 /** Errors only a programmer sees: an impossible state, a failed assertion, a rejected bridge call that the UI replaces with its own text. */
 const programmerErrors: ReadonlyArray<[string, RegExp, string]> = [
-  ['src/audio/practice.ts', /./, 'validators of a settings object the panel already constrains; the messages reach only a log or a test, never a control'],
+  ['src/audio/practice.ts', /^Invalid /, 'shape checks of a settings object the panel builds itself; never shown'],
+  ['src/audio/practice.ts', /must be|is unavailable/, 'the English source text of PracticeError, which PracticePanel shows through practice.error_<code>'],
 ];
 
 describe('no hard-coded English in the swept files', () => {
   for (const file of sweepFiles) {
     it(`${file} shows no English text that bypasses t(...)`, () => {
-      const hits = scan(file).filter(hit => !programmerErrors.some(([name, pattern]) => name === hit.file && pattern.test(hit.text)));
+      const hits = scanSource(file, readFileSync(resolve(process.cwd(), file), 'utf8')).filter(hit => !programmerErrors.some(([name, pattern]) => name === hit.file && pattern.test(hit.text)));
       expect(hits.map(hit => `${hit.file}:${hit.line} ${hit.where}: ${hit.text}`)).toEqual([]);
     });
   }
 
   it('catches a leftover string, so the scan is not vacuous', () => {
-    const probe = (text: string) => {
-      const found: string[] = [];
-      for (const [pattern, where] of [[attribute, 'attribute'], [jsxText, 'JSX text']] as const) {
-        for (const match of text.matchAll(pattern)) found.push(`${where}:${match[1] ?? match[2]}`);
-      }
-      return found;
-    };
-    expect(probe('<button title="Remove the track">x</button>')).toEqual(['attribute:Remove the track']);
+    const probe = (text: string) => scanSource('probe.tsx', text).map(hit => `${hit.where}:${hit.text}`);
+    expect(probe('<button title="Remove the track">x</button>')).toEqual(['attribute:Remove the track', 'string literal:Remove the track']);
     expect(probe('<p>Nothing to show here.</p>')).toEqual(['JSX text:Nothing to show here.']);
-    expect(probe("<span title={dirty?'Unsaved changes':t('x')}/>")).toEqual(["attribute:dirty?'Unsaved changes':t('x')"]);
+    expect(probe("<span title={dirty?'Unsaved changes':t('x')}/>")).toEqual(['attribute expression:Unsaved changes', 'string literal:Unsaved changes']);
+    expect(probe('const name = (bar: number) => `Measure ${bar + 1}, occurrence ${bar}`;')).toEqual(['template literal:Measure X, occurrence X']);
+    expect(probe('<b aria-label={`Bar ${n}, position ${r.toFixed(2)}`}/>')).toEqual(['template literal:Bar X, position X']);
+    expect(probe('<i className={`backing-waveform-grid ${line.kind}`} id={`${list}-${current.id}`}/>')).toEqual([]);
     expect(probe("<p>{t('x')}</p>")).toEqual([]);
+  });
+});
+
+/** The English source constants that other code and tests still use must not drift from the catalog. */
+describe('English sources match the catalog', () => {
+  it('keeps the shared texts equal to their en entries', async () => {
+    const { en } = await import('./en');
+    const { FINALIZED_MESSAGE, EDIT_LOCKED_MESSAGE } = await import('../project');
+    const { TRUNCATED_NOTE, batchKinds } = await import('../batch/convert');
+    const { notationPresets } = await import('../engraving/notation-presets');
+    expect(en['project.finalized']).toBe(FINALIZED_MESSAGE);
+    expect(en['project.edit_locked']).toBe(EDIT_LOCKED_MESSAGE);
+    expect(en['batch.truncated_note']).toBe(TRUNCATED_NOTE);
+    for (const kind of batchKinds) expect(en[`batch.kind_${kind.id}` as const], kind.id).toBe(kind.label);
+    for (const preset of notationPresets) {
+      expect(en[preset.nameKey], preset.id).toBe(preset.name);
+      expect(en[preset.descriptionKey], preset.id).toBe(preset.description);
+    }
   });
 });

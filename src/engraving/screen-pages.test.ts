@@ -365,10 +365,10 @@ describe('zoom arithmetic',()=>{
     expect(resolveScreenZoom({zoomMode,manualPercent,available:{width,height},natural:{width:naturalWidth,height:naturalHeight}})).toEqual({percent,limited});
   });
   it('respects a custom legibility floor for endless layouts without weakening default limits', () => {
-    // Below 50% floor -> clamped to 50% and marked limited
-    expect(resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:300,height:600},natural:{width:1000},minPercent:50})).toEqual({percent:50,limited:true});
-    // At or above 50% floor -> uses natural ratio and not limited
-    expect(resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:600,height:600},natural:{width:1000},minPercent:50})).toEqual({percent:60,limited:false});
+    // Below 63% floor -> clamped to the floor and marked limited
+    expect(resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:300,height:600},natural:{width:1000},minPercent:63})).toEqual({percent:63,limited:true});
+    // At or above 63% floor -> uses natural ratio and not limited
+    expect(resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:700,height:600},natural:{width:1000},minPercent:63})).toEqual({percent:70,limited:false});
     // Default minPercent stays 25%
     expect(resolveScreenZoom({zoomMode:'fitWidth',manualPercent:100,available:{width:300,height:600},natural:{width:1000}})).toEqual({percent:30,limited:false});
   });

@@ -7,6 +7,7 @@ import {ScoreView} from '../ScoreView';
 import {readFileSync} from 'node:fs';
 import {AlphaTabApi,LayoutMode,PlayerMode,Settings,SystemsLayoutMode,synth} from '@coderline/alphatab';
 import {music} from '../editor/fixtures';
+import {tabDigitFloorPercent} from './typography';
 import {arrangeScreenPages,paginateScreenScore,type ScreenRenderChunk} from './screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './screen-playback';
 
@@ -76,9 +77,10 @@ it.each(['manual','fitWidth'] as const)('headless real horizontal %s strip paint
  try{
   await act(async()=>{result=render(createElement('div',{className:'paper-scroll'},createElement(ScoreView,{score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),display:{layout:'horizontalScreen',zoomMode},onDisplayStatus:status})));for(let i=0;i<30;i++)await Promise.resolve();});
   const live=result!.container.querySelector<HTMLElement>('.score-live-paper')!,canvas=live.querySelector<HTMLElement>('.at-surface')!;
-  expect(parseFloat(live.style.width)).toBeGreaterThanOrEqual(480);expect(parseFloat(canvas.style.width)).toBeGreaterThan(480);
+  expect(parseFloat(canvas.style.width)).toBeGreaterThan(480);
+  expect(live.style.width).toBe(zoomMode==='manual'?'480px':`${Math.max(480,parseFloat(canvas.style.width)*(tabDigitFloorPercent(null)/100))}px`);
   expect(canvas.querySelectorAll('svg').length).toBeGreaterThan(0);
-  expect(status).toHaveBeenLastCalledWith({zoomPercent:zoomMode==='manual'?100:50,fitLimited:zoomMode==='fitWidth',pageError:null});
+  expect(status).toHaveBeenLastCalledWith({zoomPercent:zoomMode==='manual'?100:tabDigitFloorPercent(null),fitLimited:zoomMode==='fitWidth',pageError:null});
   expect(getComputedStyle(canvas).backgroundColor).toBe(getComputedStyle(live).backgroundColor);
   expect(getComputedStyle(canvas).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
   expect(forbidden).not.toHaveBeenCalled();

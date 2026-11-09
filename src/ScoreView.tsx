@@ -201,6 +201,18 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     measure();const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(measure);if(host)observer?.observe(host);window.addEventListener('resize',measure);
     return()=>{observer?.disconnect();window.removeEventListener('resize',measure);};
   },[]);
+  useEffect(()=>{
+    const host=scrollHost.current;
+    if(!host||display.layout!=='horizontalScreen')return;
+    const onWheel=(event:WheelEvent)=>{
+      if(Math.abs(event.deltaY)>=Math.abs(event.deltaX)&&event.deltaY!==0&&!event.shiftKey){
+        event.preventDefault();
+        host.scrollLeft+=event.deltaY;
+      }
+    };
+    host.addEventListener('wheel',onWheel,{passive:false});
+    return()=>host.removeEventListener('wheel',onWheel);
+  },[display.layout]);
   useEffect(()=>{onDisplayStatus?.({zoomPercent:fit.percent,fitLimited:fit.limited,pageError});},[onDisplayStatus,fit.percent,fit.limited,pageError]);
   const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop};
   const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null);

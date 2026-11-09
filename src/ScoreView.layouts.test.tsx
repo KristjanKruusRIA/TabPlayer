@@ -663,3 +663,23 @@ it('the continuous overlay disappears once the last group is removed',()=>{
  rerender(defaultEngraving());
  expect(container.querySelector('svg[data-tp-accolades]')).toBeNull();
 });
+
+it('scrolls sideways with the vertical mouse wheel in horizontal screen layout', () => {
+  const { container } = setup('horizontalScreen');
+  const scrollHost = container.querySelector('.paper-scroll') as HTMLElement;
+  expect(scrollHost.scrollLeft).toBe(0);
+  const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120 });
+  scrollHost.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(scrollHost.scrollLeft).toBe(120);
+});
+
+it('does not intercept the vertical mouse wheel in other layouts', () => {
+  const { container } = setup('verticalPage');
+  const scrollHost = container.querySelector('.paper-scroll') as HTMLElement;
+  expect(scrollHost.scrollLeft).toBe(0);
+  const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 120 });
+  scrollHost.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  expect(scrollHost.scrollLeft).toBe(0);
+});

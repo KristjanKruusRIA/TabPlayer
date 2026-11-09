@@ -40,7 +40,7 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
     try{
       scan=await bridge.scan(batchKinds.filter(kind=>kinds.has(kind.id)).map(kind=>kind.id));
     }catch(error){setProblem(message(error));setPhase('idle');return;}
-    if(!scan.files.length&&!scan.skipped.length){setSummary(`No matching files were found.${scan.truncated?` ${TRUNCATED_NOTE}`:''}`);setPhase('done');return;}
+    if(!scan.files.length&&!scan.skipped.length){setSummary(`${t('batch.no_matching_files')}${scan.truncated?` ${TRUNCATED_NOTE}`:''}`);setPhase('done');return;}
     setPhase('running');setProgress([0,scan.files.length]);
     try{
       const result=await runBatch({bridge,scan,keepFolders,cancelled:()=>cancelled.current,signal:run.current?.signal,probe,onProgress:(done,total)=>setProgress([done,total])});
@@ -55,20 +55,20 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
     event.preventDefault();items[next].focus();
   };
   const ready=!!source&&!!destination&&kinds.size>0&&!busy&&!working;
-  const text=problem??(phase==='scanning'?'Looking for scores…':phase==='running'?`Converting ${Math.min(progress[0]+1,progress[1])} of ${progress[1]}…`:summary||(source&&destination?'Ready to convert.':'Choose a source and a destination folder.'));
+  const text=problem??(phase==='scanning'?t('batch.looking_for_scores'):phase==='running'?t('batch.converting_progress',{current:Math.min(progress[0]+1,progress[1]),total:progress[1]}):summary||(source&&destination?t('batch.ready_to_convert'):t('batch.choose_folders_prompt')));
   return <div className="dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close();}}>
     <form ref={form} role="dialog" aria-modal="true" aria-labelledby={heading} aria-describedby={hint} aria-busy={working} className="batch-convert" onSubmit={event=>{event.preventDefault();if(ready)void convert();}}
       onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(running)stop();else close();}else if(event.key==='Tab')trap(event);}}>
       <h2 id={heading}>{t('batch.title')}</h2>
-      <p id={hint} className="muted">Converts every score of the chosen types in a folder and its subfolders to the current Guitar Pro format. The originals are only read, and each result is saved as a new file. The score you have open is not changed.</p>
-      <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('source')}>{t('batch.choose_source')}</button><span aria-label="Source folder">{source??'No folder chosen'}</span></div>
-      <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('destination')}>{t('batch.choose_dest')}</button><span aria-label="Destination folder">{destination??'No folder chosen'}</span></div>
+      <p id={hint} className="muted">{t('batch.description')}</p>
+      <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('source')}>{t('batch.choose_source')}</button><span aria-label={t('batch.source_folder_aria')}>{source??t('batch.no_folder_chosen')}</span></div>
+      <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('destination')}>{t('batch.choose_dest')}</button><span aria-label={t('batch.destination_folder_aria')}>{destination??t('batch.no_folder_chosen')}</span></div>
       <fieldset disabled={working}><legend>{t('batch.file_types')}</legend>
         {batchKinds.map(kind=><label key={kind.id} className="check"><input type="checkbox" checked={kinds.has(kind.id)} onChange={event=>toggle(kind.id,event.target.checked)}/>{kind.label}</label>)}
-        <label className="check"><input type="checkbox" checked={keepFolders} onChange={event=>setKeepFolders(event.target.checked)}/>Keep the subfolders in the destination</label>
+        <label className="check"><input type="checkbox" checked={keepFolders} onChange={event=>setKeepFolders(event.target.checked)}/>{t('batch.keep_subfolders')}</label>
       </fieldset>
       <p id={status} role={problem?'alert':'status'} className={problem?'error':'muted'}>{text}</p>
-      {rows&&<div className="batch-report"><table aria-label="Conversion report"><thead><tr><th scope="col">File</th><th scope="col">Result</th><th scope="col">Details</th></tr></thead>
+      {rows&&<div className="batch-report"><table aria-label={t('batch.report_aria')}><thead><tr><th scope="col">{t('batch.col_file')}</th><th scope="col">{t('batch.col_result')}</th><th scope="col">{t('batch.col_details')}</th></tr></thead>
         <tbody>{rows.map((row,index)=><tr key={index} data-status={row.status}><th scope="row">{row.relative}</th><td>{row.status}</td><td>{row.detail}</td></tr>)}</tbody></table></div>}
       <div className="dialog-actions">
         <button type="submit" className="primary" disabled={!ready}>{t('batch.convert_btn')}</button>

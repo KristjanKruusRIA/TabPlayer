@@ -16,7 +16,7 @@ export function CommandPalette({context,busy,onRun,onClose}:{context:PaletteCont
       return {...match,action:undefined,error:FINALIZED_MESSAGE};
     }
     if(context.scoreHidden&&match.action&&match.action.kind==='edit'){
-      return {...match,action:undefined,error:'Score editing is unavailable while the score is hidden.'};
+      return {...match,action:undefined,error:t('palette.score_editing_unavailable')};
     }
     return match;
   }),[query,context]),current=matches[Math.min(active,matches.length-1)];
@@ -29,7 +29,7 @@ export function CommandPalette({context,busy,onRun,onClose}:{context:PaletteCont
       else if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();if(matches.length)setActive(index=>(Math.min(index,matches.length-1)+(event.key==='ArrowDown'?1:matches.length-1))%matches.length);}
       else if(event.key==='Enter'&&!event.nativeEvent.isComposing){event.preventDefault();run(Math.min(active,matches.length-1));}
     }}>
-      <input ref={input} data-autofocus role="combobox" aria-label="Command" aria-expanded={matches.length>0} aria-controls={list} aria-autocomplete="list"
+      <input ref={input} data-autofocus role="combobox" aria-label={t('palette.command_input_aria')} aria-expanded={matches.length>0} aria-controls={list} aria-autocomplete="list"
         aria-activedescendant={current?`${list}-${current.id}`:undefined} placeholder={t('palette.placeholder')} value={query}
         onChange={event=>{setQuery(event.target.value);setActive(0);}}/>
       <ul id={list} role="listbox" aria-label={t('palette.matching_commands')} hidden={!matches.length}>{matches.map((match,index)=><li key={match.id} id={`${list}-${match.id}`} role="option" aria-keyshortcuts={match.keys?.replace(/Ctrl/g,'Control').replace(/Cmd/g,'Meta')} aria-selected={match===current} aria-disabled={!match.action||busy}

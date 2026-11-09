@@ -16,7 +16,7 @@ const voiceOptions=[
   {value:'3',label:'3'},
   {value:'4',label:'4'},
 ] as const;
-const plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
+
 
 /**
  * Reads a Standard MIDI File, lets the quantization, tuplet, voice and tablature options be chosen while showing what
@@ -63,7 +63,7 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
     if(chosen.size>MIDI_FILE_LIMIT){setFile(null);setFileProblem(t('midi_import.size_limit', { name: chosen.name }));return;}
     const reader=new FileReader();
     reader.onload=()=>{if(request!==reading.current)return;setFileProblem(null);setFile({name:chosen.name,bytes:new Uint8Array(reader.result as ArrayBuffer)});};
-    reader.onerror=()=>{if(request===reading.current){setFile(null);setFileProblem(`${chosen.name} could not be read.`);}};
+    reader.onerror=()=>{if(request===reading.current){setFile(null);setFileProblem(t('midi_import.could_not_read', { name: chosen.name }));}};
     reader.readAsArrayBuffer(chosen);
   };
   const submit=async()=>{
@@ -75,7 +75,7 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
     catch(error){setImportProblem(t('midi_import.open_failed', { error: message(error) }));}
     finally{setImporting(false);}
   };
-  const summary=imported?`${imported.summary.format===0?'Format 0':'Format 1'}, ${plural(imported.summary.tracks.length,'part')}, ${plural(imported.summary.measures,'measure')} at ${imported.summary.tempo} BPM.`:'';
+  const summary=imported?`${t(imported.summary.format===0?'midi_import.format_0':'midi_import.format_1')}, ${t(imported.summary.tracks.length===1?'midi_import.summary_parts_one':'midi_import.summary_parts_other',{count:imported.summary.tracks.length})}, ${t(imported.summary.measures===1?'midi_import.summary_measures_one':'midi_import.summary_measures_other',{count:imported.summary.measures})} ${t('midi_import.summary_at_bpm',{tempo:imported.summary.tempo})}.`:'';
   const actions=<>
     <button type="submit" {...busyGuard({busy:busy||importing,unavailable:!imported,className:'tp-button primary'})}>{t('midi_import.import_btn')}</button>
     <button type="button" {...busyGuard({busy:importing,className:'tp-button',onClick:onClose})}>{t('dialog.cancel')}</button>

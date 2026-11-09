@@ -157,6 +157,18 @@ const fixed: Array<[string, RegExp]> = [
   ['src/workspace/MidiImportDialog.tsx', /\$\{part\.voices\} voices|plural\(part\.notes/],
   ['src/audio/SelectionPlaybackControls.tsx', />(Play from cursor|Play selection|Loop selection)<|<summary>Selected playback|`Measure \$\{/],
   ['src/engraving/BarWidthsPanel.tsx', /<summary>Design: bar widths<\/summary>|Design mode: show bar width handles|>Restore default widths<\/button>/],
+  ['src/audio/BackingPanel.tsx', /<h3>Backing audio<\/h3>|>Replace backing<|>Import backing<|>Remove backing<|>Show waveform</],
+  ['src/audio/BackingWaveform.tsx', /aria-label="Backing audio waveform"|aria-label="Backing waveform"|>Score follows audio<|>Fit<\/button>/],
+  ['src/audio/BackingProcessingControls.tsx', /<summary>Pitch &amp; filter|>Reset<\/button>|label>Filter<select|Changes backing audio only\./],
+  ['src/audio/PracticePanel.tsx', /<summary>Practice settings<\/summary>|Fixed tempo is unavailable while a backing track is present|>Apply practice settings<\/button>/],
+  ['src/editor/SectionsPanel.tsx', />Previous section<\/button>|>Next section<\/button>|aria-label="Sections"|No sections yet\./],
+  ['src/engraving/EngravingPanel.tsx', />Apply engraving<\/button>|>Reset to source\/default<\/button>|<summary>Staff profiles<\/summary>|<summary>Notation style presets<\/summary>/],
+  ['src/engraving/StylePresetsPanel.tsx', />Apply saved style<\/button>|>Force default style<\/button>|<summary>Saved styles<\/summary>/],
+  ['src/editor/BarGesturePanel.tsx', /'15ma · two octaves up'|'Straight'|Use positive whole numbers adding up to/],
+  ['src/batch/BatchConvertDialog.tsx', /'Looking for scores…'|'Ready to convert\.'|aria-label="Conversion report"|Keep the subfolders in the destination/],
+  ['src/editor/CommandPalette.tsx', /'Score editing is unavailable while the score is hidden\.'|aria-label="Command"/],
+  ['src/engraving/TrackDisplayControls.tsx', /aria-label="Score display"|<span className="score-tools-caption">Display mode<\/span>|>Fit width<\/button>|>Fit page<\/button>/],
+  ['src/workspace/MidiImportDialog.tsx', /`\${chosen\.name} could not be read\.`|plural\(imported\.summary/],
 ];
 
 describe('fixed English literals', () => {

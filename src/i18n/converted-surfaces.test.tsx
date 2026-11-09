@@ -1,3 +1,6 @@
+import { SectionsPanel } from '../editor/SectionsPanel';
+import { PracticePanel } from '../audio/PracticePanel';
+import { TrackDisplayControls } from '../engraving/TrackDisplayControls';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
@@ -31,10 +34,10 @@ beforeEach(() => { localStorage.clear(); setLanguagePreference('en'); });
 
 /** Text that is legitimately the same as the English: file text from the test, and real cognates. Keep this short; each entry needs a reason. */
 const allowed: Record<'all' | SupportedLanguage, ReadonlySet<string>> = {
-  all: new Set(['Moonlight.tabplayer', 'Untitled']),   // a file name and a tab title the test supplies: user data, not UI text
+  all: new Set(['Moonlight.tabplayer', 'Untitled', 'Intro', 'Verse', 'Guitar', 'Bass']),   // a file name and a tab title the test supplies: user data, not UI text
   en: new Set(),
   et: new Set(['ASCII tab']),                      // the Estonian catalog keeps this format name as it is
-  de: new Set(['Interpretation', 'Normal']),      // the German words are spelled the same
+  de: new Set(['Interpretation', 'Normal', 'Zoom (%)']),      // the German words are spelled the same
 };
 /** Strings with no letters (numbers, symbols, units alone) cannot be English or Estonian. */
 const hasWords = (text: string) => /\p{L}{2,}/u.test(text.replace(/\b(?:BPM|MIDI|dB|Hz|ms|WAV|%)\b/g, ''));
@@ -80,6 +83,9 @@ const surfaces: Array<{ title: string; mount: () => ReturnType<typeof render> }>
   { title: 'DocumentTabs', mount: () => render(<DocumentTabs tabs={[tab('a', 'Untitled', true), tab('b', 'Untitled', false)]} activeId="a" disabled={false} onActivate={noop} onClose={noop} />) },
   { title: 'BarWidthsPanel', mount: () => render(<BarWidthsPanel value={withBarScale(defaultEngraving(), 1, 1.5)} design={false} onDesign={noop} busy={false} honoured onEdit={noop} />) },
   { title: 'Transport', mount: () => render(<Transport player={transportPlayer} measures={4} busy={false} cursor={{ track: 0, staff: 0, bar: 0, voice: 0, beat: 0 }} selection={null} />) },
+  { title: 'SectionsPanel', mount: () => render(<SectionsPanel sections={[{ bar: 0, name: 'Intro' }, { bar: 4, name: 'Verse' }]} bar={0} onGo={noop} />) },
+  { title: 'PracticePanel', mount: () => render(<PracticePanel settings={structuredClone(DEFAULT_PRACTICE)} busy={false} hasBacking={false} onChange={noop} />) },
+  { title: 'TrackDisplayControls', mount: () => render(<TrackDisplayControls ids={['0', '1']} names={['Guitar', 'Bass']} selected={0} view={{ kind: 'all' }} zoom={100} disabled={false} onView={noop} onZoom={noop} />) },
 ];
 
 describe('converted surfaces show no unchanged English', () => {

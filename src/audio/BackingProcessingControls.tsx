@@ -1,3 +1,4 @@
+import {useI18n, type MessageKey} from '../i18n';
 import {useEffect,useId,useRef,useState} from 'react';
 import type {BackingFilter,BackingSettings,EditCommand} from '../edit-types';
 import './backing-processing.css';
@@ -7,9 +8,19 @@ type Field='semitones'|'cents';
 type Session={field?:Field;value:string;settings:BackingSettings;release:()=>void;pending:boolean;current:boolean};
 const limits={semitones:12,cents:100};
 const integer=(value:string,field:Field)=>/^[+-]?\d+$/.test(value)&&Number.isSafeInteger(Number(value))&&Math.abs(Number(value))<=limits[field]?Number(value):NaN;
-const filters:[BackingFilter,string][]=[['none','No Filter'],['bassEnhance','Bass Enhance'],['bassAttenuation','Bass Attenuation'],['mediumEnhance','Medium Enhance'],['mediumAttenuation','Medium Attenuation'],['highEnhance','Hi Freq Enhance'],['highAttenuation','Hi Freq Attenuation']];
+const filterKeys: Record<BackingFilter, MessageKey> = {
+  none: 'processing.filter_none',
+  bassEnhance: 'processing.filter_bass_enhance',
+  bassAttenuation: 'processing.filter_bass_attenuation',
+  mediumEnhance: 'processing.filter_medium_enhance',
+  mediumAttenuation: 'processing.filter_medium_attenuation',
+  highEnhance: 'processing.filter_high_enhance',
+  highAttenuation: 'processing.filter_high_attenuation',
+};
+const filterTypes: BackingFilter[] = ['none','bassEnhance','bassAttenuation','mediumEnhance','mediumAttenuation','highEnhance','highAttenuation'];
 
 export function BackingProcessingControls({settings,busy,visible,beginOperation,onEdit}:{settings:BackingSettings;busy:boolean;visible:boolean;beginOperation:()=>()=>void;onEdit:(edit:EditCommand)=>void|Promise<void>}) {
+  const {t}=useI18n();
   const session=useRef<Session|null>(null),mounted=useRef(true),[,refresh]=useState(0),[error,setError]=useState<string|null>(null),guidance=useId(),helper=useId(),invalidGuidance=useId();
   const processing=settings.processing??defaultBackingProcessing(),own=session.current;
   const invalidField=own?.current&&own.field&&!Number.isFinite(integer(own.value,own.field))?own.field:null;
@@ -32,7 +43,7 @@ export function BackingProcessingControls({settings,busy,visible,beginOperation,
   };
   const field=(name:Field)=>{
     const active=own?.field===name&&own.current,value=active?own.value:String(processing[name]),number=integer(value,name);
-    return <label>{name==='semitones'?'Semitones':'Cents'}<input type="text" inputMode="numeric" role="spinbutton" value={value} aria-valuemin={-limits[name]} aria-valuemax={limits[name]} aria-valuenow={Number.isFinite(number)?number:undefined} aria-invalid={!Number.isFinite(number)||undefined} aria-describedby={`${guidance} ${helper}${invalidField===name?` ${invalidGuidance}`:''}`} disabled={!visible||(busy||!!own)&&!active} onFocus={e=>e.currentTarget.select()} onChange={e=>update(name,e.target.value)} onBlur={()=>{if(!session.current?.pending)cancel();}} onKeyDown={e=>{
+    return <label>{name==='semitones'?t('processing.semitones'):t('processing.cents')}<input type="text" inputMode="numeric" role="spinbutton" value={value} aria-valuemin={-limits[name]} aria-valuemax={limits[name]} aria-valuenow={Number.isFinite(number)?number:undefined} aria-invalid={!Number.isFinite(number)||undefined} aria-describedby={`${guidance} ${helper}${invalidField===name?` ${invalidGuidance}`:''}`} disabled={!visible||(busy||!!own)&&!active} onFocus={e=>e.currentTarget.select()} onChange={e=>update(name,e.target.value)} onBlur={()=>{if(!session.current?.pending)cancel();}} onKeyDown={e=>{
       e.stopPropagation();
       if(e.key==='Escape'){e.preventDefault();if(!session.current?.pending)cancel();}
       else if(e.key==='Enter'){e.preventDefault();const current=session.current;if(current?.field===name&&Number.isFinite(number))void commit(current,{...current.settings,processing:{...(current.settings.processing??defaultBackingProcessing()),[name]:number}});}
@@ -40,10 +51,10 @@ export function BackingProcessingControls({settings,busy,visible,beginOperation,
     }}/></label>;
   };
   const disabled=!visible||busy||!!own;
-  return <details className="backing-processing" open onToggle={e=>{if(!e.currentTarget.open){cancel();setError(null);}}} onKeyUp={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}><summary>Pitch &amp; filter<button disabled={disabled||backingProcessingKey(processing)===backingProcessingKey(null)} onClick={e=>{e.preventDefault();e.stopPropagation();if(disabled)return;const value=start();void commit(value,{...value.settings,processing:null});}}>Reset</button></summary><fieldset>
+  return <details className="backing-processing" open onToggle={e=>{if(!e.currentTarget.open){cancel();setError(null);}}} onKeyUp={e=>e.stopPropagation()} onKeyDown={e=>e.stopPropagation()}><summary>{t('processing.title')}<button disabled={disabled||backingProcessingKey(processing)===backingProcessingKey(null)} onClick={e=>{e.preventDefault();e.stopPropagation();if(disabled)return;const value=start();void commit(value,{...value.settings,processing:null});}}>{t('processing.reset')}</button></summary><fieldset>
     <div className="pair">{field('semitones')}{field('cents')}</div>
-    {invalidField&&<p className="muted processing-invalid" id={invalidGuidance}>{invalidField==='semitones'?'Semitones':'Cents'}: enter a whole number from {-limits[invalidField]} to {limits[invalidField]}.</p>}
-    <label>Filter<select disabled={disabled} value={processing.filter} onChange={e=>{const filter=e.target.value as BackingFilter;if(disabled||filter===processing.filter)return;const value=start();void commit(value,{...value.settings,processing:{...(value.settings.processing??defaultBackingProcessing()),filter}});}}>{filters.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-    <p className="muted" id={helper}>Changes backing audio only.</p><p className="muted" id={guidance}>Enter applies; Escape or blur cancels.</p>{error&&<p role="alert">{error}</p>}
+    {invalidField&&<p className="muted processing-invalid" id={invalidGuidance}>{t('processing.invalid_range',{field:t(invalidField==='semitones'?'processing.semitones':'processing.cents'),min:-limits[invalidField],max:limits[invalidField]})}</p>}
+    <label>{t('processing.filter_label')}<select disabled={disabled} value={processing.filter} onChange={e=>{const filter=e.target.value as BackingFilter;if(disabled||filter===processing.filter)return;const value=start();void commit(value,{...value.settings,processing:{...(value.settings.processing??defaultBackingProcessing()),filter}});}}>{filterTypes.map(f=><option key={f} value={f}>{t(filterKeys[f])}</option>)}</select></label>
+    <p className="muted" id={helper}>{t('processing.helper')}</p><p className="muted" id={guidance}>{t('processing.guidance')}</p>{error&&<p role="alert">{error}</p>}
   </fieldset></details>;
 }

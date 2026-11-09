@@ -59,7 +59,9 @@ jobs:
       matrix:
         include:
           - os: windows-2022
-            bundles: msi,nsis
+            # MSI only: with about 1.8 GB of bundled audio plus the offline WebView2 installer, makensis fails
+            # ("error mmapping datablock") on NSIS's roughly 2 GB limit.
+            bundles: msi
           - os: macos-15
             bundles: app,dmg
           - os: ubuntu-24.04
@@ -146,7 +148,7 @@ jobs:
           else
             npm run tauri -- build --bundles ${{ matrix.bundles }} -- --locked
           fi
-      - name: Verify actual MSI and NSIS contents offline
+      - name: Verify actual MSI contents offline
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -156,14 +158,8 @@ jobs:
           $taskArguments = @('/a', "`"$($taskMsi.FullName)`"", '/qn', "TARGETDIR=`"$taskRoot`"", 'REBOOT=ReallySuppress')
           $taskProcess = Start-Process msiexec.exe -ArgumentList $taskArguments -Wait -PassThru -WindowStyle Hidden
           if ($taskProcess.ExitCode -ne 0) { throw "MSI extraction failed: $($taskProcess.ExitCode)" }
-          node scripts/verify-packaged-resources.mjs --package-root $taskRoot --bundle-root src-tauri/target/release/bundle --formats msi,exe --report .analysis/ci/msi-resources.json
+          node scripts/verify-packaged-resources.mjs --package-root $taskRoot --bundle-root src-tauri/target/release/bundle --formats msi --report .analysis/ci/msi-resources.json
           if ($LASTEXITCODE -ne 0) { throw 'MSI resource verification failed' }
-          $taskNsis = Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' | Select-Object -First 1
-          $taskNsisRoot = Join-Path $env:GITHUB_WORKSPACE '.analysis/ci/nsis'
-          & "$env:ProgramFiles/7-Zip/7z.exe" x $taskNsis.FullName "-o$taskNsisRoot" -y | Out-Null
-          if ($LASTEXITCODE -ne 0) { throw 'NSIS extraction failed' }
-          node scripts/verify-packaged-resources.mjs --package-root $taskNsisRoot --report .analysis/ci/nsis-resources.json
-          if ($LASTEXITCODE -ne 0) { throw 'NSIS resource verification failed' }
       - name: Verify actual macOS disk image contents offline
         if: runner.os == 'macOS'
         run: |
@@ -203,7 +199,6 @@ jobs:
           name: unsigned-packages-${{ matrix.os }}-${{ github.sha }}
           path: |
             src-tauri/target/release/bundle/**/*.msi
-            src-tauri/target/release/bundle/**/*.exe
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.deb
             src-tauri/target/release/bundle/**/*.AppImage

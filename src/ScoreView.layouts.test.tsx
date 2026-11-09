@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import {afterEach,expect,it,vi} from 'vitest';
+import {afterEach,describe,expect,it,vi} from 'vitest';
 import {Component,StrictMode,type ReactElement,type ReactNode} from 'react';
 import {readFileSync} from 'node:fs';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
@@ -666,4 +666,89 @@ it('the continuous overlay disappears once the last group is removed',()=>{
  expect(container.querySelector('svg[data-tp-accolades]')).not.toBeNull();
  rerender(defaultEngraving());
  expect(container.querySelector('svg[data-tp-accolades]')).toBeNull();
+});
+
+function sizeHost(host: HTMLElement, size: { sw?: number; cw?: number; sh?: number; ch?: number } = {}) {
+  const { sw = 2000, cw = 500, sh = 300, ch = 300 } = size;
+  for (const [key, value] of Object.entries({ scrollWidth: sw, clientWidth: cw, scrollHeight: sh, clientHeight: ch })) {
+    Object.defineProperty(host, key, { configurable: true, value });
+  }
+}
+function wheel(target: HTMLElement, init: WheelEventInit) {
+  const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, ...init });
+  target.dispatchEvent(event);
+  return event;
+}
+
+it('scrolls sideways with the vertical mouse wheel in horizontal screen layout', () => {
+  const { container } = setup('horizontalScreen');
+  const scrollHost = container.querySelector('.paper-scroll') as HTMLElement;
+  sizeHost(scrollHost);
+  expect(scrollHost.scrollLeft).toBe(0);
+  const event = wheel(scrollHost, { deltaY: 120 });
+  expect(event.defaultPrevented).toBe(true);
+  expect(scrollHost.scrollLeft).toBe(120);
+});
+
+it('does not intercept the vertical mouse wheel in other layouts', () => {
+  const { container } = setup('verticalPage');
+  const scrollHost = container.querySelector('.paper-scroll') as HTMLElement;
+  sizeHost(scrollHost);
+  expect(scrollHost.scrollLeft).toBe(0);
+  const event = wheel(scrollHost, { deltaY: 120 });
+  expect(event.defaultPrevented).toBe(false);
+  expect(scrollHost.scrollLeft).toBe(0);
+});
+
+describe('horizontal screen wheel stays native when it should', () => {
+  const native = (init: WheelEventInit, size?: Parameters<typeof sizeHost>[1], start = 0) => {
+    const { container } = setup('horizontalScreen');
+    const scrollHost = container.querySelector('.paper-scroll') as HTMLElement;
+    sizeHost(scrollHost, size);
+    scrollHost.scrollLeft = start;
+    const event = wheel(scrollHost, init);
+    expect(event.defaultPrevented).toBe(false);
+    expect(scrollHost.scrollLeft).toBe(start);
+  };
+  it('when the content also overflows vertically', () => native({ deltaY: 120 }, { sh: 900 }));
+  it('when there is no horizontal overflow (nothing to scroll)', () => native({ deltaY: 120 }, { sw: 500 }));
+  it('at the right edge going right', () => native({ deltaY: 120 }, {}, 1500));
+  it('at the left edge going left', () => native({ deltaY: -120 }));
+  it.each([['ctrlKey'], ['metaKey'], ['altKey']])('with %s (zoom and pinch)', (key) => native({ deltaY: 120, [key]: true }));
+  it('with Shift', () => native({ deltaY: 120, shiftKey: true }));
+  it('for a horizontal swipe', () => native({ deltaX: 80, deltaY: 10 }));
+  it('over a scrollable child', () => {
+    const { container } = setup('horizontalScreen');
+    const scrollHost = container.querySelector('.paper-scroll') as HTMLElement;
+    sizeHost(scrollHost);
+    const child = document.createElement('div');
+    child.style.overflowY = 'auto';
+    Object.defineProperty(child, 'scrollHeight', { value: 400 });
+    Object.defineProperty(child, 'clientHeight', { value: 100 });
+    scrollHost.appendChild(child);
+    const event = wheel(child, { deltaY: 120 });
+    expect(event.defaultPrevented).toBe(false);
+    expect(scrollHost.scrollLeft).toBe(0);
+  });
+  it('over an element marked data-wheel-native', () => {
+    const { container } = setup('horizontalScreen');
+    const scrollHost = container.querySelector('.paper-scroll') as HTMLElement;
+    sizeHost(scrollHost);
+    const child = document.createElement('div');
+    child.setAttribute('data-wheel-native', '');
+    scrollHost.appendChild(child);
+    expect(wheel(child, { deltaY: 120 }).defaultPrevented).toBe(false);
+    expect(scrollHost.scrollLeft).toBe(0);
+  });
+});
+
+it('scales line and page wheel deltas', () => {
+  const { container } = setup('horizontalScreen');
+  const scrollHost = container.querySelector('.paper-scroll') as HTMLElement;
+  sizeHost(scrollHost);
+  wheel(scrollHost, { deltaY: 3, deltaMode: 1 });
+  expect(scrollHost.scrollLeft).toBe(48);
+  scrollHost.scrollLeft = 0;
+  wheel(scrollHost, { deltaY: 1, deltaMode: 2 });
+  expect(scrollHost.scrollLeft).toBe(500);
 });

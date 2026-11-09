@@ -275,6 +275,13 @@ pub trait Launcher: Send + Sync {
         bundle: &Path,
         timeout: Duration,
     ) -> Result<Vec<ClassInfo>, HelperError>;
+
+    /// Whether this launcher can host plug-ins here. The real helper hosts them only on Windows, so elsewhere every active
+    /// slot is `UnsupportedPlatform` and nothing is launched. A launcher that runs no process (the tests' fake) can say
+    /// yes on every platform, so the service's own rules are tested on all of them (final review L4).
+    fn hosts_plugins(&self) -> bool {
+        cfg!(windows)
+    }
 }
 
 struct RealSession {
@@ -852,9 +859,10 @@ impl PluginService {
             active_count += 1;
             active_tracks.insert(track_id.clone(), slot.class_id.clone());
 
-            // 2. not Windows: UnsupportedPlatform
-            #[cfg(not(windows))]
-            {
+            // 2. not Windows: UnsupportedPlatform. The launcher says so ([`Launcher::hosts_plugins`]): a run-time test, so the
+            // rest of the loop is reachable code off Windows too, and the tests' fake launcher hosts everywhere (final
+            // review L4).
+            if !self.launcher.hosts_plugins() {
                 self.record_status(
                     document_id,
                     &track_id,
@@ -1656,8 +1664,8 @@ impl PluginService {
             }
             active_count += 1;
 
-            #[cfg(not(windows))]
-            {
+            // Not Windows: as in `ensure`, the launcher says so (final review L4).
+            if !self.launcher.hosts_plugins() {
                 warnings.push(TrackPluginStatus {
                     track_id: request.track_id.clone(),
                     class_id: slot.class_id.clone(),
@@ -2032,7 +2040,7 @@ impl PluginService {
             None
         };
 
-        #[cfg(windows)]
+        // A no-op off Windows; called there too, so `pid` is used on every platform (final review L4).
         if let Some(p) = pid {
             allow_foreground(p);
         }
@@ -2531,6 +2539,8 @@ pub(crate) mod fakes {
         pub rates: Mutex<Vec<u32>>,
         /// Every probe fails.
         pub fail_probe: AtomicBool,
+        /// Whether it hosts plug-ins. It runs no process, so it does on every platform unless a test says otherwise.
+        pub hosts: AtomicBool,
     }
 
     impl FakeLauncher {
@@ -2544,6 +2554,7 @@ pub(crate) mod fakes {
                 sessions: Mutex::new(Vec::new()),
                 rates: Mutex::new(Vec::new()),
                 fail_probe: AtomicBool::new(false),
+                hosts: AtomicBool::new(true),
             }
         }
 
@@ -2606,6 +2617,10 @@ pub(crate) mod fakes {
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
             }])
+        }
+
+        fn hosts_plugins(&self) -> bool {
+            self.hosts.load(Ordering::SeqCst)
         }
     }
 
@@ -3818,6 +3833,30 @@ mod tests {
         assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::NeedsConsent));
         let offline = rig.service.offline_inserts("doc1", &req, 48_000).unwrap();
         assert_eq!(offline.warnings[0].status, PluginStatus::NeedsConsent);
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn a_launcher_that_cannot_host_here_reports_every_active_slot_unsupported() {
+        // Off Windows the real launcher says no; this runs that path on every platform (final review L4).
+        let rig = test_rig();
+        rig.launcher.hosts.store(false, Ordering::SeqCst);
+        let req = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];
+        let plans = rig.service.ensure("doc1", Some(48_000), &req);
+        assert_eq!(
+            plans[0].1.as_ref().err(),
+            Some(&PluginStatus::UnsupportedPlatform)
+        );
+        assert_eq!(
+            rig.service.statuses("doc1")[0].status,
+            PluginStatus::UnsupportedPlatform
+        );
+        let offline = rig.service.offline_inserts("doc1", &req, 48_000).unwrap();
+        assert!(offline.inserts.is_empty());
+        assert_eq!(
+            offline.warnings[0].status,
+            PluginStatus::UnsupportedPlatform
+        );
         assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 0);
     }
 

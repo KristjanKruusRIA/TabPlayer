@@ -383,6 +383,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     else if(action.name==='undo'){if(state.snapshot.canUndo&&!editLocked)change(controller.undo());}
     else if(action.name==='redo'){if(state.snapshot.canRedo&&!editLocked)change(controller.redo());}
     else if(action.name==='play')shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();
+    else if(action.name==='loop'||action.name==='slower'||action.name==='faster')shell.current?.querySelector<HTMLButtonElement>(`[data-action="${action.name}"]`)?.click();
     else if(action.name==='new')documentAction(onNew());
     else if(action.name==='open')documentAction(onOpen());
     else if(action.name==='importAscii'){if(onImportConverted)openAscii();}
@@ -768,20 +769,16 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
       event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();return;
     }
-    const ctrl=event.ctrlKey||event.metaKey;
-    if(!event.altKey&&!event.repeat){
-      if((!ctrl&&event.key==='F9')||(ctrl&&!event.shiftKey&&key==='l')){
+    // Transport keys: Shift+L loops (the passage when one is selected and the loop is off), [ and ] step the speed. Brackets match the physical key, so layouts that type them with AltGr still work.
+    if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat){
+      const transport=(action:string)=>event.currentTarget.querySelector<HTMLButtonElement>(`[data-action="${action}"]`);
+      if(event.shiftKey&&key==='l'){
         event.preventDefault();
-        const loopBtn=event.currentTarget.querySelector<HTMLButtonElement>('[data-action="loop"]');
-        const loopActive=loopBtn?.getAttribute('aria-pressed')==='true';
-        const targetBtn=(!loopActive?event.currentTarget.querySelector<HTMLButtonElement>('[data-action="loop-selection"]'):null)??loopBtn;
-        targetBtn?.click();return;
+        const loopBtn=transport('loop'),loopActive=loopBtn?.getAttribute('aria-pressed')==='true',passageBtn=transport('loop-selection');
+        (!loopActive&&passageBtn&&passageBtn.getAttribute('aria-disabled')!=='true'?passageBtn:loopBtn)?.click();return;
       }
-      if(!ctrl&&!event.shiftKey&&event.key==='F7'){
-        event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[data-action="slower"]')?.click();return;
-      }
-      if(!ctrl&&!event.shiftKey&&event.key==='F8'){
-        event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[data-action="faster"]')?.click();return;
+      if(!event.shiftKey&&(event.code==='BracketLeft'||event.code==='BracketRight')){
+        event.preventDefault();transport(event.code==='BracketLeft'?'slower':'faster')?.click();return;
       }
     }
     if((event.ctrlKey||event.metaKey)&&['c','x','v'].includes(key)){

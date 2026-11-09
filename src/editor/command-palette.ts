@@ -4,7 +4,7 @@ import type { BeatTarget } from '../project';
 import { readExpression } from './expressions';
 
 /** What a palette command does: an undoable edit, a selection move, or an application command. */
-export type PaletteAction={kind:'edit';command:EditCommand}|{kind:'select';target:BeatTarget}|{kind:'app';name:'undo'|'redo'|'play'|'new'|'open'|'importAscii'|'save'|'saveAs'|'export'|'help'|'about'};
+export type PaletteAction={kind:'edit';command:EditCommand}|{kind:'select';target:BeatTarget}|{kind:'app';name:'undo'|'redo'|'play'|'loop'|'slower'|'faster'|'new'|'open'|'importAscii'|'save'|'saveAs'|'export'|'help'|'about'};
 export interface PaletteContext {score:model.Score;target:BeatTarget;string:number;canUndo:boolean;canRedo:boolean;/** The document is finalized: edit actions, undo and redo cannot run. */locked?:boolean;/** The score is hidden (e.g. in Sound view): score editing commands cannot run. */scoreHidden?:boolean}
 /** A command matching the typed text, with either a ready action or the reason it cannot run. */
 export interface PaletteMatch {id:string;title:string;hint:string;keys?:string;action?:PaletteAction;error?:string}
@@ -63,6 +63,9 @@ const commands:Command[]=[
   {id:'undo',keys:`${mod}+Z`,title:'Undo',words:'undo',hint:'',run:(_,{canUndo})=>canUndo?app('undo'):{error:'Nothing to undo.'}},
   {id:'redo',keys:`${mod}+Shift+Z`,title:'Redo',words:'redo',hint:'',run:(_,{canRedo})=>canRedo?app('redo'):{error:'Nothing to redo.'}},
   {id:'play',keys:`Space`,title:'Play or pause',words:'play pause stop playback',hint:'',run:()=>app('play')},
+  {id:'loop',keys:`Shift+L`,title:'Loop or clear loop',words:'loop selection passage clear repeat practice',hint:'',run:()=>app('loop')},
+  {id:'slower',keys:`[`,title:'Slower',words:'slower slow down speed practice',hint:'',run:()=>app('slower')},
+  {id:'faster',keys:`]`,title:'Faster',words:'faster speed up practice',hint:'',run:()=>app('faster')},
   {id:'new',keys:`${mod}+N`,title:'New score',words:'new score file',hint:'',run:()=>app('new')},
   {id:'open',keys:`${mod}+O`,title:'Open score',words:'open score file',hint:'',run:()=>app('open')},
   {id:'importAscii',title:'Import ASCII tab',words:'import ascii text tab tablature file',hint:'',run:()=>app('importAscii')},

@@ -375,6 +375,7 @@ export const de: MessageCatalog = {
   'help.topic.shortcuts.title': 'Tastaturkürzel',
   'help.topic.shortcuts.p1': 'Strg/Cmd + N, O, S: Neu, Öffnen, Speichern (mit Shift Speichern unter). Strg/Cmd + W schließt die Partitur; Strg/Cmd + Tab wechselt zwischen Tabs.',
   'help.topic.shortcuts.p2': 'Strg/Cmd + Z macht rückgängig, Strg/Cmd + Shift + Z oder Strg/Cmd + Y wiederholt. Leertaste startet oder pausiert.',
+  'help.topic.shortcuts.practice': 'Shift + L wiederholt die markierte Passage oder, ohne Auswahl, die Takte der Schleifenfelder und beendet eine laufende Schleife. [ spielt langsamer und ] schneller.',
   'help.topic.shortcuts.p3': 'Strg/Cmd + C, X, V kopieren, schneiden aus und fügen Musik ein; mit Shift über alle ausgewählten Spuren.',
   'help.topic.shortcuts.tie': 'Strg/Cmd + T bindet die ausgewählten Noten an die vorangehenden Noten und gibt jeder den früheren Bund; Strg/Cmd + Shift + T löst die Bindungen.',
   'help.topic.shortcuts.p4': 'Strg/Cmd + Shift + P öffnet die Befehlspalette. F1 öffnet diese Hilfe.',

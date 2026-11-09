@@ -257,6 +257,21 @@ it('routes Shift+L, [ and ] through transport controls outside fields and dialog
   expect(c.getState().snapshot).toBe(before);expect(c.getState().snapshot.canUndo).toBe(canUndo);
 });
 
+it('leaves a bracket-position key to note entry or another handler (German + at the ] position)',async()=>{
+  await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});
+  // German types + at the ] position: during note entry that key shortens the beat and must not also speed up playback.
+  // Outside note entry nothing handles + first, so only the key filter keeps it from speeding up playback.
+  integration.setSpeed.mockClear();fireEvent.keyDown(workspace,{key:'+',code:'BracketRight'});expect(integration.setSpeed).not.toHaveBeenCalled();
+  fireEvent.keyDown(workspace,{key:'n'});integration.setSpeed.mockClear();
+  fireEvent.keyDown(workspace,{key:'+',code:'BracketRight'});
+  expect(integration.setSpeed).not.toHaveBeenCalled();
+  fireEvent.keyDown(workspace,{key:'n'});integration.setSpeed.mockClear();
+  // A key something else already handled is left alone, even when it is a letter at a bracket position.
+  const handled=(event:Event)=>event.preventDefault();workspace.addEventListener('keydown',handled);
+  fireEvent.keyDown(workspace,{key:'ü',code:'BracketLeft'});workspace.removeEventListener('keydown',handled);
+  expect(integration.setSpeed).not.toHaveBeenCalled();
+});
+
 it('Shift+L falls back to the Loop button while Loop selection is unavailable, and each shortcut has one announcing control',async()=>{
   await setup();const workspace=screen.getByRole('region',{name:'Score workspace'}),player=integration.players[0] as unknown as {playbackOccurrences:()=>unknown[];publish:(patch:object)=>void};
   click('Select rendered note');click('Select bar');

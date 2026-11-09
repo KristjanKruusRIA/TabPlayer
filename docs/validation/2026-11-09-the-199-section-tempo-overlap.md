@@ -1,125 +1,55 @@
-# THE-199: Section Name and Tempo Mark Overlap in the Windowline Example
+# THE-199: Section name crowds the tempo mark in the Windowline example
 
-Date: 2026-11-09. Branch `agy/the-199-section-tempo-overlap`, based on `develop` at `f24e72b`.  
-Related: Linear `THE-199`, `THE-54` walk (`docs/validation/2026-11-08-the-54-practise-walk.md`, friction 12).
+Date: 2026-11-09. Branch `agy/the-199-section-tempo-overlap`, based on `develop` at `f24e72b`.
+Related: Linear `THE-199`, the THE-54 walk (`docs/validation/2026-11-08-the-54-practise-walk.md`, friction 12).
 
----
+## Summary
 
-## 1. Summary
+At bar 1 of the bundled Windowline example, the section name `[Window] Window` sat tight under the tempo mark ` = 108`. It was crowding, not an overlap. An earlier version of this document called it an upstream alphaTab limit that the engraving layer could not fix. That was wrong.
 
-During the THE-54 open-to-practise walk, bar 1 of the bundled CC0 example score **Windowline** (`assets/library/examples/example-windowline.tabplayer`) displayed visual crowding and collision between the section name `[Window] Window` and the initial tempo mark `♩ = 108`.
+alphaTab 1.8.4 has a public setting, `display.effectBandPaddingBottom` (default 2, since 1.7.0), and it is exactly the gap between stacked effect bands. This change raises it to 5 on both render paths.
 
-This investigation evaluates whether TabPlayer's engraving configuration layer can separate direction and section text, analyzes alphaTab 1.8.4's rendering pipeline, and concludes that **this layout collision is an upstream alphaTab engine limitation** that cannot be cleanly resolved in the engraving layer without upstream changes. Per the task brief ("documented as a limit"), this document records the root cause, exact rendering mechanics, mathematical collision measurements, and upstream recommendations.
+## Cause
 
----
+Both marks attach to bar 0, beat 0. The tempo band cannot share a band (`TempoEffectInfo.canShareBand` is false), so the tempo mark and the section marker take two vertical slots. Slot 1 starts at `slot0.y + slot0.height + effectBandPaddingBottom`.
 
-## 2. Root Cause Analysis
+Measured in an alphaTab 1.8.4 SVG render with a tempo of 108 and the section `[Window] Window`:
 
-### 2.1 Score Structure
-In `assets/library/examples/example-windowline.tabplayer` (at edit `setMeasureSettings` for bar 0):
-- `section: "Window"` sets `marker: "Window"` and `text: "Window"`.
-- `tempos: [{ beat: 0, bpm: 108, linear: false }]` sets a tempo automation at beat 0 of bar 0.
+| Item | Position |
+|---|---|
+| Tempo text baseline | y 17.34 |
+| Tempo band bottom (notehead bottom) | y 20.89 |
+| Section text (hanging baseline) | y 22.89 |
 
-Both annotations attach to bar 0, beat 0.
+`BarTempoGlyph` puts the notehead's bottom edge exactly at the band bottom (`notePosY = y + height + glyphBottom * scale`). The clear space between the two marks is therefore the 2 px padding, less the little that the bracket of the Georgia section text rises above its hanging baseline. That is about 2 px, tight but not overlapping.
 
-### 2.2 alphaTab Effect Band Architecture
-alphaTab groups notation annotations positioned above the top staff into an internal `EffectBandContainer`:
-1. **Renderer Registration:**
-   In `alphaTab.Environment.defaultRenderers[0]` (`SlashBarRendererFactory`), shared top effect bands are registered in a fixed default order:
-   - Index 0: `TempoEffectInfo` (`NotationElement.EffectTempo = 33`, `order: 0`)
-   - Index 1: `TripletFeelEffectInfo` (`order: 1`)
-   - Index 2: `MarkerEffectInfo` (`NotationElement.EffectMarker = 25`, `order: 2`)
-   - Index 3: `DirectionsEffectInfo` (`NotationElement.EffectDirections = 21`, `order: 3`)
+An earlier draft counted 1.45 px by adding about 4.1 px of notehead descent below the baseline. That double-counted the drop already included in the band height, and it disagreed with its own -5.076 font-unit figure (3.55 px at the 0.7 note scale). Ignore that figure.
 
-   When rendering standard notation or tablature (`ScoreBarRendererFactory`, `TabBarRendererFactory`), these shared top bands are prepended to the first active staff's `topEffectInfos`.
+## Fix
 
-2. **Slot Allocation (`EffectBandSizingInfo`):**
-   - `TempoEffectInfo` specifies `canShareBand = false`.
-   - `MarkerEffectInfo` specifies `canShareBand = true`.
-   - Because `TempoEffectInfo` cannot share a band, and because both glyphs anchor at beat 0 (their beat intervals overlap at beat 0), `EffectBandSizingInfo.getOrCreateSlot()` assigns them to two separate vertical slots:
-     - **Slot 0:** `TempoEffectInfo` (order 0)
-     - **Slot 1:** `MarkerEffectInfo` (order 2)
+- `src/engraving/effect-bands.ts` holds `EFFECT_BAND_PADDING_BOTTOM = 5` and `applyEffectBandSpacing(settings)`.
+- The screen renderer (`src/ScoreView.tsx`, in the draw step next to `display.scale`) and PDF export (`src/export/pdf.ts`, next to the layout settings) both call it, so the two stay in step.
+- With 5 the gap grows by 3 px, from about 2 px to about 5 px. The tempo mark does not move, and the section name and everything under it on that system moves down 3 px. Every other stacked effect band also gets 3 px more space.
 
-3. **Band Height and Vertical Positioning (`EffectBandContainer._updateEffectBandHeights`):**
-   Vertical slot positions are computed sequentially:
-   $$\text{Slot } 0: y = 0, \quad h = \text{slot}[0].\text{shared}.\text{height}$$
-   $$\text{Slot } 1: y = \text{slot}[0].y + \text{slot}[0].\text{height} + \text{effectBandPaddingBottom}$$
-   where default `display.effectBandPaddingBottom = 2` px.
+### Why 5
 
-### 2.3 The Rendering Flaws in alphaTab 1.8.4
+It clears the marks by a visible margin (the reviewer suggested 5) without spending much page height: 3 px per stacked slot. A larger value such as 6 would add more height to every system with stacked marks for little further benefit. This is a judgement, not a measured optimum.
 
-1. **`BarTempoGlyph.doLayout()` ignores text metrics:**
-   In `alphaTab.core.mjs` (lines 55624–55628):
-   ```ts
-   doLayout() {
-     super.doLayout();
-     const res = this.renderer.resources;
-     this.height = this.renderer.smuflMetrics.glyphHeights.get(MusicFontSymbol.MetNoteQuarterUp) * res.engravingSettings.tempoNoteScale;
-   }
-   ```
-   `BarTempoGlyph` calculates its height solely from the SMuFL notehead glyph `MetNoteQuarterUp` scaled by `tempoNoteScale` ($0.7 \times 29.84 = 20.89$ px). It never measures the accompanying text (`" = 108"`), never sets `this.width` (leaving `width = 0`), and never reserves space for font ascenders/descenders.
+### Alternatives checked
 
-2. **`BarTempoGlyph.paint()` ignores glyph alignment and hardcodes horizontal origin:**
-   In `BarTempoGlyph.paint()` (lines 55629–55648):
-   ```ts
-   let x = cx + this.renderer.getRatioPositionX(automation.ratioPosition);
-   ...
-   const notePosY = cy + this.y + this.height + this.renderer.smuflMetrics.glyphBottom.get(MusicFontSymbol.MetNoteQuarterUp) * res.engravingSettings.tempoNoteScale;
-   canvas.textBaseline = TextBaseline.Alphabetic;
-   ```
-   Instead of using the aligned glyph coordinate `this.x`, `BarTempoGlyph` computes `x` from `getRatioPositionX(0)`. For bar 0 beat 0, this evaluates to the bar's note start offset ($x \approx 134.7$ px in Parchment layout).
-   Meanwhile, `MarkerEffectInfo` (`TextGlyph`) also aligns its left edge to beat 0 ($x \approx 135.2$ px).
-   **Both glyphs start at the exact same horizontal coordinate ($x \approx 135$ px).**
+- Reordering the bands (marker first) only moves the crowding: the bracket descenders then sit about 1.5 px above the tempo stem. That also needs an `@internal` alphaTab object, which is fragile.
+- The earlier upstream recommendations (measure the tempo text, align to `this.x`) do not change the vertical clearance. A useful upstream request would be a per-band or minimum text clearance. TabPlayer does not need to wait for it.
 
-3. **Vertical Gap Collapse (1.45 px clearance):**
-   - In Slot 0 (`TempoEffectInfo`):
-     - `this.height` $= 20.89$ px.
-     - `glyphBottom` of `MetNoteQuarterUp` is $-5.076$ font units $\times 0.7 = -3.55$ px.
-     - `notePosY` (the alphabetic baseline of ` = 108` and the notehead origin) is $0 + 20.89 - 3.55 = 17.34$ px.
-     - In Bravura / SMuFL, the notehead extends below the baseline by $0.69$ staff spaces ($\approx 4.1$ px). Thus the bottom of the notehead reaches $17.34 + 4.1 = 21.44$ px.
-   - In Slot 1 (`MarkerEffectInfo`):
-     - `band.y` $= \text{slot}[0].y + \text{slot}[0].\text{height} + \text{paddingBottom} = 0 + 20.89 + 2 = 22.89$ px.
-     - `TextGlyph` paints `[Window] Window` with `font: bold 14px Georgia, serif` using SVG `dominant-baseline: hanging` at $y = 22.89$ px.
-   - **Net vertical clearance:**
-     $$22.89\text{ px} - 21.44\text{ px} = 1.45\text{ px}$$
-   In standard screen rendering (Chromium / WebKit SVG engines on Windows/macOS/Linux), a 1.45 px gap between a 24 px music notehead and a 14 px bold serif font causes immediate visual collision and crowding.
+## Tests
 
-4. **Lack of 2D Collision Resolution:**
-   alphaTab lacks horizontal staggering or collision detection between effect bands. When two annotations occupy beat 0:
-   - They cannot share a band because `TempoEffectInfo.canShareBand` is `false`.
-   - Even if both shared a band, `EffectBandSlot.canBeUsed()` rejects sharing whenever beat ranges collide (`this.shared.lastBeat.isBefore(band.firstBeat)` is false for co-located beats).
-   - alphaTab provides no horizontal offset mechanism (e.g., placing the rehearsal mark to the left or right of the tempo mark).
+- `src/engraving/effect-bands.render.test.ts` renders a tempo mark and a section at bar 0 and measures the section text's y against the tempo band bottom. The section starts at least the shared padding below it, and the gap is wider than alphaTab's default.
+- `src/ScoreView.layouts.test.tsx` fails if the screen renderer drops the setting in any layout.
+- `src/export/pdf.test.ts` renders a score with a tempo and a section through `renderPdfPages` and fails if the export path drops the setting.
+- I confirmed the last two fail with the setting removed from their path.
+- `src/engraving/staff-groups.render.test.ts` records a SHA-256 of the default export pages. It changed because that fixture has a tempo and a section. The only difference I found (token for token, 133 changed y values on page 1, pages 2 and 3 identical) is the 3 px downward shift. The recorded hash was updated for that reason alone.
 
----
+## Limits
 
-## 3. Engraving Layer Assessment
-
-TabPlayer's engraving configuration layer (`src/engraving/`):
-- Controls document stylesheet properties (`EngravingOverrides`): barlines, dynamics, brackets, system separators, chord placement, track names, bar numbers, multi-rests.
-- Sets notation booleans and enums (`tabRhythm`, `fingering`, bend options).
-- Controls typography families and scale factors (`EngravingTypography`).
-- Applies bar widths, system gaps, and staff groups.
-
-**Limitations:**
-1. alphaTab exposes no configuration option in `Settings.display`, `Settings.notation`, or `EngravingSettings` to control:
-   - The ordering of effect bands.
-   - The horizontal positioning or collision offsetting of `MarkerEffectInfo` or `TempoEffectInfo`.
-   - Per-band padding, margins, or relative positioning.
-2. `settings.display.effectBandPaddingBottom` is a single global scalar on `DisplaySettings`. While increasing it would widen the vertical slot separation, it affects every effect band across all bars and tracks score-wide, does not solve the horizontal stacking, and is not exposed as an engraving override.
-3. The glyph creation and placement classes (`BarTempoGlyph`, `MarkerEffectInfo`, `EffectBandContainer`, `EffectBandSlot`) are internal, unexposed, and hardcoded in alphaTab's rendering bundle.
-
----
-
-## 4. Conclusion & Upstream Recommendation
-
-The overlap between `[Window] Window` and `♩ = 108` at bar 1 of the Windowline example is an **upstream alphaTab layout engine limit**.
-
-### Upstream Fix Requirements for alphaTab
-To properly support co-located tempo markings and section markers at the start of a score:
-1. `BarTempoGlyph.doLayout()` must measure the full rendered bounding box of tempo automations (including text prefix, metronome notehead, and tempo number), setting both `this.width` and `this.height` accurately.
-2. `EffectBandContainer` / `EffectBandSlot` should support horizontal staggering for co-located measure-start annotations (e.g., positioning section markers before tempo marks, or allowing section markers and tempo marks to flow horizontally when sufficient measure width exists).
-3. `BarTempoGlyph.paint()` should align to `this.x` rather than recalculating `getRatioPositionX(0)`, and ensure consistent baseline metrics relative to `band.y`.
-
-### Parked Recommendation for TabPlayer
-- Document this behavior as an upstream alphaTab engine limit.
-- When authoring example scores or user documentation, note that attaching a section marker and a tempo change to the exact same measure start (bar 0, beat 0) results in tight vertical stacking by alphaTab.
+- No in-app visual check was done. I did not open the Windowline example in the running app or look at a PDF page by eye. The evidence is SVG coordinates from jsdom renders.
+- The pre-existing failures in `src/export/musicxml.test.ts` and `src/export/midi.test.ts` come from missing `.analysis/compatibility` fixtures in the worktree and also fail on the base commit.
+- The 5 px value is a judgement, not a measured optimum.

@@ -4,6 +4,7 @@ import { validateSelection, type ExportSelection, type PrintLayout, type SvgPage
 import { selectStaves } from './selection';
 import { prepareScoreTimers } from '../editor/timers';
 import { configureEngraving,projectEngraving,type EngravingProjection } from '../engraving/projection';
+import { applyEffectBandSpacing } from '../engraving/effect-bands';
 import { accoladeMetrics,configureAccolades,planAccolades } from '../engraving/accolades';
 import { composeEngravedSystems } from '../engraving/staff-layout';
 import { resolveStaffGaps } from '../engraving/staff-groups';
@@ -105,7 +106,7 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   if(!frozen)for(const track of copy.tracks)for(const staff of track.staves){staff.showStandardNotation=layout.profile!=='Tab';staff.showTablature=layout.profile!=='Score';}
   const settings=new Settings();settings.core.engine='svg';settings.core.useWorkers=false;settings.core.enableLazyLoading=false;
   if(frozen){configureEngraving(settings,frozen.engraving,music);for(const element of roleElements.titleBlock)settings.notation.elements.set(element,false);}
-  settings.display.scale=frozen?.page.scale??layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;
+  settings.display.scale=frozen?.page.scale??layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;applyEffectBandSpacing(settings);
   // Drawn groups switch alphaTab's brackets off and reserve their room; both need the scale and padding set above.
   const plan=frozen&&projection?planAccolades({engraving:frozen.engraving,trackIds:frozen.trackIds,rendered:selection.tracks,score:copy,nativeMode:projection.bracketMode,settings}):null;
   if(frozen&&projection)configureAccolades(settings,copy,plan,projection.bracketMode);

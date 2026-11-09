@@ -3,7 +3,9 @@ import { blankProject } from '../project';
 import { buildScore, previewEdit } from '../engine';
 import { loadExportFonts, paginateSystems, renderPdfPages } from './pdf';
 import { writeFileSync,mkdirSync } from 'node:fs';
-import { model,Settings } from '@coderline/alphatab';
+import { LayoutMode,model,rendering,Settings,SystemsLayoutMode } from '@coderline/alphatab';
+import { prepareScoreTimers } from '../editor/timers';
+import { EFFECT_BAND_PADDING_BOTTOM } from '../engraving/effect-bands';
 import { music,noteAt } from '../editor/fixtures';
 import { defaultEngraving } from '../engraving/projection';
 
@@ -76,6 +78,17 @@ describe('vector notation pagination',()=>{
     expect(()=>paginateSystems([system(1100,'tall')],'',layout)).toThrow(/system.*fit/i);
     expect(()=>paginateSystems([system(100,'wide')],'',{...layout,marginMm:100})).toThrow(/width|margin/i);
     expect(()=>paginateSystems([system(100,'x')],'',{...layout,scale:NaN})).toThrow(/scale/i);
+  });
+  it('spaces the section name below the tempo mark by the shared effect band padding (THE-199)',()=>{
+    const build=()=>{const score=buildScore(blankProject());score.defaultSystemsLayout=1;score.systemsLayout=[1,1,1,1];
+      const master=score.masterBars[0];master.tempoAutomations=[model.Automation.buildTempoAutomation(false,0,108,2)];const section=new model.Section();section.marker='Window';section.text='Window';master.section=section;return score;};
+    const gap=(svg:string)=>{const y=(text:string)=>Number(svg.match(new RegExp(`<text[^>]* y="([0-9.]+)"[^>]*>${text}`))![1]);return y('.Window. Window')-y(' = 108');};
+    const exported=gap(renderPdfPages(build(),{tracks:[0],range:null},layout).map(page=>page.svg).join(''));
+    // The same score drawn by alphaTab with its default padding, at the export's scale, is the reference.
+    const settings=new Settings();settings.core.engine='svg';settings.core.useWorkers=false;settings.core.enableLazyLoading=false;settings.display.scale=layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
+    const renderer=new rendering.ScoreRenderer(settings);renderer.width=600;let svg='';renderer.partialRenderFinished.on(e=>{if(typeof e.renderResult==='string')svg+=e.renderResult;});
+    const reference=build();prepareScoreTimers(reference);renderer.renderScore(reference,[0]);renderer.destroy();
+    expect(exported-gap(svg)).toBeGreaterThanOrEqual(EFFECT_BAND_PADDING_BOTTOM-new Settings().display.effectBandPaddingBottom-1e-6);
   });
   it('renders authored notation through public SVG renderer without mutating the score',()=>{
     const project=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:1,fret:3}).project;

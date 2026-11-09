@@ -1,6 +1,5 @@
 import { useEffect,useId,useMemo,useRef,useState } from 'react';
 import { searchCommands,type PaletteAction,type PaletteContext } from './command-palette';
-import { FINALIZED_MESSAGE } from '../project';
 import { Dialog } from '../ui/Dialog';
 import { useI18n } from '../i18n';
 
@@ -13,13 +12,13 @@ export function CommandPalette({context,busy,onRun,onClose}:{context:PaletteCont
   const [query,setQuery]=useState(''),[active,setActive]=useState(0),input=useRef<HTMLInputElement>(null),list=useId();
   const matches=useMemo(()=>searchCommands(query,context).map(match=>{
     if(context.locked&&match.action&&(match.action.kind==='edit'||match.action.kind==='app'&&(match.action.name==='undo'||match.action.name==='redo'))){
-      return {...match,action:undefined,error:FINALIZED_MESSAGE};
+      return {...match,action:undefined,error:t('project.finalized')};
     }
     if(context.scoreHidden&&match.action&&match.action.kind==='edit'){
-      return {...match,action:undefined,error:'Score editing is unavailable while the score is hidden.'};
+      return {...match,action:undefined,error:t('palette.score_editing_unavailable')};
     }
     return match;
-  }),[query,context]),current=matches[Math.min(active,matches.length-1)];
+  }),[query,context,t]),current=matches[Math.min(active,matches.length-1)];
   useEffect(()=>{if(current)document.getElementById(`${list}-${current.id}`)?.scrollIntoView?.({block:'nearest'});},[current,list]);
   // Closing first returns focus, so a dialog the command opens keeps the focus it takes.
   const run=(index:number)=>{const match=matches[index];if(!match?.action||busy)return;onClose();onRun(match.action);};
@@ -29,7 +28,7 @@ export function CommandPalette({context,busy,onRun,onClose}:{context:PaletteCont
       else if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();if(matches.length)setActive(index=>(Math.min(index,matches.length-1)+(event.key==='ArrowDown'?1:matches.length-1))%matches.length);}
       else if(event.key==='Enter'&&!event.nativeEvent.isComposing){event.preventDefault();run(Math.min(active,matches.length-1));}
     }}>
-      <input ref={input} data-autofocus role="combobox" aria-label="Command" aria-expanded={matches.length>0} aria-controls={list} aria-autocomplete="list"
+      <input ref={input} data-autofocus role="combobox" aria-label={t('palette.command_input_aria')} aria-expanded={matches.length>0} aria-controls={list} aria-autocomplete="list"
         aria-activedescendant={current?`${list}-${current.id}`:undefined} placeholder={t('palette.placeholder')} value={query}
         onChange={event=>{setQuery(event.target.value);setActive(0);}}/>
       <ul id={list} role="listbox" aria-label={t('palette.matching_commands')} hidden={!matches.length}>{matches.map((match,index)=><li key={match.id} id={`${list}-${match.id}`} role="option" aria-keyshortcuts={match.keys?.replace(/Ctrl/g,'Control').replace(/Cmd/g,'Meta')} aria-selected={match===current} aria-disabled={!match.action||busy}

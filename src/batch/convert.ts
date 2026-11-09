@@ -74,10 +74,16 @@ export async function runBatch(options:{bridge:BatchBridge;scan:BatchScan;keepFo
   return rows.sort((a,b)=>a.relative.localeCompare(b.relative));
 }
 
-export function summarize(rows:BatchRow[],scan:BatchScan):string {
+/** How many rows ended in each state. The dialog words these in the chosen language; `summarize` is the English form. */
+export function batchCounts(rows:BatchRow[]):{converted:number;failed:number;skipped:number;notConverted:number} {
   const count=(status:BatchStatus)=>rows.filter(row=>row.status===status).length;
-  const parts=[`${count('Converted')} converted`,`${count('Failed')} failed`];
-  if(count('Skipped'))parts.push(`${count('Skipped')} skipped`);
-  if(count('Not converted'))parts.push(`${count('Not converted')} not converted`);
+  return {converted:count('Converted'),failed:count('Failed'),skipped:count('Skipped'),notConverted:count('Not converted')};
+}
+
+export function summarize(rows:BatchRow[],scan:BatchScan):string {
+  const counts=batchCounts(rows);
+  const parts=[`${counts.converted} converted`,`${counts.failed} failed`];
+  if(counts.skipped)parts.push(`${counts.skipped} skipped`);
+  if(counts.notConverted)parts.push(`${counts.notConverted} not converted`);
   return `${parts.join(', ')}.${scan.truncated?` ${TRUNCATED_NOTE}`:''}`;
 }

@@ -3,7 +3,7 @@ import { useMemo, useState, useSyncExternalStore } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
 import { trackIdentity } from '../engine';
-import { FINALIZED_MESSAGE, type BeatTarget } from '../project';
+import type { BeatTarget } from '../project';
 import { focusNotes, type InstrumentFocus } from './focus';
 import type { EditCommand } from '../edit-types';
 import type { EntryFollow } from './entry';
@@ -41,6 +41,6 @@ export function LiveInstrumentView({score,track,staff,target=null,player,onEdit,
   return <section className="live-instrument-view" aria-label={t('instruments.instrument_view')}>
     <InstrumentView score={score} track={track} staff={staff} notes={notes} caption={shown.caption} empty={empty}
       entry={editing&&onEdit&&!locked?{target,busy,string,onEdit}:undefined}
-      controls={<>{onEdit?<label className="instrument-check"><input type="checkbox" checked={editing&&!locked} disabled={locked} title={locked?FINALIZED_MESSAGE:undefined} onChange={event=>chooseEditing(event.target.checked)}/>{t('instruments.click_to_edit')}</label>:null}<label>{t('instruments.show_focus')}<select value={focus} disabled={editMode} onChange={event=>setFocus(event.target.value as InstrumentFocus)}>{Object.entries(focuses).map(([value,{label}])=><option key={value} value={value}>{label}</option>)}</select></label></>}/>
+      controls={<>{onEdit?<label className="instrument-check"><input type="checkbox" checked={editing&&!locked} disabled={locked} title={locked?t('project.finalized'):undefined} onChange={event=>chooseEditing(event.target.checked)}/>{t('instruments.click_to_edit')}</label>:null}<label>{t('instruments.show_focus')}<select value={focus} disabled={editMode} onChange={event=>setFocus(event.target.value as InstrumentFocus)}>{Object.entries(focuses).map(([value,{label}])=><option key={value} value={value}>{label}</option>)}</select></label></>}/>
   </section>;
 }

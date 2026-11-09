@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import {memo,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type {KeyboardEvent,PointerEvent} from 'react';
 import type {BackingSettings} from '../edit-types';
@@ -11,20 +12,22 @@ import './backing-waveform.css';
 const zooms=[1,2,4,8,16];
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 const milliseconds=(value:number)=>`${value.toLocaleString(undefined,{maximumFractionDigits:2})} ms`;
-const pointName=(bar:number,occurrence:number)=>`Measure ${bar+1}, occurrence ${occurrence+1}`;
+const pointName=(t:ReturnType<typeof useI18n>['t'],bar:number,occurrence:number)=>t('waveform.point_name',{bar:bar+1,occurrence:occurrence+1});
 type Chosen={kind:'anchor';index:number}|{kind:'grid';line:BackingGridLine}|{kind:'endpoint';endpoint:ReferenceEndpoint};
 type EndpointGesture={endpoint:ReferenceEndpoint;sourceMs:number;key?:string;delta:number;pointer?:{id:number;startX:number;width:number}};
 type Transaction={signature:string;document:BackingWaveformProps['document'];settings:BackingSettings;timeline:NonNullable<BackingWaveformProps['timeline']>;index:number;candidate:BackingSettings;invalid:boolean;phase:'preview'|'commit';release:()=>void;pointer?:{id:number;startX:number;sourceMs:number;width:number};key?:string;keyDelta?:number};
 
 const Peaks=memo(function Peaks({data}:{data:WaveformData}) {
+  const { t } = useI18n();
   const paths=useMemo(()=>Array.from({length:data.channels},(_,channel)=>data.peaks.map((peak,index)=>{
     const center=data.channels===1?61:channel===0?43:79,scale=data.channels===1?31:15,x=index/data.bucketCount*1000;
     return `M${x} ${center-peak.max[channel]*scale}L${x} ${center-peak.min[channel]*scale}H${(index+1)/data.bucketCount*1000}`;
   }).join('')),[data]);
-  return <svg className="backing-waveform-peaks" viewBox="0 20 1000 80" preserveAspectRatio="none" role="img" aria-label="Backing audio waveform">{paths.map((d,channel)=><path key={channel} data-waveform-channel={channel} d={d}/>)}</svg>;
+  return <svg className="backing-waveform-peaks" viewBox="0 20 1000 80" preserveAspectRatio="none" role="img" aria-label={t('waveform.peaks_aria')}>{paths.map((d,channel)=><path key={channel} data-waveform-channel={channel} d={d}/>)}</svg>;
 });
 
 export function BackingWaveform(props:BackingWaveformProps) {
+  const { t } = useI18n();
   const query=useBackingWaveform(props),data=query.data,viewport=useRef<HTMLDivElement>(null),content=useRef<HTMLDivElement>(null);
   const [zoomIndex,setZoomIndex]=useState(0),[width,setWidth]=useState(1),[scroll,setScroll]=useState(0),[chosen,setChosen]=useState<Chosen|null>(null);
   const [preview,setPreview]=useState<BackingSettings|null>(null),[editing,setEditing]=useState(false),[error,setError]=useState<string|null>(null);
@@ -108,7 +111,7 @@ export function BackingWaveform(props:BackingWaveformProps) {
     setError(null);
     try{
       const settings=structuredClone(props.settings),document={...props.document};
-      if(!props.isCurrent(document,settings))throw new Error('Backing audio changed. Select the sync point again.');
+      if(!props.isCurrent(document,settings))throw new Error(t('waveform.error_backing_changed'));
       const end=props.beginOperation();let released=false;
       const transaction:Transaction={signature,document,settings,timeline:props.timeline,index,candidate:settings,invalid:false,phase:'preview',release:()=>{if(!released){released=true;end();}}};
       active.current=transaction;setEditing(true);return transaction;
@@ -196,7 +199,7 @@ export function BackingWaveform(props:BackingWaveformProps) {
     const transaction=begin(-1);if(!transaction)return;
     try{
       const line=chosen.line,current=projectBackingGrid(transaction.timeline,transaction.settings,0,duration).find(item=>item.key===line.key);
-      if(!current)throw new Error('The selected score beat is no longer available.');
+      if(!current)throw new Error(t('waveform.error_beat_unavailable'));
       const candidate={...transaction.settings,anchors:[...transaction.settings.anchors,{bar:current.bar,occurrence:current.occurrence,ratio:current.ratio,audioMs:current.audioMs+transaction.settings.offsetMs}]};
       transaction.candidate=moveBackingAnchor(candidate,candidate.anchors.length-1,current.audioMs,transaction.timeline,duration);commit(transaction);
     }catch(reason){setError(message(reason));clear(transaction);}
@@ -210,20 +213,20 @@ export function BackingWaveform(props:BackingWaveformProps) {
   const selected=selectedAnchor??selectedGrid,selectedMs=selectedAnchor&&map?selectedAnchor.audioMs-map.offsetMs:selectedGrid?.audioMs;
   const selectedEndpoint=chosen?.kind==='endpoint'&&referenceTiming?chosen.endpoint:null;
   const shownError=reference?.edit.error??error??projected.error;
-  return <section className="backing-waveform" aria-label="Backing waveform" onKeyDown={event=>{if(event.key==='Escape'&&active.current?.phase==='preview'){event.preventDefault();cancel();}event.stopPropagation();}} onKeyUp={event=>event.stopPropagation()}>
+  return <section className="backing-waveform" aria-label={t('waveform.section_aria')} onKeyDown={event=>{if(event.key==='Escape'&&active.current?.phase==='preview'){event.preventDefault();cancel();}event.stopPropagation();}} onKeyUp={event=>event.stopPropagation()}>
     <div className="backing-waveform-toolbar">
-      <strong className="backing-waveform-filename" title={props.filename}>{props.filename.split(/[\\/]/).at(-1)||'Backing audio'}</strong>
-      <button aria-label="Zoom out" disabled={!data||editing||zoomIndex===0} onClick={()=>setZoomIndex(value=>value-1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button>
-      <output aria-label="Waveform zoom">{zoom*100}%</output>
-      <button aria-label="Zoom in" disabled={!data||editing||zoomIndex===zooms.length-1} onClick={()=>setZoomIndex(value=>value+1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button>
-      <button disabled={!data||editing} onClick={()=>{setZoomIndex(0);setScroll(0);if(viewport.current)viewport.current.scrollLeft=0;}}>Fit</button>
-      {referenceTiming&&<span className="backing-waveform-mode">Score follows audio</span>}
-      {props.source?.kind==='embedded'&&<span className="backing-waveform-readonly">Original embedded audio · read-only. Use Edit embedded backing to change sync points.</span>}
+      <strong className="backing-waveform-filename" title={props.filename}>{props.filename.split(/[\\/]/).at(-1)||t('dock.backing_audio_default')}</strong>
+      <button aria-label={t('waveform.zoom_out')} disabled={!data||editing||zoomIndex===0} onClick={()=>setZoomIndex(value=>value-1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10"/></svg></button>
+      <output aria-label={t('waveform.zoom_output_aria')}>{zoom*100}%</output>
+      <button aria-label={t('waveform.zoom_in')} disabled={!data||editing||zoomIndex===zooms.length-1} onClick={()=>setZoomIndex(value=>value+1)}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M8 3v10"/></svg></button>
+      <button disabled={!data||editing} onClick={()=>{setZoomIndex(0);setScroll(0);if(viewport.current)viewport.current.scrollLeft=0;}}>{t('waveform.fit')}</button>
+      {referenceTiming&&<span className="backing-waveform-mode">{t('waveform.score_follows_audio')}</span>}
+      {props.source?.kind==='embedded'&&<span className="backing-waveform-readonly">{t('waveform.embedded_readonly')}</span>}
     </div>
-    {query.kind==='none'&&<p className="backing-waveform-state">{props.source?'Show the Backing view to load its waveform.':'Score only — no backing audio.'}</p>}
-    {query.kind==='loading'&&<p className="backing-waveform-state" role="status">Loading waveform…</p>}
-    {query.kind==='error'&&<div className="backing-waveform-state"><p role="alert">{query.error}</p><button onClick={query.retry}>Retry</button></div>}
-    {data&&<div className="backing-waveform-viewport" ref={viewport} role="region" aria-label="Backing source timeline" tabIndex={0} onScroll={event=>{const element=event.currentTarget,next=Math.max(0,Math.min(element.scrollLeft,contentWidth-width));element.scrollLeft=next;setScroll(next);}}>
+    {query.kind==='none'&&<p className="backing-waveform-state">{props.source?t('waveform.show_to_load'):t('waveform.score_only')}</p>}
+    {query.kind==='loading'&&<p className="backing-waveform-state" role="status">{t('waveform.loading')}</p>}
+    {query.kind==='error'&&<div className="backing-waveform-state"><p role="alert">{query.error}</p><button onClick={query.retry}>{t('action.retry')}</button></div>}
+    {data&&<div className="backing-waveform-viewport" ref={viewport} role="region" aria-label={t('waveform.timeline_aria')} tabIndex={0} onScroll={event=>{const element=event.currentTarget,next=Math.max(0,Math.min(element.scrollLeft,contentWidth-width));element.scrollLeft=next;setScroll(next);}}>
       <div ref={content} className={`backing-waveform-content${referenceTiming?' reference':''}`} style={{width:`${contentWidth}px`}}>
         {ticks.map(tick=><span key={tick.ms} className="backing-waveform-time" style={{left:`${tick.ms/duration*100}%`}}>{tick.label}</span>)}
         {referenceTiming&&<>
@@ -234,25 +237,25 @@ export function BackingWaveform(props:BackingWaveformProps) {
             return pixels>=90?<span key={index} className="backing-waveform-tempo" style={{left:`${left/duration*100}%`,width:`${(right-left)/duration*100}%`}}>{segment.bpm.toLocaleString(undefined,{maximumFractionDigits:2})} BPM</span>:null;
           })}
         </>}
-        {projected.selection.spans.map((span,index)=><div key={index} className="backing-waveform-selection-span" aria-label={`Score selection span ${index+1}${selectionLabels.spans[index]?` · ${selectionLabels.spans[index]}`:''}`} style={{left:`${span.startMs/duration*100}%`,width:`${(span.endMs-span.startMs)/duration*100}%`}}>{selectionLabels.spans[index]&&<span className="backing-waveform-selection-label">{selectionLabels.spans[index]}</span>}</div>)}
-        {projected.grid.map(line=><button key={line.key} className={`backing-waveform-grid ${line.kind}`} aria-label={`${pointName(line.bar,line.occurrence)}, position ${line.ratio.toFixed(2)}`} title={`${pointName(line.bar,line.occurrence)}, position ${line.ratio.toFixed(2)} · ${milliseconds(line.audioMs)}`} aria-pressed={chosen?.kind==='grid'&&chosen.line.key===line.key} disabled={editing} style={{left:`${line.audioMs/duration*100}%`}} onClick={()=>{setChosen({kind:'grid',line});setError(null);}}>{line.kind==='bar'&&<span>M{line.bar+1} · {line.occurrence+1}</span>}</button>)}
+        {projected.selection.spans.map((span,index)=><div key={index} className="backing-waveform-selection-span" aria-label={`${t('waveform.selection_span_aria',{index:index+1})}${selectionLabels.spans[index]?` · ${selectionLabels.spans[index]}`:''}`} style={{left:`${span.startMs/duration*100}%`,width:`${(span.endMs-span.startMs)/duration*100}%`}}>{selectionLabels.spans[index]&&<span className="backing-waveform-selection-label">{selectionLabels.spans[index]}</span>}</div>)}
+        {projected.grid.map(line=><button key={line.key} className={`backing-waveform-grid ${line.kind}`} aria-label={t('waveform.grid_aria',{name:pointName(t,line.bar,line.occurrence),ratio:line.ratio.toFixed(2)})} title={`${t('waveform.grid_aria',{name:pointName(t,line.bar,line.occurrence),ratio:line.ratio.toFixed(2)})} · ${milliseconds(line.audioMs)}`} aria-pressed={chosen?.kind==='grid'&&chosen.line.key===line.key} disabled={editing} style={{left:`${line.audioMs/duration*100}%`}} onClick={()=>{setChosen({kind:'grid',line});setError(null);}}>{line.kind==='bar'&&<span>M{line.bar+1} · {line.occurrence+1}</span>}</button>)}
         <Peaks data={data}/>
-        {projected.selection.points.map((ms,index)=><div key={index} className="backing-waveform-selection-point" aria-label={`Score selection point ${index+1}${selectionLabels.points[index]?` · ${selectionLabels.points[index]}`:''}`} title={selectionLabels.points[index]} style={{left:`${ms/duration*100}%`}}/>)}
+        {projected.selection.points.map((ms,index)=><div key={index} className="backing-waveform-selection-point" aria-label={`${t('waveform.selection_point_aria',{index:index+1})}${selectionLabels.points[index]?` · ${selectionLabels.points[index]}`:''}`} title={selectionLabels.points[index]} style={{left:`${ms/duration*100}%`}}/>)}
         {props.timeline&&map?.anchors.map((anchor,index)=>{
           const ms=anchor.audioMs-map.offsetMs;if(ms<0||ms>duration)return null;
           const disabled=!props.enabled||!!reference?.edit.active||((props.busy||editing)&&!(active.current?.index===index&&active.current.phase==='preview'));
-          return editable?<div key={index} role="slider" tabIndex={disabled?-1:0} className="backing-waveform-handle" aria-label={`Sync point ${index+1}, measure ${anchor.bar+1}, occurrence ${anchor.occurrence+1}`} aria-valuemin={map.referenceSync?0:Math.max(0,-map.offsetMs)} aria-valuemax={duration} aria-valuenow={ms} aria-valuetext={`${pointName(anchor.bar,anchor.occurrence)}, position ${anchor.ratio.toFixed(2)} · Source ${milliseconds(ms)}`} aria-disabled={disabled} data-selected={chosen?.kind==='anchor'&&chosen.index===index} data-edge={ms===0?'start':ms===duration?'end':undefined} style={{left:`${ms/duration*100}%`}} onClick={()=>{if(!disabled)setChosen({kind:'anchor',index});}} onPointerDown={event=>{if(!disabled)pointerDown(event,index);}} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={event=>{event.stopPropagation();if(active.current?.phase==='preview')cancel();}} onLostPointerCapture={()=>{if(active.current?.phase==='preview')cancel();}} onKeyDown={event=>keyDown(event,index)} onKeyUp={keyUp} onBlur={()=>{if(active.current?.phase==='preview')cancel();}}><span>{index+1}</span></div>:<div key={index} className="backing-waveform-original-anchor" title={`${pointName(anchor.bar,anchor.occurrence)} · ${milliseconds(ms)}`} style={{left:`${ms/duration*100}%`}}/>;
+          return editable?<div key={index} role="slider" tabIndex={disabled?-1:0} className="backing-waveform-handle" aria-label={t('waveform.anchor_aria',{index:index+1,bar:anchor.bar+1,occurrence:anchor.occurrence+1})} aria-valuemin={map.referenceSync?0:Math.max(0,-map.offsetMs)} aria-valuemax={duration} aria-valuenow={ms} aria-valuetext={t('waveform.anchor_valuetext',{bar:anchor.bar+1,occurrence:anchor.occurrence+1,ratio:anchor.ratio.toFixed(2),ms:milliseconds(ms)})} aria-disabled={disabled} data-selected={chosen?.kind==='anchor'&&chosen.index===index} data-edge={ms===0?'start':ms===duration?'end':undefined} style={{left:`${ms/duration*100}%`}} onClick={()=>{if(!disabled)setChosen({kind:'anchor',index});}} onPointerDown={event=>{if(!disabled)pointerDown(event,index);}} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={event=>{event.stopPropagation();if(active.current?.phase==='preview')cancel();}} onLostPointerCapture={()=>{if(active.current?.phase==='preview')cancel();}} onKeyDown={event=>keyDown(event,index)} onKeyUp={keyUp} onBlur={()=>{if(active.current?.phase==='preview')cancel();}}><span>{index+1}</span></div>:<div key={index} className="backing-waveform-original-anchor" title={`${pointName(t,anchor.bar,anchor.occurrence)} · ${milliseconds(ms)}`} style={{left:`${ms/duration*100}%`}}/>;
         })}
         {referenceTiming&&(['entry','exit'] as const).map(endpoint=>{
-          const ms=endpoint==='entry'?referenceTiming.entrySourceMs:referenceTiming.exitSourceMs,disabled=endpointDisabled(endpoint),name=endpoint==='entry'?'Entry':'Exit';
-          return <div key={endpoint} role={editable?'slider':undefined} tabIndex={editable&&!disabled?0:undefined} className={`backing-waveform-handle backing-waveform-endpoint ${endpoint}`} aria-label={`${name} bracket`} aria-valuemin={editable?0:undefined} aria-valuemax={editable?duration:undefined} aria-valuenow={editable?ms:undefined} aria-valuetext={editable?`${name} · Source ${milliseconds(ms)}`:undefined} aria-disabled={editable?disabled:undefined} data-selected={chosen?.kind==='endpoint'&&chosen.endpoint===endpoint} data-edge={ms===0?'start':ms===duration?'end':undefined} style={{left:`${ms/duration*100}%`}} onFocus={()=>selectEndpoint(endpoint)} onClick={()=>selectEndpoint(endpoint)} onPointerDown={event=>{if(!disabled)endpointPointerDown(event,endpoint);}} onPointerMove={event=>endpointPointerMove(event)} onPointerUp={event=>endpointPointerMove(event,true)} onPointerCancel={event=>{event.stopPropagation();cancelEndpoint();}} onLostPointerCapture={()=>{if(endpointGesture.current?.pointer)cancelEndpoint();}} onKeyDown={event=>endpointKeyDown(event,endpoint)} onKeyUp={endpointKeyUp} onBlur={()=>{if(endpointGesture.current)cancelEndpoint();}}><span>{name}</span></div>;
+          const ms=endpoint==='entry'?referenceTiming.entrySourceMs:referenceTiming.exitSourceMs,disabled=endpointDisabled(endpoint),name=endpoint==='entry'?t('waveform.entry'):t('waveform.exit');
+          return <div key={endpoint} role={editable?'slider':undefined} tabIndex={editable&&!disabled?0:undefined} className={`backing-waveform-handle backing-waveform-endpoint ${endpoint}`} aria-label={t('waveform.endpoint_bracket_aria',{name})} aria-valuemin={editable?0:undefined} aria-valuemax={editable?duration:undefined} aria-valuenow={editable?ms:undefined} aria-valuetext={editable?t('waveform.endpoint_valuetext',{name,ms:milliseconds(ms)}):undefined} aria-disabled={editable?disabled:undefined} data-selected={chosen?.kind==='endpoint'&&chosen.endpoint===endpoint} data-edge={ms===0?'start':ms===duration?'end':undefined} style={{left:`${ms/duration*100}%`}} onFocus={()=>selectEndpoint(endpoint)} onClick={()=>selectEndpoint(endpoint)} onPointerDown={event=>{if(!disabled)endpointPointerDown(event,endpoint);}} onPointerMove={event=>endpointPointerMove(event)} onPointerUp={event=>endpointPointerMove(event,true)} onPointerCancel={event=>{event.stopPropagation();cancelEndpoint();}} onLostPointerCapture={()=>{if(endpointGesture.current?.pointer)cancelEndpoint();}} onKeyDown={event=>endpointKeyDown(event,endpoint)} onKeyUp={endpointKeyUp} onBlur={()=>{if(endpointGesture.current)cancelEndpoint();}}><span>{name}</span></div>;
         })}
-        {playhead!==null&&<div className="backing-waveform-playhead" aria-label="Native playback position" style={{left:`${playhead/duration*100}%`}}/>}
+        {playhead!==null&&<div className="backing-waveform-playhead" aria-label={t('waveform.playhead_aria')} style={{left:`${playhead/duration*100}%`}}/>}
       </div>
     </div>}
     <div className="backing-waveform-footer">
-      <div className="backing-waveform-readout" aria-live="polite">{shownError?<span role="alert">{shownError}</span>:data&&!props.timeline?<span>Preparing score timing…</span>:selectedEndpoint&&referenceTiming?<span>{selectedEndpoint==='entry'?'Entry':'Exit'} · Source {milliseconds(selectedEndpoint==='entry'?referenceTiming.entrySourceMs:referenceTiming.exitSourceMs)}</span>:selected&&selectedMs!==undefined?<span>{chosen?.kind==='anchor'?'Selected sync point':'Selected score beat'} · {pointName(selected.bar,selected.occurrence)} · Position {selected.ratio.toFixed(2)} · Source {milliseconds(selectedMs)}</span>:<span>Select a score beat to add a sync point, or select an existing point.</span>}</div>
-      <button disabled={!canEdit||chosen?.kind!=='grid'} onClick={add}>Add sync point</button><button disabled={!canEdit||chosen?.kind!=='anchor'} onClick={remove}>Delete sync point</button>
+      <div className="backing-waveform-readout" aria-live="polite">{shownError?<span role="alert">{shownError}</span>:data&&!props.timeline?<span>{t('waveform.preparing_timing')}</span>:selectedEndpoint&&referenceTiming?<span>{t('waveform.endpoint_valuetext',{name:selectedEndpoint==='entry'?t('waveform.entry'):t('waveform.exit'),ms:milliseconds(selectedEndpoint==='entry'?referenceTiming.entrySourceMs:referenceTiming.exitSourceMs)})}</span>:selected&&selectedMs!==undefined?<span>{chosen?.kind==='anchor'?t('waveform.selected_sync_point'):t('waveform.selected_score_beat')} · {pointName(t,selected.bar,selected.occurrence)} · {t('waveform.position')} {selected.ratio.toFixed(2)} · {t('waveform.source')} {milliseconds(selectedMs)}</span>:<span>{t('waveform.instructions')}</span>}</div>
+      <button disabled={!canEdit||chosen?.kind!=='grid'} onClick={add}>{t('waveform.add_sync_point')}</button><button disabled={!canEdit||chosen?.kind!=='anchor'} onClick={remove}>{t('waveform.delete_sync_point')}</button>
     </div>
   </section>;
 }

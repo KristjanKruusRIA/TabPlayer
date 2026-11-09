@@ -262,6 +262,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     return()=>{active=false;};
   },[harmonyOpen]);
   const digits=useRef({text:'',time:0});
+  const [pendingFret,setPendingFret]=useState<string|null>(null);
   const target=repairSelection(state.score,selection);
   const gapBar=selectedGapBar(musicSelection,target.bar);
   const tunerStaff=state.score.tracks[target.track]?.staves[target.staff],tunerTuning=useMemo(()=>tunerStaff&&!tunerStaff.isPercussion?[...tunerStaff.tuning]:[],[tunerStaff]);
@@ -294,7 +295,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const entryFret=useRef<{string:number;fret:number;score:model.Score}|null>(null);
   useEffect(()=>{
     const kept=entryFret.current;entryFret.current=null;
-    setFret(kept&&kept.score===state.score&&kept.string===string?kept.fret:location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';
+    setFret(kept&&kept.score===state.score&&kept.string===string?kept.fret:location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';setPendingFret(null);
   },[state.score,target.track,target.staff,target.bar,target.voice,target.beat,string]);
   const act=(job: Promise<unknown>)=>{void job.catch(()=>{});};
   const change=(job:Promise<unknown>)=>{const before=state.score;setClipboardError(null);clearEntryQueue();act(job.then(()=>{const score=controller.getState().score;setSelection(old=>repairSelection(score,followSelectedTrack(before,score,old)));editorSelection(null);}));};
@@ -512,7 +513,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const beat=describeSelection(state.score,fixed).beat;
     const count=state.score.tracks[fixed.track].staves[fixed.staff].tuning.length;
     const chosen=Math.max(1,Math.min(s,count));setString(chosen);
-    setFret(beat?.notes.find(n=>n.string===chosen)?.fret ?? 0);digits.current.text='';
+    setFret(beat?.notes.find(n=>n.string===chosen)?.fret ?? 0);digits.current.text='';setPendingFret(null);
   };
   /** A selection the user made: it also drops any keys still waiting, which were typed for the old cursor. Entry itself moves the cursor with `moveTo`. */
   const select=(next:BeatTarget,s=string,index?:number)=>{userMoves.current++;clearEntryQueue();moveTo(next,s,index);};
@@ -612,8 +613,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }else if(item.kind==='entry'){
       if(item.key.kind==='accidental'||item.key.kind==='respell')accidentalKeys(item.key);else entryKey(item.key,item.shift);
     }else if(item.kind==='digit'){
-      digits.current.text=((at-digits.current.time<1000?digits.current.text:'')+item.digit).slice(-2);digits.current.time=at;setFret(Number(digits.current.text));
-    }else enterFret();
+      const text=((at-digits.current.time<1000?digits.current.text:'')+item.digit).slice(-2);digits.current.text=text;digits.current.time=at;setPendingFret(text);setFret(Number(text));
+    }else {setPendingFret(null);enterFret();}
   };
   /** The key as an entry key, or null when it is anything else (navigation, the N toggle, other shortcuts). */
   const entryItem=(event:KeyboardEvent):EntryItem|null=>{
@@ -677,7 +678,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(kind==='removeNote'){
       const beat=location.beat,note=beat?noteAtCursor(beat):null;
       // Fret digits typed but not yet entered: Backspace takes them back, as it would in a text field, and leaves the note alone.
-      if(!indexed&&digits.current.text&&Date.now()-digits.current.time<1000){digits.current.text='';setFret(note?.fret??0);return;}
+      if(!indexed&&digits.current.text&&Date.now()-digits.current.time<1000){digits.current.text='';setPendingFret(null);setFret(note?.fret??0);return;}
       if(!note){setInputNotice({text:t('editor.gp8_no_note'),at});return;}
       void edit(indexed?{type:'removeNoteByIndex',target,noteIndex:note.index}:{type:'removeNote',target,string:note.string});return;
     }
@@ -779,6 +780,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       // The Practice popover's body is a portal, so its keys reach here rather than the popover's own handler.
       const menu=practiceMenu.current;
       if(menu?.open&&event.target instanceof Node&&menu.querySelector('.gp-practice-body')?.contains(event.target)){menu.open=false;menu.querySelector('summary')?.focus();event.preventDefault();return;}
+      if(pendingFret!==null||digits.current.text!==''){
+        digits.current.text='';setPendingFret(null);
+        const beat=location.beat,note=beat?noteAtCursor(beat):null;
+        setFret(note?.fret??0);event.preventDefault();return;
+      }
       editorSelection(null);setPendingAccidental(null);clearEntryQueue();event.preventDefault();
     }
   }
@@ -893,8 +899,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
-        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
-        {inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}
+        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
+        {pendingFret!==null?<div className="score-hint score-hint-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</div>:inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}
       </section>
       {inspectorShown&&<InspectorResizeHandle width={inspectorWidth} min={inspectorMin} max={inspectorMax} onWidth={setInspectorSize} onReset={()=>setInspectorSize(null)}/>}
       <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>
@@ -951,6 +957,6 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound'}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onClose={closeModal}/>}
-    <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?'Click a note to edit it in the inspector.':'Click the score, then use arrow keys, digits and Enter.'}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
+    <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}{pendingFret!==null?<span className="statusbar-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>}{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?'Click a note to edit it in the inspector.':'Click the score, then use arrow keys, digits and Enter.'}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
   </div>;
 }

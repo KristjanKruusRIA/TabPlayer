@@ -719,6 +719,7 @@ export const et: MessageCatalog = {
   'editor.voice': 'Hääl',
   'editor.string': 'Keel',
   'editor.fret': 'Astmetraat',
+  'editor.pending_fret': 'Krihv {fret}: Enter kinnitab, Escape tühistab',
   'editor.set_note': 'Määra noot',
   'editor.remove_note': 'Eemalda noot',
   'editor.chord_hint': 'Akordi moodustamiseks lisa noote selle löögi erinevatele keeltele.',

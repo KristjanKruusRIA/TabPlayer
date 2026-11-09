@@ -2117,6 +2117,22 @@ describe('GP8 edit and cursor keys',()=>{
     await waitFor(()=>expect(edits(c)).toHaveLength(3));
     expect(edits(c)[2]).toMatchObject({type:'removeNote'});
   });
+  it('shows pending fret digits while typed and clears on Enter or Escape',async()=>{
+    const c=await setup(withNotes());
+    expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0);
+    press({key:'7'});
+    await waitFor(()=>expect(screen.getAllByText('Fret 7: Enter commits, Escape cancels')).toHaveLength(2));
+    expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBe('7');
+    press({key:'Escape'});
+    await waitFor(()=>expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0));
+    expect(edits(c)).toHaveLength(2);
+
+    press({key:'5'});
+    await waitFor(()=>expect(screen.getAllByText('Fret 5: Enter commits, Escape cancels')).toHaveLength(2));
+    press({key:'Enter'});
+    await waitFor(()=>expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0));
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+  });
   it('shows the hint for the swapped Plus/Minus preference',async()=>{
     await entryOn(JSON.stringify({swapPlusMinus:true}));
     expect(screen.getByText(/- and \+ make the beat shorter and longer/)).toBeInTheDocument();

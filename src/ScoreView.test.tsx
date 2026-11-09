@@ -248,3 +248,16 @@ it('packs chips of adjacent beats so none covers another and keeps them above th
   act(()=>api.renderStarted.emit(false));expect(screen.queryAllByRole('button',{name:/Show scale diagram/})).toHaveLength(0);
   rendered.unmount();
 });
+
+it('renders pending fret digits on the score edit target caret overlay when provided',()=>{
+  const score=music(),onSelect=vi.fn();
+  const props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect,editTarget:target,editString:6};
+  const rendered=render(<ScoreView {...props}/>);
+  expect(document.querySelector('.score-edit-entry')).toBeNull();
+
+  rendered.rerender(<ScoreView {...props} editPendingFret="7"/>);
+  expect(document.querySelector('.score-edit-entry')?.textContent).toBe('Fret 7');
+
+  rendered.rerender(<ScoreView {...props} editPendingFret={null}/>);
+  expect(document.querySelector('.score-edit-entry')).toBeNull();
+});

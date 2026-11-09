@@ -717,6 +717,7 @@ export const en = {
   'editor.voice': 'Voice',
   'editor.string': 'String',
   'editor.fret': 'Fret',
+  'editor.pending_fret': 'Fret {fret}: Enter commits, Escape cancels',
   'editor.set_note': 'Set note',
   'editor.remove_note': 'Remove note',
   'editor.chord_hint': 'Add notes on different strings of this beat to make a chord.',

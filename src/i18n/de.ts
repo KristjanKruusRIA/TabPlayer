@@ -719,6 +719,7 @@ export const de: MessageCatalog = {
   'editor.voice': 'Stimme',
   'editor.string': 'Saite',
   'editor.fret': 'Bund',
+  'editor.pending_fret': 'Bund {fret}: Enter bestätigt, Escape bricht ab',
   'editor.set_note': 'Note setzen',
   'editor.remove_note': 'Note entfernen',
   'editor.chord_hint': 'Fügen Sie Noten auf verschiedenen Saiten dieses Beats hinzu, um einen Akkord zu bilden.',

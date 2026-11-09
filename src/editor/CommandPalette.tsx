@@ -1,6 +1,5 @@
 import { useEffect,useId,useMemo,useRef,useState } from 'react';
 import { searchCommands,type PaletteAction,type PaletteContext } from './command-palette';
-import { FINALIZED_MESSAGE } from '../project';
 import { Dialog } from '../ui/Dialog';
 import { useI18n } from '../i18n';
 
@@ -13,13 +12,13 @@ export function CommandPalette({context,busy,onRun,onClose}:{context:PaletteCont
   const [query,setQuery]=useState(''),[active,setActive]=useState(0),input=useRef<HTMLInputElement>(null),list=useId();
   const matches=useMemo(()=>searchCommands(query,context).map(match=>{
     if(context.locked&&match.action&&(match.action.kind==='edit'||match.action.kind==='app'&&(match.action.name==='undo'||match.action.name==='redo'))){
-      return {...match,action:undefined,error:FINALIZED_MESSAGE};
+      return {...match,action:undefined,error:t('project.finalized')};
     }
     if(context.scoreHidden&&match.action&&match.action.kind==='edit'){
       return {...match,action:undefined,error:t('palette.score_editing_unavailable')};
     }
     return match;
-  }),[query,context]),current=matches[Math.min(active,matches.length-1)];
+  }),[query,context,t]),current=matches[Math.min(active,matches.length-1)];
   useEffect(()=>{if(current)document.getElementById(`${list}-${current.id}`)?.scrollIntoView?.({block:'nearest'});},[current,list]);
   // Closing first returns focus, so a dialog the command opens keeps the focus it takes.
   const run=(index:number)=>{const match=matches[index];if(!match?.action||busy)return;onClose();onRun(match.action);};

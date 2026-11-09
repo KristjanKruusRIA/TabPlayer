@@ -4,7 +4,7 @@ import { DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings, previewEdit } from './engine';
 import type { BeatTarget, EditCommand } from './project';
 import type { SequenceStep } from './edit-types';
-import { EDIT_LOCKED_MESSAGE, FINALIZED_MESSAGE, isEditPasswordLocked, isFinalized, projectCommands } from './project';
+import { isEditPasswordLocked, isFinalized, projectCommands } from './project';
 import { ProtectionDialog,UnlockEditingDialog } from './protection/PasswordDialogs';
 import { busyGuard } from './ui/useBusyGuard';
 import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
@@ -142,7 +142,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   // playback, practice, selection, the mixer, export and save stay usable.
   // A password to edit that has not been given in this session refuses changes the same way, but is lifted by the password, not by unfinalizing.
   const finalized=isFinalized(state.snapshot.project),passwordLocked=isEditPasswordLocked(state.snapshot),editLocked=finalized||passwordLocked,editBusy=controlsBusy||editLocked;
-  const lockedMessage=finalized?FINALIZED_MESSAGE:EDIT_LOCKED_MESSAGE;
+  const lockedMessage=finalized?t('project.finalized'):t('project.edit_locked');
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
   const loopPassage=useLoopPassage(player,playbackState);
@@ -459,7 +459,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setSourceMetadata(null);
     void waveformBridge.read(document,{kind:'asset',assetId},1).then(receipt=>{
       if(!current())return;
-      if(owner.documentId!==document.documentId||receipt.owner.documentId!==owner.documentId||receipt.owner.activationId!==owner.activationId||receipt.document.documentId!==document.documentId||receipt.document.revision!==document.revision||receipt.source.kind!=='asset'||receipt.source.assetId!==assetId||!Number.isFinite(receipt.durationMs)||receipt.durationMs<=0)throw new Error('The backing timing source changed. Retry to load the current audio.');
+      if(owner.documentId!==document.documentId||receipt.owner.documentId!==owner.documentId||receipt.owner.activationId!==owner.activationId||receipt.document.documentId!==document.documentId||receipt.document.revision!==document.revision||receipt.source.kind!=='asset'||receipt.source.assetId!==assetId||!Number.isFinite(receipt.durationMs)||receipt.durationMs<=0)throw new Error(t('backing.timing_source_changed'));
       setSourceMetadata({bridge:waveformBridge,assetId,durationMs:receipt.durationMs,error:null});
     }).catch(error=>{if(current())setSourceMetadata({bridge:waveformBridge,assetId,durationMs:null,error:error instanceof Error?error.message:String(error)});});
     return()=>{active=false;};
@@ -470,7 +470,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   const referenceReady=sourceAssetId!==null&&sourceDurationMs!==null&&!!backingTimeline?.occurrences.length;
   const referenceEdit=useReferenceSyncEdit({owner:waveformBridge.owner,document:{documentId:state.documentId,revision:state.revision},sourceKey:sourceAssetId,settings:state.settings.backing,timeline:backingTimeline,durationMs:sourceDurationMs,visible:{number:referenceVisible,waveform:waveformEnabled},busy:editBusy,beginOperation:beginEditorOperation,isCurrent:waveformCurrent,onCommit:async(backing,document)=>{
-    if(!state.settings.backing||!waveformCurrent(document,state.settings.backing)||backing.assetId!==sourceAssetId)throw new Error('The active reference source changed. Try the edit again.');
+    if(!state.settings.backing||!waveformCurrent(document,state.settings.backing)||backing.assetId!==sourceAssetId)throw new Error(t('backing.reference_source_changed'));
     await controller.editAtRevision({type:'setBacking',backing},document);
   }});
   const referenceTiming=useMemo(()=>{
@@ -479,26 +479,26 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   },[referenceReady,state.settings.backing,referenceEdit.preview,backingTimeline?.occurrences,sourceDurationMs]);
   const referenceAction=async(action:'score'|'reference'|'replace'|'add'|'write')=>{
     const captured=controller.getState(),document={documentId:captured.documentId,revision:captured.revision},backing=captured.settings.backing;
-    if(controlsBusy||captured.busy||!referenceReady||!backing||captured.documentId!==state.documentId||captured.revision!==state.revision||backing.assetId!==sourceAssetId||!waveformCurrent(document,backing))throw new Error('Wait for backing timing to load before changing synchronization.');
+    if(controlsBusy||captured.busy||!referenceReady||!backing||captured.documentId!==state.documentId||captured.revision!==state.revision||backing.assetId!==sourceAssetId||!waveformCurrent(document,backing))throw new Error(t('backing.timing_wait'));
     const release=beginEditorOperation();
     try{
       const settings=structuredClone(backing),json=model.JsonConverter.scoreToJson(captured.score);let command:EditCommand;
       if(action==='write'){
         const score=scoreFromJson(json,new Settings());restoreNoteLinks(score,captureNoteLinks(captured.score));
         const locations=backingLocationsForScore(score),timing=referenceSyncTiming(settings,locations,sourceDurationMs!);
-        if(!timing)throw new Error('Enable Score follows audio before writing score tempos.');
+        if(!timing)throw new Error(t('backing.follow_audio_required'));
         command={type:'replaceTempoAutomations',points:scoreTemposFromSync(score,timing,locations)};
       }else if(action==='score')command={type:'setBacking',backing:disableReferenceSync(settings)};
       else{
         const authored=buildPlaybackPlanFromJson(json,captured.score.tracks.map(trackIdentity),backingTimeline!.generation);
         command={type:'setBacking',backing:action==='reference'?initializeReferenceSync(settings,authored,sourceDurationMs!):syncPointsFromScore(authored,settings,action,sourceDurationMs!)};
       }
-      if(!waveformCurrent(document,backing))throw new Error('The active reference source changed. Try the edit again.');
+      if(!waveformCurrent(document,backing))throw new Error(t('backing.reference_source_changed'));
       await controller.editAtRevision(command,document);
     }finally{release();}
   };
   const reference:ReferenceSyncControls={ready:referenceReady,timing:referenceTiming,edit:referenceEdit,onModeChange:referenceAction,onFromScore:referenceAction,onWriteScore:()=>referenceAction('write')};
-  const sourceMetadataStatus=sourceAssetId&&sourceDurationMs===null?<div className="backing-waveform-state">{currentMetadata?.error?<><p role="alert">{currentMetadata.error}</p><button onClick={()=>setSourceRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading backing timing…</p>}</div>:null;
+  const sourceMetadataStatus=sourceAssetId&&sourceDurationMs===null?<div className="backing-waveform-state">{currentMetadata?.error?<><p role="alert">{currentMetadata.error}</p><button onClick={()=>setSourceRetry(value=>value+1)}>{t('action.retry')}</button></>:<p role="status">{t('dock.loading_timing')}</p>}</div>:null;
   const [symbolRequest,setSymbolRequest]=useState(0);
   // The cursor as last rendered: an entry edit that lands moves it on only when the user has not moved it meanwhile.
   const cursorNow=useRef(selection);cursorNow.current=selection;
@@ -762,7 +762,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(view==='sound'&&(((event.ctrlKey||event.metaKey)&&['c','x','v','a','t'].includes(key))||event.key==='Escape')){event.preventDefault();return;}
     if((event.ctrlKey||event.metaKey)&&!event.altKey&&key==='t'){
       event.preventDefault();if(controlsBusy||event.repeat||!musicSelection)return;
-      if(editLocked){setClipboardError(FINALIZED_MESSAGE);return;}
+      if(editLocked){setClipboardError(t('project.finalized'));return;}
       edit(event.shiftKey?{type:'setSelectionTies',selection:musicSelection,tied:false}:{type:'tieSelectionToEarlierPitch',selection:musicSelection});return;
     }
     if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
@@ -795,7 +795,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>{t('action.close_score')}</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onCloseAll())}>{t('action.close_all_scores')}</button>
       {finalized?<button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>{t('action.unfinalize_document')}</button>:<button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock({kind:'finalized'}))}>{t('action.finalize_document')}</button>}
-      <button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('manage')})}>Password protection…</button>
+      <button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('manage')})}>{t('menu.password_protection')}</button>
       <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>{t('action.export_score')}</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>{t('action.export_gp')}</button>
       {libraryMenu}{sessionMenu}</section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.edit')}</summary><section aria-label={t('menu.edit')}>
@@ -853,9 +853,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{t('menu.help')}</summary><section role="region" aria-label={t('help.keyboard_editing_help')}>
       <div className="help-actions"><button type="button" onClick={()=>openHelp('start')}>{t('help.topics_f1')}</button><button type="button" onClick={()=>openHelp('about')}>{t('help.about_updates')}</button></div>
       <h2>{t('help.keyboard_editing_heading')}</h2><p>{t('help.keyboard_editing_intro')}</p>
-      <dl><dt>Ctrl/Cmd + N / O</dt><dd>{t('help.shortcut_new_open')}</dd><dt>Ctrl/Cmd + S</dt><dd>{t('help.shortcut_save')}</dd><dt>Ctrl/Cmd + W</dt><dd>{t('help.shortcut_close')}</dd><dt>Ctrl/Cmd + Tab</dt><dd>{t('help.shortcut_next_score')}</dd><dt>Ctrl/Cmd + Z</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>Space</dt><dd>{t('help.shortcut_play')}</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>{t('help.shortcut_palette')}</dd></dl>
+      <dl><dt>Ctrl/Cmd + N / O</dt><dd>{t('help.shortcut_new_open')}</dd><dt>Ctrl/Cmd + S</dt><dd>{t('help.shortcut_save')}</dd><dt>Ctrl/Cmd + W</dt><dd>{t('help.shortcut_close')}</dd><dt>Ctrl/Cmd + Tab</dt><dd>{t('help.shortcut_next_score')}</dd><dt>Ctrl/Cmd + Z</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>{t('keys.space')}</dt><dd>{t('help.shortcut_play')}</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>{t('help.shortcut_palette')}</dd></dl>
       <button type="button" onClick={openPalette}>{t('help.open_command_palette')}</button>
-      <h3>{t('help.score_focused_heading')}</h3><dl><dt>Left / Right</dt><dd>{t('help.shortcut_beat')}</dd><dt>Up / Down</dt><dd>{t('help.shortcut_string')}</dd><dt>Digits, then Enter</dt><dd>{t('help.shortcut_fret')}</dd><dt>Shift + Left/Right</dt><dd>{t('help.shortcut_selection')}</dd><dt>Ctrl/Cmd + A</dt><dd>{t('help.shortcut_select_track')}</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them, giving each the earlier fret. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>Escape</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>Ctrl+Alt, Alt+Shift or Ctrl+Shift + Up/Down</dt><dd>{t('help.shortcut_note_move')}</dd><dt>Ctrl/Cmd + 7 / 8 / 9, with Alt</dt><dd>{t('help.shortcut_accidental')}</dd><dt>Backspace, Shift + Delete, Ctrl + Insert, Ctrl + Shift + Delete</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>Home / End, Ctrl + Home / End, Shift + Home / End</dt><dd>{t('help.shortcut_gp8_cursor')}</dd></dl>
+      <h3>{t('help.score_focused_heading')}</h3><dl><dt>{t('keys.left_right')}</dt><dd>{t('help.shortcut_beat')}</dd><dt>{t('keys.up_down')}</dt><dd>{t('help.shortcut_string')}</dd><dt>{t('keys.digits_enter')}</dt><dd>{t('help.shortcut_fret')}</dd><dt>Shift + Left/Right</dt><dd>{t('help.shortcut_selection')}</dd><dt>Ctrl/Cmd + A</dt><dd>{t('help.shortcut_select_track')}</dd><dt>Ctrl/Cmd + T</dt><dd>{t('help.shortcut_tie')}</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>{t('keys.escape')}</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>{t('keys.note_move')}</dt><dd>{t('help.shortcut_note_move')}</dd><dt>{t('keys.accidental')}</dt><dd>{t('help.shortcut_accidental')}</dd><dt>Backspace, Shift + Delete, Ctrl + Insert, Ctrl + Shift + Delete</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>Home / End, Ctrl + Home / End, Shift + Home / End</dt><dd>{t('help.shortcut_gp8_cursor')}</dd></dl>
       <p>{t('help.workflow_description')}</p>
     </section></details>
     </nav><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span>
@@ -951,6 +951,6 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound'}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onClose={closeModal}/>}
-    <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?'Click a note to edit it in the inspector.':'Click the score, then use arrow keys, digits and Enter.'}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
+    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}<span>{state.snapshot.path ?? t('status.save_hint')}</span>{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?t('status.hint_note'):t('status.hint_score')}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
   </div>;
 }

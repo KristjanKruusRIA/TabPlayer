@@ -113,13 +113,13 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit,fontStatus=null
         return <fieldset key={id}><legend>{track.name}</legend><label>{t('engraving.track_profile_label',{name:track.name})}<select value={profile} onChange={e=>{const next=e.target.value as TrackProfile;setDraft({...draft,profiles:[...draft.profiles.filter(entry=>entry.trackId!==id),...next==='source'?[]:[{trackId:id,profile:next}]]});setError(null);}}>
           {profileOptions.map(([key,msgKey])=><option key={key} value={key} disabled={key==='tablature'?track.staves.some(staff=>!staff.tuning.length||staff.isPercussion):key==='numbered'&&track.staves.some(staff=>staff.isPercussion)}>{t(msgKey)}</option>)}
         </select></label>
-          {track.staves.map((staff,si)=><p key={si}>{t('engraving.source_staff_summary',{index:si+1,modes:[[staff.showStandardNotation,'standard'],[staff.showTablature,'tablature'],[staff.showSlash,'slash'],[staff.showNumbered,'numbered']].filter(([shown])=>shown).map(([,name])=>name).join(', ')||t('engraving.source_staff_hidden')})}</p>)}
+          {track.staves.map((staff,si)=><p key={si}>{t('engraving.source_staff_summary',{index:si+1,modes:[[staff.showStandardNotation,'engraving.staff_mode_standard'],[staff.showTablature,'engraving.staff_mode_tablature'],[staff.showSlash,'engraving.staff_mode_slash'],[staff.showNumbered,'engraving.staff_mode_numbered']].filter(([shown])=>shown).map(([,name])=>t(name as MessageKey)).join(', ')||t('engraving.source_staff_hidden')})}</p>)}
         </fieldset>;
       })}
     </details>
     <details><summary>{t('engraving.stylesheet_summary')}</summary>
       {styleBooleans.map(([key,labelKey,field])=><Choice key={key} label={t(labelKey)} value={boolValue(draft.stylesheet[key])} source={yesNo(style[field])} options={boolOptions} onChange={next=>updateStyle(key,parseBool(next))}/>)}
-      {styleChoices.map(([key,labelKey,field,options])=><Choice key={key} label={t(labelKey)} value={draft.stylesheet[key]} source={options[style[field]]?.[1]?t(options[style[field]][1]):'Imported'} options={options} onChange={next=>updateStyle(key,next)}/>)}
+      {styleChoices.map(([key,labelKey,field,options])=><Choice key={key} label={t(labelKey)} value={draft.stylesheet[key]} source={options[style[field]]?.[1]?t(options[style[field]][1]):t('engraving.opt_imported')} options={options} onChange={next=>updateStyle(key,next)}/>)}
       <Choice label={t('engraving.style.chordDiagrams')} value={draft.stylesheet.chords} source={style.globalDisplayChordDiagramsOnTop?(style.globalDisplayChordDiagramsInScore?t('engraving.opt_both'):t('engraving.opt_top')):(style.globalDisplayChordDiagramsInScore?t('engraving.opt_inline'):t('engraving.opt_hidden'))} options={[["hidden","engraving.opt_hidden"],["top","engraving.opt_top"],["inline","engraving.opt_inline"],["both","engraving.opt_both"]]} onChange={next=>updateStyle('chords',next)}/>
       <Choice label={t('engraving.style.multiRests')} value={draft.stylesheet.multiRests} source={style.multiTrackMultiBarRest?t('engraving.opt_on'):t('engraving.opt_off')} options={[["off","engraving.opt_off"],["on","engraving.opt_on"]]} onChange={next=>updateStyle('multiRests',next)}/>
       {(style.perTrackDisplayTuning?.size||style.perTrackChordDiagramsOnTop?.size||style.perTrackMultiBarRest?.size)?<p>{t('engraving.exceptions_hint')}</p>:null}
@@ -135,7 +135,7 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit,fontStatus=null
     </details>
     <details><summary>{t('engraving.presets_summary')}</summary>
       <p>{t('engraving.presets_hint')}</p>
-      {notationPresets.map(preset=><div key={preset.id}><button type="button" onClick={()=>{setDraft(presetApplied(preset,draft));setError(null);}}>{t('engraving.load_preset',{name:preset.name})}</button> {preset.description}</div>)}
+      {notationPresets.map(preset=><div key={preset.id}><button type="button" onClick={()=>{setDraft(presetApplied(preset,draft));setError(null);}}>{t('engraving.load_preset',{name:t(preset.nameKey)})}</button> {t(preset.descriptionKey)}</div>)}
     </details>
     <label>{t('engraving.system_spacing')}<input type="number" min={25} max={400} step="any" placeholder={t('engraving.system_spacing_placeholder')} value={draft.systemSpacing===null?'':draft.systemSpacing*100} onChange={e=>{setDraft({...draft,systemSpacing:e.target.value===''?null:Number(e.target.value)/100});setError(null);}}/></label>
     <p>{t('engraving.system_spacing_hint')}</p>

@@ -1,6 +1,3 @@
-import { SectionsPanel } from '../editor/SectionsPanel';
-import { PracticePanel } from '../audio/PracticePanel';
-import { TrackDisplayControls } from '../engraving/TrackDisplayControls';
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
@@ -19,6 +16,16 @@ import { withBarScale } from '../engraving/bar-widths';
 import { defaultEngraving } from '../engraving/projection';
 import { Transport } from '../Transport';
 import { DEFAULT_PRACTICE } from '../audio/practice-types';
+import { SectionsPanel } from '../editor/SectionsPanel';
+import { PracticePanel } from '../audio/PracticePanel';
+import { TrackDisplayControls } from '../engraving/TrackDisplayControls';
+import { BackingProcessingControls } from '../audio/BackingProcessingControls';
+import { BackingPanel } from '../audio/BackingPanel';
+import { BarGesturePanel } from '../editor/BarGesturePanel';
+import { StylePresetsPanel } from '../engraving/StylePresetsPanel';
+import { EngravingPanel } from '../engraving/EngravingPanel';
+import { BatchConvertDialog } from '../batch/BatchConvertDialog';
+import { music } from '../editor/fixtures';
 import { setLanguagePreference, type SupportedLanguage } from './index';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(async () => []) }));
@@ -34,10 +41,12 @@ beforeEach(() => { localStorage.clear(); setLanguagePreference('en'); });
 
 /** Text that is legitimately the same as the English: file text from the test, and real cognates. Keep this short; each entry needs a reason. */
 const allowed: Record<'all' | SupportedLanguage, ReadonlySet<string>> = {
-  all: new Set(['Moonlight.tabplayer', 'Untitled', 'Intro', 'Verse', 'Guitar', 'Bass']),   // a file name and a tab title the test supplies: user data, not UI text
+  all: new Set(['Moonlight.tabplayer', 'Untitled', 'Intro', 'Verse', 'Guitar', 'Bass', 'Clicks.wav',
+    'Bravura', 'Petaluma', 'Leland', 'Noto Sans', 'Noto Serif', 'Noto Sans Mono',          // font family names
+    'Guitar Pro 6 (.gpx)', 'MusicXML (.xml .musicxml .mxl)', 'Simile']),   // file format names and a musical term, the same in every language   // a file name and a tab title the test supplies: user data, not UI text
   en: new Set(),
-  et: new Set(['ASCII tab']),                      // the Estonian catalog keeps this format name as it is
-  de: new Set(['Interpretation', 'Normal', 'Zoom (%)']),      // the German words are spelled the same
+  et: new Set(['ASCII tab', 'Filter', 'Standard']),                     // the Estonian catalog keeps this format name as it is
+  de: new Set(['Interpretation', 'Normal', 'Zoom (%)', 'Filter', 'Cents', 'Solo', 'Standard', 'Horizontal', 'Notation']),      // the German words are spelled the same
 };
 /** Strings with no letters (numbers, symbols, units alone) cannot be English or Estonian. */
 const hasWords = (text: string) => /\p{L}{2,}/u.test(text.replace(/\b(?:BPM|MIDI|dB|Hz|ms|WAV|%)\b/g, ''));
@@ -86,6 +95,13 @@ const surfaces: Array<{ title: string; mount: () => ReturnType<typeof render> }>
   { title: 'SectionsPanel', mount: () => render(<SectionsPanel sections={[{ bar: 0, name: 'Intro' }, { bar: 4, name: 'Verse' }]} bar={0} onGo={noop} />) },
   { title: 'PracticePanel', mount: () => render(<PracticePanel settings={structuredClone(DEFAULT_PRACTICE)} busy={false} hasBacking={false} onChange={noop} />) },
   { title: 'TrackDisplayControls', mount: () => render(<TrackDisplayControls ids={['0', '1']} names={['Guitar', 'Bass']} selected={0} view={{ kind: 'all' }} zoom={100} disabled={false} onView={noop} onZoom={noop} />) },
+  { title: 'BackingProcessingControls', mount: () => render(<BackingProcessingControls settings={{ assetId: 'a', offsetMs: 0, anchors: [], mix: { gain: 1, pan: 0, mute: false, solo: false } }} busy={false} visible beginOperation={() => noop} onEdit={noop} />) },
+  { title: 'BackingPanel (no backing)', mount: () => render(<BackingPanel settings={null} assets={{}} onEdit={noop} stageBacking={async () => null} stageEmbeddedBacking={async () => null} beginOperation={() => noop} />) },
+  { title: 'BackingPanel (with backing)', mount: () => render(<BackingPanel settings={{ assetId: 'a', offsetMs: 0, anchors: [], mix: { gain: 1, pan: 0, mute: false, solo: false } }} assets={{ a: { filename: 'Clicks.wav', mediaType: 'audio/wav', byteLength: 40 } }} onEdit={noop} stageBacking={async () => null} stageEmbeddedBacking={async () => null} beginOperation={() => noop} durationMs={10000} />) },
+  { title: 'BarGesturePanel', mount: () => render(<BarGesturePanel score={music()} track={0} staff={0} bar={0} busy={false} onEdit={noop} />) },
+  { title: 'StylePresetsPanel', mount: () => render(<StylePresetsPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} unapplied={false} busy={false} onEdit={noop} />) },
+  { title: 'EngravingPanel', mount: () => render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={noop} />) },
+  { title: 'BatchConvertDialog', mount: () => render(<BatchConvertDialog busy={false} bridge={{ pickFolder: async () => null, scan: async () => ({ files: [], skipped: [], truncated: false, totalBytes: 0 }), read: async () => new Uint8Array(), write: async () => ({ relative: '', renamed: false }), reset: async () => {} }} onClose={noop} />) },
 ];
 
 describe('converted surfaces show no unchanged English', () => {

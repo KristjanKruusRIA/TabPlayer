@@ -17,7 +17,6 @@ const voiceOptions=[
   {value:'4',label:'4'},
 ] as const;
 
-
 /**
  * Reads a Standard MIDI File, lets the quantization, tuplet, voice and tablature options be chosen while showing what
  * they produce, and opens the result as a new untitled score. Nothing is opened until Import, and a file that cannot be
@@ -75,7 +74,7 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
     catch(error){setImportProblem(t('midi_import.open_failed', { error: message(error) }));}
     finally{setImporting(false);}
   };
-  const summary=imported?`${t(imported.summary.format===0?'midi_import.format_0':'midi_import.format_1')}, ${t(imported.summary.tracks.length===1?'midi_import.summary_parts_one':'midi_import.summary_parts_other',{count:imported.summary.tracks.length})}, ${t(imported.summary.measures===1?'midi_import.summary_measures_one':'midi_import.summary_measures_other',{count:imported.summary.measures})} ${t('midi_import.summary_at_bpm',{tempo:imported.summary.tempo})}.`:'';
+  const summary=imported?t('midi_import.summary',{format:t(imported.summary.format===0?'midi_import.format_0':'midi_import.format_1'),parts:t(imported.summary.tracks.length===1?'midi_import.summary_parts_one':'midi_import.summary_parts_other',{count:imported.summary.tracks.length}),measures:t(imported.summary.measures===1?'midi_import.summary_measures_one':'midi_import.summary_measures_other',{count:imported.summary.measures}),tempo:imported.summary.tempo}):'';
   const actions=<>
     <button type="submit" {...busyGuard({busy:busy||importing,unavailable:!imported,className:'tp-button primary'})}>{t('midi_import.import_btn')}</button>
     <button type="button" {...busyGuard({busy:importing,className:'tp-button',onClick:onClose})}>{t('dialog.cancel')}</button>

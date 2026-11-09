@@ -18,6 +18,7 @@ pub mod line_in;
 pub mod midi_out;
 pub mod password_crypto;
 pub mod password_lock;
+pub mod plugins;
 pub mod project;
 pub mod recovery;
 pub mod reveal;
@@ -1103,7 +1104,8 @@ pub fn run() {
                     let _ = session_handle.emit("recovery-status", status);
                 }),
             )?;
-            app.manage(session.workspace());
+            let workspace = session.workspace();
+            app.manage(workspace.clone());
             app.manage(session);
             let library_handle = app.handle().clone();
             app.manage(FileLibrary::open(
@@ -1113,6 +1115,64 @@ pub fn run() {
                     let _ = library_handle.emit("file-library-changed", event);
                 }),
             ));
+            let plugin_handle = app.handle().clone();
+            let helper = plugins::commands::helper_exe()
+                .unwrap_or_else(|_| PathBuf::from("tabplayer-plugin-host.exe"));
+            let library_dir = plugins::commands::library_directory(&app.handle())
+                .unwrap_or_else(|_| PathBuf::from("plugins"));
+            let consent_file = library_dir.join("consent.json");
+            let plugin_service = plugins::service::PluginService::new(
+                plugins::service::PluginPaths {
+                    helper,
+                    library_dir,
+                    consent_file,
+                },
+                Box::new(move |event| match event {
+                    plugins::service::PluginEvent::StatusChanged { document_id } => {
+                        let _ = plugin_handle.emit(
+                            "plugin-status",
+                            serde_json::json!({ "documentId": document_id }),
+                        );
+                    }
+                    plugins::service::PluginEvent::EditorClosed {
+                        document_id,
+                        track_id,
+                        state,
+                        asset_token,
+                    } => {
+                        let _ = plugin_handle.emit(
+                            "plugin-editor-closed",
+                            serde_json::json!({
+                                "documentId": document_id,
+                                "trackId": track_id,
+                                "state": state,
+                                "assetToken": asset_token,
+                            }),
+                        );
+                    }
+                    plugins::service::PluginEvent::Notice {
+                        document_id,
+                        track_id,
+                        key,
+                    } => {
+                        let _ = plugin_handle.emit(
+                            "plugin-notice",
+                            serde_json::json!({
+                                "documentId": document_id,
+                                "trackId": track_id,
+                                "key": key,
+                            }),
+                        );
+                    }
+                }),
+            )
+            .map_err(|e| e.to_string())?;
+            plugin_service.set_workspace(Arc::downgrade(&workspace));
+            workspace
+                .lock()
+                .unwrap()
+                .set_plugins(plugin_service.clone());
+            app.manage(plugin_service.clone());
             let handle = app.handle().clone();
             let root = app.path().resource_dir()?.join("audio");
             app.manage(
@@ -1122,8 +1182,27 @@ pub fn run() {
                         let _ = handle.emit("native-audio-status", status);
                     }),
                 )
+                .with_plugins(plugin_service)
                 .with_protected_paths(protected),
             );
+            // Prepares the mix again when a plug-in became ready or faulted, announced a new latency, or the device's
+            // callback grew past the pipeline the mix was built for (review H1, H2 of Task 13).
+            let tick_handle = app.handle().clone();
+            let tick_workspace = Arc::downgrade(&workspace);
+            std::thread::Builder::new()
+                .name("plugin-reprepare".into())
+                .spawn(move || {
+                    while let Some(workspace) = tick_workspace.upgrade() {
+                        let audio = tick_handle.state::<runtime::NativeAudio>();
+                        if audio.plugin_tick_stopped() {
+                            break;
+                        }
+                        audio.plugin_tick(&workspace);
+                        drop(workspace);
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                })
+                .map_err(|e| e.to_string())?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1219,6 +1298,16 @@ pub fn run() {
         audio::nam_library::nam_capture_import,
         audio::nam_library::nam_capture_remove,
         audio::nam_library::nam_capture_status,
+        plugins::commands::plugin_library_list,
+        plugins::commands::plugin_library_add,
+        plugins::commands::plugin_library_remove,
+        plugins::commands::plugin_choose,
+        plugins::commands::plugin_status,
+        plugins::commands::plugin_consent_grant,
+        plugins::commands::plugin_retry,
+        plugins::commands::plugin_editor_open,
+        plugins::commands::plugin_editor_save,
+        plugins::commands::plugin_editor_close,
         file_library_snapshot,
         file_library_retry,
         file_library_change,
@@ -1325,6 +1414,16 @@ pub fn run() {
         audio::nam_library::nam_capture_import,
         audio::nam_library::nam_capture_remove,
         audio::nam_library::nam_capture_status,
+        plugins::commands::plugin_library_list,
+        plugins::commands::plugin_library_add,
+        plugins::commands::plugin_library_remove,
+        plugins::commands::plugin_choose,
+        plugins::commands::plugin_status,
+        plugins::commands::plugin_consent_grant,
+        plugins::commands::plugin_retry,
+        plugins::commands::plugin_editor_open,
+        plugins::commands::plugin_editor_save,
+        plugins::commands::plugin_editor_close,
         file_library_snapshot,
         file_library_retry,
         file_library_change,
@@ -1361,6 +1460,7 @@ pub fn run() {
         midi_out::midi_out_set_delay,
         midi_out::midi_out_status,
         midi_out::midi_out_test_log,
+        plugins::commands::plugin_test_set_parameter,
         desktop_test_io
     ]);
     builder
@@ -1391,6 +1491,11 @@ pub fn run() {
                 // Every note a port is holding is released and the ports are closed.
                 if let Some(audio) = app.try_state::<runtime::NativeAudio>() {
                     audio.service.midi_out().shutdown();
+                    // No tick starts a helper from here on, and the helpers are asked to end (review L2).
+                    audio.stop_plugin_tick();
+                    if let Some(plugins) = &audio.plugins {
+                        plugins.shutdown_all();
+                    }
                 }
             }
         });

@@ -141,6 +141,7 @@ pub struct NativeAudioStatus {
     /// Peak absolute sample of the latest clip's own samples, before summing with
     /// playback, clamping or downmix.
     pub audition_peak: f64,
+    pub plugin_delay_frames: usize,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(
@@ -488,12 +489,17 @@ struct SharedStatus {
     audition_rate: AtomicU32,
     /// Frames per callback of the open stream; zero until its first callback.
     buffer_size: AtomicU32,
+    /// The largest callback, in frames, the open stream has asked for; zero until its first callback. A plug-in's
+    /// pipeline is sized from it, not from the steady period: a shared-mode stream's first callback can be twice the
+    /// period (preflight ruling P32).
+    max_callback_frames: AtomicU32,
     /// Name of the device the open stream was built on; set when the stream opens,
     /// so diagnostics never probe the backend.
     stream_name: Mutex<Option<String>>,
     /// The system rerouted the live stream (`DeviceChanged`), so the cached name may
     /// be wrong until the next open. A plain flag: the stream's error callback sets it.
     name_stale: AtomicU64,
+    plugin_delay_frames: AtomicU64,
 }
 impl SharedStatus {
     fn new() -> Self {
@@ -541,8 +547,10 @@ impl SharedStatus {
             audition_peak: AtomicU64::new(0),
             audition_rate: AtomicU32::new(0),
             buffer_size: AtomicU32::new(0),
+            max_callback_frames: AtomicU32::new(0),
             stream_name: Mutex::new(None),
             name_stale: AtomicU64::new(0),
+            plugin_delay_frames: AtomicU64::new(0),
         }
     }
     fn read(&self) -> NativeAudioStatus {
@@ -636,6 +644,7 @@ impl SharedStatus {
             }),
             audition_serial,
             audition_peak: f64::from_bits(self.audition_peak.load(Ordering::Relaxed)),
+            plugin_delay_frames: self.plugin_delay_frames.load(Ordering::Relaxed) as usize,
         };
         (status, snapshot)
     }
@@ -781,6 +790,7 @@ pub struct CallbackTransport {
     device_frames: usize,
     /// Frames of it already rendered.
     callback_pos: usize,
+    draining: usize,
 }
 impl CallbackTransport {
     pub fn headless(rate: u32) -> Self {
@@ -885,6 +895,7 @@ impl CallbackTransport {
             midi_cursor: 0,
             device_frames: 0,
             callback_pos: 0,
+            draining: 0,
         }
     }
     pub fn status(&self) -> NativeAudioStatus {
@@ -1022,6 +1033,12 @@ impl CallbackTransport {
         self.shared
             .peak
             .store(self.peak.to_bits(), Ordering::Relaxed);
+        self.shared.plugin_delay_frames.store(
+            self.renderer
+                .as_ref()
+                .map_or(0, |r| r.plugin_delay_frames() as u64),
+            Ordering::Relaxed,
+        );
         self.shared.sequence.store(version + 2, Ordering::Release);
     }
     pub fn install(
@@ -1059,8 +1076,15 @@ impl CallbackTransport {
         }
         renderer.set_metronome_settings(accepted.metronome);
         if preserve && generation == self.generation {
-            renderer.seek_tick(self.tick);
+            // An edit while playing: the new renderer carries on where the old one is. With a plug-in it keeps the
+            // old compensation lines streaming (a wrap, and the lines handed over); with none it is the plain seek
+            // it always was.
+            renderer.wrap_to_tick(self.tick);
+            if let Some(old) = self.renderer.as_mut() {
+                renderer.continue_from(old);
+            }
         } else {
+            self.draining = 0;
             self.playing = false;
             self.tick = 0.0;
             self.seconds = 0.0;
@@ -1280,6 +1304,9 @@ impl CallbackTransport {
                     self.resume_count = self.count.is_some();
                     self.playing = false;
                     self.phase = PracticePhase::Paused;
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.pause();
+                    }
                 }
             }
             TransportCommand::Stop { .. } => {
@@ -1320,6 +1347,7 @@ impl CallbackTransport {
                 end_tick,
                 ..
             } => {
+                self.draining = 0;
                 self.range = None;
                 self.cancel_count();
                 self.reset_passes();
@@ -1359,6 +1387,7 @@ impl CallbackTransport {
         Ok(())
     }
     fn seek(&mut self, tick: f64) {
+        self.draining = 0;
         if let Some(renderer) = &mut self.renderer {
             renderer.midi_set_cursor(self.midi_cursor);
             renderer.seek_tick(tick);
@@ -1366,7 +1395,19 @@ impl CallbackTransport {
         }
         self.tick = tick;
     }
+    fn wrap_to_tick(&mut self, tick: f64) {
+        if let Some(renderer) = &mut self.renderer {
+            renderer.midi_set_cursor(self.midi_cursor);
+            renderer.wrap_to_tick(tick);
+            self.seconds = renderer.tick_to_seconds(tick);
+        }
+        self.tick = tick;
+    }
     fn fault(&mut self) {
+        self.draining = 0;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.pause();
+        }
         self.interrupted_count =
             self.interrupted_count || self.count.is_some() || self.resume_count;
         self.cancel_count_after_fault();
@@ -1390,7 +1431,7 @@ impl CallbackTransport {
     fn wrap(&mut self, start: f64) {
         self.passes = self.passes.saturating_add(1);
         self.resolve_renderer();
-        self.seek(start);
+        self.wrap_to_tick(start);
         if self.practice.count_in.between_loops {
             self.start_count();
         }
@@ -1435,6 +1476,34 @@ impl CallbackTransport {
         let mut rendered = 0;
         let was_playing = self.playing;
         while self.playing && offset < output.len() {
+            if self.draining > 0 {
+                let Some(renderer) = &mut self.renderer else {
+                    self.draining = 0;
+                    self.playing = false;
+                    self.phase = PracticePhase::Ended;
+                    break;
+                };
+                let count = (output.len() - offset).min(self.draining);
+                for frame in 0..count {
+                    output[offset + frame] = renderer.drain_frame();
+                }
+                offset += count;
+                self.draining -= count;
+                if self.draining == 0 {
+                    let ceiling = self
+                        .loop_range
+                        .map(|r| r.1)
+                        .or(self.range.map(|r| r.end_tick));
+                    let end = ceiling.unwrap_or_else(|| renderer.duration_tick());
+                    self.seek(end);
+                    self.playing = false;
+                    self.phase = PracticePhase::Ended;
+                    self.cancel_count();
+                    self.pulse = None;
+                    break;
+                }
+                continue;
+            }
             self.midi_cursor = self.midi.frames() + offset as u64;
             if let Some(clock) = &mut self.count {
                 let frame = clock.next_frame();
@@ -1450,7 +1519,11 @@ impl CallbackTransport {
                     self.add_pulse(pulse, true, 1);
                 }
                 let click = self.click.frame(self.practice.metronome.volume);
-                output[offset] = [click, click];
+                output[offset] = if let Some(renderer) = &mut self.renderer {
+                    renderer.count_in_frame(click)
+                } else {
+                    [click, click]
+                };
                 offset += 1;
                 continue;
             }
@@ -1471,11 +1544,24 @@ impl CallbackTransport {
             let end = ceiling.unwrap_or_else(|| renderer.duration_tick());
             let remaining = renderer.output_frames_until(end);
             let count = (output.len() - offset).min(BLOCK).min(remaining);
+            let d_max = renderer.plugin_delay_frames();
+            // With no plug-in active, the end of a pass seeks to the end and then wraps or stops, exactly as before
+            // plug-ins. With one, a wrap keeps everything streaming and the end drains the compensation delay first.
+            let plugins = renderer.plugins_active();
             if count == 0 {
-                self.seek(end);
+                if !plugins {
+                    self.seek(end);
+                }
                 if let Some((start, _)) = self.loop_range {
                     self.wrap(start);
                     continue;
+                }
+                if d_max > 0 {
+                    self.draining = d_max;
+                    continue;
+                }
+                if plugins {
+                    self.seek(end);
                 }
                 self.playing = false;
                 self.phase = PracticePhase::Ended;
@@ -1499,10 +1585,17 @@ impl CallbackTransport {
                 self.add_pulse(pulse, false, status.pulse_count);
             }
             if count == remaining || (ceiling.is_none() && status.ended) {
-                self.seek(end);
+                if !plugins {
+                    self.seek(end);
+                }
                 if let Some((start, _)) = self.loop_range {
                     self.wrap(start);
+                } else if d_max > 0 {
+                    self.draining = d_max;
                 } else {
+                    if plugins {
+                        self.seek(end);
+                    }
                     self.playing = false;
                     self.phase = PracticePhase::Ended;
                     self.cancel_count();
@@ -1685,10 +1778,15 @@ impl OutputCallback {
         // Only the live stream reports its size; a retired callback must not
         // overwrite the replacement's field.
         if channels > 0 {
+            let frames = (output.len() / channels) as u32;
             self.transport
                 .shared
                 .buffer_size
-                .store((output.len() / channels) as u32, Ordering::Relaxed);
+                .store(frames, Ordering::Relaxed);
+            self.transport
+                .shared
+                .max_callback_frames
+                .fetch_max(frames, Ordering::Relaxed);
         }
         // Reserve a retirement slot before consuming an owning command.
         for _ in 0..CONTROL_CAPACITY {
@@ -1861,6 +1959,10 @@ struct PreparedDocument {
     resources: Arc<AudioResources>,
     backing: Option<Arc<DecodedAudio>>,
     practice: PracticeSettings,
+    plugin_plans: Vec<(
+        String,
+        Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+    )>,
 }
 struct ControlState {
     producer: Option<HeapProd<CallbackCommand>>,
@@ -1930,6 +2032,9 @@ pub struct AudioService {
     /// wait on the audio thread.
     midi: MidiOut,
     manager: mpsc::Sender<ManagerRequest>,
+    /// The plug-in inserts the last mix or renderer built refused, and why, until the runtime takes them to tell the
+    /// slots. A leaf lock, never held with anything else; the audio thread never touches it.
+    plugin_refusals: Mutex<Vec<(String, crate::audio::plugin_insert::InsertError)>>,
 }
 impl AudioService {
     pub fn new(
@@ -1968,6 +2073,7 @@ impl AudioService {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::default(),
             manager,
+            plugin_refusals: Mutex::default(),
         }
     }
     /// External MIDI output.
@@ -2002,7 +2108,9 @@ impl AudioService {
         document: &PreparedDocument,
         rate: u32,
     ) -> Result<(Box<Renderer>, PendingRoute), String> {
-        let mut renderer = Self::renderer(document, rate)?;
+        let callback_frames = self.max_callback_frames().unwrap_or(512) as usize;
+        let mut renderer = Self::renderer_with_callback_frames(document, rate, callback_frames)?;
+        self.keep_plugin_refusals(renderer.plugin_refusals());
         let mut pending = self
             .midi
             .build_route(&document.plan, &document.settings, false);
@@ -2010,6 +2118,15 @@ impl AudioService {
             renderer.replace_midi(tap);
         }
         Ok((renderer, pending))
+    }
+    /// Remembers what the build just made refused, replacing what an earlier build refused.
+    fn keep_plugin_refusals(&self, refused: &[(String, crate::audio::plugin_insert::InsertError)]) {
+        *self.plugin_refusals.lock().unwrap() = refused.to_vec();
+    }
+    /// The plug-in inserts the last build refused, and why; empty once taken. The runtime tells the slots, as it does
+    /// for the refusals it finds itself before a build.
+    pub fn take_plugin_refusals(&self) -> Vec<(String, crate::audio::plugin_insert::InsertError)> {
+        std::mem::take(&mut *self.plugin_refusals.lock().unwrap())
     }
     /// Sample rate to render an audition for, or None when no output stream has ever
     /// opened or the device has failed. Reads atomics only.
@@ -2288,6 +2405,12 @@ impl AudioService {
             buffer_size: (buffer != 0).then_some(buffer),
         })
     }
+    /// The largest callback, in frames, the open stream has asked for so far, or `None` before its first callback. A
+    /// plug-in insert's pipeline is `limits::pipeline_frames` of it.
+    pub fn max_callback_frames(&self) -> Option<u32> {
+        let frames = self.shared.max_callback_frames.load(Ordering::Relaxed);
+        (frames != 0).then_some(frames)
+    }
     /// Plays a quiet 440 Hz tone through the open stream. The refusal is a stable
     /// code (`AUDIO_ERROR_*`); the interface words it.
     pub fn test_tone(&self) -> Result<(), String> {
@@ -2334,6 +2457,15 @@ impl AudioService {
             .as_ref()
             .map(|document| document.plan.generation)
     }
+    /// Track IDs of the prepared document in track order.
+    pub fn prepared_track_ids(&self) -> Option<Vec<String>> {
+        self.control
+            .lock()
+            .unwrap()
+            .document
+            .as_ref()
+            .map(|document| document.plan.tracks.iter().map(|t| t.id.clone()).collect())
+    }
     pub fn prepare(
         &self,
         plan: PlaybackPlan,
@@ -2349,6 +2481,20 @@ impl AudioService {
         backing_bytes: Option<Vec<u8>>,
         practice: PracticeSettings,
     ) -> Result<(), String> {
+        self.prepare_with_practice_and_plugins(plan, settings, backing_bytes, practice, Vec::new())
+    }
+
+    pub fn prepare_with_practice_and_plugins(
+        &self,
+        plan: PlaybackPlan,
+        settings: DocumentSettings,
+        backing_bytes: Option<Vec<u8>>,
+        practice: PracticeSettings,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
+    ) -> Result<(), String> {
         practice
             .validate(backing_bytes.is_some() || settings.backing.is_some())
             .map_err(str::to_string)?;
@@ -2357,7 +2503,7 @@ impl AudioService {
         validate_count(&plan, practice, 192_000)?;
         let generation = plan.generation;
         let previous = self.shared.desired.fetch_max(generation, Ordering::AcqRel);
-        let result = self.prepare_current(plan, settings, backing_bytes, practice);
+        let result = self.prepare_current(plan, settings, backing_bytes, practice, plugin_plans);
         if result.is_err() {
             let live = self
                 .control
@@ -2381,6 +2527,10 @@ impl AudioService {
         settings: DocumentSettings,
         backing_bytes: Option<Vec<u8>>,
         practice: PracticeSettings,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
     ) -> Result<(), String> {
         let generation = plan.generation;
         self.midi
@@ -2402,11 +2552,13 @@ impl AudioService {
             resources,
             backing,
             practice,
+            plugin_plans,
         };
         if state.producer.is_none() || self.shared.is_faulted() {
             // Validate music independently of the available device. Retain it after
             // an output failure so selecting a working device can recover it.
-            let _ = Self::renderer(&document, state.rate)?;
+            let callback_frames = self.max_callback_frames().unwrap_or(512) as usize;
+            let _ = Self::renderer_with_callback_frames(&document, state.rate, callback_frames)?;
             if let Err(error) = self.open(&mut state, document.clone(), false) {
                 if self.shared.desired.load(Ordering::Acquire) == generation
                     && self.shared.is_faulted()
@@ -2444,7 +2596,17 @@ impl AudioService {
             .backing_duration
             .store(value.to_bits(), Ordering::Relaxed);
     }
+
+    #[allow(dead_code)]
     fn renderer(document: &PreparedDocument, rate: u32) -> Result<Box<Renderer>, String> {
+        Self::renderer_with_callback_frames(document, rate, 512)
+    }
+
+    fn renderer_with_callback_frames(
+        document: &PreparedDocument,
+        rate: u32,
+        callback_frames: usize,
+    ) -> Result<Box<Renderer>, String> {
         let reference = document
             .settings
             .backing
@@ -2463,11 +2625,13 @@ impl AudioService {
                 .ok_or("Reference playback requires decoded backing audio.")?;
             ReferenceSyncMap::new(settings, &document.plan)?.validate_audio(audio)?;
         }
-        let mut renderer = Renderer::new(
+        let mut renderer = Renderer::new_with_plugins(
             document.plan.clone(),
             document.resources.clone(),
             document.settings.clone(),
             rate,
+            &document.plugin_plans,
+            callback_frames,
         )?;
         if let Some(audio) = &document.backing {
             let (anchors, offset, mix) = document
@@ -2546,7 +2710,19 @@ impl AudioService {
         Ok(())
     }
     pub fn set_mix(&self, settings: DocumentSettings, generation: u64) -> Result<(), String> {
-        self.set_mix_inner(settings, generation, None)
+        self.set_mix_with_plugins(settings, generation, Vec::new())
+    }
+
+    pub fn set_mix_with_plugins(
+        &self,
+        settings: DocumentSettings,
+        generation: u64,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
+    ) -> Result<(), String> {
+        self.set_mix_inner(settings, generation, None, plugin_plans)
     }
     pub fn set_mix_with_backing(
         &self,
@@ -2554,13 +2730,30 @@ impl AudioService {
         generation: u64,
         backing_bytes: Option<Vec<u8>>,
     ) -> Result<(), String> {
-        self.set_mix_inner(settings, generation, Some(backing_bytes))
+        self.set_mix_inner(settings, generation, Some(backing_bytes), Vec::new())
+    }
+
+    pub fn set_mix_with_backing_and_plugins(
+        &self,
+        settings: DocumentSettings,
+        generation: u64,
+        backing_bytes: Option<Vec<u8>>,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
+    ) -> Result<(), String> {
+        self.set_mix_inner(settings, generation, Some(backing_bytes), plugin_plans)
     }
     fn set_mix_inner(
         &self,
         settings: DocumentSettings,
         generation: u64,
         backing_bytes: Option<Option<Vec<u8>>>,
+        plugin_plans: Vec<(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )>,
     ) -> Result<(), String> {
         self.midi
             .ensure_ports(&MidiOut::port_names(&settings), Ensure::Mix);
@@ -2633,6 +2826,7 @@ impl AudioService {
                 resources,
                 settings,
                 practice: old.practice,
+                plugin_plans,
             };
             let (renderer, route) = self.routed_renderer(&document, state.rate)?;
             Self::enqueue(
@@ -2648,7 +2842,15 @@ impl AudioService {
             self.set_backing_duration(&document);
             state.document = Some(document);
         } else {
-            let mix = PreparedMix::prepare(&settings, &old.plan, state.rate)?;
+            let callback_frames = self.max_callback_frames().unwrap_or(512) as usize;
+            let mix = PreparedMix::prepare_with_plugins(
+                &settings,
+                &old.plan,
+                state.rate,
+                &plugin_plans,
+                callback_frames,
+            )?;
+            self.keep_plugin_refusals(mix.plugin_refusals());
             let mut route = self
                 .midi
                 .build_route(&old.plan, &settings, self.midi.routed());
@@ -2659,7 +2861,9 @@ impl AudioService {
                 self.midi.wake();
             }
             self.midi.commit(route);
-            state.document.as_mut().unwrap().settings = settings;
+            let doc = state.document.as_mut().unwrap();
+            doc.settings = settings;
+            doc.plugin_plans = plugin_plans;
         }
         Ok(())
     }
@@ -2713,6 +2917,7 @@ impl AudioService {
                 resources: document.resources.clone(),
                 backing: document.backing.clone(),
                 practice: document.practice,
+                plugin_plans: document.plugin_plans.clone(),
             };
             let frozen = self.synchronize_callback(&mut state, Duration::from_secs(1));
             // The old callback is frozen (or did not answer, and is not to be trusted) and will never release what it
@@ -2780,6 +2985,7 @@ impl AudioService {
         let (epoch, snapshot) = self.shared.next_epoch_snapshot();
         // The replacement stream reports its own size on its first callback.
         self.shared.buffer_size.store(0, Ordering::Relaxed);
+        self.shared.max_callback_frames.store(0, Ordering::Relaxed);
         let preserve_position = preserve
             && document
                 .as_ref()
@@ -3056,6 +3262,7 @@ mod reference_tests {
                 frames: Arc::new(vec![[0.0; 2]; 192_000]),
             })),
             practice: PracticeSettings::default(),
+            plugin_plans: Vec::new(),
         }
     }
     #[test]
@@ -3117,6 +3324,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::default(),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         let mut candidate = original.settings.clone();
         candidate.backing.as_mut().unwrap().processing = Some(crate::settings::BackingProcessing {
@@ -3281,6 +3489,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::with_backend(ports.clone()).with_retry_interval(Duration::ZERO),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         let route = |port: Option<&str>| {
             let mut settings = original.settings.clone();
@@ -3389,6 +3598,7 @@ mod reference_tests {
             ),
             backing: None,
             practice: PracticeSettings::default(),
+            plugin_plans: Vec::new(),
         }
     }
     fn settled(log: &Arc<Mutex<Vec<Vec<u8>>>>, mut done: impl FnMut(&[Vec<u8>]) -> bool) -> bool {
@@ -3530,6 +3740,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::with_backend(backend),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         (service, commands)
     }
@@ -3612,6 +3823,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::with_backend(Arc::new(ListedPorts(Mutex::new(vec!["Synth".into()])))),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         let mut settings = original.settings.clone();
         settings.mixes.get_mut("gm").unwrap().gain = 0.5;
@@ -3664,6 +3876,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::default(),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         // Giving the track its first kit, changing it, and taking it away again: each is a mix, never an install, which
         // would cut every ringing note and strike the held ones again.
@@ -3700,6 +3913,82 @@ mod reference_tests {
             assert!(Arc::ptr_eq(&next.resources, &original.resources));
         }
     }
+    /// A plan whose helper ring runs at `ring_rate`, for a mix the service builds at 48 kHz.
+    fn plugin_plan_at(
+        track_id: &str,
+        ring_rate: u32,
+    ) -> Vec<(
+        String,
+        Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+    )> {
+        vec![(
+            track_id.to_string(),
+            Ok(crate::plugins::service::InsertPlan {
+                link: crate::plugins::bridge::BridgeLink::in_process(
+                    tabplayer_plugin_protocol::ring::OwnedRing::new(ring_rate),
+                ),
+                latency: 0,
+                input_db: 0.0,
+                output_db: 0.0,
+                shared: Arc::new(crate::plugins::bridge::InsertShared::default()),
+            }),
+        )]
+    }
+    #[test]
+    fn a_mix_change_reports_the_inserts_it_refused_once() {
+        use crate::audio::plugin_insert::InsertError;
+        let original = document();
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, _commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::default(),
+            manager,
+            plugin_refusals: Mutex::default(),
+        };
+        // A helper still at 44.1 kHz when the device has moved to 48 kHz.
+        service
+            .set_mix_with_plugins(original.settings.clone(), 1, plugin_plan_at("gm", 44_100))
+            .unwrap();
+        assert_eq!(
+            service.take_plugin_refusals(),
+            vec![("gm".to_string(), InsertError::RateMismatch)]
+        );
+        assert!(service.take_plugin_refusals().is_empty(), "taken once");
+        // A build that refuses nothing replaces an earlier refusal instead of keeping it.
+        service
+            .set_mix_with_plugins(original.settings.clone(), 1, plugin_plan_at("gm", 44_100))
+            .unwrap();
+        service
+            .set_mix_with_plugins(original.settings.clone(), 1, plugin_plan_at("gm", 48_000))
+            .unwrap();
+        assert!(service.take_plugin_refusals().is_empty());
+    }
+    #[test]
+    fn a_rebuilt_renderer_reports_the_inserts_it_refused() {
+        use crate::audio::plugin_insert::InsertError;
+        let mut document = document();
+        document.plugin_plans = plugin_plan_at("gm", 44_100);
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        service.routed_renderer(&document, 48_000).unwrap();
+        assert_eq!(
+            service.take_plugin_refusals(),
+            vec![("gm".to_string(), InsertError::RateMismatch)]
+        );
+    }
     #[test]
     fn same_plan_mix_rejects_reference_timing_before_queue_or_document_publication() {
         let original = document();
@@ -3723,6 +4012,7 @@ mod reference_tests {
             line_in_issued: AtomicU64::new(0),
             midi: MidiOut::default(),
             manager,
+            plugin_refusals: Mutex::default(),
         };
         for change in 0..5 {
             let mut candidate = original.settings.clone();
@@ -4173,6 +4463,71 @@ mod tests {
             serde_json::to_value(callback.transport.status()).unwrap(),
             before_mix
         );
+    }
+
+    #[test]
+    fn a_pause_leaves_no_board_sounding() {
+        // Re-review R2-1: the device renders nothing while paused, so a resume is a play start. A plug-in added during
+        // a pause must start on `D` behind silence, as after a stop; that needs every board to stop counting as
+        // sounding when the device pauses, the live mix's and one installed during the pause alike.
+        let document = counted_document();
+        let mut transport = CallbackTransport::headless(48_000);
+        // No count-in: the boards render from the first frame.
+        transport.install(AudioService::renderer(&document, 48_000).unwrap(), 1, false);
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        for _ in 0..20 {
+            transport.render_callback(&mut [[0.0; 2]; 480]);
+        }
+        let sounding = |t: &CallbackTransport| t.renderer.as_ref().unwrap().channels_sounding();
+        assert!(
+            sounding(&transport).iter().all(|s| *s),
+            "playing boards sound"
+        );
+        transport
+            .command(TransportCommand::Pause { generation: 1 })
+            .unwrap();
+        assert!(
+            sounding(&transport).iter().all(|s| !*s),
+            "a pause silences every board"
+        );
+        let mix = PreparedMix::prepare(&document.settings, &document.plan, 48_000).unwrap();
+        drop(transport.replace_mix(mix, 1));
+        assert!(
+            sounding(&transport).iter().all(|s| !*s),
+            "a mix installed during the pause is not sounding"
+        );
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        transport.render_callback(&mut [[0.0; 2]; 480]);
+        assert!(
+            sounding(&transport).iter().all(|s| *s),
+            "a resume sounds again"
+        );
+    }
+
+    #[test]
+    fn output_callback_records_the_largest_callback_for_plugin_pipelines() {
+        let transport = CallbackTransport::headless(48_000);
+        let shared = transport.shared.clone();
+        let (_producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, _retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        // A shared-mode stream's first callback can be twice its period (preflight ruling P32).
+        for frames in [1056usize, 480, 480] {
+            callback.render(&mut vec![0.0f32; frames * 2], 2);
+        }
+        assert_eq!(shared.max_callback_frames.load(Ordering::Relaxed), 1056);
+        assert_eq!(shared.buffer_size.load(Ordering::Relaxed), 480);
     }
 
     #[test]

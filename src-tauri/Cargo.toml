@@ -5,6 +5,10 @@ edition = "2024"
 rust-version = "1.90"
 license = "MIT"
 
+[workspace]
+# Members are added by the task that creates them. All of them share this directory's `target` folder and `Cargo.lock`.
+members = ["plugin-protocol", "test-plugin", "plugin-host"]
+
 [features]
 desktop-test = []
 
@@ -41,9 +45,23 @@ zeroize = "1.8"
 getrandom = "0.3"
 subtle = "2.6"
 tauri-plugin-single-instance = "=2.5.5"
+# The VST3 hosting wire protocol. The app never links plug-in code; it only speaks this protocol to the helper.
+tabplayer-plugin-protocol = { path = "plugin-protocol" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# The plug-in helper client (THE-71): the job object that ends helpers with the app, the shared ring mapping, the wake-up
+# events and the handle duplication into a helper. Already in the lockfile through tauri.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -53,6 +71,8 @@ tempfile = "3"
 midly = "=0.5.3"
 hound = "=3.5.1"
 nam-rs = "=0.4.0"
+# Only for `TEST_CLASS_ID` and `encode_test_state` in the helper client's tests: the app never links plug-in code (preflight ruling P25).
+tabplayer-test-plugin = { path = "test-plugin" }
 
 [patch.crates-io]
 usvg = { path = "../vendor/usvg" }

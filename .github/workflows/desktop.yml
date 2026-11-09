@@ -103,11 +103,19 @@ jobs:
         run: |
           npm test -- --maxWorkers=2 --testTimeout=15000
           npm run typecheck
+      - name: Build plug-in host helper and test plug-in
+        run: |
+          cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin
       - name: Native core, rendering, persistence and export tests
         run: |
-          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml
           cargo test --locked --manifest-path src-tauri/Cargo.toml --test audio_resources selected_real_100bar_fourtrack_resource_budget -- --ignored --nocapture
-          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - name: Native plug-in host integration tests
+        if: runner.os == 'Windows'
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -- --ignored --test-threads=1
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --test plugin_helper --test plugin_playback --test plugin_export --test plugin_editor --test plugin_library -- --ignored --test-threads=1
       - name: Make room for Linux shipping packages
         if: runner.os == 'Linux'
         run: |
@@ -134,7 +142,12 @@ jobs:
           fi
       - name: Build unsigned shipping packages with locked dependencies
         # No desktop-test feature, signing identity, updater key, or test server.
-        run: npm run tauri -- build --bundles ${{ matrix.bundles }} -- --locked
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            npm run tauri -- build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.plugin-host.conf.json -- --locked
+          else
+            npm run tauri -- build --bundles ${{ matrix.bundles }} -- --locked
+          fi
       - name: Verify actual MSI contents offline
         if: runner.os == 'Windows'
         shell: pwsh

@@ -349,6 +349,72 @@ pub struct TrackSound {
     /// sound bank. Left out for the Standard kit, so a file that never chose one is unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drum_kit: Option<u8>,
+    /// A VST3 plug-in inserted after the track's pedalboard. Left out for a track with none, so a file that never
+    /// used one is unchanged, and an older build, which does not know the key, refuses a file that has it.
+    /// A `null` is refused rather than read as none, so the key is present exactly when there is a plug-in.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::password_crypto::present"
+    )]
+    pub plugin: Option<PluginSlot>,
+}
+
+/// The formats a plug-in slot can hold. Only VST3 is hosted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PluginFormat {
+    Vst3,
+}
+
+/// The reach of a plug-in slot's input and output trims, in dB.
+pub const PLUGIN_TRIM_DB: f64 = 12.0;
+
+/// One plug-in in a track's chain, as the document stores it: which plug-in, whether it sounds, the trims around it
+/// and the id of the asset that holds its saved state (see `plugins::state`). Names are what the plug-in reported when
+/// it was chosen; they are shown, never used to find it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PluginSlot {
+    pub format: PluginFormat,
+    /// The VST3 class ID: 32 uppercase hexadecimal characters.
+    pub class_id: String,
+    pub name: String,
+    pub vendor: String,
+    pub active: bool,
+    /// Trims before and after the plug-in, as `f64` like the other dB fields; the audio path narrows them.
+    pub input_db: f64,
+    pub output_db: f64,
+    /// The id (a lowercase SHA-256 digest) of the state asset, which has the media type `STATE_MEDIA_TYPE`.
+    pub state: String,
+}
+impl PluginSlot {
+    pub fn validate(&self) -> Result<(), String> {
+        use tabplayer_plugin_protocol::validate::{valid_class_id, valid_name, valid_vendor};
+        if !valid_class_id(&self.class_id) {
+            return Err("Plug-in class ID is invalid.".into());
+        }
+        if !valid_name(&self.name) {
+            return Err("Plug-in name is invalid.".into());
+        }
+        if !valid_vendor(&self.vendor) {
+            return Err("Plug-in vendor is invalid.".into());
+        }
+        for trim in [self.input_db, self.output_db] {
+            if !trim.is_finite() || trim.abs() > PLUGIN_TRIM_DB {
+                return Err("Plug-in level trims must be between -12 and 12 dB.".into());
+            }
+        }
+        if self.state.len() != 64
+            || !self
+                .state
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        {
+            return Err("Plug-in settings reference is invalid.".into());
+        }
+        Ok(())
+    }
 }
 /// The drum kits beyond Standard that the bundled sound bank carries (Room, Jazz, Brush), by the
 /// program that selects each. `src/audio/drum-kits.json` lists the same, and a test renders the bank
@@ -362,11 +428,15 @@ impl Default for TrackSound {
             effects: FxSettings::default(),
             locked: false,
             drum_kit: None,
+            plugin: None,
         }
     }
 }
 impl TrackSound {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(plugin) = &self.plugin {
+            plugin.validate()?;
+        }
         if self
             .drum_kit
             .is_some_and(|kit| !DRUM_KIT_PROGRAMS.contains(&kit))

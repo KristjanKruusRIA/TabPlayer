@@ -2,6 +2,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import './plugin-test-support';
 import {SoundPanel,soundPreset} from './SoundPanel';
 import {forgetSessionSoundLibrary,forgetSoundClipboard,readSoundLibrary} from './sound-library';
 beforeEach(()=>localStorage.clear());
@@ -80,4 +81,18 @@ it('copies and pastes a whole sound and single pedals between tracks',()=>{
   expect(onEdit).toHaveBeenCalledTimes(2);
   expect(onEdit.mock.calls[1][0]).toMatchObject({type:'setTrackSound',trackId:'base/1'});
   expect(edited(onEdit)).toEqual(lead);
+});
+
+it('keeps the track plug-in when applying a saved sound',()=>{
+  const lead=soundPreset('lead');
+  const onEdit=vi.fn();const {rerender}=render(<SoundPanel trackId="base/0" sound={lead} onEdit={onEdit}/>);
+  fireEvent.change(screen.getByLabelText('Saved sound name'),{target:{value:'Lead'}});
+  fireEvent.click(screen.getByRole('button',{name:'Save sound'}));
+  const plug={format:'vst3' as const,classId:'A'.repeat(32),name:'Amp',vendor:'Vendor',active:true,inputDb:0,outputDb:0,state:'s'.repeat(64)};
+  const bassWithPlugin={...soundPreset('bass'),plugin:plug};
+  rerender(<SoundPanel trackId="base/1" sound={bassWithPlugin} onEdit={onEdit}/>);
+  fireEvent.change(screen.getByLabelText('Saved sound'),{target:{value:'Lead'}});
+  fireEvent.click(screen.getByRole('button',{name:'Apply saved sound'}));
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(edited(onEdit).plugin).toEqual(plug);
 });

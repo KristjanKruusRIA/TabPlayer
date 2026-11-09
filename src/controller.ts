@@ -57,6 +57,7 @@ export class DocumentController {
     if(record.documentId!==this.bridge.documentId) throw new Error('The native response belongs to a different document.');
   }
   hasPendingActions() { return this.pendingActions>0; }
+  cancelAsset(token: string) { return this.bridge.cancelAsset(token); }
   whenIdle():Promise<void> { return this.tail; }
   getState = () => this.state;
   setBeforeChange(handler: BeforeChange) { this.beforeChange=handler; }

@@ -36,6 +36,8 @@ async function fixture() {
   await writeFile(join(cabinetRoot,'LICENSE-CC0.txt'),dedication);
   await writeFile(join(cabinetRoot,'manifest.json'),JSON.stringify({schemaVersion:1,license:'CC0-1.0',licenseFile:'LICENSE-CC0.txt',source:'fixture',irs:entries}));
   await cp(cabinetRoot,cabinet,{recursive:true});
+  const helper = join(packageRoot, 'tabplayer-plugin-host.exe');
+  await writeFile(helper, 'fixture helper binary');
   return {sourceRoot,referenceRoot,packageRoot,audio,library,cabinet,cabinetRoot};
 }
 
@@ -153,4 +155,13 @@ test('package_artifact_set_requires_every_requested_format_and_hashes_real_bytes
   await writeFile(join(root,'TabPlayer.exe'),'NSIS fixture');
   const files=await packageArtifacts(root,['msi','exe']);
   assert.equal(files.length,2);assert.equal(files.find(f=>f.path.endsWith('.exe')).sha256,hash('NSIS fixture'));
+});
+
+test('verify_package_fails_without_plugin_host_helper',async()=> {
+  const {verifyPackage}=await api();const options=await fixture();
+  await unlink(join(options.packageRoot,'tabplayer-plugin-host.exe'));
+  await assert.rejects(
+    verifyPackage({...options,checkPluginHost:true}),
+    /tabplayer-plugin-host\.exe|plug-in host helper/i
+  );
 });

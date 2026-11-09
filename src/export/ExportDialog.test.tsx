@@ -319,6 +319,14 @@ it('says in the audio export that a cabinet response is missing, and only there'
   expect(vi.mocked(invoke)).toHaveBeenCalledWith('cabinet_ir_status',{ids:['d'.repeat(32)]});
 });
 
+it('lists plug-in warnings in audio export',async()=>{
+  const warnings=[{trackId:'base/0',classId:'A'.repeat(32),name:'Super Amp',vendor:'Audio Corp',status:'missing' as const}];
+  render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} pluginWarnings={warnings} trackNames={{'base/0':'Lead'}} onExport={()=>{}} onCancel={()=>{}}/>);
+  expect(screen.queryByText(/Super Amp/)).toBeNull();
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});
+  expect(screen.getByText(/Lead: The plug-in "Super Amp" is not installed on this computer, so the built-in tone plays instead\. The document is unchanged\./i)).toBeInTheDocument();
+});
+
 it('keeps focus on Export while exporting, refuses its presses and the inputs, and stays closable',()=>{
   const onExport=vi.fn(),onCancel=vi.fn(),score=music();
   const view=(busy:boolean)=><ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={busy} onExport={onExport} onCancel={onCancel}/>;

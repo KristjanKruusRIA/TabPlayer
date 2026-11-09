@@ -2,12 +2,42 @@ use super::cabinet_ir;
 use super::ir_convolver::{IrEngine, IrKernel};
 use super::nam::CaptureStage;
 use super::nam_library;
+use super::plugin_insert::PluginInsert;
 use super::tone;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Native track delay storage is bounded independently of score tempo and playback speed.
 pub const MAX_TRACK_DELAY_SECONDS: f64 = 16.0;
+
+/// What the renderer knows about one frame besides its samples: the tempo, the meter, whether the transport plays and
+/// where it stands. The board itself uses only `bpm`; a plug-in insert sends the rest to its plug-in (preflight ruling
+/// P11).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameContext {
+    pub bpm: f64,
+    pub sig_num: u16,
+    pub sig_den: u16,
+    pub playing: bool,
+    /// The frame's place in the project, in frames at the device rate.
+    pub project_frame: i64,
+    /// The frame's place in the project, in quarter notes.
+    pub project_quarters: f64,
+}
+
+impl FrameContext {
+    /// A context that carries only a tempo: 4/4, playing, at the start of the project.
+    pub fn at_bpm(bpm: f64) -> FrameContext {
+        FrameContext {
+            bpm,
+            sig_num: 4,
+            sig_den: 4,
+            playing: true,
+            project_frame: 0,
+            project_quarters: 0.0,
+        }
+    }
+}
 
 macro_rules! block {
     ($name:ident { $($field:ident:$kind:ty=$value:expr),* $(,)? }) => {
@@ -1787,6 +1817,28 @@ pub struct TrackDsp {
     /// out over the ramp; a removed board fades out and then stands still until the next configuration leaves it.
     second: Option<Box<TrackDsp>>,
     second_gain: f32,
+    /// The plug-in that stands in for Drive, Amp and Cabinet, if one is attached (never on the second board); the one a
+    /// change to another helper is leaving, with the frames left of its crossfade (it is kept, silent, until the next
+    /// configuration takes it off the audio thread); and whether the built-in Drive, Amp and Cabinet ran on the
+    /// previous frame. Stages that start again after standing still start from rest.
+    plugin: Option<Box<PluginInsert>>,
+    plugin_leaving: Option<Box<PluginInsert>>,
+    plugin_fade: u32,
+    /// Whether the leaving insert still runs: while it fades, and, with no insert arriving, until the built-in chain's
+    /// input has glided back to the undelayed signal.
+    leaving_live: bool,
+    /// What a crossfade cut short by another change was still playing of the sound before it, held and faded out
+    /// beside the new crossfade (review M2); how much of the leaving insert's output was heard when it began to leave;
+    /// and, of the last frame, how far the crossfade was and what all but the arriving sound added up to.
+    leaving_held: [f32; 2],
+    leaving_scale: f32,
+    fade_s: f32,
+    leaving_part: [f32; 2],
+    built_in_live: bool,
+    /// Whether the board has rendered since it was built, reset or paused: a plug-in added while it sounds starts its
+    /// stand-in on the undelayed signal the track plays; one added while stopped or paused starts on `D` behind
+    /// silence. The device renders nothing while paused, so a resume is a play start (re-review R2-1).
+    sounding: bool,
     /// Samples the board had to replace because its state produced a non-finite value.
     non_finite: u32,
     max_delay_seconds: f64,
@@ -1833,6 +1885,16 @@ impl TrackDsp {
         Ok(Self {
             second,
             second_gain,
+            plugin: None,
+            plugin_leaving: None,
+            plugin_fade: 0,
+            leaving_live: false,
+            leaving_held: [0.0; 2],
+            leaving_scale: 1.0,
+            fade_s: 1.0,
+            leaving_part: [0.0; 2],
+            built_in_live: true,
+            sounding: false,
             non_finite: 0,
             max_delay_seconds,
             previous: settings.clone(),
@@ -2200,6 +2262,121 @@ impl TrackDsp {
             }
             _ => {}
         }
+        self.plugin_from(old);
+    }
+    /// An edit while playing, where a new renderer replaces the old one: takes over only `old`'s plug-in insert and its
+    /// crossfade, as a mix change does, so the plug-in track keeps streaming. The built-in chain stays this board's
+    /// own, because the edit may have changed the voice. Boxes only change hands; does not allocate.
+    pub(crate) fn continue_plugin_from(&mut self, old: &mut Self) {
+        self.plugin_from(old);
+    }
+    /// The plug-in part of `transition_from`. Boxes only change hands; whatever this configuration displaces is left in
+    /// `old`, which is dropped off the audio thread.
+    fn plugin_from(&mut self, old: &mut Self) {
+        self.built_in_live = old.built_in_live;
+        self.sounding = old.sounding;
+        let same_link = match (&self.plugin, &old.plugin) {
+            (Some(arriving), Some(running)) => arriving.same_link(running),
+            _ => false,
+        };
+        if same_link {
+            let same_stream = match (&self.plugin, &old.plugin) {
+                (Some(arriving), Some(running)) => arriving.same_stream(running),
+                _ => false,
+            };
+            if same_stream {
+                // The running insert carries on, streaming, with this configuration's trims.
+                std::mem::swap(&mut self.plugin, &mut old.plugin);
+                if let (Some(running), Some(arriving)) = (&mut self.plugin, &mut old.plugin) {
+                    running.adopt(arriving);
+                }
+            } else if let (Some(arriving), Some(running)) = (&mut self.plugin, &mut old.plugin) {
+                // The same helper with another pipeline or latency: a new epoch, primed from where the old one stood.
+                arriving.continue_from(running);
+            }
+            // A crossfade the old configuration was still running goes on.
+            self.carry_fade(old);
+            return;
+        }
+        if old.plugin.is_some() {
+            // Another helper, or none: the running insert fades out over the ramp beside what plays now. What the old
+            // configuration's own crossfade still played of an earlier sound is held and fades out with it (review M2).
+            self.leaving_held = old.leaving_part;
+            self.leaving_scale = old.fade_s;
+            self.fade_s = 0.0;
+            self.leaving_part = old.leaving_part;
+            std::mem::swap(&mut self.plugin_leaving, &mut old.plugin);
+            self.plugin_fade = self.ramp_frames;
+            self.leaving_live = true;
+        } else {
+            self.carry_fade(old);
+        }
+        // A first plug-in on a board that sounds: its stand-in starts on what the track plays (review C1). On one that
+        // does not, it stays as `attach_plugin` left it, on `D` behind silence (re-review R1).
+        if !self.leaving_live && self.sounding {
+            if let Some(arriving) = self.plugin.as_mut() {
+                arriving.start_undelayed();
+            }
+        }
+        let live = self.leaving_live;
+        if let Some(leaving) = self.plugin_leaving.as_mut().filter(|_| live) {
+            match self.plugin.as_mut() {
+                // The arriving insert's stand-in starts on the timing the track was playing (review C1).
+                Some(arriving) => arriving.seed_from(leaving),
+                // Without one, the stand-in glides back to the undelayed signal (review I1).
+                None => leaving.retime(0),
+            }
+        }
+    }
+    /// Takes over a crossfade from an insert that `old` was still running.
+    fn carry_fade(&mut self, old: &mut Self) {
+        if !old.leaving_live {
+            return;
+        }
+        std::mem::swap(&mut self.plugin_leaving, &mut old.plugin_leaving);
+        self.plugin_fade = old.plugin_fade.min(self.ramp_frames);
+        self.leaving_live = true;
+        self.leaving_held = old.leaving_held;
+        self.leaving_scale = old.leaving_scale;
+        self.fade_s = old.fade_s;
+        self.leaving_part = old.leaving_part;
+    }
+    /// Puts a plug-in in place of Drive, Amp and Cabinet. Call it off the audio thread, on a configuration that is not
+    /// playing yet: an insert it displaces is dropped here. The second board never takes one.
+    ///
+    /// The insert starts as a stop leaves it, on `D` behind silence; `transition_from` moves it onto the signal the
+    /// track plays if the board it replaces is sounding.
+    pub fn attach_plugin(&mut self, mut insert: Box<PluginInsert>) {
+        insert.flush();
+        self.plugin = Some(insert);
+    }
+    /// How far the track's output trails its input because of its plug-in: `D`, or 0 without one.
+    pub fn plugin_delay(&self) -> usize {
+        self.plugin
+            .as_ref()
+            .map_or(0, |insert| insert.delay_frames())
+    }
+    /// The attached plug-in, to read its fault.
+    pub fn plugin(&self) -> Option<&PluginInsert> {
+        self.plugin.as_deref()
+    }
+    /// Whether the attached plug-in has faulted.
+    pub fn plugin_faulted(&self) -> bool {
+        self.plugin.as_ref().is_some_and(|p| p.faulted().is_some())
+    }
+    /// Whether the board has rendered since it was built, reset or paused (see the field).
+    pub fn sounding(&self) -> bool {
+        self.sounding
+    }
+    /// The device stopped rendering this board without a stop or seek: the next frame it renders starts playback. A
+    /// plug-in added before then starts on `D` behind silence. Nothing else changes; an insert already running keeps
+    /// its history and stream.
+    pub fn pause(&mut self) {
+        self.sounding = false;
+    }
+    /// Whether a plug-in plays on this board, or is still fading out.
+    pub fn has_plugin(&self) -> bool {
+        self.plugin.is_some() || self.leaving_live
     }
     /// Readies a board that starts from silence while the track already sounds, as a block switched on mid-play
     /// is: the room microphone's reflections fade in rather than arriving at full level.
@@ -2229,7 +2406,8 @@ impl TrackDsp {
         self.flush_quiet = true;
     }
     /// Whether a settings change is still crossfading. A configuration that took over now would cut the fade short. A
-    /// second board's fade starts and ends with this one's, so this covers both.
+    /// second board's fade starts and ends with this one's, so this covers both. It does not count a leaving plug-in
+    /// insert's fade or timing glide: a configuration that takes over during either carries it on (`carry_fade`).
     pub fn ramping(&self) -> bool {
         self.ramp_left > 0
     }
@@ -2252,6 +2430,10 @@ impl TrackDsp {
     }
     /// Whether the driven stages hold nothing, and whether they run one channel for both.
     pub fn driven_at_rest(&self) -> [bool; 2] {
+        // A plug-in's state is out of sight, so a track with one never rests (preflight ruling P30).
+        if self.has_plugin() {
+            return [false, false];
+        }
         // A capture in play holds the amp's state, and the circuit only while it runs beside it.
         let mut amp = self.amp_chain.at_rest();
         let playing = [
@@ -2277,7 +2459,12 @@ impl TrackDsp {
         })
     }
     pub fn process(&mut self, input: [f32; 2], bpm: f64) -> [f32; 2] {
-        let y = self.process_board(input, bpm);
+        self.process_at(input, &FrameContext::at_bpm(bpm))
+    }
+    /// `process` with the renderer's whole context for the frame, which a plug-in insert sends on to its plug-in. The
+    /// board itself uses only the tempo, so without a plug-in both give the same samples.
+    pub fn process_at(&mut self, input: [f32; 2], ctx: &FrameContext) -> [f32; 2] {
+        let y = self.process_board(input, ctx);
         let Some(second) = &mut self.second else {
             return y;
         };
@@ -2295,13 +2482,15 @@ impl TrackDsp {
         } else {
             (self.second_gain - step).max(target)
         };
-        let wet = second.process(y, bpm);
+        let wet = second.process_at(y, ctx);
         if self.second_gain == 1.0 {
             return wet;
         }
         std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * self.second_gain)
     }
-    fn process_board(&mut self, input: [f32; 2], bpm: f64) -> [f32; 2] {
+    fn process_board(&mut self, input: [f32; 2], ctx: &FrameContext) -> [f32; 2] {
+        self.sounding = true;
+        let bpm = ctx.bpm;
         let mut x = input.map(|v| if v.is_finite() { v } else { 0.0 });
         let t = if self.ramp_left == 0 {
             1.0
@@ -2336,6 +2525,388 @@ impl TrackDsp {
             Some(gain)
         } else {
             None
+        };
+        // With a plug-in, the board splits at the first of Drive, Amp and Cabinet: the plug-in stands there, and the
+        // other two are skipped in place.
+        let inserted = self.has_plugin();
+        let mut three = [Stage::Drive, Stage::Amp, Stage::Cabinet];
+        let mut found = 0;
+        for stage in self.chain {
+            if found < 3 && matches!(stage, Stage::Drive | Stage::Amp | Stage::Cabinet) {
+                three[found] = stage;
+                found += 1;
+            }
+        }
+        let mut built_in_live = self.built_in_live;
+        let fresh = !inserted && !built_in_live;
+        // Drive, Amp and Cabinet, as closures over their own state: they play in place, or behind a plug-in insert as
+        // its built-in stand-in. `fresh` starts a stage from rest, after it stood still behind a plug-in.
+        let mut drive = |mut x: [f32; 2], fresh: bool| -> [f32; 2] {
+            if fresh {
+                self.drive_chain.reset();
+                self.drive_chain.live = false;
+                self.drive_leaving.reset();
+                self.drive_tone = [[0.0; 2]; 2];
+                self.drive_envelope = 0.0;
+            }
+            if f.drive.enabled || p.drive.enabled && t < 1.0 {
+                // The playing level follows with a 20 ms attack and a 50 ms release, for the fuzz's offset.
+                let [attack, release] = self.drive_coefficients;
+                let level = x[0].abs().max(x[1].abs()) as f64;
+                let k = if level > self.drive_envelope {
+                    attack
+                } else {
+                    release
+                };
+                self.drive_envelope =
+                    flush(self.drive_envelope + (level - self.drive_envelope) * k);
+                if !self.drive_chain.live {
+                    self.drive_chain.reset();
+                    self.drive_chain.live = true;
+                }
+                // While both sides of a ramp are on, each plays and they crossfade; otherwise the side that is on
+                // plays alone.
+                let shapes = &self.drive_shapes;
+                let both = t < 1.0
+                    && p.drive.enabled
+                    && f.drive.enabled
+                    && (p.drive.model != f.drive.model || p.drive.drive != f.drive.drive);
+                let alone = if f.drive.enabled { 1 } else { 0 };
+                let envelope = self.drive_envelope;
+                let clipped = if both {
+                    self.drive_chain.crossfade(
+                        &mut self.drive_leaving,
+                        &shapes[0].circuit,
+                        &shapes[1].circuit,
+                        t,
+                        self.ramp_left == self.ramp_frames,
+                        x,
+                        [shapes[0].bias * envelope, shapes[1].bias * envelope],
+                    )
+                } else {
+                    self.drive_chain.process(
+                        &shapes[alone].circuit,
+                        x,
+                        shapes[alone].bias * envelope,
+                    )
+                };
+                let (tone, level) = (
+                    lerp(shapes[0].tone, shapes[1].tone),
+                    lerp(shapes[0].level, shapes[1].level),
+                );
+                let wet = std::array::from_fn(|c| {
+                    let mut out = clipped[c];
+                    for state in &mut self.drive_tone[c] {
+                        *state = flush(*state + tone * (out - *state));
+                        out = *state;
+                    }
+                    (out * level) as f32
+                });
+                x = blend(x, wet, p.drive.enabled, f.drive.enabled);
+            } else {
+                self.drive_chain.live = false;
+            }
+            x
+        };
+        let mut amp = |mut x: [f32; 2], fresh: bool| -> [f32; 2] {
+            if fresh {
+                self.amp_dc = [0.0; 2];
+                self.amp_chain.reset();
+                self.amp_chain.live = false;
+                // The first frame that plays a capture resets it.
+                for capture in self.amp_caps.iter_mut().flatten() {
+                    capture.live = false;
+                }
+                self.amp_leaving.reset();
+                for b in &mut self.amp_tone {
+                    b.reset();
+                }
+                self.amp_tone_db = amp_tone(&f.amp);
+            }
+            if f.amp.enabled || p.amp.enabled && t < 1.0 {
+                let drive = lerp(p.amp.drive, f.amp.drive);
+                let gain = 10f64.powf(lerp(p.amp.gain_db, f.amp.gain_db) / 20.0);
+                // A side that is off takes the other's circuit, so switching the amp only fades one sound in.
+                let from = self.amp_shapes[if p.amp.enabled { 0 } else { 1 }].as_ref();
+                let to = self.amp_shapes[if f.amp.enabled { 1 } else { 0 }].as_ref();
+                let captured = amp_capture_frame(
+                    &mut self.amp_caps,
+                    self.amp_cap_side,
+                    &self.amp_shapes,
+                    &mut self.amp_chain,
+                    &mut self.amp_dc,
+                    [&p.amp, &f.amp],
+                    t,
+                    x,
+                );
+                let wet = if let Some(captured) = captured {
+                    captured
+                } else {
+                    let plain = to.is_none() || from.is_none() && t < 1.0;
+                    let wet = if plain {
+                        // A side on the driven circuit has no plain sound to ramp from, so this side's is held.
+                        let model = |s: &str| {
+                            let pre = 1.0 + drive * if s == "bass" { 3.0 } else { 1.0 };
+                            (pre, 0.02 * drive)
+                        };
+                        let a = model(if self.amp_shapes[0].is_some() {
+                            &f.amp.model
+                        } else {
+                            &p.amp.model
+                        });
+                        let b = model(if self.amp_shapes[1].is_some() {
+                            &p.amp.model
+                        } else {
+                            &f.amp.model
+                        });
+                        let pre = lerp(a.0, b.0);
+                        let bias = lerp(a.1, b.1);
+                        let zero = bias.tanh();
+                        std::array::from_fn(|c| {
+                            let v = x[c] as f64;
+                            let direct = (v * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt();
+                            self.amp_dc[c] += 0.0005 * (direct - self.amp_dc[c]);
+                            ((direct - self.amp_dc[c]) * gain) as f32
+                        })
+                    } else {
+                        self.amp_dc = [0.0; 2];
+                        x
+                    };
+                    let wet = if let Some(circuit) = to.or(from.filter(|_| t < 1.0)) {
+                        if !self.amp_chain.live {
+                            self.amp_chain.reset();
+                            self.amp_chain.live = true;
+                        }
+                        let y = match (from, to) {
+                            (Some(a), Some(b)) if t < 1.0 && a != b => self.amp_chain.crossfade(
+                                &mut self.amp_leaving,
+                                a,
+                                b,
+                                t,
+                                self.ramp_left == self.ramp_frames,
+                                x,
+                                [0.0; 2],
+                            ),
+                            _ => self.amp_chain.process(circuit, x, 0.0),
+                        }
+                        .map(|v| (v * gain) as f32);
+                        match (plain, to.is_some()) {
+                            (false, _) => y,
+                            (true, true) => {
+                                std::array::from_fn(|c| wet[c] + (y[c] - wet[c]) * t as f32)
+                            }
+                            (true, false) => {
+                                std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * t as f32)
+                            }
+                        }
+                    } else {
+                        self.amp_chain.live = false;
+                        wet
+                    };
+                    wet
+                };
+                let wanted = amp_tone(&f.amp);
+                if f.amp.enabled && !p.amp.enabled && self.ramp_left == self.ramp_frames {
+                    // Switching the amp on starts its tone stack at its settings, from rest.
+                    self.amp_tone_db = wanted;
+                    for b in &mut self.amp_tone {
+                        b.reset();
+                    }
+                }
+                // 0.48 dB a millisecond, so a full 24 dB swing takes 50 ms at any sample rate.
+                let step = 480.0 / self.rate;
+                for (playing, wanted) in self.amp_tone_db.iter_mut().zip(wanted) {
+                    *playing = if (wanted - *playing).abs() <= step {
+                        wanted
+                    } else {
+                        *playing + step * (wanted - *playing).signum()
+                    };
+                }
+                let tone = self.amp_tone_db;
+                if tone[0] != self.cached_amp_tone[0] {
+                    self.amp_tone[0].shelf(AMP_TONE[0], tone[0], self.rate, false);
+                }
+                if tone[1] != self.cached_amp_tone[1] {
+                    self.amp_tone[1].peak(AMP_TONE[1], tone[1], self.rate);
+                }
+                if tone[2] != self.cached_amp_tone[2] {
+                    self.amp_tone[2].shelf(AMP_TONE[2], tone[2], self.rate, true);
+                }
+                if tone[3] != self.cached_amp_tone[3] {
+                    self.amp_tone[3].peak_q(AMP_TONE[3], tone[3], self.rate, 1.0);
+                }
+                self.cached_amp_tone = tone;
+                let mut toned = wet;
+                for b in &mut self.amp_tone {
+                    toned = b.process(toned);
+                }
+                // A flat stack passes the amp's output untouched, once the filters have let go of any
+                // earlier boost or cut. Flat filters with no such remainder pass their input exactly.
+                let flat = tone == [0.0; 4] && self.amp_tone.iter().all(Biquad::quiet);
+                if flat {
+                    for b in &mut self.amp_tone {
+                        b.reset();
+                    }
+                }
+                let wet = if flat { wet } else { toned };
+                x = blend(x, wet, p.amp.enabled, f.amp.enabled);
+            } else {
+                self.amp_chain.live = false;
+            }
+            x
+        };
+        let mut cabinet = |mut x: [f32; 2], fresh: bool| -> [f32; 2] {
+            if fresh {
+                for b in &mut self.cabinet {
+                    b.reset();
+                }
+                self.cabinet_fir.reset();
+                self.cabinet_fir.live = false;
+                if let Some(engine) = &mut self.ir_engine {
+                    engine.reset();
+                    engine.live = false;
+                }
+            }
+            // The side each end of the crossfade plays, as below: a side that is off takes the other's.
+            let ends = [
+                if p.cabinet.enabled { 0 } else { 1 },
+                if f.cabinet.enabled { 1 } else { 0 },
+            ];
+            let rate = self.rate as u32;
+            let usable = [0, 1].map(|side| {
+                self.ir_engine.is_some()
+                    && self.cabinet_irs[side]
+                        .as_ref()
+                        .is_some_and(|(kernel, _)| kernel.rate() == rate)
+            });
+            let crossfading = t < 1.0 && ends[0] != ends[1];
+            let ir_played = usable[ends[1]] || crossfading && usable[ends[0]];
+            if !(f.cabinet.enabled || p.cabinet.enabled && t < 1.0) {
+                self.cabinet_fir.live = false;
+                if let Some(engine) = self.ir_engine.as_mut() {
+                    engine.live = false;
+                }
+            } else if let (true, Some(engine)) = (ir_played, self.ir_engine.as_mut()) {
+                // A response the user loaded plays in place of the built-in cabinet on its side. The other
+                // side, if it has none, plays its own model by itself.
+                if !engine.live {
+                    engine.reset();
+                    engine.live = true;
+                }
+                let loaded = |side: usize| {
+                    self.cabinet_irs[side]
+                        .as_ref()
+                        .filter(|_| usable[side])
+                        .map(|(kernel, gain)| (&**kernel, *gain))
+                };
+                let (leaving, arriving) =
+                    (loaded(ends[0]).filter(|_| crossfading), loaded(ends[1]));
+                let mut built_in = 0usize;
+                let mut plays = |side: usize| {
+                    built_in += 1;
+                    let name = if side == 0 {
+                        &p.cabinet.model
+                    } else {
+                        &f.cabinet.model
+                    };
+                    builtin_cabinet(
+                        &mut self.cabinet,
+                        &mut self.cached_cabinet,
+                        &mut self.cabinet_fir,
+                        self.rate,
+                        self.cabinet_models[side],
+                        name,
+                        x,
+                    )
+                };
+                let scaled = |y: [f32; 2], gain: f32| y.map(|v| v * gain);
+                let (wet_from, wet_to) = match (leaving, arriving) {
+                    (Some((a, ga)), Some((b, gb))) => {
+                        let y = engine.process(x, a, Some(b));
+                        (Some(scaled(y[0], ga)), scaled(y[1], gb))
+                    }
+                    (None, Some((b, gb))) => {
+                        let y = engine.process(x, b, None);
+                        (crossfading.then(|| plays(ends[0])), scaled(y[0], gb))
+                    }
+                    (Some((a, ga)), None) => {
+                        let y = engine.process(x, a, None);
+                        (Some(scaled(y[0], ga)), plays(ends[1]))
+                    }
+                    // Only reached by a side that was usable a moment ago; the model plays.
+                    (None, None) => (None, plays(ends[1])),
+                };
+                if built_in == 0 {
+                    self.cabinet_fir.live = false;
+                    self.cabinet.iter_mut().for_each(Biquad::reset);
+                }
+                let wet = match wet_from {
+                    Some(from) if crossfading => {
+                        std::array::from_fn(|c| from[c] + (wet_to[c] - from[c]) * t as f32)
+                    }
+                    _ => wet_to,
+                };
+                x = blend(x, wet, p.cabinet.enabled, f.cabinet.enabled);
+            } else if f.cabinet.enabled || p.cabinet.enabled && t < 1.0 {
+                if let Some(engine) = self.ir_engine.as_mut() {
+                    engine.live = false;
+                }
+                let [before, after] = self.cabinet_models;
+                // A side that is off takes the other's cabinet, as the amp does.
+                let from = if p.cabinet.enabled { before } else { after };
+                let to = if f.cabinet.enabled { after } else { before };
+                let filtered = to.is_none() || from.is_none() && t < 1.0;
+                let mut wet = x;
+                if filtered {
+                    let cutoff = |s: &str| match s {
+                        "bass" => [35.0, 3500.0],
+                        _ => [65.0, 5500.0],
+                    };
+                    // A side on a designed cabinet has no filters to ramp from, so this side's are held.
+                    let a = cutoff(if before.is_some() {
+                        &f.cabinet.model
+                    } else {
+                        &p.cabinet.model
+                    });
+                    let b = cutoff(if after.is_some() {
+                        &p.cabinet.model
+                    } else {
+                        &f.cabinet.model
+                    });
+                    let values = [lerp(a[0], b[0]), lerp(a[1], b[1])];
+                    if values != self.cached_cabinet {
+                        self.cabinet[0].pass(values[0], self.rate, true);
+                        self.cabinet[1].pass(values[1], self.rate, false);
+                        self.cabinet[2].pass(values[1], self.rate, false);
+                        self.cached_cabinet = values;
+                    }
+                    for b in &mut self.cabinet {
+                        wet = b.process(wet);
+                    }
+                } else {
+                    self.cabinet.iter_mut().for_each(Biquad::reset);
+                }
+                if let Some(end) = to.or(from.filter(|_| t < 1.0)) {
+                    if !self.cabinet_fir.live {
+                        self.cabinet_fir.reset();
+                        self.cabinet_fir.live = true;
+                    }
+                    let y = self.cabinet_fir.process(from.unwrap_or(end), end, t, x);
+                    wet = match (filtered, to.is_some()) {
+                        (false, _) => y,
+                        (true, true) => {
+                            std::array::from_fn(|c| wet[c] + (y[c] - wet[c]) * t as f32)
+                        }
+                        (true, false) => std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * t as f32),
+                    };
+                } else {
+                    self.cabinet_fir.live = false;
+                }
+                x = blend(x, wet, p.cabinet.enabled, f.cabinet.enabled);
+            } else {
+                self.cabinet_fir.live = false;
+            }
+            x
         };
         for stage in self.chain {
             match stage {
@@ -2603,343 +3174,77 @@ impl TrackDsp {
                         );
                     }
                 }
-                Stage::Drive => {
-                    if f.drive.enabled || p.drive.enabled && t < 1.0 {
-                        // The playing level follows with a 20 ms attack and a 50 ms release, for the fuzz's offset.
-                        let [attack, release] = self.drive_coefficients;
-                        let level = x[0].abs().max(x[1].abs()) as f64;
-                        let k = if level > self.drive_envelope {
-                            attack
-                        } else {
-                            release
-                        };
-                        self.drive_envelope =
-                            flush(self.drive_envelope + (level - self.drive_envelope) * k);
-                        if !self.drive_chain.live {
-                            self.drive_chain.reset();
-                            self.drive_chain.live = true;
-                        }
-                        // While both sides of a ramp are on, each plays and they crossfade; otherwise the side that is on
-                        // plays alone.
-                        let shapes = &self.drive_shapes;
-                        let both = t < 1.0
-                            && p.drive.enabled
-                            && f.drive.enabled
-                            && (p.drive.model != f.drive.model || p.drive.drive != f.drive.drive);
-                        let alone = if f.drive.enabled { 1 } else { 0 };
-                        let envelope = self.drive_envelope;
-                        let clipped = if both {
-                            self.drive_chain.crossfade(
-                                &mut self.drive_leaving,
-                                &shapes[0].circuit,
-                                &shapes[1].circuit,
-                                t,
-                                self.ramp_left == self.ramp_frames,
-                                x,
-                                [shapes[0].bias * envelope, shapes[1].bias * envelope],
-                            )
-                        } else {
-                            self.drive_chain.process(
-                                &shapes[alone].circuit,
-                                x,
-                                shapes[alone].bias * envelope,
-                            )
-                        };
-                        let (tone, level) = (
-                            lerp(shapes[0].tone, shapes[1].tone),
-                            lerp(shapes[0].level, shapes[1].level),
-                        );
-                        let wet = std::array::from_fn(|c| {
-                            let mut out = clipped[c];
-                            for state in &mut self.drive_tone[c] {
-                                *state = flush(*state + tone * (out - *state));
-                                out = *state;
+                Stage::Drive | Stage::Amp | Stage::Cabinet if inserted => {
+                    if stage == three[0] {
+                        // The built-in chain runs at most once a frame, however many inserts ask for it.
+                        let mut ran = false;
+                        let mut cache: Option<[f32; 2]> = None;
+                        let mut run = |v: [f32; 2]| -> [f32; 2] {
+                            if let Some(y) = cache {
+                                return y;
                             }
-                            (out * level) as f32
-                        });
-                        x = blend(x, wet, p.drive.enabled, f.drive.enabled);
-                    } else {
-                        self.drive_chain.live = false;
-                    }
-                }
-                Stage::Amp => {
-                    if f.amp.enabled || p.amp.enabled && t < 1.0 {
-                        let drive = lerp(p.amp.drive, f.amp.drive);
-                        let gain = 10f64.powf(lerp(p.amp.gain_db, f.amp.gain_db) / 20.0);
-                        // A side that is off takes the other's circuit, so switching the amp only fades one sound in.
-                        let from = self.amp_shapes[if p.amp.enabled { 0 } else { 1 }].as_ref();
-                        let to = self.amp_shapes[if f.amp.enabled { 1 } else { 0 }].as_ref();
-                        let captured = amp_capture_frame(
-                            &mut self.amp_caps,
-                            self.amp_cap_side,
-                            &self.amp_shapes,
-                            &mut self.amp_chain,
-                            &mut self.amp_dc,
-                            [&p.amp, &f.amp],
-                            t,
-                            x,
-                        );
-                        let wet = if let Some(captured) = captured {
-                            captured
-                        } else {
-                            let plain = to.is_none() || from.is_none() && t < 1.0;
-                            let wet = if plain {
-                                // A side on the driven circuit has no plain sound to ramp from, so this side's is held.
-                                let model = |s: &str| {
-                                    let pre = 1.0 + drive * if s == "bass" { 3.0 } else { 1.0 };
-                                    (pre, 0.02 * drive)
+                            let fresh = !built_in_live;
+                            built_in_live = true;
+                            ran = true;
+                            let mut y = v;
+                            for stage in three {
+                                y = match stage {
+                                    Stage::Drive => drive(y, fresh),
+                                    Stage::Amp => amp(y, fresh),
+                                    _ => cabinet(y, fresh),
                                 };
-                                let a = model(if self.amp_shapes[0].is_some() {
-                                    &f.amp.model
-                                } else {
-                                    &p.amp.model
-                                });
-                                let b = model(if self.amp_shapes[1].is_some() {
-                                    &p.amp.model
-                                } else {
-                                    &f.amp.model
-                                });
-                                let pre = lerp(a.0, b.0);
-                                let bias = lerp(a.1, b.1);
-                                let zero = bias.tanh();
-                                std::array::from_fn(|c| {
-                                    let v = x[c] as f64;
-                                    let direct =
-                                        (v * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt();
-                                    self.amp_dc[c] += 0.0005 * (direct - self.amp_dc[c]);
-                                    ((direct - self.amp_dc[c]) * gain) as f32
-                                })
-                            } else {
-                                self.amp_dc = [0.0; 2];
-                                x
-                            };
-                            let wet = if let Some(circuit) = to.or(from.filter(|_| t < 1.0)) {
-                                if !self.amp_chain.live {
-                                    self.amp_chain.reset();
-                                    self.amp_chain.live = true;
-                                }
-                                let y = match (from, to) {
-                                    (Some(a), Some(b)) if t < 1.0 && a != b => {
-                                        self.amp_chain.crossfade(
-                                            &mut self.amp_leaving,
-                                            a,
-                                            b,
-                                            t,
-                                            self.ramp_left == self.ramp_frames,
-                                            x,
-                                            [0.0; 2],
-                                        )
-                                    }
-                                    _ => self.amp_chain.process(circuit, x, 0.0),
-                                }
-                                .map(|v| (v * gain) as f32);
-                                match (plain, to.is_some()) {
-                                    (false, _) => y,
-                                    (true, true) => {
-                                        std::array::from_fn(|c| wet[c] + (y[c] - wet[c]) * t as f32)
-                                    }
-                                    (true, false) => {
-                                        std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * t as f32)
-                                    }
-                                }
-                            } else {
-                                self.amp_chain.live = false;
-                                wet
-                            };
-                            wet
+                            }
+                            cache = Some(y);
+                            y
                         };
-                        let wanted = amp_tone(&f.amp);
-                        if f.amp.enabled && !p.amp.enabled && self.ramp_left == self.ramp_frames {
-                            // Switching the amp on starts its tone stack at its settings, from rest.
-                            self.amp_tone_db = wanted;
-                            for b in &mut self.amp_tone {
-                                b.reset();
+                        // The arriving insert runs first, so the built-in chain plays on its input; with none
+                        // arriving, the leaving one runs first and the chain plays on the input it glides back.
+                        let live = self.leaving_live;
+                        let leaving = self.plugin_leaving.as_mut().filter(|_| live);
+                        let (arriving, leaving_out) = match (self.plugin.as_mut(), leaving) {
+                            (Some(insert), leaving) => {
+                                let arriving = insert.process(x, ctx, &mut run);
+                                (
+                                    arriving,
+                                    leaving.map(|l| (l.process(x, ctx, &mut run), false)),
+                                )
                             }
-                        }
-                        // 0.48 dB a millisecond, so a full 24 dB swing takes 50 ms at any sample rate.
-                        let step = 480.0 / self.rate;
-                        for (playing, wanted) in self.amp_tone_db.iter_mut().zip(wanted) {
-                            *playing = if (wanted - *playing).abs() <= step {
-                                wanted
-                            } else {
-                                *playing + step * (wanted - *playing).signum()
-                            };
-                        }
-                        let tone = self.amp_tone_db;
-                        if tone[0] != self.cached_amp_tone[0] {
-                            self.amp_tone[0].shelf(AMP_TONE[0], tone[0], self.rate, false);
-                        }
-                        if tone[1] != self.cached_amp_tone[1] {
-                            self.amp_tone[1].peak(AMP_TONE[1], tone[1], self.rate);
-                        }
-                        if tone[2] != self.cached_amp_tone[2] {
-                            self.amp_tone[2].shelf(AMP_TONE[2], tone[2], self.rate, true);
-                        }
-                        if tone[3] != self.cached_amp_tone[3] {
-                            self.amp_tone[3].peak_q(AMP_TONE[3], tone[3], self.rate, 1.0);
-                        }
-                        self.cached_amp_tone = tone;
-                        let mut toned = wet;
-                        for b in &mut self.amp_tone {
-                            toned = b.process(toned);
-                        }
-                        // A flat stack passes the amp's output untouched, once the filters have let go of any
-                        // earlier boost or cut. Flat filters with no such remainder pass their input exactly.
-                        let flat = tone == [0.0; 4] && self.amp_tone.iter().all(Biquad::quiet);
-                        if flat {
-                            for b in &mut self.amp_tone {
-                                b.reset();
+                            (None, Some(leaving)) => {
+                                let out = leaving.process(x, ctx, &mut run);
+                                let gliding = leaving.gliding();
+                                (run(leaving.built_in_input()), Some((out, gliding)))
                             }
+                            (None, None) => (run(x), None),
+                        };
+                        x = match leaving_out {
+                            Some((out, gliding)) => {
+                                let fading = self.plugin_fade;
+                                let s = 1.0 - fading as f32 / self.ramp_frames as f32;
+                                self.plugin_fade = fading.saturating_sub(1);
+                                if self.plugin_fade == 0 && !gliding {
+                                    self.leaving_live = false;
+                                }
+                                let (scale, held) = (self.leaving_scale, self.leaving_held);
+                                let part: [f32; 2] =
+                                    std::array::from_fn(|c| (out[c] * scale + held[c]) * (1.0 - s));
+                                self.fade_s = s;
+                                self.leaving_part = part;
+                                std::array::from_fn(|c| arriving[c] * s + part[c])
+                            }
+                            None => {
+                                self.fade_s = 1.0;
+                                self.leaving_part = [0.0; 2];
+                                arriving
+                            }
+                        };
+                        if !ran {
+                            built_in_live = false;
                         }
-                        let wet = if flat { wet } else { toned };
-                        x = blend(x, wet, p.amp.enabled, f.amp.enabled);
-                    } else {
-                        self.amp_chain.live = false;
                     }
                 }
-                Stage::Cabinet => {
-                    // The side each end of the crossfade plays, as below: a side that is off takes the other's.
-                    let ends = [
-                        if p.cabinet.enabled { 0 } else { 1 },
-                        if f.cabinet.enabled { 1 } else { 0 },
-                    ];
-                    let rate = self.rate as u32;
-                    let usable = [0, 1].map(|side| {
-                        self.ir_engine.is_some()
-                            && self.cabinet_irs[side]
-                                .as_ref()
-                                .is_some_and(|(kernel, _)| kernel.rate() == rate)
-                    });
-                    let crossfading = t < 1.0 && ends[0] != ends[1];
-                    let ir_played = usable[ends[1]] || crossfading && usable[ends[0]];
-                    if !(f.cabinet.enabled || p.cabinet.enabled && t < 1.0) {
-                        self.cabinet_fir.live = false;
-                        if let Some(engine) = self.ir_engine.as_mut() {
-                            engine.live = false;
-                        }
-                    } else if let (true, Some(engine)) = (ir_played, self.ir_engine.as_mut()) {
-                        // A response the user loaded plays in place of the built-in cabinet on its side. The other
-                        // side, if it has none, plays its own model by itself.
-                        if !engine.live {
-                            engine.reset();
-                            engine.live = true;
-                        }
-                        let loaded = |side: usize| {
-                            self.cabinet_irs[side]
-                                .as_ref()
-                                .filter(|_| usable[side])
-                                .map(|(kernel, gain)| (&**kernel, *gain))
-                        };
-                        let (leaving, arriving) =
-                            (loaded(ends[0]).filter(|_| crossfading), loaded(ends[1]));
-                        let mut built_in = 0usize;
-                        let mut plays = |side: usize| {
-                            built_in += 1;
-                            let name = if side == 0 {
-                                &p.cabinet.model
-                            } else {
-                                &f.cabinet.model
-                            };
-                            builtin_cabinet(
-                                &mut self.cabinet,
-                                &mut self.cached_cabinet,
-                                &mut self.cabinet_fir,
-                                self.rate,
-                                self.cabinet_models[side],
-                                name,
-                                x,
-                            )
-                        };
-                        let scaled = |y: [f32; 2], gain: f32| y.map(|v| v * gain);
-                        let (wet_from, wet_to) = match (leaving, arriving) {
-                            (Some((a, ga)), Some((b, gb))) => {
-                                let y = engine.process(x, a, Some(b));
-                                (Some(scaled(y[0], ga)), scaled(y[1], gb))
-                            }
-                            (None, Some((b, gb))) => {
-                                let y = engine.process(x, b, None);
-                                (crossfading.then(|| plays(ends[0])), scaled(y[0], gb))
-                            }
-                            (Some((a, ga)), None) => {
-                                let y = engine.process(x, a, None);
-                                (Some(scaled(y[0], ga)), plays(ends[1]))
-                            }
-                            // Only reached by a side that was usable a moment ago; the model plays.
-                            (None, None) => (None, plays(ends[1])),
-                        };
-                        if built_in == 0 {
-                            self.cabinet_fir.live = false;
-                            self.cabinet.iter_mut().for_each(Biquad::reset);
-                        }
-                        let wet = match wet_from {
-                            Some(from) if crossfading => {
-                                std::array::from_fn(|c| from[c] + (wet_to[c] - from[c]) * t as f32)
-                            }
-                            _ => wet_to,
-                        };
-                        x = blend(x, wet, p.cabinet.enabled, f.cabinet.enabled);
-                    } else if f.cabinet.enabled || p.cabinet.enabled && t < 1.0 {
-                        if let Some(engine) = self.ir_engine.as_mut() {
-                            engine.live = false;
-                        }
-                        let [before, after] = self.cabinet_models;
-                        // A side that is off takes the other's cabinet, as the amp does.
-                        let from = if p.cabinet.enabled { before } else { after };
-                        let to = if f.cabinet.enabled { after } else { before };
-                        let filtered = to.is_none() || from.is_none() && t < 1.0;
-                        let mut wet = x;
-                        if filtered {
-                            let cutoff = |s: &str| match s {
-                                "bass" => [35.0, 3500.0],
-                                _ => [65.0, 5500.0],
-                            };
-                            // A side on a designed cabinet has no filters to ramp from, so this side's are held.
-                            let a = cutoff(if before.is_some() {
-                                &f.cabinet.model
-                            } else {
-                                &p.cabinet.model
-                            });
-                            let b = cutoff(if after.is_some() {
-                                &p.cabinet.model
-                            } else {
-                                &f.cabinet.model
-                            });
-                            let values = [lerp(a[0], b[0]), lerp(a[1], b[1])];
-                            if values != self.cached_cabinet {
-                                self.cabinet[0].pass(values[0], self.rate, true);
-                                self.cabinet[1].pass(values[1], self.rate, false);
-                                self.cabinet[2].pass(values[1], self.rate, false);
-                                self.cached_cabinet = values;
-                            }
-                            for b in &mut self.cabinet {
-                                wet = b.process(wet);
-                            }
-                        } else {
-                            self.cabinet.iter_mut().for_each(Biquad::reset);
-                        }
-                        if let Some(end) = to.or(from.filter(|_| t < 1.0)) {
-                            if !self.cabinet_fir.live {
-                                self.cabinet_fir.reset();
-                                self.cabinet_fir.live = true;
-                            }
-                            let y = self.cabinet_fir.process(from.unwrap_or(end), end, t, x);
-                            wet = match (filtered, to.is_some()) {
-                                (false, _) => y,
-                                (true, true) => {
-                                    std::array::from_fn(|c| wet[c] + (y[c] - wet[c]) * t as f32)
-                                }
-                                (true, false) => {
-                                    std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * t as f32)
-                                }
-                            };
-                        } else {
-                            self.cabinet_fir.live = false;
-                        }
-                        x = blend(x, wet, p.cabinet.enabled, f.cabinet.enabled);
-                    } else {
-                        self.cabinet_fir.live = false;
-                    }
-                }
+                Stage::Drive => x = drive(x, fresh),
+                Stage::Amp => x = amp(x, fresh),
+                Stage::Cabinet => x = cabinet(x, fresh),
                 Stage::Eq => {
                     if f.eq.enabled || p.eq.enabled && t < 1.0 {
                         let values = [
@@ -3346,6 +3651,7 @@ impl TrackDsp {
                 }
             }
         }
+        self.built_in_live = !inserted || built_in_live;
         if let Some(gain) = duck {
             x = x.map(|v| v * gain);
         }
@@ -3371,6 +3677,25 @@ impl TrackDsp {
         second | (std::mem::take(&mut self.non_finite) > 0)
     }
     pub fn reset(&mut self) {
+        self.reset_common(false);
+    }
+    /// A loop wrap: built-in effects are reset, but the plug-in insert, its delay lines,
+    /// and any active crossfade keep streaming without interruption.
+    pub fn reset_for_wrap(&mut self) {
+        self.reset_common(true);
+    }
+    fn reset_common(&mut self, is_wrap: bool) {
+        if !is_wrap {
+            // A stop or seek: the plug-in's stream starts again, primed; a fade-out in progress ends.
+            if let Some(insert) = &mut self.plugin {
+                insert.flush();
+            }
+            self.plugin_fade = 0;
+            self.sounding = false;
+            self.leaving_live = false;
+            self.fade_s = 1.0;
+            self.leaving_part = [0.0; 2];
+        }
         self.gate_envelope = 1.0;
         self.compressor_envelope = 0.0;
         self.amp_dc = [0.0; 2];
@@ -3449,7 +3774,11 @@ impl TrackDsp {
             .as_mut()
             .filter(|_| self.settings.second.is_some())
         {
-            second.reset();
+            if is_wrap {
+                second.reset_for_wrap();
+            } else {
+                second.reset();
+            }
         }
         self.second_gain = if self.settings.second.is_some() {
             1.0

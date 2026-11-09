@@ -1,0 +1,10 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build && node scripts/build-plugin-host.mjs"
+  },
+  "bundle": {
+    "externalBin": [
+      "binaries/tabplayer-plugin-host"
+    ]
+  }
+}

@@ -1038,3 +1038,26 @@ it('keeps focus on the lock across the busy flicker its own edit causes', async(
   expect(lock).toHaveFocus();expect(lock).not.toBeChecked();
   expect(edits.map(edit=>!!edit.sound.locked)).toEqual([true,false]);
 });
+
+it('marks Drive, Amp and Cabinet as replaced when the track has an active plug-in',()=>{
+  const plug={format:'vst3' as const,classId:'A'.repeat(32),name:'Super Amp',vendor:'Vendor',active:true,inputDb:0,outputDb:0,state:'s'.repeat(64)};
+  const sound={...soundPreset('lead'),plugin:plug};
+  render(<SoundRig trackId="guitar" sound={sound} tracks={[{id:'guitar',name:'Lead Guitar',program:29}]} onTrack={()=>{}} onEdit={()=>{}}/>);
+  const chainItem=document.querySelector('.rig-chain-item[data-replaced]');
+  expect(chainItem).not.toBeNull();
+  expect(screen.getByText(/Drive, Amp and Cabinet are replaced by the plug-in\./i)).toBeInTheDocument();
+});
+
+it('names exactly Drive, Amp and Cabinet as replaced in the chain, and none on the second pedalboard',()=>{
+  const plug={format:'vst3' as const,classId:'A'.repeat(32),name:'Super Amp',vendor:'Vendor',active:true,inputDb:0,outputDb:0,state:'s'.repeat(64)};
+  const base=soundPreset('lead');
+  const sound={...base,plugin:plug,effects:{...base.effects,second:{...base.effects,drive:{...base.effects.drive,enabled:true}}}} as TrackSound;
+  render(<SoundRig trackId="guitar" sound={sound} tracks={[{id:'guitar',name:'Lead Guitar',program:29}]} onTrack={()=>{}} onEdit={()=>{}}/>);
+  const replaced=[...document.querySelectorAll('.rig-chain-item[data-replaced]')].map(item=>item.querySelector('[role="tab"]')!.getAttribute('aria-label')!);
+  expect(replaced).toHaveLength(3);
+  expect(replaced.every(label=>/Replaced/.test(label))).toBe(true);
+  expect(replaced.map(label=>label.split(',')[0]).sort()).toEqual(['Amp','Cabinet','Drive']);
+  const labelled=screen.getAllByRole('tab').filter(tab=>/Replaced/.test(tab.getAttribute('aria-label')??''));
+  expect(labelled).toHaveLength(3);
+  expect(screen.queryByRole('tab',{name:/Second pedalboard: Drive.*Replaced/})).toBeNull();
+});

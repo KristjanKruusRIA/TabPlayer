@@ -776,3 +776,22 @@ fn the_output_callback_itself_does_not_touch_the_heap_at_large_sizes() {
         }
     }
 }
+
+#[test]
+fn line_in_ignores_plugin_slot() {
+    let mut settings = LineInSettings::default();
+    settings.sound.plugin = Some(tabplayer_lib::settings::PluginSlot {
+        format: tabplayer_lib::settings::PluginFormat::Vst3,
+        class_id: "0123456789ABCDEF0123456789ABCDEF".into(),
+        name: "Test".into(),
+        vendor: "Test".into(),
+        active: true,
+        input_db: 0.0,
+        output_db: 0.0,
+        state: "a".repeat(64),
+    });
+    // Validation must refuse a plug-in slot per P37
+    assert!(settings.validate().is_err());
+    // And build_chain must refuse it as a second guard
+    assert!(build_chain(&settings.sound, 48_000).is_err());
+}

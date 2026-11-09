@@ -1,11 +1,13 @@
 //! Shared device/offline renderer. Buffers and sample mappings are prepared off the audio thread.
 use super::{
     backing::{BackingMap, BackingVoice},
+    compensation::{Compensation, compensation_capacity},
     decode::DecodedAudio,
-    dsp::{FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
+    dsp::{FrameContext, FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
     master::MasterBus,
     midi_out::MidiTap,
     plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
+    plugin_insert::{InsertError, PluginInsert},
     practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
     resources::{AudioResources, Region},
     voices::{
@@ -106,11 +108,47 @@ struct PreparedChannel {
     /// Whether the kit mix changes anything. A kit of elements all at their defaults sounds as the track does without one.
     kit_active: bool,
 }
+/// Hands the compensation over from the mix or renderer that is playing (`old`) to the one taking over (`new`).
+/// - Both delay: the new lines take over the old history and crossfade to their own taps.
+/// - Only the new one delays: it starts undelayed while the old board sounds, and glides to its delay.
+/// - Only the old one delays: while it sounds, it glides to zero and stays with the new mix until the glide ends.
+///
+/// An old compensation that no longer does anything (`active` is false) counts as none, and stays with `old` to be
+/// retired off the audio thread with it. Moves boxes and buffers; does not allocate.
+fn carry_compensation(
+    new: &mut Option<Box<Compensation>>,
+    old: &mut Option<Box<Compensation>>,
+    old_sounding: bool,
+) {
+    let old_active = old.as_ref().is_some_and(|c| c.active());
+    match new.as_deref_mut() {
+        Some(new_comp) => match old.as_deref_mut() {
+            Some(old_comp) if old_active => new_comp.transition_from(old_comp),
+            _ => {
+                if old_sounding {
+                    new_comp.start_undelayed();
+                }
+            }
+        },
+        None => {
+            if old_sounding && old_active {
+                if let Some(old_comp) = old.as_deref_mut() {
+                    old_comp.retime_to_zero();
+                }
+                *new = old.take();
+            }
+        }
+    }
+}
 pub struct PreparedMix {
     channels: Vec<PreparedChannel>,
     backing: Gain,
-    master: MasterBus,
+    pub(crate) master: MasterBus,
     rate: u32,
+    pub(crate) compensation: Option<Box<Compensation>>,
+    /// Tracks whose plug-in insert this mix refused, and why. Read on the control thread before the mix is sent; the
+    /// audio thread never touches it.
+    refused: Vec<(String, InsertError)>,
 }
 fn validate_mix(mix: &ChannelMix) -> Result<(), String> {
     if !mix.gain.is_finite()
@@ -129,6 +167,19 @@ impl PreparedMix {
         plan: &PlaybackPlan,
         sample_rate: u32,
     ) -> Result<Self, String> {
+        Self::prepare_with_plugins(settings, plan, sample_rate, &[], 512)
+    }
+
+    pub fn prepare_with_plugins(
+        settings: &DocumentSettings,
+        plan: &PlaybackPlan,
+        sample_rate: u32,
+        plans: &[(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )],
+        callback_frames: usize,
+    ) -> Result<Self, String> {
         settings.validate()?;
         plan.validate()?;
         let any_solo = plan
@@ -137,6 +188,13 @@ impl PreparedMix {
             .any(|t| settings.mixes.get(&t.id).is_some_and(|m| m.solo))
             || settings.backing.as_ref().is_some_and(|b| b.mix.solo);
         let mut channels = Vec::with_capacity(plan.tracks.len());
+        let pipeline_frames = tabplayer_plugin_protocol::limits::pipeline_frames(callback_frames);
+        let plan_map: std::collections::HashMap<
+            &str,
+            &Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        > = plans.iter().map(|(id, res)| (id.as_str(), res)).collect();
+        let mut refused = Vec::new();
+
         for (index, track) in plan.tracks.iter().enumerate() {
             let mix = settings.mixes.get(&track.id).cloned().unwrap_or_default();
             validate_mix(&mix)?;
@@ -147,6 +205,23 @@ impl PreparedMix {
                 .unwrap_or_else(FxSettings::default);
             let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             dsp.set_ir_index(index);
+
+            if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
+                // A refusal leaves the track on its built-in sound and is named, so the slot can say why.
+                match PluginInsert::new(
+                    plan.link.clone(),
+                    crate::audio::plugin_insert::InsertMode::Realtime { pipeline_frames },
+                    plan.latency,
+                    plan.input_db,
+                    plan.output_db,
+                    sample_rate,
+                    plan.shared.clone(),
+                ) {
+                    Ok(insert) => dsp.attach_plugin(Box::new(insert)),
+                    Err(error) => refused.push((track.id.clone(), error)),
+                }
+            }
+
             let kit = mix.drum_kit.as_ref().filter(|kit| !kit.is_neutral());
             channels.push(PreparedChannel {
                 dsp,
@@ -162,12 +237,59 @@ impl PreparedMix {
             .map(|b| b.mix.clone())
             .unwrap_or_default();
         validate_mix(&backing)?;
-        Ok(Self {
+        let mut mix = Self {
             channels,
             backing: Gain::new(&backing, !backing.mute && (!any_solo || backing.solo)),
             master: MasterBus::new(settings.master.as_ref(), sample_rate)?,
             rate: sample_rate,
-        })
+            compensation: None,
+            refused,
+        };
+        mix.update_compensation();
+        Ok(mix)
+    }
+    /// The tracks whose plug-in insert this mix refused, and why, in track order.
+    pub fn plugin_refusals(&self) -> &[(String, InsertError)] {
+        &self.refused
+    }
+    /// Accessor for delay compensation.
+    pub fn compensation(&self) -> Option<&Compensation> {
+        self.compensation.as_deref()
+    }
+    /// Maximum delay among all stems in this mix.
+    pub fn plugin_delay_frames(&self) -> usize {
+        self.compensation.as_ref().map_or(0, |c| c.d_max())
+    }
+    /// Attaches plug-in inserts to the corresponding channels and computes delay compensation.
+    pub fn with_inserts(mut self, inserts: Vec<Option<Box<PluginInsert>>>) -> Self {
+        for (i, insert) in inserts.into_iter().enumerate() {
+            if let Some(insert) = insert {
+                if i < self.channels.len() {
+                    self.channels[i].dsp.attach_plugin(insert);
+                }
+            }
+        }
+        self.update_compensation();
+        self
+    }
+    /// Attaches an insert to track `track` and updates delay compensation.
+    pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
+        if track < self.channels.len() {
+            self.channels[track].dsp.attach_plugin(insert);
+            self.update_compensation();
+        }
+    }
+    fn update_compensation(&mut self) {
+        let delays: Vec<usize> = self.channels.iter().map(|c| c.dsp.plugin_delay()).collect();
+        let d_max = *delays.iter().max().unwrap_or(&0);
+        if d_max > 0 {
+            let cap = compensation_capacity(self.rate);
+            self.compensation = Some(Box::new(Compensation::new_with_rate(
+                &delays, cap, self.rate,
+            )));
+        } else {
+            self.compensation = None;
+        }
     }
 }
 #[derive(Clone, Copy, Debug)]
@@ -463,10 +585,40 @@ impl Renderer {
         settings: DocumentSettings,
         sample_rate: u32,
     ) -> Result<Self, String> {
+        let mix = PreparedMix::prepare(&settings, &plan, sample_rate)?;
+        Self::new_with_mix(plan, resources, mix, settings, sample_rate)
+    }
+
+    pub fn new_with_plugins(
+        plan: Arc<PlaybackPlan>,
+        resources: Arc<AudioResources>,
+        settings: DocumentSettings,
+        sample_rate: u32,
+        plans: &[(
+            String,
+            Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
+        )],
+        callback_frames: usize,
+    ) -> Result<Self, String> {
+        let mix = PreparedMix::prepare_with_plugins(
+            &settings,
+            &plan,
+            sample_rate,
+            plans,
+            callback_frames,
+        )?;
+        Self::new_with_mix(plan, resources, mix, settings, sample_rate)
+    }
+    pub fn new_with_mix(
+        plan: Arc<PlaybackPlan>,
+        resources: Arc<AudioResources>,
+        mix: PreparedMix,
+        settings: DocumentSettings,
+        sample_rate: u32,
+    ) -> Result<Self, String> {
         let plan = with_drum_kits(with_locked_articulations(plan, &settings), &settings);
         let settings = without_missing_kit(settings, &plan, &resources);
         let timeline = Timeline::new(&plan)?;
-        let mix = PreparedMix::prepare(&settings, &plan, sample_rate)?;
         let track_indices: HashMap<_, _> = plan
             .tracks
             .iter()
@@ -773,7 +925,7 @@ impl Renderer {
         let slots = (0..capacity).map(|_| None).collect();
         let scratch = vec![[0.0; 2]; plan.tracks.len() + 2];
         let kit_scratch = vec![[[0.0; 2]; KIT_ELEMENTS]; plan.tracks.len()];
-        Ok(Self {
+        let mut renderer = Self {
             plan,
             timeline,
             _resources: resources,
@@ -813,7 +965,12 @@ impl Renderer {
             },
             last_click: None,
             click: ClickVoice::new(sample_rate),
-        })
+        };
+        let d_max = renderer.plugin_delay_frames() as u64;
+        if let Some(tap) = &mut renderer.midi {
+            tap.set_delay_frames(d_max);
+        }
+        Ok(renderer)
     }
     fn spawn(
         &mut self,
@@ -1216,6 +1373,24 @@ impl Renderer {
             RenderTempo::Relative { ratio } => self.authored_bpm_at(tick) * ratio,
             RenderTempo::Fixed { bpm } => bpm,
         };
+        // A plug-in hears the frame's tempo, meter and place (preflight ruling P11); without one, only the tempo is
+        // needed, and nothing more is worked out.
+        let context = self
+            .mix
+            .channels
+            .iter()
+            .any(|channel| channel.dsp.has_plugin())
+            .then(|| {
+                let (sig_num, sig_den) = self.meter_at(tick);
+                FrameContext {
+                    bpm,
+                    sig_num: sig_num.min(u16::MAX as u32) as u16,
+                    sig_den: sig_den.min(u16::MAX as u32) as u16,
+                    playing: true,
+                    project_frame: (self.seconds * self.rate as f64).round() as i64,
+                    project_quarters: tick / self.plan.ppq.max(1) as f64,
+                }
+            });
         for (index, track) in self.tracks.iter_mut().enumerate() {
             if let Some(synth) = &mut track.synth {
                 let mut left = [0.0];
@@ -1244,9 +1419,13 @@ impl Renderer {
                 }
             }
             let channel = &mut self.mix.channels[index];
-            self.scratch[index] = channel
-                .gain
-                .process(channel.dsp.process(self.scratch[index], bpm));
+            let board = match &context {
+                Some(context) if channel.dsp.has_plugin() => {
+                    channel.dsp.process_at(self.scratch[index], context)
+                }
+                _ => channel.dsp.process(self.scratch[index], bpm),
+            };
+            self.scratch[index] = channel.gain.process(board);
             let routed = self.midi.as_ref().is_some_and(|tap| tap.silences(index));
             let fade = &mut self.midi_fade[index];
             let target = if routed { 0.0 } else { 1.0 };
@@ -1262,6 +1441,9 @@ impl Renderer {
                 self.scratch[index] =
                     [self.scratch[index][0] * gain, self.scratch[index][1] * gain];
             }
+            if let Some(comp) = &mut self.mix.compensation {
+                self.scratch[index] = comp.track(index, self.scratch[index]);
+            }
         }
         let backing_index = self.plan.tracks.len();
         if let Some(backing) = &mut self.backing {
@@ -1269,6 +1451,9 @@ impl Renderer {
                 self.scratch[backing_index] =
                     self.mix.backing.process(backing.next_frame(self.seconds));
             }
+        }
+        if let Some(comp) = &mut self.mix.compensation {
+            self.scratch[backing_index] = comp.backing(self.scratch[backing_index]);
         }
         let mut pulse = None;
         if self.metronome.enabled || self.metronome.visual {
@@ -1291,8 +1476,23 @@ impl Renderer {
             } else {
                 0.0
             });
-            if self.metronome.enabled {
-                self.scratch[backing_index + usize::from(self.backing.is_some())] = [click; 2];
+            let click_in = if self.metronome.enabled {
+                [click; 2]
+            } else {
+                [0.0; 2]
+            };
+            let click_out = match &mut self.mix.compensation {
+                Some(comp) => comp.click(click_in),
+                None => click_in,
+            };
+            let click_index = backing_index + usize::from(self.backing.is_some());
+            if self.metronome.enabled || click_out != [0.0; 2] {
+                self.scratch[click_index] = click_out;
+            }
+        }
+        if let Some(comp) = &mut self.mix.compensation {
+            if !self.metronome.enabled && !self.metronome.visual {
+                comp.click([0.0; 2]);
             }
         }
         // The tracks and backing go through the master's effects and level. The metronome is added after them, so
@@ -1383,6 +1583,9 @@ impl Renderer {
         let mut last_pulse = None;
         for frame in 0..frames {
             let (_, pulse) = self.frame(f64::INFINITY);
+            if let Some(tap) = &mut self.midi {
+                tap.advance_cursor();
+            }
             if pulse.is_some() {
                 pulse_count = pulse_count.saturating_add(1);
                 last_pulse = pulse;
@@ -1416,6 +1619,9 @@ impl Renderer {
         let mut last_pulse = None;
         for frame in 0..frames {
             let (value, pulse) = self.frame(end_tick);
+            if let Some(tap) = &mut self.midi {
+                tap.advance_cursor();
+            }
             mix[frame] = value;
             if pulse.is_some() {
                 pulse_count = pulse_count.saturating_add(1);
@@ -1428,6 +1634,15 @@ impl Renderer {
         self.status(frames, pulse_count, last_pulse)
     }
     pub fn seek_tick(&mut self, tick: f64) {
+        self.seek_tick_internal(tick, false);
+    }
+    /// A loop wrap: repositions playback, but keeps inserts, compensation lines and master bus continuous.
+    pub fn wrap_to_tick(&mut self, tick: f64) {
+        self.seek_tick_internal(tick, true);
+    }
+    fn seek_tick_internal(&mut self, tick: f64, is_wrap: bool) {
+        // With no plug-in, a wrap is the seek it was before plug-ins, so playback and export stay bit-identical.
+        let is_wrap = is_wrap && self.plugins_active();
         let tick = if tick.is_finite() {
             tick.clamp(0.0, self.duration_tick())
         } else {
@@ -1444,7 +1659,11 @@ impl Renderer {
         }
         self.active.clear();
         for channel in &mut self.mix.channels {
-            channel.dsp.reset();
+            if is_wrap {
+                channel.dsp.reset_for_wrap();
+            } else {
+                channel.dsp.reset();
+            }
         }
         // Everything sounding is cut, so nothing needs the old level to fade from, and held notes struck again below
         // already go where the effective kit sends them.
@@ -1452,7 +1671,12 @@ impl Renderer {
             track.kit_rendered = false;
         }
         self.settle_idle_kit();
-        self.mix.master.reset();
+        if !is_wrap {
+            self.mix.master.reset();
+            if let Some(comp) = &mut self.mix.compensation {
+                comp.flush();
+            }
+        }
         self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);
         self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
@@ -1613,6 +1837,8 @@ impl Renderer {
         }
         let mut old = self.midi.take();
         tap.adopt(old.as_deref_mut());
+        let d_max = self.plugin_delay_frames() as u64;
+        tap.set_delay_frames(d_max);
         self.midi = Some(tap);
         old
     }
@@ -1701,6 +1927,131 @@ impl Renderer {
             (measure.meter_numerator, measure.meter_denominator)
         })
     }
+    /// Delay in frames from plug-in compensation: `D_max`, or 0 without plug-ins.
+    pub fn plugin_delay_frames(&self) -> usize {
+        self.mix.compensation.as_ref().map_or(0, |c| c.d_max())
+    }
+    /// Whether a plug-in insert, or a compensation still gliding after the last one left, is active. Only then does a
+    /// wrap keep the inserts, the compensation lines and the master bus streaming; otherwise it is a plain seek.
+    pub fn plugins_active(&self) -> bool {
+        self.mix.channels.iter().any(|c| c.dsp.has_plugin()) || self.compensation_active()
+    }
+    fn compensation_active(&self) -> bool {
+        self.mix.compensation.as_ref().is_some_and(|c| c.active())
+    }
+    /// An edit while playing: this renderer replaces `old` at the same place. It takes over `old`'s plug-in inserts and
+    /// compensation lines the way a mix change does, so the plug-in tracks and the delayed stems keep streaming instead
+    /// of dropping D frames. Lines and inserts pair by position, so a renderer for other tracks, or the same tracks in
+    /// another order, takes over nothing and starts as a plain install. Moves buffers; does not allocate. `old` is
+    /// retired off the audio thread with whatever it keeps.
+    pub fn continue_from(&mut self, old: &mut Renderer) {
+        let same_tracks = self.plan.tracks.len() == old.plan.tracks.len()
+            && self
+                .plan
+                .tracks
+                .iter()
+                .zip(&old.plan.tracks)
+                .all(|(new, old)| new.id == old.id);
+        if self.rate != old.rate
+            || !same_tracks
+            || self.mix.channels.len() != old.mix.channels.len()
+        {
+            return;
+        }
+        let old_sounding = old.mix.channels.iter().any(|c| c.dsp.sounding());
+        for (new, old) in self.mix.channels.iter_mut().zip(&mut old.mix.channels) {
+            new.dsp.continue_plugin_from(&mut old.dsp);
+        }
+        carry_compensation(
+            &mut self.mix.compensation,
+            &mut old.mix.compensation,
+            old_sounding,
+        );
+        let d_max = self.plugin_delay_frames() as u64;
+        if let Some(tap) = &mut self.midi {
+            tap.set_delay_frames(d_max);
+        }
+    }
+    /// Attaches an insert to track `track` and updates delay compensation.
+    pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
+        self.mix.attach_plugin(track, insert);
+    }
+    /// The tracks whose plug-in insert this renderer's mix refused, and why.
+    pub fn plugin_refusals(&self) -> &[(String, InsertError)] {
+        self.mix.plugin_refusals()
+    }
+    /// Whether any attached plug-in has faulted.
+    pub fn plugin_faulted(&self) -> bool {
+        self.mix.channels.iter().any(|c| c.dsp.plugin_faulted())
+    }
+    /// Advances plug-in inserts and compensation lines with silent input during a count-in,
+    /// returning the delayed audio and click. With no compensation, returns `[click, click]`.
+    pub fn count_in_frame(&mut self, click: f32) -> [f32; 2] {
+        if !self.compensation_active() {
+            return [click, click];
+        }
+        let tick = self.timeline.seconds_to_tick(self.seconds);
+        let bpm = match self.tempo {
+            RenderTempo::Relative { ratio } => self.authored_bpm_at(tick) * ratio,
+            RenderTempo::Fixed { bpm } => bpm,
+        };
+        let (sig_num, sig_den) = self.meter_at(tick);
+        let comp = self.mix.compensation.as_mut().unwrap();
+        let context = FrameContext {
+            bpm,
+            sig_num: sig_num.min(u16::MAX as u32) as u16,
+            sig_den: sig_den.min(u16::MAX as u32) as u16,
+            playing: false,
+            project_frame: (self.seconds * self.rate as f64).round() as i64,
+            project_quarters: tick / self.plan.ppq.max(1) as f64,
+        };
+        for (index, channel) in self.mix.channels.iter_mut().enumerate() {
+            let board = if channel.dsp.has_plugin() {
+                channel.dsp.process_at([0.0; 2], &context)
+            } else {
+                channel.dsp.process([0.0; 2], bpm)
+            };
+            let mut gained = channel.gain.process(board);
+            // A track sent to a MIDI port stays silent here too, as in a played frame.
+            let routed = self.midi.as_ref().is_some_and(|tap| tap.silences(index));
+            if let Some(fade) = self.midi_fade.get_mut(index) {
+                *fade = if routed {
+                    (*fade - self.midi_fade_step).max(0.0)
+                } else {
+                    (*fade + self.midi_fade_step).min(1.0)
+                };
+                if *fade != 1.0 {
+                    gained = [gained[0] * *fade, gained[1] * *fade];
+                }
+            }
+            self.scratch[index] = comp.track(index, gained);
+        }
+        let backing_index = self.plan.tracks.len();
+        self.scratch[backing_index] = comp.backing([0.0; 2]);
+        let click_index = backing_index + usize::from(self.backing.is_some());
+        self.scratch[click_index] = comp.click([click; 2]);
+
+        let program = self.plan.tracks.len() + usize::from(self.backing.is_some());
+        let mut sum = [0.0; 2];
+        for sample in self.scratch.iter().take(program) {
+            for c in 0..2 {
+                sum[c] += sample[c];
+            }
+        }
+        sum = self.mix.master.bus(sum, bpm);
+        let click_out = self.scratch[click_index];
+        sum[0] += click_out[0];
+        sum[1] += click_out[1];
+        sum = self.mix.master.limit(sum);
+        sum
+    }
+    /// Drains the delay lines and plug-in inserts with silence after playback ends.
+    pub fn drain_frame(&mut self) -> [f32; 2] {
+        if !self.compensation_active() {
+            return [0.0; 2];
+        }
+        self.count_in_frame(0.0)
+    }
     pub fn has_backing(&self) -> bool {
         self.configured_backing || self.backing.is_some()
     }
@@ -1730,8 +2081,29 @@ impl Renderer {
             channel.kit.remaining = 0;
         }
     }
+    /// The transport paused: nothing renders until it plays again, so no board counts as sounding, the parked mix's
+    /// included (re-review R2-1). Cheap; called on the audio thread.
+    pub fn pause(&mut self) {
+        let parked = self.parked_mix.iter_mut().flat_map(|mix| &mut mix.channels);
+        for channel in self.mix.channels.iter_mut().chain(parked) {
+            channel.dsp.pause();
+        }
+    }
+    /// Whether each channel of the live mix, then of the parked one, is sounding: for tests.
+    #[cfg(test)]
+    pub(crate) fn channels_sounding(&self) -> Vec<bool> {
+        let parked = self.parked_mix.iter().flat_map(|mix| &mix.channels);
+        self.mix
+            .channels
+            .iter()
+            .chain(parked)
+            .map(|channel| channel.dsp.sounding())
+            .collect()
+    }
     fn mix_ramping(&self) -> bool {
-        self.mix.channels.iter().any(|c| c.dsp.ramping()) || self.mix.master.ramping()
+        self.mix.channels.iter().any(|c| c.dsp.ramping())
+            || self.mix.master.ramping()
+            || self.mix.compensation.as_ref().is_some_and(|c| c.gliding())
     }
     /// Takes `settings` now, or parks it until the current crossfade ends, when `settle_mix` installs it. A newer mix
     /// replaces a parked one, because only the latest settings still matter. Callback callers retire whatever comes
@@ -1765,8 +2137,18 @@ impl Renderer {
         settings.backing.current = self.mix.backing.current;
         settings.backing.remaining = (self.rate as f64 * 0.01) as u32;
         settings.master.transition_from(&mut self.mix.master);
+        let old_sounding = self.mix.channels.iter().any(|c| c.dsp.sounding());
+        carry_compensation(
+            &mut settings.compensation,
+            &mut self.mix.compensation,
+            old_sounding,
+        );
         for (track, channel) in self.tracks.iter_mut().zip(&settings.channels) {
             track.kit_active = channel.kit_active;
+        }
+        let d_max = settings.compensation.as_ref().map_or(0, |c| c.d_max()) as u64;
+        if let Some(tap) = &mut self.midi {
+            tap.set_delay_frames(d_max);
         }
         std::mem::replace(&mut self.mix, settings)
     }

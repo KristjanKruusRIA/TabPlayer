@@ -2,6 +2,7 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import './plugin-test-support';
 import {SoundPanel,soundPreset} from './SoundPanel';
 import {factoryCategories} from './factory-sounds';
 import {deleteSoundPreset,forgetSessionSoundLibrary,saveSoundPreset} from './sound-library';

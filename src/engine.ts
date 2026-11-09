@@ -79,6 +79,7 @@ export function validateProject(value: unknown): Project {
   for(const edit of [...p.baselineEdits,...p.edits])validateParityCommand(edit);
   for(const edit of projectCommands(p)) {
     if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw refusal('engine.backing_asset_missing');
+    if(edit.type==='setTrackSound' && edit.sound?.plugin && !p.assets[edit.sound.plugin.state]) throw refusal('engine.plugin_state_missing');
   }
   return structuredClone(p);
 }

@@ -476,3 +476,21 @@ fn eviction_and_wrong_rate_paths_do_not_touch_the_heap() {
     );
     assert_eq!(transport.status().audition_serial, 5);
 }
+
+#[test]
+fn audition_ignores_plugin_slot() {
+    let mut req = request(24, false, &[(40, 0), (45, 60)], 500);
+    req.voice.plugin = Some(tabplayer_lib::settings::PluginSlot {
+        format: tabplayer_lib::settings::PluginFormat::Vst3,
+        class_id: "0123456789ABCDEF0123456789ABCDEF".into(),
+        name: "Test".into(),
+        vendor: "Test".into(),
+        active: true,
+        input_db: 0.0,
+        output_db: 0.0,
+        state: "a".repeat(64),
+    });
+    let clip = render_clip(&root(), &req, 48_000).unwrap();
+    assert!(!clip.frames.is_empty());
+    assert!(!clip.tone);
+}

@@ -67,6 +67,7 @@ export const completeSound = (sound: TrackSound): TrackSound => {
   const completed: TrackSound = { ...sound, effects: completeEffects(sound.effects) };
   if (!completed.locked) delete completed.locked;
   if (completed.drumKit===undefined) delete completed.drumKit;
+  if (completed.plugin===undefined) delete completed.plugin;
   return completed;
 };
 /** Echo durations in quarter notes with their names: straight, dotted and triplet divisions. */
@@ -115,14 +116,36 @@ export const cabinetIrFits=(value:unknown):boolean=>{
 };
 // An amp capture reference and a cabinet impulse response reference share one rule (a library identity, a name and a level trim), so `capture` is marked `cabinetIr` above and checked by `cabinetIrFits`.
 const fits=(value:unknown,rule:FieldRule):boolean=>'cabinetIr' in rule?cabinetIrFits(value):'one' in rule?rule.one.includes(value as string|number):'each' in rule?Array.isArray(value)&&value.length===rule.length&&value.every(item=>fits(item,rule.each)):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
+/** The longest plug-in name or vendor, in characters. */
+export const MAX_PLUGIN_TEXT_LENGTH=64;
+/** The reach of a plug-in's input and output trims, in dB. */
+export const PLUGIN_TRIM_DB=12;
+// The rule of `tabplayer-plugin-protocol::validate::valid_text`, which `tests/plugin-slot-protocol.json` holds both sides to: XML-safe, no control character
+// (Rust's `char::is_control`: C0, DEL and C1) and no bidi control, equal to its own trim, and U+0085 and U+FEFF refused at either end because Rust's trim and JavaScript's differ on exactly those two.
+const pluginText=(text:unknown,allowEmpty:boolean):boolean=>typeof text==='string'&&(allowEmpty||text.length>0)&&text===text.trim()&&!/^[\u0085\uFEFF]|[\u0085\uFEFF]$/.test(text)&&[...text].length<=MAX_PLUGIN_TEXT_LENGTH&&irText(text)&&!/[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/.test(text);
+/** Why a plug-in slot cannot be applied, or null. It accepts what the native `PluginSlot::validate` accepts and refuses the rest. */
+export function pluginSlotProblem(value:unknown):string|null {
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join()!=='active,classId,format,inputDb,name,outputDb,state,vendor')return 'Invalid plug-in.';
+  const slot=value as Record<string,unknown>;
+  if(slot.format!=='vst3')return 'Invalid plug-in.';
+  if(typeof slot.active!=='boolean')return 'Invalid plug-in.';
+  if(typeof slot.classId!=='string'||!/^[0-9A-F]{32}$/.test(slot.classId))return 'Invalid plug-in class ID.';
+  if(!pluginText(slot.name,false))return 'Invalid plug-in name.';
+  if(!pluginText(slot.vendor,true))return 'Invalid plug-in vendor.';
+  for(const trim of [slot.inputDb,slot.outputDb])if(typeof trim!=='number'||!Number.isFinite(trim)||Math.abs(trim)>PLUGIN_TRIM_DB)return 'Invalid plug-in level trim.';
+  if(typeof slot.state!=='string'||!/^[0-9a-f]{64}$/.test(slot.state))return 'Invalid plug-in settings reference.';
+  return null;
+}
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
 export function soundProblem(sound: TrackSound): string|null {
   if (!sound||typeof sound!=='object') return 'Invalid sound.';
-  const keys = Object.keys(sound).sort().join();
-  if (!['effects,presetId,voiceId','effects,locked,presetId,voiceId','drumKit,effects,presetId,voiceId','drumKit,effects,locked,presetId,voiceId'].includes(keys)) return 'Invalid sound.';
+  // Three keys are required; the others are written only when they have something to say.
+  const keys = Object.keys(sound);
+  if (!['effects','presetId','voiceId'].every(key=>keys.includes(key))||!keys.every(key=>['effects','presetId','voiceId','locked','drumKit','plugin'].includes(key))) return 'Invalid sound.';
   if (Object.hasOwn(sound,'locked')&&typeof (sound as {locked?:unknown}).locked!=='boolean') return 'Invalid sound.';
   // Only a kit beyond Standard is stored; the native player refuses any other number.
   if (Object.hasOwn(sound,'drumKit')&&!([8,32,40] as unknown[]).includes((sound as {drumKit?:unknown}).drumKit)) return 'Unknown drum kit.';
+  if (Object.hasOwn(sound,'plugin')) { const problem=pluginSlotProblem((sound as {plugin?:unknown}).plugin); if (problem) return problem; }
   if (!sound.effects||typeof sound.effects!=='object') return 'Invalid sound.';
   if (!['gm','clean','crunch','lead','bass'].includes(sound.presetId)) return 'Invalid sound preset.';
   if (sound.voiceId!==null && !['gm','green-guitar','black-guitar','darkblack-bass','babyblue-bass'].includes(sound.voiceId)) return 'Unknown instrument voice.';

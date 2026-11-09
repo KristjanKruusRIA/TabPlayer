@@ -1,6 +1,7 @@
 pub mod audition;
 pub mod backing;
 pub mod cabinet_ir;
+pub mod compensation;
 pub mod decode;
 pub mod device;
 #[cfg(test)]
@@ -14,6 +15,7 @@ pub mod nam;
 pub mod nam_library;
 pub mod plan;
 pub mod playback;
+pub mod plugin_insert;
 pub mod practice;
 pub mod reference_sync;
 pub mod renderer;

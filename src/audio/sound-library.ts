@@ -87,12 +87,17 @@ function write(entries:SoundPresetEntry[],storage:PreferenceStorage|undefined):b
   return stored;
 }
 
+/** A saved sound is a tone: the plug-in slot names a document-local state asset, so it never goes into the library (as in `copySound`). */
+function withoutPlugin(sound:TrackSound):TrackSound {
+  const {plugin:_plugin,...rest}=sound;
+  return rest;
+}
 /** Saves a copy of `sound` under `name`, replacing a saved sound with the same name in any letter case. */
 export function saveSoundPreset(name:string,sound:TrackSound,storage:PreferenceStorage|undefined=browserStorage()):SoundLibraryResult {
   const trimmed=name.trim(),problem=nameProblem(trimmed)??soundProblem(sound);
   if(problem)return {ok:false,error:problem};
   const {entries,unusable}=readStored(storage),replaced=[...entries,...unusable].some(entry=>same(entry.name,trimmed));
-  const stored=write([...entries.filter(entry=>!same(entry.name,trimmed)),{name:trimmed,sound:structuredClone(completeSound(sound))}],storage);
+  const stored=write([...entries.filter(entry=>!same(entry.name,trimmed)),{name:trimmed,sound:withoutPlugin(structuredClone(completeSound(sound)))}],storage);
   return {ok:true,replaced,stored};
 }
 export function renameSoundPreset(from:string,to:string,storage:PreferenceStorage|undefined=browserStorage()):SoundLibraryResult {
@@ -116,7 +121,7 @@ const clipboardListeners=new Set<()=>void>();
 export const subscribeSoundClipboard=(listener:()=>void)=>{clipboardListeners.add(listener);return()=>{clipboardListeners.delete(listener);};};
 export const soundClipboard=()=>clipboard;
 const setClipboard=(next:typeof clipboard)=>{clipboard=next;clipboardListeners.forEach(listener=>listener());};
-export const copySound=(sound:TrackSound)=>setClipboard({...clipboard,sound:structuredClone(completeSound(sound))});
+export const copySound=(sound:TrackSound)=>{const completed=structuredClone(completeSound(sound));delete completed.plugin;setClipboard({...clipboard,sound:completed});};
 export const copiedSound=()=>clipboard.sound;
 export const copyPedal=<Block extends EffectBlock>(block:Block,settings:FxSettings[Block])=>setClipboard({...clipboard,pedal:{block,settings:structuredClone(settings)} as CopiedPedal});
 export const copiedPedal=()=>clipboard.pedal;

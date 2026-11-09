@@ -11,13 +11,16 @@ import { SoundLock } from './SoundLock';
 import { BusyFieldset, busyGuard } from '../ui';
 import { useI18n } from '../i18n';
 import { DrumKitPicker } from './DrumKitPicker';
+import { PluginSlotPanel } from './PluginSlotPanel';
+import { makePluginStateCandidate, type PluginStatus } from './plugin-host';
+import type { AssetCandidate } from '../project';
 import { useSoundEditing } from './useSoundEditing';
 import type { Board } from './useSoundEditing';
 import './sound-panel.css';
 
 export { soundPreset };
 /** The inspector's Sound task: every control as a field. The rig in `src/rig` shows the same sound as hardware; both share `useSoundEditing`. */
-export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false}:{trackId:string;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}) {
+export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false,documentId,status:pluginStatus,onAllowConsent,onRetrySlot}:{trackId:string;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand,asset?:AssetCandidate)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean;documentId?:string;status?:PluginStatus;onAllowConsent?:()=>void|Promise<unknown>;onRetrySlot?:()=>void|Promise<unknown>}) {
   const { lang, t } = useI18n();
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown,diagnostics:true});
   const {playbackState,current,devices,diagnostics,diagnosticsError,testToneMessage,testTone,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
@@ -39,7 +42,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
   /** One pedal's controls on `board`, at `index` in the track's chain. Names on the second board say so. */
   const pedal=(board:Board,block:EffectBlock,index:number)=>{
     const bName=localizedBlockName(block,lang);
-    return <details className="sound-block" key={block}><summary><span className="sound-block-name">{bName}</span><span className="sound-block-state">{board.effects[block].enabled?t('sound.enabled'):t('sound.bypassed')}</span></summary><BusyFieldset busy={busy}>
+    return <details className="sound-block" key={block}><summary><span className="sound-block-name">{bName}</span><span className="sound-block-state">{board.effects[block].enabled?t('sound.enabled'):t('sound.bypassed')}{!board.second&&current.plugin?.active&&(block==='drive'||block==='amp'||block==='cabinet')?`, ${t('plugin.replaced')}`:''}</span></summary><BusyFieldset busy={busy}>
       <label className="check"><input aria-label={board.name(t('sound.enable_block',{block:lang==='en'?block:bName}))} type="checkbox" checked={board.effects[block].enabled} onChange={e=>fx(board,block,'enabled',e.target.checked)}/>{t('sound.enabled')}</label>
       {!board.second&&<div className="sound-block-order"><button aria-label={board.name(t('sound.move_block_earlier',{block:bName}))} disabled={index===0} onClick={()=>move(block,-1)}>{t('sound.move_earlier')}</button><button aria-label={board.name(t('sound.move_block_later',{block:bName}))} disabled={index===order.length-1} onClick={()=>move(block,1)}>{t('sound.move_later')}</button></div>}
       {parameters[block].map(p=>{const pLabel=lang==='en'?p.label:localizedParamLabel(block,p.key,p.label,lang);return <label key={p.key}>{pLabel}<input aria-label={board.name(`${lang==='en'?block:bName} ${pLabel}`)} type="number" disabled={block==='wah'&&p.key===(board.effects.wah.mode==='auto'?'position':'sensitivity')||p.key==='rateHz'&&syncOf(board,block)!==0} min={p.min} max={p.max} step={p.step} value={Number((board.effects[block] as unknown as Record<string,unknown>)[p.key]??0)} onChange={e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=p.min&&value<=p.max)fx(board,block,p.key,value);}}/></label>;})}
@@ -82,7 +85,30 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
       <label>{t('sound.saved_sound_name')}<input aria-label={t('sound.saved_sound_name')} value={name} maxLength={60} onChange={e=>setName(e.target.value)}/></label>
       <div className="sound-library-actions"><button disabled={!name.trim()} onClick={editing.saveNamed}>{t('sound.save_sound')}</button><button disabled={!entry||!name.trim()} onClick={editing.renameChosen}>{t('sound.rename_saved_sound')}</button></div>
       <p role="status" className="muted">{status}</p>
-    </BusyFieldset><p className="sound-chain-label muted">{t('sound.signal_chain')}</p>
+    </BusyFieldset>
+    <PluginSlotPanel
+      trackId={trackId}
+      slot={current.plugin}
+      status={pluginStatus}
+      busy={busy}
+      documentId={documentId}
+      onChange={(nextSlot, assetToken) => {
+        const next = { ...current };
+        if (nextSlot) {
+          next.plugin = nextSlot;
+        } else {
+          delete next.plugin;
+        }
+        if (assetToken && nextSlot) {
+          void onEdit({ type: 'setTrackSound', trackId, sound: next }, makePluginStateCandidate(nextSlot.state, assetToken));
+        } else {
+          void editing.save(next);
+        }
+      }}
+      onAllow={onAllowConsent}
+      onRetry={onRetrySlot}
+    />
+    <p className="sound-chain-label muted">{t('sound.signal_chain')}</p>
     <div className="sound-chain" ref={chainRef}>{order.map((block,index)=>pedal(first,block,index))}</div>
     {second&&effectBlocks.some(block=>second.effects[block].enabled)&&<section className="sound-second-board" aria-label={t('sound.second_pedalboard')}><p className="sound-chain-label muted">{t('sound.second_pedalboard_desc')}</p><div className="sound-chain">{chainOrder(second.effects).filter(block=>second.effects[block].enabled).map((block,index)=>pedal(second,block,index))}</div></section>}
     {playback&&<BusyFieldset busy={busy} className="sound-output">

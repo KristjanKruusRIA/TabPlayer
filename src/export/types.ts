@@ -1,5 +1,6 @@
 import type { PrintLayout } from '../document-settings';
 import type { PageLayout } from '../engraving/types';
+import type { TrackPluginStatus } from '../audio/plugin-host';
 export type { PrintLayout } from '../document-settings';
 export interface ExportSelection { tracks:number[]; range:{first:number;last:number}|null;staves?:Record<number,number[]> }
 export interface SvgPage { svg:string; widthMm:number; heightMm:number }
@@ -33,4 +34,8 @@ export function validateSelection(trackCount:number,barCount:number,selection:Ex
   const r=selection.range;
   if(r && (![r.first,r.last].every(Number.isInteger)||r.first<0||r.last<r.first||r.last>=barCount)) throw new Error('Use an inclusive range of existing measures.');
   for(const [track,staves] of Object.entries(selection.staves??{})){const index=Number(track);if(!selection.tracks.includes(index)||!Array.isArray(staves)||!staves.length||new Set(staves).size!==staves.length||staves.some(n=>!Number.isInteger(n)||n<0||n>=(staffCounts[index]??0)))throw new Error('Select existing staves for each exported track.');}
+}
+
+export interface ExportInspection {
+  pluginWarnings?: TrackPluginStatus[];
 }

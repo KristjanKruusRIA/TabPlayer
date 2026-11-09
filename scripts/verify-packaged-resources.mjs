@@ -46,8 +46,12 @@ async function verifyLibraryInventory(root,allowed) {
 }
 
 /** Inspect extracted package bytes only. No process launch or network access. */
-export async function verifyPackage({packageRoot,referenceRoot=join(repository,'src-tauri/resources/audio'),cabinetRoot=join(repository,'src-tauri/resources/cabinet-irs'),sourceRoot=repository}) {
+export async function verifyPackage({packageRoot,referenceRoot=join(repository,'src-tauri/resources/audio'),cabinetRoot=join(repository,'src-tauri/resources/cabinet-irs'),sourceRoot=repository,checkPluginHost=process.platform==='win32'}) {
   const packageFiles=await files(packageRoot);
+  if(checkPluginHost) {
+    const hasHelper=packageFiles.some(path=>basename(path).toLowerCase()==='tabplayer-plugin-host.exe');
+    if(!hasHelper)throw new Error('Packaged plug-in host helper is missing (tabplayer-plugin-host.exe)');
+  }
   const manifests=packageFiles.filter(path=>basename(path)==='manifest.json'&&basename(dirname(path))==='audio');
   if(manifests.length!==1)throw new Error(`Expected one extracted audio manifest, found ${manifests.length}`);
   const audioRoot=dirname(manifests[0]);

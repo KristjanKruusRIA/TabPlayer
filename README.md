@@ -47,8 +47,8 @@ npm run tauri -- dev
 ```powershell
 npm test
 npm run typecheck
-cargo test --locked --manifest-path src-tauri/Cargo.toml
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml
+cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check
 node scripts/prepare-audio.mjs --offline
 ```
 

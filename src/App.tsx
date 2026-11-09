@@ -29,6 +29,9 @@ import { nativeMidiOut } from './audio/midi-out';
 import { readMidiOutDelay } from './audio/midi-out-preferences';
 import { CabinetNotices } from './audio/CabinetNotices';
 import { CaptureNotices } from './audio/CaptureNotices';
+import { PluginNotices } from './audio/PluginNotices';
+import { usePluginMoves, usePluginNotices, usePluginStatus } from './audio/usePluginStatus';
+import { onPluginStatus, onPluginEditorClosed, pluginConsentGrant, pluginNotices, pluginRetry, handlePluginEditorClosed } from './audio/plugin-host';
 import { AmpCapture } from './audio/AmpCapture';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
@@ -147,6 +150,27 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{controller.setBeforeChange(bars=>player?.beforeScoreChange(true,bars));return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
+  const pluginStatuses = usePluginStatus(state.documentId);
+  const pluginMoves = usePluginMoves(pluginStatuses);
+  const pluginNoticeList = usePluginNotices(state.documentId);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onPluginStatus(payload => {
+      if (payload.documentId === state.documentId) {
+        if (player && typeof player.refreshSounds === 'function') {
+          void player.refreshSounds().catch(() => {});
+        }
+      }
+    }).then(fn => { unlisten = fn; }, () => {});
+    return () => { unlisten?.(); };
+  }, [state.documentId, player]);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    onPluginEditorClosed(payload => {
+      handlePluginEditorClosed(payload, state.documentId, controller);
+    }).then(fn => { unlisten = fn; }, () => {});
+    return () => { unlisten?.(); };
+  }, [state.documentId, controller]);
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
   const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[contextScope,setContextScope]=useState<InspectorContextScope>('all'),[measureRequest,setMeasureRequest]=useState(0),[lyricsRequest,setLyricsRequest]=useState(0);
@@ -856,6 +880,15 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {passwordLocked&&<div className="finalized-banner" role="status"><p>Locked for editing: you can play and read this score, but changes need its password.</p><button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('unlock')})}>Unlock editing…</button></div>}
     <CabinetNotices sounds={state.settings.sounds} trackNames={trackNames}/>
     <CaptureNotices sounds={state.settings.sounds} trackNames={trackNames}/>
+    <PluginNotices
+      statuses={pluginStatuses}
+      moved={pluginMoves}
+      notices={pluginNoticeList}
+      onDismiss={pluginNotices.dismiss}
+      trackNames={trackNames}
+      onAllow={() => pluginConsentGrant(state.documentId)}
+      onRetry={retryTrackId => pluginRetry(state.documentId, retryTrackId)}
+    />
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
@@ -872,7 +905,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
         <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3><TrackSettingsPanel key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></section>
-        <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'}/>}</section>
+        <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}</section>
         <section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
         <section className="inspector-section" aria-labelledby="inspector-track-midi-out"><h3 id="inspector-track-midi-out">{t('inspector.midi_out')}</h3><MidiOutPanel key={trackId} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
       </div>
@@ -908,7 +941,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         </div>
       </section>
     </div>
-    {exportOpen&&<ExportDialog layoutLocked={editLocked} layoutLockedNote={finalized?undefined:'This score is locked for editing, so exports use its current layout.'} plainNote={state.snapshot.protection&&(state.snapshot.protection.open||state.snapshot.protection.edit!=='none')?'This score is password-protected, but its exports are not: they are plain files with no password, and a Guitar Pro file opened again in TabPlayer has no edit lock.':undefined} sounds={state.settings.sounds} trackNames={trackNames} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
+    {exportOpen&&<ExportDialog layoutLocked={editLocked} layoutLockedNote={finalized?undefined:'This score is locked for editing, so exports use its current layout.'} plainNote={state.snapshot.protection&&(state.snapshot.protection.open||state.snapshot.protection.edit!=='none')?'This score is password-protected, but its exports are not: they are plain files with no password, and a Guitar Pro file opened again in TabPlayer has no edit lock.':undefined} sounds={state.settings.sounds} trackNames={trackNames} pluginWarnings={pluginStatuses} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}

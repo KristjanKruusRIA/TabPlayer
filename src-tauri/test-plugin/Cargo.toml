@@ -1,0 +1,19 @@
+[package]
+name = "tabplayer-test-plugin"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+description = "A VST3 test plug-in for TabPlayer's plug-in hosting tests: a delayed gain with state, latency and fault modes."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pinned exactly: the plug-in is derived from this crate's `examples/gain.rs`, and its only dependency is `com-scrape-types`.
+vst3 = "=0.3.0"
+
+# The editor (Windows only) is a child window of the host's. Already in the lockfile through the app, so no new crate.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

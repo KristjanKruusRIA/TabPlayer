@@ -1,0 +1,623 @@
+{
+  "version": 1,
+  "note": "Read by src-tauri/tests/plugin_document.rs and src/document-settings.test.ts so the Rust and TypeScript plug-in slot rules cannot drift. Each case patches `base` (set, then remove) and says whether a slot must be accepted.",
+  "base": {
+    "format": "vst3",
+    "classId": "0123456789ABCDEF0123456789ABCDEF",
+    "name": "Amped ML5",
+    "vendor": "Amped Audio",
+    "active": true,
+    "inputDb": 0,
+    "outputDb": -3.5,
+    "state": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  },
+  "cases": [
+    {
+      "name": "base_slot",
+      "valid": true
+    },
+    {
+      "name": "empty_vendor",
+      "valid": true,
+      "set": {
+        "vendor": ""
+      }
+    },
+    {
+      "name": "trims_at_the_edges",
+      "valid": true,
+      "set": {
+        "inputDb": 12,
+        "outputDb": -12
+      }
+    },
+    {
+      "name": "inactive",
+      "valid": true,
+      "set": {
+        "active": false
+      }
+    },
+    {
+      "name": "name_ok_plain_with_inner_space",
+      "valid": true,
+      "set": {
+        "name": "A B"
+      }
+    },
+    {
+      "name": "name_ok_sixty_four_ascii",
+      "valid": true,
+      "set": {
+        "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "name_ok_sixty_four_accented",
+      "valid": true,
+      "set": {
+        "name": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9"
+      }
+    },
+    {
+      "name": "name_ok_astral_character",
+      "valid": true,
+      "set": {
+        "name": "\ud83c\udfb8 Amp"
+      }
+    },
+    {
+      "name": "name_ok_sixty_four_astral",
+      "valid": true,
+      "set": {
+        "name": "\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8"
+      }
+    },
+    {
+      "name": "name_ok_line_separator_u2028",
+      "valid": true,
+      "set": {
+        "name": "a\u2028b"
+      }
+    },
+    {
+      "name": "name_ok_zero_width_space",
+      "valid": true,
+      "set": {
+        "name": "a\u200bb"
+      }
+    },
+    {
+      "name": "name_ok_bom_middle",
+      "valid": true,
+      "set": {
+        "name": "bo\ufeffm"
+      }
+    },
+    {
+      "name": "name_ok_replacement_character",
+      "valid": true,
+      "set": {
+        "name": "a\ufffdb"
+      }
+    },
+    {
+      "name": "name_bad_empty",
+      "valid": false,
+      "set": {
+        "name": ""
+      }
+    },
+    {
+      "name": "name_bad_sixty_five_ascii",
+      "valid": false,
+      "set": {
+        "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "name_bad_sixty_five_astral",
+      "valid": false,
+      "set": {
+        "name": "\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8"
+      }
+    },
+    {
+      "name": "name_bad_leading_space",
+      "valid": false,
+      "set": {
+        "name": " padded"
+      }
+    },
+    {
+      "name": "name_bad_trailing_space",
+      "valid": false,
+      "set": {
+        "name": "padded "
+      }
+    },
+    {
+      "name": "name_bad_leading_nbsp",
+      "valid": false,
+      "set": {
+        "name": "\u00a0x"
+      }
+    },
+    {
+      "name": "name_bad_trailing_nbsp",
+      "valid": false,
+      "set": {
+        "name": "x\u00a0"
+      }
+    },
+    {
+      "name": "name_bad_trailing_ideographic_space",
+      "valid": false,
+      "set": {
+        "name": "x\u3000"
+      }
+    },
+    {
+      "name": "name_bad_trailing_u2028",
+      "valid": false,
+      "set": {
+        "name": "x\u2028"
+      }
+    },
+    {
+      "name": "name_bad_tab",
+      "valid": false,
+      "set": {
+        "name": "tab\there"
+      }
+    },
+    {
+      "name": "name_bad_line_feed",
+      "valid": false,
+      "set": {
+        "name": "line\nbreak"
+      }
+    },
+    {
+      "name": "name_bad_carriage_return",
+      "valid": false,
+      "set": {
+        "name": "carriage\rreturn"
+      }
+    },
+    {
+      "name": "name_bad_bell",
+      "valid": false,
+      "set": {
+        "name": "bell\u0007"
+      }
+    },
+    {
+      "name": "name_bad_nul",
+      "valid": false,
+      "set": {
+        "name": "nul\u0000"
+      }
+    },
+    {
+      "name": "name_bad_del",
+      "valid": false,
+      "set": {
+        "name": "del\u007f"
+      }
+    },
+    {
+      "name": "name_bad_c1_start",
+      "valid": false,
+      "set": {
+        "name": "c1\u0080x"
+      }
+    },
+    {
+      "name": "name_bad_c1_end",
+      "valid": false,
+      "set": {
+        "name": "c1\u009fx"
+      }
+    },
+    {
+      "name": "name_bad_u0085_middle",
+      "valid": false,
+      "set": {
+        "name": "c1\u0085middle"
+      }
+    },
+    {
+      "name": "name_bad_u0085_tail",
+      "valid": false,
+      "set": {
+        "name": "tail\u0085"
+      }
+    },
+    {
+      "name": "name_bad_u0085_head",
+      "valid": false,
+      "set": {
+        "name": "\u0085head"
+      }
+    },
+    {
+      "name": "name_bad_bom_head",
+      "valid": false,
+      "set": {
+        "name": "\ufeffbom"
+      }
+    },
+    {
+      "name": "name_bad_bom_tail",
+      "valid": false,
+      "set": {
+        "name": "bom\ufeff"
+      }
+    },
+    {
+      "name": "name_bad_noncharacter_fffe",
+      "valid": false,
+      "set": {
+        "name": "bad\ufffe"
+      }
+    },
+    {
+      "name": "name_bad_noncharacter_ffff",
+      "valid": false,
+      "set": {
+        "name": "bad\uffff"
+      }
+    },
+    {
+      "name": "name_bad_bidi_override",
+      "valid": false,
+      "set": {
+        "name": "rtl\u202eoverride"
+      }
+    },
+    {
+      "name": "name_bad_bidi_embedding",
+      "valid": false,
+      "set": {
+        "name": "x\u202ay"
+      }
+    },
+    {
+      "name": "name_bad_bidi_pop",
+      "valid": false,
+      "set": {
+        "name": "x\u202cy"
+      }
+    },
+    {
+      "name": "name_bad_bidi_lrm",
+      "valid": false,
+      "set": {
+        "name": "mark\u200e"
+      }
+    },
+    {
+      "name": "name_bad_bidi_rlm",
+      "valid": false,
+      "set": {
+        "name": "mark\u200f"
+      }
+    },
+    {
+      "name": "name_bad_bidi_alm",
+      "valid": false,
+      "set": {
+        "name": "mark\u061cx"
+      }
+    },
+    {
+      "name": "name_bad_bidi_isolate",
+      "valid": false,
+      "set": {
+        "name": "isolate\u2066x"
+      }
+    },
+    {
+      "name": "name_bad_bidi_isolate_pop",
+      "valid": false,
+      "set": {
+        "name": "x\u2069y"
+      }
+    },
+    {
+      "name": "vendor_ok_sixty_four",
+      "valid": true,
+      "set": {
+        "vendor": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+      }
+    },
+    {
+      "name": "vendor_ok_accented",
+      "valid": true,
+      "set": {
+        "vendor": "\u00e9"
+      }
+    },
+    {
+      "name": "vendor_ok_sixty_four_astral",
+      "valid": true,
+      "set": {
+        "vendor": "\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8\ud83c\udfb8"
+      }
+    },
+    {
+      "name": "vendor_bad_sixty_five",
+      "valid": false,
+      "set": {
+        "vendor": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+      }
+    },
+    {
+      "name": "vendor_bad_leading_space",
+      "valid": false,
+      "set": {
+        "vendor": " v"
+      }
+    },
+    {
+      "name": "vendor_bad_trailing_space",
+      "valid": false,
+      "set": {
+        "vendor": "v "
+      }
+    },
+    {
+      "name": "vendor_bad_tab",
+      "valid": false,
+      "set": {
+        "vendor": "a\tb"
+      }
+    },
+    {
+      "name": "vendor_bad_bidi",
+      "valid": false,
+      "set": {
+        "vendor": "a\u202eb"
+      }
+    },
+    {
+      "name": "vendor_bad_bom",
+      "valid": false,
+      "set": {
+        "vendor": "\ufeffv"
+      }
+    },
+    {
+      "name": "vendor_bad_u0085",
+      "valid": false,
+      "set": {
+        "vendor": "v\u0085"
+      }
+    },
+    {
+      "name": "class_id_bad_lowercase",
+      "valid": false,
+      "set": {
+        "classId": "0123456789abcdef0123456789abcdef"
+      }
+    },
+    {
+      "name": "class_id_bad_short",
+      "valid": false,
+      "set": {
+        "classId": "0123456789ABCDEF0123456789ABCDE"
+      }
+    },
+    {
+      "name": "class_id_bad_long",
+      "valid": false,
+      "set": {
+        "classId": "0123456789ABCDEF0123456789ABCDEF0"
+      }
+    },
+    {
+      "name": "class_id_bad_non_hex",
+      "valid": false,
+      "set": {
+        "classId": "0123456789ABCDEF0123456789ABCDEG"
+      }
+    },
+    {
+      "name": "class_id_bad_accented_last",
+      "valid": false,
+      "set": {
+        "classId": "0123456789ABCDEF0123456789ABCDE\u00e9"
+      }
+    },
+    {
+      "name": "class_id_bad_trailing_newline",
+      "valid": false,
+      "set": {
+        "classId": "0123456789ABCDEF0123456789ABCDE\n"
+      }
+    },
+    {
+      "name": "class_id_bad_empty",
+      "valid": false,
+      "set": {
+        "classId": ""
+      }
+    },
+    {
+      "name": "state_bad_uppercase",
+      "valid": false,
+      "set": {
+        "state": "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"
+      }
+    },
+    {
+      "name": "state_bad_short",
+      "valid": false,
+      "set": {
+        "state": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde"
+      }
+    },
+    {
+      "name": "state_bad_long",
+      "valid": false,
+      "set": {
+        "state": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"
+      }
+    },
+    {
+      "name": "state_bad_non_hex",
+      "valid": false,
+      "set": {
+        "state": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg"
+      }
+    },
+    {
+      "name": "state_bad_empty",
+      "valid": false,
+      "set": {
+        "state": ""
+      }
+    },
+    {
+      "name": "state_bad_trailing_newline",
+      "valid": false,
+      "set": {
+        "state": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde\n"
+      }
+    },
+    {
+      "name": "trim_bad_input_over",
+      "valid": false,
+      "set": {
+        "inputDb": 12.5
+      }
+    },
+    {
+      "name": "trim_bad_input_under",
+      "valid": false,
+      "set": {
+        "inputDb": -12.0001
+      }
+    },
+    {
+      "name": "trim_bad_output_over",
+      "valid": false,
+      "set": {
+        "outputDb": 12.0001
+      }
+    },
+    {
+      "name": "trim_bad_output_under",
+      "valid": false,
+      "set": {
+        "outputDb": -13
+      }
+    },
+    {
+      "name": "trim_bad_input_string",
+      "valid": false,
+      "set": {
+        "inputDb": "1"
+      }
+    },
+    {
+      "name": "trim_bad_input_null",
+      "valid": false,
+      "set": {
+        "inputDb": null
+      }
+    },
+    {
+      "name": "trim_bad_output_bool",
+      "valid": false,
+      "set": {
+        "outputDb": true
+      }
+    },
+    {
+      "name": "format_clap",
+      "valid": false,
+      "set": {
+        "format": "clap"
+      }
+    },
+    {
+      "name": "format_uppercase",
+      "valid": false,
+      "set": {
+        "format": "VST3"
+      }
+    },
+    {
+      "name": "active_string",
+      "valid": false,
+      "set": {
+        "active": "yes"
+      }
+    },
+    {
+      "name": "unknown_key",
+      "valid": false,
+      "set": {
+        "extra": 1
+      }
+    },
+    {
+      "name": "missing_format",
+      "valid": false,
+      "remove": [
+        "format"
+      ]
+    },
+    {
+      "name": "missing_classId",
+      "valid": false,
+      "remove": [
+        "classId"
+      ]
+    },
+    {
+      "name": "missing_name",
+      "valid": false,
+      "remove": [
+        "name"
+      ]
+    },
+    {
+      "name": "missing_vendor",
+      "valid": false,
+      "remove": [
+        "vendor"
+      ]
+    },
+    {
+      "name": "missing_active",
+      "valid": false,
+      "remove": [
+        "active"
+      ]
+    },
+    {
+      "name": "missing_inputDb",
+      "valid": false,
+      "remove": [
+        "inputDb"
+      ]
+    },
+    {
+      "name": "missing_outputDb",
+      "valid": false,
+      "remove": [
+        "outputDb"
+      ]
+    },
+    {
+      "name": "missing_state",
+      "valid": false,
+      "remove": [
+        "state"
+      ]
+    }
+  ]
+}

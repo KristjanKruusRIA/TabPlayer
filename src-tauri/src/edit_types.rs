@@ -1488,11 +1488,21 @@ impl StaffSettings {
     }
 }
 impl EditCommand {
+    /// The asset this edit needs the project to hold: a backing track's audio, or a plug-in slot's saved state.
     pub fn asset_id(&self) -> Option<&str> {
         match self {
             Self::SetBacking {
                 backing: Some(backing),
             } => Some(&backing.asset_id),
+            _ => self.plugin_state_id(),
+        }
+    }
+    /// The state asset of the plug-in slot this edit sets, if it sets one.
+    pub fn plugin_state_id(&self) -> Option<&str> {
+        match self {
+            Self::SetTrackSound { sound, .. } => {
+                sound.plugin.as_ref().map(|plugin| plugin.state.as_str())
+            }
             _ => None,
         }
     }

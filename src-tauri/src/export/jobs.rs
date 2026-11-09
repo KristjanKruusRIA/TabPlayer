@@ -19,6 +19,8 @@ pub struct ExportProgress {
     pub total_frames: u64,
     pub status: JobStatus,
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<crate::plugins::service::TrackPluginStatus>,
 }
 struct Job {
     document_id: String,
@@ -54,6 +56,7 @@ impl ExportJobs {
                 total_frames,
                 status: JobStatus::Running,
                 error: None,
+                warnings: Vec::new(),
             },
             cancel: cancel.clone(),
         });
@@ -109,6 +112,13 @@ impl JobHandle {
                 .filter(|j| j.progress.id == self.id && j.progress.status == JobStatus::Running)
             {
                 job.progress.frames = frames;
+            }
+        }
+    }
+    pub fn warnings(&self, warnings: Vec<crate::plugins::service::TrackPluginStatus>) {
+        if let Ok(mut slot) = self.jobs.current.lock() {
+            if let Some(job) = slot.as_mut().filter(|j| j.progress.id == self.id) {
+                job.progress.warnings = warnings;
             }
         }
     }

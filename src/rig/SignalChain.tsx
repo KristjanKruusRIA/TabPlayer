@@ -62,8 +62,9 @@ export function SignalChain({editing,selected,onSelect,disabled}:{editing:SoundE
   const item=(entry:Entry)=>{
     const {ref,board}=entry,{block}=ref,key=keyOf(ref),on=board.effects[block].enabled,look=blockLook[block],name=board.name(blockNames[block]);
     const dragging=drag?.moved&&!ref.second&&drag.block===block,target=drag?.moved&&!ref.second&&drag.over===entry.index&&drag.block!==block;
-    return <div key={key} className="rig-chain-item" role="presentation" data-selected={sameRef(ref,selected)||undefined} data-on={on} data-dragging={dragging||undefined} data-drop={target||undefined} style={{'--pedal':look.color,transform:dragging?`translateX(${drag!.dx}px)`:undefined} as React.CSSProperties}>
-      <button ref={el=>{if(el)buttons.current.set(key,el);else buttons.current.delete(key);}} type="button" role="tab" className="rig-chain-tab" aria-selected={sameRef(ref,selected)} aria-label={`${name}, ${on?t('rig.enabled'):t('rig.bypassed')}`} tabIndex={key===stop?0:-1}
+    const replaced=!ref.second&&Boolean(editing.current.plugin?.active)&&(block==='drive'||block==='amp'||block==='cabinet');
+    return <div key={key} className="rig-chain-item" role="presentation" data-selected={sameRef(ref,selected)||undefined} data-on={on} data-replaced={replaced||undefined} data-dragging={dragging||undefined} data-drop={target||undefined} style={{'--pedal':look.color,transform:dragging?`translateX(${drag!.dx}px)`:undefined} as React.CSSProperties}>
+      <button ref={el=>{if(el)buttons.current.set(key,el);else buttons.current.delete(key);}} type="button" role="tab" className="rig-chain-tab" aria-selected={sameRef(ref,selected)} aria-label={`${name}, ${on?t('rig.enabled'):t('rig.bypassed')}${replaced?`, ${t('plugin.replaced')}`:''}`} tabIndex={key===stop?0:-1}
         onFocus={()=>setRover(key)}
         onClick={()=>{if(swallowClick.current)return;onSelect(ref);}}
         onPointerDown={event=>down(event,entry)} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel}

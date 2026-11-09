@@ -216,6 +216,7 @@ pub struct DocumentWorkspace {
     locked_intakes: Vec<LockedIntake>,
     checkpoint_revision: u64,
     frozen: bool,
+    plugins: Option<Arc<crate::plugins::service::PluginService>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -402,7 +403,17 @@ impl DocumentWorkspace {
             locked_intakes: Vec::new(),
             checkpoint_revision: 0,
             frozen: false,
+            plugins: None,
         })
+    }
+
+    pub fn set_plugins(&mut self, plugins: Arc<crate::plugins::service::PluginService>) {
+        self.plugins = Some(plugins);
+    }
+
+    pub fn plugin_pairs(&self, id: &str) -> Result<Vec<(String, String)>, String> {
+        let entry = self.entry(id)?;
+        Ok(entry.session.plugin_pairs())
     }
 
     pub fn snapshot(&self) -> WorkspaceSnapshot {
@@ -667,6 +678,12 @@ impl DocumentWorkspace {
         }
         self.probe_document_id(&mut entry);
         entry.saved_file_sha256 = saved_file_sha256;
+        // The document left behind ends its helpers, as an activation does (final review M1).
+        if self.active.document_id != entry.id {
+            if let Some(plugins) = &self.plugins {
+                plugins.shutdown_document(&self.active.document_id);
+            }
+        }
         self.active = AudioOwner {
             document_id: entry.id.clone(),
             activation_id: identity("activation"),
@@ -680,6 +697,9 @@ impl DocumentWorkspace {
         self.check_admission()?;
         self.entry(id)?;
         if self.active.document_id != id {
+            if let Some(plugins) = &self.plugins {
+                plugins.shutdown_document(&self.active.document_id);
+            }
             let revision = self.next_checkpoint_revision()?;
             self.active = AudioOwner {
                 document_id: id.into(),
@@ -750,6 +770,11 @@ impl DocumentWorkspace {
     }
 
     pub(crate) fn commit_close(&mut self, prepared: PreparedClose) -> WorkspaceSnapshot {
+        for id in &prepared.closing {
+            if let Some(plugins) = &self.plugins {
+                plugins.shutdown_document(id);
+            }
+        }
         self.documents
             .retain(|entry| !prepared.closing.contains(&entry.id));
         if let Some(replacement) = prepared.replacement {
@@ -916,6 +941,13 @@ impl DocumentWorkspace {
         Ok(snapshot)
     }
 
+    /// How many staged assets of the document wait for an edit.
+    #[cfg(test)]
+    pub(crate) fn staged_asset_count(&self, id: &str) -> usize {
+        self.entry(id)
+            .map_or(0, |entry| entry.candidates.staged_asset_count())
+    }
+
     pub fn stage_asset(&mut self, id: &str, asset: StoredAsset) -> Result<StagedAsset, String> {
         let entry = self.entry_mut(id)?;
         if entry.session.lock().is_some() {
@@ -946,6 +978,32 @@ impl DocumentWorkspace {
 
     pub fn asset_bytes(&self, id: &str, asset_id: &str) -> Result<Vec<u8>, String> {
         self.entry(id)?.session.asset_bytes(asset_id)
+    }
+
+    pub fn is_edit_locked(&self, id: &str) -> Result<bool, String> {
+        let entry = self.entry(id)?;
+        Ok(entry.session.lock().is_some() || entry.session.edit_locked())
+    }
+
+    /// The slot of the track's last `SetTrackSound`. It does not replay the settings (a duplicated track's slot comes
+    /// from `DuplicateTrack`, which this does not see). The plug-in service uses it only to see whether an editor save,
+    /// which is itself a `SetTrackSound` on the track, was committed; tests read it too.
+    pub fn track_plugin_slot(
+        &self,
+        id: &str,
+        track_id: &str,
+    ) -> Result<Option<crate::settings::PluginSlot>, String> {
+        let entry = self.entry(id)?;
+        Ok(entry.session.track_plugin_slot(track_id))
+    }
+
+    pub fn check_plugin_state(
+        &self,
+        id: &str,
+        state_id: &str,
+        asset: &StoredAsset,
+    ) -> Result<(), String> {
+        self.entry(id)?.session.check_plugin_state(state_id, asset)
     }
 
     pub(crate) fn capture_export_backing(

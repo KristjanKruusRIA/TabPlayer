@@ -85,3 +85,24 @@ it('matches the catalog the native tests play',()=>{
   if(process.env.UPDATE_FACTORY_SOUNDS)writeFileSync(file,`[\n${catalog.map(entry=>JSON.stringify(entry)).join(',\n')}\n]\n`);
   expect(JSON.parse(readFileSync(file,'utf8'))).toEqual(catalog);
 });
+
+it('applies a factory sound keeping the track plug-in',async()=>{
+  const onEdit=vi.fn();
+  const plug={format:'vst3' as const,classId:'A'.repeat(32),name:'Amp',vendor:'Vendor',active:true,inputDb:0,outputDb:0,state:'s'.repeat(64)};
+  const soundWithPlugin={...soundPreset('clean','black-guitar'),plugin:plug};
+  render(<SoundPanel trackId="base/0" sound={soundWithPlugin} onEdit={onEdit}/>);
+  const select=screen.getByLabelText('Factory sound');
+  fireEvent.change(select,{target:{value:'metal-rhythm'}});
+  await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Apply factory sound'}));});
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit.mock.calls[0][0].sound.plugin).toEqual(plug);
+});
+
+it('marks Drive, Amp and Cabinet as replaced in the inspector chain when the plug-in is active',()=>{
+  const plug={format:'vst3' as const,classId:'A'.repeat(32),name:'Amp',vendor:'Vendor',active:true,inputDb:0,outputDb:0,state:'s'.repeat(64)};
+  const {container,rerender}=render(<SoundPanel trackId="base/0" sound={{...soundPreset('clean','black-guitar'),plugin:plug}} onEdit={vi.fn()}/>);
+  const states=(root:HTMLElement)=>[...root.querySelectorAll('.sound-chain>details.sound-block')].filter(block=>/Replaced/.test(block.querySelector('summary')!.textContent??'')).map(block=>block.querySelector('.sound-block-name')!.textContent);
+  expect(states(container).sort()).toEqual(['Amp','Cabinet','Drive']);
+  rerender(<SoundPanel trackId="base/0" sound={{...soundPreset('clean','black-guitar'),plugin:{...plug,active:false}}} onEdit={vi.fn()}/>);
+  expect(states(container)).toEqual([]);
+});

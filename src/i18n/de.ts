@@ -788,7 +788,7 @@ export const de: MessageCatalog = {
   'editor.select_music_to_copy': 'Wählen Sie Musik zum Kopieren oder Ausschneiden aus.',
   'editor.clipboard_multi_hint': 'Mehrspuriges Kopieren erweitert sich auf vollständige Takte und alle Systeme und Stimmen der ausgewählten Spuren.',
   'editor.clipboard_multi_cut_hint': 'Ausschneiden entfernt diese Takte von jeder Spur, einschließlich nicht ausgewählter Spuren.',
-  'editor.clipboard_single_hint': 'Einzelspur-Phrasen erfordern eine Stimmenspur. Vollständige Takte umfassen alle Systeme und Stimmen dieser Spur.',
+  'editor.clipboard_single_hint': 'Einzelspur-Phrasen erfordern ein einzelnes Notensystem. Vollständige Takte umfassen alle Systeme und Stimmen dieser Spur.',
   'editor.copy_music': 'Musik kopieren',
   'editor.cut_music': 'Musik ausschneiden',
   'editor.paste_context_hint': 'Phrasen überschreiben klingende Noten oder füllen Pausen in einer Stimme. Vollständige Takte werden global eingefügt; andere Spuren erhalten leere Takte. Nicht unterstützte musikalische Kontexte werden vor der Bearbeitung abgewiesen.',

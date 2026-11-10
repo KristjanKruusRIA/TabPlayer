@@ -4187,7 +4187,7 @@
       "historical_status": "missing",
       "current_status": "partial",
       "current_behavior": "Half-open tick ranges, indexed multi-note sets and whole-bar multi-track selections support reverse/drag/keyboard selection and transactional edits across lanes.",
-      "remaining_gap": "Selection resolves attacks and authored boundaries; arbitrary sustained-beat subdivision and partial multi-voice slicing are not implemented.",
+      "remaining_gap": "Selection resolves attacks and authored boundaries; arbitrary sustained-beat subdivision is not implemented.",
       "current_evidence": [
         "range",
         "range_validation",
@@ -4381,8 +4381,8 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Single-track one-voice phrases and whole-bar all-voice copy/cut/paste are self-contained across New/Open, with destination context, undo and restart replay.",
-      "remaining_gap": "Partial multi-voice slicing and beat subdivision remain open.",
+      "current_behavior": "Single-track phrases (supporting up to 4 simultaneous voices) and whole-bar all-voice copy/cut/paste are self-contained across New/Open, with destination context, sounding overwrite, undo and restart replay.",
+      "remaining_gap": "Beat subdivision remains open.",
       "current_evidence": [
         "clipboard",
         "clipboard_validation",

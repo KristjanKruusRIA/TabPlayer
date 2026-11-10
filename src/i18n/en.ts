@@ -786,7 +786,7 @@ export const en = {
   'editor.select_music_to_copy': 'Select music to copy or cut.',
   'editor.clipboard_multi_hint': 'Multitrack copy expands to complete measures and all staves and voices of the selected tracks.',
   'editor.clipboard_multi_cut_hint': 'Cut removes these measures from every track, including unselected tracks.',
-  'editor.clipboard_single_hint': 'Single-track phrases require one voice lane. Complete bars include all staves and voices of that track.',
+  'editor.clipboard_single_hint': 'Single-track phrases require a single staff. Complete bars include all staves and voices of that track.',
   'editor.copy_music': 'Copy music',
   'editor.cut_music': 'Cut music',
   'editor.paste_context_hint': 'Phrases overwrite sounding notes or fill rests in one voice. Complete bars insert globally; other tracks receive empty bars. Unsupported musical contexts are rejected before editing.',

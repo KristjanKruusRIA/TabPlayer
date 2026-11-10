@@ -788,7 +788,7 @@ export const et: MessageCatalog = {
   'editor.select_music_to_copy': 'Vali muusika kopeerimiseks või lõikamiseks.',
   'editor.clipboard_multi_hint': 'Mitmikraja kopeerimine laieneb valitud radade tervetele taktidele ning kõigile noodiridadele ja häältele.',
   'editor.clipboard_multi_cut_hint': 'Lõikamine eemaldab need taktid igalt rajalt, sealhulgas valimata radadelt.',
-  'editor.clipboard_single_hint': 'Ühe raja fraasid vajavad ühte häälerada. Terved taktid hõlmavad selle raja kõiki noodiridu ja hääli.',
+  'editor.clipboard_single_hint': 'Ühe raja fraasid vajavad ühte noodirida. Terved taktid hõlmavad selle raja kõiki noodiridu ja hääli.',
   'editor.copy_music': 'Kopeeri muusika',
   'editor.cut_music': 'Lõika muusika',
   'editor.paste_context_hint': 'Fraasid kirjutavad helisevad noodid üle või täidavad pause ühes hääles. Terved taktid lisatakse globaalselt; teistele radadele lisanduvad tühjad taktid. Toetamata muusikalised kontekstid lükatakse enne muutmist tagasi.',

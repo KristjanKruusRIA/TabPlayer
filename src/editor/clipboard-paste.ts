@@ -165,7 +165,7 @@ function pasteBars(score:model.Score,clip:MusicClip,source:model.Score,command:C
   relink(score);restoreNoteLinks(score,links);validateLinks(score,retainedLinks,false);validateLinks(score,pastedLinks);restoreSuffix(score,target.bar+total,state,changed,pedals,changedTempo);guardMixedProgramLanes(score,[...barMap.inserted,...score.masterBars[target.bar+total]?[target.bar+total]:[]],changed);return {score,barMap};
 }
 
-type Placement={beat:model.Beat;source:model.Staff;bar:number;tick:number;length:number;repeat:number};
+type Placement={beat:model.Beat;source:model.Staff;bar:number;voice:number;tick:number;length:number;repeat:number};
 type PhraseEvents={mix:Array<{tick:number;value:model.Automation}>;pedals:Array<{tick:number;value:model.SustainPedalMarker}>};
 function phraseEvents(score:model.Score):PhraseEvents {
   const mix:PhraseEvents['mix']=[],pedals:PhraseEvents['pedals']=[],staff=score.tracks[0].staves[0],points=trackMixAutomations(score.tracks[0]);let offset=0;
@@ -198,6 +198,8 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
   const {target,count,filters}=command.options,staff=score.tracks[target.track].staves[target.staff],firstVoice=staff.bars[target.bar].voices[target.voice];
   if(target.beat>=firstVoice.beats.length)throw new Error('Choose an existing destination track, staff, measure, voice and beat.');
   if(score.masterBars[target.bar].isFreeTime)throw new Error('Free-time phrase placement is not supported.');
+  const voicesCount=source.tracks[0].staves[0].bars[0].voices.length;
+  for(let v=0;v<voicesCount;v++){if(!staff.bars[target.bar].voices[target.voice+v])throw new Error('The destination must already contain every copied voice.');}
   const allocate=reserveIds(score),links=captureNoteLinks(score),retainedLinks=protectedLinks(score,links),pastedLinks:NoteLinks=[],parts:model.Score[]=[],events:PhraseEvents[]=[],placements:Placement[]=[],changes=new Map<number,Set<model.AutomationType>>(),pedals=new Set<model.Staff>(),affected=new Set<number>();
   let bar=target.bar,tick=firstVoice.beats.slice(0,target.beat).reduce((sum,beat)=>sum+rhythmTicks(beat),0),insertAt:number|null=null,insertCount=0;
   const inherited=(index:number)=>score.masterBars[Math.max(0,Math.min(index-1,score.masterBars.length-1))];
@@ -205,74 +207,120 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
   const nextBar=()=>{
     bar++;tick=0;
     if(insertAt!==null){insertCount++;if(insertCount>1000)throw new Error('Paste at most 1000 inserted measures.');return;}
-    const voice=staff.bars[bar]?.voices[target.voice];
-    if(!voice&&bar<score.masterBars.length)throw new Error('The destination must already contain the phrase voice in every reused measure.');
-    if(!voice||voice.beats.some(beat=>beat.notes.length)){insertAt=bar;insertCount=1;}
-    else if(score.masterBars[bar].isFreeTime)throw new Error('Free-time phrase placement is not supported.');
+    for(let v=0;v<voicesCount;v++){
+      const voice=staff.bars[bar]?.voices[target.voice+v];
+      if(!voice&&bar<score.masterBars.length)throw new Error('The destination must already contain every copied voice.');
+      if(!voice||voice.beats.some(beat=>beat.notes.length)){insertAt=bar;insertCount=1;break;}
+      else if(score.masterBars[bar].isFreeTime)throw new Error('Free-time phrase placement is not supported.');
+    }
   };
   for(let repeat=0;repeat<count;repeat++){
-    const part=repeat===0?source:decode(clip);events.push(phraseEvents(part));materializePhraseRests(part);parts.push(part);const newLinks=allocate(part);links.push(...newLinks);pastedLinks.push(...newLinks);const from=part.tracks[0].staves[0];let pending:model.Beat[]=[];
-    for(const measure of from.bars)for(const beat of measure.voices[0].beats){const length=rhythmTicks(beat,measure.masterBar.calculateDuration(false));if(length===0){pending.push(beat);continue;}
-      if(length>master().calculateDuration(false))throw new Error('A copied beat is longer than the complete destination measure.');
-      if(tick+length>master().calculateDuration(false)){restBeats(master().calculateDuration(false)-tick);nextBar();if(length>master().calculateDuration(false))throw new Error('A copied beat is longer than the complete destination measure.');}
-      for(const grace of pending)placements.push({beat:grace,source:from,bar,tick,length:0,repeat});pending=[];placements.push({beat,source:from,bar,tick,length,repeat});affected.add(bar);tick+=length;
+    const part=repeat===0?source:decode(clip);events.push(phraseEvents(part));materializePhraseRests(part);parts.push(part);const newLinks=allocate(part);links.push(...newLinks);pastedLinks.push(...newLinks);const from=part.tracks[0].staves[0];
+    if(voicesCount===1){
+      let pending:model.Beat[]=[];
+      for(const measure of from.bars)for(const beat of measure.voices[0].beats){
+        const length=rhythmTicks(beat,measure.masterBar.calculateDuration(false));if(length===0){pending.push(beat);continue;}
+        if(length>master().calculateDuration(false))throw new Error('A copied beat is longer than the complete destination measure.');
+        if(tick+length>master().calculateDuration(false)){restBeats(master().calculateDuration(false)-tick);nextBar();if(length>master().calculateDuration(false))throw new Error('A copied beat is longer than the complete destination measure.');}
+        for(const grace of pending)placements.push({beat:grace,source:from,bar,voice:target.voice,tick,length:0,repeat});pending=[];placements.push({beat,source:from,bar,voice:target.voice,tick,length,repeat});affected.add(bar);tick+=length;
+      }
+      if(pending.length)throw new Error('A phrase must include the attack belonging to its trailing grace group.');
+    }else{
+      for(const measure of from.bars){
+        const measureDuration=measure.voices[0].beats.reduce((sum,beat)=>sum+rhythmTicks(beat,measure.masterBar.calculateDuration(false)),0);
+        if(measureDuration===0)continue;
+        if(measureDuration>master().calculateDuration(false))throw new Error('A copied beat is longer than the complete destination measure.');
+        if(tick+measureDuration>master().calculateDuration(false)){restBeats(master().calculateDuration(false)-tick);nextBar();if(measureDuration>master().calculateDuration(false))throw new Error('A copied beat is longer than the complete destination measure.');}
+        for(let v=0;v<measure.voices.length;v++){
+          const destVoice=target.voice+v;
+          let vTick=tick,pending:model.Beat[]=[];
+          for(const beat of measure.voices[v].beats){
+            const length=rhythmTicks(beat,measure.masterBar.calculateDuration(false));
+            if(length===0){pending.push(beat);continue;}
+            for(const grace of pending)placements.push({beat:grace,source:from,bar,voice:destVoice,tick:vTick,length:0,repeat});
+            pending=[];
+            placements.push({beat,source:from,bar,voice:destVoice,tick:vTick,length,repeat});
+            vTick+=length;
+          }
+          if(pending.length)throw new Error('A phrase must include the attack belonging to its trailing grace group.');
+        }
+        affected.add(bar);
+        tick+=measureDuration;
+      }
     }
-    if(pending.length)throw new Error('A phrase must include the attack belonging to its trailing grace group.');
   }
   if(!placements.length)throw new Error('Choose a phrase with a complete written rhythm.');restBeats(master().calculateDuration(false)-tick);
   const midBar=insertAt===null&&tick<master().calculateDuration(false),suffixOld=insertAt??(midBar?bar:bar+1),suffixTick=midBar?tick:0,state=stateAt(score,suffixOld,mappings,suffixTick),barMap=insertAt===null?identity(score):insert(score,insertAt,insertCount),suffix=insertAt===null?suffixOld:insertAt+insertCount;
-  const removedMix=new Set([...affected].flatMap(index=>staff.bars[index].voices[target.voice].beats.flatMap(beat=>beat.automations.filter(isGpMixAutomation))));
+  const targetVoiceIndices=[...new Set(placements.map(p=>p.voice))];
+  const removedMix=new Set([...affected].flatMap(index=>targetVoiceIndices.flatMap(v=>staff.bars[index].voices[v]?.beats.flatMap(beat=>beat.automations.filter(isGpMixAutomation))??[])));
   const chordMaps=parts.map((part,repeat)=>filters.diagrams?installChords(part.tracks[0].staves[0],staff,repeat):new Map<string,string>()),existingMix=trackMixAutomations(score.tracks[target.track]).filter(point=>affected.has(point.bar)&&removedMix.has(point.automation));
-  const metadata=new Map<number,Array<{tick:number;beat:model.Beat}>>();
-  for(const index of affected){const voice=staff.bars[index].voices[target.voice];if(!voice)throw new Error('The destination must already contain the phrase voice in each reused measure.');let onset=0;const retained:Array<{tick:number;beat:model.Beat}>=[];for(const beat of voice.beats){if(index!==target.bar||beat.index>=target.beat)retained.push({tick:onset,beat});onset+=rhythmTicks(beat);}metadata.set(index,retained);}
+  const metadata=new Map<string,Array<{tick:number;beat:model.Beat}>>();
   for(const index of affected){
-    const voice=staff.bars[index].voices[target.voice],barPlacements=placements.filter(item=>item.bar===index);
-    if(!barPlacements.length)continue;
-    const pasteStartTick=barPlacements[0].tick,pasteEndTick=Math.max(...barPlacements.map(p=>p.tick+p.length));
-    let t=0;
-    const originalBeatsWithTicks=voice.beats.map(b=>{const start=t,len=rhythmTicks(b,score.masterBars[index].calculateDuration(false));t+=len;return {beat:b,start,end:start+len};});
-    for(const item of originalBeatsWithTicks){
-      if((index!==target.bar||item.start>=pasteStartTick)&&item.start<pasteEndTick){
-        for(const note of item.beat.notes)detachNote(note);
+    const affectedVoiceIndices=[...new Set(placements.filter(p=>p.bar===index).map(p=>p.voice))];
+    for(const destVoice of affectedVoiceIndices){
+      const voice=staff.bars[index].voices[destVoice];
+      if(!voice)throw new Error('The destination must already contain every copied voice.');
+      let onset=0;
+      const retained:Array<{tick:number;beat:model.Beat}>=[];
+      for(const beat of voice.beats){
+        if(index!==target.bar||beat.index>=target.beat)retained.push({tick:onset,beat});
+        onset+=rhythmTicks(beat);
       }
+      metadata.set(`${index}/${destVoice}`,retained);
     }
-    const survivingSuffix=originalBeatsWithTicks.filter(item=>(index!==target.bar||voice.beats.indexOf(item.beat)>=target.beat)&&item.start>=pasteEndTick);
-    const prefix=index===target.bar?voice.beats.slice(0,target.beat):[],output=[...prefix];
-    let onset=prefix.reduce((sum,beat)=>sum+rhythmTicks(beat),0);
-    for(const placement of barPlacements){
-      if(placement.tick>onset)output.push(...restBeats(placement.tick-onset));
-      prepareBeat(placement.beat,placement.source,staff,filters,chordMaps[placement.repeat]);
-      recordChanges(placement.beat,target.track,changes);
-      output.push(placement.beat);
-      onset=placement.tick+placement.length;
-    }
-    const hasSoundingSuffix=survivingSuffix.some(item=>item.beat.notes.length>0);
-    if(hasSoundingSuffix){
-      const firstSuffixTick=survivingSuffix[0].start;
-      if(firstSuffixTick>onset){
-        output.push(...restBeats(firstSuffixTick-onset));
-        onset=firstSuffixTick;
+  }
+  for(const index of affected){
+    const affectedVoiceIndices=[...new Set(placements.filter(p=>p.bar===index).map(p=>p.voice))];
+    for(const destVoice of affectedVoiceIndices){
+      const voice=staff.bars[index].voices[destVoice],barPlacements=placements.filter(item=>item.bar===index&&item.voice===destVoice);
+      if(!barPlacements.length)continue;
+      const pasteStartTick=barPlacements[0].tick,pasteEndTick=Math.max(...barPlacements.map(p=>p.tick+p.length));
+      let t=0;
+      const originalBeatsWithTicks=voice.beats.map(b=>{const start=t,len=rhythmTicks(b,score.masterBars[index].calculateDuration(false));t+=len;return {beat:b,start,end:start+len};});
+      for(const item of originalBeatsWithTicks){
+        if((index!==target.bar||item.start>=pasteStartTick)&&item.start<pasteEndTick){
+          for(const note of item.beat.notes)detachNote(note);
+        }
       }
-      for(const item of survivingSuffix){
-        output.push(item.beat);
-        onset=item.end;
+      const survivingSuffix=originalBeatsWithTicks.filter(item=>(index!==target.bar||(destVoice===target.voice?voice.beats.indexOf(item.beat)>=target.beat:item.start>=pasteStartTick))&&item.start>=pasteEndTick);
+      const prefix=destVoice===target.voice&&index===target.bar?voice.beats.slice(0,target.beat):originalBeatsWithTicks.filter(item=>item.end<=pasteStartTick).map(item=>item.beat);
+      const output=[...prefix];
+      let onset=prefix.reduce((sum,beat)=>sum+rhythmTicks(beat),0);
+      for(const placement of barPlacements){
+        if(placement.tick>onset)output.push(...restBeats(placement.tick-onset));
+        prepareBeat(placement.beat,placement.source,staff,filters,chordMaps[placement.repeat]);
+        recordChanges(placement.beat,target.track,changes);
+        output.push(placement.beat);
+        onset=placement.tick+placement.length;
       }
-    }
-    const capacity=score.masterBars[index].calculateDuration(false);
-    if(onset<capacity)output.push(...restBeats(capacity-onset));
-    voice.beats=output;
-    output.forEach((beat,beatIndex)=>{beat.voice=voice;beat.index=beatIndex;beat.automations=beat.automations.filter(value=>!isGpMixAutomation(value));});
-    for(const saved of metadata.get(index)??[]){
-      const original=saved.beat,values=original.automations.filter(value=>!isGpMixAutomation(value)&&!value.syncPointValue),outside=!barPlacements.some(item=>item.length>0&&saved.tick>=item.tick&&saved.tick<item.tick+item.length),keepText=outside||!filters.texts,keepDiagram=outside||!filters.diagrams,keepTimer=outside||!filters.timers;
-      const needs=(keepText&&!!original.text)||(keepDiagram&&!!original.chordId)||(keepTimer&&original.showTimer)||values.length>0||(outside&&original.lyrics!==null);if(!needs)continue;let position=0;const destination=output.find(beat=>{const match=position===saved.tick;position+=rhythmTicks(beat,score.masterBars[index].calculateDuration(false));return match;});if(!destination)throw new Error('A retained destination annotation or automation has no exact beat onset after phrase reflow.');
-      if(destination!==original){
-        if(keepText)destination.text=original.text;if(keepDiagram)destination.chordId=original.chordId;if(keepTimer)destination.showTimer=original.showTimer;if(outside&&original.lyrics)destination.lyrics=[...original.lyrics];destination.automations.unshift(...values.map(automation));
+      const hasSoundingSuffix=survivingSuffix.some(item=>item.beat.notes.length>0);
+      if(hasSoundingSuffix){
+        const firstSuffixTick=survivingSuffix[0].start;
+        if(firstSuffixTick>onset){
+          output.push(...restBeats(firstSuffixTick-onset));
+          onset=firstSuffixTick;
+        }
+        for(const item of survivingSuffix){
+          output.push(item.beat);
+          onset=item.end;
+        }
+      }
+      const capacity=score.masterBars[index].calculateDuration(false);
+      if(onset<capacity)output.push(...restBeats(capacity-onset));
+      voice.beats=output;
+      output.forEach((beat,beatIndex)=>{beat.voice=voice;beat.index=beatIndex;beat.automations=beat.automations.filter(value=>!isGpMixAutomation(value));});
+      for(const saved of metadata.get(`${index}/${destVoice}`)??[]){
+        const original=saved.beat,values=original.automations.filter(value=>!isGpMixAutomation(value)&&!value.syncPointValue),outside=!barPlacements.some(item=>item.length>0&&saved.tick>=item.tick&&saved.tick<item.tick+item.length),keepText=outside||!filters.texts,keepDiagram=outside||!filters.diagrams,keepTimer=outside||!filters.timers;
+        const needs=(keepText&&!!original.text)||(keepDiagram&&!!original.chordId)||(keepTimer&&original.showTimer)||values.length>0||(outside&&original.lyrics!==null);if(!needs)continue;let position=0;const destination=output.find(beat=>{const match=position===saved.tick;position+=rhythmTicks(beat,score.masterBars[index].calculateDuration(false));return match;});if(!destination)throw new Error('A retained destination annotation or automation has no exact beat onset after phrase reflow.');
+        if(destination!==original){
+          if(keepText)destination.text=original.text;if(keepDiagram)destination.chordId=original.chordId;if(keepTimer)destination.showTimer=original.showTimer;if(outside&&original.lyrics)destination.lyrics=[...original.lyrics];destination.automations.unshift(...values.map(automation));
+        }
       }
     }
   }
   for(const point of existingMix){const carrier=beats(staff.bars[point.bar])[0];carrier.automations.push(automation(point.automation));}
   for(let repeat=0;repeat<parts.length;repeat++)if(filters.trackAutomations){
-    const location=(sourceTick:number)=>{let elapsed=0;const placement=placements.filter(item=>item.repeat===repeat&&item.length>0).find(item=>{const match=sourceTick>=elapsed&&sourceTick<elapsed+item.length;elapsed+=item.length;return match;});if(!placement)throw new Error('A copied controller has no exact phrase position.');return {bar:placement.bar,ratio:(placement.tick+sourceTick-(elapsed-placement.length))/score.masterBars[placement.bar].calculateDuration(false)};};
+    const location=(sourceTick:number)=>{let elapsed=0;const placement=placements.filter(item=>item.repeat===repeat&&item.length>0&&item.voice===target.voice).find(item=>{const match=sourceTick>=elapsed&&sourceTick<elapsed+item.length;elapsed+=item.length;return match;});if(!placement)throw new Error('A copied controller has no exact phrase position.');return {bar:placement.bar,ratio:(placement.tick+sourceTick-(elapsed-placement.length))/score.masterBars[placement.bar].calculateDuration(false)};};
     for(const point of events[repeat].mix){const position=location(point.tick),value=Object.assign(automation(point.value),{ratioPosition:position.ratio}),carrier=beats(staff.bars[position.bar])[0];carrier.automations.push(value);recordChanges(carrier,target.track,changes);}
     for(const point of events[repeat].pedals){const position=location(point.tick),measure=staff.bars[position.bar];measure.sustainPedals.push(Object.assign(new model.SustainPedalMarker(),point.value,{bar:measure,ratioPosition:position.ratio}));if(point.value.pedalType!==model.SustainPedalMarkerType.Hold)pedals.add(staff);}
   }

@@ -234,3 +234,84 @@ it('retains legal bar-end sustain markers when mapped exactly to destination bar
   const source=music(),bar=source.tracks[0].staves[0].bars[0];bar.sustainPedals.push(Object.assign(new model.SustainPedalMarker(),{pedalType:model.SustainPedalMarkerType.Down,ratioPosition:0}),Object.assign(new model.SustainPedalMarker(),{pedalType:model.SustainPedalMarkerType.Up,ratioPosition:1}));const result=preparePasteMusic(music(),command(bars(source))).score;
   expect(result.tracks[0].staves[0].bars[1].sustainPedals.map(marker=>[marker.pedalType,marker.ratioPosition])).toEqual([[model.SustainPedalMarkerType.Down,0],[model.SustainPedalMarkerType.Up,1]]);
 });
+
+it('pastes a multi-voice phrase overwriting multiple destination voices simultaneously',()=>{
+  const source=music(),staff=source.tracks[0].staves[0];
+  for(const bar of staff.bars){
+    const voice1=new model.Voice();
+    for(let i=0;i<4;i++){
+      const beat=new model.Beat(),note=new model.Note();
+      beat.duration=4;note.string=2;note.fret=10+i;beat.addNote(note);voice1.addBeat(beat);
+    }
+    bar.addVoice(voice1);
+  }
+  source.finish(new Settings());
+  const clip=makeMusicClip(source,{
+    kind:'range',
+    range:{start:{bar:0,tick:0},end:{bar:0,tick:1920},lanes:[{track:0,staff:0,voice:0},{track:0,staff:0,voice:1}]},
+  },'singleTrack');
+
+  const destination=music(),destStaff=destination.tracks[0].staves[0];
+  for(const bar of destStaff.bars){
+    const voice1=new model.Voice();
+    for(let i=0;i<4;i++){
+      const beat=new model.Beat(),note=new model.Note();
+      beat.duration=4;note.string=3;note.fret=1;beat.addNote(note);voice1.addBeat(beat);
+    }
+    bar.addVoice(voice1);
+  }
+  const rebuiltDest=rebuild(destination);
+  const edit:ClipboardCommand={
+    type:'pasteMusic',
+    clip,
+    options:{
+      target:{track:0,staff:0,bar:1,voice:0,beat:0},
+      destinations:[{sourceTrack:0,track:0,staffMap:[0]}],
+      count:1,
+      placement:'currentBar',
+      filters:{...all},
+    },
+  };
+
+  const result=preparePasteMusic(rebuiltDest,edit).score;
+  const bar1=result.tracks[0].staves[0].bars[1];
+  expect(bar1.voices).toHaveLength(2);
+  expect(bar1.voices[0].beats[0].notes[0].fret).toBe(source.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret);
+  expect(bar1.voices[0].beats[1].notes[0].fret).toBe(source.tracks[0].staves[0].bars[0].voices[0].beats[1].notes[0].fret);
+  expect(bar1.voices[1].beats[0].notes[0].fret).toBe(10);
+  expect(bar1.voices[1].beats[1].notes[0].fret).toBe(11);
+  expect(bar1.voices[1].beats[2].notes[0].fret).toBe(1);
+  expect(bar1.voices[1].beats[3].notes[0].fret).toBe(1);
+});
+
+it('rejects pasting a multi-voice phrase when destination lacks the required voices',()=>{
+  const source=music(),staff=source.tracks[0].staves[0];
+  for(const bar of staff.bars){
+    const voice1=new model.Voice();
+    for(let i=0;i<4;i++){
+      const beat=new model.Beat(),note=new model.Note();
+      beat.duration=4;note.string=2;note.fret=10+i;beat.addNote(note);voice1.addBeat(beat);
+    }
+    bar.addVoice(voice1);
+  }
+  source.finish(new Settings());
+  const clip=makeMusicClip(source,{
+    kind:'range',
+    range:{start:{bar:0,tick:0},end:{bar:0,tick:1920},lanes:[{track:0,staff:0,voice:0},{track:0,staff:0,voice:1}]},
+  },'singleTrack');
+
+  const destination=music();
+  const edit:ClipboardCommand={
+    type:'pasteMusic',
+    clip,
+    options:{
+      target:{track:0,staff:0,bar:1,voice:0,beat:0},
+      destinations:[{sourceTrack:0,track:0,staffMap:[0]}],
+      count:1,
+      placement:'currentBar',
+      filters:{...all},
+    },
+  };
+
+  expect(()=>preparePasteMusic(destination,edit)).toThrow('The destination must already contain every copied voice.');
+});

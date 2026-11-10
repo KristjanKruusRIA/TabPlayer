@@ -78,7 +78,7 @@ const written={
   track:new Set(['staves','playbackinfo','name','shortname','color','defaultsystemslayout','systemslayout','isvisibleonmultitrack']),
   // Mute and solo are player state and the port is MIDI routing, not notation.
   playback:new Set(['program','primarychannel','secondarychannel','volume','balance','ismute','issolo','port']),
-  staff:new Set(['bars','stringtuning','displaytranspositionpitch','showtablature','showstandardnotation','standardnotationlinecount']),
+  staff:new Set(['capo','bars','stringtuning','displaytranspositionpitch','showtablature','showstandardnotation','standardnotationlinecount']),
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
@@ -330,7 +330,9 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   (json.staves as Json[]).forEach(s=>check('staff',s));
   if(track.staves.some(s=>s.isPercussion))unsupported('percussion staves');
   if(track.staves.length>1&&track.staves.some(s=>s.stringTuning.tunings.length>0))unsupported('more than one staff per track');
+  if(track.staves.some(s=>s.capo!==0&&!s.stringTuning.tunings.length))unsupported('a capo on a non-stringed staff');
   const staff0=track.staves[0],strings=staff0.stringTuning.tunings,stringed=strings.length>0;
+  if(stringed&&(!Number.isInteger(staff0.capo)||staff0.capo<0||staff0.capo>24))unsupported('this capo');
   const tab=stringed&&staff0.showTablature&&!staff0.showStandardNotation;
   const both=track.staves.length===1&&stringed&&staff0.showTablature&&staff0.showStandardNotation;
   if(track.staves.length===1&&stringed&&!tab&&!both)unsupported('a stringed staff shown only as standard notation');
@@ -381,7 +383,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         if(bar0.clef!==previous.clef||bar0.clefOttava!==previous.clefOttava)attributes.push(clef(bar0,tab,''));
       }
     }
-    if(!previous&&stringed)attributes.push(element('staff-details',(both?element('staff-type','alternate'):'')+element('staff-lines',strings.length)+strings.map((_,line)=>element('staff-tuning',tuningStep(strings[strings.length-1-line]),` line="${line+1}"`)).join(''),both?' number="2"':''));
+    if(!previous&&stringed){
+      const capo=staff0.capo>0?element('capo',staff0.capo):'';
+      if(both&&capo)attributes.push(element('staff-details',capo,' number="1"'));
+      attributes.push(element('staff-details',(both?element('staff-type','alternate'):'')+element('staff-lines',strings.length)+strings.map((_,line)=>element('staff-tuning',tuningStep(strings[strings.length-1-line]),` line="${line+1}"`)).join('')+capo,both?' number="2"':''));
+    }
     if(!previous){
       if(track.staves.length===1){
         const transpose=staff0.displayTranspositionPitch,octaveChange=Math.trunc(transpose/12),chromatic=transpose-12*octaveChange;

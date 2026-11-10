@@ -403,7 +403,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Staff.capo',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetStaff(s).capo = 2; },
       verify: r => expect(targetStaff(r).capo).toBe(2),
     },

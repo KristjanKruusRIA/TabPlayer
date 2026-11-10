@@ -1,11 +1,11 @@
-# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, and alternate repeat endings (F13, partial)
+# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, and capo (F13, partial)
 
 2026-11-09 – 2026-11-10. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
-**Scope: multi-staff tracks, ghost notes, palm mutes, and alternate repeat endings have been lifted.** THE-62 is not finished. These refusals still apply:
+**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, and staff capo have been lifted.** THE-62 is not finished. These refusals still apply:
 - percussion staves
 - a stringed staff shown only as standard notation
 - more than one staff on a stringed track
@@ -63,6 +63,13 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Multi-measure endings span across measures without emitting duplicate start/stop tags; alphaTab's importer maintains ending state across measures via `_nextMasterBarRepeatEnding`.
    - Out-of-range masks (>255, <0, or non-integer) fail closed with `unsupported('this alternate ending')`.
 
+8. **Capo (`staff.capo`)** (Supported):
+   - In MusicXML 4.0, a capo is expressed via `<capo>{fret}</capo>` inside `<staff-details>`, placed in DTD sequence following `staff-tuning*`.
+   - alphaTab's `MusicXmlImporter` parses `<capo>` inside `<staff-details>` natively into `staff.capo`.
+   - For dual notation + TAB staves (`both`), `<capo>` is placed on staff 2's `<staff-details number="2">` and staff 1's `<staff-details number="1">`. When re-imported, `applyMusicXmlAlternateStaves` preserves `capo: tab.capo` when folding into a single staff.
+   - Sounding pitch is computed by alphaTab incorporating `staff.capo` into `note.stringTuning`, ensuring written MusicXML `<pitch>` reflects true sounding pitches and tab frets remain preserved.
+   - Capo on non-stringed staves or invalid values (<0, >24, or non-integer) fails closed with `unsupported(...)`.
+
 ## Implementation Details
 
 1. `src/export/musicxml.ts`:
@@ -82,6 +89,9 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added `alternateendings` to `written.master` allowlist.
    - Added `endingNumbers(flags)` helper mapping bitmasks to numbers array, failing closed on invalid flags.
    - Updated measure loop in `writePart` to emit `<ending ... type="start">` on left barline and `<ending ... type="stop"/>` on right barline according to measure boundaries and repeat counts.
+   - Added `capo` to `written.staff` allowlist.
+   - Added validation failing closed on capo on non-stringed tracks or invalid capo fret values.
+   - Emitted `<capo>` inside `<staff-details>` for stringed tracks and notation + TAB layouts.
 
 2. `src/export/musicxml.test.ts`:
    - Added unit test `writes a grand-staff piano track with two staves and round-trips it`: verifies `<staves>2</staves>`, numbered clefs (`1:G`, `2:F`), `<staff>1</staff>` and `<staff>2</staff>`, backup durations, and exact round-trip equality via `content(back)`.
@@ -93,15 +103,18 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added unit test `writes a multi-measure alternate ending and round-trips it`: verifies multi-measure 1st ending spanning 2 bars with left start on measure 1 and right stop on measure 2.
    - Added unit test `writes multi-number alternate endings (e.g. 1, 2) and round-trips them`: verifies comma-separated ending numbers (`number="1, 2"`).
    - Added unit test `keeps alternate repeat endings on a notation + TAB guitar`: verifies alternate endings survive round-trip on dual notation + TAB staves.
+   - Added unit test `writes a capo on a TAB guitar and round-trips it`: verifies `<staff-details><capo>3</capo></staff-details>` and preserves note frets, strings, and sounding realValues.
+   - Added unit test `writes a capo on a notation + TAB guitar and round-trips it`: verifies dual staves preserve capo and fold into a single staff.
    - Replaced `fails closed for a note effect` expectation from `/note isghost/` to `/note isdead/`.
    - Updated `fails closed for an invalid alternate ending` to test flags out of range (`alternateEndings = 256`).
+   - Added `fails closed for a capo on a non-stringed staff` and `fails closed for an invalid capo`.
 
 3. `src/interchange/field-preservation.test.ts`:
-   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, and `MasterBar.alternateEndings`.
+   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, and `Staff.capo`.
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (166 tests): all passed.
-- `src/interchange/field-preservation.test.ts` (184 tests): all passed.
-- `src/export/` (22 test files, 543 tests): all passed.
+- `src/export/musicxml.test.ts` (170 tests): all passed.
+- `src/interchange/field-preservation.test.ts` (185 tests): all passed.
+- `src/export/` (22 test files, 547 tests): all passed.
 - `npm run typecheck` (`tsc --noEmit`): 0 errors.

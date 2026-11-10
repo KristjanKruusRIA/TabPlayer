@@ -82,7 +82,7 @@ const written={
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
-  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking','text']),
+  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking','text','crescendo']),
   // Bend points are written as <bend> elements (their type is derived from them).
   note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid','isghost','ispalmmute']),
 };
@@ -177,6 +177,15 @@ function swingOf(feel:model.TripletFeel,prevFeel:model.TripletFeel):string{
     default:
       return unsupported('this triplet feel');
   }
+}
+
+function wedgeOf(kind:model.CrescendoType,current:model.CrescendoType,staff:string):{xml:string;next:model.CrescendoType}{
+  if(kind===current)return {xml:'',next:current};
+  let xml='';
+  if(current!==model.CrescendoType.None)xml+=element('direction',element('direction-type','<wedge type="stop"/>')+staff,' placement="below"');
+  if(kind===model.CrescendoType.Crescendo)xml+=element('direction',element('direction-type','<wedge type="crescendo"/>')+staff,' placement="below"');
+  else if(kind===model.CrescendoType.Decrescendo)xml+=element('direction',element('direction-type','<wedge type="diminuendo"/>')+staff,' placement="below"');
+  return {xml,next:kind};
 }
 
 // A bend curve (offsets 0–60, values in quarter tones) as one <bend> per value change:
@@ -389,7 +398,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   if(track.staves.length===1&&stringed&&!tab&&!both)unsupported('a stringed staff shown only as standard notation');
   const layouts=both?[{staffIndex:0,staff:'1',voices:0,technical:false},{staffIndex:0,staff:'2',voices:4,technical:true}]:track.staves.length>1?track.staves.map((_,s)=>({staffIndex:s,staff:String(s+1),voices:0,technical:true})):[{staffIndex:0,staff:'',voices:0,technical:true}];
   const ties=layouts.map(()=>new Map<model.Note,number>()),legatos=layouts.map(()=>new Map<model.Note,number>()),slides=layouts.map(()=>new Map<model.Note,number>());
-  let measures='',previous:model.Bar|null=null;
+  let measures='',previous:model.Bar|null=null,currentCrescendo=model.CrescendoType.None;
   for(const [index,bar0] of staff0.bars.entries()){
     const master=bar0.masterBar;check('master',(scoreJson.masterbars as Json[])[master.index]);
     const length=master.calculateDuration();let content='';
@@ -500,6 +509,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
           if(beat.automations.some(change=>change.type!==model.AutomationType.Volume&&change.type!==model.AutomationType.Balance&&!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
           if(!beat.notes.length&&(beat.pickStroke!==model.PickStroke.None||beat.tap))unsupported('a pick stroke or tap on a rest');
           if(!beat.notes.length&&beat.tremoloPicking)unsupported('tremolo picking on a rest');
+          if(!Number.isInteger(beat.crescendo)||beat.crescendo<0||beat.crescendo>2)unsupported('this crescendo');
+          if(voice.index!==0&&beat.crescendo!==model.CrescendoType.None)unsupported('crescendo outside the first voice');
           if(voice.isEmpty){if(beat.notes.length)unsupported('notes in an empty voice');continue;}
           if(beat.isEmpty)unsupported('an empty beat inside a voice');
           const voiceNumber=(layout:typeof layouts[number])=>element('voice',voice.index+1+layout.voices);
@@ -508,6 +519,10 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
           if(beat.dynamics!==state.dynamic||(opening&&beat.dynamics!==model.DynamicValue.F)){
             const name=(model.DynamicValue[beat.dynamics]??unsupported('this dynamic')).toLowerCase();
             notes[0]+=element('direction',element('direction-type',element('dynamics',`<${name}/>`))+staffOf(layouts[0]),' placement="below"');state.dynamic=beat.dynamics;
+          }
+          if(voice.index===0){
+            const wedge=wedgeOf(beat.crescendo,currentCrescendo,staffOf(layouts[0]));
+            notes[0]+=wedge.xml;currentCrescendo=wedge.next;
           }
           if(beat.text)notes[0]+=element('direction',element('direction-type',element('words',escape(beat.text)))+staffOf(layouts[0]),' placement="above"');
           if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
@@ -546,6 +561,10 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             });
           }
         }
+        if(voice.index===0&&!staff0.bars.slice(index+1).some(b=>b.voices[0]&&!b.voices[0].isEmpty)&&currentCrescendo!==model.CrescendoType.None){
+          const stop=wedgeOf(model.CrescendoType.None,currentCrescendo,staffOf(layouts[0]));
+          notes[0]+=stop.xml;currentCrescendo=stop.next;
+        }
         layouts.forEach((_,at)=>{if(notes[at])voices[at].push({notes:notes[at],total});});
       }
     }else{
@@ -579,6 +598,9 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             if(beat.automations.some(change=>change.type!==model.AutomationType.Volume&&change.type!==model.AutomationType.Balance&&!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
             if(!beat.notes.length&&(beat.pickStroke!==model.PickStroke.None||beat.tap))unsupported('a pick stroke or tap on a rest');
             if(!beat.notes.length&&beat.tremoloPicking)unsupported('tremolo picking on a rest');
+            if(!Number.isInteger(beat.crescendo)||beat.crescendo<0||beat.crescendo>2)unsupported('this crescendo');
+            if(track.staves.length>1&&beat.crescendo!==model.CrescendoType.None)unsupported('crescendo on a multi-staff track');
+            if(voice.index!==0&&beat.crescendo!==model.CrescendoType.None)unsupported('crescendo outside the first voice');
             if(voice.isEmpty){if(beat.notes.length)unsupported('notes in an empty voice');continue;}
             if(beat.isEmpty)unsupported('an empty beat inside a voice');
             const voiceNumber=element('voice',voice.index+1+layout.voices);
@@ -587,6 +609,10 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             if(beat.dynamics!==state.dynamic||(opening&&beat.dynamics!==model.DynamicValue.F)){
               const name=(model.DynamicValue[beat.dynamics]??unsupported('this dynamic')).toLowerCase();
               notes+=element('direction',element('direction-type',element('dynamics',`<${name}/>`))+staffOf(layout),' placement="below"');state.dynamic=beat.dynamics;
+            }
+            if(voice.index===0&&layout.staffIndex===0){
+              const wedge=wedgeOf(beat.crescendo,currentCrescendo,staffOf(layout));
+              notes+=wedge.xml;currentCrescendo=wedge.next;
             }
             if(beat.text)notes+=element('direction',element('direction-type',element('words',escape(beat.text)))+staffOf(layout),' placement="above"');
             if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
@@ -622,6 +648,10 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               notes+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+placeNoteAttributes(timing,written.accidental,noteheadOf(note))
                 +(tied||marked?element('notations',tied+marked):'')+(layout.staffIndex===0&&at===0&&noteIndex===0?lyrics:'')+playOf(note));
             }
+          }
+          if(voice.index===0&&layout.staffIndex===0&&!staff.bars.slice(index+1).some(b=>b.voices[0]&&!b.voices[0].isEmpty)&&currentCrescendo!==model.CrescendoType.None){
+            const stop=wedgeOf(model.CrescendoType.None,currentCrescendo,staffOf(layout));
+            notes+=stop.xml;currentCrescendo=stop.next;
           }
           if(notes)voices[at].push({notes,total});
         }

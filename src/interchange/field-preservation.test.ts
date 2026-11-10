@@ -648,7 +648,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Beat.crescendo',
       category: 'notation',
-      formats: ['gp'],
+      formats: ['gp', 'musicxml'],
       apply: s => { targetBeat(s).crescendo = model.CrescendoType.Crescendo; },
       verify: r => expect(targetBeat(r).crescendo).toBe(model.CrescendoType.Crescendo),
     },

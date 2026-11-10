@@ -659,6 +659,117 @@ describe('MusicXML export',()=>{
     expect(back.tracks[0].staves[1].bars[0].voices[0].beats[0].text).toBe('Left hand');
   });
 
+  it('writes crescendo and decrescendo hairpins and reads them back',()=>{
+    const score=guitar();
+    const bar0=score.tracks[0].staves[0].bars[0].voices[0].beats;
+    bar0[0].crescendo=model.CrescendoType.Crescendo;
+    bar0[1].crescendo=model.CrescendoType.Crescendo;
+    bar0[2].crescendo=model.CrescendoType.None;
+    bar0[3].crescendo=model.CrescendoType.Decrescendo;
+
+    const bar1=score.tracks[0].staves[0].bars[1].voices[0].beats;
+    bar1[0].crescendo=model.CrescendoType.None;
+    bar1[1].crescendo=model.CrescendoType.Crescendo;
+    bar1[2].crescendo=model.CrescendoType.Crescendo;
+    bar1[3].crescendo=model.CrescendoType.Crescendo;
+    bar1[4].crescendo=model.CrescendoType.Crescendo;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const wedges=[...doc.querySelectorAll('direction > direction-type > wedge')].map(w=>w.getAttribute('type'));
+    expect(wedges).toEqual(['crescendo','stop','diminuendo','stop','crescendo','stop']);
+
+    const back=loadInterchangeScore(bytes,settings);
+    const backBar0=back.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(backBar0.map(b=>b.crescendo)).toEqual([
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.None,
+      model.CrescendoType.Decrescendo,
+    ]);
+
+    const backBar1=back.tracks[0].staves[0].bars[1].voices[0].beats;
+    expect(backBar1.map(b=>b.crescendo)).toEqual([
+      model.CrescendoType.None,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+    ]);
+  });
+
+  it('keeps crescendo hairpins on a notation + TAB guitar',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].showStandardNotation=true;
+    score.tracks[0].staves[0].showTablature=true;
+    const bar0=score.tracks[0].staves[0].bars[0].voices[0].beats;
+    bar0[0].crescendo=model.CrescendoType.Crescendo;
+    bar0[1].crescendo=model.CrescendoType.Crescendo;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const wedgeDir=doc.querySelector('direction > direction-type > wedge')?.parentElement?.parentElement;
+    expect(wedgeDir?.querySelector('staff')?.textContent).toBe('1');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    const backBar0=back.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(backBar0.map(b=>b.crescendo)).toEqual([
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.None,
+      model.CrescendoType.None,
+    ]);
+  });
+
+  it('refuses crescendo outside the first voice',()=>{
+    const score=new model.Score();
+    const track=new model.Track();score.addTrack(track);track.ensureStaveCount(1);
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+    const staff=track.staves[0];
+    const bar=new model.Bar();staff.addBar(bar);bar.clef=model.Clef.G2;
+    const voice0=new model.Voice();bar.addVoice(voice0);
+    const beat0=new model.Beat();beat0.duration=model.Duration.Whole;voice0.addBeat(beat0);
+    const note0=new model.Note();note0.octave=4;note0.tone=0;beat0.addNote(note0);
+
+    const voice1=new model.Voice();bar.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=4;note1.tone=4;beat1.addNote(note1);
+    beat1.crescendo=model.CrescendoType.Crescendo;
+    score.finish(settings);
+
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/crescendo outside the first voice/);
+  });
+
+  it('refuses crescendo on a multi-staff track',()=>{
+    const score=new model.Score();
+    const track=new model.Track();score.addTrack(track);track.ensureStaveCount(2);
+    const [treble,bass]=track.staves;
+    treble.showStandardNotation=true;treble.showTablature=false;
+    bass.showStandardNotation=true;bass.showTablature=false;
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+
+    const bar1=new model.Bar();treble.addBar(bar1);bar1.clef=model.Clef.G2;
+    const voice1=new model.Voice();bar1.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=5;note1.tone=0;beat1.addNote(note1);
+    beat1.crescendo=model.CrescendoType.Crescendo;
+
+    const bar2=new model.Bar();bass.addBar(bar2);bar2.clef=model.Clef.F4;
+    const voice2=new model.Voice();bar2.addVoice(voice2);
+    const beat2=new model.Beat();beat2.duration=model.Duration.Whole;voice2.addBeat(beat2);
+    const note2=new model.Note();note2.octave=3;note2.tone=0;beat2.addNote(note2);
+    score.finish(settings);
+
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/crescendo on a multi-staff track/);
+  });
+
+  it('fails closed for an invalid crescendo',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].crescendo=99 as model.CrescendoType;
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/this crescendo/);
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);

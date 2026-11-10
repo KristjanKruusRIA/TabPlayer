@@ -1,18 +1,18 @@
-# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, capo, measure directions, triplet feel, subtitle, arranger, and beat text (F13, partial)
+# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, capo, measure directions, triplet feel, subtitle, arranger, beat text, and crescendo/decrescendo hairpins (F13, partial)
 
 2026-11-09 – 2026-11-10. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
-**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, staff capo, measure directions, triplet feel, subtitle, arranger metadata, and beat text have been lifted.** THE-62 is not finished. These refusals still apply:
+**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, staff capo, measure directions, triplet feel, subtitle, arranger metadata, beat text, and crescendo/decrescendo hairpins have been lifted.** THE-62 is not finished. These refusals still apply:
 - percussion staves
 - a stringed staff shown only as standard notation
 - more than one staff on a stringed track
 - sounding transposition
 - MIDI channels above 16
 - different key signatures on the staves of one track
-- features outside the `written` allowlist in `musicxml.ts` (sections, dead notes, let ring, harmonics, fingering, crescendo, chords, double bars, album, tab, instructions, notices, beat effects like slap/pop/fade)
+- features outside the `written` allowlist in `musicxml.ts` (sections, dead notes, let ring, harmonics, fingering, chords, double bars, album, tab, instructions, notices, beat effects like slap/pop/fade)
 
 The backlog ticket THE-62 asked to treat the remaining refusals as the list of work, widening support where MusicXML and the importer faithfully express the notation, while continuing to refuse anything that cannot be written or round-tripped correctly:
 - Multi-staff tracks (e.g. keyboard / piano grand staff, organ).
@@ -107,6 +107,19 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
      - Multi-staff tracks (e.g. grand-staff piano): `<direction>` carries `<staff>1</staff>` or `<staff>2</staff>`, preserving beat text on the appropriate staff.
    - Text is escaped via `escape()`, preserving XML entity escaping and control character rejection.
 
+13. **Crescendo and Decrescendo hairpins (`beat.crescendo`)** (Supported):
+   - In MusicXML 4.0, hairpin wedges are expressed via `<direction placement="below"><direction-type><wedge type="crescendo|diminuendo|stop"/></direction-type>{staff}</direction>`.
+   - In alphaTab's `MusicXmlImporter`:
+     - `<wedge type="crescendo"/>` sets `this._nextBeatCrescendo = CrescendoType.Crescendo` (1).
+     - `<wedge type="diminuendo"/>` sets `this._nextBeatCrescendo = CrescendoType.Decrescendo` (2).
+     - `<wedge type="stop"/>` sets `this._nextBeatCrescendo = null`.
+     - When each beat is created: `if (crescendo !== null) newBeat.crescendo = crescendo;`.
+     - Hairpin state persists across measures until explicitly stopped.
+     - Notation + TAB dual staves (`both`): hairpins are emitted only on staff 1 (`notes[0]`), never on staff 2. `applyMusicXmlAlternateStaves` retains staff 1's crescendo (included in `ignoredBeat`) when folding into 1 staff.
+     - In alphaTab, `_nextBeatCrescendo` is global across staves in the importer; hairpins on multi-staff tracks cannot be isolated cleanly to single staves and fail closed (`crescendo on a multi-staff track`).
+     - Hairpins outside voice 0 fail closed (`crescendo outside the first voice`).
+     - Out-of-range or non-integer crescendo values fail closed (`this crescendo`).
+
 ## Implementation Details
 
 1. `src/export/musicxml.ts`:
@@ -141,6 +154,10 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Emitted `<credit page="1"><credit-type>subtitle</credit-type><credit-words>...</credit-words></credit>` when `score.subTitle` is set.
    - Added `text` to `written.beat` allowlist.
    - Emitted `<direction placement="above"><direction-type><words>{text}</words></direction-type>{staff}</direction>` before each beat carrying `beat.text`.
+   - Added `crescendo` to `written.beat` allowlist.
+   - Implemented `wedgeOf(kind, current, staff)` managing hairpin transitions and `<wedge type="crescendo|diminuendo|stop"/>` emission in placement="below" direction elements.
+   - Tracked running crescendo state across bars and measures, stopping unclosed hairpins at track end.
+   - Refused crescendo on multi-staff tracks and outside voice 0.
 
 2. `src/export/musicxml.test.ts`:
    - Added unit test `writes a grand-staff piano track with two staves and round-trips it`: verifies `<staves>2</staves>`, numbered clefs (`1:G`, `2:F`), `<staff>1</staff>` and `<staff>2</staff>`, backup durations, and exact round-trip equality via `content(back)`.
@@ -164,14 +181,15 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added unit test `fails closed for an invalid triplet feel`.
    - Added unit test `writes subtitle and music (arranger) metadata and round-trips them`: asserts DOM `<credit>` and `<creator type="arranger">` elements and round-trip preservation on `score.subTitle` and `score.music`.
    - Added unit tests `writes beat text and reads it back`, `keeps beat text on a notation + TAB guitar`, and `writes beat text on multi-staff tracks`.
+   - Added unit tests `writes crescendo and decrescendo hairpins and reads them back`, `keeps crescendo hairpins on a notation + TAB guitar`, `refuses crescendo outside the first voice`, `refuses crescendo on a multi-staff track`, and `fails closed for an invalid crescendo`.
    - Updated `fails closed for a beat effect` to assert unwritten `/beat slap/`.
 
 3. `src/interchange/field-preservation.test.ts`:
-   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, `MasterBar.directions`, `MasterBar.tripletFeel`, `Score.subTitle`, `Score.music`, and `Beat.text`.
+   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, `MasterBar.directions`, `MasterBar.tripletFeel`, `Score.subTitle`, `Score.music`, `Beat.text`, and `Beat.crescendo`.
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (180 tests): all passed.
-- `src/interchange/field-preservation.test.ts` (190 tests): all passed.
-- `src/export/` (22 test files, 557 tests): all passed.
+- `src/export/musicxml.test.ts` (185 tests): all passed.
+- `src/interchange/field-preservation.test.ts` (191 tests): all passed.
+- `src/export/` (22 test files, 562 tests): all passed.
 - `npm run typecheck` (`tsc --noEmit`): 0 errors.

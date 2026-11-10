@@ -74,7 +74,7 @@ const written={
   // Presentation is not written: colours (style) and every stylesheet display choice.
   score:new Set(['title','artist','words','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
   // Beaming rules are display grouping.
-  master:new Set(['alternateendings','directions','fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
+  master:new Set(['alternateendings','directions','fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules','tripletfeel']),
   track:new Set(['staves','playbackinfo','name','shortname','color','defaultsystemslayout','systemslayout','isvisibleonmultitrack']),
   // Mute and solo are player state and the port is MIDI routing, not notation.
   playback:new Set(['program','primarychannel','secondarychannel','volume','balance','ismute','issolo','port']),
@@ -155,6 +155,28 @@ function directionsOf(master:model.MasterBar):string{
     }
   }
   return result;
+}
+
+function swingOf(feel:model.TripletFeel,prevFeel:model.TripletFeel):string{
+  if(feel===prevFeel)return '';
+  switch(feel){
+    case model.TripletFeel.NoTripletFeel:
+      return element('sound',element('swing',element('straight','')));
+    case model.TripletFeel.Triplet16th:
+      return element('sound',element('swing',element('first',2)+element('second',1)+element('swing-type','16th')));
+    case model.TripletFeel.Triplet8th:
+      return element('sound',element('swing',element('first',2)+element('second',1)+element('swing-type','eighth')));
+    case model.TripletFeel.Dotted16th:
+      return element('sound',element('swing',element('first',3)+element('second',1)+element('swing-type','16th')));
+    case model.TripletFeel.Dotted8th:
+      return element('sound',element('swing',element('first',3)+element('second',1)+element('swing-type','eighth')));
+    case model.TripletFeel.Scottish16th:
+      return element('sound',element('swing',element('first',1)+element('second',3)+element('swing-type','16th')));
+    case model.TripletFeel.Scottish8th:
+      return element('sound',element('swing',element('first',1)+element('second',3)+element('swing-type','eighth')));
+    default:
+      return unsupported('this triplet feel');
+  }
 }
 
 // A bend curve (offsets 0–60, values in quarter tones) as one <bend> per value change:
@@ -373,6 +395,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
     const length=master.calculateDuration();let content='';
     const flags=master.alternateEndings;
     if(!Number.isInteger(flags)||flags<0||flags>255)unsupported('this alternate ending');
+    const feel=master.tripletFeel;
+    if(!Number.isInteger(feel)||feel<0||feel>6)unsupported('this triplet feel');
     let startEndingXml='',stopEndingXml='';
     if(flags>0){
       const nums=endingNumbers(flags).join(', ');
@@ -438,11 +462,14 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       content+=element('barline',leftStyle+startEndingXml+leftRepeat,' location="left"');
     }
     const directionsXml=directionsOf(master);
+    const prevFeel=index>0?staff0.bars[index-1].masterBar.tripletFeel:model.TripletFeel.NoTripletFeel;
+    const swingXml=swingOf(feel,prevFeel);
     if(first){
       const tempos=[...master.tempoAutomations].sort((a,b)=>a.ratioPosition-b.ratioPosition);
       if(index===0&&!tempos.some(change=>change.ratioPosition===0))tempos.unshift(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:score.tempo,ratioPosition:0,isVisible:true}));
       content+=tempos.map(change=>tempoDirection(change,master)).join('');
       content+=directionsXml;
+      content+=swingXml;
     }
     content+=mix.filter(point=>point.bar===index).map(point=>mixDirection(point.automation,master,instrument,layouts[0].staff?element('staff',layouts[0].staff):'')).join('');
     const voices:{notes:string;total:number}[][]=layouts.map(()=>[]);

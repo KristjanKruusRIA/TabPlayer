@@ -1,18 +1,18 @@
-# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, capo, and measure directions (F13, partial)
+# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, capo, measure directions, and triplet feel (F13, partial)
 
 2026-11-09 – 2026-11-10. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
-**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, staff capo, and measure directions have been lifted.** THE-62 is not finished. These refusals still apply:
+**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, staff capo, measure directions, and triplet feel have been lifted.** THE-62 is not finished. These refusals still apply:
 - percussion staves
 - a stringed staff shown only as standard notation
 - more than one staff on a stringed track
 - sounding transposition
 - MIDI channels above 16
 - different key signatures on the staves of one track
-- features outside the `written` allowlist in `musicxml.ts` (sections, beat text, dead notes, let ring, harmonics, fingering, crescendo, chords, triplet feel, double bars and others)
+- features outside the `written` allowlist in `musicxml.ts` (sections, beat text, dead notes, let ring, harmonics, fingering, crescendo, chords, double bars and others)
 
 The backlog ticket THE-62 asked to treat the remaining refusals as the list of work, widening support where MusicXML and the importer faithfully express the notation, while continuing to refuse anything that cannot be written or round-tripped correctly:
 - Multi-staff tracks (e.g. keyboard / piano grand staff, organ).
@@ -79,6 +79,20 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
      - Any unsupported direction value (e.g. `TargetSegnoSegno`, `TargetDoubleCoda`, `JumpDaCapoAlFine`, etc.) fails closed with `unsupported('this direction')`.
    - Directions are emitted once on the primary part (`if (first)`), placing `<direction>` and `<sound>` tags in DTD-valid order at the beginning of the measure before notes.
 
+10. **Triplet Feel (`master.tripletFeel`)** (Supported):
+   - MusicXML expresses swing and triplet feels using `<sound><swing>...</swing></sound>` inside `<measure>`.
+   - In alphaTab's `MusicXmlImporter`:
+     - `<swing><straight/></swing>` sets `masterBar.tripletFeel = TripletFeel.NoTripletFeel` (0).
+     - `<swing><first>2</first><second>1</second><swing-type>eighth</swing-type></swing>` sets `TripletFeel.Triplet8th` (2).
+     - `<swing><first>2</first><second>1</second><swing-type>16th</swing-type></swing>` sets `TripletFeel.Triplet16th` (1).
+     - `<swing><first>3</first><second>1</second><swing-type>eighth</swing-type></swing>` sets `TripletFeel.Dotted8th` (4).
+     - `<swing><first>3</first><second>1</second><swing-type>16th</swing-type></swing>` sets `TripletFeel.Dotted16th` (3).
+     - `<swing><first>1</first><second>3</second><swing-type>eighth</swing-type></swing>` sets `TripletFeel.Scottish8th` (6).
+     - `<swing><first>1</first><second>3</second><swing-type>16th</swing-type></swing>` sets `TripletFeel.Scottish16th` (5).
+     - alphaTab inherits `tripletFeel` across measures until an explicit `<swing>` (or `<straight/>`) is encountered (`newMasterBar.tripletFeel = newMasterBar.previousMasterBar.tripletFeel;`).
+   - The exporter emits `<sound><swing>...</swing></sound>` whenever `master.tripletFeel` changes from the previous master bar (or on measure 1 if non-zero), emitting on the primary part (`if (first)`).
+   - Invalid values (<0, >6, or non-integer) fail closed with `unsupported('this triplet feel')`.
+
 ## Implementation Details
 
 1. `src/export/musicxml.ts`:
@@ -104,6 +118,10 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added `directions` to `written.master` allowlist.
    - Implemented `directionsOf(master)` helper mapping supported directions (`TargetSegno`, `TargetCoda`, `TargetFine`, `JumpDaCapo`, `JumpDalSegno`, `JumpDaCoda`) to MusicXML `<direction>` and `<sound>` elements, failing closed on unhandled directions.
    - Emitted direction elements on the primary part at measure start.
+   - Added `tripletfeel` to `written.master` allowlist.
+   - Implemented `swingOf(feel, prevFeel)` helper mapping all `model.TripletFeel` enums to standard MusicXML `<sound><swing>...</swing></sound>` elements.
+   - Added validation failing closed on invalid triplet feel values.
+   - Emitted swing elements on the primary part when triplet feel changes.
 
 2. `src/export/musicxml.test.ts`:
    - Added unit test `writes a grand-staff piano track with two staves and round-trips it`: verifies `<staves>2</staves>`, numbered clefs (`1:G`, `2:F`), `<staff>1</staff>` and `<staff>2</staff>`, backup durations, and exact round-trip equality via `content(back)`.
@@ -122,13 +140,16 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added `fails closed for a capo on a non-stringed staff` and `fails closed for an invalid capo`.
    - Added unit test `writes measure directions (segno, coda, fine, da capo, dal segno, to coda) and round-trips them`: asserts DOM `<direction><direction-type><segno/></direction-type></direction>`, `<sound segno="segno"/>`, `<sound coda="coda"/>`, `<sound fine="fine"/>`, `<sound dacapo="dacapo"/>`, `<sound dalsegno="segno"/>`, `<sound tocoda="coda"/>`, and round-trip preservation of all directions on `MasterBar.directions`.
    - Added unit test `fails closed for an unhandled measure direction`.
+   - Added unit test `writes triplet feel changes and round-trips them`: tests all 7 triplet feel values (Triplet8th, Triplet16th, Dotted8th, Dotted16th, Scottish8th, Scottish16th, NoTripletFeel) asserting DOM `<sound><swing>...</swing></sound>` structure and round-trip equality.
+   - Added unit test `writes triplet feel only on the first part of a multi-track score`.
+   - Added unit test `fails closed for an invalid triplet feel`.
 
 3. `src/interchange/field-preservation.test.ts`:
-   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, and `MasterBar.directions`.
+   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, `MasterBar.directions`, and `MasterBar.tripletFeel`.
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (173 tests): all passed.
-- `src/interchange/field-preservation.test.ts` (186 tests): all passed.
-- `src/export/` (22 test files, 550 tests): all passed.
+- `src/export/musicxml.test.ts` (176 tests): all passed.
+- `src/interchange/field-preservation.test.ts` (187 tests): all passed.
+- `src/export/` (22 test files, 553 tests): all passed.
 - `npm run typecheck` (`tsc --noEmit`): 0 errors.

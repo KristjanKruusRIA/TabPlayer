@@ -283,7 +283,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'MasterBar.tripletFeel',
       category: 'notation',
-      formats: ['gp'],
+      formats: ['gp', 'musicxml'],
       apply: s => { targetMasterBar(s).tripletFeel = model.TripletFeel.Triplet8th; },
       verify: r => expect(targetMasterBar(r).tripletFeel).toBe(model.TripletFeel.Triplet8th),
     },

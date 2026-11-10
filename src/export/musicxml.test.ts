@@ -484,6 +484,97 @@ describe('MusicXML export',()=>{
     expect(back.masterBars[1].directions).toContain(model.Direction.JumpDalSegno);
   });
 
+  it('writes triplet feel changes and round-trips them',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:5}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:7}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:9}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:11}]}]]},
+      ],
+    });
+    score.masterBars[0].tripletFeel=model.TripletFeel.Triplet8th;
+    score.masterBars[1].tripletFeel=model.TripletFeel.Triplet16th;
+    score.masterBars[2].tripletFeel=model.TripletFeel.Dotted8th;
+    score.masterBars[3].tripletFeel=model.TripletFeel.Dotted16th;
+    score.masterBars[4].tripletFeel=model.TripletFeel.Scottish8th;
+    score.masterBars[5].tripletFeel=model.TripletFeel.Scottish16th;
+    score.masterBars[6].tripletFeel=model.TripletFeel.NoTripletFeel;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const measures=doc.querySelectorAll('measure');
+
+    // Triplet8th
+    expect(measures[0].querySelector('sound > swing > first')?.textContent).toBe('2');
+    expect(measures[0].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(measures[0].querySelector('sound > swing > swing-type')?.textContent).toBe('eighth');
+
+    // Triplet16th
+    expect(measures[1].querySelector('sound > swing > first')?.textContent).toBe('2');
+    expect(measures[1].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(measures[1].querySelector('sound > swing > swing-type')?.textContent).toBe('16th');
+
+    // Dotted8th
+    expect(measures[2].querySelector('sound > swing > first')?.textContent).toBe('3');
+    expect(measures[2].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(measures[2].querySelector('sound > swing > swing-type')?.textContent).toBe('eighth');
+
+    // Dotted16th
+    expect(measures[3].querySelector('sound > swing > first')?.textContent).toBe('3');
+    expect(measures[3].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(measures[3].querySelector('sound > swing > swing-type')?.textContent).toBe('16th');
+
+    // Scottish8th
+    expect(measures[4].querySelector('sound > swing > first')?.textContent).toBe('1');
+    expect(measures[4].querySelector('sound > swing > second')?.textContent).toBe('3');
+    expect(measures[4].querySelector('sound > swing > swing-type')?.textContent).toBe('eighth');
+
+    // Scottish16th
+    expect(measures[5].querySelector('sound > swing > first')?.textContent).toBe('1');
+    expect(measures[5].querySelector('sound > swing > second')?.textContent).toBe('3');
+    expect(measures[5].querySelector('sound > swing > swing-type')?.textContent).toBe('16th');
+
+    // NoTripletFeel (straight)
+    expect(measures[6].querySelector('sound > swing > straight')).not.toBeNull();
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[0].tripletFeel).toBe(model.TripletFeel.Triplet8th);
+    expect(back.masterBars[1].tripletFeel).toBe(model.TripletFeel.Triplet16th);
+    expect(back.masterBars[2].tripletFeel).toBe(model.TripletFeel.Dotted8th);
+    expect(back.masterBars[3].tripletFeel).toBe(model.TripletFeel.Dotted16th);
+    expect(back.masterBars[4].tripletFeel).toBe(model.TripletFeel.Scottish8th);
+    expect(back.masterBars[5].tripletFeel).toBe(model.TripletFeel.Scottish16th);
+    expect(back.masterBars[6].tripletFeel).toBe(model.TripletFeel.NoTripletFeel);
+  });
+
+  it('writes triplet feel only on the first part of a multi-track score',()=>{
+    const score=build({
+      copies:2,
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+      ],
+    });
+    score.masterBars[0].tripletFeel=model.TripletFeel.Triplet8th;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const parts=doc.querySelectorAll('part');
+    expect(parts).toHaveLength(2);
+
+    expect(parts[0].querySelector('sound > swing > first')?.textContent).toBe('2');
+    expect(parts[0].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(parts[0].querySelector('sound > swing > swing-type')?.textContent).toBe('eighth');
+
+    expect(parts[1].querySelector('sound > swing')).toBeNull();
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[0].tripletFeel).toBe(model.TripletFeel.Triplet8th);
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
@@ -1255,6 +1346,7 @@ describe('MusicXML export',()=>{
     ['a capo on a non-stringed staff',/capo on a non-stringed staff/,(score:model.Score)=>{score.tracks[0].staves[0].stringTuning.tunings=[];score.tracks[0].staves[0].capo=2;}],
     ['an invalid capo',/this capo/,(score:model.Score)=>{score.tracks[0].staves[0].capo=-1;}],
     ['an unsupported direction',/this direction/,(score:model.Score)=>{score.masterBars[0].addDirection(model.Direction.TargetSegnoSegno);}],
+    ['an invalid triplet feel',/this triplet feel/,(score:model.Score)=>{score.masterBars[0].tripletFeel=99 as model.TripletFeel;}],
     ['an invalid alternate ending',/this alternate ending/,(score:model.Score)=>{score.masterBars[1].alternateEndings=256;}],
     ['a section',/master section/,(score:model.Score)=>{score.masterBars[0].section=Object.assign(new model.Section(),{text:'Verse',marker:'A'});}],
     ['a sounding transposition',/sounding transposition|staff transpositionpitch/,(score:model.Score)=>{score.tracks[0].staves[0].transpositionPitch=2;}],

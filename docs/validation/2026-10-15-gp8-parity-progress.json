@@ -3271,14 +3271,15 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "current_behavior": "Range keyboard selection, select-all, Escape, Shift navigation, clipboard shortcuts and focus guards accompany existing editing/transport shortcuts. Note entry adds the N toggle, A to G, Guitar Pro duration, dot, triplet and rest keys, note moves, and an Advance after entering a note input preference. Slice 2 adds GP8's accidental keys, the Plus/Minus Keys Behavior preference with the = and _ aliases, an entry key queue, and Backspace, Shift+Delete, Ctrl+Insert, Ctrl+Shift+Delete, Home/End, Ctrl+Home/End and Shift+Home/End.",
-      "remaining_gap": "Voices (Ctrl+1..4, Alt+1..4, Ctrl+M), technique and annotation letters, transport keys, Ctrl+Up/Down and Ctrl+G are open; Shift+Delete refuses several beats; Ctrl+End and key repeat are not compared with GP8; broader action/search workflows are separate open rows.",
+      "current_behavior": "Range keyboard selection, select-all, Escape, Shift navigation, clipboard shortcuts and focus guards accompany existing editing/transport shortcuts. Note entry adds the N toggle, A to G, Guitar Pro duration, dot, triplet and rest keys, note moves, and an Advance after entering a note input preference. Slice 2 adds GP8's accidental keys, the Plus/Minus Keys Behavior preference with the = and _ aliases, an entry key queue, and Backspace, Shift+Delete, Ctrl+Insert, Ctrl+Shift+Delete, Home/End, Ctrl+Home/End and Shift+Home/End. Slice 3 adds voice switching (Ctrl/Alt/Meta+1..4, auto-adding voice if next), multivoice toggle (Ctrl+M), track switching (Ctrl+Up/Down), bar jumps (Ctrl+Left/Right, with Shift extension), Ctrl+Space transport and Ctrl+G Go to bar, plus technique keys (H, S, V, P, I, X).",
+      "remaining_gap": "Shift+Delete refuses several beats; Ctrl+End and key repeat are not compared with GP8; broader action/search workflows are separate open rows.",
       "current_evidence": [
         "range",
         "clipboard",
         "clipboard_validation",
         "score_entry_behavior",
-        "2026-11-07-gp8-score-entry-2.md"
+        "2026-11-07-gp8-score-entry-2.md",
+        "2026-11-10-gp8-score-entry-3.md"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -4283,7 +4284,7 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Note entry on the rendered score: clicking a staff line or space, or typing A to G, writes the pitch on the beat with a hover preview, Shift for chords, Guitar Pro duration, dot, triplet and rest keys, step, semitone and octave moves that keep the note, and an automatic-advance preference that inserts a rest at a bar with room. Each gesture, including the inspector staff's off-key notes, is one undo through a validated `sequence` edit. The inspector staff keeps its accidental and octave keys. Slice 2 adds double accidentals in entry and GP8's accidental keys (Ctrl+7/8/9, Ctrl+Alt+7/9, Ctrl+Alt+8): a pending accidental makes an off-key note one gesture and one undo, and over a note the key re-spells it. Keys typed while a note records wait in an ordered, bounded queue instead of being dropped; the desktop driver checked a pending sharp, a double sharp and a fast three-letter burst.",
+      "current_behavior": "Note entry on the rendered score: clicking a staff line or space, or typing A to G, writes the pitch on the beat with a hover preview, Shift for chords, Guitar Pro duration, dot, triplet and rest keys, step, semitone and octave moves that keep the note, and an automatic-advance preference that inserts a rest at a bar with room. Each gesture, including the inspector staff's off-key notes, is one undo through a validated `sequence` edit. The inspector staff keeps its accidental and octave keys. Slice 2 adds double accidentals in entry and GP8's accidental keys (Ctrl+7/8/9, Ctrl+Alt+7/9, Ctrl+Alt+8): a pending accidental makes an off-key note one gesture and one undo, and over a note the key re-spells it. Keys typed while a note records wait in an ordered, bounded queue instead of being dropped; the desktop driver checked a pending sharp, a double sharp and a fast three-letter burst. Slice 3 adds voice switching/creation, multivoice mode, track navigation, transport/bar jumps, and single-letter technique toggles.",
       "remaining_gap": "AltGr chords were not tried on real German or Estonian keyboards; whether GP8's accidental keys change pitch is unchecked (TabPlayer re-spells); the GP7 writer stores mismatched Step/Accidental for forced spellings and no export was opened in GP8; the hit test reads alphaTab 1.8.4 internals; no MIDI input or nested tuplets.",
       "current_evidence": [
         "notation_entry_behavior",
@@ -4291,7 +4292,8 @@
         "score_entry_behavior",
         "score_entry_evidence",
         "score_entry_limits",
-        "2026-11-07-gp8-score-entry-2.md"
+        "2026-11-07-gp8-score-entry-2.md",
+        "2026-11-10-gp8-score-entry-3.md"
       ],
       "runtime_rechecked_by_this_audit": false
     },

@@ -2313,6 +2313,114 @@ describe('GP8 edit and cursor keys',()=>{
   });
 });
 
+describe('GP8 voice, track, transport and technique keys', () => {
+  const pane = () => screen.getByRole('region', { name: 'Score workspace' });
+  const press = (init: Parameters<typeof fireEvent.keyDown>[1]) => fireEvent.keyDown(pane(), init);
+  const edits = (c: DocumentController) => c.getState().snapshot.project.edits;
+  const cursor = () => (engravingView.mock.lastCall![0] as { editTarget: { track: number; staff: number; bar: number; voice: number; beat: number } }).editTarget;
+  const quiet = () => new Promise(resolve => setTimeout(resolve, 30));
+  const at = (beat: number, bar = 0) => ({ track: 0, staff: 0, bar, voice: 0, beat });
+  const twoTracks = (...more: EditCommand[]) => ({
+    ...blankProject(),
+    edits: [
+      { type: 'appendMeasure' },
+      { type: 'addTrack', name: 'Bass', program: 33, tuning: [43, 38, 33, 28] },
+      { type: 'setNote', target: at(0), string: 6, fret: 3 },
+      { type: 'setNote', target: at(1), string: 6, fret: 5 },
+      ...more,
+    ] as EditCommand[],
+  });
+
+  it('switches voices with Ctrl+1..4 and Alt+1..4, and creates voice if needed', async () => {
+    const c = await setup({
+      ...twoTracks(),
+      edits: [...twoTracks().edits, { type: 'addVoice', track: 0, staff: 0 }],
+    });
+    // With 2 voices present, Ctrl+2 switches voice to index 1
+    press({ key: '2', ctrlKey: true });
+    expect(cursor().voice).toBe(1);
+
+    // Alt+1 switches back to voice index 0
+    press({ key: '1', altKey: true });
+    expect(cursor().voice).toBe(0);
+
+    // Now test adding voice 3 (voice index 2)
+    press({ key: '3', ctrlKey: true });
+    await waitFor(() => expect(cursor().voice).toBe(2));
+  });
+
+  it('toggles multivoice mode with Ctrl+M', async () => {
+    await setup(twoTracks());
+    press({ key: 'm', ctrlKey: true });
+    expect(await screen.findByText('Multivoice editing on')).toBeInTheDocument();
+
+    press({ key: 'm', ctrlKey: true });
+    expect(await screen.findByText('Multivoice editing off')).toBeInTheDocument();
+  });
+
+  it('switches tracks with Ctrl+Up and Ctrl+Down', async () => {
+    await setup(twoTracks());
+    expect(cursor().track).toBe(0);
+
+    press({ key: 'ArrowDown', ctrlKey: true });
+    expect(cursor().track).toBe(1);
+
+    press({ key: 'ArrowUp', ctrlKey: true });
+    expect(cursor().track).toBe(0);
+  });
+
+  it('jumps measures with Ctrl+Left and Ctrl+Right', async () => {
+    await setup(twoTracks());
+    expect(cursor().bar).toBe(0);
+
+    press({ key: 'ArrowRight', ctrlKey: true });
+    expect(cursor().bar).toBe(1);
+    expect(cursor().beat).toBe(0);
+
+    press({ key: 'ArrowLeft', ctrlKey: true });
+    expect(cursor().bar).toBe(0);
+    expect(cursor().beat).toBe(0);
+  });
+
+  it('opens Go to bar dialog with Ctrl+G', async () => {
+    await setup(twoTracks());
+    press({ key: 'g', ctrlKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Go to bar' })).toBeInTheDocument();
+  });
+
+  it('toggles techniques on notes with P, I, V, S, H, X', async () => {
+    const c = await setup(twoTracks());
+    // Palm mute: P
+    press({ key: 'p' });
+    await waitFor(() => expect(edits(c).some(e => e.type === 'setNoteTechniques' && (e as any).patch?.palmMute === true)).toBe(true));
+    await quiet();
+
+    // Let ring: I
+    press({ key: 'i' });
+    await waitFor(() => expect(edits(c).some(e => e.type === 'setNoteTechniques' && (e as any).patch?.letRing === true)).toBe(true));
+    await quiet();
+
+    // Vibrato: V
+    press({ key: 'v' });
+    await waitFor(() => expect(edits(c).some(e => e.type === 'setNoteTechniques' && (e as any).patch?.vibrato === 1)).toBe(true));
+    await quiet();
+
+    // Slide: S (links to beat 1 on string 6)
+    press({ key: 's' });
+    await waitFor(() => expect(edits(c).some(e => e.type === 'setNoteTechniques' && (e as any).patch?.slideOut === 1)).toBe(true));
+    await quiet();
+
+    // Hammer-on/pull-off: H
+    press({ key: 'h' });
+    await waitFor(() => expect(edits(c).some(e => e.type === 'setNoteLink' && (e as any).kind === 'hammerPull')).toBe(true));
+    await quiet();
+
+    // Dead note: X
+    press({ key: 'x' });
+    await waitFor(() => expect(edits(c).some(e => e.type === 'setNoteTechniques' && (e as any).patch?.dead === true)).toBe(true));
+  });
+});
+
 it('runs the practice shortcut commands from the command palette',async()=>{
   await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});integration.setSpeed.mockClear();
   fireEvent.keyDown(workspace,{key:'P',code:'KeyP',ctrlKey:true,shiftKey:true});

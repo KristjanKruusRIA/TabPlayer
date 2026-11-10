@@ -166,7 +166,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Score.subTitle',
       category: 'notation',
-      formats: ['gp'],
+      formats: ['gp', 'musicxml'],
       apply: s => { s.subTitle = 'PreservedSubTitle'; },
       verify: r => expect(r.subTitle).toBe('PreservedSubTitle'),
     },
@@ -194,7 +194,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Score.music',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { s.music = 'PreservedMusic'; },
       verify: r => expect(cleanText(r.music)).toBe('PreservedMusic'),
     },

@@ -72,7 +72,7 @@ function beatTicks(beat:model.Beat){
 // the default of a pristine model object so nothing is silently lost.
 const written={
   // Presentation is not written: colours (style) and every stylesheet display choice.
-  score:new Set(['title','artist','words','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
+  score:new Set(['title','artist','words','music','subtitle','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
   // Beaming rules are display grouping.
   master:new Set(['alternateendings','directions','fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules','tripletfeel']),
   track:new Set(['staves','playbackinfo','name','shortname','color','defaultsystemslayout','systemslayout','isvisibleonmultitrack']),
@@ -683,9 +683,10 @@ function exportMusicXmlPlain(score:model.Score,selection:ExportSelection):Uint8A
       body:element('part',writePart(track,copy,(json.tracks as Json[])[index],json,index===0,`${id}-I1`,state),` id="${id}"`),
     };
   });
-  const identification=[copy.artist?element('creator',escape(copy.artist),' type="composer"'):'',copy.words?element('creator',escape(copy.words),' type="lyricist"'):'',copy.copyright?element('rights',escape(copy.copyright)):''].join('');
+  const identification=[copy.artist?element('creator',escape(copy.artist),' type="composer"'):'',copy.words?element('creator',escape(copy.words),' type="lyricist"'):'',copy.music?element('creator',escape(copy.music),' type="arranger"'):'',copy.copyright?element('rights',escape(copy.copyright)):''].join('');
+  const credit=copy.subTitle?element('credit',element('credit-type','subtitle')+element('credit-words',escape(copy.subTitle)),' page="1"'):'';
   const xml='<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n'
-    +element('score-partwise',(copy.title?element('work',element('work-title',escape(copy.title))):'')+(identification?element('identification',identification):'')
+    +element('score-partwise',(copy.title?element('work',element('work-title',escape(copy.title))):'')+(identification?element('identification',identification):'')+credit
       +element('part-list',parts.map(part=>part.list).join(''))+parts.map(part=>part.body).join(''),' version="4.0"');
   return strToU8(xml);
 }

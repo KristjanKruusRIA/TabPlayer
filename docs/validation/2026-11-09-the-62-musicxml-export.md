@@ -1,18 +1,18 @@
-# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, capo, measure directions, and triplet feel (F13, partial)
+# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, capo, measure directions, triplet feel, subtitle, and arranger metadata (F13, partial)
 
 2026-11-09 – 2026-11-10. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
-**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, staff capo, measure directions, and triplet feel have been lifted.** THE-62 is not finished. These refusals still apply:
+**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, staff capo, measure directions, triplet feel, subtitle, and arranger metadata have been lifted.** THE-62 is not finished. These refusals still apply:
 - percussion staves
 - a stringed staff shown only as standard notation
 - more than one staff on a stringed track
 - sounding transposition
 - MIDI channels above 16
 - different key signatures on the staves of one track
-- features outside the `written` allowlist in `musicxml.ts` (sections, beat text, dead notes, let ring, harmonics, fingering, crescendo, chords, double bars and others)
+- features outside the `written` allowlist in `musicxml.ts` (sections, beat text, dead notes, let ring, harmonics, fingering, crescendo, chords, double bars, album, tab, instructions, notices)
 
 The backlog ticket THE-62 asked to treat the remaining refusals as the list of work, widening support where MusicXML and the importer faithfully express the notation, while continuing to refuse anything that cannot be written or round-tripped correctly:
 - Multi-staff tracks (e.g. keyboard / piano grand staff, organ).
@@ -93,6 +93,11 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - The exporter emits `<sound><swing>...</swing></sound>` whenever `master.tripletFeel` changes from the previous master bar (or on measure 1 if non-zero), emitting on the primary part (`if (first)`).
    - Invalid values (<0, >6, or non-integer) fail closed with `unsupported('this triplet feel')`.
 
+11. **Score Subtitle and Arranger / Music Metadata (`score.subTitle`, `score.music`)** (Supported):
+   - In MusicXML, arranger/music credits are placed inside `<identification>` as `<creator type="arranger">...</creator>`, which alphaTab's `MusicXmlImporter` parses natively into `score.music`.
+   - Subtitle metadata is placed in `<credit page="1"><credit-type>subtitle</credit-type><credit-words>...</credit-words></credit>`, positioned immediately following `<identification>` and preceding `<part-list>` per MusicXML 4.0 DTD sequence rules. alphaTab's `MusicXmlImporter` parses this credit element into `score.subTitle`.
+   - Both metadata fields are escaped via `escape()`, preserving control character rejection.
+
 ## Implementation Details
 
 1. `src/export/musicxml.ts`:
@@ -122,6 +127,9 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Implemented `swingOf(feel, prevFeel)` helper mapping all `model.TripletFeel` enums to standard MusicXML `<sound><swing>...</swing></sound>` elements.
    - Added validation failing closed on invalid triplet feel values.
    - Emitted swing elements on the primary part when triplet feel changes.
+   - Added `music` and `subtitle` to `written.score` allowlist.
+   - Emitted `<creator type="arranger">` in `<identification>` when `score.music` is set.
+   - Emitted `<credit page="1"><credit-type>subtitle</credit-type><credit-words>...</credit-words></credit>` when `score.subTitle` is set.
 
 2. `src/export/musicxml.test.ts`:
    - Added unit test `writes a grand-staff piano track with two staves and round-trips it`: verifies `<staves>2</staves>`, numbered clefs (`1:G`, `2:F`), `<staff>1</staff>` and `<staff>2</staff>`, backup durations, and exact round-trip equality via `content(back)`.
@@ -143,13 +151,14 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added unit test `writes triplet feel changes and round-trips them`: tests all 7 triplet feel values (Triplet8th, Triplet16th, Dotted8th, Dotted16th, Scottish8th, Scottish16th, NoTripletFeel) asserting DOM `<sound><swing>...</swing></sound>` structure and round-trip equality.
    - Added unit test `writes triplet feel only on the first part of a multi-track score`.
    - Added unit test `fails closed for an invalid triplet feel`.
+   - Added unit test `writes subtitle and music (arranger) metadata and round-trips them`: asserts DOM `<credit>` and `<creator type="arranger">` elements and round-trip preservation on `score.subTitle` and `score.music`.
 
 3. `src/interchange/field-preservation.test.ts`:
-   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, `MasterBar.directions`, and `MasterBar.tripletFeel`.
+   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, `MasterBar.directions`, `MasterBar.tripletFeel`, `Score.subTitle`, and `Score.music`.
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (176 tests): all passed.
-- `src/interchange/field-preservation.test.ts` (187 tests): all passed.
-- `src/export/` (22 test files, 553 tests): all passed.
+- `src/export/musicxml.test.ts` (177 tests): all passed.
+- `src/interchange/field-preservation.test.ts` (189 tests): all passed.
+- `src/export/` (22 test files, 554 tests): all passed.
 - `npm run typecheck` (`tsc --noEmit`): 0 errors.

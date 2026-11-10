@@ -575,6 +575,23 @@ describe('MusicXML export',()=>{
     expect(back.masterBars[0].tripletFeel).toBe(model.TripletFeel.Triplet8th);
   });
 
+  it('writes subtitle and music (arranger) metadata and round-trips them',()=>{
+    const score=guitar();
+    score.subTitle='A Study in D';
+    score.music='Arranger Name';
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    expect(doc.querySelector('credit > credit-type')?.textContent).toBe('subtitle');
+    expect(doc.querySelector('credit > credit-words')?.textContent).toBe('A Study in D');
+    expect(doc.querySelector('identification > creator[type="arranger"]')?.textContent).toBe('Arranger Name');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.subTitle.replace(/\u00a0/g,' ')).toBe('A Study in D');
+    expect(back.music.replace(/\u00a0/g,' ')).toBe('Arranger Name');
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);

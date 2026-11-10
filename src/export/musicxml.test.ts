@@ -146,6 +146,63 @@ describe('MusicXML export',()=>{
     expect(music(staff,true)).toEqual(music(score.tracks[0].staves[0],true));
   });
 
+  it('writes ghost notes and palm mutes and reads them back',()=>{
+    const score=guitar();
+    const notes=score.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(b=>b.notes);
+    notes[0].isGhost=true;
+    notes[1].isPalmMute=true;
+    notes[2].isGhost=true;
+    notes[2].isPalmMute=true;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    const noteheads=[...doc.querySelectorAll('note > notehead')];
+    expect(noteheads).toHaveLength(2);
+    expect(noteheads.every(n=>n.getAttribute('parentheses')==='yes'&&n.textContent==='normal')).toBe(true);
+
+    const mutes=[...doc.querySelectorAll('note > play > mute')];
+    expect(mutes).toHaveLength(2);
+    expect(mutes.every(m=>m.textContent==='palm')).toBe(true);
+
+    const back=loadInterchangeScore(bytes,settings);
+    const backNotes=back.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(b=>b.notes);
+    expect(backNotes[0].isGhost).toBe(true);
+    expect(backNotes[0].isPalmMute).toBe(false);
+    expect(backNotes[1].isGhost).toBe(false);
+    expect(backNotes[1].isPalmMute).toBe(true);
+    expect(backNotes[2].isGhost).toBe(true);
+    expect(backNotes[2].isPalmMute).toBe(true);
+    expect(backNotes[3].isGhost).toBe(false);
+    expect(backNotes[3].isPalmMute).toBe(false);
+  });
+
+  it('round-trips ghost notes and palm mutes on a notation + TAB guitar',()=>{
+    const score=notationAndTab();
+    const notes=score.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(b=>b.notes);
+    notes[0].isGhost=true;
+    notes[1].isPalmMute=true;
+    notes[2].isGhost=true;
+    notes[2].isPalmMute=true;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    expect(doc.querySelectorAll('note > notehead[parentheses="yes"]').length).toBe(4);
+    expect(doc.querySelectorAll('note > play > mute').length).toBe(4);
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves).toHaveLength(1);
+    expect([back.tracks[0].staves[0].showStandardNotation,back.tracks[0].staves[0].showTablature]).toEqual([true,true]);
+    const backNotes=back.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(b=>b.notes);
+    expect(backNotes[0].isGhost).toBe(true);
+    expect(backNotes[0].isPalmMute).toBe(false);
+    expect(backNotes[1].isGhost).toBe(false);
+    expect(backNotes[1].isPalmMute).toBe(true);
+    expect(backNotes[2].isGhost).toBe(true);
+    expect(backNotes[2].isPalmMute).toBe(true);
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
@@ -910,7 +967,7 @@ describe('MusicXML export',()=>{
   });
 
   it.each([
-    ['a note effect',/note isghost/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].isGhost=true;}],
+    ['a note effect',/note isdead/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].isDead=true;}],
     ['a beat effect',/beat text/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Intro';}],
     ['a second staff',/more than one staff/,(score:model.Score)=>{score.tracks[0].ensureStaveCount(2);}],
     ['a percussion staff',/percussion|staff ispercussion/,(score:model.Score)=>{score.tracks[0].staves[0].isPercussion=true;}],

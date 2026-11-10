@@ -744,7 +744,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Note.isGhost',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetNote(s).isGhost = true; },
       verify: r => expect(targetNote(r).isGhost).toBe(true),
     },
@@ -758,7 +758,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Note.isPalmMute',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetNote(s).isPalmMute = true; },
       verify: r => expect(targetNote(r).isPalmMute).toBe(true),
     },

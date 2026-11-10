@@ -1,18 +1,18 @@
-# THE-62: MusicXML export, multi-staff tracks only (F13, partial)
+# THE-62: MusicXML export, multi-staff tracks, ghost notes and palm mutes (F13, partial)
 
-2026-11-09. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
+2026-11-09 – 2026-11-10. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
-**Scope: only the multi-staff refusal was lifted.** THE-62 is not finished. These refusals still apply:
+**Scope: multi-staff tracks, ghost notes, and palm mutes have been lifted.** THE-62 is not finished. These refusals still apply:
 - percussion staves
 - a stringed staff shown only as standard notation
 - more than one staff on a stringed track
 - sounding transposition
 - MIDI channels above 16
-- different key signatures on the staves of one track (new)
-- every feature outside the `written` allowlist in `musicxml.ts` (sections, alternate endings, beat text, ghost and dead notes, palm mute, let ring, harmonics, fingering, crescendo, chords, triplet feel, double bars and others), which this branch did not audit
+- different key signatures on the staves of one track
+- features outside the `written` allowlist in `musicxml.ts` (sections, alternate endings, beat text, dead notes, let ring, harmonics, fingering, crescendo, chords, triplet feel, double bars and others)
 
 The backlog ticket THE-62 asked to treat the remaining refusals as the list of work, widening support where MusicXML and the importer faithfully express the notation, while continuing to refuse anything that cannot be written or round-tripped correctly:
 - Multi-staff tracks (e.g. keyboard / piano grand staff, organ).
@@ -48,6 +48,12 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
 5. **MIDI channels above 16** (Kept refused):
    - Standard MusicXML 1.0–4.0 `<midi-channel>` uses 1–16. Higher channels cannot be represented without data loss.
 
+6. **Ghost notes (`note.isGhost`) and Palm mutes (`note.isPalmMute`)** (Supported):
+   - In MusicXML 4.0, ghost notes are expressed via `<notehead parentheses="yes">normal</notehead>`, placed in DTD sequence before `<staff>` and `<notations>`.
+   - Palm mutes are expressed via `<play><mute>palm</mute></play>`, placed in DTD sequence after `<notations>` and `<lyric>`.
+   - alphaTab's `MusicXmlImporter` parses both directly: `element.getAttribute("parentheses") === "yes"` sets `note.isGhost = true`, and `<mute>palm</mute>` sets `note.isPalmMute = true`.
+   - On notation + TAB guitar parts (`both`), both staves receive the notehead and play elements, allowing `applyMusicXmlAlternateStaves` to match and fold them back into a single staff without loss.
+
 ## Implementation Details
 
 1. `src/export/musicxml.ts`:
@@ -60,15 +66,25 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Supported per-staff transposition when multi-staff instruments require distinct display transposition.
    - Emitted notes with `<staff>S</staff>` and `<voice>V</voice>`, separated by `<backup><duration>{total}</duration></backup>` across all voices and staves in each measure.
    - Emitted measure rests with `<rest measure="yes"/>` for resting staves.
+   - Added `isghost` and `ispalmmute` to `written.note` allowlist.
+   - Added `noteheadOf(note)` emitting `<notehead parentheses="yes">normal</notehead>` when `note.isGhost` is true.
+   - Added `playOf(note)` emitting `<play><mute>palm</mute></play>` when `note.isPalmMute` is true.
+   - Implemented `placeNoteAttributes(timing, accidental, notehead)` to ensure strict DTD element ordering (`... dot, accidental, time-modification, notehead, staff`).
 
 2. `src/export/musicxml.test.ts`:
    - Added unit test `writes a grand-staff piano track with two staves and round-trips it`: verifies `<staves>2</staves>`, numbered clefs (`1:G`, `2:F`), `<staff>1</staff>` and `<staff>2</staff>`, backup durations, and exact round-trip equality via `content(back)`.
    - Added unit test `writes a 3-staff organ track and round-trips it`: verifies 3 staves (manual 1, manual 2, pedal), backup elements, and 3-staff model round-trip.
    - Added unit test `writes measure rests on inactive staves of a multi-staff track`: verifies explicit `<rest measure="yes"/>` on inactive staves with appropriate staff tags.
-   - Preserved `it.each` fail-closed tests for stringed second staff, percussion staff, sounding transposition, etc.
+   - Added unit test `writes ghost notes and palm mutes and reads them back`: asserts DOM structure (`<notehead parentheses="yes">normal</notehead>`, `<play><mute>palm</mute></play>`) and exact round-trip for ghost notes, palm mute notes, combined notes, and untouched notes.
+   - Added unit test `round-trips ghost notes and palm mutes on a notation + TAB guitar`: verifies `<notehead>` and `<play>` elements across both staves and verifies folding into one staff.
+   - Replaced `fails closed for a note effect` expectation from `/note isghost/` to `/note isdead/`.
+
+3. `src/interchange/field-preservation.test.ts`:
+   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost` and `Note.isPalmMute`.
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (160 tests): all passed, including the new key-disagreement refusal (it failed before the guard was added).
-- `npx tsc --noEmit`: 0 errors.
-- The full Vitest suite was not re-run for this revision.
+- `src/export/musicxml.test.ts` (162 tests): all passed.
+- `src/interchange/field-preservation.test.ts` (183 tests): all passed.
+- `src/export/` (22 test files, 539 tests): all passed.
+- `npm run typecheck` (`tsc --noEmit`): 0 errors.

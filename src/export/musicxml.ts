@@ -84,7 +84,7 @@ const written={
   // Stem direction is display; dynamics are written as directions.
   beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking']),
   // Bend points are written as <bend> elements (their type is derived from them).
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid','isghost','ispalmmute']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -300,6 +300,22 @@ function checkHammerPulls(score:model.Score,copy:model.Score){
   }
 }
 
+const noteheadOf=(note:model.Note)=>note.isGhost?'<notehead parentheses="yes">normal</notehead>':'';
+const playOf=(note:model.Note)=>note.isPalmMute?'<play><mute>palm</mute></play>':'';
+function placeNoteAttributes(timing:string,accidental:string,notehead:string):string {
+  const timeCut=timing.indexOf('<time-modification>'),staffCut=timing.indexOf('<staff>');
+  if(timeCut>=0&&staffCut>=0){
+    return timing.slice(0,timeCut)+accidental+timing.slice(timeCut,staffCut)+notehead+timing.slice(staffCut);
+  }
+  if(timeCut>=0){
+    return timing.slice(0,timeCut)+accidental+timing.slice(timeCut)+notehead;
+  }
+  if(staffCut>=0){
+    return timing.slice(0,staffCut)+accidental+notehead+timing.slice(staffCut);
+  }
+  return timing+accidental+notehead;
+}
+
 function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean}){
   state.started=false;
   const mix=trackMixAutomations(track),sung={seen:new Set<number>(),open:[] as boolean[]};
@@ -436,9 +452,9 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
               const marked=(noteIndex===0?held:'')+(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
               const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
-              const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
-              notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
-                +(tied||marked?element('notations',tied+marked):'')+(at===0&&noteIndex===0?lyrics:''));
+              const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`);
+              notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+placeNoteAttributes(timing,written.accidental,noteheadOf(note))
+                +(tied||marked?element('notations',tied+marked):'')+(at===0&&noteIndex===0?lyrics:'')+playOf(note));
             });
           }
         }
@@ -513,9 +529,9 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
               const marked=(noteIndex===0?held:'')+(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
               const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
-              const timing=rhythm.replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
-              notes+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
-                +(tied||marked?element('notations',tied+marked):'')+(layout.staffIndex===0&&at===0&&noteIndex===0?lyrics:''));
+              const timing=rhythm.replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`);
+              notes+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+placeNoteAttributes(timing,written.accidental,noteheadOf(note))
+                +(tied||marked?element('notations',tied+marked):'')+(layout.staffIndex===0&&at===0&&noteIndex===0?lyrics:'')+playOf(note));
             }
           }
           if(notes)voices[at].push({notes,total});

@@ -791,7 +791,7 @@ export const et: MessageCatalog = {
   'editor.clipboard_single_hint': 'Ühe raja fraasid vajavad ühte häälerada. Terved taktid hõlmavad selle raja kõiki noodiridu ja hääli.',
   'editor.copy_music': 'Kopeeri muusika',
   'editor.cut_music': 'Lõika muusika',
-  'editor.paste_context_hint': 'Fraasid täidavad pausi või tühja lõpu ühes hääles. Terved taktid lisatakse globaalselt; teistele radadele lisanduvad tühjad taktid. Toetamata muusikalised kontekstid lükatakse enne muutmist tagasi.',
+  'editor.paste_context_hint': 'Fraasid kirjutavad helisevad noodid üle või täidavad pause ühes hääles. Terved taktid lisatakse globaalselt; teistele radadele lisanduvad tühjad taktid. Toetamata muusikalised kontekstid lükatakse enne muutmist tagasi.',
   'editor.paste_repetitions': 'Kleepimise korduste arv',
   'editor.paste_special': 'Eriline kleepimine',
   'editor.clipboard_empty': 'Muusika lõikelaud on tühi.',

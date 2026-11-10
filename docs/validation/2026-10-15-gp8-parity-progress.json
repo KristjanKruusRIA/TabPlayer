@@ -4382,7 +4382,7 @@
       "historical_status": "missing",
       "current_status": "partial",
       "current_behavior": "Single-track one-voice phrases and whole-bar all-voice copy/cut/paste are self-contained across New/Open, with destination context, undo and restart replay.",
-      "remaining_gap": "Partial multi-voice slicing, beat subdivision and sounding-destination overwrite remain open.",
+      "remaining_gap": "Partial multi-voice slicing and beat subdivision remain open.",
       "current_evidence": [
         "clipboard",
         "clipboard_validation",

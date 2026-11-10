@@ -789,7 +789,7 @@ export const en = {
   'editor.clipboard_single_hint': 'Single-track phrases require one voice lane. Complete bars include all staves and voices of that track.',
   'editor.copy_music': 'Copy music',
   'editor.cut_music': 'Cut music',
-  'editor.paste_context_hint': 'Phrases fill a rest or empty suffix in one voice. Complete bars insert globally; other tracks receive empty bars. Unsupported musical contexts are rejected before editing.',
+  'editor.paste_context_hint': 'Phrases overwrite sounding notes or fill rests in one voice. Complete bars insert globally; other tracks receive empty bars. Unsupported musical contexts are rejected before editing.',
   'editor.paste_repetitions': 'Paste repetitions',
   'editor.paste_special': 'Paste special',
   'editor.clipboard_empty': 'The musical clipboard is empty.',

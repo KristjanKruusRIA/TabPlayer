@@ -84,8 +84,37 @@ it('fills a rest suffix, reuses a rest bar, and inserts once before untouched mu
   expect(result.score.tracks[0].staves[0].bars[2].voices[0].beats.at(-1)?.notes).toHaveLength(0);
 });
 
-it('rejects sounding target, free time, too-long beat and absent mappings without mutation',()=>{
-  for(const change of ['sounding','free','long','mapping'] as const){let destination=rests(music(),0);const edit=command(phrase(),0);if(change==='sounding')destination=music();if(change==='free')destination.masterBars[0].isFreeTime=true;if(change==='long'){const source=music(),voice=source.tracks[0].staves[0].bars[0].voices[0];source.masterBars[0].timeSignatureNumerator=8;voice.beats.splice(1);voice.beats[0].duration=-2;edit.clip=makeMusicClip(rebuild(source),{kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:7680},lanes:[{track:0,staff:0,voice:0}]}},'singleTrack');}if(change==='mapping')edit.options.destinations[0].staffMap=[9];const before=json(destination);expect(()=>preparePasteMusic(destination,edit)).toThrow();expect(json(destination)).toBe(before);}
+it('rejects free time, too-long beat and absent mappings without mutation',()=>{
+  for(const change of ['free','long','mapping'] as const){let destination=rests(music(),0);const edit=command(phrase(),0);if(change==='free')destination.masterBars[0].isFreeTime=true;if(change==='long'){const source=music(),voice=source.tracks[0].staves[0].bars[0].voices[0];source.masterBars[0].timeSignatureNumerator=8;voice.beats.splice(1);voice.beats[0].duration=-2;edit.clip=makeMusicClip(rebuild(source),{kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:7680},lanes:[{track:0,staff:0,voice:0}]}},'singleTrack');}if(change==='mapping')edit.options.destinations[0].staffMap=[9];const before=json(destination);expect(()=>preparePasteMusic(destination,edit)).toThrow();expect(json(destination)).toBe(before);}
+});
+
+it('overwrites sounding destination notes, preserves prefix and sounding suffix, and detaches severed links',()=>{
+  const destination=music();
+  const v0=destination.tracks[0].staves[0].bars[0].voices[0];
+  const prefixNoteId=v0.beats[0].notes[0].id;
+  const suffixNote2Id=v0.beats[2].notes[0].id;
+  const suffixNote3Id=v0.beats[3].notes[0].id;
+  v0.beats[0].notes[0].tieDestination=v0.beats[1].notes[0];
+  v0.beats[1].notes[0].tieOrigin=v0.beats[0].notes[0];
+  v0.beats[1].notes[0].isTieDestination=true;
+  v0.beats[2].notes[0].tieDestination=v0.beats[3].notes[0];
+  v0.beats[3].notes[0].tieOrigin=v0.beats[2].notes[0];
+  v0.beats[3].notes[0].isTieDestination=true;
+
+  const source=music();
+  source.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret=9;
+  const edit=command(phrase(source,0),0);
+  edit.options.target.beat=1;
+
+  const result=preparePasteMusic(destination,edit).score;
+  const pastedVoice=result.tracks[0].staves[0].bars[0].voices[0];
+  expect(pastedVoice.beats).toHaveLength(4);
+  expect(pastedVoice.beats[0].notes[0].id).toBe(prefixNoteId);
+  expect(pastedVoice.beats[0].notes[0].tieDestination).toBeNull();
+  expect(pastedVoice.beats[1].notes[0].fret).toBe(9);
+  expect(pastedVoice.beats[2].notes[0].id).toBe(suffixNote2Id);
+  expect(pastedVoice.beats[3].notes[0].id).toBe(suffixNote3Id);
+  expect(pastedVoice.beats[2].notes[0].tieDestination).toBe(pastedVoice.beats[3].notes[0]);
 });
 
 it('preserves excluded destination annotations only at exact retained onsets',()=>{

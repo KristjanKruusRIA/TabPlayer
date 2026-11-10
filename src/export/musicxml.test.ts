@@ -203,6 +203,178 @@ describe('MusicXML export',()=>{
     expect(backNotes[2].isPalmMute).toBe(true);
   });
 
+  it('writes alternate repeat endings and round-trips them',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:5}]}]]},
+      ],
+    });
+    score.masterBars[0].isRepeatStart=true;
+    score.masterBars[1].alternateEndings=1;
+    score.masterBars[1].repeatCount=2;
+    score.masterBars[2].alternateEndings=2;
+    score.masterBars[2].repeatCount=0;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    const measures=doc.querySelectorAll('measure');
+    expect(measures).toHaveLength(4);
+
+    // Measure 1: repeat forward on left barline
+    const m1Left=measures[0].querySelector('barline[location="left"]');
+    expect(m1Left?.querySelector('repeat')?.getAttribute('direction')).toBe('forward');
+    expect(measures[0].querySelector('ending')).toBeNull();
+
+    // Measure 2: 1st ending start on left barline, stop + repeat backward on right barline
+    const m2LeftEnding=measures[1].querySelector('barline[location="left"] > ending');
+    expect(m2LeftEnding?.getAttribute('number')).toBe('1');
+    expect(m2LeftEnding?.getAttribute('type')).toBe('start');
+    expect(m2LeftEnding?.textContent).toBe('1.');
+
+    const m2Right=measures[1].querySelector('barline[location="right"]');
+    expect(m2Right?.querySelector('bar-style')?.textContent).toBe('light-heavy');
+    const m2RightEnding=m2Right?.querySelector('ending');
+    expect(m2RightEnding?.getAttribute('number')).toBe('1');
+    expect(m2RightEnding?.getAttribute('type')).toBe('stop');
+    expect(m2Right?.querySelector('repeat')?.getAttribute('direction')).toBe('backward');
+
+    // Measure 3: 2nd ending start on left barline, stop on right barline
+    const m3LeftEnding=measures[2].querySelector('barline[location="left"] > ending');
+    expect(m3LeftEnding?.getAttribute('number')).toBe('2');
+    expect(m3LeftEnding?.getAttribute('type')).toBe('start');
+    expect(m3LeftEnding?.textContent).toBe('2.');
+
+    const m3RightEnding=measures[2].querySelector('barline[location="right"] > ending');
+    expect(m3RightEnding?.getAttribute('number')).toBe('2');
+    expect(m3RightEnding?.getAttribute('type')).toBe('stop');
+    expect(measures[2].querySelector('barline[location="right"] > repeat')).toBeNull();
+
+    // Measure 4: no endings
+    expect(measures[3].querySelector('ending')).toBeNull();
+
+    // Round-trip
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars).toHaveLength(4);
+    expect(back.masterBars[0].isRepeatStart).toBe(true);
+    expect(back.masterBars[1].alternateEndings).toBe(1);
+    expect(back.masterBars[1].repeatCount).toBe(2);
+    expect(back.masterBars[2].alternateEndings).toBe(2);
+    expect(back.masterBars[2].repeatCount).toBe(0);
+    expect(back.masterBars[3].alternateEndings).toBe(0);
+  });
+
+  it('writes a multi-measure alternate ending and round-trips it',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:3}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:5}]}]]},
+      ],
+    });
+    score.masterBars[0].isRepeatStart=true;
+    // 1st ending spans bar 1 and bar 2
+    score.masterBars[1].alternateEndings=1;
+    score.masterBars[1].repeatCount=0;
+    score.masterBars[2].alternateEndings=1;
+    score.masterBars[2].repeatCount=2;
+    // 2nd ending is bar 3
+    score.masterBars[3].alternateEndings=2;
+    score.masterBars[3].repeatCount=0;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const measures=doc.querySelectorAll('measure');
+
+    // Measure 2: start ending 1 on left, no ending on right
+    expect(measures[1].querySelector('barline[location="left"] > ending')?.getAttribute('type')).toBe('start');
+    expect(measures[1].querySelector('barline[location="right"] > ending')).toBeNull();
+
+    // Measure 3: no ending on left, stop ending 1 on right with repeat backward
+    expect(measures[2].querySelector('barline[location="left"] > ending')).toBeNull();
+    expect(measures[2].querySelector('barline[location="right"] > ending')?.getAttribute('type')).toBe('stop');
+    expect(measures[2].querySelector('barline[location="right"] > repeat')?.getAttribute('direction')).toBe('backward');
+
+    // Measure 4: start ending 2 on left, stop on right
+    expect(measures[3].querySelector('barline[location="left"] > ending')?.getAttribute('type')).toBe('start');
+    expect(measures[3].querySelector('barline[location="right"] > ending')?.getAttribute('type')).toBe('stop');
+
+    // Round-trip
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[1].alternateEndings).toBe(1);
+    expect(back.masterBars[2].alternateEndings).toBe(1);
+    expect(back.masterBars[2].repeatCount).toBe(2);
+    expect(back.masterBars[3].alternateEndings).toBe(2);
+    expect(back.masterBars[4].alternateEndings).toBe(0);
+  });
+
+  it('writes multi-number alternate endings (e.g. 1, 2) and round-trips them',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+      ],
+    });
+    score.masterBars[0].isRepeatStart=true;
+    // alternateEndings = 3 (bits 1 and 2 set: endings 1 and 2)
+    score.masterBars[1].alternateEndings=3;
+    score.masterBars[1].repeatCount=2;
+    // 3rd ending is bar 2 (bit 3: flags = 4)
+    score.masterBars[2].alternateEndings=4;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const measures=doc.querySelectorAll('measure');
+
+    const m2LeftEnding=measures[1].querySelector('barline[location="left"] > ending');
+    expect(m2LeftEnding?.getAttribute('number')).toBe('1, 2');
+    expect(m2LeftEnding?.getAttribute('type')).toBe('start');
+    expect(m2LeftEnding?.textContent).toBe('1, 2.');
+
+    const m2RightEnding=measures[1].querySelector('barline[location="right"] > ending');
+    expect(m2RightEnding?.getAttribute('number')).toBe('1, 2');
+    expect(m2RightEnding?.getAttribute('type')).toBe('stop');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[1].alternateEndings).toBe(3);
+    expect(back.masterBars[2].alternateEndings).toBe(4);
+  });
+
+  it('keeps alternate repeat endings on a notation + TAB guitar',()=>{
+    const score=build({
+      strings:[64,59,55,50,45,40],
+      transpose:-12,
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{string:1,fret:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{string:1,fret:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{string:1,fret:3}]}]]},
+      ],
+    });
+    const staff=score.tracks[0].staves[0];
+    staff.showStandardNotation=true;
+    staff.showTablature=true;
+    for(const bar of staff.bars)bar.clefOttava=model.Ottavia._8vb;
+
+    score.masterBars[0].isRepeatStart=true;
+    score.masterBars[1].alternateEndings=1;
+    score.masterBars[1].repeatCount=2;
+    score.masterBars[2].alternateEndings=2;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves).toHaveLength(1);
+    expect([back.tracks[0].staves[0].showStandardNotation,back.tracks[0].staves[0].showTablature]).toEqual([true,true]);
+    expect(back.masterBars[1].alternateEndings).toBe(1);
+    expect(back.masterBars[1].repeatCount).toBe(2);
+    expect(back.masterBars[2].alternateEndings).toBe(2);
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
@@ -971,7 +1143,7 @@ describe('MusicXML export',()=>{
     ['a beat effect',/beat text/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Intro';}],
     ['a second staff',/more than one staff/,(score:model.Score)=>{score.tracks[0].ensureStaveCount(2);}],
     ['a percussion staff',/percussion|staff ispercussion/,(score:model.Score)=>{score.tracks[0].staves[0].isPercussion=true;}],
-    ['alternate endings',/master alternateendings/,(score:model.Score)=>{score.masterBars[1].alternateEndings=1;}],
+    ['an invalid alternate ending',/this alternate ending/,(score:model.Score)=>{score.masterBars[1].alternateEndings=256;}],
     ['a section',/master section/,(score:model.Score)=>{score.masterBars[0].section=Object.assign(new model.Section(),{text:'Verse',marker:'A'});}],
     ['a sounding transposition',/sounding transposition|staff transpositionpitch/,(score:model.Score)=>{score.tracks[0].staves[0].transpositionPitch=2;}],
     ['a later instrument change',/beat automations/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[1].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Instrument,value:30}));}],

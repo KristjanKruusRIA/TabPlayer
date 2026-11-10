@@ -74,7 +74,7 @@ const written={
   // Presentation is not written: colours (style) and every stylesheet display choice.
   score:new Set(['title','artist','words','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
   // Beaming rules are display grouping.
-  master:new Set(['fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
+  master:new Set(['alternateendings','fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
   track:new Set(['staves','playbackinfo','name','shortname','color','defaultsystemslayout','systemslayout','isvisibleonmultitrack']),
   // Mute and solo are player state and the port is MIDI routing, not notation.
   playback:new Set(['program','primarychannel','secondarychannel','volume','balance','ismute','issolo','port']),
@@ -316,6 +316,13 @@ function placeNoteAttributes(timing:string,accidental:string,notehead:string):st
   return timing+accidental+notehead;
 }
 
+function endingNumbers(flags:number):number[]{
+  if(!Number.isInteger(flags)||flags<=0||flags>255)unsupported('this alternate ending');
+  const result:number[]=[];
+  for(let i=0;i<8;i++)if((flags&(1<<i))!==0)result.push(i+1);
+  return result;
+}
+
 function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean}){
   state.started=false;
   const mix=trackMixAutomations(track),sung={seen:new Set<number>(),open:[] as boolean[]};
@@ -333,6 +340,18 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   for(const [index,bar0] of staff0.bars.entries()){
     const master=bar0.masterBar;check('master',(scoreJson.masterbars as Json[])[master.index]);
     const length=master.calculateDuration();let content='';
+    const flags=master.alternateEndings;
+    if(!Number.isInteger(flags)||flags<0||flags>255)unsupported('this alternate ending');
+    let startEndingXml='',stopEndingXml='';
+    if(flags>0){
+      const nums=endingNumbers(flags).join(', ');
+      const prevMaster=index>0?staff0.bars[index-1].masterBar:null;
+      const prevStopped=!prevMaster||prevMaster.repeatCount>0||prevMaster.alternateEndings!==flags;
+      if(prevStopped)startEndingXml=element('ending',`${nums}.`,` number="${nums}" type="start"`);
+      const nextMaster=index<staff0.bars.length-1?staff0.bars[index+1].masterBar:null;
+      const nextStopped=!nextMaster||master.repeatCount>0||nextMaster.alternateEndings!==flags;
+      if(nextStopped)stopEndingXml=element('ending','',` number="${nums}" type="stop"`);
+    }
     // One unnumbered <key> applies to every staff on import, so staves that disagree cannot be written.
     if(track.staves.some(s=>s.bars[index].keySignature!==bar0.keySignature||s.bars[index].keySignatureType!==bar0.keySignatureType))unsupported('different key signatures on the staves of one track');
     const attributes:string[]=[];
@@ -378,7 +397,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       }
     }
     if(attributes.length)content+=element('attributes',attributes.join(''));
-    if(master.isRepeatStart)content+=element('barline',element('bar-style','heavy-light')+'<repeat direction="forward"/>',' location="left"');
+    if(master.isRepeatStart||startEndingXml){
+      const leftStyle=master.isRepeatStart?element('bar-style','heavy-light'):'';
+      const leftRepeat=master.isRepeatStart?'<repeat direction="forward"/>':'';
+      content+=element('barline',leftStyle+startEndingXml+leftRepeat,' location="left"');
+    }
     if(first){
       const tempos=[...master.tempoAutomations].sort((a,b)=>a.ratioPosition-b.ratioPosition);
       if(index===0&&!tempos.some(change=>change.ratioPosition===0))tempos.unshift(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:score.tempo,ratioPosition:0,isVisible:true}));
@@ -540,7 +563,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
     }
     const entries=layouts.flatMap((layout,at)=>voices[at].length?voices[at]:[{notes:element('note','<rest measure="yes"/>'+element('duration',length)+element('voice',1+layout.voices)+staffOf(layout)),total:length}]);
     entries.forEach(({notes,total},at)=>{content+=notes+(at<entries.length-1?element('backup',element('duration',total)):'');});
-    if(master.repeatCount>0)content+=element('barline',element('bar-style','light-heavy')+`<repeat direction="backward"${master.repeatCount===2?'':` times="${master.repeatCount}"`}/>`,' location="right"');
+    if(master.repeatCount>0||stopEndingXml){
+      const rightStyle=master.repeatCount>0?element('bar-style','light-heavy'):'';
+      const rightRepeat=master.repeatCount>0?`<repeat direction="backward"${master.repeatCount===2?'':` times="${master.repeatCount}"`}/>`:'';
+      content+=element('barline',rightStyle+stopEndingXml+rightRepeat,' location="right"');
+    }
     measures+=element('measure',content,` number="${index+1}"`);previous=bar0;
   }
   if([...legatos,...slides].some(open=>open.size))unsupported('a hammer-on, pull-off or slide left open');

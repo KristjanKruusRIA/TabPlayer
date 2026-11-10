@@ -276,7 +276,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'MasterBar.alternateEndings',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetMasterBar(s, 1).alternateEndings = 3; },
       verify: r => expect(targetMasterBar(r, 1).alternateEndings).toBe(3),
     },

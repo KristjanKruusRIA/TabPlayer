@@ -1,18 +1,18 @@
-# THE-62: MusicXML export, multi-staff tracks, ghost notes and palm mutes (F13, partial)
+# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, and alternate repeat endings (F13, partial)
 
 2026-11-09 – 2026-11-10. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
-**Scope: multi-staff tracks, ghost notes, and palm mutes have been lifted.** THE-62 is not finished. These refusals still apply:
+**Scope: multi-staff tracks, ghost notes, palm mutes, and alternate repeat endings have been lifted.** THE-62 is not finished. These refusals still apply:
 - percussion staves
 - a stringed staff shown only as standard notation
 - more than one staff on a stringed track
 - sounding transposition
 - MIDI channels above 16
 - different key signatures on the staves of one track
-- features outside the `written` allowlist in `musicxml.ts` (sections, alternate endings, beat text, dead notes, let ring, harmonics, fingering, crescendo, chords, triplet feel, double bars and others)
+- features outside the `written` allowlist in `musicxml.ts` (sections, beat text, dead notes, let ring, harmonics, fingering, crescendo, chords, triplet feel, double bars and others)
 
 The backlog ticket THE-62 asked to treat the remaining refusals as the list of work, widening support where MusicXML and the importer faithfully express the notation, while continuing to refuse anything that cannot be written or round-tripped correctly:
 - Multi-staff tracks (e.g. keyboard / piano grand staff, organ).
@@ -54,6 +54,15 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - alphaTab's `MusicXmlImporter` parses both directly: `element.getAttribute("parentheses") === "yes"` sets `note.isGhost = true`, and `<mute>palm</mute>` sets `note.isPalmMute = true`.
    - On notation + TAB guitar parts (`both`), both staves receive the notehead and play elements, allowing `applyMusicXmlAlternateStaves` to match and fold them back into a single staff without loss.
 
+7. **Alternate repeat endings (`master.alternateEndings`)** (Supported):
+   - In MusicXML 4.0, alternate endings are expressed via `<ending number="..." type="start|stop">`, placed within `<barline>` elements in DTD order (`bar-style?`, `ending?`, `repeat?`).
+   - alphaTab stores alternate endings as an 8-bit mask on `MasterBar.alternateEndings` where bit $i$ represents ending $i+1$.
+   - The exporter converts masks to comma-separated number strings (e.g. mask `3` becomes `"1, 2"`, with text `"1, 2."`).
+   - For `<barline location="left">`: emits `<ending ... type="start">` on the measure where an ending begins.
+   - For `<barline location="right">`: emits `<ending ... type="stop"/>` on the measure where the ending finishes (either due to `repeatCount > 0` or moving to a different ending/unmarked measure).
+   - Multi-measure endings span across measures without emitting duplicate start/stop tags; alphaTab's importer maintains ending state across measures via `_nextMasterBarRepeatEnding`.
+   - Out-of-range masks (>255, <0, or non-integer) fail closed with `unsupported('this alternate ending')`.
+
 ## Implementation Details
 
 1. `src/export/musicxml.ts`:
@@ -70,6 +79,9 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added `noteheadOf(note)` emitting `<notehead parentheses="yes">normal</notehead>` when `note.isGhost` is true.
    - Added `playOf(note)` emitting `<play><mute>palm</mute></play>` when `note.isPalmMute` is true.
    - Implemented `placeNoteAttributes(timing, accidental, notehead)` to ensure strict DTD element ordering (`... dot, accidental, time-modification, notehead, staff`).
+   - Added `alternateendings` to `written.master` allowlist.
+   - Added `endingNumbers(flags)` helper mapping bitmasks to numbers array, failing closed on invalid flags.
+   - Updated measure loop in `writePart` to emit `<ending ... type="start">` on left barline and `<ending ... type="stop"/>` on right barline according to measure boundaries and repeat counts.
 
 2. `src/export/musicxml.test.ts`:
    - Added unit test `writes a grand-staff piano track with two staves and round-trips it`: verifies `<staves>2</staves>`, numbered clefs (`1:G`, `2:F`), `<staff>1</staff>` and `<staff>2</staff>`, backup durations, and exact round-trip equality via `content(back)`.
@@ -77,14 +89,19 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added unit test `writes measure rests on inactive staves of a multi-staff track`: verifies explicit `<rest measure="yes"/>` on inactive staves with appropriate staff tags.
    - Added unit test `writes ghost notes and palm mutes and reads them back`: asserts DOM structure (`<notehead parentheses="yes">normal</notehead>`, `<play><mute>palm</mute></play>`) and exact round-trip for ghost notes, palm mute notes, combined notes, and untouched notes.
    - Added unit test `round-trips ghost notes and palm mutes on a notation + TAB guitar`: verifies `<notehead>` and `<play>` elements across both staves and verifies folding into one staff.
+   - Added unit test `writes alternate repeat endings and round-trips them`: verifies 1st and 2nd endings, DOM barlines and ending tags, and exact model round-trip.
+   - Added unit test `writes a multi-measure alternate ending and round-trips it`: verifies multi-measure 1st ending spanning 2 bars with left start on measure 1 and right stop on measure 2.
+   - Added unit test `writes multi-number alternate endings (e.g. 1, 2) and round-trips them`: verifies comma-separated ending numbers (`number="1, 2"`).
+   - Added unit test `keeps alternate repeat endings on a notation + TAB guitar`: verifies alternate endings survive round-trip on dual notation + TAB staves.
    - Replaced `fails closed for a note effect` expectation from `/note isghost/` to `/note isdead/`.
+   - Updated `fails closed for an invalid alternate ending` to test flags out of range (`alternateEndings = 256`).
 
 3. `src/interchange/field-preservation.test.ts`:
-   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost` and `Note.isPalmMute`.
+   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, and `MasterBar.alternateEndings`.
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (162 tests): all passed.
-- `src/interchange/field-preservation.test.ts` (183 tests): all passed.
-- `src/export/` (22 test files, 539 tests): all passed.
+- `src/export/musicxml.test.ts` (166 tests): all passed.
+- `src/interchange/field-preservation.test.ts` (184 tests): all passed.
+- `src/export/` (22 test files, 543 tests): all passed.
 - `npm run typecheck` (`tsc --noEmit`): 0 errors.

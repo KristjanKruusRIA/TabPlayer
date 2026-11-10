@@ -304,7 +304,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'MasterBar.directions',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => {
         targetMasterBar(s, 0).addDirection(model.Direction.TargetSegno);
         targetMasterBar(s, 1).addDirection(model.Direction.JumpDalSegno);

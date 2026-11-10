@@ -1,11 +1,11 @@
-# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, and capo (F13, partial)
+# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, capo, and measure directions (F13, partial)
 
 2026-11-09 – 2026-11-10. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
-**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, and staff capo have been lifted.** THE-62 is not finished. These refusals still apply:
+**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, staff capo, and measure directions have been lifted.** THE-62 is not finished. These refusals still apply:
 - percussion staves
 - a stringed staff shown only as standard notation
 - more than one staff on a stringed track
@@ -70,6 +70,15 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Sounding pitch is computed by alphaTab incorporating `staff.capo` into `note.stringTuning`, ensuring written MusicXML `<pitch>` reflects true sounding pitches and tab frets remain preserved.
    - Capo on non-stringed staves or invalid values (<0, >24, or non-integer) fails closed with `unsupported(...)`.
 
+9. **Measure directions (`master.directions`)** (Supported):
+   - In MusicXML, musical navigation directions (Segno, Coda, Fine, Da Capo, Dal Segno, To Coda) are represented using `<direction>` and `<sound>` elements.
+   - In alphaTab's `MusicXmlImporter`:
+     - Visual navigation signs `<segno/>` and `<coda/>` are parsed inside `<direction><direction-type>`, creating `TargetSegno` (1) and `TargetCoda` (3) directions on the `MasterBar`.
+     - Navigation jumps and targets (`<sound segno="segno"/>`, `<sound coda="coda"/>`, `<sound fine="fine"/>`, `<sound dacapo="dacapo"/>`, `<sound dalsegno="segno"/>`, `<sound tocoda="coda"/>`) are parsed as direct children of `<measure>` without polluting `beat.text`.
+     - The supported subset corresponds to alphaTab's direction enum: `TargetFine` (0), `TargetSegno` (1), `TargetCoda` (3), `JumpDaCapo` (5), `JumpDalSegno` (9), and `JumpDaCoda` (17).
+     - Any unsupported direction value (e.g. `TargetSegnoSegno`, `TargetDoubleCoda`, `JumpDaCapoAlFine`, etc.) fails closed with `unsupported('this direction')`.
+   - Directions are emitted once on the primary part (`if (first)`), placing `<direction>` and `<sound>` tags in DTD-valid order at the beginning of the measure before notes.
+
 ## Implementation Details
 
 1. `src/export/musicxml.ts`:
@@ -92,6 +101,9 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added `capo` to `written.staff` allowlist.
    - Added validation failing closed on capo on non-stringed tracks or invalid capo fret values.
    - Emitted `<capo>` inside `<staff-details>` for stringed tracks and notation + TAB layouts.
+   - Added `directions` to `written.master` allowlist.
+   - Implemented `directionsOf(master)` helper mapping supported directions (`TargetSegno`, `TargetCoda`, `TargetFine`, `JumpDaCapo`, `JumpDalSegno`, `JumpDaCoda`) to MusicXML `<direction>` and `<sound>` elements, failing closed on unhandled directions.
+   - Emitted direction elements on the primary part at measure start.
 
 2. `src/export/musicxml.test.ts`:
    - Added unit test `writes a grand-staff piano track with two staves and round-trips it`: verifies `<staves>2</staves>`, numbered clefs (`1:G`, `2:F`), `<staff>1</staff>` and `<staff>2</staff>`, backup durations, and exact round-trip equality via `content(back)`.
@@ -108,13 +120,15 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Replaced `fails closed for a note effect` expectation from `/note isghost/` to `/note isdead/`.
    - Updated `fails closed for an invalid alternate ending` to test flags out of range (`alternateEndings = 256`).
    - Added `fails closed for a capo on a non-stringed staff` and `fails closed for an invalid capo`.
+   - Added unit test `writes measure directions (segno, coda, fine, da capo, dal segno, to coda) and round-trips them`: asserts DOM `<direction><direction-type><segno/></direction-type></direction>`, `<sound segno="segno"/>`, `<sound coda="coda"/>`, `<sound fine="fine"/>`, `<sound dacapo="dacapo"/>`, `<sound dalsegno="segno"/>`, `<sound tocoda="coda"/>`, and round-trip preservation of all directions on `MasterBar.directions`.
+   - Added unit test `fails closed for an unhandled measure direction`.
 
 3. `src/interchange/field-preservation.test.ts`:
-   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, and `Staff.capo`.
+   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, and `MasterBar.directions`.
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (170 tests): all passed.
-- `src/interchange/field-preservation.test.ts` (185 tests): all passed.
-- `src/export/` (22 test files, 547 tests): all passed.
+- `src/export/musicxml.test.ts` (173 tests): all passed.
+- `src/interchange/field-preservation.test.ts` (186 tests): all passed.
+- `src/export/` (22 test files, 550 tests): all passed.
 - `npm run typecheck` (`tsc --noEmit`): 0 errors.

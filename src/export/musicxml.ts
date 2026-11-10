@@ -74,7 +74,7 @@ const written={
   // Presentation is not written: colours (style) and every stylesheet display choice.
   score:new Set(['title','artist','words','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
   // Beaming rules are display grouping.
-  master:new Set(['alternateendings','fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
+  master:new Set(['alternateendings','directions','fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
   track:new Set(['staves','playbackinfo','name','shortname','color','defaultsystemslayout','systemslayout','isvisibleonmultitrack']),
   // Mute and solo are player state and the port is MIDI routing, not notation.
   playback:new Set(['program','primarychannel','secondarychannel','volume','balance','ismute','issolo','port']),
@@ -126,6 +126,35 @@ function tempoDirection(change:model.Automation,master:model.MasterBar){
   // A hidden tempo keeps its label hidden too.
   return element('direction',(change.text&&change.isVisible?element('direction-type',element('words',escape(change.text))):'')+element('direction-type',element('metronome',element('beat-unit','quarter')+element('per-minute',number(change.value)),change.isVisible?'':' print-object="no"'))
     +(tick?element('offset',tick,' sound="yes"'):'')+`<sound tempo="${number(change.value)}"/>`,' placement="above"');
+}
+function directionsOf(master:model.MasterBar):string{
+  if(!master.directions||master.directions.size===0)return '';
+  let result='';
+  for(const direction of master.directions){
+    switch(direction){
+      case model.Direction.TargetSegno:
+        result+=element('direction',element('direction-type','<segno/>'),' placement="above"')+'<sound segno="segno"/>';
+        break;
+      case model.Direction.TargetCoda:
+        result+=element('direction',element('direction-type','<coda/>'),' placement="above"')+'<sound coda="coda"/>';
+        break;
+      case model.Direction.TargetFine:
+        result+='<sound fine="fine"/>';
+        break;
+      case model.Direction.JumpDaCapo:
+        result+='<sound dacapo="dacapo"/>';
+        break;
+      case model.Direction.JumpDalSegno:
+        result+='<sound dalsegno="segno"/>';
+        break;
+      case model.Direction.JumpDaCoda:
+        result+='<sound tocoda="coda"/>';
+        break;
+      default:
+        unsupported('this direction');
+    }
+  }
+  return result;
 }
 
 // A bend curve (offsets 0–60, values in quarter tones) as one <bend> per value change:
@@ -408,10 +437,12 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       const leftRepeat=master.isRepeatStart?'<repeat direction="forward"/>':'';
       content+=element('barline',leftStyle+startEndingXml+leftRepeat,' location="left"');
     }
+    const directionsXml=directionsOf(master);
     if(first){
       const tempos=[...master.tempoAutomations].sort((a,b)=>a.ratioPosition-b.ratioPosition);
       if(index===0&&!tempos.some(change=>change.ratioPosition===0))tempos.unshift(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:score.tempo,ratioPosition:0,isVisible:true}));
       content+=tempos.map(change=>tempoDirection(change,master)).join('');
+      content+=directionsXml;
     }
     content+=mix.filter(point=>point.bar===index).map(point=>mixDirection(point.automation,master,instrument,layouts[0].staff?element('staff',layouts[0].staff):'')).join('');
     const voices:{notes:string;total:number}[][]=layouts.map(()=>[]);

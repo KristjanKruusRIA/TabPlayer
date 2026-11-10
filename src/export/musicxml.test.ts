@@ -413,6 +413,77 @@ describe('MusicXML export',()=>{
     expect(back.tracks[0].staves[0].capo).toBe(2);
   });
 
+  it('writes measure directions and round-trips them',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:5}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:7}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:9}]}]]},
+      ],
+    });
+    score.masterBars[0].addDirection(model.Direction.TargetSegno);
+    score.masterBars[1].addDirection(model.Direction.TargetCoda);
+    score.masterBars[2].addDirection(model.Direction.JumpDalSegno);
+    score.masterBars[3].addDirection(model.Direction.JumpDaCapo);
+    score.masterBars[4].addDirection(model.Direction.TargetFine);
+    score.masterBars[5].addDirection(model.Direction.JumpDaCoda);
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const measures=doc.querySelectorAll('measure');
+
+    expect(measures[0].querySelector('direction > direction-type > segno')).not.toBeNull();
+    expect(measures[0].querySelector('sound[segno]')?.getAttribute('segno')).toBe('segno');
+
+    expect(measures[1].querySelector('direction > direction-type > coda')).not.toBeNull();
+    expect(measures[1].querySelector('sound[coda]')?.getAttribute('coda')).toBe('coda');
+
+    expect(measures[2].querySelector('sound')?.getAttribute('dalsegno')).toBe('segno');
+    expect(measures[3].querySelector('sound')?.getAttribute('dacapo')).toBe('dacapo');
+    expect(measures[4].querySelector('sound')?.getAttribute('fine')).toBe('fine');
+    expect(measures[5].querySelector('sound')?.getAttribute('tocoda')).toBe('coda');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[0].directions).toContain(model.Direction.TargetSegno);
+    expect(back.masterBars[1].directions).toContain(model.Direction.TargetCoda);
+    expect(back.masterBars[2].directions).toContain(model.Direction.JumpDalSegno);
+    expect(back.masterBars[3].directions).toContain(model.Direction.JumpDaCapo);
+    expect(back.masterBars[4].directions).toContain(model.Direction.TargetFine);
+    expect(back.masterBars[5].directions).toContain(model.Direction.JumpDaCoda);
+  });
+
+  it('writes directions only on the first part of a multi-track score',()=>{
+    const score=build({
+      copies:2,
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+      ],
+    });
+    score.masterBars[0].addDirection(model.Direction.TargetSegno);
+    score.masterBars[1].addDirection(model.Direction.JumpDalSegno);
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const parts=doc.querySelectorAll('part');
+    expect(parts).toHaveLength(2);
+
+    expect(parts[0].querySelector('direction > direction-type > segno')).not.toBeNull();
+    expect(parts[0].querySelectorAll('sound[segno="segno"]')).toHaveLength(1);
+    expect(parts[0].querySelectorAll('sound[dalsegno="segno"]')).toHaveLength(1);
+
+    expect(parts[1].querySelector('direction > direction-type > segno')).toBeNull();
+    expect(parts[1].querySelector('sound[segno="segno"]')).toBeNull();
+    expect(parts[1].querySelector('sound[dalsegno="segno"]')).toBeNull();
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[0].directions).toContain(model.Direction.TargetSegno);
+    expect(back.masterBars[1].directions).toContain(model.Direction.JumpDalSegno);
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
@@ -1183,6 +1254,7 @@ describe('MusicXML export',()=>{
     ['a percussion staff',/percussion|staff ispercussion/,(score:model.Score)=>{score.tracks[0].staves[0].isPercussion=true;}],
     ['a capo on a non-stringed staff',/capo on a non-stringed staff/,(score:model.Score)=>{score.tracks[0].staves[0].stringTuning.tunings=[];score.tracks[0].staves[0].capo=2;}],
     ['an invalid capo',/this capo/,(score:model.Score)=>{score.tracks[0].staves[0].capo=-1;}],
+    ['an unsupported direction',/this direction/,(score:model.Score)=>{score.masterBars[0].addDirection(model.Direction.TargetSegnoSegno);}],
     ['an invalid alternate ending',/this alternate ending/,(score:model.Score)=>{score.masterBars[1].alternateEndings=256;}],
     ['a section',/master section/,(score:model.Score)=>{score.masterBars[0].section=Object.assign(new model.Section(),{text:'Verse',marker:'A'});}],
     ['a sounding transposition',/sounding transposition|staff transpositionpitch/,(score:model.Score)=>{score.tracks[0].staves[0].transpositionPitch=2;}],

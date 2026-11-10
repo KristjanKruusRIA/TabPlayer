@@ -592,6 +592,73 @@ describe('MusicXML export',()=>{
     expect(back.music.replace(/\u00a0/g,' ')).toBe('Arranger Name');
   });
 
+  it('writes beat text and reads it back',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Intro riff';
+    score.tracks[0].staves[0].bars[0].voices[0].beats[2].text='Lead';
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const words=[...doc.querySelectorAll('direction > direction-type > words')].map(w=>w.textContent);
+    expect(words).toContain('Intro riff');
+    expect(words).toContain('Lead');
+
+    const back=loadInterchangeScore(bytes,settings);
+    const beats=back.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(beats[0].text).toBe('Intro riff');
+    expect(beats[2].text).toBe('Lead');
+  });
+
+  it('keeps beat text on a notation + TAB guitar',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].showStandardNotation=true;
+    score.tracks[0].staves[0].showTablature=true;
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Solo';
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    expect(doc.querySelector('direction > direction-type > words')?.textContent).toBe('Solo');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBe('Solo');
+  });
+
+  it('writes beat text on multi-staff tracks',()=>{
+    const score=new model.Score();
+    const track=new model.Track();score.addTrack(track);track.ensureStaveCount(2);
+    const [treble,bass]=track.staves;
+    treble.showStandardNotation=true;treble.showTablature=false;
+    bass.showStandardNotation=true;bass.showTablature=false;
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+
+    const bar1=new model.Bar();treble.addBar(bar1);bar1.clef=model.Clef.G2;
+    const voice1=new model.Voice();bar1.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=5;note1.tone=0;beat1.addNote(note1);
+    beat1.text='Right hand';
+
+    const bar2=new model.Bar();bass.addBar(bar2);bar2.clef=model.Clef.F4;
+    const voice2=new model.Voice();bar2.addVoice(voice2);
+    const beat2=new model.Beat();beat2.duration=model.Duration.Whole;voice2.addBeat(beat2);
+    const note2=new model.Note();note2.octave=3;note2.tone=0;beat2.addNote(note2);
+    beat2.text='Left hand';
+
+    score.finish(settings);
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const directions=[...doc.querySelectorAll('direction')].filter(d=>d.querySelector('words'));
+    expect(directions[0].querySelector('words')?.textContent).toBe('Right hand');
+    expect(directions[0].querySelector('staff')?.textContent).toBe('1');
+    expect(directions[1].querySelector('words')?.textContent).toBe('Left hand');
+    expect(directions[1].querySelector('staff')?.textContent).toBe('2');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBe('Right hand');
+    expect(back.tracks[0].staves[1].bars[0].voices[0].beats[0].text).toBe('Left hand');
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
@@ -1357,7 +1424,7 @@ describe('MusicXML export',()=>{
 
   it.each([
     ['a note effect',/note isdead/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].isDead=true;}],
-    ['a beat effect',/beat text/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Intro';}],
+    ['a beat effect',/beat slap/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].slap=true;}],
     ['a second staff',/more than one staff/,(score:model.Score)=>{score.tracks[0].ensureStaveCount(2);}],
     ['a percussion staff',/percussion|staff ispercussion/,(score:model.Score)=>{score.tracks[0].staves[0].isPercussion=true;}],
     ['a capo on a non-stringed staff',/capo on a non-stringed staff/,(score:model.Score)=>{score.tracks[0].staves[0].stringTuning.tunings=[];score.tracks[0].staves[0].capo=2;}],

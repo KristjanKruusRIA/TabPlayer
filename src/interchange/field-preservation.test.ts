@@ -540,7 +540,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Beat.text',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetBeat(s).text = 'Solo'; },
       verify: r => expect(targetBeat(r).text).toBe('Solo'),
     },

@@ -82,7 +82,7 @@ const written={
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
-  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking']),
+  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking','text']),
   // Bend points are written as <bend> elements (their type is derived from them).
   note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid','isghost','ispalmmute']),
 };
@@ -509,6 +509,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             const name=(model.DynamicValue[beat.dynamics]??unsupported('this dynamic')).toLowerCase();
             notes[0]+=element('direction',element('direction-type',element('dynamics',`<${name}/>`))+staffOf(layouts[0]),' placement="below"');state.dynamic=beat.dynamics;
           }
+          if(beat.text)notes[0]+=element('direction',element('direction-type',element('words',escape(beat.text)))+staffOf(layouts[0]),' placement="above"');
           if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
             const held=fermataOf(beat);
             layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber(layout)+staffOf(layout)+(held?element('notations',held):''));});total=length;continue;
@@ -587,6 +588,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               const name=(model.DynamicValue[beat.dynamics]??unsupported('this dynamic')).toLowerCase();
               notes+=element('direction',element('direction-type',element('dynamics',`<${name}/>`))+staffOf(layout),' placement="below"');state.dynamic=beat.dynamics;
             }
+            if(beat.text)notes+=element('direction',element('direction-type',element('words',escape(beat.text)))+staffOf(layout),' placement="above"');
             if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
               const held=fermataOf(beat);
               notes+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber+staffOf(layout)+(held?element('notations',held):''));total=length;continue;

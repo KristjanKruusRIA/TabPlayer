@@ -770,6 +770,55 @@ describe('MusicXML export',()=>{
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/this crescendo/);
   });
 
+  it('writes left-hand and right-hand fingering and reads them back',()=>{
+    const score=guitar();
+    const note0=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    note0.leftHandFinger=model.Fingers.IndexFinger;
+    note0.rightHandFinger=model.Fingers.Thumb;
+
+    const note1=score.tracks[0].staves[0].bars[0].voices[0].beats[1].notes[0];
+    note1.leftHandFinger=model.Fingers.MiddleFinger;
+    note1.rightHandFinger=model.Fingers.IndexFinger;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const fingerings=[...doc.querySelectorAll('technical > fingering')].map(f=>f.textContent);
+    const plucks=[...doc.querySelectorAll('technical > pluck')].map(p=>p.textContent);
+    expect(fingerings).toEqual(['2','3']);
+    expect(plucks).toEqual(['p','i']);
+
+    const back=loadInterchangeScore(bytes,settings);
+    const backNote0=back.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect(backNote0.leftHandFinger).toBe(model.Fingers.IndexFinger);
+    expect(backNote0.rightHandFinger).toBe(model.Fingers.Thumb);
+
+    const backNote1=back.tracks[0].staves[0].bars[0].voices[0].beats[1].notes[0];
+    expect(backNote1.leftHandFinger).toBe(model.Fingers.MiddleFinger);
+    expect(backNote1.rightHandFinger).toBe(model.Fingers.IndexFinger);
+  });
+
+  it('keeps fingering on a notation + TAB guitar',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].showStandardNotation=true;
+    score.tracks[0].staves[0].showTablature=true;
+    const note0=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    note0.leftHandFinger=model.Fingers.AnnularFinger;
+    note0.rightHandFinger=model.Fingers.MiddleFinger;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    const backNote=back.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect(backNote.leftHandFinger).toBe(model.Fingers.AnnularFinger);
+    expect(backNote.rightHandFinger).toBe(model.Fingers.MiddleFinger);
+  });
+
+  it('fails closed for an invalid fingering',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].leftHandFinger=99 as model.Fingers;
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/this fingering/);
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);

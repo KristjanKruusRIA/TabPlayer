@@ -1,22 +1,42 @@
-# THE-62: MusicXML export, multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, capo, measure directions, triplet feel, subtitle, arranger, beat text, and crescendo/decrescendo hairpins (F13, partial)
+# THE-62: MusicXML export: multi-staff tracks, ghost notes, palm mutes, alternate endings, capo, directions, swing, metadata, beat text, hairpins, and fingering (F13)
 
 2026-11-09 – 2026-11-10. Branch `agy/the-62-musicxml-export` from `develop` (`f24e72b`).
 
 ## Context & Objectives
 
 The MusicXML exporter (`src/export/musicxml.ts`) provides an owned MusicXML 4.0 `score-partwise` writer. Any feature that cannot be expressed faithfully fails closed (`unsupported(...)`) rather than dropping or corrupting data.
-**Scope: multi-staff tracks, ghost notes, palm mutes, alternate repeat endings, staff capo, measure directions, triplet feel, subtitle, arranger metadata, beat text, and crescendo/decrescendo hairpins have been lifted.** THE-62 is not finished. These refusals still apply:
-- percussion staves
-- a stringed staff shown only as standard notation
-- more than one staff on a stringed track
-- sounding transposition
-- MIDI channels above 16
-- different key signatures on the staves of one track
-- features outside the `written` allowlist in `musicxml.ts` (sections, dead notes, let ring, harmonics, fingering, chords, double bars, album, tab, instructions, notices, beat effects like slap/pop/fade)
+THE-62 treated all export refusals as a systematic backlog, widening support wherever MusicXML 4.0 and alphaTab can faithfully express and round-trip content, while verifying and cementing fail-closed refusals on everything that cannot be written or round-tripped with fidelity.
 
-The backlog ticket THE-62 asked to treat the remaining refusals as the list of work, widening support where MusicXML and the importer faithfully express the notation, while continuing to refuse anything that cannot be written or round-tripped correctly:
-- Multi-staff tracks (e.g. keyboard / piano grand staff, organ).
-- Assessment of other refusal families: percussion staves, stringed staves shown only as standard notation, sounding transposition, and high MIDI channels.
+### Scope Lifted:
+- Multi-staff tracks (keyboard/piano grand staff, organ manuals/pedal).
+- Ghost notes (`note.isGhost`).
+- Palm mutes (`note.isPalmMute`).
+- Alternate repeat endings (`master.alternateEndings`).
+- Staff capo (`staff.capo`).
+- Measure directions (`master.directions`: Segno, Coda, Fine, Da Capo, Dal Segno, To Coda).
+- Triplet feel and swing (`master.tripletFeel`: all 7 swing and straight feel types).
+- Subtitle and Arranger metadata (`score.subTitle`, `score.music`).
+- Beat text annotations (`beat.text`).
+- Crescendo & Decrescendo hairpins (`beat.crescendo`).
+- Left-hand & Right-hand fingering (`note.leftHandFinger`, `note.rightHandFinger`).
+
+### Refusals Solidified & Kept Failed-Closed:
+1. **Percussion staves (`staff.isPercussion`)**: alphaTab's `MusicXmlImporter` instantiates ad-hoc articulation records with blank staff lines and notehead symbols, corrupting General MIDI drum mapping, cymbal/hi-hat noteheads, and vertical position.
+2. **Stringed staves shown only as standard notation (`stringed && !tab && !both`)**: alphaTab forces tablature display when tuning is present, or defaults tuning to empty and computes negative string offsets when omitted.
+3. **Multi-staff stringed tracks (`track.staves.length > 1 && track.staves.some(s => s.stringTuning.tunings.length > 0)`)**: TabPlayer and alphaTab model stringed instruments as single-staff or notation+TAB views; multi-staff stringed tracks are unrepresentable.
+4. **Sounding transposition (`staff.transpositionPitch !== 0`)**: MusicXML `<transpose>` is parsed exclusively into `displayTranspositionPitch`, altering playback pitch if used for sounding transposition.
+5. **MIDI channels above 16 (`info.primaryChannel > 15`)**: Standard MusicXML 1.0–4.0 limits MIDI channels to 1–16.
+6. **Different key signatures on staves of one track**: alphaTab applies one unnumbered `<key>` to all staves on import, losing divergent staff keys.
+7. **Harmonics (`note.harmonicType`)**: alphaTab's `MusicXmlImporter` has an empty `case "harmonic": break;` handler that completely ignores harmonics on import.
+8. **Chords (`beat.chordId`, `staff.chords`)**: alphaTab generates synthetic local IDs on import rather than preserving chord IDs, and standard `<harmony>` lacks full diagram geometry fidelity.
+9. **Let ring on notes (`note.isLetRing`)**: alphaTab's MusicXML importer only sets `beat.isLetRing`, leaving `note.isLetRing` unset (`false`).
+10. **Dead notes (`note.isDead`)**: alphaTab parses `<notehead>x</notehead>` as `NoteStyle`, not `note.isDead`.
+11. **Sections (`master.section`)**: alphaTab's `MusicXmlImporter` parses `<rehearsal>` into `section.marker` but drops `section.text`.
+12. **Double barlines (`master.isDoubleBar`)**: alphaTab's importer sets `bar.barLineRight = BarLineStyle.LightLight`, leaving `masterBar.isDoubleBar` unset.
+13. **Sustain pedals (`bar.sustainPedals`)**: `applyMusicXmlAlternateStaves` does not ignore `sustainPedals` in `ignoredBar`, causing dual notation + TAB guitars to fail folding.
+14. **Trill pitch (`note.trillValue`)**: alphaTab's importer computes stringed trills from open string tuning (`note.stringTuning + step`) instead of fretted pitch, corrupting trill pitch.
+15. **Beat effects (`slap`, `pop`, `fade`, `golpe`, `wahPedal`, `rasgueado`, `barreFret`, `showTimer`)**: Not supported by alphaTab MusicXmlImporter.
+16. **Score metadata (`album`, `tab`, `instructions`, `notices`)**: Not parsed by alphaTab MusicXmlImporter.
 
 ## Analysis of Refusal Families
 
@@ -120,6 +140,16 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
      - Hairpins outside voice 0 fail closed (`crescendo outside the first voice`).
      - Out-of-range or non-integer crescendo values fail closed (`this crescendo`).
 
+14. **Left-hand and Right-hand Fingering (`note.leftHandFinger`, `note.rightHandFinger`)** (Supported):
+   - In MusicXML 4.0, fingerings are expressed inside `<notations><technical>`:
+     - Left-hand fingering: `<fingering>{val}</fingering>`, where values map to standard digits `0` (NoOrDead), `1` (Thumb), `2` (Index), `3` (Middle), `4` (Annular), `5` (Little).
+     - Right-hand fingering: `<pluck>{val}</pluck>`, where values map to classical guitar pluck letters `0` (NoOrDead), `p` (Thumb / Pulgar), `i` (Index / Indice), `m` (Middle / Medio), `a` (Annular / Anular), `c` (Little / Chico).
+   - In alphaTab's `MusicXmlImporter`:
+     - `<fingering>` is parsed by `_parseFingering` directly into `note.leftHandFinger`.
+     - `<pluck>` is parsed by `_parseFingering` directly into `note.rightHandFinger`.
+     - Dual staves (`both`): `<fingering>` and `<pluck>` emit on both staves, preserving matching fingering values across notation and TAB staves and folding cleanly without loss.
+     - Out-of-range or invalid fingering enum values fail closed (`this fingering`).
+
 ## Implementation Details
 
 1. `src/export/musicxml.ts`:
@@ -158,6 +188,8 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Implemented `wedgeOf(kind, current, staff)` managing hairpin transitions and `<wedge type="crescendo|diminuendo|stop"/>` emission in placement="below" direction elements.
    - Tracked running crescendo state across bars and measures, stopping unclosed hairpins at track end.
    - Refused crescendo on multi-staff tracks and outside voice 0.
+   - Added `lefthandfinger` and `righthandfinger` to `written.note` allowlist.
+   - Implemented `fingerOf(note)` emitting `<fingering>` and `<pluck>` inside `<technical>`.
 
 2. `src/export/musicxml.test.ts`:
    - Added unit test `writes a grand-staff piano track with two staves and round-trips it`: verifies `<staves>2</staves>`, numbered clefs (`1:G`, `2:F`), `<staff>1</staff>` and `<staff>2</staff>`, backup durations, and exact round-trip equality via `content(back)`.
@@ -182,14 +214,15 @@ The backlog ticket THE-62 asked to treat the remaining refusals as the list of w
    - Added unit test `writes subtitle and music (arranger) metadata and round-trips them`: asserts DOM `<credit>` and `<creator type="arranger">` elements and round-trip preservation on `score.subTitle` and `score.music`.
    - Added unit tests `writes beat text and reads it back`, `keeps beat text on a notation + TAB guitar`, and `writes beat text on multi-staff tracks`.
    - Added unit tests `writes crescendo and decrescendo hairpins and reads them back`, `keeps crescendo hairpins on a notation + TAB guitar`, `refuses crescendo outside the first voice`, `refuses crescendo on a multi-staff track`, and `fails closed for an invalid crescendo`.
+   - Added unit tests `writes left-hand and right-hand fingering and reads them back`, `keeps fingering on a notation + TAB guitar`, and `fails closed for an invalid fingering`.
    - Updated `fails closed for a beat effect` to assert unwritten `/beat slap/`.
 
 3. `src/interchange/field-preservation.test.ts`:
-   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, `MasterBar.directions`, `MasterBar.tripletFeel`, `Score.subTitle`, `Score.music`, `Beat.text`, and `Beat.crescendo`.
+   - Added `'musicxml'` to the preserved `formats` list for `Note.isGhost`, `Note.isPalmMute`, `MasterBar.alternateEndings`, `Staff.capo`, `MasterBar.directions`, `MasterBar.tripletFeel`, `Score.subTitle`, `Score.music`, `Beat.text`, `Beat.crescendo`, and `Note.leftHandFinger & rightHandFinger`.
 
 ## Verification
 
-- `src/export/musicxml.test.ts` (185 tests): all passed.
-- `src/interchange/field-preservation.test.ts` (191 tests): all passed.
-- `src/export/` (22 test files, 562 tests): all passed.
+- `src/export/musicxml.test.ts` (188 tests): all passed.
+- `src/interchange/field-preservation.test.ts` (192 tests): all passed.
+- `src/export/` (22 test files, 565 tests): all passed.
 - `npm run typecheck` (`tsc --noEmit`): 0 errors.

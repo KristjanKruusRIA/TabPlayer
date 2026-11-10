@@ -84,7 +84,7 @@ const written={
   // Stem direction is display; dynamics are written as directions.
   beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking','text','crescendo']),
   // Bend points are written as <bend> elements (their type is derived from them).
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid','isghost','ispalmmute']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid','isghost','ispalmmute','lefthandfinger','righthandfinger']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -362,6 +362,34 @@ function checkHammerPulls(score:model.Score,copy:model.Score){
 
 const noteheadOf=(note:model.Note)=>note.isGhost?'<notehead parentheses="yes">normal</notehead>':'';
 const playOf=(note:model.Note)=>note.isPalmMute?'<play><mute>palm</mute></play>':'';
+const leftFingers:Partial<Record<model.Fingers,string>>={
+  [model.Fingers.NoOrDead]:'0',
+  [model.Fingers.Thumb]:'1',
+  [model.Fingers.IndexFinger]:'2',
+  [model.Fingers.MiddleFinger]:'3',
+  [model.Fingers.AnnularFinger]:'4',
+  [model.Fingers.LittleFinger]:'5',
+};
+const rightFingers:Partial<Record<model.Fingers,string>>={
+  [model.Fingers.NoOrDead]:'0',
+  [model.Fingers.Thumb]:'p',
+  [model.Fingers.IndexFinger]:'i',
+  [model.Fingers.MiddleFinger]:'m',
+  [model.Fingers.AnnularFinger]:'a',
+  [model.Fingers.LittleFinger]:'c',
+};
+function fingerOf(note:model.Note):string{
+  let xml='';
+  if(note.leftHandFinger!==model.Fingers.Unknown){
+    const val=leftFingers[note.leftHandFinger]??unsupported('this fingering');
+    xml+=element('fingering',val);
+  }
+  if(note.rightHandFinger!==model.Fingers.Unknown){
+    const val=rightFingers[note.rightHandFinger]??unsupported('this fingering');
+    xml+=element('pluck',val);
+  }
+  return xml;
+}
 function placeNoteAttributes(timing:string,accidental:string,notehead:string):string {
   const timeCut=timing.indexOf('<time-modification>'),staffCut=timing.indexOf('<staff>');
   if(timeCut>=0&&staffCut>=0){
@@ -552,7 +580,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               }
               const fingering=layout.technical&&note.isStringed?element('string',strings.length-note.string+1)+element('fret',note.fret):'',bent=bends(note),mark=marks(note,noteIndex===0);
               if(note.vibrato!==model.VibratoType.None&&note.hasBend&&!bent)unsupported('vibrato on a bend held over a tie');
-              const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
+              const slurred=legato(note,legatos[at],legatos),plucks=fingerOf(note),technical=fingering||bent||mark.technical||slurred||plucks?element('technical',slurred+bent+mark.technical+fingering+plucks):'';
               const marked=(noteIndex===0?held:'')+(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
               const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
               const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`);
@@ -641,7 +669,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               }
               const fingering=layout.technical&&note.isStringed?element('string',strings.length-note.string+1)+element('fret',note.fret):'',bent=bends(note),mark=marks(note,noteIndex===0);
               if(note.vibrato!==model.VibratoType.None&&note.hasBend&&!bent)unsupported('vibrato on a bend held over a tie');
-              const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
+              const slurred=legato(note,legatos[at],legatos),plucks=fingerOf(note),technical=fingering||bent||mark.technical||slurred||plucks?element('technical',slurred+bent+mark.technical+fingering+plucks):'';
               const marked=(noteIndex===0?held:'')+(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
               const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
               const timing=rhythm.replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`);

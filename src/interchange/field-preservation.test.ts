@@ -807,7 +807,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Note.leftHandFinger & rightHandFinger',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => {
         targetNote(s).leftHandFinger = model.Fingers.IndexFinger;
         targetNote(s).rightHandFinger = model.Fingers.Thumb;

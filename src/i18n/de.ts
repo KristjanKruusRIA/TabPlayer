@@ -1111,6 +1111,7 @@ export const de: MessageCatalog = {
   'editor.paste_bars_source': 'Ganze Takte werden vor Takt {measure} eingefügt',
   'editor.copied_track': 'Kopierte Spur {n}: {name}',
   'editor.destination_track_for': 'Zielspur für kopierte Spur {n}',
+  'editor.new_track_option': 'Neue Spur {n}',
   'editor.destination_staff_for': 'Zielsystem für kopierte Spur {n}, Notensystem {staff}',
   'editor.note_controls_intro': 'Die Notensteuerung gilt für {target}. Die Beat-Steuerung gilt für jede Note im Beat.',
   'editor.note_target_chord': 'die ausgewählte Akkordnote',

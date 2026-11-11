@@ -349,8 +349,48 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
   return {score,barMap};
 }
 
+/** Destination mappings whose track index lies past the existing tracks ask a multitrack bar paste to append that track. */
+function plannedTracks(score:model.Score,source:model.Score,command:ClipboardCommand):PasteDestination[] {
+  const destinations=command.options?.destinations;if(!Array.isArray(destinations))return [];
+  const existing=score.tracks.length,created=destinations.filter(mapping=>integer(mapping?.track)&&mapping.track>=existing).sort((a,b)=>a.track-b.track);
+  if(!created.length)return [];
+  if(command.clip.kind!=='bars'||command.clip.mode!=='multiTrack')throw new Error('Only a multitrack bar paste can create destination tracks.');
+  created.forEach((mapping,offset)=>{
+    const original=source.tracks[mapping.sourceTrack];
+    if(mapping.track!==existing+offset)throw new Error('New destination tracks must directly follow the existing tracks, in order.');
+    if(!original||!Array.isArray(mapping.staffMap)||mapping.staffMap.length!==original.staves.length||mapping.staffMap.some((staff,index)=>staff!==index))throw new Error('A new destination track keeps the copied staff order.');
+  });
+  return created;
+}
+/** Append empty tracks that carry the copied instrument context: tuning, capo, transposition, staves, voices and sound. */
+function createTracks(score:model.Score,clip:MusicClip,planned:PasteDestination[]) {
+  if(!planned.length)return;
+  const context=decode(clip),used=new Set(score.tracks.flatMap(track=>[track.playbackInfo.primaryChannel,track.playbackInfo.secondaryChannel]));
+  const channel=()=>{let value=0;while(value===9||used.has(value))value++;if(value>15)throw new Error('No free MIDI channel remains for a new destination track.');used.add(value);return value;};
+  const reference=score.tracks[0]?.staves[0];
+  for(const mapping of planned){
+    const track=context.tracks[mapping.sourceTrack],voices=track.staves.map(staff=>Math.max(1,...staff.bars.map(bar=>bar.voices.length)));
+    const percussion=track.staves.some(staff=>staff.isPercussion);
+    track.playbackInfo.isMute=false;track.playbackInfo.isSolo=false;
+    track.playbackInfo.primaryChannel=percussion?9:channel();track.playbackInfo.secondaryChannel=percussion?9:channel();
+    const clefs=track.staves.map(staff=>({clef:staff.bars[0]?.clef??(staff.isPercussion?model.Clef.Neutral:model.Clef.G2),ottava:staff.bars[0]?.clefOttava??model.Ottavia.Regular}));
+    for(const staff of track.staves){staff.bars=[];staff.chords=new Map();}
+    score.addTrack(track);
+    track.staves.forEach((staff,staffIndex)=>{for(const master of score.masterBars){
+      const bar=new model.Bar(),key=reference?.bars[master.index];bar.clef=clefs[staffIndex].clef;bar.clefOttava=clefs[staffIndex].ottava;
+      if(key){bar.keySignature=key.keySignature;bar.keySignatureType=key.keySignatureType;}
+      const first=new model.Voice();for(let index=0;index<master.timeSignatureNumerator;index++){const rest=new model.Beat();rest.duration=master.timeSignatureDenominator;rest.isEmpty=false;first.addBeat(rest);}bar.addVoice(first);
+      for(let index=1;index<voices[staffIndex];index++){const voice=new model.Voice(),carrier=new model.Beat();carrier.isEmpty=true;voice.addBeat(carrier);bar.addVoice(voice);}
+      staff.addBar(bar);
+    }});
+  }
+  relink(score);
+}
+
 /** Prepare one complete mutation on a detached destination; native history is root-owned. */
 export function preparePasteMusic(score:model.Score,command:ClipboardCommand):PreparedMusicPaste {
-  const clip=readMusicClip(command.clip),source=decode(clip),mappings=targetAndMappings(score,source,{...command,clip});
-  const destination=clone(score),preserved=preserveObjects(destination),result=clip.kind==='bars'?pasteBars(destination,clip,source,command,mappings):pastePhrase(destination,clip,source,command,mappings);finishFreshIds(result.score,preserved);return result;
+  const clip=readMusicClip(command.clip),source=decode(clip),planned=plannedTracks(score,source,{...command,clip});
+  const destination=clone(score),preserved=preserveObjects(destination);createTracks(destination,clip,planned);
+  const mappings=targetAndMappings(destination,source,{...command,clip});
+  const result=clip.kind==='bars'?pasteBars(destination,clip,source,command,mappings):pastePhrase(destination,clip,source,command,mappings);finishFreshIds(result.score,preserved);return {...result,addedTracks:planned.length};
 }

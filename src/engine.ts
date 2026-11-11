@@ -384,6 +384,9 @@ export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocume
     const previous=documentSettings.backing?.referenceSync?referenceSyncTiming(documentSettings.backing,backingLocationsForScore(score)):null;
     if(edit.type==='pasteMusic'){
       const prepared=preparePasteMusic(rebuild(score),edit);score=rebuild(prepared.score);
+      // Tracks a multitrack paste appended get identities of their own, so their mix and engraving settings never reuse another track's.
+      for(let added=0;added<(prepared.addedTracks??0);added++)identities.push(`added/${index}/paste/${added}`);
+      if(prepared.addedTracks)forgetTrackOrderedEntries(score);
       mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);documentSettings.engraving=mapEngravingBars(documentSettings.engraving,prepared.barMap.oldToNew);
     }else if(edit.type==='transposeHarmony')score=prepareHarmonyTranspose(rebuild(score),edit,index);
     else {

@@ -64,9 +64,18 @@ it('all_six_filters_are_explicit_and_bar_expansion_stays_within_1000',()=>{
 it('invalid_counts_and_missing_existing_tracks_staves_or_voices_never_dispatch',()=>{
   const options:PasteOptions[]=[],props={score:music(),target,selection:bars,clip:phrase(),busy:false,onCopy:()=>{},onCut:()=>{},onPaste:(value:PasteOptions)=>options.push(value)},view=render(<ClipboardPanel {...props}/>);
   for(const value of ['','0','1001','1.5']){change('Paste repetitions',value);paste();expect(screen.getByRole('alert')).toHaveTextContent(/1.*1000/i);}
-  const source=destination(2,2),clip=makeMusicClip(source,{kind:'bars',tracks:[0,1],firstBar:0,lastBar:0},'multiTrack');view.rerender(<ClipboardPanel {...props} clip={clip}/>);paste();expect(screen.getByRole('alert')).toHaveTextContent(/existing.*track|map every.*track/i);
+  const source=destination(2,2),clip=makeMusicClip(source,{kind:'bars',tracks:[0,1],firstBar:0,lastBar:0},'multiTrack');view.rerender(<ClipboardPanel {...props} clip={clip}/>);
+  // The second copied track has no destination left, so it defaults to a new track; the first still lacks a second staff.
+  expect(screen.getByLabelText(trackLabel(2))).toHaveValue('1');paste();expect(screen.getByRole('alert')).toHaveTextContent(/existing.*staff|map every.*staff/i);
   view.rerender(<ClipboardPanel {...props} score={destination(2,1)} clip={clip}/>);paste();expect(screen.getByRole('alert')).toHaveTextContent(/existing.*staff|map every.*staff/i);
   const voices=music();for(const bar of voices.tracks[0].staves[0].bars){const voice=new model.Voice(),rest=new model.Beat();rest.duration=1;rest.isEmpty=false;voice.addBeat(rest);bar.addVoice(voice);}voices.finish(new Settings());view.rerender(<ClipboardPanel {...props} clip={makeMusicClip(voices,bars,'singleTrack')}/>);paste();expect(screen.getByRole('alert')).toHaveTextContent(/every copied voice/i);expect(options).toEqual([]);
+});
+it('a_multitrack_bar_clip_offers_and_dispatches_appended_new_tracks',()=>{
+  const source=destination(2,1),clip=makeMusicClip(source,{kind:'bars',tracks:[0,1],firstBar:0,lastBar:0},'multiTrack'),options:PasteOptions[]=[];
+  render(<ClipboardPanel score={music()} target={target} selection={bars} clip={clip} busy={false} onCopy={()=>{}} onCut={()=>{}} onPaste={value=>options.push(value)}/>);
+  expect(screen.getByLabelText(trackLabel(2))).toHaveValue('1');expect(screen.getAllByRole('option',{name:'New track 2',hidden:true}).length).toBeGreaterThan(0);expect(screen.getByLabelText(staffLabel(2,1))).toBeDisabled();
+  paste();expect(options[0].destinations).toEqual([{sourceTrack:0,track:0,staffMap:[0]},{sourceTrack:1,track:1,staffMap:[0]}]);
+  change(trackLabel(2),'2');paste();expect(options).toHaveLength(1);expect(screen.getByRole('alert')).toHaveTextContent(/directly follow/i);
 });
 it('a_phrase_maps_to_the_selected_staff_and_voice',()=>{
   const options:PasteOptions[]=[],selected={...target,track:1,staff:1};render(<ClipboardPanel score={destination()} target={selected} selection={null} clip={phrase()} busy={false} onCopy={()=>{}} onCut={()=>{}} onPaste={value=>options.push(value)}/>);

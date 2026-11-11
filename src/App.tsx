@@ -346,8 +346,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const pasteMusic=(options?:PasteOptions)=>{
     if(!clip||editBusy)return;
     try{
-      const source=options?null:scoreFromMusicClip(clip),multi=clip.mode==='multiTrack';
-      edit({type:'pasteMusic',clip,options:options??{target:{...target},destinations:source!.tracks.map((track,index)=>({sourceTrack:index,track:target.track+index,staffMap:track.staves.map((_,staff)=>clip.kind==='phrase'?target.staff:staff)})),count:1,placement:clip.kind==='phrase'?'currentBar':'beforeBar',filters:{diagrams:inputPrefs.pasteDiagrams,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi}}});
+      const source=options?null:scoreFromMusicClip(clip),multi=clip.mode==='multiTrack',creates=multi&&clip.kind==='bars';let appended=state.score.tracks.length;
+      // A multitrack bar clip with more tracks than remain from the cursor appends the rest as new tracks.
+      edit({type:'pasteMusic',clip,options:options??{target:{...target},destinations:source!.tracks.map((track,index)=>{const created=creates&&!state.score.tracks[target.track+index];return {sourceTrack:index,track:created?appended++:target.track+index,staffMap:track.staves.map((_,staff)=>clip.kind==='phrase'?target.staff:staff)};}),count:1,placement:clip.kind==='phrase'?'currentBar':'beforeBar',filters:{diagrams:inputPrefs.pasteDiagrams,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi}}});
     }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
   };
   const showClipboard=()=>{setContextScope('all');setInspectorVisible(true);setInspectorTab('selection');setClipboardFocus(value=>value+1);};

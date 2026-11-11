@@ -1111,6 +1111,7 @@ export const et: MessageCatalog = {
   'editor.paste_bars_source': 'Terved taktid lisatakse enne takti {measure}',
   'editor.copied_track': 'Kopeeritud rada {n}: {name}',
   'editor.destination_track_for': 'Kopeeritud raja {n} sihtrada',
+  'editor.new_track_option': 'Uus rada {n}',
   'editor.destination_staff_for': 'Kopeeritud raja {n} noodirea {staff} siht',
   'editor.note_controls_intro': 'Noodi juhtelemendid kehtivad: {target}. Löögi juhtelemendid kehtivad kõigile löögi nootidele.',
   'editor.note_target_chord': 'valitud akordinoot',

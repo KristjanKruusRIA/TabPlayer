@@ -1109,6 +1109,7 @@ export const en = {
   'editor.paste_bars_source': 'Complete bars inserted before measure {measure}',
   'editor.copied_track': 'Copied track {n}: {name}',
   'editor.destination_track_for': 'Destination track for copied track {n}',
+  'editor.new_track_option': 'New track {n}',
   'editor.destination_staff_for': 'Destination staff for copied track {n}, staff {staff}',
   'editor.note_controls_intro': 'Note controls apply to {target}. Beat controls apply to every note in the beat.',
   'editor.note_target_chord': 'the selected chord note',

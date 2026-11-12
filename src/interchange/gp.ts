@@ -30,6 +30,7 @@ import { applyMusicXmlAlternateStaves } from './musicxml-alternate-staves';
 import { applyMusicXmlTiedBends } from './musicxml-tied-bends';
 import { applyMusicXmlLyricSyllables } from './musicxml-lyric-syllables';
 import { applyMusicXmlTempoWords } from './musicxml-tempo-words';
+import { applyMusicXmlTimeSymbols } from './musicxml-time-symbols';
 
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
@@ -84,7 +85,7 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialC
   // Before the stock reader, which would otherwise inflate a refused archive first.
   assertArchiveAccepted(bytes,settings.importer.maxDecodingBufferSize);
   const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlLoaderBytes(bytes,settings),settings);
-  const musicXml=()=>applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings);
+  const musicXml=()=>applyMusicXmlTimeSymbols(applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings);
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();
   const entries=unzip(bytes,settings);
   // The stock GP reader takes any member named score.gpif, so such archives

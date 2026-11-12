@@ -36,21 +36,30 @@ export function copyTimeSignatureSources(source:model.Score,destination:model.Sc
   });
 }
 
-export function getTimeSignatureExportIntent(score:model.Score):{changed:boolean;value:boolean|null} {
+/**
+ * What a Guitar Pro export does about common/cut time. The file holds one choice for the whole score. Each eligible bar
+ * (4/4 or 2/2) has an intent: the choice it made explicitly, or the source file's, which is null when the source left
+ * the option absent. `differing` and `inherited` are the indices of master bars, so a warning and the writer agree.
+ *  - unchanged from the source, or no eligible bar: nothing is written (`changed` false);
+ *  - otherwise the choice made by more explicit bars is written, a tie going to numeric (false);
+ *  - the bars whose explicit choice is the other one `differ`; bars with no choice of their own are `inherited` and now follow it;
+ *  - a majority equal to the source's own choice writes nothing, but its minority still `differs`.
+ */
+export interface TimeSignatureExportPlan {changed:boolean;value:boolean|null;differing:number[];inherited:number[]}
+export function planTimeSignatureExport(score:model.Score):TimeSignatureExportPlan {
   const imported=scoreSources.get(score),hasSource=scoreSources.has(score);
-  const intents=score.masterBars.filter(eligible).map(master=>{
+  const bars:{index:number;intent:boolean|null}[]=[];
+  score.masterBars.forEach((master,index)=>{
+    if(!eligible(master))return;
     const source=masterSources.get(master);
-    if(!hasSource||!source||source.explicit!==null||master.timeSignatureCommon!==source.displayed) {
-      return master.timeSignatureCommon;
-    }
-    return source.imported;
+    bars.push({index,intent:!hasSource||!source||source.explicit!==null||master.timeSignatureCommon!==source.displayed?master.timeSignatureCommon:source.imported});
   });
-  if(!intents.length||(hasSource&&intents.every(intent=>intent===imported)))return {changed:false,value:null};
-  if(intents.includes(null)) {
-    throw new Error('GP export cannot resolve inherited common/cut choices for every selected measure. Set each selected 4/4 or 2/2 measure explicitly before exporting changed choices.');
-  }
-  if(intents.some(intent=>intent!==intents[0])) {
-    throw new Error('GP export cannot represent mixed common/cut and numeric measure choices. Export a uniform measure range or use consistent choices.');
-  }
-  return {changed:true,value:intents[0]};
+  if(!bars.length||(hasSource&&bars.every(bar=>bar.intent===imported)))return {changed:false,value:null,differing:[],inherited:[]};
+  const common=bars.filter(bar=>bar.intent===true).length,numeric=bars.filter(bar=>bar.intent===false).length,value=common>numeric;
+  const differing=bars.filter(bar=>bar.intent!==null&&bar.intent!==value).map(bar=>bar.index),inherited=bars.filter(bar=>bar.intent===null).map(bar=>bar.index);
+  const changed=!(hasSource&&imported===value);
+  return {changed,value:changed?value:null,differing,inherited};
+}
+export function getTimeSignatureExportIntent(score:model.Score):{changed:boolean;value:boolean|null} {
+  const {changed,value}=planTimeSignatureExport(score);return {changed,value};
 }

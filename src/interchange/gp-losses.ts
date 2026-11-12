@@ -1,7 +1,7 @@
 import { model } from '@coderline/alphatab';
 import { planCurves,wherever } from './curves';
 import { harmonyCarrierRefusal,sourceViewsRebuilt } from './gp';
-import { getTimeSignatureExportIntent } from '../editor/time-signature-source';
+import { planTimeSignatureExport } from '../editor/time-signature-source';
 
 /** alphaTab's GPIF reader looks at most this many bars back for the origin of a tie (`Note._maxOffsetForSameLineSearch`); gp-link-reach.test.ts pins it. The destination's search itself is pinned in gp-link-search.test.ts. */
 const maxTieReach=3;
@@ -99,6 +99,11 @@ export function gpLosses(score:model.Score):string[] {
       }
     }
   }
+  // One choice for the whole score is written; `planTimeSignatureExport` is what the stylesheet writer uses too.
+  const time=planTimeSignatureExport(score),barOf=(index:number)=>`bar ${(((score.tracks[0]?.staves[0]?.bars[index]) as {sourceIndex?:number}|undefined)?.sourceIndex??index)+1}`;
+  const differing=time.differing.length?{count:time.differing.length,first:barOf(time.differing[0])}:undefined,inherited=time.inherited.length?{count:time.inherited.length,first:barOf(time.inherited[0])}:undefined;
+  // The differing bars all chose the opposite of what the file ends up showing.
+  const showsSymbol=time.differing.length>0&&score.masterBars[time.differing[0]]?.timeSignatureCommon===false;
   // A carrier the export refuses is not written as a rest at all: the refusal says so instead.
   if(carriers&&harmonyCarrierRefusal(score))carriers=undefined;
   // The aggregates come first: a dialog shows five lines and a batch report three, and a long per-item list must not push them all under "and N more".
@@ -113,6 +118,8 @@ export function gpLosses(score:model.Score):string[] {
     ...line(badLengths,'note has a sounding length outside 0 to 16 that will not be read back','notes have a sounding length outside 0 to 16 that will not be read back'),
     ...line(hidden,'hidden note is written as hidden only for TabPlayer','hidden notes are written as hidden only for TabPlayer'),
     ...line(carriers,'empty beat that only carries a chord diagram is written as a quarter rest','empty beats that only carry a chord diagram are written as quarter rests'),
+    ...differing?line(differing,'bar that chose '+(showsSymbol?'numbers will show the common/cut symbol':'the common/cut symbol will show numbers')+', because the Guitar Pro file holds one choice for the whole score','bars that chose '+(showsSymbol?'numbers will show the common/cut symbol':'the common/cut symbol will show numbers')+', because the Guitar Pro file holds one choice for the whole score'):[],
+    ...line(inherited,'bar with no common/cut choice of its own now follows the whole-score choice of '+(time.value?'the common/cut symbol':'numbers'),'bars with no common/cut choice of their own now follow the whole-score choice of '+(time.value?'the common/cut symbol':'numbers')),
     ...sourceViewsRebuilt(score)?["the source file's part, layout and score views were rebuilt because tracks were added, left out or reordered"]:[],
     ...plan.losses,
   ];
@@ -120,11 +127,11 @@ export function gpLosses(score:model.Score):string[] {
 
 /**
  * The message the export would throw for this score, worked out without writing anything, or null. Asked before the
- * user confirms the warning, so a refusal is shown instead of a warning confirmed for nothing. It covers the refusals
- * that depend on the score alone: an empty chord carrier that is not one plain quarter, and common/cut time choices
- * that cannot be written. Refusals that depend on the bytes of an imported file (its view styles) are still thrown by the export.
+ * user confirms the warning, so a refusal is shown instead of a warning confirmed for nothing. It covers the refusal
+ * that depends on the score alone: an empty chord carrier that is not one plain quarter. Mixed or inherited common/cut
+ * time is not a refusal (it is written as one choice and reported by `gpLosses`). Refusals that depend on the bytes of
+ * an imported file (its view styles) are still thrown by the export.
  */
 export function gpExportRefusal(score:model.Score):string|null {
-  const carrier=harmonyCarrierRefusal(score);if(carrier)return carrier;
-  try{getTimeSignatureExportIntent(score);return null;}catch(error){return error instanceof Error?error.message:String(error);}
+  return harmonyCarrierRefusal(score);
 }

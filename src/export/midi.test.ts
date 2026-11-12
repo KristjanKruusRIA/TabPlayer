@@ -76,6 +76,14 @@ describe('standard MIDI export',()=>{
     expect(parsed.events.filter(e=>e.type===81).map(e=>e.tick)).toEqual([0,3840,11520]);
     mkdirSync('.analysis/expansion',{recursive:true});writeFileSync('.analysis/expansion/authored-export.mid',data);
   });
+  it('writes a golpe as a percussion-channel hit in its own track on every pass, leaving the written notes as they were',()=>{
+    const plain=decode(exportMidi(score(),{tracks:[0],range:null})),marked=score(),beats=marked.tracks[0].staves[0].bars;
+    beats[0].voices[0].beats[0].golpe=model.GolpeType.Thumb;beats[2].voices[0].beats[0].golpe=model.GolpeType.Finger;
+    const data=decode(exportMidi(marked,{tracks:[0],range:null})),knocks=data.events.filter(e=>(e.type===144||e.type===128)&&e.channel===9);
+    expect(plain.events.filter(e=>e.channel===9)).toEqual([]);
+    expect(knocks.map(e=>[e.type,e.tick,e.data[0],e.track])).toEqual([[144,0,77,1],[128,120,77,1],[144,7680,37,1],[128,7800,37,1],[144,15360,37,1],[128,15480,37,1]]);
+    expect(data.events.filter(e=>e.channel!==9)).toEqual(plain.events);
+  });
   it('concatenates selected played bars with state at zero and balanced note boundaries',()=>{
     const p=decode(exportMidi(score(),{tracks:[0],range:{first:2,last:2}}));
     expect(p.events.filter(e=>e.type===144).map(e=>[e.tick,e.data[0]])).toEqual([[0,68],[3840,68]]);

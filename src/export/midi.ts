@@ -5,6 +5,7 @@ import { selectStaves } from './selection';
 import { deadBrushMidiDurations,fadeRestoreLevels,noteAudioMidiAdjustments,prepareMidiScore,restoreVolumeAfterFades } from '../audio/plan';
 import { hasNoteAudio } from '../editor/note-audio';
 import { gpControllerEvents,prepareGpMidiScore } from '../interchange/automation';
+import { GOLPE_CHANNEL,golpeHits } from '../audio/golpe';
 class TrackName extends midi.MidiEvent {
   constructor(track:number,readonly name:string){super(track,0,midi.MidiEventType.Meta);}
   writeTo(stream:io.IWriteable){const bytes=new TextEncoder().encode(this.name);stream.writeByte(255);stream.writeByte(3);midi.MidiFile.writeVariableInt(stream,bytes.length);stream.write(bytes,0,bytes.length);}
@@ -47,6 +48,8 @@ export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Arr
   const settings=new Settings(),handler=new ExportMidiHandler(source,true);const generator=new midi.MidiFileGenerator(prepared,settings,handler);const restores=restoreVolumeAfterFades(generator,handler);
   generator.applyTranspositionPitches=true;generator.generate();
   const performed=generator.tickLookup.masterBars.map(bar=>({bar:bar.masterBar.index,startTick:bar.start+source.tickShift,endTick:bar.end+source.tickShift}));
+  // A golpe is written as a General MIDI percussion hit in its own track's events, as playback plays it.
+  for(const hit of golpeHits(prepared,performed))handler.pairs.push({on:new midi.NoteOnEvent(hit.track,hit.tick,GOLPE_CHANNEL,hit.key,hit.velocity),off:new midi.NoteOffEvent(hit.track,hit.tick+hit.length,GOLPE_CHANNEL,hit.key,hit.velocity),attack:-1});
   const automated=gpControllerEvents(prepared,performed);
   for(const event of [...automated,...fadeRestoreLevels(restores,automated,source.tickShift)])source.addEvent(new midi.ControlChangeEvent(event.track,event.tick,event.channel,event.controller,event.value));
   const selected=new Set(selection.tracks);const remap=new Map(selection.tracks.map((n,i)=>[n,i+1]));

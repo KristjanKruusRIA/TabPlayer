@@ -21,7 +21,7 @@ use crate::settings::{
 };
 use rustysynth::{Synthesizer, SynthesizerSettings};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::Arc,
 };
 
@@ -363,6 +363,11 @@ struct DrumVoice {
     off_by: u32,
     choke: bool,
 }
+/// The channel a guitar or bass track's golpe knocks play on: General MIDI's percussion channel. A hit there that no plan
+/// note owns is played by the track's General MIDI synthesizer from the sound bank's Standard kit, whatever voice the track has.
+const KNOCK_CHANNEL: u8 = 9;
+/// The sound bank's Standard kit.
+const KNOCK_KIT: u8 = 0;
 /// How fast a choked cymbal falls silent once the hand stops it.
 const CHOKE_RELEASE_SECONDS: f64 = 0.06;
 /// How many strokes of one drum sound ring on one track at once. A cymbal rings for up to 14 s, so a ride played in
@@ -437,6 +442,10 @@ struct Track {
 impl Track {
     /// Whether a MIDI attack with no plan note plays a recorded voice. A drum attack never does: the kit knows its sound
     /// only from the note.
+    /// Whether a MIDI attack that no plan note owns is a golpe knock: on the percussion channel of a track that is not a drum track.
+    fn is_knock(&self, channel: u8, attack: Option<MidiAttack>) -> bool {
+        attack.is_none() && !self.percussion && channel == KNOCK_CHANNEL
+    }
     fn recorded_program(&self, program: u8) -> bool {
         !self.percussion
             && (self.fixed_recorded
@@ -631,6 +640,19 @@ impl Renderer {
             .enumerate()
             .map(|(i, n)| (n.id.as_str(), i))
             .collect();
+        // A track with percussion-channel hits needs a General MIDI synthesizer to play them, whatever its voice.
+        let knocks: HashSet<&str> = plan
+            .midi
+            .iter()
+            .filter_map(|event| match event {
+                PlanMidiEvent::NoteOn {
+                    track_id,
+                    channel: KNOCK_CHANNEL,
+                    ..
+                } => Some(track_id.as_str()),
+                _ => None,
+            })
+            .collect();
         let mut tracks = Vec::with_capacity(plan.tracks.len());
         for (track_index, track) in plan.tracks.iter().enumerate() {
             // A drum track loads only the kit sounds its notes ask for; any other voice on it plays General MIDI.
@@ -641,6 +663,7 @@ impl Renderer {
             }
             // A drum track keeps General MIDI for the sounds the recorded kit lacks.
             let has_gm = track.percussion
+                || knocks.contains(track.id.as_str())
                 || voice_id_for_track(track, &settings).is_none()
                 || plan.notes.iter().any(|n| {
                     n.track_id == track.id && voice_id_for_note(&plan, n, &settings).is_none()
@@ -1158,6 +1181,10 @@ impl Renderer {
                 kit_element,
                 ..
             } => {
+                if track.is_knock(*channel, attack) {
+                    Self::gm_note_on(track, *channel, *key, *velocity, KNOCK_KIT, None);
+                    return;
+                }
                 let program =
                     attack.map_or(track.channels[*channel as usize].program, |a| a.program);
                 let recorded =
@@ -1734,7 +1761,9 @@ impl Renderer {
                     } => {
                         let c = *channel as usize;
                         let k = *key as usize;
+                        // A knock is a one-shot tap: a seek into its few milliseconds does not strike it again.
                         if self.midi_attacks[event_index].is_none()
+                            && !track.is_knock(*channel, None)
                             && !track.recorded_program(track.channels[c].program)
                         {
                             held[c][k] = held[c][k].saturating_add(1);

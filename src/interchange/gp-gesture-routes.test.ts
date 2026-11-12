@@ -45,13 +45,20 @@ it('characterizes the gesture sound routes: slap, pop and tap each get their own
   expect(notesAt(load(false),0,3).map(note=>[note.articulation,note.endTick-note.startTick])).toEqual([['picked',960]]);
 });
 
-it('characterizes golpe as having no sound route of its own: both golpe types are kept on the beat, yet the planned note equals a plain note exactly',()=>{
+it('plays a golpe as a short knock added to its beat: thumb a low wood block, finger a side stick, the written note unchanged, a plain beat unchanged',()=>{
   const score=load(true),plain=load(false),beats=score.tracks[0].staves[0].bars[1].voices[0].beats;
   expect(beats.slice(0,3).map(beat=>beat.golpe)).toEqual([model.GolpeType.Thumb,model.GolpeType.Finger,model.GolpeType.None]);
+  // The notes are exactly a plain score's: a golpe adds a sound, it replaces none.
   for(const beat of [0,1,2]) {
     const planned=notesAt(score,1,beat);
     expect(planned).toHaveLength(1);
     expect(planned).toEqual(notesAt(plain,1,beat));
     expect([planned[0].articulation,planned[0].key,planned[0].velocity,planned[0].startTick,planned[0].endTick,planned[0].lockedArticulation]).toEqual(['picked',67,95,3840+960*beat,4800+960*beat,undefined]);
   }
+  const id=buildPlaybackPlan(score,1).tracks[0].id,knocks=(s:model.Score)=>buildPlaybackPlan(s,1).midi.filter(event=>(event.type==='noteOn'||event.type==='noteOff')&&event.channel===9);
+  expect(knocks(score)).toEqual([
+    {type:'noteOn',trackId:id,tick:3840,channel:9,key:77,velocity:85},{type:'noteOff',trackId:id,tick:3960,channel:9,key:77,velocity:85},
+    {type:'noteOn',trackId:id,tick:4800,channel:9,key:37,velocity:75},{type:'noteOff',trackId:id,tick:4920,channel:9,key:37,velocity:75},
+  ]);
+  expect(knocks(plain)).toEqual([]);
 });

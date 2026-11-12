@@ -439,6 +439,9 @@ pub struct RouteSpec {
     pub audible: bool,
     pub gain: f32,
     pub pan: f32,
+    /// Plan channel 9 of this melodic track carries golpe knocks, not a channel of its own: it plays on the port's shared
+    /// percussion channel, in the Standard kit.
+    pub knock: bool,
 }
 impl RouteSpec {
     /// A track whose plan channel 0 plays on `channel`.
@@ -458,6 +461,7 @@ impl RouteSpec {
             audible: true,
             gain: 1.0,
             pan: 0.0,
+            knock: false,
         }
     }
 }
@@ -469,6 +473,8 @@ struct Lane {
     slot: u8,
     port_gen: u32,
     chan: u8,
+    /// Golpe knocks: this lane plays the Standard kit on the shared percussion channel, whatever the track's program.
+    knock: bool,
     /// Note-ons sent and not yet released, by key.
     held: [u8; 128],
     /// Keys whose note-off could not be staged and is still owed.
@@ -496,6 +502,7 @@ impl Lane {
             slot: spec.slot,
             port_gen: spec.port_gen,
             chan,
+            knock: spec.knock && plan_channel == 9,
             held: [0; 128],
             retry_off: 0,
             dirty: false,
@@ -1256,7 +1263,11 @@ impl MidiTap {
         let mut any = false;
         for lane in 0..self.lanes.len() {
             if self.tracks[self.lanes[lane].track].live && self.lanes[lane].needs_resync {
-                let program = self.start_programs[self.lanes[lane].track];
+                let program = if self.lanes[lane].knock {
+                    0
+                } else {
+                    self.start_programs[self.lanes[lane].track]
+                };
                 self.scan[lane].reset(program);
                 any = true;
             }
@@ -1971,6 +1982,98 @@ mod tests {
         let mut expected = vec![vec![0x89, 38, 0]];
         expected.extend(panic_on(9));
         assert_eq!(messages, expected);
+    }
+
+    /// A guitar (track 0) whose plan channel 9 carries golpe knocks, beside a drum track (1), on one port.
+    fn guitar_and_drums() -> Box<MidiTap> {
+        let guitar = RouteSpec {
+            knock: true,
+            ..RouteSpec::lanes(0, 0, &[(0, 0), (9, 9)])
+        };
+        MidiTap::new(
+            &[25, 0],
+            &[(0, guitar), (1, RouteSpec::lanes(0, 0, &[(9, 9)]))],
+        )
+    }
+    fn off_on(channel: u8, key: u8) -> PlanMidiEvent {
+        PlanMidiEvent::NoteOff {
+            track_id: "t".into(),
+            tick: 0.0,
+            channel,
+            key,
+            velocity: 0,
+            kit_element: None,
+        }
+    }
+
+    #[test]
+    fn a_knock_is_struck_and_released_on_the_percussion_channel_beside_the_guitars_own_notes() {
+        let mut tap = guitar_and_drums();
+        tap.event(0, &on(64, 90));
+        tap.event(0, &event_on(9, 77, 85));
+        tap.event(0, &off_on(9, 77));
+        tap.event(0, &off(64));
+        assert_eq!(
+            sent(&mut tap),
+            vec![
+                vec![0x90, 64, 90],
+                vec![0x99, 77, 85],
+                vec![0x89, 77, 0],
+                vec![0x80, 64, 0]
+            ]
+        );
+        assert_eq!(tap.held_notes(0), 0);
+    }
+
+    #[test]
+    fn a_knock_selects_the_standard_kit_not_the_guitars_program_when_the_position_is_stated() {
+        let mut tap = guitar_and_drums();
+        tap.resync(&[], &[], 0);
+        let stated = sent(&mut tap);
+        assert!(
+            stated.contains(&vec![0xc0, 25]),
+            "the guitar keeps its sound: {stated:?}"
+        );
+        assert!(
+            !stated.contains(&vec![0xc9, 25]),
+            "a guitar program on the percussion channel would pick another drum kit: {stated:?}"
+        );
+        assert!(stated.contains(&vec![0xc9, 0]));
+    }
+
+    #[test]
+    fn a_guitar_that_stops_does_not_silence_a_drum_it_shares_the_channel_with_and_a_stop_leaves_nothing_sounding()
+     {
+        let mut tap = guitar_and_drums();
+        tap.event(1, &event_on(9, 36, 100));
+        tap.event(0, &event_on(9, 77, 85));
+        sent(&mut tap);
+        let lane = tap.tracks[0].lane_of[9] as usize;
+        tap.release_lane(lane);
+        // Only the knock lets go, and the shared channel is unpedalled but not silenced.
+        assert_eq!(sent(&mut tap), vec![vec![0x89, 77, 0], vec![0xb9, 64, 0]]);
+        assert_eq!(tap.held_notes(1), 1, "the drum still sounds");
+        tap.release_all();
+        let mut expected = vec![vec![0x89, 36, 0]];
+        expected.extend(panic_on(9));
+        assert_eq!(sent(&mut tap), expected);
+        assert_eq!((tap.held_notes(0), tap.held_notes(1)), (0, 0));
+    }
+
+    #[test]
+    fn a_failed_port_hands_the_knock_back_to_the_internal_sound_and_lets_go_of_it() {
+        let mut tap = guitar_and_drums();
+        assert!(tap.silences(0));
+        tap.event(0, &event_on(9, 77, 85));
+        sent(&mut tap);
+        tap.set_fault_mask(1);
+        assert!(
+            !tap.silences(0),
+            "the renderer plays the guitar and its knock itself"
+        );
+        let released = sent(&mut tap);
+        assert!(released.contains(&vec![0x89, 77, 0]), "{released:?}");
+        assert_eq!(tap.held_notes(0), 0);
     }
 
     #[test]

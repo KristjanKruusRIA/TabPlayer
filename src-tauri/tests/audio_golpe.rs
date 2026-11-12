@@ -196,3 +196,72 @@ fn a_seek_into_a_knock_does_not_strike_it_again_whatever_the_tracks_voice() {
     );
     assert_eq!(energy(&recorded, 0.0, 1.0), 0.0);
 }
+
+/// Guitars "a" and "b" (program 25), each playing recorded key 67 at the start on `channel`; b's golpe, if any, knocks at
+/// the same moment.
+fn two_guitars(channel: u8, knock_on_b: bool) -> Arc<PlaybackPlan> {
+    let mut notes = vec![];
+    let mut midi = vec![];
+    for (index, track) in ["a", "b"].into_iter().enumerate() {
+        notes.push(serde_json::json!({"id":format!("n{index}"),"trackId":track,"source":{"target":{"track":index,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"channel":channel,"program":25,"startTick":0,"endTick":960,"key":67,"velocity":95,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]}));
+        midi.push(serde_json::json!({"type":"noteOn","trackId":track,"tick":0,"channel":channel,"key":67,"velocity":95}));
+        midi.push(serde_json::json!({"type":"noteOff","trackId":track,"tick":960,"channel":channel,"key":67,"velocity":95}));
+    }
+    if knock_on_b {
+        midi.push(serde_json::json!({"type":"noteOn","trackId":"b","tick":0,"channel":9,"key":77,"velocity":85}));
+        midi.push(serde_json::json!({"type":"noteOff","trackId":"b","tick":120,"channel":9,"key":77,"velocity":85}));
+    }
+    midi.sort_by(|a, b| a["tick"].as_f64().partial_cmp(&b["tick"].as_f64()).unwrap());
+    Arc::new(serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":7680,"durationMs":4000,"tracks":[{"id":"a","program":25,"percussion":false},{"id":"b","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":7680,"startMs":0,"endMs":4000}],"notes":notes,"midi":midi})).unwrap())
+}
+/// Each track's own output, before the mix, for one second.
+fn stems(plan: Arc<PlaybackPlan>, settings: DocumentSettings) -> (Vec<[f32; 2]>, Vec<[f32; 2]>) {
+    let mut renderer = Renderer::new(plan, resources(), settings, RATE).unwrap();
+    let (mut a, mut b) = (
+        vec![[0.0f32; 2]; RATE as usize],
+        vec![[0.0f32; 2]; RATE as usize],
+    );
+    renderer.render_stems_into(&mut [&mut a, &mut b]);
+    (a, b)
+}
+
+#[test]
+fn a_knock_on_the_second_track_is_in_its_output_and_leaves_the_first_tracks_output_untouched() {
+    let (a_plain, b_plain) = stems(two_guitars(0, false), DocumentSettings::default());
+    let (a_knock, b_knock) = stems(two_guitars(0, true), DocumentSettings::default());
+    assert!(energy(&a_plain, 0.0, 0.2) > 1e-4 && energy(&b_plain, 0.0, 0.2) > 1e-4);
+    assert!(
+        a_knock == a_plain,
+        "the first track is bit-for-bit what it was"
+    );
+    assert!(b_knock != b_plain, "the second track gains the knock");
+    // What it gains is the knock alone, added to the note it already played.
+    let knock_alone = render(plan(false, &[(0.0, 77, 85)]));
+    for ((with, without), knock) in b_knock.iter().zip(&b_plain).zip(&knock_alone) {
+        for c in 0..2 {
+            assert!((with[c] - (without[c] + knock[c])).abs() < 1e-4);
+        }
+    }
+}
+
+#[test]
+fn a_pitched_track_on_channel_nine_with_no_golpe_plays_its_notes_as_any_other_channel_does() {
+    // The notes own their attacks, so none of them is taken for a knock: the recorded voice plays as on channel 0.
+    let (a_nine, b_nine) = stems(two_guitars(9, false), DocumentSettings::default());
+    let (a_zero, b_zero) = stems(two_guitars(0, false), DocumentSettings::default());
+    assert!(energy(&a_nine, 0.0, 0.2) > 1e-4);
+    assert!(a_nine == a_zero && b_nine == b_zero);
+    // On a General MIDI guitar the note-ons are paired with their notes too: they play, and no knock is added.
+    let mut general = DocumentSettings::default();
+    for track in ["a", "b"] {
+        general.sounds.insert(
+            track.into(),
+            TrackSound {
+                voice_id: Some("gm".into()),
+                ..TrackSound::default()
+            },
+        );
+    }
+    let (a_gm, _) = stems(two_guitars(9, false), general);
+    assert!(energy(&a_gm, 0.0, 0.2) > 1e-8);
+}

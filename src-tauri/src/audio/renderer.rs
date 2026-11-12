@@ -440,12 +440,13 @@ struct Track {
     rpn_lsb: [u8; 16],
 }
 impl Track {
-    /// Whether a MIDI attack with no plan note plays a recorded voice. A drum attack never does: the kit knows its sound
-    /// only from the note.
-    /// Whether a MIDI attack that no plan note owns is a golpe knock: on the percussion channel of a track that is not a drum track.
+    /// Whether a MIDI attack that no plan note owns is a golpe knock: on the percussion channel of a track that is not a
+    /// drum track.
     fn is_knock(&self, channel: u8, attack: Option<MidiAttack>) -> bool {
         attack.is_none() && !self.percussion && channel == KNOCK_CHANNEL
     }
+    /// Whether a MIDI attack with no plan note plays a recorded voice. A drum attack never does: the kit knows its sound
+    /// only from the note.
     fn recorded_program(&self, program: u8) -> bool {
         !self.percussion
             && (self.fixed_recorded

@@ -405,9 +405,15 @@ pub struct Want {
     pub track: usize,
     pub percussion: bool,
     pub plan_channels: u16,
+    /// A melodic track whose plan channel 9 holds only golpe knocks (left out of `plan_channels`): they play on the
+    /// percussion channel the drum tracks share, and take none of the fifteen melodic ones.
+    pub knock: bool,
 }
+/// The plan channel a melodic track's golpe knocks are on: General MIDI's percussion channel.
+pub const KNOCK_PLAN_CHANNEL: u8 = 9;
 /// Percussion goes to channel 10 (9, counting from zero), which every percussion track shares; the other fifteen are
-/// taken one for each `(track, plan channel)` pair a melodic track uses. A pair keeps the channel it had (`kept`) so
+/// taken one for each `(track, plan channel)` pair a melodic track uses. A melodic track's golpe knocks (`knock`) go
+/// to channel 10 too and take none of the fifteen. A pair keeps the channel it had (`kept`) so
 /// that adding or taking away a route never moves another track's notes; the others take the lowest free channel. A
 /// melodic track whose pairs do not all fit is left out whole.
 pub fn allocate_channels(wants: &[Want], kept: &dyn Fn(usize, u8) -> Option<u8>) -> Allocation {
@@ -458,6 +464,9 @@ pub fn allocate_channels(wants: &[Want], kept: &dyn Fn(usize, u8) -> Option<u8>)
             }
         }
         if fits {
+            if want.knock {
+                assigned.push((KNOCK_PLAN_CHANNEL, PERCUSSION_CHANNEL));
+            }
             channels.push((want.track, assigned));
         } else {
             for chan in taken {
@@ -508,7 +517,7 @@ pub struct MidiOut {
     threads: Mutex<Option<Threads>>,
     committed: Mutex<Committed>,
     last_names: Mutex<BTreeSet<String>>,
-    channel_cache: Mutex<Option<(u64, usize, Arc<Vec<u16>>)>>,
+    channel_cache: Mutex<Option<(u64, usize, Arc<Vec<(u16, bool)>>)>>,
     /// Whether the renderer in use has any track routed, so removing the last route still reaches it.
     routed: AtomicBool,
     retry_interval: Duration,
@@ -812,8 +821,10 @@ impl MidiOut {
             .filter_map(|mix| mix.midi_port.clone())
             .collect()
     }
-    /// The plan channels each track uses, found once for a plan and kept.
-    fn plan_channels(&self, plan: &PlaybackPlan) -> Arc<Vec<u16>> {
+    /// The plan channels each track uses, found once for a plan and kept, and whether a melodic track's plan channel 9
+    /// holds only golpe knocks: hits that no plan note of that track owns. A knock is not a channel of its own, so it is
+    /// left out of the channels; a melodic track that has notes on channel 9 keeps it as one.
+    fn plan_channels(&self, plan: &PlaybackPlan) -> Arc<Vec<(u16, bool)>> {
         let mut cache = lock(&self.channel_cache);
         if let Some((generation, events, found)) = cache.as_ref() {
             if *generation == plan.generation
@@ -835,7 +846,35 @@ impl MidiOut {
                 masks[track] |= 1 << (event.channel() & 15);
             }
         }
-        let found = Arc::new(masks);
+        let mut owned = vec![false; plan.tracks.len()];
+        for note in plan
+            .notes
+            .iter()
+            .filter(|n| n.channel == Some(KNOCK_PLAN_CHANNEL))
+        {
+            if let Some(&track) = index.get(note.track_id.as_str()) {
+                owned[track] = true;
+            }
+        }
+        let found: Arc<Vec<(u16, bool)>> = Arc::new(
+            masks
+                .into_iter()
+                .zip(owned)
+                .zip(&plan.tracks)
+                .map(|((mask, owned), track)| {
+                    let knock =
+                        !track.percussion && !owned && mask & (1 << KNOCK_PLAN_CHANNEL) != 0;
+                    (
+                        if knock {
+                            mask & !(1 << KNOCK_PLAN_CHANNEL)
+                        } else {
+                            mask
+                        },
+                        knock,
+                    )
+                })
+                .collect(),
+        );
         *cache = Some((plan.generation, plan.midi.len(), found.clone()));
         found
     }
@@ -865,7 +904,8 @@ impl MidiOut {
             let want = Want {
                 track: index,
                 percussion: track.percussion,
-                plan_channels: used[index],
+                plan_channels: used[index].0,
+                knock: used[index].1,
             };
             match order.iter_mut().find(|(port, _)| port == name) {
                 Some((_, wants)) => wants.push(want),
@@ -908,7 +948,12 @@ impl MidiOut {
             for (track, pairs) in &allocation.channels {
                 let id = &plan.tracks[*track].id;
                 if !plan.tracks[*track].percussion {
+                    let knock = wants.iter().any(|w| w.track == *track && w.knock);
                     for &(plan_channel, chan) in pairs {
+                        if knock && plan_channel == KNOCK_PLAN_CHANNEL && chan == PERCUSSION_CHANNEL
+                        {
+                            continue;
+                        }
                         remembered.insert((name.clone(), id.clone(), plan_channel), chan);
                     }
                 }
@@ -917,6 +962,7 @@ impl MidiOut {
                 if let Some(slot) = slot {
                     let mix = settings.mixes.get(id).cloned().unwrap_or_default();
                     let mut spec = RouteSpec::lanes(slot, port_gen, pairs);
+                    spec.knock = wants.iter().any(|w| w.track == *track && w.knock);
                     spec.audible = !mix.mute && (!any_solo || mix.solo);
                     spec.gain = mix.gain;
                     spec.pan = mix.pan;
@@ -1567,6 +1613,7 @@ mod tests {
             track,
             percussion: false,
             plan_channels,
+            knock: false,
         }
     }
 
@@ -1607,6 +1654,7 @@ mod tests {
                 track: i,
                 percussion: true,
                 plan_channels: 1,
+                knock: false,
             })
             .collect();
         assert!(allocate_channels(&drums, &|_, _| None).overflow.is_empty());
@@ -1627,6 +1675,62 @@ mod tests {
         assert_eq!(allocation.channels[0], (0, vec![(0, 0), (1, 1)]));
         assert_eq!(allocation.overflow, vec![13]);
         assert_eq!(allocation.channels.last().unwrap(), &(14, vec![(0, 15)]));
+    }
+
+    #[test]
+    fn a_golpe_knock_shares_the_percussion_channel_and_takes_no_melodic_channel() {
+        let knock = |track| Want {
+            track,
+            percussion: false,
+            plan_channels: 0b1,
+            knock: true,
+        };
+        let drum = Want {
+            track: 2,
+            percussion: true,
+            plan_channels: 1 << 9,
+            knock: false,
+        };
+        let allocation = allocate_channels(&[knock(0), knock(1), drum], &|_, _| None);
+        assert_eq!(
+            allocation.channels,
+            vec![
+                (0, vec![(0, 0), (9, 9)]),
+                (1, vec![(0, 1), (9, 9)]),
+                (2, vec![(9, 9)]),
+            ]
+        );
+        // Fifteen guitars with a golpe fit as fifteen without one do, and the sixteenth falls back either way.
+        let melodic = |knocks: bool| {
+            let wants: Vec<Want> = (0..16)
+                .map(|i| Want {
+                    knock: knocks,
+                    ..want(i, 0b1)
+                })
+                .collect();
+            let allocation = allocate_channels(&wants, &|_, _| None);
+            let own: Vec<(usize, Vec<(u8, u8)>)> = allocation
+                .channels
+                .iter()
+                .map(|(t, pairs)| (*t, pairs.iter().filter(|p| p.0 != 9).copied().collect()))
+                .collect();
+            (own, allocation.overflow)
+        };
+        assert_eq!(melodic(true), melodic(false));
+        assert_eq!(melodic(true).1, vec![15]);
+    }
+
+    #[test]
+    fn a_knock_pair_is_not_remembered_as_a_melodic_channel() {
+        // The knock pair is the shared channel, so a track keeps its own channel when its golpe is added or removed.
+        let with = allocate_channels(
+            &[Want {
+                knock: true,
+                ..want(0, 0b1)
+            }],
+            &|_, _| None,
+        );
+        assert_eq!(with.channels, vec![(0, vec![(0, 0), (9, 9)])]);
     }
 
     #[test]
@@ -1701,6 +1805,85 @@ mod tests {
         assert!(rig.out.build_route(&plan, &none, false).tap.is_none());
         let cleared = rig.out.build_route(&plan, &none, true).tap.unwrap();
         assert!(!cleared.has_routes());
+    }
+
+    /// `plan_using`, with an owned note on plan channel 9 for each track in `own9`.
+    fn plan_owning(tracks: &[(&str, bool)], used: &[(&str, u8)], own9: &[&str]) -> PlaybackPlan {
+        let mut value = serde_json::to_value(plan_using(tracks, used)).unwrap();
+        value["notes"] = own9
+            .iter()
+            .enumerate()
+            .map(|(i, track)| {
+                let target = tracks.iter().position(|t| t.0 == *track).unwrap();
+                serde_json::json!({"id": format!("n{i}"), "trackId": track, "source": {"target": {"track": target, "staff": 0, "bar": 0, "voice": 0, "beat": 0}, "string": 0}, "occurrence": 0, "channel": 9, "startTick": 0, "endTick": 480, "key": 60, "velocity": 90, "articulation": "picked", "legatoFrom": null, "pitch": [{"tick": 0, "semitones": 0}]})
+            })
+            .collect();
+        serde_json::from_value(value).unwrap()
+    }
+    fn routed(rig: &Rig, plan: &PlaybackPlan, tracks: &[&str]) -> Box<MidiTap> {
+        let routes: Vec<(&str, &str)> = tracks.iter().map(|t| (*t, "Synth")).collect();
+        let document = settings(&routes);
+        rig.out
+            .ensure_ports(&MidiOut::port_names(&document), Ensure::Prepare);
+        rig.out.settle();
+        rig.out.build_route(plan, &document, false).tap.unwrap()
+    }
+    fn channels_of(tap: &MidiTap, track: usize) -> Vec<(u8, u8)> {
+        tap.destinations(track)
+            .into_iter()
+            .map(|(_, plan, port)| (plan, port))
+            .collect()
+    }
+
+    #[test]
+    fn a_routed_guitars_golpe_goes_to_the_percussion_channel_and_its_notes_stay_on_its_own() {
+        let rig = rig(&["Synth"]);
+        let tracks = [("a", false), ("b", false), ("kit", true)];
+        let plan = plan_using(
+            &tracks,
+            &[("a", 0), ("a", 9), ("b", 0), ("b", 9), ("kit", 9)],
+        );
+        let tap = routed(&rig, &plan, &["a", "b", "kit"]);
+        assert_eq!(channels_of(&tap, 0), vec![(0, 0), (9, 9)]);
+        assert_eq!(channels_of(&tap, 1), vec![(0, 1), (9, 9)]);
+        assert_eq!(channels_of(&tap, 2), vec![(9, 9)]);
+    }
+
+    #[test]
+    fn golpe_changes_neither_how_many_melodic_channels_a_port_hands_out_nor_who_overflows() {
+        let rig = rig(&["Synth"]);
+        let ids: Vec<String> = (0..16).map(|i| format!("g{i}")).collect();
+        let tracks: Vec<(&str, bool)> = ids.iter().map(|id| (id.as_str(), false)).collect();
+        let names: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let plain: Vec<(&str, u8)> = names.iter().map(|id| (*id, 0)).collect();
+        let marked: Vec<(&str, u8)> = names.iter().flat_map(|id| [(*id, 0), (*id, 9)]).collect();
+        let one = routed(&rig, &plan_using(&tracks, &plain), &names);
+        let two = routed(&rig, &plan_using(&tracks, &marked), &names);
+        for track in 0..15 {
+            assert_eq!(channels_of(&two, track)[0], channels_of(&one, track)[0]);
+            assert_eq!(channels_of(&two, track)[1], (9, 9));
+            assert_eq!(channels_of(&one, track).len(), 1);
+        }
+        // The sixteenth guitar does not fit in either: it plays on the internal sound.
+        assert!(one.destination(15).is_none() && two.destination(15).is_none());
+    }
+
+    #[test]
+    fn a_routed_track_without_golpe_or_with_its_own_channel_nine_is_allocated_as_before() {
+        let rig = rig(&["Synth"]);
+        let tracks = [("a", false), ("b", false)];
+        let plain = routed(
+            &rig,
+            &plan_using(&tracks, &[("a", 0), ("b", 0)]),
+            &["a", "b"],
+        );
+        assert_eq!(channels_of(&plain, 0), vec![(0, 0)]);
+        assert_eq!(channels_of(&plain, 1), vec![(0, 1)]);
+        // A melodic track with a note of its own on plan channel 9 keeps taking a melodic channel for it.
+        let own = plan_owning(&tracks, &[("a", 0), ("a", 9), ("b", 0)], &["a"]);
+        let tap = routed(&rig, &own, &["a", "b"]);
+        assert_eq!(channels_of(&tap, 0), vec![(0, 0), (9, 1)]);
+        assert_eq!(channels_of(&tap, 1), vec![(0, 2)]);
     }
 
     #[test]

@@ -146,6 +146,679 @@ describe('MusicXML export',()=>{
     expect(music(staff,true)).toEqual(music(score.tracks[0].staves[0],true));
   });
 
+  it('writes ghost notes and palm mutes and reads them back',()=>{
+    const score=guitar();
+    const notes=score.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(b=>b.notes);
+    notes[0].isGhost=true;
+    notes[1].isPalmMute=true;
+    notes[2].isGhost=true;
+    notes[2].isPalmMute=true;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    const noteheads=[...doc.querySelectorAll('note > notehead')];
+    expect(noteheads).toHaveLength(2);
+    expect(noteheads.every(n=>n.getAttribute('parentheses')==='yes'&&n.textContent==='normal')).toBe(true);
+
+    const mutes=[...doc.querySelectorAll('note > play > mute')];
+    expect(mutes).toHaveLength(2);
+    expect(mutes.every(m=>m.textContent==='palm')).toBe(true);
+
+    const back=loadInterchangeScore(bytes,settings);
+    const backNotes=back.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(b=>b.notes);
+    expect(backNotes[0].isGhost).toBe(true);
+    expect(backNotes[0].isPalmMute).toBe(false);
+    expect(backNotes[1].isGhost).toBe(false);
+    expect(backNotes[1].isPalmMute).toBe(true);
+    expect(backNotes[2].isGhost).toBe(true);
+    expect(backNotes[2].isPalmMute).toBe(true);
+    expect(backNotes[3].isGhost).toBe(false);
+    expect(backNotes[3].isPalmMute).toBe(false);
+  });
+
+  it('round-trips ghost notes and palm mutes on a notation + TAB guitar',()=>{
+    const score=notationAndTab();
+    const notes=score.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(b=>b.notes);
+    notes[0].isGhost=true;
+    notes[1].isPalmMute=true;
+    notes[2].isGhost=true;
+    notes[2].isPalmMute=true;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    expect(doc.querySelectorAll('note > notehead[parentheses="yes"]').length).toBe(4);
+    expect(doc.querySelectorAll('note > play > mute').length).toBe(4);
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves).toHaveLength(1);
+    expect([back.tracks[0].staves[0].showStandardNotation,back.tracks[0].staves[0].showTablature]).toEqual([true,true]);
+    const backNotes=back.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(b=>b.notes);
+    expect(backNotes[0].isGhost).toBe(true);
+    expect(backNotes[0].isPalmMute).toBe(false);
+    expect(backNotes[1].isGhost).toBe(false);
+    expect(backNotes[1].isPalmMute).toBe(true);
+    expect(backNotes[2].isGhost).toBe(true);
+    expect(backNotes[2].isPalmMute).toBe(true);
+  });
+
+  it('writes alternate repeat endings and round-trips them',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:5}]}]]},
+      ],
+    });
+    score.masterBars[0].isRepeatStart=true;
+    score.masterBars[1].alternateEndings=1;
+    score.masterBars[1].repeatCount=2;
+    score.masterBars[2].alternateEndings=2;
+    score.masterBars[2].repeatCount=0;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    const measures=doc.querySelectorAll('measure');
+    expect(measures).toHaveLength(4);
+
+    // Measure 1: repeat forward on left barline
+    const m1Left=measures[0].querySelector('barline[location="left"]');
+    expect(m1Left?.querySelector('repeat')?.getAttribute('direction')).toBe('forward');
+    expect(measures[0].querySelector('ending')).toBeNull();
+
+    // Measure 2: 1st ending start on left barline, stop + repeat backward on right barline
+    const m2LeftEnding=measures[1].querySelector('barline[location="left"] > ending');
+    expect(m2LeftEnding?.getAttribute('number')).toBe('1');
+    expect(m2LeftEnding?.getAttribute('type')).toBe('start');
+    expect(m2LeftEnding?.textContent).toBe('1.');
+
+    const m2Right=measures[1].querySelector('barline[location="right"]');
+    expect(m2Right?.querySelector('bar-style')?.textContent).toBe('light-heavy');
+    const m2RightEnding=m2Right?.querySelector('ending');
+    expect(m2RightEnding?.getAttribute('number')).toBe('1');
+    expect(m2RightEnding?.getAttribute('type')).toBe('stop');
+    expect(m2Right?.querySelector('repeat')?.getAttribute('direction')).toBe('backward');
+
+    // Measure 3: 2nd ending start on left barline, stop on right barline
+    const m3LeftEnding=measures[2].querySelector('barline[location="left"] > ending');
+    expect(m3LeftEnding?.getAttribute('number')).toBe('2');
+    expect(m3LeftEnding?.getAttribute('type')).toBe('start');
+    expect(m3LeftEnding?.textContent).toBe('2.');
+
+    const m3RightEnding=measures[2].querySelector('barline[location="right"] > ending');
+    expect(m3RightEnding?.getAttribute('number')).toBe('2');
+    expect(m3RightEnding?.getAttribute('type')).toBe('stop');
+    expect(measures[2].querySelector('barline[location="right"] > repeat')).toBeNull();
+
+    // Measure 4: no endings
+    expect(measures[3].querySelector('ending')).toBeNull();
+
+    // Round-trip
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars).toHaveLength(4);
+    expect(back.masterBars[0].isRepeatStart).toBe(true);
+    expect(back.masterBars[1].alternateEndings).toBe(1);
+    expect(back.masterBars[1].repeatCount).toBe(2);
+    expect(back.masterBars[2].alternateEndings).toBe(2);
+    expect(back.masterBars[2].repeatCount).toBe(0);
+    expect(back.masterBars[3].alternateEndings).toBe(0);
+  });
+
+  it('writes a multi-measure alternate ending and round-trips it',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:3}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:5}]}]]},
+      ],
+    });
+    score.masterBars[0].isRepeatStart=true;
+    // 1st ending spans bar 1 and bar 2
+    score.masterBars[1].alternateEndings=1;
+    score.masterBars[1].repeatCount=0;
+    score.masterBars[2].alternateEndings=1;
+    score.masterBars[2].repeatCount=2;
+    // 2nd ending is bar 3
+    score.masterBars[3].alternateEndings=2;
+    score.masterBars[3].repeatCount=0;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const measures=doc.querySelectorAll('measure');
+
+    // Measure 2: start ending 1 on left, no ending on right
+    expect(measures[1].querySelector('barline[location="left"] > ending')?.getAttribute('type')).toBe('start');
+    expect(measures[1].querySelector('barline[location="right"] > ending')).toBeNull();
+
+    // Measure 3: no ending on left, stop ending 1 on right with repeat backward
+    expect(measures[2].querySelector('barline[location="left"] > ending')).toBeNull();
+    expect(measures[2].querySelector('barline[location="right"] > ending')?.getAttribute('type')).toBe('stop');
+    expect(measures[2].querySelector('barline[location="right"] > repeat')?.getAttribute('direction')).toBe('backward');
+
+    // Measure 4: start ending 2 on left, stop on right
+    expect(measures[3].querySelector('barline[location="left"] > ending')?.getAttribute('type')).toBe('start');
+    expect(measures[3].querySelector('barline[location="right"] > ending')?.getAttribute('type')).toBe('stop');
+
+    // Round-trip
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[1].alternateEndings).toBe(1);
+    expect(back.masterBars[2].alternateEndings).toBe(1);
+    expect(back.masterBars[2].repeatCount).toBe(2);
+    expect(back.masterBars[3].alternateEndings).toBe(2);
+    expect(back.masterBars[4].alternateEndings).toBe(0);
+  });
+
+  it('writes multi-number alternate endings (e.g. 1, 2) and round-trips them',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+      ],
+    });
+    score.masterBars[0].isRepeatStart=true;
+    // alternateEndings = 3 (bits 1 and 2 set: endings 1 and 2)
+    score.masterBars[1].alternateEndings=3;
+    score.masterBars[1].repeatCount=2;
+    // 3rd ending is bar 2 (bit 3: flags = 4)
+    score.masterBars[2].alternateEndings=4;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const measures=doc.querySelectorAll('measure');
+
+    const m2LeftEnding=measures[1].querySelector('barline[location="left"] > ending');
+    expect(m2LeftEnding?.getAttribute('number')).toBe('1, 2');
+    expect(m2LeftEnding?.getAttribute('type')).toBe('start');
+    expect(m2LeftEnding?.textContent).toBe('1, 2.');
+
+    const m2RightEnding=measures[1].querySelector('barline[location="right"] > ending');
+    expect(m2RightEnding?.getAttribute('number')).toBe('1, 2');
+    expect(m2RightEnding?.getAttribute('type')).toBe('stop');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[1].alternateEndings).toBe(3);
+    expect(back.masterBars[2].alternateEndings).toBe(4);
+  });
+
+  it('keeps alternate repeat endings on a notation + TAB guitar',()=>{
+    const score=build({
+      strings:[64,59,55,50,45,40],
+      transpose:-12,
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{string:1,fret:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{string:1,fret:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{string:1,fret:3}]}]]},
+      ],
+    });
+    const staff=score.tracks[0].staves[0];
+    staff.showStandardNotation=true;
+    staff.showTablature=true;
+    for(const bar of staff.bars)bar.clefOttava=model.Ottavia._8vb;
+
+    score.masterBars[0].isRepeatStart=true;
+    score.masterBars[1].alternateEndings=1;
+    score.masterBars[1].repeatCount=2;
+    score.masterBars[2].alternateEndings=2;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves).toHaveLength(1);
+    expect([back.tracks[0].staves[0].showStandardNotation,back.tracks[0].staves[0].showTablature]).toEqual([true,true]);
+    expect(back.masterBars[1].alternateEndings).toBe(1);
+    expect(back.masterBars[1].repeatCount).toBe(2);
+    expect(back.masterBars[2].alternateEndings).toBe(2);
+  });
+
+  it('writes a capo on a TAB guitar and round-trips it',()=>{
+    const score=guitar();
+    const staff=score.tracks[0].staves[0];
+    staff.capo=3;
+    const note=staff.bars[0].voices[0].beats[0].notes[0];
+    const initialRealValue=note.calculateRealValue(false,false);
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    const capoElement=doc.querySelector('staff-details > capo');
+    expect(capoElement?.textContent).toBe('3');
+
+    const back=loadInterchangeScore(bytes,settings);
+    const backStaff=back.tracks[0].staves[0];
+    expect(backStaff.capo).toBe(3);
+    const backNote=backStaff.bars[0].voices[0].beats[0].notes[0];
+    expect(backNote.fret).toBe(note.fret);
+    expect(backNote.string).toBe(note.string);
+    expect(backNote.calculateRealValue(false,false)).toBe(initialRealValue);
+  });
+
+  it('writes a capo on a notation + TAB guitar and round-trips it',()=>{
+    const score=notationAndTab();
+    score.tracks[0].staves[0].capo=2;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    const capos=[...doc.querySelectorAll('staff-details > capo')].map(c=>c.textContent);
+    expect(capos).toContain('2');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves).toHaveLength(1);
+    expect([back.tracks[0].staves[0].showStandardNotation,back.tracks[0].staves[0].showTablature]).toEqual([true,true]);
+    expect(back.tracks[0].staves[0].capo).toBe(2);
+  });
+
+  it('writes measure directions and round-trips them',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:5}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:7}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:9}]}]]},
+      ],
+    });
+    score.masterBars[0].addDirection(model.Direction.TargetSegno);
+    score.masterBars[1].addDirection(model.Direction.TargetCoda);
+    score.masterBars[2].addDirection(model.Direction.JumpDalSegno);
+    score.masterBars[3].addDirection(model.Direction.JumpDaCapo);
+    score.masterBars[4].addDirection(model.Direction.TargetFine);
+    score.masterBars[5].addDirection(model.Direction.JumpDaCoda);
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const measures=doc.querySelectorAll('measure');
+
+    expect(measures[0].querySelector('direction > direction-type > segno')).not.toBeNull();
+    expect(measures[0].querySelector('sound[segno]')?.getAttribute('segno')).toBe('segno');
+
+    expect(measures[1].querySelector('direction > direction-type > coda')).not.toBeNull();
+    expect(measures[1].querySelector('sound[coda]')?.getAttribute('coda')).toBe('coda');
+
+    expect(measures[2].querySelector('sound')?.getAttribute('dalsegno')).toBe('segno');
+    expect(measures[3].querySelector('sound')?.getAttribute('dacapo')).toBe('dacapo');
+    expect(measures[4].querySelector('sound')?.getAttribute('fine')).toBe('fine');
+    expect(measures[5].querySelector('sound')?.getAttribute('tocoda')).toBe('coda');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[0].directions).toContain(model.Direction.TargetSegno);
+    expect(back.masterBars[1].directions).toContain(model.Direction.TargetCoda);
+    expect(back.masterBars[2].directions).toContain(model.Direction.JumpDalSegno);
+    expect(back.masterBars[3].directions).toContain(model.Direction.JumpDaCapo);
+    expect(back.masterBars[4].directions).toContain(model.Direction.TargetFine);
+    expect(back.masterBars[5].directions).toContain(model.Direction.JumpDaCoda);
+  });
+
+  it('writes directions only on the first part of a multi-track score',()=>{
+    const score=build({
+      copies:2,
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+      ],
+    });
+    score.masterBars[0].addDirection(model.Direction.TargetSegno);
+    score.masterBars[1].addDirection(model.Direction.JumpDalSegno);
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const parts=doc.querySelectorAll('part');
+    expect(parts).toHaveLength(2);
+
+    expect(parts[0].querySelector('direction > direction-type > segno')).not.toBeNull();
+    expect(parts[0].querySelectorAll('sound[segno="segno"]')).toHaveLength(1);
+    expect(parts[0].querySelectorAll('sound[dalsegno="segno"]')).toHaveLength(1);
+
+    expect(parts[1].querySelector('direction > direction-type > segno')).toBeNull();
+    expect(parts[1].querySelector('sound[segno="segno"]')).toBeNull();
+    expect(parts[1].querySelector('sound[dalsegno="segno"]')).toBeNull();
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[0].directions).toContain(model.Direction.TargetSegno);
+    expect(back.masterBars[1].directions).toContain(model.Direction.JumpDalSegno);
+  });
+
+  it('writes triplet feel changes and round-trips them',()=>{
+    const score=build({
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:2}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:4}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:5}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:7}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:9}]}]]},
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:11}]}]]},
+      ],
+    });
+    score.masterBars[0].tripletFeel=model.TripletFeel.Triplet8th;
+    score.masterBars[1].tripletFeel=model.TripletFeel.Triplet16th;
+    score.masterBars[2].tripletFeel=model.TripletFeel.Dotted8th;
+    score.masterBars[3].tripletFeel=model.TripletFeel.Dotted16th;
+    score.masterBars[4].tripletFeel=model.TripletFeel.Scottish8th;
+    score.masterBars[5].tripletFeel=model.TripletFeel.Scottish16th;
+    score.masterBars[6].tripletFeel=model.TripletFeel.NoTripletFeel;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const measures=doc.querySelectorAll('measure');
+
+    // Triplet8th
+    expect(measures[0].querySelector('sound > swing > first')?.textContent).toBe('2');
+    expect(measures[0].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(measures[0].querySelector('sound > swing > swing-type')?.textContent).toBe('eighth');
+
+    // Triplet16th
+    expect(measures[1].querySelector('sound > swing > first')?.textContent).toBe('2');
+    expect(measures[1].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(measures[1].querySelector('sound > swing > swing-type')?.textContent).toBe('16th');
+
+    // Dotted8th
+    expect(measures[2].querySelector('sound > swing > first')?.textContent).toBe('3');
+    expect(measures[2].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(measures[2].querySelector('sound > swing > swing-type')?.textContent).toBe('eighth');
+
+    // Dotted16th
+    expect(measures[3].querySelector('sound > swing > first')?.textContent).toBe('3');
+    expect(measures[3].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(measures[3].querySelector('sound > swing > swing-type')?.textContent).toBe('16th');
+
+    // Scottish8th
+    expect(measures[4].querySelector('sound > swing > first')?.textContent).toBe('1');
+    expect(measures[4].querySelector('sound > swing > second')?.textContent).toBe('3');
+    expect(measures[4].querySelector('sound > swing > swing-type')?.textContent).toBe('eighth');
+
+    // Scottish16th
+    expect(measures[5].querySelector('sound > swing > first')?.textContent).toBe('1');
+    expect(measures[5].querySelector('sound > swing > second')?.textContent).toBe('3');
+    expect(measures[5].querySelector('sound > swing > swing-type')?.textContent).toBe('16th');
+
+    // NoTripletFeel (straight)
+    expect(measures[6].querySelector('sound > swing > straight')).not.toBeNull();
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[0].tripletFeel).toBe(model.TripletFeel.Triplet8th);
+    expect(back.masterBars[1].tripletFeel).toBe(model.TripletFeel.Triplet16th);
+    expect(back.masterBars[2].tripletFeel).toBe(model.TripletFeel.Dotted8th);
+    expect(back.masterBars[3].tripletFeel).toBe(model.TripletFeel.Dotted16th);
+    expect(back.masterBars[4].tripletFeel).toBe(model.TripletFeel.Scottish8th);
+    expect(back.masterBars[5].tripletFeel).toBe(model.TripletFeel.Scottish16th);
+    expect(back.masterBars[6].tripletFeel).toBe(model.TripletFeel.NoTripletFeel);
+  });
+
+  it('writes triplet feel only on the first part of a multi-track score',()=>{
+    const score=build({
+      copies:2,
+      bars:[
+        {numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:4,tone:0}]}]]},
+      ],
+    });
+    score.masterBars[0].tripletFeel=model.TripletFeel.Triplet8th;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const parts=doc.querySelectorAll('part');
+    expect(parts).toHaveLength(2);
+
+    expect(parts[0].querySelector('sound > swing > first')?.textContent).toBe('2');
+    expect(parts[0].querySelector('sound > swing > second')?.textContent).toBe('1');
+    expect(parts[0].querySelector('sound > swing > swing-type')?.textContent).toBe('eighth');
+
+    expect(parts[1].querySelector('sound > swing')).toBeNull();
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.masterBars[0].tripletFeel).toBe(model.TripletFeel.Triplet8th);
+  });
+
+  it('writes subtitle and music (arranger) metadata and round-trips them',()=>{
+    const score=guitar();
+    score.subTitle='A Study in D';
+    score.music='Arranger Name';
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+
+    expect(doc.querySelector('credit > credit-type')?.textContent).toBe('subtitle');
+    expect(doc.querySelector('credit > credit-words')?.textContent).toBe('A Study in D');
+    expect(doc.querySelector('identification > creator[type="arranger"]')?.textContent).toBe('Arranger Name');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.subTitle.replace(/\u00a0/g,' ')).toBe('A Study in D');
+    expect(back.music.replace(/\u00a0/g,' ')).toBe('Arranger Name');
+  });
+
+  it('writes beat text and reads it back',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Intro riff';
+    score.tracks[0].staves[0].bars[0].voices[0].beats[2].text='Lead';
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const words=[...doc.querySelectorAll('direction > direction-type > words')].map(w=>w.textContent);
+    expect(words).toContain('Intro riff');
+    expect(words).toContain('Lead');
+
+    const back=loadInterchangeScore(bytes,settings);
+    const beats=back.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(beats[0].text).toBe('Intro riff');
+    expect(beats[2].text).toBe('Lead');
+  });
+
+  it('keeps beat text on a notation + TAB guitar',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].showStandardNotation=true;
+    score.tracks[0].staves[0].showTablature=true;
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Solo';
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    expect(doc.querySelector('direction > direction-type > words')?.textContent).toBe('Solo');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBe('Solo');
+  });
+
+  it('writes beat text on multi-staff tracks',()=>{
+    const score=new model.Score();
+    const track=new model.Track();score.addTrack(track);track.ensureStaveCount(2);
+    const [treble,bass]=track.staves;
+    treble.showStandardNotation=true;treble.showTablature=false;
+    bass.showStandardNotation=true;bass.showTablature=false;
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+
+    const bar1=new model.Bar();treble.addBar(bar1);bar1.clef=model.Clef.G2;
+    const voice1=new model.Voice();bar1.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=5;note1.tone=0;beat1.addNote(note1);
+    beat1.text='Right hand';
+
+    const bar2=new model.Bar();bass.addBar(bar2);bar2.clef=model.Clef.F4;
+    const voice2=new model.Voice();bar2.addVoice(voice2);
+    const beat2=new model.Beat();beat2.duration=model.Duration.Whole;voice2.addBeat(beat2);
+    const note2=new model.Note();note2.octave=3;note2.tone=0;beat2.addNote(note2);
+    beat2.text='Left hand';
+
+    score.finish(settings);
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const directions=[...doc.querySelectorAll('direction')].filter(d=>d.querySelector('words'));
+    expect(directions[0].querySelector('words')?.textContent).toBe('Right hand');
+    expect(directions[0].querySelector('staff')?.textContent).toBe('1');
+    expect(directions[1].querySelector('words')?.textContent).toBe('Left hand');
+    expect(directions[1].querySelector('staff')?.textContent).toBe('2');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBe('Right hand');
+    expect(back.tracks[0].staves[1].bars[0].voices[0].beats[0].text).toBe('Left hand');
+  });
+
+  it('writes crescendo and decrescendo hairpins and reads them back',()=>{
+    const score=guitar();
+    const bar0=score.tracks[0].staves[0].bars[0].voices[0].beats;
+    bar0[0].crescendo=model.CrescendoType.Crescendo;
+    bar0[1].crescendo=model.CrescendoType.Crescendo;
+    bar0[2].crescendo=model.CrescendoType.None;
+    bar0[3].crescendo=model.CrescendoType.Decrescendo;
+
+    const bar1=score.tracks[0].staves[0].bars[1].voices[0].beats;
+    bar1[0].crescendo=model.CrescendoType.None;
+    bar1[1].crescendo=model.CrescendoType.Crescendo;
+    bar1[2].crescendo=model.CrescendoType.Crescendo;
+    bar1[3].crescendo=model.CrescendoType.Crescendo;
+    bar1[4].crescendo=model.CrescendoType.Crescendo;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const wedges=[...doc.querySelectorAll('direction > direction-type > wedge')].map(w=>w.getAttribute('type'));
+    expect(wedges).toEqual(['crescendo','stop','diminuendo','stop','crescendo','stop']);
+
+    const back=loadInterchangeScore(bytes,settings);
+    const backBar0=back.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(backBar0.map(b=>b.crescendo)).toEqual([
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.None,
+      model.CrescendoType.Decrescendo,
+    ]);
+
+    const backBar1=back.tracks[0].staves[0].bars[1].voices[0].beats;
+    expect(backBar1.map(b=>b.crescendo)).toEqual([
+      model.CrescendoType.None,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+    ]);
+  });
+
+  it('keeps crescendo hairpins on a notation + TAB guitar',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].showStandardNotation=true;
+    score.tracks[0].staves[0].showTablature=true;
+    const bar0=score.tracks[0].staves[0].bars[0].voices[0].beats;
+    bar0[0].crescendo=model.CrescendoType.Crescendo;
+    bar0[1].crescendo=model.CrescendoType.Crescendo;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const wedgeDir=doc.querySelector('direction > direction-type > wedge')?.parentElement?.parentElement;
+    expect(wedgeDir?.querySelector('staff')?.textContent).toBe('1');
+
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    const backBar0=back.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(backBar0.map(b=>b.crescendo)).toEqual([
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.Crescendo,
+      model.CrescendoType.None,
+      model.CrescendoType.None,
+    ]);
+  });
+
+  it('refuses crescendo outside the first voice',()=>{
+    const score=new model.Score();
+    const track=new model.Track();score.addTrack(track);track.ensureStaveCount(1);
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+    const staff=track.staves[0];
+    const bar=new model.Bar();staff.addBar(bar);bar.clef=model.Clef.G2;
+    const voice0=new model.Voice();bar.addVoice(voice0);
+    const beat0=new model.Beat();beat0.duration=model.Duration.Whole;voice0.addBeat(beat0);
+    const note0=new model.Note();note0.octave=4;note0.tone=0;beat0.addNote(note0);
+
+    const voice1=new model.Voice();bar.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=4;note1.tone=4;beat1.addNote(note1);
+    beat1.crescendo=model.CrescendoType.Crescendo;
+    score.finish(settings);
+
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/crescendo outside the first voice/);
+  });
+
+  it('refuses crescendo on a multi-staff track',()=>{
+    const score=new model.Score();
+    const track=new model.Track();score.addTrack(track);track.ensureStaveCount(2);
+    const [treble,bass]=track.staves;
+    treble.showStandardNotation=true;treble.showTablature=false;
+    bass.showStandardNotation=true;bass.showTablature=false;
+    const master=new model.MasterBar();master.timeSignatureNumerator=4;master.timeSignatureDenominator=4;score.addMasterBar(master);
+
+    const bar1=new model.Bar();treble.addBar(bar1);bar1.clef=model.Clef.G2;
+    const voice1=new model.Voice();bar1.addVoice(voice1);
+    const beat1=new model.Beat();beat1.duration=model.Duration.Whole;voice1.addBeat(beat1);
+    const note1=new model.Note();note1.octave=5;note1.tone=0;beat1.addNote(note1);
+    beat1.crescendo=model.CrescendoType.Crescendo;
+
+    const bar2=new model.Bar();bass.addBar(bar2);bar2.clef=model.Clef.F4;
+    const voice2=new model.Voice();bar2.addVoice(voice2);
+    const beat2=new model.Beat();beat2.duration=model.Duration.Whole;voice2.addBeat(beat2);
+    const note2=new model.Note();note2.octave=3;note2.tone=0;beat2.addNote(note2);
+    score.finish(settings);
+
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/crescendo on a multi-staff track/);
+  });
+
+  it('fails closed for an invalid crescendo',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].crescendo=99 as model.CrescendoType;
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/this crescendo/);
+  });
+
+  it('writes left-hand and right-hand fingering and reads them back',()=>{
+    const score=guitar();
+    const note0=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    note0.leftHandFinger=model.Fingers.IndexFinger;
+    note0.rightHandFinger=model.Fingers.Thumb;
+
+    const note1=score.tracks[0].staves[0].bars[0].voices[0].beats[1].notes[0];
+    note1.leftHandFinger=model.Fingers.MiddleFinger;
+    note1.rightHandFinger=model.Fingers.IndexFinger;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const doc=parse(bytes);
+    const fingerings=[...doc.querySelectorAll('technical > fingering')].map(f=>f.textContent);
+    const plucks=[...doc.querySelectorAll('technical > pluck')].map(p=>p.textContent);
+    expect(fingerings).toEqual(['2','3']);
+    expect(plucks).toEqual(['p','i']);
+
+    const back=loadInterchangeScore(bytes,settings);
+    const backNote0=back.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect(backNote0.leftHandFinger).toBe(model.Fingers.IndexFinger);
+    expect(backNote0.rightHandFinger).toBe(model.Fingers.Thumb);
+
+    const backNote1=back.tracks[0].staves[0].bars[0].voices[0].beats[1].notes[0];
+    expect(backNote1.leftHandFinger).toBe(model.Fingers.MiddleFinger);
+    expect(backNote1.rightHandFinger).toBe(model.Fingers.IndexFinger);
+  });
+
+  it('keeps fingering on a notation + TAB guitar',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].showStandardNotation=true;
+    score.tracks[0].staves[0].showTablature=true;
+    const note0=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    note0.leftHandFinger=model.Fingers.AnnularFinger;
+    note0.rightHandFinger=model.Fingers.MiddleFinger;
+
+    const bytes=exportMusicXml(score,selectAll(score));
+    const back=loadInterchangeScore(bytes,settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    const backNote=back.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect(backNote.leftHandFinger).toBe(model.Fingers.AnnularFinger);
+    expect(backNote.rightHandFinger).toBe(model.Fingers.MiddleFinger);
+  });
+
+  it('fails closed for an invalid fingering',()=>{
+    const score=guitar();
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].leftHandFinger=99 as model.Fingers;
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/this fingering/);
+  });
+
   it('writes a grand-staff piano track with two staves and round-trips it',()=>{
     const score=new model.Score();score.title='Grand Piano';score.artist='Chopin';
     const track=new model.Track();track.name='Piano';score.addTrack(track);track.ensureStaveCount(2);
@@ -910,11 +1583,15 @@ describe('MusicXML export',()=>{
   });
 
   it.each([
-    ['a note effect',/note isghost/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].isGhost=true;}],
-    ['a beat effect',/beat text/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Intro';}],
+    ['a note effect',/note isdead/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].isDead=true;}],
+    ['a beat effect',/beat slap/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].slap=true;}],
     ['a second staff',/more than one staff/,(score:model.Score)=>{score.tracks[0].ensureStaveCount(2);}],
     ['a percussion staff',/percussion|staff ispercussion/,(score:model.Score)=>{score.tracks[0].staves[0].isPercussion=true;}],
-    ['alternate endings',/master alternateendings/,(score:model.Score)=>{score.masterBars[1].alternateEndings=1;}],
+    ['a capo on a non-stringed staff',/capo on a non-stringed staff/,(score:model.Score)=>{score.tracks[0].staves[0].stringTuning.tunings=[];score.tracks[0].staves[0].capo=2;}],
+    ['an invalid capo',/this capo/,(score:model.Score)=>{score.tracks[0].staves[0].capo=-1;}],
+    ['an unsupported direction',/this direction/,(score:model.Score)=>{score.masterBars[0].addDirection(model.Direction.TargetSegnoSegno);}],
+    ['an invalid triplet feel',/this triplet feel/,(score:model.Score)=>{score.masterBars[0].tripletFeel=99 as model.TripletFeel;}],
+    ['an invalid alternate ending',/this alternate ending/,(score:model.Score)=>{score.masterBars[1].alternateEndings=256;}],
     ['a section',/master section/,(score:model.Score)=>{score.masterBars[0].section=Object.assign(new model.Section(),{text:'Verse',marker:'A'});}],
     ['a sounding transposition',/sounding transposition|staff transpositionpitch/,(score:model.Score)=>{score.tracks[0].staves[0].transpositionPitch=2;}],
     ['a later instrument change',/beat automations/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[1].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Instrument,value:30}));}],

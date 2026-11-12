@@ -72,19 +72,19 @@ function beatTicks(beat:model.Beat){
 // the default of a pristine model object so nothing is silently lost.
 const written={
   // Presentation is not written: colours (style) and every stylesheet display choice.
-  score:new Set(['title','artist','words','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
+  score:new Set(['title','artist','words','music','subtitle','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
   // Beaming rules are display grouping.
-  master:new Set(['fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
+  master:new Set(['alternateendings','directions','fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules','tripletfeel']),
   track:new Set(['staves','playbackinfo','name','shortname','color','defaultsystemslayout','systemslayout','isvisibleonmultitrack']),
   // Mute and solo are player state and the port is MIDI routing, not notation.
   playback:new Set(['program','primarychannel','secondarychannel','volume','balance','ismute','issolo','port']),
-  staff:new Set(['bars','stringtuning','displaytranspositionpitch','showtablature','showstandardnotation','standardnotationlinecount']),
+  staff:new Set(['capo','bars','stringtuning','displaytranspositionpitch','showtablature','showstandardnotation','standardnotationlinecount']),
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
-  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking']),
+  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking','text','crescendo']),
   // Bend points are written as <bend> elements (their type is derived from them).
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid','isghost','ispalmmute','lefthandfinger','righthandfinger']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -126,6 +126,66 @@ function tempoDirection(change:model.Automation,master:model.MasterBar){
   // A hidden tempo keeps its label hidden too.
   return element('direction',(change.text&&change.isVisible?element('direction-type',element('words',escape(change.text))):'')+element('direction-type',element('metronome',element('beat-unit','quarter')+element('per-minute',number(change.value)),change.isVisible?'':' print-object="no"'))
     +(tick?element('offset',tick,' sound="yes"'):'')+`<sound tempo="${number(change.value)}"/>`,' placement="above"');
+}
+function directionsOf(master:model.MasterBar):string{
+  if(!master.directions||master.directions.size===0)return '';
+  let result='';
+  for(const direction of master.directions){
+    switch(direction){
+      case model.Direction.TargetSegno:
+        result+=element('direction',element('direction-type','<segno/>'),' placement="above"')+'<sound segno="segno"/>';
+        break;
+      case model.Direction.TargetCoda:
+        result+=element('direction',element('direction-type','<coda/>'),' placement="above"')+'<sound coda="coda"/>';
+        break;
+      case model.Direction.TargetFine:
+        result+='<sound fine="fine"/>';
+        break;
+      case model.Direction.JumpDaCapo:
+        result+='<sound dacapo="dacapo"/>';
+        break;
+      case model.Direction.JumpDalSegno:
+        result+='<sound dalsegno="segno"/>';
+        break;
+      case model.Direction.JumpDaCoda:
+        result+='<sound tocoda="coda"/>';
+        break;
+      default:
+        unsupported('this direction');
+    }
+  }
+  return result;
+}
+
+function swingOf(feel:model.TripletFeel,prevFeel:model.TripletFeel):string{
+  if(feel===prevFeel)return '';
+  switch(feel){
+    case model.TripletFeel.NoTripletFeel:
+      return element('sound',element('swing',element('straight','')));
+    case model.TripletFeel.Triplet16th:
+      return element('sound',element('swing',element('first',2)+element('second',1)+element('swing-type','16th')));
+    case model.TripletFeel.Triplet8th:
+      return element('sound',element('swing',element('first',2)+element('second',1)+element('swing-type','eighth')));
+    case model.TripletFeel.Dotted16th:
+      return element('sound',element('swing',element('first',3)+element('second',1)+element('swing-type','16th')));
+    case model.TripletFeel.Dotted8th:
+      return element('sound',element('swing',element('first',3)+element('second',1)+element('swing-type','eighth')));
+    case model.TripletFeel.Scottish16th:
+      return element('sound',element('swing',element('first',1)+element('second',3)+element('swing-type','16th')));
+    case model.TripletFeel.Scottish8th:
+      return element('sound',element('swing',element('first',1)+element('second',3)+element('swing-type','eighth')));
+    default:
+      return unsupported('this triplet feel');
+  }
+}
+
+function wedgeOf(kind:model.CrescendoType,current:model.CrescendoType,staff:string):{xml:string;next:model.CrescendoType}{
+  if(kind===current)return {xml:'',next:current};
+  let xml='';
+  if(current!==model.CrescendoType.None)xml+=element('direction',element('direction-type','<wedge type="stop"/>')+staff,' placement="below"');
+  if(kind===model.CrescendoType.Crescendo)xml+=element('direction',element('direction-type','<wedge type="crescendo"/>')+staff,' placement="below"');
+  else if(kind===model.CrescendoType.Decrescendo)xml+=element('direction',element('direction-type','<wedge type="diminuendo"/>')+staff,' placement="below"');
+  return {xml,next:kind};
 }
 
 // A bend curve (offsets 0–60, values in quarter tones) as one <bend> per value change:
@@ -300,6 +360,57 @@ function checkHammerPulls(score:model.Score,copy:model.Score){
   }
 }
 
+const noteheadOf=(note:model.Note)=>note.isGhost?'<notehead parentheses="yes">normal</notehead>':'';
+const playOf=(note:model.Note)=>note.isPalmMute?'<play><mute>palm</mute></play>':'';
+const leftFingers:Partial<Record<model.Fingers,string>>={
+  [model.Fingers.NoOrDead]:'0',
+  [model.Fingers.Thumb]:'1',
+  [model.Fingers.IndexFinger]:'2',
+  [model.Fingers.MiddleFinger]:'3',
+  [model.Fingers.AnnularFinger]:'4',
+  [model.Fingers.LittleFinger]:'5',
+};
+const rightFingers:Partial<Record<model.Fingers,string>>={
+  [model.Fingers.NoOrDead]:'0',
+  [model.Fingers.Thumb]:'p',
+  [model.Fingers.IndexFinger]:'i',
+  [model.Fingers.MiddleFinger]:'m',
+  [model.Fingers.AnnularFinger]:'a',
+  [model.Fingers.LittleFinger]:'c',
+};
+function fingerOf(note:model.Note):string{
+  let xml='';
+  if(note.leftHandFinger!==model.Fingers.Unknown){
+    const val=leftFingers[note.leftHandFinger]??unsupported('this fingering');
+    xml+=element('fingering',val);
+  }
+  if(note.rightHandFinger!==model.Fingers.Unknown){
+    const val=rightFingers[note.rightHandFinger]??unsupported('this fingering');
+    xml+=element('pluck',val);
+  }
+  return xml;
+}
+function placeNoteAttributes(timing:string,accidental:string,notehead:string):string {
+  const timeCut=timing.indexOf('<time-modification>'),staffCut=timing.indexOf('<staff>');
+  if(timeCut>=0&&staffCut>=0){
+    return timing.slice(0,timeCut)+accidental+timing.slice(timeCut,staffCut)+notehead+timing.slice(staffCut);
+  }
+  if(timeCut>=0){
+    return timing.slice(0,timeCut)+accidental+timing.slice(timeCut)+notehead;
+  }
+  if(staffCut>=0){
+    return timing.slice(0,staffCut)+accidental+notehead+timing.slice(staffCut);
+  }
+  return timing+accidental+notehead;
+}
+
+function endingNumbers(flags:number):number[]{
+  if(!Number.isInteger(flags)||flags<=0||flags>255)unsupported('this alternate ending');
+  const result:number[]=[];
+  for(let i=0;i<8;i++)if((flags&(1<<i))!==0)result.push(i+1);
+  return result;
+}
+
 function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean}){
   state.started=false;
   const mix=trackMixAutomations(track),sung={seen:new Set<number>(),open:[] as boolean[]};
@@ -307,16 +418,32 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   (json.staves as Json[]).forEach(s=>check('staff',s));
   if(track.staves.some(s=>s.isPercussion))unsupported('percussion staves');
   if(track.staves.length>1&&track.staves.some(s=>s.stringTuning.tunings.length>0))unsupported('more than one staff per track');
+  if(track.staves.some(s=>s.capo!==0&&!s.stringTuning.tunings.length))unsupported('a capo on a non-stringed staff');
   const staff0=track.staves[0],strings=staff0.stringTuning.tunings,stringed=strings.length>0;
+  if(stringed&&(!Number.isInteger(staff0.capo)||staff0.capo<0||staff0.capo>24))unsupported('this capo');
   const tab=stringed&&staff0.showTablature&&!staff0.showStandardNotation;
   const both=track.staves.length===1&&stringed&&staff0.showTablature&&staff0.showStandardNotation;
   if(track.staves.length===1&&stringed&&!tab&&!both)unsupported('a stringed staff shown only as standard notation');
   const layouts=both?[{staffIndex:0,staff:'1',voices:0,technical:false},{staffIndex:0,staff:'2',voices:4,technical:true}]:track.staves.length>1?track.staves.map((_,s)=>({staffIndex:s,staff:String(s+1),voices:0,technical:true})):[{staffIndex:0,staff:'',voices:0,technical:true}];
   const ties=layouts.map(()=>new Map<model.Note,number>()),legatos=layouts.map(()=>new Map<model.Note,number>()),slides=layouts.map(()=>new Map<model.Note,number>());
-  let measures='',previous:model.Bar|null=null;
+  let measures='',previous:model.Bar|null=null,currentCrescendo=model.CrescendoType.None;
   for(const [index,bar0] of staff0.bars.entries()){
     const master=bar0.masterBar;check('master',(scoreJson.masterbars as Json[])[master.index]);
     const length=master.calculateDuration();let content='';
+    const flags=master.alternateEndings;
+    if(!Number.isInteger(flags)||flags<0||flags>255)unsupported('this alternate ending');
+    const feel=master.tripletFeel;
+    if(!Number.isInteger(feel)||feel<0||feel>6)unsupported('this triplet feel');
+    let startEndingXml='',stopEndingXml='';
+    if(flags>0){
+      const nums=endingNumbers(flags).join(', ');
+      const prevMaster=index>0?staff0.bars[index-1].masterBar:null;
+      const prevStopped=!prevMaster||prevMaster.repeatCount>0||prevMaster.alternateEndings!==flags;
+      if(prevStopped)startEndingXml=element('ending',`${nums}.`,` number="${nums}" type="start"`);
+      const nextMaster=index<staff0.bars.length-1?staff0.bars[index+1].masterBar:null;
+      const nextStopped=!nextMaster||master.repeatCount>0||nextMaster.alternateEndings!==flags;
+      if(nextStopped)stopEndingXml=element('ending','',` number="${nums}" type="stop"`);
+    }
     // One unnumbered <key> applies to every staff on import, so staves that disagree cannot be written.
     if(track.staves.some(s=>s.bars[index].keySignature!==bar0.keySignature||s.bars[index].keySignatureType!==bar0.keySignatureType))unsupported('different key signatures on the staves of one track');
     const attributes:string[]=[];
@@ -346,7 +473,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         if(bar0.clef!==previous.clef||bar0.clefOttava!==previous.clefOttava)attributes.push(clef(bar0,tab,''));
       }
     }
-    if(!previous&&stringed)attributes.push(element('staff-details',(both?element('staff-type','alternate'):'')+element('staff-lines',strings.length)+strings.map((_,line)=>element('staff-tuning',tuningStep(strings[strings.length-1-line]),` line="${line+1}"`)).join(''),both?' number="2"':''));
+    if(!previous&&stringed){
+      const capo=staff0.capo>0?element('capo',staff0.capo):'';
+      if(both&&capo)attributes.push(element('staff-details',capo,' number="1"'));
+      attributes.push(element('staff-details',(both?element('staff-type','alternate'):'')+element('staff-lines',strings.length)+strings.map((_,line)=>element('staff-tuning',tuningStep(strings[strings.length-1-line]),` line="${line+1}"`)).join('')+capo,both?' number="2"':''));
+    }
     if(!previous){
       if(track.staves.length===1){
         const transpose=staff0.displayTranspositionPitch,octaveChange=Math.trunc(transpose/12),chromatic=transpose-12*octaveChange;
@@ -362,11 +493,20 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       }
     }
     if(attributes.length)content+=element('attributes',attributes.join(''));
-    if(master.isRepeatStart)content+=element('barline',element('bar-style','heavy-light')+'<repeat direction="forward"/>',' location="left"');
+    if(master.isRepeatStart||startEndingXml){
+      const leftStyle=master.isRepeatStart?element('bar-style','heavy-light'):'';
+      const leftRepeat=master.isRepeatStart?'<repeat direction="forward"/>':'';
+      content+=element('barline',leftStyle+startEndingXml+leftRepeat,' location="left"');
+    }
+    const directionsXml=directionsOf(master);
+    const prevFeel=index>0?staff0.bars[index-1].masterBar.tripletFeel:model.TripletFeel.NoTripletFeel;
+    const swingXml=swingOf(feel,prevFeel);
     if(first){
       const tempos=[...master.tempoAutomations].sort((a,b)=>a.ratioPosition-b.ratioPosition);
       if(index===0&&!tempos.some(change=>change.ratioPosition===0))tempos.unshift(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:score.tempo,ratioPosition:0,isVisible:true}));
       content+=tempos.map(change=>tempoDirection(change,master)).join('');
+      content+=directionsXml;
+      content+=swingXml;
     }
     content+=mix.filter(point=>point.bar===index).map(point=>mixDirection(point.automation,master,instrument,layouts[0].staff?element('staff',layouts[0].staff):'')).join('');
     const voices:{notes:string;total:number}[][]=layouts.map(()=>[]);
@@ -397,6 +537,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
           if(beat.automations.some(change=>change.type!==model.AutomationType.Volume&&change.type!==model.AutomationType.Balance&&!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
           if(!beat.notes.length&&(beat.pickStroke!==model.PickStroke.None||beat.tap))unsupported('a pick stroke or tap on a rest');
           if(!beat.notes.length&&beat.tremoloPicking)unsupported('tremolo picking on a rest');
+          if(!Number.isInteger(beat.crescendo)||beat.crescendo<0||beat.crescendo>2)unsupported('this crescendo');
+          if(voice.index!==0&&beat.crescendo!==model.CrescendoType.None)unsupported('crescendo outside the first voice');
           if(voice.isEmpty){if(beat.notes.length)unsupported('notes in an empty voice');continue;}
           if(beat.isEmpty)unsupported('an empty beat inside a voice');
           const voiceNumber=(layout:typeof layouts[number])=>element('voice',voice.index+1+layout.voices);
@@ -406,6 +548,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             const name=(model.DynamicValue[beat.dynamics]??unsupported('this dynamic')).toLowerCase();
             notes[0]+=element('direction',element('direction-type',element('dynamics',`<${name}/>`))+staffOf(layouts[0]),' placement="below"');state.dynamic=beat.dynamics;
           }
+          if(voice.index===0){
+            const wedge=wedgeOf(beat.crescendo,currentCrescendo,staffOf(layouts[0]));
+            notes[0]+=wedge.xml;currentCrescendo=wedge.next;
+          }
+          if(beat.text)notes[0]+=element('direction',element('direction-type',element('words',escape(beat.text)))+staffOf(layouts[0]),' placement="above"');
           if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
             const held=fermataOf(beat);
             layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber(layout)+staffOf(layout)+(held?element('notations',held):''));});total=length;continue;
@@ -433,14 +580,18 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               }
               const fingering=layout.technical&&note.isStringed?element('string',strings.length-note.string+1)+element('fret',note.fret):'',bent=bends(note),mark=marks(note,noteIndex===0);
               if(note.vibrato!==model.VibratoType.None&&note.hasBend&&!bent)unsupported('vibrato on a bend held over a tie');
-              const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
+              const slurred=legato(note,legatos[at],legatos),plucks=fingerOf(note),technical=fingering||bent||mark.technical||slurred||plucks?element('technical',slurred+bent+mark.technical+fingering+plucks):'';
               const marked=(noteIndex===0?held:'')+(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
               const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
-              const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
-              notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
-                +(tied||marked?element('notations',tied+marked):'')+(at===0&&noteIndex===0?lyrics:''));
+              const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`);
+              notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+placeNoteAttributes(timing,written.accidental,noteheadOf(note))
+                +(tied||marked?element('notations',tied+marked):'')+(at===0&&noteIndex===0?lyrics:'')+playOf(note));
             });
           }
+        }
+        if(voice.index===0&&!staff0.bars.slice(index+1).some(b=>b.voices[0]&&!b.voices[0].isEmpty)&&currentCrescendo!==model.CrescendoType.None){
+          const stop=wedgeOf(model.CrescendoType.None,currentCrescendo,staffOf(layouts[0]));
+          notes[0]+=stop.xml;currentCrescendo=stop.next;
         }
         layouts.forEach((_,at)=>{if(notes[at])voices[at].push({notes:notes[at],total});});
       }
@@ -475,6 +626,9 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             if(beat.automations.some(change=>change.type!==model.AutomationType.Volume&&change.type!==model.AutomationType.Balance&&!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
             if(!beat.notes.length&&(beat.pickStroke!==model.PickStroke.None||beat.tap))unsupported('a pick stroke or tap on a rest');
             if(!beat.notes.length&&beat.tremoloPicking)unsupported('tremolo picking on a rest');
+            if(!Number.isInteger(beat.crescendo)||beat.crescendo<0||beat.crescendo>2)unsupported('this crescendo');
+            if(track.staves.length>1&&beat.crescendo!==model.CrescendoType.None)unsupported('crescendo on a multi-staff track');
+            if(voice.index!==0&&beat.crescendo!==model.CrescendoType.None)unsupported('crescendo outside the first voice');
             if(voice.isEmpty){if(beat.notes.length)unsupported('notes in an empty voice');continue;}
             if(beat.isEmpty)unsupported('an empty beat inside a voice');
             const voiceNumber=element('voice',voice.index+1+layout.voices);
@@ -484,6 +638,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               const name=(model.DynamicValue[beat.dynamics]??unsupported('this dynamic')).toLowerCase();
               notes+=element('direction',element('direction-type',element('dynamics',`<${name}/>`))+staffOf(layout),' placement="below"');state.dynamic=beat.dynamics;
             }
+            if(voice.index===0&&layout.staffIndex===0){
+              const wedge=wedgeOf(beat.crescendo,currentCrescendo,staffOf(layout));
+              notes+=wedge.xml;currentCrescendo=wedge.next;
+            }
+            if(beat.text)notes+=element('direction',element('direction-type',element('words',escape(beat.text)))+staffOf(layout),' placement="above"');
             if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
               const held=fermataOf(beat);
               notes+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber+staffOf(layout)+(held?element('notations',held):''));total=length;continue;
@@ -510,13 +669,17 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               }
               const fingering=layout.technical&&note.isStringed?element('string',strings.length-note.string+1)+element('fret',note.fret):'',bent=bends(note),mark=marks(note,noteIndex===0);
               if(note.vibrato!==model.VibratoType.None&&note.hasBend&&!bent)unsupported('vibrato on a bend held over a tie');
-              const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
+              const slurred=legato(note,legatos[at],legatos),plucks=fingerOf(note),technical=fingering||bent||mark.technical||slurred||plucks?element('technical',slurred+bent+mark.technical+fingering+plucks):'';
               const marked=(noteIndex===0?held:'')+(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
               const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
-              const timing=rhythm.replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
-              notes+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
-                +(tied||marked?element('notations',tied+marked):'')+(layout.staffIndex===0&&at===0&&noteIndex===0?lyrics:''));
+              const timing=rhythm.replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`);
+              notes+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+placeNoteAttributes(timing,written.accidental,noteheadOf(note))
+                +(tied||marked?element('notations',tied+marked):'')+(layout.staffIndex===0&&at===0&&noteIndex===0?lyrics:'')+playOf(note));
             }
+          }
+          if(voice.index===0&&layout.staffIndex===0&&!staff.bars.slice(index+1).some(b=>b.voices[0]&&!b.voices[0].isEmpty)&&currentCrescendo!==model.CrescendoType.None){
+            const stop=wedgeOf(model.CrescendoType.None,currentCrescendo,staffOf(layout));
+            notes+=stop.xml;currentCrescendo=stop.next;
           }
           if(notes)voices[at].push({notes,total});
         }
@@ -524,7 +687,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
     }
     const entries=layouts.flatMap((layout,at)=>voices[at].length?voices[at]:[{notes:element('note','<rest measure="yes"/>'+element('duration',length)+element('voice',1+layout.voices)+staffOf(layout)),total:length}]);
     entries.forEach(({notes,total},at)=>{content+=notes+(at<entries.length-1?element('backup',element('duration',total)):'');});
-    if(master.repeatCount>0)content+=element('barline',element('bar-style','light-heavy')+`<repeat direction="backward"${master.repeatCount===2?'':` times="${master.repeatCount}"`}/>`,' location="right"');
+    if(master.repeatCount>0||stopEndingXml){
+      const rightStyle=master.repeatCount>0?element('bar-style','light-heavy'):'';
+      const rightRepeat=master.repeatCount>0?`<repeat direction="backward"${master.repeatCount===2?'':` times="${master.repeatCount}"`}/>`:'';
+      content+=element('barline',rightStyle+stopEndingXml+rightRepeat,' location="right"');
+    }
     measures+=element('measure',content,` number="${index+1}"`);previous=bar0;
   }
   if([...legatos,...slides].some(open=>open.size))unsupported('a hammer-on, pull-off or slide left open');
@@ -576,9 +743,10 @@ function exportMusicXmlPlain(score:model.Score,selection:ExportSelection):Uint8A
       body:element('part',writePart(track,copy,(json.tracks as Json[])[index],json,index===0,`${id}-I1`,state),` id="${id}"`),
     };
   });
-  const identification=[copy.artist?element('creator',escape(copy.artist),' type="composer"'):'',copy.words?element('creator',escape(copy.words),' type="lyricist"'):'',copy.copyright?element('rights',escape(copy.copyright)):''].join('');
+  const identification=[copy.artist?element('creator',escape(copy.artist),' type="composer"'):'',copy.words?element('creator',escape(copy.words),' type="lyricist"'):'',copy.music?element('creator',escape(copy.music),' type="arranger"'):'',copy.copyright?element('rights',escape(copy.copyright)):''].join('');
+  const credit=copy.subTitle?element('credit',element('credit-type','subtitle')+element('credit-words',escape(copy.subTitle)),' page="1"'):'';
   const xml='<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 4.0 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n'
-    +element('score-partwise',(copy.title?element('work',element('work-title',escape(copy.title))):'')+(identification?element('identification',identification):'')
+    +element('score-partwise',(copy.title?element('work',element('work-title',escape(copy.title))):'')+(identification?element('identification',identification):'')+credit
       +element('part-list',parts.map(part=>part.list).join(''))+parts.map(part=>part.body).join(''),' version="4.0"');
   return strToU8(xml);
 }

@@ -166,7 +166,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Score.subTitle',
       category: 'notation',
-      formats: ['gp'],
+      formats: ['gp', 'musicxml'],
       apply: s => { s.subTitle = 'PreservedSubTitle'; },
       verify: r => expect(r.subTitle).toBe('PreservedSubTitle'),
     },
@@ -194,7 +194,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Score.music',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { s.music = 'PreservedMusic'; },
       verify: r => expect(cleanText(r.music)).toBe('PreservedMusic'),
     },
@@ -276,14 +276,14 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'MasterBar.alternateEndings',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetMasterBar(s, 1).alternateEndings = 3; },
       verify: r => expect(targetMasterBar(r, 1).alternateEndings).toBe(3),
     },
     {
       field: 'MasterBar.tripletFeel',
       category: 'notation',
-      formats: ['gp'],
+      formats: ['gp', 'musicxml'],
       apply: s => { targetMasterBar(s).tripletFeel = model.TripletFeel.Triplet8th; },
       verify: r => expect(targetMasterBar(r).tripletFeel).toBe(model.TripletFeel.Triplet8th),
     },
@@ -304,7 +304,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'MasterBar.directions',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => {
         targetMasterBar(s, 0).addDirection(model.Direction.TargetSegno);
         targetMasterBar(s, 1).addDirection(model.Direction.JumpDalSegno);
@@ -403,7 +403,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Staff.capo',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetStaff(s).capo = 2; },
       verify: r => expect(targetStaff(r).capo).toBe(2),
     },
@@ -540,7 +540,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Beat.text',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetBeat(s).text = 'Solo'; },
       verify: r => expect(targetBeat(r).text).toBe('Solo'),
     },
@@ -648,7 +648,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Beat.crescendo',
       category: 'notation',
-      formats: ['gp'],
+      formats: ['gp', 'musicxml'],
       apply: s => { targetBeat(s).crescendo = model.CrescendoType.Crescendo; },
       verify: r => expect(targetBeat(r).crescendo).toBe(model.CrescendoType.Crescendo),
     },
@@ -744,7 +744,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Note.isGhost',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetNote(s).isGhost = true; },
       verify: r => expect(targetNote(r).isGhost).toBe(true),
     },
@@ -758,7 +758,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Note.isPalmMute',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => { targetNote(s).isPalmMute = true; },
       verify: r => expect(targetNote(r).isPalmMute).toBe(true),
     },
@@ -807,7 +807,7 @@ describe('F27 import field preservation matrix: preserved fields', () => {
     {
       field: 'Note.leftHandFinger & rightHandFinger',
       category: 'notation',
-      formats: ['gp', 'gp5'],
+      formats: ['gp', 'gp5', 'musicxml'],
       apply: s => {
         targetNote(s).leftHandFinger = model.Fingers.IndexFinger;
         targetNote(s).rightHandFinger = model.Fingers.Thumb;

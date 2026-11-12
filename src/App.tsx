@@ -61,7 +61,7 @@ import { LiveInstrumentView } from './instruments/LiveInstrumentView';
 import { followEntry, type EntryFollow } from './instruments/entry';
 import type { MusicSelection } from './editor/range-types';
 import { rangeFromBeats,resolveSelectionBeats,resolveSelectionNotes,selectionForTrack } from './editor/range-selection';
-import { beatAddress,gp8CursorTarget,gp8Key } from './editor/gp8-keys';
+import { beatAddress,gp8CursorTarget,gp8Key,planTechniqueToggle } from './editor/gp8-keys';
 import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
 import { useI18n, type LanguagePreference, type MessageKey } from './i18n';
@@ -197,6 +197,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [zoom,setZoom]=useState(documentView.zoom),[trackView,setTrackView]=useState<TrackView>(documentView.trackView);
   const [scoreDisplay,setScoreDisplay]=useState<ScoreDisplayPreferences|undefined>(documentView.scoreDisplay);
   const display=useMemo(()=>resolveScoreDisplay(scoreDisplay),[scoreDisplay]);
+  const [multiVoice,setMultiVoice]=useState(false);
   const [barDesign,setBarDesign]=useState(false),barWidthsHonoured=display.layout!=='verticalScreen'&&display.layout!=='horizontalScreen';
   const [renderedSystems,setRenderedSystems]=useState<SystemSpan[]|null>(null),systemGapsLayout=display.layout==='verticalPage'||display.layout==='horizontalPage'||display.layout==='grid';
   const [displayStatus,setDisplayStatus]=useState<{zoomPercent:number;fitLimited:boolean;pageError:string|null}|null>(null);
@@ -737,6 +738,78 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       }
       editorSelection(null);select(next);event.preventDefault();return;
     }
+    if(gp8?.kind==='voice'){
+      event.preventDefault();if(event.repeat)return;
+      const voiceIndex=gp8.voiceIndex,bar=state.score.tracks[target.track]?.staves[target.staff]?.bars[target.bar];
+      if(!bar)return;
+      if(voiceIndex<bar.voices.length){
+        const beats=bar.voices[voiceIndex].beats,nextBeat=Math.min(target.beat,Math.max(0,beats.length-1));
+        editorSelection(null);select({...target,voice:voiceIndex,beat:nextBeat});
+      }else if(!editLocked&&bar.voices.length<4&&voiceIndex===bar.voices.length){
+        editorSelection(null);
+        void edit({type:'addVoice',track:target.track,staff:target.staff},newScore=>{
+          setSelection(repairSelection(newScore,{...target,voice:voiceIndex,beat:0}));
+          setNoteIndex(null);
+        });
+      }
+      return;
+    }
+    if(gp8?.kind==='multivoice'){
+      event.preventDefault();if(event.repeat)return;
+      setMultiVoice(on=>{
+        const next=!on;
+        setInputNotice({text:t(next?'editor.multivoice_on':'editor.multivoice_off'),at:JSON.stringify(target)});
+        return next;
+      });
+      return;
+    }
+    if(gp8?.kind==='track'){
+      event.preventDefault();if(event.repeat)return;
+      const nextTrackIndex=Math.max(0,Math.min(state.score.tracks.length-1,target.track+gp8.direction));
+      if(nextTrackIndex!==target.track){
+        const newTrack=state.score.tracks[nextTrackIndex],newStaff=Math.min(target.staff,newTrack.staves.length-1);
+        const newBar=newTrack.staves[newStaff].bars[target.bar],newVoice=Math.min(target.voice,newBar.voices.length-1);
+        const newBeat=Math.min(target.beat,Math.max(0,newBar.voices[newVoice].beats.length-1));
+        editorSelection(null);select({track:nextTrackIndex,staff:newStaff,bar:target.bar,voice:newVoice,beat:newBeat},newTrack.staves[newStaff].tuning.length);
+      }
+      return;
+    }
+    if(gp8?.kind==='bar'){
+      event.preventDefault();
+      const nextBarIndex=Math.max(0,Math.min(state.score.masterBars.length-1,target.bar+gp8.direction));
+      const bar=state.score.tracks[target.track]?.staves[target.staff]?.bars[nextBarIndex];
+      const voice=bar?Math.min(target.voice,bar.voices.length-1):0;
+      const barNext:BeatTarget={...target,bar:nextBarIndex,voice,beat:0};
+      if(gp8.extend){
+        const anchor=rangeAnchor.current??target;
+        try{setMusicSelection({kind:'range',range:rangeFromBeats(state.score,anchor,barNext,[{track:target.track,staff:target.staff,voice:target.voice}])});rangeAnchor.current=anchor;}catch{ /* An empty voice has no attack endpoint. */ }
+        select(barNext);return;
+      }
+      editorSelection(null);select(barNext);return;
+    }
+    if(gp8?.kind==='playBar'){
+      event.preventDefault();event.stopPropagation();if(event.repeat)return;
+      if(player){try{player.seekToMeasure(target.bar);if(!player.getState().playing)player.play();}catch{}}
+      return;
+    }
+    if(gp8?.kind==='goToBar'){
+      event.preventDefault();event.stopPropagation();if(event.repeat)return;
+      const btn=(shell.current??document).querySelector<HTMLButtonElement>('[data-action="go-to-bar"], .transport-lcd-bar button');
+      btn?.click();
+      return;
+    }
+    if(gp8?.kind==='technique'){
+      event.preventDefault();if(event.repeat)return;
+      const at=JSON.stringify(target);
+      if(editLocked){refuse(lockedMessage,at);return;}
+      if(refusing.current||entryQueue.current.length||ownEdits.current>0||controlsBusy){
+        if(entryQueue.current.length||ownEdits.current>0)refusing.current=true;
+        setInputNotice({text:t('editor.entry_busy'),at});return;
+      }
+      const command=planTechniqueToggle(state.score,target,indexed?null:string,noteIndex,gp8.technique);
+      if(command){setInputNotice(null);void edit(command);}
+      return;
+    }
     if(event.key==='ArrowRight') {
       if(next.beat<location.voice.beats.length-1) next.beat++;
       else if(next.bar<state.score.masterBars.length-1) {next.bar++;next.beat=0;}
@@ -779,6 +852,17 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
     if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
       event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();return;
+    }
+    if(!event.defaultPrevented&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&key===' '&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
+      event.preventDefault();
+      if(player){try{player.seekToMeasure(target.bar);if(!player.getState().playing)player.play();}catch{}}
+      return;
+    }
+    if(!event.defaultPrevented&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&key==='g'&&!event.repeat){
+      event.preventDefault();
+      const btn=(shell.current??document).querySelector<HTMLButtonElement>('[data-action="go-to-bar"], .transport-lcd-bar button');
+      btn?.click();
+      return;
     }
     // Transport keys: Shift+L loops (the passage when one is selected and the loop is off), [ and ] step the speed. Brackets match the physical key when it types a bracket or a letter (German and Estonian put u-umlaut, and Estonian o-tilde, there), never a symbol such as the + that German types in the ] position, which note entry takes.
     if(!event.defaultPrevented&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat){
@@ -883,7 +967,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <h2>{t('help.keyboard_editing_heading')}</h2><p>{t('help.keyboard_editing_intro')}</p>
       <dl><dt>{t('keys.chord_new_open')}</dt><dd>{t('help.shortcut_new_open')}</dd><dt>{t('keys.chord_save')}</dt><dd>{t('help.shortcut_save')}</dd><dt>{t('keys.chord_close')}</dt><dd>{t('help.shortcut_close')}</dd><dt>{t('keys.chord_next_score')}</dt><dd>{t('help.shortcut_next_score')}</dd><dt>{t('keys.chord_undo')}</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>{t('keys.space')}</dt><dd>{t('help.shortcut_play')}</dd><dt>{t('keys.chord_palette')}</dt><dd>{t('help.shortcut_palette')}</dd></dl>
       <button type="button" onClick={openPalette}>{t('help.open_command_palette')}</button>
-      <h3>{t('help.score_focused_heading')}</h3><dl><dt>{t('keys.left_right')}</dt><dd>{t('help.shortcut_beat')}</dd><dt>{t('keys.up_down')}</dt><dd>{t('help.shortcut_string')}</dd><dt>{t('keys.digits_enter')}</dt><dd>{t('help.shortcut_fret')}</dd><dt>{t('keys.chord_selection')}</dt><dd>{t('help.shortcut_selection')}</dd><dt>{t('keys.chord_select_track')}</dt><dd>{t('help.shortcut_select_track')}</dd><dt>{t('keys.chord_tie')}</dt><dd>{t('help.shortcut_tie')}</dd><dt>{t('keys.chord_clipboard')}</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>{t('keys.escape')}</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>{t('keys.note_move')}</dt><dd>{t('help.shortcut_note_move')}</dd><dt>{t('keys.accidental')}</dt><dd>{t('help.shortcut_accidental')}</dd><dt>{t('keys.chord_gp8_edit')}</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>{t('keys.chord_gp8_cursor')}</dt><dd>{t('help.shortcut_gp8_cursor')}</dd></dl>
+      <h3>{t('help.score_focused_heading')}</h3><dl><dt>{t('keys.left_right')}</dt><dd>{t('help.shortcut_beat')}</dd><dt>{t('keys.up_down')}</dt><dd>{t('help.shortcut_string')}</dd><dt>{t('keys.digits_enter')}</dt><dd>{t('help.shortcut_fret')}</dd><dt>{t('keys.chord_selection')}</dt><dd>{t('help.shortcut_selection')}</dd><dt>{t('keys.chord_select_track')}</dt><dd>{t('help.shortcut_select_track')}</dd><dt>{t('keys.chord_tie')}</dt><dd>{t('help.shortcut_tie')}</dd><dt>{t('keys.chord_clipboard')}</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>{t('keys.escape')}</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>{t('keys.note_move')}</dt><dd>{t('help.shortcut_note_move')}</dd><dt>{t('keys.accidental')}</dt><dd>{t('help.shortcut_accidental')}</dd><dt>{t('keys.chord_gp8_edit')}</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>{t('keys.chord_gp8_cursor')}</dt><dd>{t('help.shortcut_gp8_cursor')}</dd><dt>{t('keys.chord_gp8_voice')}</dt><dd>{t('help.shortcut_gp8_voice')}</dd><dt>{t('keys.chord_gp8_multivoice')}</dt><dd>{t('help.shortcut_gp8_multivoice')}</dd><dt>{t('keys.chord_gp8_track')}</dt><dd>{t('help.shortcut_gp8_track')}</dd><dt>{t('keys.chord_gp8_bar')}</dt><dd>{t('help.shortcut_gp8_bar')}</dd><dt>{t('keys.chord_gp8_play_bar')}</dt><dd>{t('help.shortcut_gp8_play_bar')}</dd><dt>{t('keys.chord_gp8_go_to')}</dt><dd>{t('help.shortcut_gp8_go_to')}</dd><dt>{t('keys.chord_gp8_techniques')}</dt><dd>{t('help.shortcut_gp8_techniques')}</dd></dl>
       <p>{t('help.workflow_description')}</p>
     </section></details>
     </nav><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span>

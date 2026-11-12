@@ -24,8 +24,8 @@ A golpe beat used to plan exactly like a plain one. It now adds a short percussi
 - **Not heard.** The tests show the hit is audible, differs between thumb and finger and has died away after 0.6 s. They do not show it sounds like a knock on a guitar. A low wood block is clearly pitched and may read as a wood block, not a body thump. The two sounds are constants in `src/audio/golpe.ts`; a recorded knock, or any sound outside the General MIDI kit, would need an explicit marker on the plan event.
 - **Volume automation.** The hit follows the track's mix gain, mute and solo, not a volume or expression automation or fade on the track.
 - **MIDI round trip.** Exporting MIDI and importing it back gives an extra drum part holding the hits, because the importer splits a part by channel. The import is not changed.
-- **A pitched track whose own channel is 9** keeps the earlier routing: its channel takes a melodic channel on an external port, and a golpe on it shares that lane.
-- **Shared percussion channel.** On an external port the knock shares channel 10 with a real drum track. Its volume and pan there come from the guitar's mix level, and the last one written wins. Two guitars knocking the same key on the same tick, and a drum track set to a kit other than Standard, are untested.
+- **A pitched track whose own notes are on channel 9** keeps the earlier routing: its channel takes a melodic channel on an external port, and a golpe on it goes out there as a pitched note.
+- **Shared percussion channel.** On an external port the knock shares channel 10 with a real drum track. The knock sends no volume, pan or bend range there, and states the Standard kit only when no drum track is live on that channel, so it plays through the drum track's kit and level and the guitar's fader does not reach the drums. After a drum track is muted or unrouted mid-play the knock keeps that kit until the next start or seek. A knock's note-off for key 37 or 77 can cut a drum track's side stick or wood block on a device that honours note-off for percussion. Two guitars knocking the same key on the same tick, and a knock lane that comes up before the drum track, are untested.
 - No MIDI device was used.
 
 ## Fermata hold
@@ -49,6 +49,7 @@ So the hold waits for two MIDI files exported by the user from an activated Guit
 Implemented by Sonnet subagents and reviewed by a Fable subagent.
 
 - **Golpe commit.** Confirmed by reading: a golpe on a track routed to an external MIDI output was allocated a melodic channel and sent as a pitched note, with the knock itself silent. Fixed in the following commit. Confirmed by running: the MIDI round trip yields a drum part, recorded above as a limit.
+- **Routing fix commit.** Reviewed by reading only. The blocking defect was confirmed fixed, with allocation unchanged for scores without golpe and no new work on the audio thread. Found: the knock lane wrote the guitar's volume, pan and the Standard kit onto the shared percussion channel, so a guitar's fader could move the drums and a drum track listed first lost its kit on each restatement. Fixed in the following commit, with tests for a drum track on a Power kit in both track orders.
 - **Probe commit.** Found sound: the cases separate the hypotheses, the MIDI reader handled 20,000 random tracks and two 8 MB degenerate files without throwing, and nothing is written into tracked folders.
 
 ## Verification
@@ -56,7 +57,7 @@ Implemented by Sonnet subagents and reviewed by a Fable subagent.
 Worktree `.worktrees/the-60b`, 2026-11-12:
 
 - `npm run typecheck`: no errors. `npm test`: Vitest 375 files passed, 3 skipped; 6429 tests passed, 7 skipped (run before the Rust-only fix commit; no TypeScript changed after it).
-- `cargo test --locked --lib`: 896 passed, 7 ignored.
+- `cargo test --locked --lib`: 901 passed, 7 ignored.
 - `--test audio_golpe` 7, `audio_midi_out` 15, `audio_render` 38, `audio_recorded_kit` 7, `audio_drum_mix` 19, `audio_plan` 7: all passed.
 - `cargo fmt --all -- --check`: clean.
 - Not run: the full Cargo workspace beyond the above, and the desktop drivers.

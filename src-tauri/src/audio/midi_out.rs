@@ -858,6 +858,19 @@ impl MidiTap {
                 && (self.tracks[l.track].live || l.holding())
         })
     }
+    /// Whether a lane that is not a knock lane, and is playing, is on `lane`'s port channel: a drum track, whose kit and
+    /// level the channel then has.
+    fn drum_plays_on(&self, lane: usize) -> bool {
+        let this = &self.lanes[lane];
+        self.lanes.iter().enumerate().any(|(other, l)| {
+            other != lane
+                && !l.knock
+                && l.slot == this.slot
+                && l.port_gen == this.port_gen
+                && l.chan == this.chan
+                && self.tracks[l.track].live
+        })
+    }
     /// Sends the note-offs `lane` holds. False when some found no room in the staging area and wait.
     fn release_notes(&mut self, lane: usize) -> bool {
         let (slot, chan) = (self.lanes[lane].slot, self.lanes[lane].chan);
@@ -1149,6 +1162,10 @@ impl MidiTap {
         (volume, pan)
     }
     fn send_levels(&mut self, lane: usize, force: bool) {
+        // A knock lane plays through the level of the percussion channel it shares; the guitar's mix is not that level.
+        if self.lanes[lane].knock {
+            return;
+        }
         let (slot, chan) = (self.lanes[lane].slot, self.lanes[lane].chan);
         let (volume, pan) = self.levels(lane);
         if (force || self.lanes[lane].sent_volume != volume)
@@ -1307,6 +1324,24 @@ impl MidiTap {
                 if controller == 64 && value >= 64 {
                     self.lanes[lane].dirty = true;
                 }
+            }
+            // A knock lane states the Standard kit only when no drum lane that is playing owns the channel's kit, and
+            // never a pitch bend range, level or wheel: those are the drums' own, and it has none of its own to state.
+            if self.lanes[lane].knock {
+                if !self.drum_plays_on(lane) {
+                    self.stage(slot, 2, [0xc0 | chan, self.scan[lane].program, 0], false);
+                }
+                for key in 0..128usize {
+                    if self.scan[lane].held[key] == 0 {
+                        continue;
+                    }
+                    let velocity = self.scan[lane].velocity[key];
+                    if self.stage(slot, 3, [0x90 | chan, key as u8, velocity], false) {
+                        self.lanes[lane].held[key] = self.scan[lane].held[key];
+                        self.lanes[lane].dirty = true;
+                    }
+                }
+                continue;
             }
             let program = self.scan[lane].program;
             self.stage(slot, 2, [0xc0 | chan, program, 0], false);
@@ -2074,6 +2109,218 @@ mod tests {
         let released = sent(&mut tap);
         assert!(released.contains(&vec![0x89, 77, 0]), "{released:?}");
         assert_eq!(tap.held_notes(0), 0);
+    }
+
+    fn controller_on(track: &str, channel: u8, controller: u8, value: u8) -> PlanMidiEvent {
+        PlanMidiEvent::Controller {
+            track_id: track.into(),
+            tick: 0.0,
+            channel,
+            controller,
+            value,
+        }
+    }
+    /// A golpe guitar (track 0, program 25) and a drum track (track 1, the Power kit, 16) on one port, in `drums_first` order.
+    fn knock_and_kit(drums_first: bool, guitar: RouteSpec) -> Box<MidiTap> {
+        let guitar = RouteSpec {
+            knock: true,
+            ..guitar
+        };
+        let kit = RouteSpec::lanes(0, 0, &[(9, 9)]);
+        let routes = if drums_first {
+            [(1, kit), (0, guitar)]
+        } else {
+            [(0, guitar), (1, kit)]
+        };
+        MidiTap::new(&[25, 16], &routes)
+    }
+    /// The last value sent for a status and first data byte, e.g. (0xb9, 7).
+    fn last_on(messages: &[Vec<u8>], status: u8, first: u8) -> Option<Vec<u8>> {
+        messages
+            .iter()
+            .rev()
+            .find(|m| m[0] == status && m.get(1) == Some(&first))
+            .cloned()
+    }
+
+    #[test]
+    fn a_knock_lane_leaves_the_drum_tracks_kit_and_levels_on_the_shared_channel_in_either_order() {
+        let plan = [
+            controller_on("g", 0, 7, 100),
+            controller_on("g", 0, 10, 20),
+            controller_on("k", 9, 7, 80),
+            controller_on("k", 9, 10, 30),
+        ];
+        let tracks = [0u16, 0, 1, 1];
+        // What the drum track states when it is alone on the port: the levels the shared channel must end with.
+        let mut alone = MidiTap::new(&[25, 16], &[(1, RouteSpec::lanes(0, 0, &[(9, 9)]))]);
+        alone.resync(&plan, &tracks, 4);
+        let alone = sent(&mut alone);
+        let (volume, pan) = (
+            last_on(&alone, 0xb9, 7).unwrap(),
+            last_on(&alone, 0xb9, 10).unwrap(),
+        );
+        assert_eq!(volume[2], 80);
+        for drums_first in [true, false] {
+            let mut tap = knock_and_kit(drums_first, RouteSpec::lanes(0, 0, &[(0, 0), (9, 9)]));
+            tap.resync(&plan, &tracks, 4);
+            let stated = sent(&mut tap);
+            let program = last_on(
+                &stated
+                    .iter()
+                    .filter(|m| m.len() == 2)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                0xc9,
+                16,
+            );
+            assert!(program.is_some(), "drums_first={drums_first}: {stated:?}");
+            assert_eq!(
+                stated.iter().rev().find(|m| m[0] == 0xc9),
+                Some(&vec![0xc9, 16]),
+                "the drum kit is the last program on channel 10 (drums_first={drums_first})"
+            );
+            assert_eq!(
+                last_on(&stated, 0xb9, 7),
+                Some(volume.clone()),
+                "drums_first={drums_first}"
+            );
+            assert_eq!(
+                last_on(&stated, 0xb9, 10),
+                Some(pan.clone()),
+                "drums_first={drums_first}"
+            );
+            // The guitar's own channel still gets its program and levels.
+            assert!(stated.contains(&vec![0xc0, 25]) && stated.contains(&vec![0xb0, 7, 100]));
+            // A seek states everything again, with the same result.
+            tap.on_seek();
+            tap.resync(&plan, &tracks, 4);
+            let stated = sent(&mut tap);
+            assert_eq!(
+                stated.iter().rev().find(|m| m[0] == 0xc9),
+                Some(&vec![0xc9, 16])
+            );
+            assert_eq!(last_on(&stated, 0xb9, 7), Some(volume.clone()));
+            assert_eq!(last_on(&stated, 0xb9, 10), Some(pan.clone()));
+        }
+    }
+
+    #[test]
+    fn moving_the_guitars_fader_or_pan_sends_levels_only_on_its_own_channel() {
+        let mut first = knock_and_kit(false, RouteSpec::lanes(0, 0, &[(0, 0), (9, 9)]));
+        first.resync(&[], &[], 0);
+        first.event(0, &event_on(9, 77, 85));
+        sent(&mut first);
+        let mut second = knock_and_kit(
+            false,
+            RouteSpec {
+                gain: 0.25,
+                pan: -1.0,
+                ..RouteSpec::lanes(0, 0, &[(0, 0), (9, 9)])
+            },
+        );
+        second.adopt(Some(&mut first));
+        let stated = sent(&mut second);
+        assert!(
+            stated.iter().any(|m| m[0] == 0xb0 && m[1] == 7),
+            "the guitar's own volume moves: {stated:?}"
+        );
+        assert!(
+            stated
+                .iter()
+                .all(|m| !(m[0] == 0xb9 && (m[1] == 7 || m[1] == 10))),
+            "the drums' level is not the guitar's: {stated:?}"
+        );
+    }
+
+    #[test]
+    fn a_drum_track_that_is_muted_or_unrouted_mid_play_lets_go_of_its_notes_and_leaves_the_knock_sounding_and_releasable()
+     {
+        let guitar = RouteSpec {
+            knock: true,
+            ..RouteSpec::lanes(0, 0, &[(0, 0), (9, 9)])
+        };
+        let kit = RouteSpec::lanes(0, 0, &[(9, 9)]);
+        for muted in [true, false] {
+            let mut tap = MidiTap::new(&[25, 16], &[(0, guitar), (1, kit)]);
+            tap.resync(&[], &[], 0);
+            tap.event(1, &event_on(9, 36, 100));
+            tap.event(0, &event_on(9, 77, 85));
+            sent(&mut tap);
+            let mut next = if muted {
+                MidiTap::new(
+                    &[25, 16],
+                    &[
+                        (0, guitar),
+                        (
+                            1,
+                            RouteSpec {
+                                audible: false,
+                                ..kit
+                            },
+                        ),
+                    ],
+                )
+            } else {
+                MidiTap::new(&[25, 16], &[(0, guitar)])
+            };
+            next.adopt(Some(&mut tap));
+            let stated = sent(&mut next);
+            assert!(
+                stated.contains(&vec![0x89, 36, 0]),
+                "muted={muted}: the drum lets go: {stated:?}"
+            );
+            assert!(
+                !stated
+                    .iter()
+                    .any(|m| m[0] == 0xb9 && (m[1] == 123 || m[1] == 120)),
+                "muted={muted}: the channel is not silenced under the knock: {stated:?}"
+            );
+            assert_eq!((next.held_notes(0), next.held_notes(1)), (1, 0));
+            // The kit the drum had stays on the channel; the knock states nothing of its own over it.
+            next.resync(&[], &[], 0);
+            assert!(sent(&mut next).iter().all(|m| m[0] != 0xc9 || muted));
+            next.release_all();
+            let released = sent(&mut next);
+            assert!(
+                released.contains(&vec![0x89, 77, 0]),
+                "muted={muted}: {released:?}"
+            );
+            assert_eq!(next.held_notes(0), 0);
+        }
+    }
+
+    #[test]
+    fn a_golpe_guitar_alone_on_a_port_selects_the_standard_kit_once_and_strikes_unchanged() {
+        let guitar = RouteSpec {
+            knock: true,
+            ..RouteSpec::lanes(0, 0, &[(0, 0), (9, 9)])
+        };
+        let mut tap = MidiTap::new(&[25], &[(0, guitar)]);
+        tap.resync(&[], &[], 0);
+        let stated = sent(&mut tap);
+        assert_eq!(stated.iter().filter(|m| m[0] == 0xc9).count(), 1);
+        assert!(stated.contains(&vec![0xc9, 0]));
+        assert!(
+            stated
+                .iter()
+                .all(|m| !(m[0] == 0xb9 && (m[1] == 7 || m[1] == 10))),
+            "{stated:?}"
+        );
+        tap.event(0, &event_on(9, 77, 85));
+        tap.event(0, &off_on(9, 77));
+        assert_eq!(sent(&mut tap), vec![vec![0x99, 77, 85], vec![0x89, 77, 0]]);
+    }
+
+    #[test]
+    fn two_drum_tracks_on_one_port_each_state_their_kit_and_levels_as_before() {
+        let kit = RouteSpec::lanes(0, 0, &[(9, 9)]);
+        let mut tap = MidiTap::new(&[16, 8], &[(0, kit), (1, kit)]);
+        let plan = [controller_on("a", 9, 7, 80), controller_on("b", 9, 7, 60)];
+        tap.resync(&plan, &[0, 1], 2);
+        let stated = sent(&mut tap);
+        assert!(stated.contains(&vec![0xc9, 16]) && stated.contains(&vec![0xc9, 8]));
+        assert!(stated.contains(&vec![0xb9, 7, 80]) && stated.contains(&vec![0xb9, 7, 60]));
     }
 
     #[test]

@@ -6,6 +6,9 @@ export interface PlanNote { start: number; dur: number; key: number }
 export interface PlanBar { index: number; case: ProbeCase | null; t1: PlanNote[]; t2: PlanNote[] }
 export const CASES: ProbeCase[];
 export function probePlan(): PlanBar[];
+export const GUITAR_TUNING: number[];
+export const MAX_FRET: number;
+export function stringAndFret(key: number): { string: number; fret: number };
 export function fermataXml(probeCase: ProbeCase): string;
 export function buildProbeFile(bpm: number): Uint8Array;
 export function readmeText(): string;
@@ -21,7 +24,7 @@ export function parseSmf(input: Uint8Array | ArrayBuffer, maxBytes?: number): Sm
 export function tempoMap(tempos: { tick: number; usPerQuarter: number }[], ppq: number): { tick: number; usPerQuarter: number; seconds: number }[];
 export function tickToSeconds(map: ReturnType<typeof tempoMap>, ppq: number, tick: number): number;
 export interface AnalysedCase { id: string; mechanism: string; added1: { ticks: number; seconds: number }; added2: { ticks: number; seconds: number }; [key: string]: unknown }
-export interface Analysis { ppq: number; bpm: number; problems: string[]; cases: AnalysedCase[]; [key: string]: unknown }
+export interface Analysis { ppq: number; bpm: number; problems: string[]; cases: AnalysedCase[]; matchedBy: 'keys' | 'track' | null; keyNote: string | null; [key: string]: unknown }
 export function analyseSmf(smf: Smf, nominalBpm: number | null): Analysis;
 export function describeFile(name: string, result: Analysis): string[];
 export function conclude(files: { name: string; bpm: number; result: Analysis }[]): string[];

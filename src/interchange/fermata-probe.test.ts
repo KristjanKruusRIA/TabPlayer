@@ -1,6 +1,6 @@
 import { expect,it } from 'vitest';
 import { strFromU8,unzipSync } from 'fflate';
-import { analyseSmf,buildProbeFile,CASES,conclude,describeFile,parseSmf,probePlan } from '../../scripts/fermata-probe.mjs';
+import { analyseSmf,buildProbeFile,CASES,conclude,describeFile,GUITAR_TUNING,MAX_FRET,parseSmf,probePlan,stringAndFret } from '../../scripts/fermata-probe.mjs';
 
 // THE-60: the fermata probe (scripts/fermata-probe.mjs). The written files must carry the intended fermatas, and the
 // analyser must tell the possible Guitar Pro behaviours apart before any real export exists. The MIDI below is synthetic.
@@ -17,7 +17,7 @@ function track(events:Ev[]){
 const tempoBytes=(bpm:number)=>{const us=Math.round(60e6/bpm);return [255,81,3,(us>>16)&255,(us>>8)&255,us&255];};
 type Add=(c:{id:string})=>number;
 /** Builds the probe's MIDI as Guitar Pro might have written it under one hypothetical behaviour. `add` is the hold in ticks. */
-function synth(mode:Mode,bpm:number,add:Add=()=>PPQ){
+function synth(mode:Mode,bpm:number,add:Add=()=>PPQ,rekey:(key:number)=>number=key=>key){
   const plan=probePlan(),holds:{at:number;add:number}[]=[],tempo=[{tick:0,bpm}];
   for(const bar of plan)if(bar.case){
     const start=(bar.index*4+bar.case.beat)*PPQ,end=start+PPQ;
@@ -31,14 +31,14 @@ function synth(mode:Mode,bpm:number,add:Add=()=>PPQ){
     for(const bar of plan)for(const note of bar[key]){
       const on=(bar.index*4+note.start)*PPQ;let off=on+note.dur*PPQ;
       if(mode==='longer'&&key==='t1'&&bar.case&&note.start===bar.case.beat)off+=add(bar.case);
-      ev.push({tick:map(on),order:1,bytes:[0x90|channel,note.key,80]},{tick:map(off),order:0,bytes:[0x80|channel,note.key,0]});
+      ev.push({tick:map(on),order:1,bytes:[0x90|channel,rekey(note.key),80]},{tick:map(off),order:0,bytes:[0x80|channel,rekey(note.key),0]});
     }
     return track(ev);
   };
   return new Uint8Array([...chunk('MThd',[0,1,0,3,PPQ>>8,PPQ&255]),...t0,...build('t1',0),...build('t2',1)]);
 }
-const analyse=(mode:Mode,bpm:number,add?:Add)=>{
-  const smf=parseSmf(synth(mode,bpm,add));expect(smf.warnings).toEqual([]);
+const analyse=(mode:Mode,bpm:number,add?:Add,rekey?:(key:number)=>number)=>{
+  const smf=parseSmf(synth(mode,bpm,add,rekey));expect(smf.warnings).toEqual([]);
   return {name:`synthetic-${mode}-${bpm}.mid`,bpm,result:analyseSmf(smf,bpm)};
 };
 const text=(files:ReturnType<typeof analyse>[])=>conclude(files).join('\n');
@@ -133,4 +133,65 @@ it('says so when the file does not match the probe',()=>{
   const file={name:'odd.mid',bpm:120,result:analyseSmf(smf,120)};
   expect(file.result.problems.join(' ')).toContain('notes found');
   expect(conclude([file]).join('\n')).toContain('No usable file');
+});
+
+it('writes every probe note as a stringed note on a standard-tuned guitar staff, keeping the key split between the tracks',()=>{
+  // The first probe wrote bare pitched notes on a staff with no tuning and Guitar Pro 8 exported all of them at key 0.
+  expect(GUITAR_TUNING).toEqual([64,59,55,50,45,40]);
+  const plan=probePlan();
+  for(const bar of plan)for(const note of [...bar.t1,...bar.t2]){
+    const {string,fret}=stringAndFret(note.key);
+    expect(fret).toBeGreaterThanOrEqual(0);expect(fret).toBeLessThanOrEqual(MAX_FRET);
+    expect(GUITAR_TUNING[GUITAR_TUNING.length-string]+fret).toBe(note.key);
+  }
+  expect(stringAndFret(40)).toEqual({string:1,fret:0});expect(stringAndFret(72)).toEqual({string:6,fret:8});
+  expect(()=>stringAndFret(39)).toThrow();
+  expect(Math.min(...plan.flatMap(bar=>bar.t1.map(n=>n.key)))).toBeGreaterThanOrEqual(60);
+  expect(Math.max(...plan.flatMap(bar=>bar.t2.map(n=>n.key)))).toBeLessThan(60);
+  for(const bpm of [120,60]){
+    const gpif=strFromU8(unzipSync(buildProbeFile(bpm))['Content/score.gpif']);
+    expect(gpif.match(/<Property name="Tuning"><Pitches>[\d ]+<\/Pitches>/g)).toEqual(Array(2).fill('<Property name="Tuning"><Pitches>40 45 50 55 59 64</Pitches>'));
+    const notes=[...gpif.matchAll(/<Note id="\d+"><Properties>(.*?)<\/Properties>/g)].map(m=>m[1]);
+    expect(notes).toHaveLength(107+69);
+    expect(gpif).not.toContain('<Property name="Octave">');
+    // GPIF numbers strings from 0 at the lowest, and Midi is the string's open pitch plus the fret.
+    const keys=notes.map(props=>{
+      const string=Number(/<Property name="String"><String>(\d+)<\/String>/.exec(props)?.[1]),fret=Number(/<Property name="Fret"><Fret>(\d+)<\/Fret>/.exec(props)?.[1]),midi=Number(/<Property name="Midi"><Number>(\d+)<\/Number>/.exec(props)?.[1]);
+      expect(string).toBeGreaterThanOrEqual(0);expect(string).toBeLessThanOrEqual(5);
+      expect(midi).toBe(GUITAR_TUNING[GUITAR_TUNING.length-1-string]+fret);return midi;
+    });
+    expect(keys.filter(key=>key>=60)).toHaveLength(107);expect(keys.filter(key=>key<60)).toHaveLength(69);
+  }
+});
+
+it('falls back to matching by track and note count when the keys are wrong, says so, and still finds the same mechanism',()=>{
+  // Guitar Pro 8 exported every note of the first probe at key 0; this mimics that with the synthetic shift export.
+  const keyed=analyse('shift',120),flat=analyse('shift',120,undefined,()=>0);
+  expect(keyed.result.matchedBy).toBe('keys');expect(keyed.result.keyNote).toBeNull();
+  expect(flat.result.matchedBy).toBe('track');expect(flat.result.problems).toEqual([]);
+  expect(flat.result.keyNote).toContain('Matched by track and note count because the keys did not match the layout');
+  expect(flat.result.keyNote).toContain('track 1 has 107 notes (the fermata track) and track 2 has 69 (the sustain track)');
+  expect(flat.result.keyNote).toContain('Keys seen: 0 ');
+  expect(flat.result.cases.map(c=>c.mechanism)).toEqual(keyed.result.cases.map(c=>c.mechanism));
+  expect(flat.result.cases.map(c=>c.added1)).toEqual(keyed.result.cases.map(c=>c.added1));
+  expect(describeFile(flat.name,flat.result).join('\n')).toContain('Matched by track and note count');
+  const out=text([analyse('none',60,undefined,()=>0)]);
+  expect(out).toContain('Caveat 1: these notes were matched by track and note count');
+  expect(out).toContain('Caveat 2: nothing in the MIDI shows whether Guitar Pro read the fermatas');
+  expect(text([analyse('none',60)])).not.toContain('Caveat 1');
+  // Keys that are wrong but not all equal still match by track.
+  const odd=analyse('none',120,undefined,key=>key%7);
+  expect(odd.result.matchedBy).toBe('track');expect(odd.result.keyNote).toContain('Keys seen: 0, 1, 2, 3, 4, 5, 6');
+});
+
+it('still refuses when neither the keys nor the track note counts match the layout',()=>{
+  const smf=parseSmf(synth('none',120,undefined,()=>0));expect(smf.warnings).toEqual([]);
+  smf.notes.splice(smf.notes.findIndex(n=>n.track===1),1);
+  const short=analyseSmf(smf,120);
+  expect(short.problems.join(' ')).toContain('Matching by track and note count did not work either');
+  expect(short.problems.join(' ')).toContain('track 1: 106, track 2: 69');expect(short.cases).toEqual([]);
+  // Both tracks merged into one: no track has the right count.
+  const merged=parseSmf(synth('none',120,undefined,()=>0));merged.notes.forEach(n=>{n.track=1;});
+  expect(analyseSmf(merged,120).problems.join(' ')).toContain('Matching by track and note count did not work either');
+  expect(conclude([{name:'bad.mid',bpm:120,result:short}]).join('\n')).toContain('No usable file');
 });

@@ -1,6 +1,7 @@
 import { describe,expect,it } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
-import { defaultMidiImportOptions,importMidi,midiImportFileName,type MidiImportOptions } from './midi-import';
+import { defaultMidiImportOptions,formatMidiImportNote,importMidi,midiImportFileName,type MidiImportNote,type MidiImportOptions } from './midi-import';
+import { getMessage } from '../i18n';
 import { readMidiFile } from './midi-smf';
 import { exportGpInterchange,loadInterchangeScore } from './gp';
 
@@ -95,7 +96,7 @@ describe('importMidi rhythm',()=>{
     const conductor=track([[0,meter(3,4)],[1500,meter(6,8)]]);
     const {score,summary}=run(file(1,480,[conductor,track(line([[0,3840,60]]))]));
     expect(score.masterBars.map(bar=>`${bar.timeSignatureNumerator}/${bar.timeSignatureDenominator}`).slice(0,3)).toEqual(['3/4','3/4','6/8']);
-    expect(summary.notes.join(' ')).toMatch(/inside a measure moved to the next bar line/);
+    expect(summary.notes).toEqual([{code:'deferred_meters',count:1}]);
   });
   it('writes tempo changes at their position in the bar and starts at 120 when the file gives no tempo',()=>{
     const {score}=run(file(1,480,[track([[960,tempo(80)],[960,tempo(80)],[960,tempo(140)]]),track(line([[0,3840,60]]))]));
@@ -150,7 +151,7 @@ describe('importMidi voices, programs and instruments',()=>{
   it('cuts overlapping notes short with one voice and says so',()=>{
     const {score,summary}=run(file(1,480,[track(line([[0,1920,36],[480,480,72]]))]),{voices:1});
     expect(score.tracks[0].staves[0].bars[0].voices).toHaveLength(1);
-    expect(summary.notes.join(' ')).toMatch(/cut short/);
+    expect(summary.notes).toEqual([{code:'shortened_notes',count:1}]);
   });
   it('fills a later voice with an empty voice in bars where it is silent',()=>{
     const {score}=run(file(1,480,[track(line([[0,1920,36],[0,480,72],[1920,480,60]]))]),{voices:2});
@@ -175,7 +176,7 @@ describe('importMidi voices, programs and instruments',()=>{
   });
   it('imports a guitar part with a note out of range as notation only',()=>{
     const {score,summary}=run(file(1,480,[track([[0,program(25)],...line([[0,480,20],[480,480,60]])])]));
-    expect(score.tracks[0].staves[0].tuning).toEqual([]);expect(summary.notes.join(' ')).toMatch(/imported as notation only/);
+    expect(score.tracks[0].staves[0].tuning).toEqual([]);expect(summary.notes).toEqual([{code:'unplayable_tab',count:1}]);
   });
   it('imports guitar as notation when tablature is switched off',()=>{
     const {score}=run(file(1,480,[track([[0,program(25)],...line([[0,480,60]])])]),{tablature:false});
@@ -188,7 +189,7 @@ describe('importMidi voices, programs and instruments',()=>{
     expect(staff.isPercussion).toBe(true);expect(score.tracks[0].playbackInfo.primaryChannel).toBe(9);
     expect(shape(staff.bars[0].voices[0].beats)).toEqual(['8*','8*','4*','2r']);
     expect(staff.bars[0].voices[0].beats[2].notes.map(item=>item.percussionArticulation).sort()).toEqual([38,42]);
-    expect(summary.notes.join(' ')).toMatch(/1 drum note on sounds without a drum symbol was skipped/);
+    expect(summary.notes).toEqual([{code:'dropped_drum_notes',count:1}]);
   });
   it('applies a key signature from its bar on',()=>{
     const {score}=run(file(1,480,[track([[0,[0xff,0x59,2,2,0]],[3840,[0xff,0x59,2,0xfd,1]]]),track(line([[0,7680,60]]))]));
@@ -200,7 +201,7 @@ describe('importMidi voices, programs and instruments',()=>{
   });
   it('notes program changes after the start of a part',()=>{
     const {summary}=run(file(1,480,[track([[0,program(0)],[0,on(60)],[480,off(60)],[0,program(40)],[0,on(62)],[480,off(62)]])]));
-    expect(summary.notes.join(' ')).toMatch(/1 instrument change after the start of a part was not imported/);
+    expect(summary.notes).toEqual([{code:'later_instruments',count:1}]);
   });
 });
 
@@ -294,5 +295,63 @@ describe('midiImportFileName',()=>{
     expect(midiImportFileName('a/b:c.midi')).toBe('a b c.gp');
     expect(midiImportFileName('.mid')).toBe('Imported MIDI.gp');
     expect(new TextEncoder().encode(midiImportFileName(`${'é'.repeat(300)}.mid`)).length).toBeLessThanOrEqual(200);
+});
+
+describe('formatMidiImportNote',()=>{
+  const tr=(lang:'en'|'et'|'de')=>(key:any,params?:any)=>getMessage(lang,key,params);
+  it('formats unsupported meters note in en, et and de',()=>{
+    const note:MidiImportNote={code:'unsupported_meters'};
+    expect(formatMidiImportNote(note,tr('en'))).toBe('Time signatures this import cannot write were skipped.');
+    expect(formatMidiImportNote(note,tr('et'))).toBe('Taktimõõdud, mida see import ei saa kirjutada, jäeti vahele.');
+    expect(formatMidiImportNote(note,tr('de'))).toBe('Taktarten, die dieser Import nicht schreiben kann, wurden übersprungen.');
+  });
+  it('formats deferred meters note with single and plural count in en, et and de',()=>{
+    expect(formatMidiImportNote({code:'deferred_meters',count:1},tr('en'))).toBe('1 time signature change that started inside a measure moved to the next bar line.');
+    expect(formatMidiImportNote({code:'deferred_meters',count:2},tr('en'))).toBe('2 time signature changes that started inside a measure moved to the next bar line.');
+    expect(formatMidiImportNote({code:'deferred_meters',count:1},tr('et'))).toBe('1 taktimõõdu muutus, mis algas takti sees, viidi järgmisele taktijoonele.');
+    expect(formatMidiImportNote({code:'deferred_meters',count:2},tr('et'))).toBe('2 taktimõõdu muutust, mis algasid takti sees, viidi järgmisele taktijoonele.');
+    expect(formatMidiImportNote({code:'deferred_meters',count:1},tr('de'))).toBe('1 Taktartwechsel, der innerhalb eines Taktes begann, wurde auf den nächsten Taktstrich verschoben.');
+    expect(formatMidiImportNote({code:'deferred_meters',count:2},tr('de'))).toBe('2 Taktartwechsel, die innerhalb eines Taktes begannen, wurden auf den nächsten Taktstrich verschoben.');
+  });
+  it('formats later instruments note with single and plural count in en, et and de',()=>{
+    expect(formatMidiImportNote({code:'later_instruments',count:1},tr('en'))).toBe('1 instrument change after the start of a part was not imported.');
+    expect(formatMidiImportNote({code:'later_instruments',count:3},tr('en'))).toBe('3 instrument changes after the start of a part were not imported.');
+    expect(formatMidiImportNote({code:'later_instruments',count:1},tr('et'))).toBe('1 pillivahetust pärast partii algust ei imporditud.');
+    expect(formatMidiImportNote({code:'later_instruments',count:3},tr('et'))).toBe('3 pillivahetust pärast partii algust ei imporditud.');
+    expect(formatMidiImportNote({code:'later_instruments',count:1},tr('de'))).toBe('1 Instrumentenwechsel nach dem Beginn eines Parts wurde nicht importiert.');
+    expect(formatMidiImportNote({code:'later_instruments',count:3},tr('de'))).toBe('3 Instrumentenwechsel nach dem Beginn eines Parts wurden nicht importiert.');
+  });
+  it('formats unplayable tab note with single and plural count in en, et and de',()=>{
+    expect(formatMidiImportNote({code:'unplayable_tab',count:1},tr('en'))).toBe('1 guitar or bass part has notes that cannot be fingered on strings, so it was imported as notation only.');
+    expect(formatMidiImportNote({code:'unplayable_tab',count:2},tr('en'))).toBe('2 guitar or bass parts have notes that cannot be fingered on strings, so they were imported as notation only.');
+    expect(formatMidiImportNote({code:'unplayable_tab',count:1},tr('et'))).toBe('1 kitarri- või bassipartiil on noodid, mida ei saa keeltel sõrmitseda, seega imporditi see ainult noodikirjana.');
+    expect(formatMidiImportNote({code:'unplayable_tab',count:2},tr('et'))).toBe('2 kitarri- või bassipartiil on noodid, mida ei saa keeltel sõrmitseda, seega imporditi need ainult noodikirjana.');
+    expect(formatMidiImportNote({code:'unplayable_tab',count:1},tr('de'))).toBe('1 Gitarren- oder Bass-Part enthält Noten, die auf Saiten nicht gegriffen werden können, und wurde daher nur als Notation importiert.');
+    expect(formatMidiImportNote({code:'unplayable_tab',count:2},tr('de'))).toBe('2 Gitarren- oder Bass-Parts enthalten Noten, die auf Saiten nicht gegriffen werden können, und wurden daher nur als Notation importiert.');
+  });
+  it('formats dropped drum notes note with single and plural count in en, et and de',()=>{
+    expect(formatMidiImportNote({code:'dropped_drum_notes',count:1},tr('en'))).toBe('1 drum note on sounds without a drum symbol was skipped.');
+    expect(formatMidiImportNote({code:'dropped_drum_notes',count:4},tr('en'))).toBe('4 drum notes on sounds without a drum symbol were skipped.');
+    expect(formatMidiImportNote({code:'dropped_drum_notes',count:1},tr('et'))).toBe('1 trumminoot helidel ilma trummisümbolita jäeti vahele.');
+    expect(formatMidiImportNote({code:'dropped_drum_notes',count:4},tr('et'))).toBe('4 trumminooti helidel ilma trummisümbolita jäeti vahele.');
+    expect(formatMidiImportNote({code:'dropped_drum_notes',count:1},tr('de'))).toBe('1 Schlagzeugnote für Klänge ohne Schlagzeugsymbol wurde übersprungen.');
+    expect(formatMidiImportNote({code:'dropped_drum_notes',count:4},tr('de'))).toBe('4 Schlagzeugnoten für Klänge ohne Schlagzeugsymbol wurden übersprungen.');
+  });
+  it('formats shortened notes note with single and plural count in en, et and de',()=>{
+    expect(formatMidiImportNote({code:'shortened_notes',count:1},tr('en'))).toBe('1 note was cut short where more notes overlapped than the voices allow.');
+    expect(formatMidiImportNote({code:'shortened_notes',count:5},tr('en'))).toBe('5 notes were cut short where more notes overlapped than the voices allow.');
+    expect(formatMidiImportNote({code:'shortened_notes',count:1},tr('et'))).toBe('1 noot lühendati kohas, kus kattus rohkem noote kui hääled lubavad.');
+    expect(formatMidiImportNote({code:'shortened_notes',count:5},tr('et'))).toBe('5 nooti lühendati kohtades, kus kattus rohkem noote kui hääled lubavad.');
+    expect(formatMidiImportNote({code:'shortened_notes',count:1},tr('de'))).toBe('1 Note wurde gekürzt, wo sich mehr Noten überschnitten als Stimmen zulassen.');
+    expect(formatMidiImportNote({code:'shortened_notes',count:5},tr('de'))).toBe('5 Noten wurden gekürzt, wo sich mehr Noten überschnitten als Stimmen zulassen.');
+  });
+  it('formats merged notes note with single and plural count in en, et and de',()=>{
+    expect(formatMidiImportNote({code:'merged_notes',count:1},tr('en'))).toBe('1 note was given the length of the chord it starts with.');
+    expect(formatMidiImportNote({code:'merged_notes',count:3},tr('en'))).toBe('3 notes were given the length of the chord it starts with.');
+    expect(formatMidiImportNote({code:'merged_notes',count:1},tr('et'))).toBe('1 noodile anti selle akordi pikkus, millega see algab.');
+    expect(formatMidiImportNote({code:'merged_notes',count:3},tr('et'))).toBe('3 noodile anti selle akordi pikkus, millega need algavad.');
+    expect(formatMidiImportNote({code:'merged_notes',count:1},tr('de'))).toBe('1 Note erhielt die Dauer des Akkords, mit dem sie beginnt.');
+    expect(formatMidiImportNote({code:'merged_notes',count:3},tr('de'))).toBe('3 Noten erhielten die Dauer des Akkords, mit dem sie beginnen.');
+  });
   });
 });

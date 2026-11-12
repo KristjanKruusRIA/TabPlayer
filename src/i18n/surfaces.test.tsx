@@ -174,7 +174,7 @@ const fixed: Array<[string, RegExp]> = [
   ['src/batch/BatchConvertDialog.tsx', /\{kind\.label\}|<td>\{row\.status\}<\/td>|<td>\{row\.detail\}<\/td>|TRUNCATED_NOTE|summarize\(/],
   ['src/engraving/EngravingPanel.tsx', /:'Imported'|'standard'\],\[|preset\.(name|description)/],
   ['src/editor/CommandPalette.tsx', /FINALIZED_MESSAGE/],
-  ['src/workspace/MidiImportDialog.tsx', /summary_at_bpm/],
+  ['src/workspace/MidiImportDialog.tsx', /summary_at_bpm|note\[0\]\.toUpperCase/],
 ];
 
 describe('fixed English literals', () => {

@@ -2,6 +2,7 @@ use super::*;
 use crate::{
     files::write_project,
     project::{EditCommand, Project},
+    workspace::CloseDocument,
 };
 use std::{fs, path::Path, sync::Mutex};
 
@@ -346,6 +347,152 @@ fn metadata_requires_exact_successful_revision_and_saved_path_and_never_recreate
         .unwrap();
     assert_eq!(snapshot.revision, removed_revision);
     assert_eq!(snapshot.recents.len(), 1);
+}
+
+/// Closes documents the way the `workspace_close` command does.
+fn close(library: &FileLibrary, workspace: &Mutex<DocumentWorkspace>, documents: &[CloseDocument]) {
+    library.retire(workspace).unwrap();
+    workspace
+        .lock()
+        .unwrap()
+        .close_documents(documents)
+        .unwrap();
+    library.forget_closed(workspace);
+    library.resume();
+}
+
+#[test]
+fn closing_another_document_keeps_the_receipt_of_a_score_that_stays_open() {
+    let (directory, library, workspace, _) = fixture();
+    // A fresh start holds one untouched blank tab. Opening a score adds it, then closes that tab.
+    let blank = workspace.lock().unwrap().snapshot().active.document_id;
+    let path = directory.path().join("opened.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let opened = add(&library, &workspace, &path);
+    success(&library, &workspace, &opened);
+    close(
+        &library,
+        &workspace,
+        &[CloseDocument {
+            document_id: blank,
+            revision: 0,
+            discard: false,
+        }],
+    );
+    let snapshot = library
+        .metadata_ack(&opened, metadata("Opened"), &workspace)
+        .unwrap();
+    assert_eq!(snapshot.recents.len(), 1);
+    assert_eq!(
+        snapshot.recents[0].metadata.as_ref().unwrap().title,
+        "Opened"
+    );
+}
+
+#[test]
+fn a_refused_close_keeps_every_receipt() {
+    let (directory, library, workspace, _) = fixture();
+    let path = directory.path().join("edited.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let opened = add(&library, &workspace, &path);
+    let edited = workspace
+        .lock()
+        .unwrap()
+        .apply_edit(&opened, EditCommand::AppendMeasure, None)
+        .unwrap();
+    let edited = DocumentRevision {
+        document_id: edited.document_id,
+        revision: edited.revision,
+    };
+    let saved = workspace
+        .lock()
+        .unwrap()
+        .save_to_path(&edited, path)
+        .unwrap();
+    let saved = DocumentRevision {
+        document_id: saved.document_id,
+        revision: saved.revision,
+    };
+    success(&library, &workspace, &saved);
+    // An address that is out of date is refused, so the score stays open.
+    library.retire(&workspace).unwrap();
+    assert!(
+        workspace
+            .lock()
+            .unwrap()
+            .close_documents(&[CloseDocument {
+                document_id: opened.document_id.clone(),
+                revision: opened.revision,
+                discard: false,
+            }])
+            .is_err()
+    );
+    library.forget_closed(&workspace);
+    library.resume();
+    let snapshot = library
+        .metadata_ack(&saved, metadata("Still open"), &workspace)
+        .unwrap();
+    assert_eq!(
+        snapshot.recents[0].metadata.as_ref().unwrap().title,
+        "Still open"
+    );
+}
+
+#[test]
+fn closing_a_score_forgets_its_receipt_and_the_others_still_refuse_stale_metadata() {
+    let (directory, library, workspace, _) = fixture();
+    let mut scores = vec![];
+    for name in ["kept.tabplayer", "closed.tabplayer"] {
+        let path = directory.path().join(name);
+        write_project(&path, &Project::blank()).unwrap();
+        let address = add(&library, &workspace, &path);
+        success(&library, &workspace, &address);
+        scores.push(address);
+    }
+    let (kept, closed) = (scores[0].clone(), scores[1].clone());
+    close(
+        &library,
+        &workspace,
+        &[CloseDocument {
+            document_id: closed.document_id.clone(),
+            revision: closed.revision,
+            discard: false,
+        }],
+    );
+    let held: Vec<_> = library
+        .core
+        .lock()
+        .unwrap()
+        .receipts
+        .iter()
+        .map(|record| record.native.document.clone())
+        .collect();
+    assert_eq!(held, vec![kept.clone()]);
+    assert!(
+        library
+            .metadata_ack(&closed, metadata("Closed"), &workspace)
+            .is_err()
+    );
+    // The kept receipt is for one revision only: an edit after it makes the callback stale, as before.
+    let edited = workspace
+        .lock()
+        .unwrap()
+        .apply_edit(&kept, EditCommand::AppendMeasure, None)
+        .unwrap();
+    let edited = DocumentRevision {
+        document_id: edited.document_id,
+        revision: edited.revision,
+    };
+    assert!(
+        library
+            .metadata_ack(&kept, metadata("Stale"), &workspace)
+            .is_err()
+    );
+    assert!(
+        library
+            .metadata_ack(&edited, metadata("Unreceipted edit"), &workspace)
+            .is_err()
+    );
 }
 
 #[test]

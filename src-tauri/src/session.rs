@@ -961,6 +961,7 @@ pub(crate) async fn session_shutdown(
             &app.state::<NativeAudio>(),
             &app.state::<ExportJobs>(),
         );
+        library.forget_closed(&workspace);
         if result.is_err()
             && !workspace
                 .lock()

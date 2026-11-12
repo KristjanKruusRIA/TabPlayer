@@ -423,6 +423,8 @@ async fn workspace_close(
             &app.state::<runtime::NativeAudio>(),
             &app.state::<export::jobs::ExportJobs>(),
         );
+        // Whether or not the close went through, only documents that are gone lose their receipts.
+        library.forget_closed(&workspace);
         if !workspace
             .lock()
             .map_err(|error| error.to_string())?

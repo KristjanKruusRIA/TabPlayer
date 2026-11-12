@@ -52,7 +52,7 @@ export function convertScoreBytes(bytes:Uint8Array):{bytes:Uint8Array;tracks:num
   // A file is reported converted only when the result reads back with the same shape.
   const check=loadInterchangeScore(output,new Settings());
   if(check.tracks.length!==score.tracks.length||check.masterBars.length!==score.masterBars.length)throw new Error('The converted file did not read back as the same score.');
-  return {bytes:output,tracks:score.tracks.length,bars:score.masterBars.length,losses,detail:`${plural(score.tracks.length,'track')}, ${plural(score.masterBars.length,'bar')}${losses.length?`; left out of the Guitar Pro file: ${losses.slice(0,3).join('; ')}${losses.length>3?`; and ${losses.length-3} more`:''}`:''}`};
+  return {bytes:output,tracks:score.tracks.length,bars:score.masterBars.length,losses,detail:`${plural(score.tracks.length,'track')}, ${plural(score.masterBars.length,'bar')}${losses.length?`; differences in the Guitar Pro file: ${losses.slice(0,3).join('; ')}${losses.length>3?`; and ${losses.length-3} more`:''}`:''}`};
 }
 
 export function formatBatchDetail(detail:BatchDetail|string,t:(key:MessageKey,params?:Record<string,string|number>)=>string):string {

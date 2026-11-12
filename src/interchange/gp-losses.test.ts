@@ -5,7 +5,9 @@ import { strFromU8,strToU8,unzipSync,zipSync } from 'fflate';
 import { applyHarmonyEdit } from '../harmony/edits';
 import { selectScore } from '../export/selection';
 import { exportGpInterchange,loadInterchangeScore } from './gp';
-import { gpLosses } from './gp-losses';
+import { gpExportRefusal,gpLosses } from './gp-losses';
+import { projectGpDocument } from './backing-projection';
+import { defaultDocumentSettings } from '../document-settings';
 import { curveLosses } from './curves';
 
 const settings=new Settings();
@@ -55,38 +57,49 @@ const noteNodes=(doc:Document)=>byId(doc,'Notes','Note');
 const hasProperty=(note:Element|undefined,name:string)=>kids(kids(note,'Properties')[0],'Property').some(property=>property.getAttribute('name')===name);
 const propertyNamed=(note:Element|undefined,prefix:string)=>kids(kids(note,'Properties')[0],'Property').some(property=>(property.getAttribute('name')??'').startsWith(prefix));
 
+/** `bars` bars of rests; `put` then places single notes where a test wants them. */
+const bare=(bars:number)=>{
+  const score=build(bars);
+  for(const bar of score.tracks[0].staves[0].bars)for(const beat of bar.voices[0].beats)beat.notes.length=0;
+  return score;
+};
+const put=(score:model.Score,bar:number,beat:number,string:number)=>{
+  const holder=score.tracks[0].staves[0].bars[bar].voices[0].beats[beat],note=new model.Note();note.string=string;note.fret=3;holder.addNote(note);return note;
+};
+
 describe('GP 7/8 export loss list',()=>{
-  it('is exactly the curve list for a score with nothing new to report, and writes the same bytes as it did',()=>{
+  it('reports nothing for links the reader restores to the same notes, and nothing for an ordinary score',()=>{
     const score=build(6);tie(noteAt(score,0,0),noteAt(score,0,1));hammer(noteAt(score,1,3),noteAt(score,2,0));slide(noteAt(score,3,0),noteAt(score,3,1));
     expect(gpLosses(score)).toEqual(curveLosses(score));
     expect(gpLosses(score)).toEqual([]);
     expect(gpLosses(build(0))).toEqual([]);
   });
 
-  it('reports ties, hammer-ons and slides whose destination is more than three bars away, from the links the file really holds',()=>{
-    const score=build(8);
-    tie(noteAt(score,0,0),noteAt(score,4,0));tie(noteAt(score,1,1),noteAt(score,5,1));tie(noteAt(score,0,2),noteAt(score,3,2));
-    hammer(noteAt(score,2,0),noteAt(score,6,0));
-    slide(noteAt(score,0,3),noteAt(score,4,3));
+  it('reports ties, hammer-ons and slides the reader cannot restore, from the links the file really holds',()=>{
+    const score=bare(8);
+    // One string per link, so each search can only find its own notes.
+    tie(put(score,0,0,6),put(score,4,0,6));tie(put(score,1,1,5),put(score,5,1,5));tie(put(score,0,2,4),put(score,3,2,4));
+    hammer(put(score,2,0,3),put(score,6,0,3));
+    slide(put(score,0,3,2),put(score,4,3,2));
     const losses=gpLosses(score);
     expect(losses).toEqual([
-      '2 ties reach further than a Guitar Pro file can link and will not be read back as tied (first at track 1, bar 1, beat 1)',
-      '1 hammer-on or pull-off cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar 3, beat 1)',
-      '1 slide cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar 1, beat 4)',
+      '2 ties will not be linked to the same notes when this file is opened again (first at track 1, bar 1, beat 1)',
+      '1 hammer-on or pull-off will not be linked to the same notes when this file is opened again (first at track 1, bar 3, beat 1)',
+      '1 slide will not be linked to the same notes when this file is opened again (first at track 1, bar 1, beat 4)',
     ]);
-    // The bytes: alphaTab writes only flags, and the far destination sits more than three bars after its origin in the file's own lists.
+    // The bytes: alphaTab writes only flags, and the far destinations sit four bars after their origins in the file's own lists.
     const {doc}=written(exportGpInterchange(score,settings)),barOf=barOfNotes(doc),notes=noteNodes(doc);
     const withTie=(flag:'origin'|'destination')=>[...notes].filter(([,node])=>kids(node,'Tie')[0]?.getAttribute(flag)==='true').map(([id])=>barOf.get(id)!).sort((a,b)=>a-b);
     expect(withTie('origin')).toEqual([0,0,1]);expect(withTie('destination')).toEqual([3,4,5]);
     expect([...notes.values()].filter(node=>hasProperty(node,'HopoOrigin'))).toHaveLength(1);
   });
 
-  it('counts exactly four bars as inside the reach and five as outside',()=>{
-    const score=build(6);
-    tie(noteAt(score,0,0),noteAt(score,3,0));
+  it('links a tie up to three bars ahead and not four',()=>{
+    const score=bare(6);
+    tie(put(score,0,0,6),put(score,3,0,6));
     expect(gpLosses(score)).toEqual([]);
-    tie(noteAt(score,1,1),noteAt(score,5,1));
-    expect(gpLosses(score)).toEqual(['1 tie reaches further than a Guitar Pro file can link and will not be read back as tied (first at track 1, bar 2, beat 2)']);
+    tie(put(score,1,1,5),put(score,5,1,5));
+    expect(gpLosses(score)).toEqual(['1 tie will not be linked to the same notes when this file is opened again (first at track 1, bar 2, beat 2)']);
   });
 
   describe('hammer-ons and slides follow the reader search, not a bar count',()=>{
@@ -109,11 +122,11 @@ describe('GP 7/8 export loss list',()=>{
     ];
     it.each(cases)('hammer-on: %s',(_name,layout,[fromBar,fromBeat],[toBar,toBeat],lost)=>{
       const score=sparse(layout);hammer(noteAt(score,fromBar,fromBeat),noteAt(score,toBar,toBeat));
-      expect(gpLosses(score)).toEqual(lost?[`1 hammer-on or pull-off cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar ${fromBar+1}, beat ${fromBeat+1})`]:[]);
+      expect(gpLosses(score)).toEqual(lost?[`1 hammer-on or pull-off will not be linked to the same notes when this file is opened again (first at track 1, bar ${fromBar+1}, beat ${fromBeat+1})`]:[]);
     });
     it.each(cases)('slide: %s',(_name,layout,[fromBar,fromBeat],[toBar,toBeat],lost)=>{
       const score=sparse(layout);slide(noteAt(score,fromBar,fromBeat),noteAt(score,toBar,toBeat));
-      expect(gpLosses(score)).toEqual(lost?[`1 slide cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar ${fromBar+1}, beat ${fromBeat+1})`]:[]);
+      expect(gpLosses(score)).toEqual(lost?[`1 slide will not be linked to the same notes when this file is opened again (first at track 1, bar ${fromBar+1}, beat ${fromBeat+1})`]:[]);
     });
     it('treats a shift slide like a legato slide, and leaves a slide with no target alone',()=>{
       const far=sparse([[T,R,R,R],[R,T,R,R]]);slide(noteAt(far,0,0),noteAt(far,1,1));noteAt(far,0,0).slideOutType=model.SlideOutType.Shift;
@@ -151,6 +164,123 @@ describe('GP 7/8 export loss list',()=>{
     ]);
   });
 
+  it('lists the aggregated lines before the per-item curve lines, which keep their own order',()=>{
+    const score=build(2);
+    score.tracks[0].staves[0].bars[1].voices[0].beats[0].tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:2,style:model.TremoloPickingStyle.BuzzRoll});
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:2,style:model.TremoloPickingStyle.BuzzRoll});
+    slur(noteAt(score,0,1),noteAt(score,0,3));
+    expect(gpLosses(score)).toEqual([
+      '1 slur is written only for TabPlayer (first at track 1, bar 1, beat 2)',
+      'the buzz-roll tremolo picking at track 1, bar 1, beat 1 becomes ordinary tremolo picking',
+      'the buzz-roll tremolo picking at track 1, bar 2, beat 1 becomes ordinary tremolo picking',
+    ]);
+  });
+
+  describe('ties follow the reader backward search',()=>{
+    const tieLine=(bar:number,beat:number)=>`1 tie will not be linked to the same notes when this file is opened again (first at track 1, bar ${bar}, beat ${beat})`;
+    it('warns for a tie whose origin is not the nearest earlier note on its string, and the file really re-reads it onto that note',()=>{
+      const score=build(1);
+      noteAt(score,0,0).fret=3;noteAt(score,0,1).fret=7;noteAt(score,0,1).isDead=true;noteAt(score,0,2).fret=3;
+      tie(noteAt(score,0,0),noteAt(score,0,2));
+      expect(gpLosses(score)).toEqual([tieLine(1,1)]);
+      const bytes=exportGpInterchange(score,settings),reread=loadInterchangeScore(bytes,settings).tracks[0].staves[0].bars[0].voices[0].beats;
+      expect(reread[2].notes[0].tieOrigin===reread[1].notes[0]).toBe(true);expect(reread[2].notes[0].fret).toBe(7);
+      // Independent of the reader: the file lists the tie origin flag on beat 1 and the destination flag on beat 3 with a note between them.
+      const {doc}=written(bytes),flags=[...noteNodes(doc).values()].map(node=>kids(node,'Tie')[0]?.getAttribute('origin')==='true'?'o':kids(node,'Tie')[0]?.getAttribute('destination')==='true'?'d':'-');
+      expect(flags).toEqual(['o','-','d','-']);
+    });
+    it('stays quiet for a tie to the next note on the string, even with other strings in between',()=>{
+      const score=build(2);
+      tie(noteAt(score,0,3),noteAt(score,1,0));
+      expect(gpLosses(score)).toEqual([]);
+      const far=build(3);const between=noteAt(far,1,1);between.string=2;
+      tie(noteAt(far,0,0),noteAt(far,0,1));
+      expect(gpLosses(far)).toEqual([]);
+    });
+  });
+
+  it('does not match a hammer-on on a staff without strings, where the reader finds nothing',()=>{
+    const score=new model.Score(),track=new model.Track(),staff=new model.Staff();
+    staff.showTablature=false;track.addStaff(staff);score.addTrack(track);score.addMasterBar(new model.MasterBar());
+    const bar=new model.Bar(),voice=new model.Voice();bar.clef=model.Clef.G2;
+    for(const tone of [0,2]){const beat=new model.Beat();beat.duration=4;beat.isEmpty=false;const note=new model.Note();note.octave=4;note.tone=tone;beat.addNote(note);voice.addBeat(beat);}
+    bar.addVoice(voice);staff.addBar(bar);score.finish(settings);
+    const first=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0],second=score.tracks[0].staves[0].bars[0].voices[0].beats[1].notes[0];
+    expect(first.string).toBe(-1);
+    hammer(first,second);
+    expect(gpLosses(score)).toEqual(['1 hammer-on or pull-off will not be linked to the same notes when this file is opened again (first at track 1, bar 1, beat 1)']);
+  });
+
+  describe('refusals the export would throw, worked out before anything is confirmed',()=>{
+    const chord={name:'Dm',nameMode:'manual' as const,recipe:null,firstFret:1,frets:[1,3,2,0,-1,-1],fingers:[1,3,2,-2,-2,-2],barreFrets:[],showName:false,showDiagram:true,showFingering:false};
+    function carrierScore() {
+      const score=build(2),staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];score.tracks[0].addStaff(staff);
+      for(const master of score.masterBars){void master;const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;beat.duration=model.Duration.Quarter;voice.addBeat(beat);bar.addVoice(voice);staff.addBar(bar);}
+      score.finish(settings);
+      applyHarmonyEdit(score,{type:'setHarmonyChord',target:{track:0,staff:1,bar:0,voice:0,beat:0},chord,fillEmptyBeat:false},1);
+      return score;
+    }
+    const thrown=(score:model.Score)=>{try{exportGpInterchange(score,settings);return null;}catch(error){return (error as Error).message;}};
+    it('returns null for a score the export accepts',()=>{
+      expect(gpExportRefusal(build(2))).toBeNull();
+      expect(gpExportRefusal(carrierScore())).toBeNull();
+    });
+    it('returns the message for a chord carrier that is not a plain quarter, and the list does not call it a quarter rest',()=>{
+      const score=carrierScore();score.tracks[0].staves[1].bars[0].voices[0].beats[0].duration=model.Duration.Half;score.finish(settings);
+      const message=thrown(score);
+      expect(message).toBe('GP export supports an annotated empty carrier only with one existing plain quarter rhythm.');
+      expect(gpExportRefusal(score)).toBe(message);
+      expect(gpLosses(score).filter(entry=>/quarter rest/.test(entry))).toEqual([]);
+    });
+    it('returns the message for mixed common and cut choices',()=>{
+      const score=build(3);score.masterBars[0].timeSignatureCommon=true;score.masterBars[1].timeSignatureCommon=false;
+      const message=thrown(score);
+      expect(message).toBe('GP export cannot represent mixed common/cut and numeric measure choices. Export a uniform measure range or use consistent choices.');
+      expect(gpExportRefusal(score)).toBe(message);
+    });
+  });
+
+  describe('through the export dialog projection, which clones the score',()=>{
+    const T=true,R=false;
+    const sparse=(layout:boolean[][])=>{
+      const score=build(layout.length);
+      layout.forEach((beats,bar)=>beats.forEach((keep,beat)=>{if(!keep)score.tracks[0].staves[0].bars[bar].voices[0].beats[beat].notes.length=0;}));
+      return score;
+    };
+    const project=(score:model.Score,selection:{tracks:number[];range:{first:number;last:number}|null}={tracks:[0],range:null})=>projectGpDocument({score,settings:defaultDocumentSettings(),bytes:null,selection,backing:false});
+    const hammerLine=(bar:number,beat:number)=>`1 hammer-on or pull-off will not be linked to the same notes when this file is opened again (first at track 1, bar ${bar}, beat ${beat})`;
+    it('warns for a hammer-on the reader cannot reach, as it does on the score itself',()=>{
+      const score=sparse([[T,R,R,R],[R,T,R,R]]);hammer(noteAt(score,0,0),noteAt(score,1,1));
+      expect(gpLosses(score)).toEqual([hammerLine(1,1)]);
+      expect(gpLosses(project(score))).toEqual([hammerLine(1,1)]);
+      const bytes=exportGpInterchange(project(score),settings);
+      expect(strFromU8(unzipSync(bytes)[gpif])).toContain('HopoOrigin');
+      expect(loadInterchangeScore(bytes,settings).tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].isHammerPullOrigin).toBe(false);
+    });
+    it('warns for a hammer-on the reader would link to a nearer note',()=>{
+      const score=sparse([[T,T,T,R]]);hammer(noteAt(score,0,0),noteAt(score,0,2));
+      expect(gpLosses(score)).toEqual([hammerLine(1,1)]);
+      expect(gpLosses(project(score))).toEqual([hammerLine(1,1)]);
+    });
+    it('keeps a hammer-on the reader can reach clean, and still warns for ties and slides',()=>{
+      const clean=sparse([[T,R,T,R]]);hammer(noteAt(clean,0,0),noteAt(clean,0,2));
+      expect(gpLosses(project(clean))).toEqual([]);
+      const score=build(8);tie(noteAt(score,0,0),noteAt(score,4,0));slide(noteAt(score,0,3),noteAt(score,4,3));
+      expect(gpLosses(project(score))).toEqual(gpLosses(score));
+      expect(gpLosses(project(score))).toHaveLength(2);
+    });
+    it('does not throw, and restores no link, when a bar range cuts a link in half',()=>{
+      const score=build(4);
+      hammer(noteAt(score,0,3),noteAt(score,1,0));tie(noteAt(score,0,0),noteAt(score,1,1));slide(noteAt(score,1,3),noteAt(score,2,0));
+      let cut!:model.Score;
+      expect(()=>{cut=project(score,{tracks:[0],range:{first:1,last:1}});}).not.toThrow();
+      const notes=cut.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(beat=>beat.notes);
+      expect(notes.every(note=>!note.hammerPullOrigin&&!note.tieOrigin&&!note.slideTarget)).toBe(true);
+      expect(gpLosses(cut)).toEqual([]);
+      expect(()=>exportGpInterchange(cut,settings)).not.toThrow();
+    });
+  });
+
   it('gives an empty list for a large ordinary score and does not throw on odd ones',()=>{
     expect(gpLosses(build(200,4))).toEqual([]);
     expect(gpLosses(new model.Score())).toEqual([]);
@@ -163,9 +293,9 @@ describe('GP 7/8 export loss list',()=>{
     let losses:string[]=[];
     expect(()=>{losses=gpLosses(score);}).not.toThrow();
     expect(losses.map(entry=>entry.replace(/^\d+ /,''))).toEqual([
-      'tie reaches further than a Guitar Pro file can link and will not be read back as tied (first at track 1, bar 1, beat 1)',
-      'hammer-on or pull-off cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar 1, beat 1)',
-      'slide cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar 1, beat 2)',
+      'tie will not be linked to the same notes when this file is opened again (first at track 1, bar 1, beat 1)',
+      'hammer-on or pull-off will not be linked to the same notes when this file is opened again (first at track 1, bar 1, beat 1)',
+      'slide will not be linked to the same notes when this file is opened again (first at track 1, bar 1, beat 2)',
     ]);
   });
 

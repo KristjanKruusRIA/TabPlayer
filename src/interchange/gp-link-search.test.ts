@@ -99,3 +99,18 @@ it('characterizes the stock reader: an out-and-down slide has no target even bes
   const find=loaded([[OUT_DOWN,PLAIN]]),origin=find(0,0);
   expect(origin.slideOutType).toBe(model.SlideOutType.OutDown);expect(origin.slideTarget).toBeNull();expect(find(0,1).slideOrigin).toBeNull();
 });
+
+// A tie destination looks backwards for the first note on its string, whatever that note is (Note.findTieOrigin,
+// within the three bars before it, over bars that are already chained). A note in between takes the tie.
+const TIE_ORIGIN=7,DEAD=8,TIE_DESTINATION=9;
+it('characterizes the stock reader tie search: the nearest earlier note on the string wins, even a dead note',()=>{
+  const find=loaded([[TIE_ORIGIN,DEAD,TIE_DESTINATION]]),origin=find(0,0),dead=find(0,1),destination=find(0,2);
+  expect(destination.tieOrigin===dead).toBe(true);expect(dead.tieDestination===destination).toBe(true);
+  expect(origin.tieDestination).toBeNull();
+  // It also takes the dead note's fret.
+  expect(destination.fret).toBe(7);
+});
+it('characterizes the stock reader tie search: with nothing in between the origin is found',()=>{
+  const find=loaded([[TIE_ORIGIN,null,TIE_DESTINATION]]);
+  expect(find(0,2).tieOrigin===find(0,0)).toBe(true);expect(find(0,2).fret).toBe(3);
+});

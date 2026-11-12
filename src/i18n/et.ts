@@ -2378,7 +2378,7 @@ export const et: MessageCatalog = {
   'batch.detail_cancelled': 'Tühistati enne seda faili.',
   'batch.detail_saved_as': 'Salvestatud nimega {path}',
   'batch.detail_name_taken': 'kuna nimi oli juba võetud',
-  'batch.detail_losses': 'Guitar Pro failist välja jäetud: {losses}',
+  'batch.detail_losses': 'erinevused Guitar Pro failis: {losses}',
   'batch.detail_losses_more': 'ja veel {count}',
   'batch.track_count_one': '{count} rada',
   'batch.track_count_other': '{count} rada',

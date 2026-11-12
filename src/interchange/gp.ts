@@ -51,14 +51,23 @@ function orderedTracks(doc:Document){
 }
 const text=(node:Element,name:string)=>node.querySelector(`:scope > ${name}`)?.textContent??'';
 
-function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Score {
+/** The empty voices that only carry a chord diagram, checked the way the export needs them: throws the message the export would refuse with. */
+function harmonyCarriers(score:model.Score) {
   const carriers=score.tracks.flatMap((track,trackIndex)=>track.staves.flatMap((staff,staffIndex)=>staff.bars.flatMap((bar,barIndex)=>bar.voices.flatMap((voice,voiceIndex)=>voice.isEmpty&&voice.beats.some(beat=>beat.hasChord)?[{track:trackIndex,staff:staffIndex,bar:barIndex,voice:voiceIndex}]:[]))));
-  if(!carriers.length)return score;
   for(const target of carriers){
     const voice=score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice],beat=voice.beats[0];
     if(voice.beats.length!==1||!beat.isEmpty||beat.notes.length||beat.duration!==model.Duration.Quarter||beat.dots!==0||beat.tupletNumerator>0||beat.tupletDenominator>0||beat.graceType!==model.GraceType.None||beat.overrideDisplayDuration!==undefined)throw new Error('GP export supports an annotated empty carrier only with one existing plain quarter rhythm.');
     const clock=voice.bar.masterBar.calculateDuration();if(!Number.isFinite(clock)||clock<960)throw new Error('The empty chord carrier would extend the existing measure clock in GP export.');
   }
+  return carriers;
+}
+/** The message the export would throw for a chord carrier it cannot write, or null. Writes nothing. */
+export function harmonyCarrierRefusal(score:model.Score):string|null {
+  try{harmonyCarriers(score);return null;}catch(error){return error instanceof Error?error.message:String(error);}
+}
+function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Score {
+  const carriers=harmonyCarriers(score);
+  if(!carriers.length)return score;
   const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),settings);restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);
   for(const target of carriers){
     const voice=copy.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice],beat=voice.beats[0];

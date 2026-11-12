@@ -153,13 +153,13 @@ describe('formatBatchDetail',()=>{
   });
   it('formats curve losses up to 3 and beyond 3 in en, et and de',()=>{
     const losses3:BatchDetail={code:'converted',tracks:1,bars:1,savedAs:'a.gp',renamed:false,losses:['slur A','slur B']};
-    expect(formatBatchDetail(losses3,tr('en'))).toBe('1 track, 1 bar; left out of the Guitar Pro file: slur A; slur B. Saved as a.gp.');
-    expect(formatBatchDetail(losses3,tr('et'))).toBe('1 rada, 1 takt; Guitar Pro failist välja jäetud: slur A; slur B. Salvestatud nimega a.gp.');
-    expect(formatBatchDetail(losses3,tr('de'))).toBe('1 Spur, 1 Takt; aus der Guitar-Pro-Datei ausgelassen: slur A; slur B. Gespeichert als a.gp.');
+    expect(formatBatchDetail(losses3,tr('en'))).toBe('1 track, 1 bar; differences in the Guitar Pro file: slur A; slur B. Saved as a.gp.');
+    expect(formatBatchDetail(losses3,tr('et'))).toBe('1 rada, 1 takt; erinevused Guitar Pro failis: slur A; slur B. Salvestatud nimega a.gp.');
+    expect(formatBatchDetail(losses3,tr('de'))).toBe('1 Spur, 1 Takt; Unterschiede in der Guitar-Pro-Datei: slur A; slur B. Gespeichert als a.gp.');
 
     const losses5:BatchDetail={code:'converted',tracks:1,bars:1,savedAs:'a.gp',renamed:false,losses:['loss 1','loss 2','loss 3','loss 4','loss 5']};
-    expect(formatBatchDetail(losses5,tr('en'))).toBe('1 track, 1 bar; left out of the Guitar Pro file: loss 1; loss 2; loss 3; and 2 more. Saved as a.gp.');
-    expect(formatBatchDetail(losses5,tr('et'))).toBe('1 rada, 1 takt; Guitar Pro failist välja jäetud: loss 1; loss 2; loss 3; ja veel 2. Salvestatud nimega a.gp.');
-    expect(formatBatchDetail(losses5,tr('de'))).toBe('1 Spur, 1 Takt; aus der Guitar-Pro-Datei ausgelassen: loss 1; loss 2; loss 3; und 2 weitere. Gespeichert als a.gp.');
+    expect(formatBatchDetail(losses5,tr('en'))).toBe('1 track, 1 bar; differences in the Guitar Pro file: loss 1; loss 2; loss 3; and 2 more. Saved as a.gp.');
+    expect(formatBatchDetail(losses5,tr('et'))).toBe('1 rada, 1 takt; erinevused Guitar Pro failis: loss 1; loss 2; loss 3; ja veel 2. Salvestatud nimega a.gp.');
+    expect(formatBatchDetail(losses5,tr('de'))).toBe('1 Spur, 1 Takt; Unterschiede in der Guitar-Pro-Datei: loss 1; loss 2; loss 3; und 2 weitere. Gespeichert als a.gp.');
   });
 });

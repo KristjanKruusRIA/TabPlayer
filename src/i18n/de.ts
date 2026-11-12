@@ -2378,7 +2378,7 @@ export const de: MessageCatalog = {
   'batch.detail_cancelled': 'Vor dieser Datei abgebrochen.',
   'batch.detail_saved_as': 'Gespeichert als {path}',
   'batch.detail_name_taken': 'da der Name bereits vergeben war',
-  'batch.detail_losses': 'aus der Guitar-Pro-Datei ausgelassen: {losses}',
+  'batch.detail_losses': 'Unterschiede in der Guitar-Pro-Datei: {losses}',
   'batch.detail_losses_more': 'und {count} weitere',
   'batch.track_count_one': '{count} Spur',
   'batch.track_count_other': '{count} Spuren',

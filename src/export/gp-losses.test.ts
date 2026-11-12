@@ -110,12 +110,21 @@ describe('batch conversion',()=>{
   it('converts a MusicXML cross-voice slur and says what it left out',()=>{
     expect(Object.values(loadInterchangeScore(crossVoice,settings).tracks[0].staves[0].bars[0].voices).some(voice=>voice.beats.some(beat=>beat.notes.some(note=>note.slurDestination)))).toBe(true);
     const converted=convertScoreBytes(crossVoice);
-    expect(converted.detail).toMatch(/left out of the Guitar Pro file: .*slur at track 1, bar 1, beat 1/);
+    expect(converted.detail).toMatch(/differences in the Guitar Pro file: .*slur at track 1, bar 1, beat 1/);
     expect(loadInterchangeScore(converted.bytes,new Settings()).masterBars).toHaveLength(1);
   });
   it('converts a slur inside one chord and reports it',()=>{
     const converted=convertScoreBytes(sameChord);
-    expect(converted.detail).toMatch(/left out of the Guitar Pro file: .*slur/);
+    expect(converted.detail).toMatch(/differences in the Guitar Pro file: .*slur/);
+  });
+  it('characterizes a MusicXML file with a common-time symbol on its first measure only',()=>{
+    const measure=(number:number,time:string)=>`<measure number="${number}"><attributes><divisions>1</divisions>${time}<clef><sign>G</sign><line>2</line></clef></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure>`;
+    const xml=strToU8(`<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1">${measure(1,'<time symbol="common"><beats>4</beats><beat-type>4</beat-type></time>')}${measure(2,'')}${measure(3,'')}</part></score-partwise>`);
+    const score=loadInterchangeScore(xml,settings);
+    // alphaTab sets the common flag only on the measure that carries the symbol.
+    expect(score.masterBars.map(bar=>bar.timeSignatureCommon)).toEqual([true,false,false]);
+    // Batch conversion therefore refuses the file, with the mixed-choices message, and writes nothing.
+    expect(()=>convertScoreBytes(xml)).toThrow('GP export cannot represent mixed common/cut and numeric measure choices. Export a uniform measure range or use consistent choices.');
   });
   it('reports the converted row with its note, not as Failed',async()=>{
     const rows=await runBatch({bridge:{read:async()=>crossVoice,write:async()=>({relative:'a.gp',renamed:false})} as unknown as BatchBridge,scan:{files:[{index:0,relative:'a.xml'}],skipped:[],truncated:false} as never,keepFolders:false,cancelled:()=>false,onProgress:()=>undefined,probe:async()=>({ok:true}) as never});
@@ -127,7 +136,7 @@ describe('batch conversion',()=>{
   it('converts a score with buzz-roll tremolo picking and reports it on the batch row',()=>{
     const buzzXml=twoVoiceXml('<note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type><notations><ornaments><tremolo type="single" smufl="buzzRoll">2</tremolo></ornaments></notations></note>');
     const converted=convertScoreBytes(buzzXml);
-    expect(converted.detail).toMatch(/left out of the Guitar Pro file: .*buzz-roll tremolo picking at track 1, bar 1, beat 1/);
+    expect(converted.detail).toMatch(/differences in the Guitar Pro file: .*buzz-roll tremolo picking at track 1, bar 1, beat 1/);
   });
 });
 
@@ -136,7 +145,7 @@ describe('the app asks before writing',()=>{
     const bridge=bridgeFor([whammyEdit]),controller=await DocumentController.create(bridge);
     await controller.export();
     const confirm=vi.mocked(bridge.confirmExport),write=vi.mocked(bridge.exportGp);
-    expect(confirm).toHaveBeenCalledTimes(1);expect(confirm.mock.calls[0][0]?.message).toMatch(/Left out of this file: .*5-point whammy bar at track 1, bar 1, beat 1/);
+    expect(confirm).toHaveBeenCalledTimes(1);expect(confirm.mock.calls[0][0]?.message).toMatch(/Differences in this file: .*5-point whammy bar at track 1, bar 1, beat 1/);
     expect(write).toHaveBeenCalledTimes(1);expect(confirm.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
   });
   it('the document export asks the plain question, and writes nothing if declined',async()=>{
@@ -154,6 +163,21 @@ describe('the app asks before writing',()=>{
     await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:null}})).toBe(true);});
     expect(confirmExport).toHaveBeenCalledTimes(1);expect(confirmExport.mock.calls[0][0]?.message).toMatch(/5-point whammy bar/);
     expect(confirmExport.mock.invocationCallOrder[0]).toBeLessThan(exportGp.mock.invocationCallOrder[0]);
+  });
+  const mixedMessage='GP export cannot represent mixed common/cut and numeric measure choices. Export a uniform measure range or use consistent choices.';
+  it('the export dialog shows a refusal instead of asking, when the export would throw',async()=>{
+    const score=music();score.masterBars[0].timeSignatureCommon=true;score.masterBars[1].timeSignatureCommon=false;score.finish(settings);
+    const confirmExport=vi.fn(async(_detail?:{title:string;message:string})=>true),exportGp=vi.fn(async()=>true);
+    const native={exportGp5:async()=>true} as unknown as ExportNativeBridge;
+    const {result}=renderHook(()=>useExportCoordinator({revision:3,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport,readBackingAsset:vi.fn(),exportGp},native}));
+    await act(async()=>{await expect(result.current.run({format:'gp',selection:{tracks:[0],range:null}})).rejects.toThrow(mixedMessage);});
+    expect(confirmExport).not.toHaveBeenCalled();expect(exportGp).not.toHaveBeenCalled();
+  });
+  it('the document export shows a refusal instead of asking, when the export would throw',async()=>{
+    const bridge=bridgeFor([]),controller=await DocumentController.create(bridge);
+    const held=(controller as unknown as {state:{score:model.Score}}).state.score;held.masterBars[0].timeSignatureCommon=true;held.masterBars[1].timeSignatureCommon=false;
+    await expect(controller.export()).rejects.toThrow(mixedMessage);
+    expect(bridge.confirmExport).not.toHaveBeenCalled();expect(bridge.exportGp).not.toHaveBeenCalled();
   });
   it('the export dialog asks with buzz-roll loss before writing when buzz roll is present',async()=>{
     const score=music();

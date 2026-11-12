@@ -2376,7 +2376,7 @@ export const en = {
   'batch.detail_cancelled': 'Cancelled before this file.',
   'batch.detail_saved_as': 'Saved as {path}',
   'batch.detail_name_taken': 'because the name was taken',
-  'batch.detail_losses': 'left out of the Guitar Pro file: {losses}',
+  'batch.detail_losses': 'differences in the Guitar Pro file: {losses}',
   'batch.detail_losses_more': 'and {count} more',
   'batch.track_count_one': '{count} track',
   'batch.track_count_other': '{count} tracks',

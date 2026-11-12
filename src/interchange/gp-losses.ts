@@ -1,14 +1,14 @@
 import { model } from '@coderline/alphatab';
 import { planCurves,wherever } from './curves';
-import { sourceViewsRebuilt } from './gp';
+import { harmonyCarrierRefusal,sourceViewsRebuilt } from './gp';
+import { getTimeSignatureExportIntent } from '../editor/time-signature-source';
 
-/** alphaTab's GPIF reader looks at most this many bars back for the origin of a tie (`Note._maxOffsetForSameLineSearch`); gp-link-reach.test.ts pins it. */
+/** alphaTab's GPIF reader looks at most this many bars back for the origin of a tie (`Note._maxOffsetForSameLineSearch`); gp-link-reach.test.ts pins it. The destination's search itself is pinned in gp-link-search.test.ts. */
 const maxTieReach=3;
 interface Tally {count:number;first:string}
 const tally=(into:Tally|undefined,where:()=>string):Tally=>{if(into){into.count++;return into;}return {count:1,first:where()};};
 /** One line per kind: the count, the verb agreeing with it, and where the first one is. */
 const line=(item:Tally|undefined,one:string,many:string)=>item?[`${item.count} ${item.count===1?one:many} (first at ${item.first})`]:[];
-const distance=(from:model.Note,to:model.Note|null)=>to?(to.beat?.voice?.bar?.index??Infinity)-(from.beat?.voice?.bar?.index??0):0;
 
 /**
  * The beats the reader can see when it looks for the destination of a hammer-on or slide while finishing a note
@@ -21,7 +21,30 @@ function* readerBeats(note:model.Note):Generator<model.Beat> {
   for(let index=beat.index+1;index<voice.beats.length;index++)yield voice.beats[index];
   const next=bar.staff?.bars[bar.index+1]?.voices[voice.index]?.beats[0];if(next)yield next;
 }
-const onString=(beat:model.Beat,string:number)=>beat.notes.find(note=>note.string===string)??null;
+/** `Beat.getNoteOnString`: only stringed notes are indexed, and a later note on the same string replaces an earlier one. */
+const onString=(beat:model.Beat,string:number)=>{
+  let found:model.Note|null=null;
+  if(string>=0)for(const note of beat.notes)if(note.string===string)found=note;
+  return found;
+};
+/** The beats the reader sees going back from a tie destination: earlier beats of its bar, then the bars before it, at most three back (all already chained). */
+function* readerBeatsBack(note:model.Note):Generator<model.Beat> {
+  const beat=note.beat,voice=beat?.voice,bar=voice?.bar;if(!voice||!bar)return;
+  for(let index=beat.index-1;index>=0;index--)yield voice.beats[index];
+  for(let at=bar.index-1;at>=bar.index-maxTieReach;at--){
+    const earlier=bar.staff?.bars[at]?.voices[voice.index];if(!earlier||!earlier.beats.length)return;
+    for(let index=earlier.beats.length-1;index>=0;index--)yield earlier.beats[index];
+  }
+}
+/** `Note.findTieOrigin`: the first earlier note on the same string whatever it is; without strings, the note at the same index or with the same pitch. */
+function readerTieOrigin(note:model.Note):model.Note|null {
+  for(const beat of readerBeatsBack(note)){
+    if(note.string>=0){const found=onString(beat,note.string);if(found)return found;}
+    else if(note.octave===-1&&note.tone===-1){if(note.index<beat.notes.length)return beat.notes[note.index];}
+    else{let found:model.Note|null=null;for(const other of beat.notes)if(other.realValue===note.realValue)found=other;if(found)return found;}
+  }
+  return null;
+}
 /** `Note.nextNoteOnSameLine`: the first note on the same string. */
 function readerSlideTarget(note:model.Note):model.Note|null {
   for(const beat of readerBeats(note)){const found=onString(beat,note.string);if(found)return found;}
@@ -68,7 +91,7 @@ export function gpLosses(score:model.Score):string[] {
           if(note.bendStyle!==model.BendStyle.Default)styled=tally(styled,where);
         }
         if(plan.carriedSlurs.has(note))slurs=tally(slurs,where);
-        if(distance(note,note.tieDestination)>maxTieReach)ties=tally(ties,where);
+        if(note.tieDestination&&readerTieOrigin(note.tieDestination)!==note)ties=tally(ties,where);
         if(note.isHammerPullOrigin&&note.hammerPullDestination&&readerHammerDestination(note)!==note.hammerPullDestination)hammers=tally(hammers,where);
         if(note.slideTarget&&((note.slideOutType!==model.SlideOutType.Shift&&note.slideOutType!==model.SlideOutType.Legato)||readerSlideTarget(note)!==note.slideTarget))slides=tally(slides,where);
         if(note.durationPercent!==1){if(restorableLength(note.durationPercent))lengths=tally(lengths,where);else badLengths=tally(badLengths,where);}
@@ -76,11 +99,13 @@ export function gpLosses(score:model.Score):string[] {
       }
     }
   }
+  // A carrier the export refuses is not written as a rest at all: the refusal says so instead.
+  if(carriers&&harmonyCarrierRefusal(score))carriers=undefined;
+  // The aggregates come first: a dialog shows five lines and a batch report three, and a long per-item list must not push them all under "and N more".
   return [
-    ...plan.losses,
-    ...line(ties,'tie reaches further than a Guitar Pro file can link and will not be read back as tied','ties reach further than a Guitar Pro file can link and will not be read back as tied'),
-    ...line(hammers,'hammer-on or pull-off cannot be linked again from a Guitar Pro file and will not be read back as linked','hammer-ons or pull-offs cannot be linked again from a Guitar Pro file and will not be read back as linked'),
-    ...line(slides,'slide cannot be linked again from a Guitar Pro file and will not be read back as linked','slides cannot be linked again from a Guitar Pro file and will not be read back as linked'),
+    ...line(ties,'tie will not be linked to the same notes when this file is opened again','ties will not be linked to the same notes when this file is opened again'),
+    ...line(hammers,'hammer-on or pull-off will not be linked to the same notes when this file is opened again','hammer-ons or pull-offs will not be linked to the same notes when this file is opened again'),
+    ...line(slides,'slide will not be linked to the same notes when this file is opened again','slides will not be linked to the same notes when this file is opened again'),
     ...line(slurs,'slur is written only for TabPlayer','slurs are written only for TabPlayer'),
     ...line(long,'bend or whammy bar has more than four points and is written only for TabPlayer','bends or whammy bars have more than four points and are written only for TabPlayer'),
     ...line(styled,'bend or whammy bar has a style that is written only for TabPlayer','bends or whammy bars have a style that is written only for TabPlayer'),
@@ -89,5 +114,17 @@ export function gpLosses(score:model.Score):string[] {
     ...line(hidden,'hidden note is written as hidden only for TabPlayer','hidden notes are written as hidden only for TabPlayer'),
     ...line(carriers,'empty beat that only carries a chord diagram is written as a quarter rest','empty beats that only carry a chord diagram are written as quarter rests'),
     ...sourceViewsRebuilt(score)?["the source file's part, layout and score views were rebuilt because tracks were added, left out or reordered"]:[],
+    ...plan.losses,
   ];
+}
+
+/**
+ * The message the export would throw for this score, worked out without writing anything, or null. Asked before the
+ * user confirms the warning, so a refusal is shown instead of a warning confirmed for nothing. It covers the refusals
+ * that depend on the score alone: an empty chord carrier that is not one plain quarter, and common/cut time choices
+ * that cannot be written. Refusals that depend on the bytes of an imported file (its view styles) are still thrown by the export.
+ */
+export function gpExportRefusal(score:model.Score):string|null {
+  const carrier=harmonyCarrierRefusal(score);if(carrier)return carrier;
+  try{getTimeSignatureExportIntent(score);return null;}catch(error){return error instanceof Error?error.message:String(error);}
 }

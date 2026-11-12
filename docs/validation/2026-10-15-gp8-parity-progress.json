@@ -82,19 +82,19 @@
       "missing": 7,
       "unverified": 6
     },
-    "evidence_reviewed_total": 198,
+    "evidence_reviewed_total": 200,
     "evidence_reviewed": {
       "implemented": 60,
       "partial": 135,
       "missing": 0,
-      "unverified": 3
+      "unverified": 5
     },
-    "baseline_not_reaudited_total": 60,
+    "baseline_not_reaudited_total": 58,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 8,
       "missing": 7,
-      "unverified": 3
+      "unverified": 1
     },
     "status_changed_total": 151,
     "transition_counts": {
@@ -2323,6 +2323,18 @@
       "path": "docs/validation/2026-10-31-gp8-buzz-roll.md",
       "start_line": 45,
       "end_line": 48,
+      "kind": "validation_report"
+    },
+    "legacy_gp_audit": {
+      "path": "docs/validation/2026-11-08-the-63-legacy-gp.md",
+      "start_line": 1,
+      "end_line": 52,
+      "kind": "validation_report"
+    },
+    "midi_large_arrangement": {
+      "path": "docs/validation/2026-11-08-the-63-legacy-gp.md",
+      "start_line": 53,
+      "end_line": 86,
       "kind": "validation_report"
     }
   },
@@ -8341,11 +8353,13 @@
       "runtime_rechecked": false,
       "historical_status": "unverified",
       "current_status": "unverified",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "GTP not listed; alphaTab delegation and17 private files do not prove all old generations.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "unverified",
+      "current_behavior": "Small authored GP3, GP4 and GP5 binary fixtures under tests/fixtures/ verify import of multiple tracks, percussion tracks, repeats, bends, overlapping bends, slides, hammer-ons, harmonics and tuplets. Per-generation differences are audited: GP3 has beat-level harmonics (pinch collapsed to artificial) and 1 voice; GP4 adds note-level harmonics, slide types and lyrics but remains 1 voice; GP5 supports 2 voices, 19 directions, page setup and beaming.",
+      "remaining_gap": "GTP (Guitar Pro 1/2) is not implemented by alphaTab; fixtures are authored from format specifications rather than original Guitar Pro 3/4/5 binaries; no original Guitar Pro 8 runtime comparison; desktop drivers were not run.",
+      "current_evidence": [
+        "legacy_gp_audit"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -8710,11 +8724,13 @@
       "runtime_rechecked": false,
       "historical_status": "unverified",
       "current_status": "unverified",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "15 melodic-track cap and channel-wide bends are known; exact comparison to target's own limits unverified.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "unverified",
+      "current_behavior": "MIDI export tested on a large synthetic arrangement of 16 tracks (15 melodic tracks and 1 percussion track) and 1,000 bars (3,840,000 ticks at 960 PPQ). Output SMF Format 1 produces 17 tracks and 48,195 events, completing in ~1.4 s on Windows x64. The 15-melodic-track cap is enforced to match the 16 MIDI channel limit with channel 9 reserved for GM drums.",
+      "remaining_gap": "Standard MIDI format 0/1 uses channel-wide pitch wheel events so polyphonic bends on one track share pitch deflection without MPE or multi-channel allocation; target GP8 runtime track routing and bend limits remain unverified; desktop drivers were not run.",
+      "current_evidence": [
+        "midi_large_arrangement"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

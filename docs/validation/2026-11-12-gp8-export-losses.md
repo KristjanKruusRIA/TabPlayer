@@ -53,7 +53,7 @@ The tests assert on hand-authored GPIF fragments, on literal stylesheet bytes, o
 - No Guitar Pro 8 run. Every statement about reopening is about alphaTab's reader, which TabPlayer uses.
 - Synthetic and hand-authored scores only.
 - A golpe sound, a played fermata hold and a per-bar common/cut field are not implemented; the last cannot be, in this format.
-- `tests/desktop/parity-stylesheet.mjs` was updated to expect the warning and the written choice instead of the removed refusals. It was changed by reading and **not run**; no desktop driver was run.
+- **Desktop driver.** `tests/desktop/parity-stylesheet.mjs` was updated to expect the warning and the written choice instead of the removed refusals. As committed it stops at its first Open on a Library alert, `Library: Metadata requires the exact successful file operation for this document revision.` `parity-notation.mjs` stops on the same alert, and this work changed no Rust or Library code, so the alert is not from this work; its cause was not investigated. Run once on the desktop test build of merged `develop` with only that alert tolerated (a local change, not committed), the stylesheet driver passed: 24 exports checked, including the mixed, tie and inherited cases, and the 4 expected view-conflict refusals. No other desktop driver was run to completion.
 - Cargo tests were not run; no Rust changed.
 - A marked project was not taken through a real native save and reload; the controller test uses a stand-in for the native side.
 
@@ -73,3 +73,9 @@ Worktree `.worktrees/the-60`, 2026-11-12, at the last code commit:
 
 - `npm run typecheck`: no errors.
 - `npm test`: Node resource tests 0 failures; Vitest 373 files passed, 3 skipped; 6415 tests passed, 7 skipped.
+
+Main checkout, merged `develop` (270e7d6):
+
+- `npm run typecheck`: no errors.
+- `npm test`: Vitest 374 files passed, 2 skipped; 6418 tests passed, 4 skipped.
+- `scripts/build-desktop-test.ps1`: built. `node tests/desktop/parity-stylesheet.mjs`: see the desktop driver limit above.

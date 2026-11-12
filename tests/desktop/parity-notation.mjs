@@ -26,7 +26,7 @@ try {
   await page.getByRole('combobox',{name:/^Global fermata/}).selectOption('2');await change('Stored length','1.5');await button('Apply global fermata');
   await details('Bar gestures');await page.getByRole('combobox',{name:/^Clef octave/}).selectOption('1');await button('Apply clef octave');
   await page.getByLabel('Common / cut time',{exact:true}).check();await page.getByLabel('Double bar',{exact:true}).check();await button('Apply measure gestures');
-  // GP keeps common/cut time as one score-wide style, so export refuses a mix of the two (b73ae93): give the other bars the same choice.
+  // GP keeps common/cut time as one score-wide style, so a mix of the two is written as the choice most bars make and warned about: give the other bars the same choice so every bar stays common.
   for(const measure of [2,3,4]){await change('Measure',measure);await page.getByLabel('Common / cut time',{exact:true}).check();await button('Apply measure gestures');}
   await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-notation.png')});
   await change('Measure',2);await details('Bar gestures');await page.getByRole('combobox',{name:/^Simile/}).selectOption('single');await button('Apply simile');

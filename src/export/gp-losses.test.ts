@@ -194,7 +194,7 @@ describe('the app asks before writing',()=>{
     const native={exportGp5:async()=>true} as unknown as ExportNativeBridge;
     const {result}=renderHook(()=>useExportCoordinator({revision:3,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport,readBackingAsset:vi.fn(),exportGp},native}));
     await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:null}})).toBe(true);});
-    expect(confirmExport.mock.calls[0][0]?.message).toContain('1 bar that chose numbers will show the common/cut symbol');
+    expect(confirmExport.mock.calls[0][0]?.message).toContain('1 bar set to numbers will show the common/cut symbol');
     expect(exportGp).toHaveBeenCalledTimes(1);
   });
   it('the export dialog asks with buzz-roll loss before writing when buzz roll is present',async()=>{

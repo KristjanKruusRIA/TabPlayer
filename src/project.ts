@@ -10,7 +10,7 @@ export interface AssetCandidate { token:string; assetId:string; info:AssetInfo; 
 export type DocumentLock = { kind: 'finalized' };
 export const FINALIZED_MESSAGE = 'This document is finalized. Unfinalize it to make changes.';
 export interface ProjectView { format: 'TabPlayer'; schemaVersion: 3; engineVersion: '1.8.4'; base: BaseDocument; baselineEdits: EditCommand[]; edits: EditCommand[]; assets: Record<string,AssetInfo>; lock?: DocumentLock;
-  /** Present (true) once a score read from a file was edited on a build with partial capo support: the file's partial capo then applies. Absent keeps every earlier project exactly as it replayed. */
+  /** Present (true) once a score read from a file was edited on a build with partial capo support (or a MusicXML time symbol carried forward): the file's partial capo then applies, and the symbol stays carried. Absent keeps every earlier project exactly as it replayed. */
   partialCapo?: true }
 export const isFinalized = (project: { lock?: DocumentLock | null } | null | undefined): boolean => project?.lock?.kind === 'finalized';
 export type Project = ProjectView;

@@ -244,12 +244,12 @@ describe('GP 7/8 export loss list',()=>{
     const flagged=(flags:boolean[])=>{const score=build(flags.length);flags.forEach((flag,index)=>{score.masterBars[index].timeSignatureCommon=flag;});return score;};
     const why=', because the Guitar Pro file holds one choice for the whole score';
     it('counts the numeric bars when the common bars are the majority',()=>{
-      expect(gpLosses(flagged([true,true,false]))).toEqual([`1 bar that chose numbers will show the common/cut symbol${why} (first at bar 3)`]);
-      expect(gpLosses(flagged([false,true,true,false,true]))).toEqual([`2 bars that chose numbers will show the common/cut symbol${why} (first at bar 1)`]);
+      expect(gpLosses(flagged([true,true,false]))).toEqual([`1 bar set to numbers will show the common/cut symbol${why} (first at bar 3)`]);
+      expect(gpLosses(flagged([false,true,true,false,true]))).toEqual([`2 bars set to numbers will show the common/cut symbol${why} (first at bar 1)`]);
     });
     it('counts the common bars when numeric wins or ties',()=>{
-      expect(gpLosses(flagged([true,false]))).toEqual([`1 bar that chose the common/cut symbol will show numbers${why} (first at bar 1)`]);
-      expect(gpLosses(flagged([false,true,true,false]))).toEqual([`2 bars that chose the common/cut symbol will show numbers${why} (first at bar 2)`]);
+      expect(gpLosses(flagged([true,false]))).toEqual([`1 bar set to the common/cut symbol will show numbers${why} (first at bar 1)`]);
+      expect(gpLosses(flagged([false,true,true,false]))).toEqual([`2 bars set to the common/cut symbol will show numbers${why} (first at bar 2)`]);
     });
     it('says nothing for a uniform score, and the file the model exports reads back as the written choice',()=>{
       expect(gpLosses(flagged([true,true,true]))).toEqual([]);expect(gpLosses(flagged([false,false]))).toEqual([]);
@@ -264,11 +264,11 @@ describe('GP 7/8 export loss list',()=>{
       const out=unzipSync(exportGpInterchange(score,settings));
       expect(Array.from(out['Content/Stylesheets/score.gpss'])).toEqual([8,1,0x5a,4,0x2a,2,8,1]);
       setTimeSignatureIntent(score.masterBars[1],false);
-      expect(gpLosses(score)).toEqual(['1 bar that chose the common/cut symbol will show numbers, because the Guitar Pro file holds one choice for the whole score (first at bar 1)','1 bar with no common/cut choice of its own now follows the whole-score choice of numbers (first at bar 3)']);
+      expect(gpLosses(score)).toEqual(['1 bar set to the common/cut symbol will show numbers, because the Guitar Pro file holds one choice for the whole score (first at bar 1)','1 bar with no common/cut choice of its own now follows the whole-score choice of numbers (first at bar 3)']);
     });
     it('names source bars when a bar range is exported',()=>{
       const projected=projectGpDocument({score:flagged([true,false,false,true]),settings:defaultDocumentSettings(),bytes:null,selection:{tracks:[0],range:{first:1,last:3}},backing:false});
-      expect(gpLosses(projected)).toEqual([`1 bar that chose the common/cut symbol will show numbers${why} (first at bar 4)`]);
+      expect(gpLosses(projected)).toEqual([`1 bar set to the common/cut symbol will show numbers${why} (first at bar 4)`]);
     });
   });
 

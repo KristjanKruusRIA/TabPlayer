@@ -442,6 +442,7 @@ export const de: MessageCatalog = {
   'export.mp3': 'MP3 (komprimiert)',
   'export.mp3_note': 'MP3 ist komprimiert und verlustbehaftet, mit konstant 256 kbit/s, und lässt sich fast überall abspielen. Dateien sind etwa ein Sechstel so groß wie WAV, und normalisierte Spitzen können nach der Komprimierung −1 dBFS leicht überschreiten.',
   'export.ogg_note': 'OGG Vorbis ist komprimiert und verlustbehaftet, mit etwa 192 kbit/s. Dateien sind etwa ein Siebtel so groß wie WAV, und normalisierte Spitzen können nach der Komprimierung −1 dBFS leicht überschreiten.',
+  'export.engraving_note': "Notensatz-Einstellungen wirken sich auf Bildschirm und PDF aus. Guitar Pro kennt nur eine Wahl zwischen Common/Cut-Zeichen und Zahlen für die ganze Partitur: Der GP-Export behält die Formatierung der Quelle bei, und gemischte Taktwahlen werden als die Wahl der meisten Takte geschrieben und in der Warnung aufgeführt.",
 
   // Saved Tunings Dialog
   'tuning.saved_tunings_title': 'Gespeicherte Stimmungen',

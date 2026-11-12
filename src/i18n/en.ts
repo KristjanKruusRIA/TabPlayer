@@ -440,6 +440,7 @@ export const en = {
   'export.mp3': 'MP3 (compressed)',
   'export.mp3_note': 'MP3 is compressed and lossy, at a constant 256 kbit/s, and plays almost everywhere. Files are around a sixth of the WAV size, and normalized peaks can pass −1 dBFS slightly after compression.',
   'export.ogg_note': 'OGG Vorbis is compressed and lossy, at about 192 kbit/s. Files are around a seventh of the WAV size, and normalized peaks can pass −1 dBFS slightly after compression.',
+  'export.engraving_note': "Engraving settings affect the screen and PDF. Guitar Pro holds one common/cut choice for the whole score: GP export keeps the source styling, and mixed measure choices are written as the choice most bars make and listed in the warning.",
 
   // Saved Tunings Dialog
   'tuning.saved_tunings_title': 'Saved tunings',

@@ -8,7 +8,7 @@ import { planTimeSignatureExport } from '../editor/time-signature-source';
 
 // THE-60 characterisation of the GP common/cut limit. GPIF has no per-bar "common time" field; the display is one
 // global stylesheet boolean, so only one choice can be written: the one more explicit bars make (a tie goes to
-// numeric), and bars that chose otherwise or had no choice are counted by planTimeSignatureExport for the warning.
+// numeric), and bars set otherwise or with no choice of their own are counted by planTimeSignatureExport for the warning.
 // The stylesheet members below are literal bytes written out here, not produced by our writer. stylesheet.test.ts
 // and stylesheet-replay.test.ts already cover: the writer-level choices on a hand-built model, the same choices
 // reached through native project replay, view-style conflicts, and the unchanged-export preservation of members. What they do

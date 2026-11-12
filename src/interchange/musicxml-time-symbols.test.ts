@@ -1,7 +1,8 @@
-import { expect,it } from 'vitest';
+import { expect,it,vi } from 'vitest';
 import { Settings } from '@coderline/alphatab';
 import { strToU8 } from 'fflate';
 import { loadInterchangeScore } from './gp';
+import { applyMusicXmlTimeSymbols } from './musicxml-time-symbols';
 
 // In MusicXML a time signature, including its symbol, stays in force until the next <time>. alphaTab 1.8.4 sets
 // timeSignatureCommon only on the measure whose own <time> carries the symbol, so the importer is completed here.
@@ -45,4 +46,27 @@ it('leaves a file without a symbol as imported',()=>{
 it('leaves a file it cannot follow as imported',()=>{
   const entity=strToU8(new TextDecoder().decode(file([measure(1,time(4,4,'common')),measure(2),measure(3)])).replace('Part 1','Part &unknown; 1'));
   expect(()=>flags(entity)).not.toThrow();
+});
+
+// The carry starts only from a measure the importer itself flagged, and only parses a file that really holds a symbol.
+const bodyOf=(inner:string)=>strToU8(`<?xml version="1.0"?><score-partwise version="4.0">${inner}</score-partwise>`);
+const listed='<part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list>';
+it('does not start a carry from a symbol the importer did not apply (a part that is not in the part list)',()=>{
+  const xml=bodyOf(`${listed}<part id="P1">${[measure(1,time(4,4)),measure(2),measure(3)].join('')}</part><part id="P9">${[measure(1,time(4,4,'common')),measure(2),measure(3)].join('')}</part>`);
+  expect(flags(xml)).toEqual([false,false,false]);
+});
+it('carries in a file with a character reference or CDATA outside the parts, and keeps the stock import for CDATA inside a part',()=>{
+  const measures=[measure(1,time(4,4,'common')),measure(2),measure(3)].join('');
+  expect(flags(bodyOf(`${listed.replace('Piano','Caf&#xE9; &#233;')}<part id="P1">${measures}</part>`))).toEqual([true,true,true]);
+  expect(flags(bodyOf(`<movement-title><![CDATA[Slow]]></movement-title>${listed}<part id="P1">${measures}</part>`))).toEqual([true,true,true]);
+  const inside=measures.replace(note,'<note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type><lyric><text><![CDATA[la]]></text></lyric></note>');
+  expect(flags(bodyOf(`${listed}<part id="P1">${inside}</part>`))).toEqual([true,false,false]);
+});
+it('parses only a file that holds a time with a common or cut symbol, and once',()=>{
+  const parse=vi.spyOn(DOMParser.prototype,'parseFromString');
+  const count=(xml:Uint8Array)=>{parse.mockClear();const score=loadInterchangeScore(xml,settings,false);parse.mockClear();applyMusicXmlTimeSymbols(score,xml,settings);return parse.mock.calls.length;};
+  expect(count(file([measure(1,time(4,4,'single-number')),measure(2)]))).toBe(0);
+  expect(count(file([measure(1,time(4,4)),measure(2)]))).toBe(0);
+  expect(count(file([measure(1,time(4,4,'common')),measure(2),measure(3)]))).toBe(1);
+  parse.mockRestore();
 });

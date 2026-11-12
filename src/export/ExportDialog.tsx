@@ -88,7 +88,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <label>Print scale (%)<input type="number" min="25" max="300" value={print.scale*100} onChange={e=>setPrint({...print,scale:Number(e.target.value)/100})}/></label>
         <div className="export-field"><span className="export-field-label" aria-hidden="true">Staves</span><Segmented label="Staves" value={print.profile} disabled={busy||layoutLocked} options={[{value:'ScoreTab',label:'Score and tab'},{value:'Score',label:'Score'},{value:'Tab',label:'Tab'}]} onChange={profile=>setPrint({...print,profile})}/></div>
       </fieldset>)}
-      {(format==='gp'||paged)&&<p>Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.</p>}
+      {(format==='gp'||paged)&&<p>{t('export.engraving_note')}</p>}
       {splittable&&<><label className="export-check"><input type="checkbox" checked={perTrack} onChange={e=>{const checked=e.target.checked;setPerTrack(checked);if(checked&&fileName===DEFAULT_FILE_NAME)setFileName(PER_TRACK_FILE_NAME);if(!checked&&fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}/>One file per track</label>{perTrack&&<p>Each selected track is saved as its own file in the folder you choose, named from the file name with that track's %t and %n. Names that would repeat get the track number.</p>}</>}
       {(format==='svg'||format==='png')&&<label className="export-check"><input type="checkbox" checked={transparent} onChange={e=>setTransparent(e.target.checked)}/>Transparent background</label>}
       {format==='svg'&&<p>SVG writes one file per page. Notation and text are written as outlines, so the files need no fonts to view.</p>}

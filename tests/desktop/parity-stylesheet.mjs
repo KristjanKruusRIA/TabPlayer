@@ -10,8 +10,6 @@ import {assertExport,buildStylesheetFixtures,hash,viewPath} from './stylesheet-f
 // The root runner owns the shared application/CDP port and visual acceptance.
 const prefix=`style-${Date.now()}`,fixtures=buildStylesheetFixtures(prefix);
 const result={authored:true,originalGp8RuntimeAcceptance:false,fixtures:Object.fromEntries(Object.entries(fixtures).map(([name,value])=>[name,{path:value.path,sha256:value.sha256}])),screenshots:[],exports:[],failures:[]};
-const mixed='GP export cannot represent mixed common/cut and numeric measure choices. Export a uniform measure range or use consistent choices.';
-const inherited='GP export cannot resolve inherited common/cut choices for every selected measure. Set each selected 4/4 or 2/2 measure explicitly before exporting changed choices.';
 const errors=[];
 let id=null,browser=null,page=null,destination,saved,session=0;
 const snapshot=()=>readActiveDocument(page);
@@ -69,7 +67,7 @@ const dialog=()=>page.getByRole('dialog',{name:'Export score',exact:true});
 async function startDialog(){
   // The open dialog holds the workspace busy, so wait for the dialog itself, not for idle.
   await clickWorkstationButton(page,'Export score',{waitForIdle:false});await dialog().waitFor();await dialog().getByRole('combobox',{name:'Export format',exact:true}).selectOption('gp');
-  await dialog().getByText('Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.',{exact:true}).waitFor();
+  await dialog().getByText('Engraving settings affect the screen and PDF. Guitar Pro holds one common/cut choice for the whole score: GP export keeps the source styling, and mixed measure choices are written as the choice most bars make and listed in the warning.',{exact:true}).waitFor();
 }
 async function exportValid(surface,fixture,expectation,label){
   const before=await snapshot();
@@ -116,7 +114,8 @@ try{
   const stored=await saveRestart('native-replay');await flags([false,false,false]);await capture('native-replay-numeric');
   assert.deepEqual((await snapshot()).project.edits,stored.project.edits);
   await undo();await flags([false,true,false]);assert.deepEqual((await snapshot()).redoEdit,stored.project.edits[1]);
-  await exportFailure('direct',mixed,'restart-mixed');await button('Redo');await flags([false,false,false]);
+  // One bar numeric and one still common is a tie, which is written as numeric and warned about, not refused.
+  await exportValid('direct',fixtures.true,{current:false,legacy:false,changed:true},'restart-mixed');await button('Redo');await flags([false,false,false]);
   const falseDirect=await exportValid('direct',fixtures.true,{current:false,legacy:false,changed:true},'false');
   const falseDialog=await exportValid('dialog',fixtures.true,{current:false,legacy:false,changed:true},'false');
   await undo(2);await flags([true,true,false]);await exportValid('direct',fixtures.true,{current:true,legacy:false},'undo-source-styles');
@@ -132,19 +131,19 @@ try{
   await open(fixtures['legacy-only'].path,'legacy-only');await flags([true,true,false]);
   await apply(1,false);await apply(2,false);await exportValid('direct',fixtures['legacy-only'],{current:null,legacy:false,changed:true},'legacy-only-false');
 
-  // Both error surfaces must recover; the first blocks an absent output, the
-  // second must preserve an existing sentinel. Each failure gets a valid export.
+  // A mix of the two is written as one choice (a tie goes to numeric) on both surfaces, then undo restores the source styles.
   await open(fixtures.true.path,'mixed');
   for(const surface of ['direct','dialog']){
-    await apply(1,false);await exportFailure(surface,mixed,'mixed');await undo();
+    await apply(1,false);await exportValid(surface,fixtures.true,{current:false,legacy:false,changed:true},`mixed-tie-${surface}`);await undo();
     await exportValid(surface,fixtures.true,{current:true,legacy:false},`mixed-recovered-${surface}`);
   }
   await open(fixtures.inherited.path,'inherited');await flags([false,false,false]);
   await exportValid('direct',fixtures.inherited,{current:null,legacy:true},'untouched-inherited');
   await apply(1,false);await saveRestart('inherited-equal-false');await flags([false,false,false]);
-  await exportFailure('direct',inherited,'inherited-equal-false');await apply(2,false);
+  // One explicit bar next to an inherited one writes the explicit choice, which the inherited bar then follows.
+  await exportValid('direct',fixtures.inherited,{current:false,legacy:false,changed:true},'inherited-one-bar');await apply(2,false);
   await exportValid('direct',fixtures.inherited,{current:false,legacy:false,changed:true},'inherited-resolved');
-  await undo();await exportFailure('dialog',inherited,'inherited-equal-false');await button('Redo');
+  await undo();await exportValid('dialog',fixtures.inherited,{current:false,legacy:false,changed:true},'inherited-one-bar');await button('Redo');
   await exportValid('dialog',fixtures.inherited,{current:false,legacy:false,changed:true},'inherited-resolved');
   result.equalFalseIntentSurvivesNativeReplay=true;
 

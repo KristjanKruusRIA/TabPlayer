@@ -30,7 +30,7 @@ import { applyMusicXmlAlternateStaves } from './musicxml-alternate-staves';
 import { applyMusicXmlTiedBends } from './musicxml-tied-bends';
 import { applyMusicXmlLyricSyllables } from './musicxml-lyric-syllables';
 import { applyMusicXmlTempoWords } from './musicxml-tempo-words';
-import { applyMusicXmlTimeSymbols } from './musicxml-time-symbols';
+import { applyMusicXmlTimeSymbols,copyMusicXmlTimeCarry } from './musicxml-time-symbols';
 
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
@@ -80,12 +80,13 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
   return copy;
 }
 
-/** `partialCapo` false leaves a partial capo the file holds unapplied, as projects logged before the feature replay it. */
+/** `partialCapo` false leaves a partial capo the file holds unapplied, and a MusicXML time symbol uncarried, as projects logged before those features replay them. */
 export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialCapo=true):model.Score {
   // Before the stock reader, which would otherwise inflate a refused archive first.
   assertArchiveAccepted(bytes,settings.importer.maxDecodingBufferSize);
   const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlLoaderBytes(bytes,settings),settings);
-  const musicXml=()=>applyMusicXmlTimeSymbols(applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings);
+  const stockOrCarried=(value:model.Score)=>partialCapo?applyMusicXmlTimeSymbols(value,bytes,settings):value;
+  const musicXml=()=>stockOrCarried(applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings));
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();
   const entries=unzip(bytes,settings);
   // The stock GP reader takes any member named score.gpif, so such archives
@@ -232,6 +233,7 @@ export function copyGpInterchangeSource(source:model.Score,destination:model.Sco
   copyTimeSignatureSources(source,destination);
   const entries=sourceEntries.get(source);if(entries)sourceEntries.set(destination,entries);
   if(rebuiltViews.has(source))rebuiltViews.add(destination);
+  copyMusicXmlTimeCarry(source,destination);
   if(source.backingTrack?.rawAudioFile&&!destination.backingTrack?.rawAudioFile) {
     destination.backingTrack??=new model.BackingTrack();destination.backingTrack.rawAudioFile=source.backingTrack.rawAudioFile.slice();
   }

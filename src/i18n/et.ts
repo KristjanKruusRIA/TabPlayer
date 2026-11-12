@@ -442,6 +442,7 @@ export const et: MessageCatalog = {
   'export.mp3': 'MP3 (tihendatud)',
   'export.mp3_note': 'MP3 on tihendatud ja kadudega, püsiva bitikiirusega 256 kbit/s, ning mängib peaaegu kõikjal. Failid on umbes kuuendik WAV-i suurusest ja normaliseeritud tipud võivad pärast tihendamist −1 dBFS-i veidi ületada.',
   'export.ogg_note': 'OGG Vorbis on tihendatud ja kadudega, umbes 192 kbit/s. Failid on umbes seitsmendik WAV-i suurusest ja normaliseeritud tipud võivad pärast tihendamist −1 dBFS-i veidi ületada.',
+  'export.engraving_note': "Kujundusseaded mõjutavad ekraani ja PDF-i. Guitar Pro hoiab kogu partituuri jaoks ühte ühise/lõigatud taktimõõdu valikut: GP eksport säilitab lähtefaili stiili ning segatud taktivalikud kirjutatakse valikuna, mida teeb enamik takte, ja need on hoiatuses loetletud.",
 
   // Saved Tunings Dialog
   'tuning.saved_tunings_title': 'Salvestatud häälestused',

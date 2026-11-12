@@ -171,7 +171,7 @@ const fixed: Array<[string, RegExp]> = [
   ['src/workspace/MidiImportDialog.tsx', /`\${chosen\.name} could not be read\.`|plural\(imported\.summary/],
   ['src/App.tsx', /Password protection…|'Working…'|'Unsaved changes'|'Not saved'|'New score'|Save a \.tabplayer project to keep|Click a note to edit it in the inspector|Loading backing timing…|>Retry<|<dt>(Space|Escape|Left \/ Right|Up \/ Down|Digits, then Enter)<|Tie the selected notes to the notes before|The backing timing source changed|Wait for backing timing to load|Enable Score follows audio before|The active reference source changed|FINALIZED_MESSAGE|EDIT_LOCKED_MESSAGE/],
   ['src/audio/BackingWaveform.tsx', /`Measure \$\{|, position \$\{|'Backing audio changed|'The selected score beat is no longer available/],
-  ['src/batch/BatchConvertDialog.tsx', /\{kind\.label\}|<td>\{row\.status\}<\/td>|TRUNCATED_NOTE|summarize\(/],
+  ['src/batch/BatchConvertDialog.tsx', /\{kind\.label\}|<td>\{row\.status\}<\/td>|<td>\{row\.detail\}<\/td>|TRUNCATED_NOTE|summarize\(/],
   ['src/engraving/EngravingPanel.tsx', /:'Imported'|'standard'\],\[|preset\.(name|description)/],
   ['src/editor/CommandPalette.tsx', /FINALIZED_MESSAGE/],
   ['src/workspace/MidiImportDialog.tsx', /summary_at_bpm/],

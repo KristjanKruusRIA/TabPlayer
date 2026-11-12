@@ -4,7 +4,8 @@ import { describe,expect,it } from 'vitest';
 import { Settings } from '@coderline/alphatab';
 import { strToU8,zipSync } from 'fflate';
 import { loadInterchangeScore } from '../interchange/gp';
-import { convertScoreBytes,runBatch,summarize,TRUNCATED_NOTE,type BatchBridge,type BatchScan } from './convert';
+import { convertScoreBytes,formatBatchDetail,runBatch,summarize,TRUNCATED_NOTE,type BatchBridge,type BatchDetail,type BatchScan } from './convert';
+import { getMessage } from '../i18n';
 import type { Probe } from './probe';
 
 const xml=(title:string)=>strToU8(`<?xml version="1.0"?><score-partwise version="4.0"><work><work-title>${title}</work-title></work><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure></part></score-partwise>`);
@@ -60,8 +61,9 @@ describe('runBatch',()=>{
     const {bridge,scan,written}=fakeBridge(originals,{failWrite:'full.xml'});
     const rows=await run(bridge,{...scan,skipped:[{relative:'huge.gp5',reason:'Larger than 32 MiB.'}]});
     expect(rows.map(row=>[row.relative,row.status])).toEqual([['a.xml','Converted'],['bad.gp3','Failed'],['full.xml','Failed'],['huge.gp5','Skipped'],['sub/b.xml','Converted']]);
-    expect(rows.find(row=>row.relative==='full.xml')!.detail).toBe('The disk is full.');
-    expect(rows.find(row=>row.relative==='a.xml')!.detail).toBe('1 track, 1 bar. Saved as a.gp.');
+    expect(rows.find(row=>row.relative==='full.xml')!.detail).toEqual({code:'failed',message:'The disk is full.'});
+    expect(rows.find(row=>row.relative==='a.xml')!.detail).toEqual({code:'converted',tracks:1,bars:1,savedAs:'a.gp',renamed:false,losses:[]});
+    expect(rows.find(row=>row.relative==='huge.gp5')!.detail).toEqual({code:'skipped',reason:'Larger than 32 MiB.'});
     expect(Object.keys(written).sort()).toEqual(['a.gp','sub/b.gp']);
     expect(originals).toEqual(snapshot);
     expect(summarize(rows,scan)).toBe('2 converted, 2 failed, 1 skipped.');
@@ -71,6 +73,8 @@ describe('runBatch',()=>{
     let done=0;
     const rows=await runBatch({bridge,scan,keepFolders:true,cancelled:()=>done>=1,probe:pass,onProgress:count=>{done=Math.max(done,count+1);}});
     expect(rows.map(row=>[row.relative,row.status])).toEqual([['a.xml','Converted'],['b.xml','Not converted'],['c.xml','Not converted']]);
+    expect(rows[1].detail).toEqual({code:'cancelled'});
+    expect(rows[2].detail).toEqual({code:'cancelled'});
     expect(writes).toEqual(['a.gp']);
     expect(summarize(rows,scan)).toBe('1 converted, 0 failed, 2 not converted.');
   });
@@ -78,7 +82,7 @@ describe('runBatch',()=>{
     const {scan}=fakeBridge({'a.xml':xml('A')});
     const kept:boolean[]=[],bridge:BatchBridge={reset:async()=>{},pickFolder:async()=>null,scan:async()=>scan,read:async()=>xml('A'),write:async(_i,_b,keep)=>{kept.push(keep);return {relative:'x.gp',renamed:true,note:'Windows programs read this name as a device.'};}};
     const rows=await runBatch({bridge,scan:{...scan,truncated:true},keepFolders:false,cancelled:()=>false,onProgress:()=>{},probe:pass});
-    expect(kept).toEqual([false]);expect(rows[0].detail).toContain('Saved as x.gp because the name was taken.');expect(rows[0].detail).toContain('read this name as a device');
+    expect(kept).toEqual([false]);expect(rows[0].detail).toEqual({code:'converted',tracks:1,bars:1,savedAs:'x.gp',renamed:true,losses:[],note:'Windows programs read this name as a device.'});
     expect(summarize(rows,{...scan,truncated:true})).toContain(TRUNCATED_NOTE);
     expect(TRUNCATED_NOTE).toContain('Choose a subfolder');expect(TRUNCATED_NOTE).not.toContain('again');
   });
@@ -88,7 +92,7 @@ describe('runBatch',()=>{
     const probe:Probe=async bytes=>{asked.push(bytes.length);return bytes.length===xml('Hang').length&&asked.length===2?{ok:false,error:'The file did not open within 15 seconds, so it was left out. It may be damaged.'}:{ok:true,tracks:1,bars:1};};
     const rows=await run(bridge,scan,()=>false,probe);
     expect(rows.map(row=>[row.relative,row.status])).toEqual([['a.xml','Converted'],['c.xml','Converted'],['hang.gpx','Failed']]);
-    expect(rows.find(row=>row.relative==='hang.gpx')!.detail).toContain('did not open within');
+    expect(rows.find(row=>row.relative==='hang.gpx')!.detail).toEqual({code:'failed',message:expect.stringContaining('did not open within')});
     expect(Object.keys(written).sort()).toEqual(['a.gp','c.gp']);
   });
 });
@@ -105,7 +109,7 @@ describe('the window reads under the cap the probe read with',()=>{
     const {bridge,scan,writes}=fakeBridge({'crafted.gp':crafted,'good.xml':xml('Good')});
     const rows=await run(bridge,scan);
     expect(rows.map(row=>[row.relative,row.status])).toEqual([['crafted.gp','Failed'],['good.xml','Converted']]);
-    expect(rows[0].detail).toMatch(/ZIP entry exceeds/);expect(writes).toEqual(['good.gp']);
+    expect(rows[0].detail).toEqual({code:'failed',message:expect.stringMatching(/ZIP entry exceeds/)});expect(writes).toEqual(['good.gp']);
   });
 });
 
@@ -117,3 +121,45 @@ it('converts a dense score whose written score.gpif is larger than the input cap
   const {detail,bytes}=convertScoreBytes(dense);
   expect(detail).toBe(`1 track, ${measures.length} bars`);expect(bytes.length).toBeGreaterThan(0);
 },60000);
+
+describe('formatBatchDetail',()=>{
+  const tr=(lang:'en'|'et'|'de')=>(key:any,params?:any)=>getMessage(lang,key,params);
+  it('formats cancelled rows in en, et and de',()=>{
+    const detail:BatchDetail={code:'cancelled'};
+    expect(formatBatchDetail(detail,tr('en'))).toBe('Cancelled before this file.');
+    expect(formatBatchDetail(detail,tr('et'))).toBe('Tühistati enne seda faili.');
+    expect(formatBatchDetail(detail,tr('de'))).toBe('Vor dieser Datei abgebrochen.');
+  });
+  it('passes through skipped reasons and failed error messages',()=>{
+    expect(formatBatchDetail({code:'skipped',reason:'File too large.'},tr('en'))).toBe('File too large.');
+    expect(formatBatchDetail({code:'failed',message:'Out of memory.'},tr('en'))).toBe('Out of memory.');
+  });
+  it('formats converted files with track/bar counts and saved path in en, et and de',()=>{
+    const single:BatchDetail={code:'converted',tracks:1,bars:1,savedAs:'song.gp',renamed:false,losses:[]};
+    expect(formatBatchDetail(single,tr('en'))).toBe('1 track, 1 bar. Saved as song.gp.');
+    expect(formatBatchDetail(single,tr('et'))).toBe('1 rada, 1 takt. Salvestatud nimega song.gp.');
+    expect(formatBatchDetail(single,tr('de'))).toBe('1 Spur, 1 Takt. Gespeichert als song.gp.');
+
+    const multi:BatchDetail={code:'converted',tracks:4,bars:16,savedAs:'song.gp',renamed:false,losses:[]};
+    expect(formatBatchDetail(multi,tr('en'))).toBe('4 tracks, 16 bars. Saved as song.gp.');
+    expect(formatBatchDetail(multi,tr('et'))).toBe('4 rada, 16 takti. Salvestatud nimega song.gp.');
+    expect(formatBatchDetail(multi,tr('de'))).toBe('4 Spuren, 16 Takte. Gespeichert als song.gp.');
+  });
+  it('formats renamed notes and device warnings in details',()=>{
+    const renamed:BatchDetail={code:'converted',tracks:1,bars:1,savedAs:'aux.gp',renamed:true,losses:[],note:'Device name'};
+    expect(formatBatchDetail(renamed,tr('en'))).toBe('1 track, 1 bar. Saved as aux.gp because the name was taken. Device name');
+    expect(formatBatchDetail(renamed,tr('et'))).toBe('1 rada, 1 takt. Salvestatud nimega aux.gp kuna nimi oli juba võetud. Device name');
+    expect(formatBatchDetail(renamed,tr('de'))).toBe('1 Spur, 1 Takt. Gespeichert als aux.gp da der Name bereits vergeben war. Device name');
+  });
+  it('formats curve losses up to 3 and beyond 3 in en, et and de',()=>{
+    const losses3:BatchDetail={code:'converted',tracks:1,bars:1,savedAs:'a.gp',renamed:false,losses:['slur A','slur B']};
+    expect(formatBatchDetail(losses3,tr('en'))).toBe('1 track, 1 bar; left out of the Guitar Pro file: slur A; slur B. Saved as a.gp.');
+    expect(formatBatchDetail(losses3,tr('et'))).toBe('1 rada, 1 takt; Guitar Pro failist välja jäetud: slur A; slur B. Salvestatud nimega a.gp.');
+    expect(formatBatchDetail(losses3,tr('de'))).toBe('1 Spur, 1 Takt; aus der Guitar-Pro-Datei ausgelassen: slur A; slur B. Gespeichert als a.gp.');
+
+    const losses5:BatchDetail={code:'converted',tracks:1,bars:1,savedAs:'a.gp',renamed:false,losses:['loss 1','loss 2','loss 3','loss 4','loss 5']};
+    expect(formatBatchDetail(losses5,tr('en'))).toBe('1 track, 1 bar; left out of the Guitar Pro file: loss 1; loss 2; loss 3; and 2 more. Saved as a.gp.');
+    expect(formatBatchDetail(losses5,tr('et'))).toBe('1 rada, 1 takt; Guitar Pro failist välja jäetud: loss 1; loss 2; loss 3; ja veel 2. Salvestatud nimega a.gp.');
+    expect(formatBatchDetail(losses5,tr('de'))).toBe('1 Spur, 1 Takt; aus der Guitar-Pro-Datei ausgelassen: loss 1; loss 2; loss 3; und 2 weitere. Gespeichert als a.gp.');
+  });
+});

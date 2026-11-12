@@ -119,7 +119,7 @@ describe('batch conversion',()=>{
   });
   it('reports the converted row with its note, not as Failed',async()=>{
     const rows=await runBatch({bridge:{read:async()=>crossVoice,write:async()=>({relative:'a.gp',renamed:false})} as unknown as BatchBridge,scan:{files:[{index:0,relative:'a.xml'}],skipped:[],truncated:false} as never,keepFolders:false,cancelled:()=>false,onProgress:()=>undefined,probe:async()=>({ok:true}) as never});
-    expect(rows).toEqual([expect.objectContaining({status:'Converted',detail:expect.stringContaining('left out of the Guitar Pro file')})]);
+    expect(rows).toEqual([expect.objectContaining({status:'Converted',detail:expect.objectContaining({code:'converted',losses:expect.arrayContaining([expect.stringContaining('slur')])})})]);
   });
   it('adds no note when nothing is left out',()=>{
     expect(convertScoreBytes(twoVoiceXml(`<note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>`)).detail).not.toContain('left out');

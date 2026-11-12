@@ -1,5 +1,5 @@
 import { useEffect,useId,useRef,useState,type KeyboardEvent } from 'react';
-import { batchCounts,batchKinds,runBatch,type BatchBridge,type BatchKind,type BatchRow,type BatchScan,type BatchStatus } from './convert';
+import { batchCounts,batchKinds,formatBatchDetail,runBatch,type BatchBridge,type BatchKind,type BatchRow,type BatchScan,type BatchStatus } from './convert';
 import type { Probe } from './probe';
 import { nativeBatchBridge } from './bridge';
 import { useI18n,type MessageKey } from '../i18n';
@@ -74,7 +74,7 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
       </fieldset>
       <p id={status} role={problem?'alert':'status'} className={problem?'error':'muted'}>{text}</p>
       {rows&&<div className="batch-report"><table aria-label={t('batch.report_aria')}><thead><tr><th scope="col">{t('batch.col_file')}</th><th scope="col">{t('batch.col_result')}</th><th scope="col">{t('batch.col_details')}</th></tr></thead>
-        <tbody>{rows.map((row,index)=><tr key={index} data-status={row.status}><th scope="row">{row.relative}</th><td>{t(statusKeys[row.status])}</td><td>{row.detail}</td></tr>)}</tbody></table></div>}
+        <tbody>{rows.map((row,index)=><tr key={index} data-status={row.status}><th scope="row">{row.relative}</th><td>{t(statusKeys[row.status])}</td><td>{formatBatchDetail(row.detail,t)}</td></tr>)}</tbody></table></div>}
       <div className="dialog-actions">
         <button type="submit" className="primary" disabled={!ready}>{t('batch.convert_btn')}</button>
         {running?<button ref={cancelButton} type="button" onClick={stop}>{t('batch.cancel_conversion')}</button>:null}

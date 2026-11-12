@@ -1,6 +1,7 @@
 import type { model } from '@coderline/alphatab';
 import { admitDocumentBase } from './interchange/archive-gate';
-import { curveLosses } from './interchange/curves';
+import { gpExportRefusal,gpLosses } from './interchange/gp-losses';
+import { scoreHasMusicXmlTimeCarry } from './interchange/musicxml-time-symbols';
 import { gpWarning } from './export/gp-warning';
 import { buildDocument, effectiveAudioSettings,exportGp, forgetPreview, previewEdit, replayDocumentSettings, type BuiltDocument } from './engine';
 import { appliesFilePartialCapo, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
@@ -90,7 +91,7 @@ export class DocumentController {
   }
   private needsPartialCapoMark() {
     const project=this.state.snapshot.project;
-    return !!this.bridge.markPartialCapo&&project.base.kind==='file'&&!this.state.snapshot.canRedo&&appliesFilePartialCapo(project)&&project.partialCapo!==true&&(scoreUsesTempoUnits(this.state.score)||this.state.score.tracks.some(track=>track.staves.some(staff=>getPartialCapo(staff))));
+    return !!this.bridge.markPartialCapo&&project.base.kind==='file'&&!this.state.snapshot.canRedo&&appliesFilePartialCapo(project)&&project.partialCapo!==true&&(scoreHasMusicXmlTimeCarry(this.state.score)||scoreUsesTempoUnits(this.state.score)||this.state.score.tracks.some(track=>track.staves.some(staff=>getPartialCapo(staff))));
   }
   private async editNow(command:EditCommand,asset?:AssetCandidate) {
     let candidate:ReturnType<typeof previewEdit>;let record:DocumentSnapshot;
@@ -189,7 +190,8 @@ export class DocumentController {
   save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
   export() { return this.run(async()=>{
     // What the file cannot keep is worked out first, so the user is asked once, with it, and not after confirming.
-    const losses=curveLosses(this.state.score);
+    const refusal=gpExportRefusal(this.state.score);if(refusal)throw new Error(refusal);
+    const losses=gpLosses(this.state.score);
     if(!await (losses.length?this.bridge.confirmExport(gpWarning(losses)):this.bridge.confirmExport()))return;
     const current=this.state,settings=effectiveAudioSettings(current.snapshot.project,current),backing=settings.backing;
     const bytes=backing&&backing.assetId!=='embedded'?await this.bridge.readBackingAsset(backing.assetId,current.revision):current.embeddedBacking;

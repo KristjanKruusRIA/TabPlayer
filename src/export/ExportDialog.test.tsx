@@ -14,9 +14,9 @@ function fixture(){const score=new model.Score();for(let i=0;i<3;i++)score.addMa
 const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
 const radio=(group:string,name:string)=>within(screen.getByRole('radiogroup',{name:group})).getByRole('radio',{name});
 
-it('explains supported uniform common/cut interchange beside GP export options',()=>{
+it('explains the one whole-score common/cut choice beside GP export options',()=>{
   render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={()=>{}} onCancel={()=>{}}/>);
-  expect(screen.getByText('Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.')).toBeVisible();
+  expect(screen.getByText('Engraving settings affect the screen and PDF. Guitar Pro holds one common/cut choice for the whole score: GP export keeps the source styling, and mixed measure choices are written as the choice most bars make and listed in the warning.')).toBeVisible();
 });
 
 it('includes GP backing by default without exposing audio format settings',()=>{

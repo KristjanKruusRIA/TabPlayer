@@ -1,0 +1,10 @@
+<!-- Hand-authored GPIF MasterBar fragment (not copied from any score). One Long fermata on the first
+     master bar. Length 1.75 is deliberately not a round value so a changed or rounded value is visible;
+     its unit is not established by this fixture. Offset 1/2 is half a bar-position ratio as the format writes it. -->
+<GPIF>
+  <MasterBars>
+    <MasterBar><Time>4/4</Time><Bars>0</Bars><Fermatas>
+      <Fermata><Type>Long</Type><Length>1.75</Length><Offset>1/2</Offset></Fermata>
+    </Fermatas></MasterBar>
+  </MasterBars>
+</GPIF>

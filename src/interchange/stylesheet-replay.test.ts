@@ -27,8 +27,6 @@ afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const settings=new Settings(),current='Content/Stylesheets/score.gpss',legacy='Content/BinaryStylesheet';
 const yes=Uint8Array.of(0x5a,4,0x2a,2,8,1),no=Uint8Array.of(0x5a,4,0x2a,2,8,0),absent=Uint8Array.of(8,1);
 const legacyFlag=(value:boolean)=>Uint8Array.of(0,0,0,1,24,...strToU8('Staff/drawTimeSignatureC'),0,Number(value));
-const mixed='GP export cannot represent mixed common/cut and numeric measure choices.';
-const inherited='GP export cannot resolve inherited common/cut choices for every selected measure.';
 function authored(flag:Uint8Array=yes,view?:Uint8Array):Uint8Array {
   const score=music();score.masterBars[1].timeSignatureNumerator=2;score.masterBars[1].timeSignatureDenominator=2;
   for(const index of [2,3]){score.masterBars[index].timeSignatureNumerator=3;score.tracks[0].staves[0].bars[index].voices[0].beats.pop();}
@@ -62,17 +60,18 @@ it('source-free uniform true writes the legacy key without inventing current GPS
   expect(out[current]).toBeUndefined();expect(readLegacyStylesheetSymbol(out[legacy])).toBe(true);expect(standardMidi(score)).toEqual(before);
   expect(flags(loadInterchangeScore(zipSync(out),settings))).toEqual([true,true,true,true]);
 });
-it('native replay reconstructs explicit equal-false intent and rejects unresolved neighbors',()=>{
-  const input=authored(absent),before=input.slice(),one=project(input,[gestures(0,false)]);expect(()=>exportGp(buildScore(one))).toThrow(inherited);
+it('native replay reconstructs explicit equal-false intent, and an unresolved neighbor follows it',()=>{
+  const input=authored(absent),before=input.slice(),one=project(input,[gestures(0,false)]);
+  expect(readGpStylesheetSymbol(unzipSync(exportGp(buildScore(one)))[current])).toBe(false);
   const complete={...one,edits:[...one.edits,gestures(1,false)]},reopened=buildScore(JSON.parse(JSON.stringify(complete)));
   const output=unzipSync(exportGp(reopened));expect(readGpStylesheetSymbol(output[current])).toBe(false);expect(readLegacyStylesheetSymbol(output[legacy])).toBe(false);
   expect(input).toEqual(before);expect(complete.edits).toEqual([gestures(0,false),gestures(1,false)]);
 });
-it('mixed authoring rejects, Undo restores exact styles and Redo rejects after native rebuild',()=>{
+it('mixed authoring writes the tie as numeric, Undo restores exact styles and Redo writes it again after native rebuild',()=>{
   const input=authored(),original=unzipSync(input),edited=project(input,[gestures(0,false)]);
-  expect(()=>exportGp(buildScore(edited))).toThrow(mixed);
+  expect(readGpStylesheetSymbol(bytes(buildScore(edited))[current])).toBe(false);
   const undone=bytes(buildScore({...edited,edits:[]}));expect(undone[current]).toEqual(original[current]);expect(undone[legacy]).toEqual(original[legacy]);
-  expect(()=>exportGp(buildScore(JSON.parse(JSON.stringify(edited))))).toThrow(mixed);
+  expect(readGpStylesheetSymbol(bytes(buildScore(JSON.parse(JSON.stringify(edited))))[current])).toBe(false);
 });
 it('invalid gestures and measure settings leave explicit intent untouched',()=>{
   const score=loadInterchangeScore(authored(absent),settings),before=model.JsonConverter.scoreToJson(score);
@@ -82,19 +81,19 @@ it('invalid gestures and measure settings leave explicit intent untouched',()=>{
 });
 it('successful measure settings explicitly clear inherited common time',()=>{
   const input=authored(absent),edit:EditCommand={type:'setMeasureSettings',bar:0,numerator:4,denominator:4,pickup:false,freeTime:false,repeatStart:false,repeatCount:0,endings:[],section:'',tempos:[]};
-  expect(()=>exportGp(buildScore(project(input,[edit])))).toThrow(inherited);
+  expect(readGpStylesheetSymbol(bytes(buildScore(project(input,[edit])))[current])).toBe(false);
 });
 it('aligned clone and uniform excerpt keep intent attached before filtering masters',()=>{
   const score=buildScore(project(authored(),[gestures(0,false)])),copy=model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(score),settings);copyGpInterchangeSource(score,copy);
-  expect(()=>exportGp(copy)).toThrow(mixed);
+  expect(readGpStylesheetSymbol(bytes(copy)[current])).toBe(false);
   const numeric=bytes(selectScore(copy,{tracks:[0],range:{first:0,last:0}})),symbol=bytes(selectScore(copy,{tracks:[0],range:{first:1,last:1}}));
-  expect(readGpStylesheetSymbol(numeric[current])).toBe(false);expect(readGpStylesheetSymbol(symbol[current])).toBe(true);expect(()=>exportGp(score)).toThrow(mixed);
+  expect(readGpStylesheetSymbol(numeric[current])).toBe(false);expect(readGpStylesheetSymbol(symbol[current])).toBe(true);expect(readGpStylesheetSymbol(bytes(score)[current])).toBe(false);
 });
 it('marker-only clones retain source absence without archive provenance',()=>{
   const score=music();initializeTimeSignatureSource(score,null);
   const copy=model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(score),settings);copyGpInterchangeSource(score,copy);
   expect(getTimeSignatureExportIntent(copy)).toEqual({changed:false,value:null});
-  applyBarGestureEdit(copy,gestures(0,false) as never);expect(()=>exportGp(copy)).toThrow(inherited);expect(getTimeSignatureExportIntent(score)).toEqual({changed:false,value:null});
+  applyBarGestureEdit(copy,gestures(0,false) as never);expect(readLegacyStylesheetSymbol(bytes(copy)[legacy])).toBe(false);expect(getTimeSignatureExportIntent(score)).toEqual({changed:false,value:null});
 });
 
 it('style-only projection retains tied links, chord data and detached backing bytes',()=>{
@@ -111,11 +110,11 @@ it('style-only projection retains tied links, chord data and detached backing by
 });
 it('insertion copies inherited context, deletion removes intent and legacy append stays numeric',()=>{
   const input=authored(absent),inserted=buildScore(project(input,[{type:'insertMeasures',beforeBar:1,count:1},gestures(0,false),gestures(2,false)]));
-  expect(()=>exportGp(inserted)).toThrow(inherited);
+  expect(readGpStylesheetSymbol(bytes(inserted)[current])).toBe(false);
   const complete=buildScore(project(input,[{type:'insertMeasures',beforeBar:1,count:1},gestures(0,false),gestures(1,false),gestures(2,false)]));expect(readGpStylesheetSymbol(bytes(complete)[current])).toBe(false);
   const removed=buildScore(project(authored(),[gestures(0,false),{type:'removeMeasures',firstBar:0,lastBar:0}]));expect(readGpStylesheetSymbol(bytes(removed)[current])).toBe(true);
   const all=music();for(const master of all.masterBars)master.timeSignatureCommon=true;const allInput=new exporter.Gp7Exporter().export(all,settings),entries=unzipSync(allInput);entries[current]=yes;entries[legacy]=legacyFlag(true);
-  const appended=buildScore(project(zipSync(entries),[{type:'appendMeasure'}]));expect(flags(appended)).toEqual([true,true,true,true,false]);expect(()=>exportGp(appended)).toThrow(mixed);
+  const appended=buildScore(project(zipSync(entries),[{type:'appendMeasure'}]));expect(flags(appended)).toEqual([true,true,true,true,false]);expect(readGpStylesheetSymbol(bytes(appended)[current])).toBe(true);
 });
 it('changed view conflicts fail visibly while untouched and equal view bytes are preserved',()=>{
   const input=authored(yes,no),unchanged=loadInterchangeScore(input,settings);expect(bytes(unchanged)['Content/Stylesheets/scoreview1.gpss']).toEqual(no);
@@ -133,7 +132,7 @@ it('clipboard master replacement is explicit while a phrase retains destination 
   const source=loadInterchangeScore(authored(absent),settings),target={track:0,staff:0,bar:0,voice:0,beat:0},filters={diagrams:true,texts:true,timers:true,trackAutomations:true,masterAutomations:true,sections:true};
   const bars=makeMusicClip(source,{kind:'bars',tracks:[0],firstBar:0,lastBar:0},'multiTrack');
   const inserted=preparePasteMusic(source,{type:'pasteMusic',clip:bars,options:{target,destinations:[{sourceTrack:0,track:0,staffMap:[0]}],count:1,placement:'beforeBar',filters}}).score;
-  expect(()=>exportGp(inserted)).toThrow(inherited);
+  expect(readGpStylesheetSymbol(bytes(inserted)[current])).toBe(false);
   const clip=makeMusicClip(source,{kind:'notes',notes:[{target,noteIndex:0}]},'singleTrack');
   const destination=loadInterchangeScore(authored(absent),settings);for(const beat of destination.tracks[0].staves[0].bars[0].voices[0].beats)beat.notes=[];
   const pasted=preparePasteMusic(destination,{type:'pasteMusic',clip,options:{target,destinations:[{sourceTrack:0,track:0,staffMap:[0]}],count:1,placement:'currentBar',filters:{...filters,masterAutomations:false,sections:false}}}).score;
@@ -151,7 +150,7 @@ it('XML-adapter export preserves raw lyrics, source siblings, MIDI and clocks wi
   const doc=new DOMParser().parseFromString(new TextDecoder().decode(out['Content/score.gpif']),'application/xml');expect(doc.querySelector('Tracks > Track > Lyrics > Line > Text')?.textContent).toBe(raw);
 });
 
-const invalidCases=[['mixed',()=>project(authored(),[gestures(0,false)]),mixed],['inherited',()=>project(authored(absent),[gestures(0,false)]),inherited],['view',()=>project(authored(yes,yes),[gestures(0,false),gestures(1,false)]),'scoreview1.gpss']] as const;
+const invalidCases=[['view',()=>project(authored(yes,yes),[gestures(0,false),gestures(1,false)]),'scoreview1.gpss']] as const;
 it.each(invalidCases)('direct controller %s export clears busy/error and never calls the writer on failure',async(_name,make,message)=>{
   const exportGp=vi.fn(async()=>true),bridge={documentId:'stylesheet-test',snapshot:async()=>({documentId:'stylesheet-test',revision:0,snapshot:{project:make(),path:null,dirty:false,canUndo:true,canRedo:false}}),confirmExport:async()=>true,exportGp} as unknown as NativeBridge;
   const controller=await DocumentController.create(bridge),initial=controller.getState().snapshot;

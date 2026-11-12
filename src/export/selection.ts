@@ -1,7 +1,7 @@
 import { model,Settings } from '@coderline/alphatab';
 import { validateSelection,type ExportSelection } from './types';
 import { scoreFromJson } from '../model-clone';
-import { copyGpInterchangeSource } from '../interchange/gp';
+import { copyGpInterchangeSource,forgetTrackOrderedEntries } from '../interchange/gp';
 import { isGpMixAutomation,trackMixAutomations } from '../interchange/automation';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { applyLyricsEdit,reconstructTrackLyrics } from '../editor/lyrics';
@@ -107,7 +107,9 @@ export function selectScore(score:model.Score,selection:ExportSelection):model.S
     if(note.hammerPullOrigin&&!notes.has(note.hammerPullOrigin))note.hammerPullOrigin=null;
     if(note.hammerPullDestination&&!notes.has(note.hammerPullDestination)){note.hammerPullDestination=null;note.isHammerPullOrigin=false;}
   }
-  const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());copyGpInterchangeSource(copy,result);
+  const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());restoreNoteLinks(result,captureNoteLinks(copy));copyGpInterchangeSource(copy,result);
+  // The source file's views describe its tracks by position; a subset or a new order would leave them describing other tracks.
+  if(selection.tracks.length!==score.tracks.length||selection.tracks.some((track,index)=>track!==index))forgetTrackOrderedEntries(result);
   result.tracks.forEach((track,t)=>{
     (track as any).sourceIndex=(score.tracks[selection.tracks[t]] as any)?.sourceIndex??selection.tracks[t];
     track.staves.forEach(staff=>{
@@ -122,7 +124,7 @@ export function selectScore(score:model.Score,selection:ExportSelection):model.S
 /** Retains original track indexing for public MIDI/playback plan generation. */
 export function selectStaves(score:model.Score,selection:ExportSelection):model.Score {
   validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
-  const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),new Settings());
+  const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),new Settings());restoreNoteLinks(copy,captureNoteLinks(score));
   copyGpInterchangeSource(score,copy);
   for(const [index,staves]of Object.entries(selection.staves??{})) {
     const track=copy.tracks[Number(index)],mix=trackMixAutomations(track);
@@ -135,5 +137,5 @@ export function selectStaves(score:model.Score,selection:ExportSelection):model.
       voice.beats[0].automations.push(Object.assign(new model.Automation(),automation));
     }
   }
-  const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());copyGpInterchangeSource(copy,result);return result;
+  const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());restoreNoteLinks(result,captureNoteLinks(copy));copyGpInterchangeSource(copy,result);return result;
 }

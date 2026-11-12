@@ -30,6 +30,7 @@ import { applyMusicXmlAlternateStaves } from './musicxml-alternate-staves';
 import { applyMusicXmlTiedBends } from './musicxml-tied-bends';
 import { applyMusicXmlLyricSyllables } from './musicxml-lyric-syllables';
 import { applyMusicXmlTempoWords } from './musicxml-tempo-words';
+import { applyMusicXmlTimeSymbols,copyMusicXmlTimeCarry } from './musicxml-time-symbols';
 
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
@@ -51,14 +52,23 @@ function orderedTracks(doc:Document){
 }
 const text=(node:Element,name:string)=>node.querySelector(`:scope > ${name}`)?.textContent??'';
 
-function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Score {
+/** The empty voices that only carry a chord diagram, checked the way the export needs them: throws the message the export would refuse with. */
+function harmonyCarriers(score:model.Score) {
   const carriers=score.tracks.flatMap((track,trackIndex)=>track.staves.flatMap((staff,staffIndex)=>staff.bars.flatMap((bar,barIndex)=>bar.voices.flatMap((voice,voiceIndex)=>voice.isEmpty&&voice.beats.some(beat=>beat.hasChord)?[{track:trackIndex,staff:staffIndex,bar:barIndex,voice:voiceIndex}]:[]))));
-  if(!carriers.length)return score;
   for(const target of carriers){
     const voice=score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice],beat=voice.beats[0];
     if(voice.beats.length!==1||!beat.isEmpty||beat.notes.length||beat.duration!==model.Duration.Quarter||beat.dots!==0||beat.tupletNumerator>0||beat.tupletDenominator>0||beat.graceType!==model.GraceType.None||beat.overrideDisplayDuration!==undefined)throw new Error('GP export supports an annotated empty carrier only with one existing plain quarter rhythm.');
     const clock=voice.bar.masterBar.calculateDuration();if(!Number.isFinite(clock)||clock<960)throw new Error('The empty chord carrier would extend the existing measure clock in GP export.');
   }
+  return carriers;
+}
+/** The message the export would throw for a chord carrier it cannot write, or null. Writes nothing. */
+export function harmonyCarrierRefusal(score:model.Score):string|null {
+  try{harmonyCarriers(score);return null;}catch(error){return error instanceof Error?error.message:String(error);}
+}
+function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Score {
+  const carriers=harmonyCarriers(score);
+  if(!carriers.length)return score;
   const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),settings);restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);
   for(const target of carriers){
     const voice=copy.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice],beat=voice.beats[0];
@@ -70,12 +80,13 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
   return copy;
 }
 
-/** `partialCapo` false leaves a partial capo the file holds unapplied, as projects logged before the feature replay it. */
+/** `partialCapo` false leaves a partial capo the file holds unapplied, and a MusicXML time symbol uncarried, as projects logged before those features replay them. */
 export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialCapo=true):model.Score {
   // Before the stock reader, which would otherwise inflate a refused archive first.
   assertArchiveAccepted(bytes,settings.importer.maxDecodingBufferSize);
   const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlLoaderBytes(bytes,settings),settings);
-  const musicXml=()=>applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings);
+  const stockOrCarried=(value:model.Score)=>partialCapo?applyMusicXmlTimeSymbols(value,bytes,settings):value;
+  const musicXml=()=>stockOrCarried(applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings));
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();
   const entries=unzip(bytes,settings);
   // The stock GP reader takes any member named score.gpif, so such archives
@@ -203,9 +214,15 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
 /** Source archive entries that describe tracks by position. Once tracks are added, removed or
  * reordered they would describe the wrong tracks, so export uses alphaTab's regenerated copies. */
 const trackOrderedEntry=(path:string)=>path==='Content/PartConfiguration'||path==='Content/LayoutConfiguration'||path.startsWith('Content/ScoreViews/');
+const rebuiltViews=new WeakSet<model.Score>();
+/** Whether the source file's views were dropped from this score, so the export writes alphaTab's regenerated ones. */
+export const sourceViewsRebuilt=(score:model.Score)=>rebuiltViews.has(score);
 export function forgetTrackOrderedEntries(score:model.Score):void {
   const entries=sourceEntries.get(score);
-  if(entries)sourceEntries.set(score,Object.fromEntries(Object.entries(entries).filter(([path])=>!trackOrderedEntry(path))));
+  if(!entries)return;
+  const kept=Object.entries(entries).filter(([path])=>!trackOrderedEntry(path));
+  if(kept.length<Object.keys(entries).length)rebuiltViews.add(score);
+  sourceEntries.set(score,Object.fromEntries(kept));
 }
 
 /** Carry source archive siblings and binary backing data omitted by model JSON. */
@@ -215,6 +232,8 @@ export function copyGpInterchangeSource(source:model.Score,destination:model.Sco
   copyScaleDiagrams(source,destination);
   copyTimeSignatureSources(source,destination);
   const entries=sourceEntries.get(source);if(entries)sourceEntries.set(destination,entries);
+  if(rebuiltViews.has(source))rebuiltViews.add(destination);
+  copyMusicXmlTimeCarry(source,destination);
   if(source.backingTrack?.rawAudioFile&&!destination.backingTrack?.rawAudioFile) {
     destination.backingTrack??=new model.BackingTrack();destination.backingTrack.rawAudioFile=source.backingTrack.rawAudioFile.slice();
   }

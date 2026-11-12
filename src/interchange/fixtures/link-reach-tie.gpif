@@ -1,0 +1,16 @@
+<!-- Hand-authored GPIF Notes fragment (not copied from any score). Two notes on string 0, fret 5.
+     Note 1 is marked as a tie destination, with no origin flag on note 0: the reader must find the origin itself. -->
+<GPIF>
+  <Notes>
+    <Note id="0"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>5</Fret></Property>
+      <Property name="Midi"><Number>45</Number></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="1"><Tie origin="false" destination="true"/><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>5</Fret></Property>
+      <Property name="Midi"><Number>45</Number></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+  </Notes>
+</GPIF>

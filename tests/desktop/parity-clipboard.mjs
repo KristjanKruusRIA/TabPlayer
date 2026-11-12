@@ -9,8 +9,8 @@ import { directory,launch,connect,stop } from './harness.mjs';
 import { buildInstrumentFixture,fixturePath } from './instrument-fixture.mjs';
 
 await buildInstrumentFixture();const sourceHash=createHash('sha256').update(readFileSync(fixturePath)).digest('hex');
-// Pasting whole bars replaces their measures, which counts as an explicit common/cut choice, so GP export refuses unless the file states its own
-// (src/interchange/stylesheet-replay.test.ts). The fixture has no style, so the multi-track export step opens a copy that states numeric time.
+// Pasting whole bars replaces their measures, which counts as an explicit common/cut choice, so GP export writes the choice most bars make and
+// warns unless the file states its own (src/interchange/stylesheet-replay.test.ts). The fixture has no style, so the multi-track export step opens a copy that states numeric time.
 const styledFixture=resolve(directory,'gp8-clipboard-styled.gp');{const entries=unzipSync(readFileSync(fixturePath));entries['Content/Stylesheets/score.gpss']=Uint8Array.of(0x5a,4,0x2a,2,8,0);writeFileSync(styledFixture,zipSync(entries));}
 const saved=resolve(directory,'gp8-clipboard.tabplayer'),exported=resolve(directory,'gp8-clipboard.gp'),result={};
 let id=launch({TABPLAYER_TEST_OPEN:fixturePath,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported}),browser,page;

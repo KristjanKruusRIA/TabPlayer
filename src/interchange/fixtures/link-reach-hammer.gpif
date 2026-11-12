@@ -1,0 +1,18 @@
+<!-- Hand-authored GPIF Notes fragment (not copied from any score). Note 0 (string 0, fret 5) carries the
+     HopoOrigin property; note 1 (string 0, fret 7) is a plain note with no destination flag, because the
+     reader ignores HopoDestination and searches forward for the destination itself. -->
+<GPIF>
+  <Notes>
+    <Note id="0"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>5</Fret></Property>
+      <Property name="Midi"><Number>45</Number></Property>
+      <Property name="HopoOrigin"><Enable/></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="1"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>7</Fret></Property>
+      <Property name="Midi"><Number>47</Number></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+  </Notes>
+</GPIF>

@@ -1,0 +1,66 @@
+<!-- Hand-authored GPIF Notes fragment (not copied from any score). Each note is a role the tests place by index.
+     0: string 0, fret 5, HopoOrigin.            1: string 0, fret 7, plain (the usual destination).
+     2: string 1, fret 3, plain (another string). 3: string 1, fret 2, LeftHandTapped (another string).
+     4: string 0, fret 5, Slide flags 2 (legato). 5: string 0, fret 5, Slide flags 1 (shift).
+     6: string 0, fret 5, Slide flags 4 (out and down, which has no target note).
+     7: string 0, fret 3, tie origin.  8: string 0, fret 7, muted (dead) plain.  9: string 0, fret 3, tie destination. -->
+<GPIF>
+  <Notes>
+    <Note id="0"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>5</Fret></Property>
+      <Property name="Midi"><Number>45</Number></Property>
+      <Property name="HopoOrigin"><Enable/></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="1"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>7</Fret></Property>
+      <Property name="Midi"><Number>47</Number></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="2"><Properties>
+      <Property name="String"><String>1</String></Property>
+      <Property name="Fret"><Fret>3</Fret></Property>
+      <Property name="Midi"><Number>50</Number></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="3"><Properties>
+      <Property name="String"><String>1</String></Property>
+      <Property name="Fret"><Fret>2</Fret></Property>
+      <Property name="Midi"><Number>49</Number></Property>
+      <Property name="LeftHandTapped"><Enable/></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="4"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>5</Fret></Property>
+      <Property name="Midi"><Number>45</Number></Property>
+      <Property name="Slide"><Flags>2</Flags></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="5"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>5</Fret></Property>
+      <Property name="Midi"><Number>45</Number></Property>
+      <Property name="Slide"><Flags>1</Flags></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="6"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>5</Fret></Property>
+      <Property name="Midi"><Number>45</Number></Property>
+      <Property name="Slide"><Flags>4</Flags></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="7"><Tie origin="true" destination="false"/><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>3</Fret></Property>
+      <Property name="Midi"><Number>43</Number></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="8"><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>7</Fret></Property>
+      <Property name="Midi"><Number>47</Number></Property>
+      <Property name="Muted"><Enable/></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+    <Note id="9"><Tie origin="false" destination="true"/><Properties>
+      <Property name="String"><String>0</String></Property>
+      <Property name="Fret"><Fret>3</Fret></Property>
+      <Property name="Midi"><Number>43</Number></Property>
+    </Properties><InstrumentArticulation>0</InstrumentArticulation></Note>
+  </Notes>
+</GPIF>

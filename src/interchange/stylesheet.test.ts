@@ -1,6 +1,6 @@
 import { expect,it } from 'vitest';
 import { model } from '@coderline/alphatab';
-import { getTimeSignatureExportIntent,setTimeSignatureIntent } from '../editor/time-signature-source';
+import { getTimeSignatureExportIntent,planTimeSignatureExport,setTimeSignatureIntent } from '../editor/time-signature-source';
 import { readStylesheetTimeSignatures,writeStylesheetTimeSignatures } from './stylesheet';
 
 const current='Content/Stylesheets/score.gpss',legacyPath='Content/BinaryStylesheet';
@@ -79,14 +79,18 @@ it('changed_export_keeps_missing_current_absent_and_patches_only_generated_legac
   expect(()=>writeStylesheetTimeSignatures(target,{[current]:no})).toThrow(/legacy|BinaryStylesheet/i);
 });
 
-it('mixed_and_inherited_changes_reject_without_modifying_any_archive_bytes_or_intent',()=>{
+it('inherited_and_mixed_changes_write_one_choice_without_modifying_any_archive_bytes_or_intent',()=>{
   const entries={[current]:absent,[legacyPath]:legacy(true),'Content/Stylesheets/scoreview1.gpss':no,'Content/unknown.bin':bad};
   const before=snapshot(entries),target=score([false,false]);readStylesheetTimeSignatures(target,entries);edit(target,false);
-  const inherited='GP export cannot resolve inherited common/cut choices for every selected measure. Set each selected 4/4 or 2/2 measure explicitly before exporting changed choices.';
-  expect(()=>writeStylesheetTimeSignatures(target,entries)).toThrow(inherited);
-  expect(()=>writeStylesheetTimeSignatures(target,entries)).toThrow(inherited);
+  // One explicit bar next to an inherited one: the explicit choice is written (changed from an absent option), the other bar follows it.
+  const first=writeStylesheetTimeSignatures(target,entries);
+  expect(first[current]).toEqual(Uint8Array.of(8,1,0x5a,4,0x2a,2,8,0));expect(first[legacyPath]).toEqual(legacy(false));
+  expect(first['Content/Stylesheets/scoreview1.gpss']).toBe(entries['Content/Stylesheets/scoreview1.gpss']);expect(first['Content/unknown.bin']).toBe(entries['Content/unknown.bin']);
+  expect(writeStylesheetTimeSignatures(target,entries)[current]).toEqual(first[current]);
+  // A second explicit bar with the other choice is a tie, which is written as numeric, the same bytes.
   edit(target,true,1);
-  expect(()=>writeStylesheetTimeSignatures(target,entries)).toThrow('GP export cannot represent mixed common/cut and numeric measure choices. Export a uniform measure range or use consistent choices.');
+  const second=writeStylesheetTimeSignatures(target,entries);
+  expect(second[current]).toEqual(first[current]);expect(second[legacyPath]).toEqual(first[legacyPath]);
   expect(snapshot(entries)).toEqual(before);
 });
 
@@ -148,4 +152,39 @@ it('malformed_changed_current_rejects_without_modifying_valid_legacy_or_marker_s
   readStylesheetTimeSignatures(target,{[current]:yes});edit(target,false);
   expect(()=>writeStylesheetTimeSignatures(target,entries)).toThrow(/^Unsupported GP common\/cut stylesheet:/);
   expect(snapshot(entries)).toEqual(before);expect(getTimeSignatureExportIntent(target)).toEqual({changed:true,value:false});
+});
+
+// THE-60: a score whose bars do not all make one common/cut choice is written with one global choice, and says so.
+const out=(target:model.Score,entries:Record<string,Uint8Array>)=>writeStylesheetTimeSignatures(target,entries);
+it('mixed_choices_write_the_majority_and_a_tie_goes_to_numeric',()=>{
+  const entries={[current]:no,[legacyPath]:legacy(false)},before=snapshot(entries),target=score([false,false,false]);
+  readStylesheetTimeSignatures(target,entries);edit(target,true,0);edit(target,true,1);
+  const common=out(target,entries);
+  expect(common[current]).toEqual(yes);expect(common[legacyPath]).toEqual(legacy(true));
+  expect(planTimeSignatureExport(target)).toEqual({changed:true,value:true,differing:[2],inherited:[]});
+  expect(snapshot(entries)).toEqual(before);
+  const tie=score([true,true]),tieEntries={[current]:yes,[legacyPath]:legacy(true)};
+  readStylesheetTimeSignatures(tie,tieEntries);edit(tie,false,1);
+  const numeric=out(tie,tieEntries);
+  expect(numeric[current]).toEqual(no);expect(numeric[legacyPath]).toEqual(legacy(false));
+  expect(planTimeSignatureExport(tie)).toEqual({changed:true,value:false,differing:[0],inherited:[]});
+});
+it('a majority equal to the source leaves every style member untouched and still counts the other bars',()=>{
+  const entries={[current]:yes,[legacyPath]:legacy(true),'Content/Stylesheets/scoreview1.gpss':no},before=snapshot(entries),target=score([true,true,true]);
+  readStylesheetTimeSignatures(target,entries);edit(target,false,2);
+  expect(snapshot(out(target,entries))).toEqual(before);
+  expect(planTimeSignatureExport(target)).toEqual({changed:false,value:null,differing:[2],inherited:[]});
+});
+it('an explicit bar next to inherited bars writes the explicit choice and counts the bars that had none',()=>{
+  const entries={[current]:absent,[legacyPath]:legacy(true),'Content/unknown.bin':bad},before=snapshot(entries),target=score([false,false,false]);
+  readStylesheetTimeSignatures(target,entries);edit(target,false,0);
+  const written=out(target,entries);
+  expect(written[current]).toEqual(Uint8Array.of(8,1,0x5a,4,0x2a,2,8,0));expect(written[legacyPath]).toEqual(legacy(false));expect(written['Content/unknown.bin']).toBe(entries['Content/unknown.bin']);
+  expect(planTimeSignatureExport(target)).toEqual({changed:true,value:false,differing:[],inherited:[1,2]});
+  expect(snapshot(entries)).toEqual(before);
+});
+it('a mixed choice still refuses a conflicting imported view style',()=>{
+  const entries={[current]:no,[legacyPath]:legacy(false),'Content/Stylesheets/scoreview1.gpss':no},target=score([false,false,false]);
+  readStylesheetTimeSignatures(target,entries);edit(target,true,0);edit(target,true,1);
+  expect(()=>out(target,entries)).toThrow(/imported view style conflicts with the changed full-score choice/i);
 });

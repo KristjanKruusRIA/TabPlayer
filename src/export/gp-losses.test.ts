@@ -9,6 +9,7 @@ import type { NativeBridge } from '../bridge';
 import type { DocumentSnapshot } from '../workspace/types';
 import { music } from '../editor/fixtures';
 import { defaultDocumentSettings } from '../document-settings';
+import { applyHarmonyEdit } from '../harmony/edits';
 import { convertScoreBytes,runBatch,type BatchBridge } from '../batch/convert';
 import { curveLosses } from '../interchange/curves';
 import { projectGpDocument } from '../interchange/backing-projection';
@@ -110,12 +111,21 @@ describe('batch conversion',()=>{
   it('converts a MusicXML cross-voice slur and says what it left out',()=>{
     expect(Object.values(loadInterchangeScore(crossVoice,settings).tracks[0].staves[0].bars[0].voices).some(voice=>voice.beats.some(beat=>beat.notes.some(note=>note.slurDestination)))).toBe(true);
     const converted=convertScoreBytes(crossVoice);
-    expect(converted.detail).toMatch(/left out of the Guitar Pro file: .*slur at track 1, bar 1, beat 1/);
+    expect(converted.detail).toMatch(/differences in the Guitar Pro file: .*slur at track 1, bar 1, beat 1/);
     expect(loadInterchangeScore(converted.bytes,new Settings()).masterBars).toHaveLength(1);
   });
   it('converts a slur inside one chord and reports it',()=>{
     const converted=convertScoreBytes(sameChord);
-    expect(converted.detail).toMatch(/left out of the Guitar Pro file: .*slur/);
+    expect(converted.detail).toMatch(/differences in the Guitar Pro file: .*slur/);
+  });
+  it('converts a MusicXML file with a common-time symbol on its first measure only, with no common/cut note',()=>{
+    const measure=(number:number,time:string)=>`<measure number="${number}"><attributes><divisions>1</divisions>${time}<clef><sign>G</sign><line>2</line></clef></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure>`;
+    const xml=strToU8(`<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1">${measure(1,'<time symbol="common"><beats>4</beats><beat-type>4</beat-type></time>')}${measure(2,'')}${measure(3,'')}</part></score-partwise>`);
+    // The symbol stays in force until the next <time>, so every bar is common (alphaTab alone sets only the first).
+    expect(loadInterchangeScore(xml,settings).masterBars.map(bar=>bar.timeSignatureCommon)).toEqual([true,true,true]);
+    const converted=convertScoreBytes(xml);
+    expect(converted.losses).toEqual([]);expect(converted.detail).not.toMatch(/common|differences/);
+    expect(loadInterchangeScore(converted.bytes,new Settings()).masterBars.map(bar=>bar.timeSignatureCommon)).toEqual([true,true,true]);
   });
   it('reports the converted row with its note, not as Failed',async()=>{
     const rows=await runBatch({bridge:{read:async()=>crossVoice,write:async()=>({relative:'a.gp',renamed:false})} as unknown as BatchBridge,scan:{files:[{index:0,relative:'a.xml'}],skipped:[],truncated:false} as never,keepFolders:false,cancelled:()=>false,onProgress:()=>undefined,probe:async()=>({ok:true}) as never});
@@ -127,7 +137,7 @@ describe('batch conversion',()=>{
   it('converts a score with buzz-roll tremolo picking and reports it on the batch row',()=>{
     const buzzXml=twoVoiceXml('<note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type><notations><ornaments><tremolo type="single" smufl="buzzRoll">2</tremolo></ornaments></notations></note>');
     const converted=convertScoreBytes(buzzXml);
-    expect(converted.detail).toMatch(/left out of the Guitar Pro file: .*buzz-roll tremolo picking at track 1, bar 1, beat 1/);
+    expect(converted.detail).toMatch(/differences in the Guitar Pro file: .*buzz-roll tremolo picking at track 1, bar 1, beat 1/);
   });
 });
 
@@ -136,7 +146,7 @@ describe('the app asks before writing',()=>{
     const bridge=bridgeFor([whammyEdit]),controller=await DocumentController.create(bridge);
     await controller.export();
     const confirm=vi.mocked(bridge.confirmExport),write=vi.mocked(bridge.exportGp);
-    expect(confirm).toHaveBeenCalledTimes(1);expect(confirm.mock.calls[0][0]?.message).toMatch(/Left out of this file: .*5-point whammy bar at track 1, bar 1, beat 1/);
+    expect(confirm).toHaveBeenCalledTimes(1);expect(confirm.mock.calls[0][0]?.message).toMatch(/Differences in this file: .*5-point whammy bar at track 1, bar 1, beat 1/);
     expect(write).toHaveBeenCalledTimes(1);expect(confirm.mock.invocationCallOrder[0]).toBeLessThan(write.mock.invocationCallOrder[0]);
   });
   it('the document export asks the plain question, and writes nothing if declined',async()=>{
@@ -154,6 +164,38 @@ describe('the app asks before writing',()=>{
     await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:null}})).toBe(true);});
     expect(confirmExport).toHaveBeenCalledTimes(1);expect(confirmExport.mock.calls[0][0]?.message).toMatch(/5-point whammy bar/);
     expect(confirmExport.mock.invocationCallOrder[0]).toBeLessThan(exportGp.mock.invocationCallOrder[0]);
+  });
+  const carrierMessage='GP export supports an annotated empty carrier only with one existing plain quarter rhythm.';
+  /** A score with an empty chord carrier that is a half note, which the export refuses. */
+  function refusedCarrierScore() {
+    const score=music(),staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];score.tracks[0].addStaff(staff);
+    for(let index=0;index<score.masterBars.length;index++){const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;beat.duration=model.Duration.Half;voice.addBeat(beat);bar.addVoice(voice);staff.addBar(bar);}
+    score.finish(settings);
+    applyHarmonyEdit(score,{type:'setHarmonyChord',target:{track:0,staff:1,bar:0,voice:0,beat:0},chord:{name:'Dm',nameMode:'manual',recipe:null,firstFret:1,frets:[1,3,2,0,-1,-1],fingers:[1,3,2,-2,-2,-2],barreFrets:[],showName:false,showDiagram:true,showFingering:false},fillEmptyBeat:false},1);
+    return score;
+  }
+  it('the export dialog shows a refusal instead of asking, when the export would throw',async()=>{
+    const score=refusedCarrierScore();
+    const confirmExport=vi.fn(async(_detail?:{title:string;message:string})=>true),exportGp=vi.fn(async()=>true);
+    const native={exportGp5:async()=>true} as unknown as ExportNativeBridge;
+    const {result}=renderHook(()=>useExportCoordinator({revision:3,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport,readBackingAsset:vi.fn(),exportGp},native}));
+    await act(async()=>{await expect(result.current.run({format:'gp',selection:{tracks:[0],range:null}})).rejects.toThrow(carrierMessage);});
+    expect(confirmExport).not.toHaveBeenCalled();expect(exportGp).not.toHaveBeenCalled();
+  });
+  it('the document export shows a refusal instead of asking, when the export would throw',async()=>{
+    const bridge=bridgeFor([]),controller=await DocumentController.create(bridge);
+    (controller as unknown as {state:{score:model.Score}}).state.score=refusedCarrierScore();
+    await expect(controller.export()).rejects.toThrow(carrierMessage);
+    expect(bridge.confirmExport).not.toHaveBeenCalled();expect(bridge.exportGp).not.toHaveBeenCalled();
+  });
+  it('the export dialog warns about mixed common and cut choices and then writes the file',async()=>{
+    const score=music();score.masterBars[0].timeSignatureCommon=true;score.masterBars[1].timeSignatureCommon=true;score.masterBars[2].timeSignatureCommon=false;score.masterBars[3].timeSignatureCommon=true;score.finish(settings);
+    const confirmExport=vi.fn(async(_detail?:{title:string;message:string})=>true),exportGp=vi.fn(async()=>true);
+    const native={exportGp5:async()=>true} as unknown as ExportNativeBridge;
+    const {result}=renderHook(()=>useExportCoordinator({revision:3,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport,readBackingAsset:vi.fn(),exportGp},native}));
+    await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:null}})).toBe(true);});
+    expect(confirmExport.mock.calls[0][0]?.message).toContain('1 bar set to numbers will show the common/cut symbol');
+    expect(exportGp).toHaveBeenCalledTimes(1);
   });
   it('the export dialog asks with buzz-roll loss before writing when buzz roll is present',async()=>{
     const score=music();

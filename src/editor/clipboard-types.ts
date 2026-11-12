@@ -15,7 +15,8 @@ export interface PasteFilters {diagrams:boolean;texts:boolean;timers:boolean;tra
 export interface PasteDestination {sourceTrack:number;track:number;staffMap:number[]}
 export interface PasteOptions {target:BeatTarget;destinations:PasteDestination[];count:number;placement:'currentBar'|'beforeBar';filters:PasteFilters}
 export type ClipboardCommand={type:'pasteMusic';clip:MusicClip;options:PasteOptions};
-export interface PreparedMusicPaste {score:model.Score;barMap:BarIndexMap}
+/** `addedTracks` counts destination tracks a multitrack bar paste appended after the existing tracks. */
+export interface PreparedMusicPaste {score:model.Score;barMap:BarIndexMap;addedTracks?:number}
 export interface ClipboardPanelProps {
   score:model.Score;target:BeatTarget;selection:MusicSelection|null;clip:MusicClip|null;busy:boolean;
   /** The document is finalized: copying still works, cutting and pasting do not. */

@@ -37,12 +37,12 @@ function validateStructure(raw:RecordValue,clip:MusicClip) {
   const empty=object(JSON.parse(json(new model.Score())));for(const master of masters)scalarFields(object(master),new model.MasterBar());
   for(const [key,value]of Object.entries(raw))if(!['masterbars','tracks'].includes(key)&&(!(key in empty)||JSON.stringify(value)!==JSON.stringify(empty[key])))throw new Error('Clipboard contains document metadata or unsupported root settings.');
   if(clip.mode==='singleTrack'&&tracks.length!==1)throw new Error('Single track clipboard requires one track.');
-  if(clip.kind==='phrase'&&(clip.mode!=='singleTrack'||tracks.length!==1))throw new Error('Phrase clipboard requires one track and voice lane.');
+  if(clip.kind==='phrase'&&(clip.mode!=='singleTrack'||tracks.length!==1))throw new Error('Phrase clipboard requires one track.');
   const ids=new Map<string,Set<number>>();
   const id=(kind:string,value:unknown)=>{if(typeof value!=='number'||!integer(value,0,0xffffffff))throw new Error('Clipboard model IDs must be unsigned integers.');const seen=ids.get(kind)??new Set<number>();if(seen.has(value))throw new Error(`Duplicate clipboard ${kind} ID.`);seen.add(value);ids.set(kind,seen);};
   for(const t of tracks){const track=object(t),staves=array(track.staves,1);scalarFields(track,new model.Track());scalarFields(object(track.playbackinfo),new model.PlaybackInformation());if(clip.kind==='phrase'&&staves.length!==1)throw new Error('Phrase clipboard requires one staff.');
     for(const s of staves){const staff=object(s),bars=array(staff.bars,masters.length,masters.length);scalarFields(staff,new model.Staff());
-      for(const b of bars){const bar=object(b);id('bar',bar.id);const voices=array(bar.voices,1,4);if(clip.kind==='phrase'&&voices.length!==1)throw new Error('Phrase clipboard requires one voice.');
+      for(const b of bars){const bar=object(b);id('bar',bar.id);const voices=array(bar.voices,1,4);
         for(const v of voices){const voice=object(v);id('voice',voice.id);for(const b of array(voice.beats)){const beat=object(b);id('beat',beat.id);scalarFields(beat,new model.Beat());
           if(beat.text!==null&&typeof beat.text!=='string'||beat.chordid!==null&&typeof beat.chordid!=='string')throw new Error('Invalid clipboard beat text or chord ID.');
           if(Object.hasOwn(beat,'overridedisplayduration')&&(typeof beat.overridedisplayduration!=='number'||!integer(beat.overridedisplayduration,1,0xffffffff)))throw new Error('Invalid clipboard rhythm override.');
@@ -161,7 +161,8 @@ export function musicClipSelection(score:model.Score,selection:MusicSelection,mo
   const addresses=normalized.kind==='range'?normalized.range.lanes:normalized.kind==='notes'?normalized.notes.map(note=>note.target):normalized.tracks.map(track=>({track,staff:0,voice:0}));
   const tracks=[...new Set(addresses.map(address=>address.track))].sort((a,b)=>a-b);
   if(mode==='singleTrack'){
-    if(tracks.length!==1||normalized.kind!=='bars'&&new Set(addresses.map(address=>`${address.track}/${address.staff}/${address.voice}`)).size!==1)throw new Error('Single track partial phrases require one voice lane.');
+    const staves=new Set(addresses.map(address=>`${address.track}/${address.staff}`));
+    if(tracks.length!==1||normalized.kind!=='bars'&&staves.size!==1)throw new Error('Single track partial phrases require one track and staff.');
     return normalized;
   }
   if(normalized.kind==='bars')return {...normalized,tracks};
@@ -175,8 +176,11 @@ export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:Cl
   const selectedBeats=resolveSelectionBeats(score,selection),selectedNotes=new Set(resolveSelectionNotes(score,selection));
   const tracks=selection.kind==='bars'?selection.tracks:selection.kind==='range'?selection.range.lanes.map(lane=>lane.track):selection.notes.map(note=>note.target.track);
   const indices=[...new Set(tracks)].sort((a,b)=>a-b),kind=mode==='multiTrack'||selection.kind==='bars'?'bars':'phrase';
-  const lanes=new Set(selectedBeats.map(beat=>`${beat.voice.bar.staff.track.index}/${beat.voice.bar.staff.index}/${beat.voice.index}`));
-  if(mode==='singleTrack'&&(indices.length!==1||kind==='phrase'&&lanes.size!==1))throw new Error('Single track partial phrases require one voice lane.');
+  const staves=new Set(selectedBeats.map(beat=>`${beat.voice.bar.staff.track.index}/${beat.voice.bar.staff.index}`));
+  if(mode==='singleTrack'&&(indices.length!==1||kind==='phrase'&&staves.size!==1))throw new Error('Single track partial phrases require one track and staff.');
+  const declaredVoiceIndices=selection.kind==='range'?selection.range.lanes.filter(l=>indices.includes(l.track)).map(l=>l.voice):[...new Set(selectedBeats.map(b=>b.voice.index))];
+  const selectedVoiceIndices=[...new Set(selectedBeats.map(b=>b.voice.index))].sort((a,b)=>a-b);
+  if(kind==='phrase'&&declaredVoiceIndices.some(v=>!selectedVoiceIndices.includes(v)))throw new Error('Mixed empty or partial voice lanes require complete-bar copying.');
   if(kind==='phrase'&&!selectedBeats.length)throw new Error('Select complete beats or copy complete empty bars.');
   let first=selection.kind==='bars'?selection.firstBar:Math.min(...selectedBeats.map(beat=>beat.voice.bar.index)),last=selection.kind==='bars'?selection.lastBar:Math.max(...selectedBeats.map(beat=>beat.voice.bar.index));
   if(selection.kind==='range'&&mode==='multiTrack'){first=selection.range.start.bar;last=selection.range.end.bar-(selection.range.end.tick===0?1:0);}
@@ -191,20 +195,45 @@ export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:Cl
     snapshot.addMasterBar(master);
   }
   for(const index of indices){const source=score.tracks[index],copy=clone.tracks[index],track=new model.Track();track.name=copy.name;track.shortName=copy.shortName;track.color=copy.color;track.playbackInfo=copy.playbackInfo;track.percussionArticulations=copy.percussionArticulations;snapshot.addTrack(track);
-    const sourceLane=selectedBeats[0]?.voice,staffIndices=kind==='phrase'?[sourceLane!.bar.staff.index]:copy.staves.map((_,staff)=>staff);
+    const staffIndices=kind==='phrase'?[selectedBeats[0].voice.bar.staff.index]:copy.staves.map((_,staff)=>staff);
+    const selectedVoiceIndices=[...new Set(selectedBeats.map(b=>b.voice.index))].sort((a,b)=>a-b);
     for(const staffIndex of staffIndices){const staff=copy.staves[staffIndex],original=source.staves[staffIndex],oldBars=staff.bars;staff.bars=[];track.addStaff(staff);
       for(let barIndex=first;barIndex<=last;barIndex++){const bar=oldBars[barIndex],originalBar=original.bars[barIndex];if(kind==='phrase'){
-          const voice=bar.voices[sourceLane!.index],oldBeats=voice.beats,originalVoice=originalBar.voices[sourceLane!.index],selected=originalVoice.beats.map((beat,index)=>selectedBeats.includes(beat)?index:-1).filter(index=>index>=0);
-          if(!selected.length)throw new Error('Mixed empty or partial voice lanes require complete-bar copying.');const start=Math.min(...selected),end=Math.max(...selected);let tick=0;const positions=originalVoice.beats.map(beat=>{const current=tick;tick+=rhythmTicks(beat,score.masterBars[barIndex].calculateDuration(false));return current;});
-          spans.set(barIndex,{start:positions[start],end:positions[end]+rhythmTicks(originalVoice.beats[end],score.masterBars[barIndex].calculateDuration(false))});voice.beats=[];
-          for(let beatIndex=start;beatIndex<=end;beatIndex++){const beat=oldBeats[beatIndex],originalBeat=originalVoice.beats[beatIndex];
-            if(selection.kind==='notes'&&!selectedBeats.includes(originalBeat)){const gap=new model.Beat();gap.id=beat.id;gap.duration=beat.duration;gap.dots=beat.dots;gap.tupletNumerator=beat.tupletNumerator;gap.tupletDenominator=beat.tupletDenominator;gap.graceType=beat.graceType;gap.isEmpty=beat.isEmpty;gap.overrideDisplayDuration=beat.overrideDisplayDuration;voice.addBeat(gap);}
-            else{beat.notes=beat.notes.filter((_,noteIndex)=>selectedNotes.has(originalBeat.notes[noteIndex]));voice.addBeat(beat);}
+          let barStartTick=Infinity,barEndTick=-Infinity;
+          const voiceData:Array<{voice:model.Voice;oldBeats:model.Beat[];originalVoice:model.Voice;selected:number[];positions:number[];start:number;end:number}>=[];
+          const duration=score.masterBars[barIndex].calculateDuration(false);
+          for(const v of selectedVoiceIndices){
+            const originalVoice=originalBar.voices[v],oldVoice=bar.voices[v];
+            if(!originalVoice||!oldVoice)throw new Error('Mixed empty or partial voice lanes require complete-bar copying.');
+            const selected=originalVoice.beats.map((beat,index)=>selectedBeats.includes(beat)?index:-1).filter(index=>index>=0);
+            if(!selected.length)throw new Error('Mixed empty or partial voice lanes require complete-bar copying.');
+            const start=Math.min(...selected),end=Math.max(...selected);let tick=0;
+            const positions=originalVoice.beats.map(beat=>{const current=tick;tick+=rhythmTicks(beat,duration);return current;});
+            const vStart=positions[start],vEnd=positions[end]+rhythmTicks(originalVoice.beats[end],duration);
+            if(vStart<barStartTick)barStartTick=vStart;
+            if(vEnd>barEndTick)barEndTick=vEnd;
+            voiceData.push({voice:oldVoice,oldBeats:oldVoice.beats,originalVoice,selected,positions,start,end});
           }
-          const duration=score.masterBars[barIndex].calculateDuration(false),selectedTime=(tick:number)=>selected.some(index=>tick>=positions[index]&&tick<positions[index]+rhythmTicks(originalVoice.beats[index],duration));
-          const master=snapshot.masterBars[barIndex-first];if(master.fermata)master.fermata=new Map([...master.fermata].filter(([tick])=>selectedTime(tick)).map(([tick,value])=>[tick-positions[start],value]));
-          bar.voices=[];bar.addVoice(voice);bar.sustainPedals=bar.sustainPedals.filter(marker=>selectedTime(marker.ratioPosition*duration));
-          for(const marker of bar.sustainPedals)marker.ratioPosition-=positions[start]/duration;
+          spans.set(barIndex,{start:barStartTick,end:barEndTick});
+          bar.voices=[];
+          for(let vi=0;vi<selectedVoiceIndices.length;vi++){
+            const {voice,oldBeats,originalVoice,start,end}=voiceData[vi];
+            voice.beats=[];
+            for(let beatIndex=start;beatIndex<=end;beatIndex++){
+              const beat=oldBeats[beatIndex],originalBeat=originalVoice.beats[beatIndex];
+              if(selection.kind==='notes'&&!selectedBeats.includes(originalBeat)){
+                const gap=new model.Beat();gap.id=beat.id;gap.duration=beat.duration;gap.dots=beat.dots;gap.tupletNumerator=beat.tupletNumerator;gap.tupletDenominator=beat.tupletDenominator;gap.graceType=beat.graceType;gap.isEmpty=beat.isEmpty;gap.overrideDisplayDuration=beat.overrideDisplayDuration;voice.addBeat(gap);
+              }else{
+                beat.notes=beat.notes.filter((_,noteIndex)=>selectedNotes.has(originalBeat.notes[noteIndex]));voice.addBeat(beat);
+              }
+            }
+            bar.addVoice(voice);
+          }
+          const selectedTime=(tick:number)=>voiceData.some(d=>d.selected.some(index=>tick>=d.positions[index]&&tick<d.positions[index]+rhythmTicks(d.originalVoice.beats[index],duration)));
+          const master=snapshot.masterBars[barIndex-first];
+          if(master.fermata)master.fermata=new Map([...master.fermata].filter(([tick])=>selectedTime(tick)).map(([tick,value])=>[tick-barStartTick,value]));
+          bar.sustainPedals=bar.sustainPedals.filter(marker=>selectedTime(marker.ratioPosition*duration));
+          for(const marker of bar.sustainPedals)marker.ratioPosition-=barStartTick/duration;
         }
         for(const voice of bar.voices)for(const beat of voice.beats){beat.lyrics=null;beat.automations=beat.automations.filter(automation=>!isGpMixAutomation(automation)&&!automation.syncPointValue);for(const note of beat.notes)keptIds.add(note.id);}
         staff.addBar(bar);

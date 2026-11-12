@@ -84,8 +84,37 @@ it('fills a rest suffix, reuses a rest bar, and inserts once before untouched mu
   expect(result.score.tracks[0].staves[0].bars[2].voices[0].beats.at(-1)?.notes).toHaveLength(0);
 });
 
-it('rejects sounding target, free time, too-long beat and absent mappings without mutation',()=>{
-  for(const change of ['sounding','free','long','mapping'] as const){let destination=rests(music(),0);const edit=command(phrase(),0);if(change==='sounding')destination=music();if(change==='free')destination.masterBars[0].isFreeTime=true;if(change==='long'){const source=music(),voice=source.tracks[0].staves[0].bars[0].voices[0];source.masterBars[0].timeSignatureNumerator=8;voice.beats.splice(1);voice.beats[0].duration=-2;edit.clip=makeMusicClip(rebuild(source),{kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:7680},lanes:[{track:0,staff:0,voice:0}]}},'singleTrack');}if(change==='mapping')edit.options.destinations[0].staffMap=[9];const before=json(destination);expect(()=>preparePasteMusic(destination,edit)).toThrow();expect(json(destination)).toBe(before);}
+it('rejects free time, too-long beat and absent mappings without mutation',()=>{
+  for(const change of ['free','long','mapping'] as const){let destination=rests(music(),0);const edit=command(phrase(),0);if(change==='free')destination.masterBars[0].isFreeTime=true;if(change==='long'){const source=music(),voice=source.tracks[0].staves[0].bars[0].voices[0];source.masterBars[0].timeSignatureNumerator=8;voice.beats.splice(1);voice.beats[0].duration=-2;edit.clip=makeMusicClip(rebuild(source),{kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:7680},lanes:[{track:0,staff:0,voice:0}]}},'singleTrack');}if(change==='mapping')edit.options.destinations[0].staffMap=[9];const before=json(destination);expect(()=>preparePasteMusic(destination,edit)).toThrow();expect(json(destination)).toBe(before);}
+});
+
+it('overwrites sounding destination notes, preserves prefix and sounding suffix, and detaches severed links',()=>{
+  const destination=music();
+  const v0=destination.tracks[0].staves[0].bars[0].voices[0];
+  const prefixNoteId=v0.beats[0].notes[0].id;
+  const suffixNote2Id=v0.beats[2].notes[0].id;
+  const suffixNote3Id=v0.beats[3].notes[0].id;
+  v0.beats[0].notes[0].tieDestination=v0.beats[1].notes[0];
+  v0.beats[1].notes[0].tieOrigin=v0.beats[0].notes[0];
+  v0.beats[1].notes[0].isTieDestination=true;
+  v0.beats[2].notes[0].tieDestination=v0.beats[3].notes[0];
+  v0.beats[3].notes[0].tieOrigin=v0.beats[2].notes[0];
+  v0.beats[3].notes[0].isTieDestination=true;
+
+  const source=music();
+  source.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret=9;
+  const edit=command(phrase(source,0),0);
+  edit.options.target.beat=1;
+
+  const result=preparePasteMusic(destination,edit).score;
+  const pastedVoice=result.tracks[0].staves[0].bars[0].voices[0];
+  expect(pastedVoice.beats).toHaveLength(4);
+  expect(pastedVoice.beats[0].notes[0].id).toBe(prefixNoteId);
+  expect(pastedVoice.beats[0].notes[0].tieDestination).toBeNull();
+  expect(pastedVoice.beats[1].notes[0].fret).toBe(9);
+  expect(pastedVoice.beats[2].notes[0].id).toBe(suffixNote2Id);
+  expect(pastedVoice.beats[3].notes[0].id).toBe(suffixNote3Id);
+  expect(pastedVoice.beats[2].notes[0].tieDestination).toBe(pastedVoice.beats[3].notes[0]);
 });
 
 it('preserves excluded destination annotations only at exact retained onsets',()=>{
@@ -204,4 +233,85 @@ it('later-bar source phrases do not acquire a synthetic source program on paste'
 it('retains legal bar-end sustain markers when mapped exactly to destination bar end',()=>{
   const source=music(),bar=source.tracks[0].staves[0].bars[0];bar.sustainPedals.push(Object.assign(new model.SustainPedalMarker(),{pedalType:model.SustainPedalMarkerType.Down,ratioPosition:0}),Object.assign(new model.SustainPedalMarker(),{pedalType:model.SustainPedalMarkerType.Up,ratioPosition:1}));const result=preparePasteMusic(music(),command(bars(source))).score;
   expect(result.tracks[0].staves[0].bars[1].sustainPedals.map(marker=>[marker.pedalType,marker.ratioPosition])).toEqual([[model.SustainPedalMarkerType.Down,0],[model.SustainPedalMarkerType.Up,1]]);
+});
+
+it('pastes a multi-voice phrase overwriting multiple destination voices simultaneously',()=>{
+  const source=music(),staff=source.tracks[0].staves[0];
+  for(const bar of staff.bars){
+    const voice1=new model.Voice();
+    for(let i=0;i<4;i++){
+      const beat=new model.Beat(),note=new model.Note();
+      beat.duration=4;note.string=2;note.fret=10+i;beat.addNote(note);voice1.addBeat(beat);
+    }
+    bar.addVoice(voice1);
+  }
+  source.finish(new Settings());
+  const clip=makeMusicClip(source,{
+    kind:'range',
+    range:{start:{bar:0,tick:0},end:{bar:0,tick:1920},lanes:[{track:0,staff:0,voice:0},{track:0,staff:0,voice:1}]},
+  },'singleTrack');
+
+  const destination=music(),destStaff=destination.tracks[0].staves[0];
+  for(const bar of destStaff.bars){
+    const voice1=new model.Voice();
+    for(let i=0;i<4;i++){
+      const beat=new model.Beat(),note=new model.Note();
+      beat.duration=4;note.string=3;note.fret=1;beat.addNote(note);voice1.addBeat(beat);
+    }
+    bar.addVoice(voice1);
+  }
+  const rebuiltDest=rebuild(destination);
+  const edit:ClipboardCommand={
+    type:'pasteMusic',
+    clip,
+    options:{
+      target:{track:0,staff:0,bar:1,voice:0,beat:0},
+      destinations:[{sourceTrack:0,track:0,staffMap:[0]}],
+      count:1,
+      placement:'currentBar',
+      filters:{...all},
+    },
+  };
+
+  const result=preparePasteMusic(rebuiltDest,edit).score;
+  const bar1=result.tracks[0].staves[0].bars[1];
+  expect(bar1.voices).toHaveLength(2);
+  expect(bar1.voices[0].beats[0].notes[0].fret).toBe(source.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret);
+  expect(bar1.voices[0].beats[1].notes[0].fret).toBe(source.tracks[0].staves[0].bars[0].voices[0].beats[1].notes[0].fret);
+  expect(bar1.voices[1].beats[0].notes[0].fret).toBe(10);
+  expect(bar1.voices[1].beats[1].notes[0].fret).toBe(11);
+  expect(bar1.voices[1].beats[2].notes[0].fret).toBe(1);
+  expect(bar1.voices[1].beats[3].notes[0].fret).toBe(1);
+});
+
+it('rejects pasting a multi-voice phrase when destination lacks the required voices',()=>{
+  const source=music(),staff=source.tracks[0].staves[0];
+  for(const bar of staff.bars){
+    const voice1=new model.Voice();
+    for(let i=0;i<4;i++){
+      const beat=new model.Beat(),note=new model.Note();
+      beat.duration=4;note.string=2;note.fret=10+i;beat.addNote(note);voice1.addBeat(beat);
+    }
+    bar.addVoice(voice1);
+  }
+  source.finish(new Settings());
+  const clip=makeMusicClip(source,{
+    kind:'range',
+    range:{start:{bar:0,tick:0},end:{bar:0,tick:1920},lanes:[{track:0,staff:0,voice:0},{track:0,staff:0,voice:1}]},
+  },'singleTrack');
+
+  const destination=music();
+  const edit:ClipboardCommand={
+    type:'pasteMusic',
+    clip,
+    options:{
+      target:{track:0,staff:0,bar:1,voice:0,beat:0},
+      destinations:[{sourceTrack:0,track:0,staffMap:[0]}],
+      count:1,
+      placement:'currentBar',
+      filters:{...all},
+    },
+  };
+
+  expect(()=>preparePasteMusic(destination,edit)).toThrow('The destination must already contain every copied voice.');
 });

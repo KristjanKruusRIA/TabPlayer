@@ -86,7 +86,9 @@ it('bar_scope_and_expansion_are_exact',()=>{
   score.masterBars[0].isRepeatStart=false;score.masterBars[2].repeatCount=0;
   const expanded=decode(makeMusicClip(score,notes(1),'multiTrack'));expect(expanded.tracks[0].staves[0].bars[0].voices).toHaveLength(2);
   const partial:MusicSelection={kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:960},lanes:[{track:0,staff:0,voice:0},{track:0,staff:0,voice:1}]}};
-  expect(()=>makeMusicClip(score,partial,'singleTrack')).toThrow(/lane|voice|scope/i);
+  const partialClip=decode(makeMusicClip(score,partial,'singleTrack'));expect(partialClip.tracks[0].staves[0].bars[0].voices).toHaveLength(2);
+  const acrossTracks:MusicSelection={kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:960},lanes:[{track:0,staff:0,voice:0},{track:1,staff:0,voice:0}]}};
+  expect(()=>makeMusicClip(score,acrossTracks,'singleTrack')).toThrow(/track|staff|scope/i);
   staff.bars[1].voices[0].beats.splice(1);const underfull=decode(makeMusicClip(score,{kind:'notes',notes:[{target:{...target,bar:1},noteIndex:0}]},'singleTrack'));
   expect(underfull.tracks[0].staves[0].bars[0].voices[0].beats.reduce((sum,beat)=>sum+beat.playbackDuration,0)).toBe(960);
   for(const beat of staff.bars[3].voices[0].beats){beat.notes=[];beat.isEmpty=true;}expect(makeMusicClip(score,bars(3),'singleTrack').kind).toBe('bars');
@@ -148,6 +150,36 @@ it('declared empty partial lanes cannot be silently omitted',()=>{
   const score=music(),staff=score.tracks[0].staves[0];for(const bar of staff.bars){const voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);bar.addVoice(voice);}
   const selection:MusicSelection={kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:960},lanes:[{track:0,staff:0,voice:0},{track:0,staff:0,voice:1}]}};
   expect(()=>makeMusicClip(score,selection,'singleTrack')).toThrow(/lane|voice/i);
+});
+it('copies a partial multi-voice phrase range on the same staff',()=>{
+  const source=music(),staff=source.tracks[0].staves[0];
+  for(const bar of staff.bars){
+    const voice1=new model.Voice();
+    for(let i=0;i<4;i++){
+      const beat=new model.Beat(),note=new model.Note();
+      beat.duration=4;note.string=2;note.fret=5+i;beat.addNote(note);voice1.addBeat(beat);
+    }
+    bar.addVoice(voice1);
+  }
+  source.finish(new Settings());
+  const selection:MusicSelection={
+    kind:'range',
+    range:{
+      start:{bar:0,tick:0},
+      end:{bar:0,tick:1920},
+      lanes:[{track:0,staff:0,voice:0},{track:0,staff:0,voice:1}],
+    },
+  };
+  const clip=makeMusicClip(source,selection,'singleTrack');
+  expect(clip.mode).toBe('singleTrack');
+  expect(clip.kind).toBe('phrase');
+  const copy=decode(clip),clipStaff=copy.tracks[0].staves[0];
+  expect(clipStaff.bars).toHaveLength(1);
+  expect(clipStaff.bars[0].voices).toHaveLength(2);
+  expect(clipStaff.bars[0].voices[0].beats).toHaveLength(2);
+  expect(clipStaff.bars[0].voices[1].beats).toHaveLength(2);
+  expect(clipStaff.bars[0].voices[1].beats[0].notes[0].fret).toBe(5);
+  expect(clipStaff.bars[0].voices[1].beats[1].notes[0].fret).toBe(6);
 });
 it('accepts complete truly empty bars and registered custom percussion context',()=>{
   const score=music();score.tracks[0].staves[0].bars[0].voices[0].beats=[];expect(makeMusicClip(score,bars(),'singleTrack').kind).toBe('bars');

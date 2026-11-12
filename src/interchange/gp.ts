@@ -203,9 +203,15 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
 /** Source archive entries that describe tracks by position. Once tracks are added, removed or
  * reordered they would describe the wrong tracks, so export uses alphaTab's regenerated copies. */
 const trackOrderedEntry=(path:string)=>path==='Content/PartConfiguration'||path==='Content/LayoutConfiguration'||path.startsWith('Content/ScoreViews/');
+const rebuiltViews=new WeakSet<model.Score>();
+/** Whether the source file's views were dropped from this score, so the export writes alphaTab's regenerated ones. */
+export const sourceViewsRebuilt=(score:model.Score)=>rebuiltViews.has(score);
 export function forgetTrackOrderedEntries(score:model.Score):void {
   const entries=sourceEntries.get(score);
-  if(entries)sourceEntries.set(score,Object.fromEntries(Object.entries(entries).filter(([path])=>!trackOrderedEntry(path))));
+  if(!entries)return;
+  const kept=Object.entries(entries).filter(([path])=>!trackOrderedEntry(path));
+  if(kept.length<Object.keys(entries).length)rebuiltViews.add(score);
+  sourceEntries.set(score,Object.fromEntries(kept));
 }
 
 /** Carry source archive siblings and binary backing data omitted by model JSON. */
@@ -215,6 +221,7 @@ export function copyGpInterchangeSource(source:model.Score,destination:model.Sco
   copyScaleDiagrams(source,destination);
   copyTimeSignatureSources(source,destination);
   const entries=sourceEntries.get(source);if(entries)sourceEntries.set(destination,entries);
+  if(rebuiltViews.has(source))rebuiltViews.add(destination);
   if(source.backingTrack?.rawAudioFile&&!destination.backingTrack?.rawAudioFile) {
     destination.backingTrack??=new model.BackingTrack();destination.backingTrack.rawAudioFile=source.backingTrack.rawAudioFile.slice();
   }

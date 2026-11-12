@@ -2,7 +2,7 @@ import { Settings } from '@coderline/alphatab';
 import type { MessageKey } from '../i18n';
 import { READ_ENTRY_LIMIT } from '../interchange/archive';
 import { exportGpInterchange,loadInterchangeScore } from '../interchange/gp';
-import { curveLosses } from '../interchange/curves';
+import { gpLosses } from '../interchange/gp-losses';
 import { probeScoreBytes,type Probe } from './probe';
 
 export type BatchKind='gp345'|'gpx'|'gp'|'musicxml';
@@ -48,7 +48,7 @@ export function convertScoreBytes(bytes:Uint8Array):{bytes:Uint8Array;tracks:num
   if(!score.tracks.length||!score.masterBars.length)throw new Error('The file holds no music.');
   // Writing and reading back are held to what Open accepts, not the input's cap: a dense score of a few MiB writes a
   // larger uncompressed score.gpif and is not a damaged file.
-  const losses=curveLosses(score),output=exportGpInterchange(score,new Settings());
+  const losses=gpLosses(score),output=exportGpInterchange(score,new Settings());
   // A file is reported converted only when the result reads back with the same shape.
   const check=loadInterchangeScore(output,new Settings());
   if(check.tracks.length!==score.tracks.length||check.masterBars.length!==score.masterBars.length)throw new Error('The converted file did not read back as the same score.');

@@ -128,7 +128,7 @@ export function hasGpifCurves(score:model.Score):boolean {
 
 /** What the property will carry, and what it cannot. Pure: the export and every place that warns about it use this one result. */
 export interface CurvePlan {carriedBeats:Set<model.Beat>;carriedNotes:Set<model.Note>;carriedSlurs:Set<model.Note>;losses:string[]}
-const wherever=(beat:model.Beat)=>{
+export const wherever=(beat:model.Beat)=>{
   const trackIndex=(beat.voice.bar.staff.track as {sourceIndex?:number}).sourceIndex??beat.voice.bar.staff.track.index;
   const barIndex=(beat.voice.bar as {sourceIndex?:number}).sourceIndex??beat.voice.bar.index;
   return `track ${trackIndex+1}, bar ${barIndex+1}, beat ${beat.index+1}`;

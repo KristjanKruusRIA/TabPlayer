@@ -1,0 +1,26 @@
+<!-- Hand-authored GPIF fragments (not copied from any score), written from the names alphaTab's reader accepts.
+     Both lists are positional: entry k is merged into the k-th beat / note of the grafted skeleton.
+       beat 0 slap (beat property Slapped)      beat 1 pop (beat property Popped)
+       beat 2 tap (note property Tapped, below)  beat 3 dead slap (beat element DeadSlapped)
+       beat 4 golpe by thumb                     beat 5 golpe by finger
+       beat 6 plain, no gesture (control)        -->
+<GPIF>
+  <Beats>
+    <Beat><Properties><Property name="Slapped"><Enable/></Property></Properties></Beat>
+    <Beat><Properties><Property name="Popped"><Enable/></Property></Properties></Beat>
+    <Beat/>
+    <Beat><DeadSlapped/></Beat>
+    <Beat><Golpe>Thumb</Golpe></Beat>
+    <Beat><Golpe>Finger</Golpe></Beat>
+    <Beat/>
+  </Beats>
+  <Notes>
+    <Note/>
+    <Note/>
+    <Note><Properties><Property name="Tapped"><Enable/></Property></Properties></Note>
+    <Note/>
+    <Note/>
+    <Note/>
+    <Note/>
+  </Notes>
+</GPIF>

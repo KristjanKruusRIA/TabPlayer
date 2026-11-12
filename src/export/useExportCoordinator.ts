@@ -14,7 +14,7 @@ import { exportMusicXml } from './musicxml';
 import { exportAsciiTab } from './ascii-tab';
 import { exportGp5,gp5Warning } from './gp5';
 import { gpWarning } from './gp-warning';
-import { curveLosses } from '../interchange/curves';
+import { gpLosses } from '../interchange/gp-losses';
 import { clearBacking } from '../interchange/backing-projection';
 import { DEFAULT_FILE_NAME,expandFileName,fileKey,fileNameContext,savedFileNames,withSuffix } from './file-name';
 import { assertPngSize,loadExportFonts,renderPdfPages,svgPageWithBackground } from './pdf';
@@ -77,7 +77,7 @@ export function useExportCoordinator({score,settings,currentSpeed,metronomeSound
       const name=expandFileName(frozenOptions.fileName??DEFAULT_FILE_NAME,fileNameContext(copy,selection,new Date()));
       if(frozenOptions.format==='gp'){
         // What the file cannot keep is worked out first, so the user is asked once, with it, before anything is written.
-        const losses=curveLosses(projectGpDocument({score:copy,settings:frozenSettings,bytes:null,selection,backing:false}));
+        const losses=gpLosses(projectGpDocument({score:copy,settings:frozenSettings,bytes:null,selection,backing:false}));
         if(!await (losses.length?bridge.confirmExport(gpWarning(losses)):bridge.confirmExport())||cancelled.current||!alive.current)return false;
         const include=frozenOptions.backing!==false,backing=frozenSettings.backing;
         const bytes=include&&backing?(backing.assetId==='embedded'?embedded:await bridge.readBackingAsset(backing.assetId,revision)):null;

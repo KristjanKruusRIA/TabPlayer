@@ -1,7 +1,7 @@
 import { model,Settings } from '@coderline/alphatab';
 import { validateSelection,type ExportSelection } from './types';
 import { scoreFromJson } from '../model-clone';
-import { copyGpInterchangeSource } from '../interchange/gp';
+import { copyGpInterchangeSource,forgetTrackOrderedEntries } from '../interchange/gp';
 import { isGpMixAutomation,trackMixAutomations } from '../interchange/automation';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { applyLyricsEdit,reconstructTrackLyrics } from '../editor/lyrics';
@@ -108,6 +108,8 @@ export function selectScore(score:model.Score,selection:ExportSelection):model.S
     if(note.hammerPullDestination&&!notes.has(note.hammerPullDestination)){note.hammerPullDestination=null;note.isHammerPullOrigin=false;}
   }
   const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());copyGpInterchangeSource(copy,result);
+  // The source file's views describe its tracks by position; a subset or a new order would leave them describing other tracks.
+  if(selection.tracks.length!==score.tracks.length||selection.tracks.some((track,index)=>track!==index))forgetTrackOrderedEntries(result);
   result.tracks.forEach((track,t)=>{
     (track as any).sourceIndex=(score.tracks[selection.tracks[t]] as any)?.sourceIndex??selection.tracks[t];
     track.staves.forEach(staff=>{

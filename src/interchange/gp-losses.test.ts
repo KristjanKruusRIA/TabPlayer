@@ -1,0 +1,306 @@
+// @vitest-environment jsdom
+import { describe,expect,it,vi } from 'vitest';
+import { model,Settings } from '@coderline/alphatab';
+import { strFromU8,strToU8,unzipSync,zipSync } from 'fflate';
+import { applyHarmonyEdit } from '../harmony/edits';
+import { selectScore } from '../export/selection';
+import { exportGpInterchange,loadInterchangeScore } from './gp';
+import { gpLosses } from './gp-losses';
+import { curveLosses } from './curves';
+
+const settings=new Settings();
+const gpif='Content/score.gpif';
+
+/** A guitar score of `bars` bars of four quarter notes on string 6, `tracks` tracks alike. */
+function build(bars:number,tracks=1):model.Score {
+  const score=new model.Score();
+  for(let t=0;t<tracks;t++){
+    const track=new model.Track();track.name=`Track ${t+1}`;track.playbackInfo.program=25;
+    const staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];track.addStaff(staff);score.addTrack(track);
+  }
+  for(let i=0;i<bars;i++){
+    score.addMasterBar(new model.MasterBar());
+    for(const track of score.tracks){
+      const bar=new model.Bar();bar.clef=model.Clef.G2;const voice=new model.Voice();
+      for(let b=0;b<4;b++){const beat=new model.Beat();beat.duration=4;beat.isEmpty=false;const note=new model.Note();note.string=6;note.fret=3;beat.addNote(note);voice.addBeat(beat);}
+      bar.addVoice(voice);track.staves[0].addBar(bar);
+    }
+  }
+  score.finish(settings);return score;
+}
+const noteAt=(score:model.Score,bar:number,beat:number,track=0)=>score.tracks[track].staves[0].bars[bar].voices[0].beats[beat].notes[0];
+const tie=(from:model.Note,to:model.Note)=>{from.tieDestination=to;to.tieOrigin=from;to.isTieDestination=true;};
+const hammer=(from:model.Note,to:model.Note)=>{from.hammerPullDestination=to;from.isHammerPullOrigin=true;to.hammerPullOrigin=from;};
+const slide=(from:model.Note,to:model.Note)=>{from.slideTarget=to;from.slideOutType=model.SlideOutType.Legato;to.slideOrigin=from;};
+const slur=(from:model.Note,to:model.Note)=>{from.slurDestination=to;to.slurOrigin=from;to.isSlurDestination=true;};
+
+/** The GPIF document of an exported file, read here and not by alphaTab's reader. */
+function written(bytes:Uint8Array) {
+  const xml=strFromU8(unzipSync(bytes)[gpif]),doc=new DOMParser().parseFromString(xml,'application/xml');
+  return {xml,doc};
+}
+const kids=(node:Element|null|undefined,name:string)=>node?[...node.children].filter(child=>child.localName===name):[];
+const ids=(node:Element|null|undefined,name:string)=>(kids(node,name)[0]?.textContent??'').trim().split(/\s+/).filter(id=>id&&id!=='-1');
+const byId=(doc:Document,section:string,name:string)=>new Map(kids(kids(doc.documentElement,section)[0],name).map(node=>[node.getAttribute('id')!,node]));
+/** For every note id of the first staff of the first track, the master bar it sits in, from the file's own id lists. */
+function barOfNotes(doc:Document):Map<string,number> {
+  const bars=byId(doc,'Bars','Bar'),voices=byId(doc,'Voices','Voice'),beats=byId(doc,'Beats','Beat'),result=new Map<string,number>();
+  kids(kids(doc.documentElement,'MasterBars')[0],'MasterBar').forEach((master,index)=>{
+    const bar=bars.get(ids(master,'Bars')[0]);
+    for(const voiceId of ids(bar,'Voices'))for(const beatId of ids(voices.get(voiceId),'Beats'))for(const noteId of ids(beats.get(beatId),'Notes'))result.set(noteId,index);
+  });
+  return result;
+}
+const noteNodes=(doc:Document)=>byId(doc,'Notes','Note');
+const hasProperty=(note:Element|undefined,name:string)=>kids(kids(note,'Properties')[0],'Property').some(property=>property.getAttribute('name')===name);
+const propertyNamed=(note:Element|undefined,prefix:string)=>kids(kids(note,'Properties')[0],'Property').some(property=>(property.getAttribute('name')??'').startsWith(prefix));
+
+describe('GP 7/8 export loss list',()=>{
+  it('is exactly the curve list for a score with nothing new to report, and writes the same bytes as it did',()=>{
+    const score=build(6);tie(noteAt(score,0,0),noteAt(score,0,1));hammer(noteAt(score,1,3),noteAt(score,2,0));slide(noteAt(score,3,0),noteAt(score,3,1));
+    expect(gpLosses(score)).toEqual(curveLosses(score));
+    expect(gpLosses(score)).toEqual([]);
+    expect(gpLosses(build(0))).toEqual([]);
+  });
+
+  it('reports ties, hammer-ons and slides whose destination is more than three bars away, from the links the file really holds',()=>{
+    const score=build(8);
+    tie(noteAt(score,0,0),noteAt(score,4,0));tie(noteAt(score,1,1),noteAt(score,5,1));tie(noteAt(score,0,2),noteAt(score,3,2));
+    hammer(noteAt(score,2,0),noteAt(score,6,0));
+    slide(noteAt(score,0,3),noteAt(score,4,3));
+    const losses=gpLosses(score);
+    expect(losses).toEqual([
+      '2 ties reach further than a Guitar Pro file can link and will not be read back as tied (first at track 1, bar 1, beat 1)',
+      '1 hammer-on or pull-off cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar 3, beat 1)',
+      '1 slide cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar 1, beat 4)',
+    ]);
+    // The bytes: alphaTab writes only flags, and the far destination sits more than three bars after its origin in the file's own lists.
+    const {doc}=written(exportGpInterchange(score,settings)),barOf=barOfNotes(doc),notes=noteNodes(doc);
+    const withTie=(flag:'origin'|'destination')=>[...notes].filter(([,node])=>kids(node,'Tie')[0]?.getAttribute(flag)==='true').map(([id])=>barOf.get(id)!).sort((a,b)=>a-b);
+    expect(withTie('origin')).toEqual([0,0,1]);expect(withTie('destination')).toEqual([3,4,5]);
+    expect([...notes.values()].filter(node=>hasProperty(node,'HopoOrigin'))).toHaveLength(1);
+  });
+
+  it('counts exactly four bars as inside the reach and five as outside',()=>{
+    const score=build(6);
+    tie(noteAt(score,0,0),noteAt(score,3,0));
+    expect(gpLosses(score)).toEqual([]);
+    tie(noteAt(score,1,1),noteAt(score,5,1));
+    expect(gpLosses(score)).toEqual(['1 tie reaches further than a Guitar Pro file can link and will not be read back as tied (first at track 1, bar 2, beat 2)']);
+  });
+
+  describe('hammer-ons and slides follow the reader search, not a bar count',()=>{
+    // gp-link-search.test.ts pins the reader: later beats of the origin bar, then the first beat of the next bar; the first note on the string wins.
+    const T=true,R=false;
+    /** `layout[bar][beat]` says whether the beat keeps its note; the rest become rests. */
+    function sparse(layout:boolean[][]) {
+      const score=build(layout.length);
+      layout.forEach((beats,bar)=>beats.forEach((keep,beat)=>{if(!keep)score.tracks[0].staves[0].bars[bar].voices[0].beats[beat].notes.length=0;}));
+      return score;
+    }
+    const cases:[string,boolean[][],[number,number],[number,number],boolean][]=[
+      ['the next beat of the same bar',[[T,T,R,R]],[0,0],[0,1],false],
+      ['a later beat with a rest between',[[T,R,T,R]],[0,0],[0,2],false],
+      ['the first beat of the next bar after rests',[[T,R,R,R],[T,R,R,R]],[0,0],[1,0],false],
+      ['the first beat of the next bar from the last beat',[[R,R,R,T],[T,R,R,R]],[0,3],[1,0],false],
+      ['the second beat of the next bar',[[T,R,R,R],[R,T,R,R]],[0,0],[1,1],true],
+      ['the first beat of the bar after next',[[T,R,R,R],[R,R,R,R],[T,R,R,R]],[0,0],[2,0],true],
+      ['a later beat past a nearer note on the same string',[[T,T,T,R]],[0,0],[0,2],true],
+    ];
+    it.each(cases)('hammer-on: %s',(_name,layout,[fromBar,fromBeat],[toBar,toBeat],lost)=>{
+      const score=sparse(layout);hammer(noteAt(score,fromBar,fromBeat),noteAt(score,toBar,toBeat));
+      expect(gpLosses(score)).toEqual(lost?[`1 hammer-on or pull-off cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar ${fromBar+1}, beat ${fromBeat+1})`]:[]);
+    });
+    it.each(cases)('slide: %s',(_name,layout,[fromBar,fromBeat],[toBar,toBeat],lost)=>{
+      const score=sparse(layout);slide(noteAt(score,fromBar,fromBeat),noteAt(score,toBar,toBeat));
+      expect(gpLosses(score)).toEqual(lost?[`1 slide cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar ${fromBar+1}, beat ${fromBeat+1})`]:[]);
+    });
+    it('treats a shift slide like a legato slide, and leaves a slide with no target alone',()=>{
+      const far=sparse([[T,R,R,R],[R,T,R,R]]);slide(noteAt(far,0,0),noteAt(far,1,1));noteAt(far,0,0).slideOutType=model.SlideOutType.Shift;
+      expect(gpLosses(far)).toHaveLength(1);
+      const none=sparse([[T,R,R,R],[R,T,R,R]]);noteAt(none,0,0).slideOutType=model.SlideOutType.OutDown;
+      expect(gpLosses(none)).toEqual([]);
+    });
+  });
+
+  it('counts a sounding length outside 0 to 16 separately: it is written, and the reader refuses it',()=>{
+    const score=build(1);noteAt(score,0,0).durationPercent=20;noteAt(score,0,1).durationPercent=Number.NaN;noteAt(score,0,2).durationPercent=0.5;
+    expect(gpLosses(score)).toEqual([
+      '1 note has a sounding length that is written only for TabPlayer (first at track 1, bar 1, beat 3)',
+      '2 notes have a sounding length outside 0 to 16 that will not be read back (first at track 1, bar 1, beat 1)',
+    ]);
+    const bytes=exportGpInterchange(score,settings),{doc}=written(bytes),items=[...doc.querySelectorAll('Property[name="TabPlayerCurves"] > Items > Note')];
+    expect(items.map(item=>item.getAttribute('durationPercent'))).toEqual(['20','NaN','0.5']);
+    const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+    const reread=loadInterchangeScore(bytes,settings).tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(reread.map(beat=>beat.notes[0].durationPercent)).toEqual([1,1,0.5,1]);expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it('agrees with the writer on which notes carry a length or a hidden flag: every note of a voice that is not empty, and none of an empty voice',()=>{
+    const score=build(2);
+    noteAt(score,0,0).durationPercent=0.5;noteAt(score,0,1).isVisible=false;
+    // An empty voice (every beat a placeholder) is skipped by both the writer and the list.
+    const bar=score.tracks[0].staves[0].bars[1].voices[0];for(const beat of bar.beats){beat.isEmpty=true;beat.notes[0].durationPercent=0.25;}
+    score.finish(settings);
+    const losses=gpLosses(score),{doc}=written(exportGpInterchange(score,settings));
+    const items=[...doc.querySelectorAll('Property[name="TabPlayerCurves"] > Items > Note')];
+    expect(items).toHaveLength(2);
+    expect(losses).toEqual([
+      '1 note has a sounding length that is written only for TabPlayer (first at track 1, bar 1, beat 1)',
+      '1 hidden note is written as hidden only for TabPlayer (first at track 1, bar 1, beat 2)',
+    ]);
+  });
+
+  it('gives an empty list for a large ordinary score and does not throw on odd ones',()=>{
+    expect(gpLosses(build(200,4))).toEqual([]);
+    expect(gpLosses(new model.Score())).toEqual([]);
+    const noBars=new model.Score(),track=new model.Track();track.addStaff(new model.Staff());noBars.addTrack(track);
+    expect(gpLosses(noBars)).toEqual([]);
+    // Links to notes that sit in no bar at all.
+    const score=build(2),origin=noteAt(score,0,0);
+    origin.tieDestination=new model.Note();origin.hammerPullDestination=new model.Note();origin.isHammerPullOrigin=true;
+    const other=noteAt(score,0,1);other.slideTarget=new model.Note();other.slideOutType=model.SlideOutType.Legato;
+    let losses:string[]=[];
+    expect(()=>{losses=gpLosses(score);}).not.toThrow();
+    expect(losses.map(entry=>entry.replace(/^\d+ /,''))).toEqual([
+      'tie reaches further than a Guitar Pro file can link and will not be read back as tied (first at track 1, bar 1, beat 1)',
+      'hammer-on or pull-off cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar 1, beat 1)',
+      'slide cannot be linked again from a Guitar Pro file and will not be read back as linked (first at track 1, bar 1, beat 2)',
+    ]);
+  });
+
+  it('reports carried slurs, which only TabPlayer reads',()=>{
+    const score=build(3);slur(noteAt(score,0,1),noteAt(score,0,3));slur(noteAt(score,1,0),noteAt(score,2,0));
+    expect(gpLosses(score)).toEqual(['2 slurs are written only for TabPlayer (first at track 1, bar 1, beat 2)']);
+    const {xml,doc}=written(exportGpInterchange(score,settings));
+    // The slur is in the private property and nowhere in GPIF's own fields: nothing but TabPlayerCurves names it.
+    const items=[...doc.querySelectorAll('Property[name="TabPlayerCurves"] > Items > Slur')];
+    expect(items).toHaveLength(2);
+    expect(xml.replace(/<Property name="TabPlayerCurves">[\s\S]*?<\/Property>/,'')).not.toMatch(/slur/i);
+    const one=build(2);slur(noteAt(one,0,0),noteAt(one,1,0));
+    expect(gpLosses(one)).toEqual(['1 slur is written only for TabPlayer (first at track 1, bar 1, beat 1)']);
+  });
+
+  it('reports curve detail that only TabPlayerCurves holds, and nothing for a curve GPIF holds whole',()=>{
+    const score=build(2);
+    const long=noteAt(score,0,0);long.bendType=model.BendType.Custom;for(const [offset,value]of [[0,0],[15,2],[30,4],[45,2],[60,0]])long.addBendPoint(new model.BendPoint(offset,value));
+    const whammy=score.tracks[0].staves[0].bars[1].voices[0].beats[0];whammy.whammyBarType=model.WhammyType.Custom;for(const [offset,value]of [[0,0],[12,-1],[24,-2],[36,-1],[60,0]])whammy.addWhammyBarPoint(new model.BendPoint(offset,value));
+    const styled=noteAt(score,0,2);styled.bendType=model.BendType.Bend;styled.bendStyle=model.BendStyle.Gradual;for(const [offset,value]of [[0,0],[60,4]])styled.addBendPoint(new model.BendPoint(offset,value));
+    const plain=noteAt(score,0,3);plain.bendType=model.BendType.Bend;for(const [offset,value]of [[0,0],[60,4]])plain.addBendPoint(new model.BendPoint(offset,value));
+    noteAt(score,1,1).durationPercent=0.5;noteAt(score,1,2).durationPercent=0.25;
+    noteAt(score,1,3).isVisible=false;
+    score.finish(settings);
+    expect(gpLosses(score)).toEqual([
+      '2 bends or whammy bars have more than four points and are written only for TabPlayer (first at track 1, bar 1, beat 1)',
+      '1 bend or whammy bar has a style that is written only for TabPlayer (first at track 1, bar 1, beat 3)',
+      '2 notes have a sounding length that is written only for TabPlayer (first at track 1, bar 2, beat 2)',
+      '1 hidden note is written as hidden only for TabPlayer (first at track 1, bar 2, beat 4)',
+    ]);
+    const {doc}=written(exportGpInterchange(score,settings)),notes=noteNodes(doc),barOf=barOfNotes(doc);
+    // The 5-point bend has no ordinary GPIF field at all; the private property holds all five points.
+    const bendItems=[...doc.querySelectorAll('Property[name="TabPlayerCurves"] > Items > Bend')];
+    const five=bendItems.find(item=>item.querySelectorAll('Point').length===5)!;
+    expect(five).toBeDefined();
+    expect(propertyNamed(notes.get(five.getAttribute('id')!),'Bend')).toBe(false);
+    const whammyItem=[...doc.querySelectorAll('Property[name="TabPlayerCurves"] > Items > Whammy')].find(item=>item.querySelectorAll('Point').length===5);
+    expect(whammyItem).toBeDefined();
+    const beatNode=byId(doc,'Beats','Beat').get(whammyItem!.getAttribute('id')!)!;
+    expect(kids(beatNode,'Whammy')).toHaveLength(0);
+    // The styled two-point bend keeps its ordinary fields, but its style is in the private property alone.
+    const styledItem=bendItems.find(item=>item.getAttribute('style')==='1')!;
+    expect(styledItem.querySelectorAll('Point')).toHaveLength(2);
+    expect(propertyNamed(notes.get(styledItem.getAttribute('id')!),'Bend')).toBe(true);
+    // Duration percent and visibility are likewise only in the private property.
+    const noteItems=[...doc.querySelectorAll('Property[name="TabPlayerCurves"] > Items > Note')];
+    expect(noteItems.map(item=>[barOf.get(item.getAttribute('id')!),item.getAttribute('durationPercent'),item.getAttribute('isVisible')])).toEqual([[1,'0.5',null],[1,'0.25',null],[1,null,'false']]);
+  });
+
+  describe('empty chord carriers',()=>{
+    const chord={name:'Dm',nameMode:'manual' as const,recipe:null,firstFret:1,frets:[1,3,2,0,-1,-1],fingers:[1,3,2,-2,-2,-2],barreFrets:[],showName:false,showDiagram:true,showFingering:false};
+    function withCarriers(count:number) {
+      const score=build(3),staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];score.tracks[0].addStaff(staff);
+      for(const master of score.masterBars){void master;const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;beat.duration=model.Duration.Quarter;voice.addBeat(beat);bar.addVoice(voice);staff.addBar(bar);}
+      score.finish(settings);
+      for(let bar=0;bar<count;bar++)applyHarmonyEdit(score,{type:'setHarmonyChord',target:{track:0,staff:1,bar,voice:0,beat:0},chord,fillEmptyBeat:false},1);
+      return score;
+    }
+    it('says how many are written as quarter rests',()=>{
+      const score=withCarriers(2);
+      expect(gpLosses(score)).toEqual(['2 empty beats that only carry a chord diagram are written as quarter rests (first at track 1, bar 1, beat 1)']);
+      // The bytes: the second staff's bars 1 and 2 list a real voice, bar 3 (no chord) the empty marker.
+      const {doc}=written(exportGpInterchange(score,settings)),bars=byId(doc,'Bars','Bar'),masters=kids(kids(doc.documentElement,'MasterBars')[0],'MasterBar');
+      const voiceOf=(bar:number)=>(kids(bars.get((kids(masters[bar],'Bars')[0].textContent??'').trim().split(/\s+/)[1]),'Voices')[0].textContent??'').trim();
+      expect(voiceOf(0)).not.toBe('-1');expect(voiceOf(1)).not.toBe('-1');expect(voiceOf(2)).toBe('-1');
+      const voices=byId(doc,'Voices','Voice'),beats=byId(doc,'Beats','Beat'),rhythms=byId(doc,'Rhythms','Rhythm');
+      const beat=beats.get((kids(voices.get(voiceOf(0)),'Beats')[0].textContent??'').trim())!;
+      expect(kids(beat,'Notes')).toHaveLength(0);
+      expect(kids(rhythms.get(kids(beat,'Rhythm')[0].getAttribute('ref')!),'NoteValue')[0].textContent).toBe('Quarter');
+    });
+    it('says it in the singular for one',()=>{
+      expect(gpLosses(withCarriers(1))).toEqual(['1 empty beat that only carries a chord diagram is written as a quarter rest (first at track 1, bar 1, beat 1)']);
+    });
+  });
+
+  describe('views of a partial export',()=>{
+    // The reader of a PartConfiguration: Int32 view count; per view a multi-rest byte, an Int32 group count and one flag byte per group; a trailing Int32.
+    function decodeParts(bytes:Uint8Array) {
+      const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),views:{multi:number;flags:number[]}[]=[];let at=0;
+      const count=view.getInt32(at);at+=4;
+      for(let i=0;i<count;i++){const multi=bytes[at++],groups=view.getInt32(at);at+=4;const flags:number[]=[];for(let j=0;j<groups;j++)flags.push(bytes[at++]);views.push({multi,flags});}
+      return {views,tail:view.getInt32(at),length:bytes.length,consumed:at+4};
+    }
+    const int32=(value:number)=>[(value>>>24)&255,(value>>>16)&255,(value>>>8)&255,value&255];
+    /** Master view of three tracks, then one view per track: flags 3, 6 and 10 are standard+tab, tab+slash and tab+numbered. */
+    const flags=[3,6,10];
+    const authoredParts=Uint8Array.from([...int32(4),0,...int32(3),...flags,...flags.flatMap(flag=>[0,...int32(1),flag]),...int32(1)]);
+    const authoredLayout=Uint8Array.from([...int32(4),0,0,255,0,255,255,255,255,255,255,255,255]);
+    const sentinel=strToU8('a view the source file defined');
+    function source() {
+      const entries=unzipSync(exportGpInterchange(build(2,3),settings));
+      entries['Content/PartConfiguration']=authoredParts;entries['Content/LayoutConfiguration']=authoredLayout;entries['Content/ScoreViews/main']=sentinel;
+      return loadInterchangeScore(zipSync(entries),settings);
+    }
+    const exported=(score:model.Score)=>unzipSync(exportGpInterchange(score,settings));
+
+    it('keeps the hand-authored entries byte for byte when every track is kept in order',()=>{
+      const kept=exported(selectScore(source(),{tracks:[0,1,2],range:null}));
+      expect(Array.from(kept['Content/PartConfiguration'])).toEqual(Array.from(authoredParts));
+      expect(Array.from(kept['Content/LayoutConfiguration'])).toEqual(Array.from(authoredLayout));
+      expect(Array.from(kept['Content/ScoreViews/main'])).toEqual(Array.from(sentinel));
+      expect(gpLosses(selectScore(source(),{tracks:[0,1,2],range:null}))).toEqual([]);
+      // A range of bars does not change which tracks the views describe.
+      expect(Array.from(exported(selectScore(source(),{tracks:[0,1,2],range:{first:0,last:0}}))['Content/PartConfiguration'])).toEqual(Array.from(authoredParts));
+    });
+    it('does not carry views that describe three tracks into a file of one',()=>{
+      const subset=selectScore(source(),{tracks:[1],range:null}),out=exported(subset);
+      // The source describes 4 views of 3 tracks; the file now holds 2 views of 1 track, as alphaTab regenerates them.
+      const parts=decodeParts(out['Content/PartConfiguration']);
+      expect(decodeParts(authoredParts).views.map(view=>view.flags.length)).toEqual([3,1,1,1]);
+      expect(parts.views.map(view=>view.flags.length)).toEqual([1,1]);
+      expect(parts.consumed).toBe(parts.length);expect(parts.tail).toBe(1);
+      expect(out['Content/LayoutConfiguration'].length).toBe(8);
+      expect(out['Content/ScoreViews/main']).toBeUndefined();
+      expect(gpLosses(subset)).toEqual(["the source file's part, layout and score views were rebuilt because tracks were added, left out or reordered"]);
+    });
+    it('does the same for a reordered selection',()=>{
+      const reordered=selectScore(source(),{tracks:[2,1,0],range:null}),out=exported(reordered);
+      const parts=decodeParts(out['Content/PartConfiguration']);
+      expect(parts.views).toHaveLength(4);
+      expect(Array.from(out['Content/PartConfiguration'])).not.toEqual(Array.from(authoredParts));
+      expect(parts.views[0].flags).toEqual([10,6,3]);
+      expect(out['Content/ScoreViews/main']).toBeUndefined();
+      expect(gpLosses(reordered)).toEqual(["the source file's part, layout and score views were rebuilt because tracks were added, left out or reordered"]);
+    });
+    it('says nothing for a score that has no source views to rebuild',()=>{
+      expect(gpLosses(selectScore(build(2,3),{tracks:[1],range:null}))).toEqual([]);
+    });
+  });
+
+  it('does not throw on a score with no links, an empty voice, no bars or a half-built bar',()=>{
+    expect(gpLosses(new model.Score())).toEqual([]);
+    const score=build(2);score.tracks[0].staves[0].bars[0].voices[0].beats.length=0;
+    expect(()=>gpLosses(score)).not.toThrow();
+    const bare=new model.Score(),track=new model.Track();track.addStaff(new model.Staff());bare.addTrack(track);
+    expect(gpLosses(bare)).toEqual([]);
+  });
+});

@@ -6461,7 +6461,7 @@
       "historical_status": "missing",
       "current_status": "partial",
       "current_behavior": "Beat tap/slap/pop, finger/thumb golpe and dead-slap flags are authored without fabricated pitched notes; dead-slap and retrigger behavior have literal MIDI coverage. 2026-11-06: slap and pop now have recorded bass sounds; dead slap keeps the dead-note voice.",
-      "remaining_gap": "Golpe has no sound of its own, and target audible acceptance is open.",
+      "remaining_gap": "Golpe now adds a percussion hit of its own (thumb: General MIDI Low Wood Block, finger: Side Stick) in playback, audio export and MIDI export, leaving the written notes unchanged; the sound has not been heard by anyone, and target audible acceptance is open (2026-11-12-gp8-golpe-sound-fermata-probe.md).",
       "current_evidence": [
         "lyrics_notation",
         "lyrics_validation",

@@ -1012,3 +1012,76 @@ fn the_sender_is_told_the_score_is_playing_only_while_something_is_routed() {
     routed.shared.request_reset();
     assert!(!routed.shared.rendering.load(Ordering::Relaxed));
 }
+
+/// The lead's golpe knocks: key 77 at the start and key 38 at 1300 ticks, which the score ends only at 7000.
+fn knock_events() -> Vec<Value> {
+    let mut events = default_events();
+    events.extend([
+        on("lead", 0, 9, 77),
+        off("lead", 120, 9, 77),
+        on("lead", 1300, 9, 38),
+        off("lead", 7000, 9, 38),
+    ]);
+    events
+}
+fn knock_routes() -> Vec<(usize, RouteSpec)> {
+    vec![
+        (
+            LEAD,
+            RouteSpec {
+                knock: true,
+                ..RouteSpec::lanes(0, 0, &[(0, 0), (9, 9)])
+            },
+        ),
+        (BASS, spec(0, 1)),
+        (DRUMS, spec(0, 9)),
+    ]
+}
+
+#[test]
+fn a_routed_guitars_knock_reaches_the_percussion_channel_not_the_speakers_and_is_let_go_however_the_score_stops()
+ {
+    let mut rig = Rig::with_plan(&knock_routes(), plan_with(1, knock_events()));
+    rig.play();
+    rig.run(1.5);
+    let mut messages = rig.messages();
+    let find = |bytes: &[u8]| messages.iter().filter(|m| m.bytes == bytes).count();
+    assert_eq!(find(&[0x99, 77, 90]), 1, "the knock plays on channel 10");
+    assert_eq!(find(&[0x89, 77, 0]), 1);
+    assert_eq!(find(&[0x99, 38, 90]), 1);
+    assert_eq!(
+        find(&[0x90, 60, 90]),
+        1,
+        "the written notes stay on the guitar's channel"
+    );
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.bytes[0] & 0xf0 != 0x90 || m.bytes[0] & 15 != 2),
+        "no melodic channel is spent on the knock"
+    );
+    assert!(
+        peak(&rig.heard) < 1e-6,
+        "the routed guitar is silent here, its knock too"
+    );
+    // Stop leaves neither the knock nor the drums sounding.
+    rig.command(TransportCommand::Stop { generation: 1 });
+    rig.run(0.1);
+    messages.extend(rig.messages());
+    assert_eq!(sounding(&messages), vec![]);
+    // A seek into the held knock states it again; stopping lets go of it.
+    let mut rig = Rig::with_plan(&knock_routes(), plan_with(1, knock_events()));
+    rig.play();
+    rig.run(0.1);
+    rig.command(TransportCommand::SeekTick {
+        generation: 1,
+        tick: 4000.0,
+    });
+    rig.run(0.2);
+    let mut messages = rig.messages();
+    assert!(sounding(&messages).contains(&(0, 9, 38)));
+    rig.command(TransportCommand::Stop { generation: 1 });
+    rig.run(0.1);
+    messages.extend(rig.messages());
+    assert_eq!(sounding(&messages), vec![]);
+}

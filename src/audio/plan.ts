@@ -15,6 +15,7 @@ import type { ReferenceLocation } from './reference-sync-types';
 import { interpretAttacks, type Attack } from './interpretation';
 import { DRUM_KIT_ELEMENTS, planKitElement } from './drum-kit';
 import { kitSound } from './kit-sound';
+import { GOLPE_CHANNEL, golpeHits, playbackBar } from './golpe';
 import { ownerOf } from '../instruments/drum-kit';
 import type { DrumKitElement } from '../edit-types';
 
@@ -262,14 +263,6 @@ function laneScore(json: ReturnType<typeof model.JsonConverter.scoreToJson>, lan
   }
   track.staves = [staff]; score.tracks = [track]; return { score, markers };
 }
-function playbackBar(bar: model.Bar): model.Bar {
-  switch (bar.simileMark) {
-    case model.SimileMark.Simple: return bar.previousBar ? playbackBar(bar.previousBar) : bar;
-    case model.SimileMark.FirstOfDouble:
-    case model.SimileMark.SecondOfDouble: return bar.previousBar?.previousBar ? playbackBar(bar.previousBar.previousBar) : bar;
-    default: return bar;
-  }
-}
 function articulation(note: model.Note, program: number, legato: boolean, style?: TrackInterpretation['style']): Articulation {
   if (note.isDead) return 'dead';
   if (note.isPalmMute) return 'muted';
@@ -468,7 +461,14 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity, ...(note.kit ? { kitElement: note.kit } : {}) };
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
   }
-  const durationTick = Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end), 0);
+  // A golpe adds a percussion hit to its beat; it is part of its track and replaces no note.
+  const knocks = golpeHits(score, occurrences.map(o => ({ bar: o.bar, startTick: o.startTick }))).map((hit, index) => ({ ...hit, index }));
+  for (const hit of knocks) {
+    const common = { trackId: ids[hit.track], channel: GOLPE_CHANNEL, key: hit.key, velocity: hit.velocity };
+    // Order after every written event, a hit's release before the next hit's start.
+    events.push({ ...common, type: 'noteOff', tick: hit.tick + hit.length, order: 2 ** 50 + hit.index }, { ...common, type: 'noteOn', tick: hit.tick, order: 2 ** 50 + knocks.length + hit.index });
+  }
+  const durationTick = Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end), ...knocks.map(hit => hit.tick + hit.length), 0);
   const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, tempos), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, occurrences, performedBeats, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick || a.order - b.order).map(({ order, ...event }) => event as PlanMidiEvent) };
   validatePlaybackPlan(plan); return plan;
 }

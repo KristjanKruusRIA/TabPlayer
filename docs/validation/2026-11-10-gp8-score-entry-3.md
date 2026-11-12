@@ -1,7 +1,7 @@
 # GP8 parity E05 and W19: voice, track, transport and technique keys (2026-11-10)
 
 This is the third score-entry slice (Linear THE-65), following [2026-11-06-gp8-score-entry.md](2026-11-06-gp8-score-entry.md) and [2026-11-07-gp8-score-entry-2.md](2026-11-07-gp8-score-entry-2.md). It addresses the remaining keyboard workflow and technique entry gaps under W19 and E05:
-- voice selection and multivoice mode toggle;
+- voice selection;
 - track navigation shortcuts;
 - bar navigation, transport and "Go to bar" shortcuts;
 - single-letter technique toggles on fretted and percussion notes.
@@ -12,7 +12,7 @@ The plan is documented in Linear THE-65. No edit command schemas, project file f
 - **Voice selection and creation:**
   - `Ctrl+1..4`, `Alt+1..4`, and `Meta+1..4` switch active voice (0..3).
   - If selecting the next uncreated voice on the measure (e.g. voice 2 when only voice 0 and 1 exist), it dynamically creates the voice via an undoable `addVoice` command and moves selection to beat 0 of the new voice.
-  - `Ctrl+M` / `Meta+M` toggles multivoice editing mode with transient user feedback (`Multivoice editing on` / `Multivoice editing off`).
+  - **Withdrawn 2026-11-12:** the `Ctrl+M` multivoice toggle shipped in this slice only showed a notice; no edit read the mode. It was removed in the [review fixes](2026-11-12-merged-slices-review-fixes.md). Simultaneous multivoice editing stays open under S10.
 - **Track navigation:**
   - `Ctrl+Up` / `Ctrl+Down` (and `Meta+Up/Down`) switch the active track up or down, clamping track index, staff, voice, and beat, and adjusting the string selection to fit the target track's tuning.
 - **Bar jumps and transport shortcuts:**

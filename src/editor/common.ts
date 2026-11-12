@@ -48,3 +48,17 @@ export function rhythmTicks(beat:model.Beat,measureTicks=beat.voice.bar.masterBa
 export function validateCapacity(voice:model.Voice,measureTicks=voice.bar.masterBar.calculateDuration(false),freeTime=voice.bar.masterBar.isFreeTime) {
   if(!freeTime&&voice.beats.reduce((sum,b)=>sum+rhythmTicks(b,measureTicks),0)>measureTicks)throw new Error('That rhythm would overfill this measure. Shorten or remove another beat first.');
 }
+/** Rest beats whose written lengths add up to exactly `ticks`. */
+export function restBeats(ticks:number):model.Beat[] {
+  const choices:Array<{duration:number;dots:number;ticks:number}>=[];
+  for(const duration of [-4,-2,1,2,4,8,16,32,64,128,256])for(let dots=0;dots<=3;dots++){const base=Math.trunc(3840/(duration<0?1/-duration:duration));let ticks=base;for(let dot=1;dot<=dots;dot++)ticks+=Math.trunc(base/2**dot);choices.push({duration,dots,ticks});}
+  choices.sort((a,b)=>b.ticks-a.ticks||a.dots-b.dots);const result:model.Beat[]=[];let remaining=ticks;
+  for(const choice of choices)while(remaining>=choice.ticks){result.push(Object.assign(new model.Beat(),{duration:choice.duration,dots:choice.dots,isEmpty:false}));remaining-=choice.ticks;}
+  if(remaining===0)return result;
+  // Truncated dots at 1/256 have 22/25/26 tick lengths, so a greedy
+  // decomposition can fail even when another exact supported sum exists.
+  const path=new Int32Array(ticks+1);path.fill(-1);path[0]=-2;
+  for(let amount=1;amount<=ticks;amount++)for(let index=0;index<choices.length;index++){const previous=amount-choices[index].ticks;if(previous>=0&&path[previous]!==-1){path[amount]=index;break;}}
+  if(path[ticks]===-1)throw new Error('The remaining gap cannot be represented by exact supported rests.');
+  const exact:model.Beat[]=[];for(let amount=ticks;amount>0;){const choice=choices[path[amount]];exact.push(Object.assign(new model.Beat(),{duration:choice.duration,dots:choice.dots,isEmpty:false}));amount-=choice.ticks;}return exact;
+}

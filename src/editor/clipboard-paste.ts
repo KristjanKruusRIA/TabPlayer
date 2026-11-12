@@ -7,7 +7,7 @@ import { convertClipboardBeat } from './clipboard-conversion';
 import { allNotes,captureNoteLinks,detachNote,restoreNoteLinks,type NoteLinks } from './links';
 import { applyMeasureEdit,planMeasureMap } from './measures';
 import { mapLyricsMeasures } from './lyrics-measures';
-import { integer,rhythmTicks } from './common';
+import { integer,restBeats,rhythmTicks } from './common';
 import { copyHarmonyChord } from '../harmony/chord-source';
 import type { ClipboardCommand,MusicClip,PasteDestination,PasteFilters,PreparedMusicPaste } from './clipboard-types';
 import type { BarIndexMap } from './measures-types';
@@ -176,19 +176,6 @@ function phraseEvents(score:model.Score):PhraseEvents {
   }
   return {mix,pedals};
 }
-function restBeats(ticks:number):model.Beat[] {
-  const choices:Array<{duration:number;dots:number;ticks:number}>=[];
-  for(const duration of [-4,-2,1,2,4,8,16,32,64,128,256])for(let dots=0;dots<=3;dots++){const base=Math.trunc(3840/(duration<0?1/-duration:duration));let ticks=base;for(let dot=1;dot<=dots;dot++)ticks+=Math.trunc(base/2**dot);choices.push({duration,dots,ticks});}
-  choices.sort((a,b)=>b.ticks-a.ticks||a.dots-b.dots);const result:model.Beat[]=[];let remaining=ticks;
-  for(const choice of choices)while(remaining>=choice.ticks){result.push(Object.assign(new model.Beat(),{duration:choice.duration,dots:choice.dots,isEmpty:false}));remaining-=choice.ticks;}
-  if(remaining===0)return result;
-  // Truncated dots at 1/256 have 22/25/26 tick lengths, so a greedy
-  // decomposition can fail even when another exact supported sum exists.
-  const path=new Int32Array(ticks+1);path.fill(-1);path[0]=-2;
-  for(let amount=1;amount<=ticks;amount++)for(let index=0;index<choices.length;index++){const previous=amount-choices[index].ticks;if(previous>=0&&path[previous]!==-1){path[amount]=index;break;}}
-  if(path[ticks]===-1)throw new Error('The remaining gap cannot be represented by exact supported rests.');
-  const exact:model.Beat[]=[];for(let amount=ticks;amount>0;){const choice=choices[path[amount]];exact.push(Object.assign(new model.Beat(),{duration:choice.duration,dots:choice.dots,isEmpty:false}));amount-=choice.ticks;}return exact;
-}
 function materializePhraseRests(score:model.Score) {
   for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices){
     if(voice.beats.length!==1||!voice.beats[0].isFullBarRest)continue;const beat=voice.beats[0],rests=restBeats(bar.masterBar.calculateDuration(false)),first=rests.shift()!;beat.duration=first.duration;beat.dots=first.dots;beat.tupletNumerator=-1;beat.tupletDenominator=-1;voice.beats=[beat,...rests];voice.beats.forEach((item,index)=>{item.voice=voice;item.index=index;});
@@ -196,12 +183,14 @@ function materializePhraseRests(score:model.Score) {
 }
 function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command:ClipboardCommand,mappings:PasteDestination[]):PreparedMusicPaste {
   const {target,count,filters}=command.options,staff=score.tracks[target.track].staves[target.staff],firstVoice=staff.bars[target.bar].voices[target.voice];
-  if(target.beat>=firstVoice.beats.length)throw new Error('Choose an existing destination track, staff, measure, voice and beat.');
+  // The position just past the last beat stays valid: recorded pastes there replay into the next measure.
+  if(target.beat>firstVoice.beats.length)throw new Error('Choose an existing destination track, staff, measure, voice and beat.');
   if(score.masterBars[target.bar].isFreeTime)throw new Error('Free-time phrase placement is not supported.');
   const voicesCount=source.tracks[0].staves[0].bars[0].voices.length;
   for(let v=0;v<voicesCount;v++){if(!staff.bars[target.bar].voices[target.voice+v])throw new Error('The destination must already contain every copied voice.');}
   const allocate=reserveIds(score),links=captureNoteLinks(score),retainedLinks=protectedLinks(score,links),pastedLinks:NoteLinks=[],parts:model.Score[]=[],events:PhraseEvents[]=[],placements:Placement[]=[],changes=new Map<number,Set<model.AutomationType>>(),pedals=new Set<model.Staff>(),affected=new Set<number>();
-  let bar=target.bar,tick=firstVoice.beats.slice(0,target.beat).reduce((sum,beat)=>sum+rhythmTicks(beat),0),insertAt:number|null=null,insertCount=0;
+  const targetTick=firstVoice.beats.slice(0,target.beat).reduce((sum,beat)=>sum+rhythmTicks(beat),0);
+  let bar=target.bar,tick=targetTick,insertAt:number|null=null,insertCount=0;
   const inherited=(index:number)=>score.masterBars[Math.max(0,Math.min(index-1,score.masterBars.length-1))];
   const master=()=>insertAt!==null&&bar>=insertAt?inherited(insertAt):score.masterBars[bar];
   const nextBar=()=>{
@@ -227,7 +216,8 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
       if(pending.length)throw new Error('A phrase must include the attack belonging to its trailing grace group.');
     }else{
       for(const measure of from.bars){
-        const measureDuration=measure.voices[0].beats.reduce((sum,beat)=>sum+rhythmTicks(beat,measure.masterBar.calculateDuration(false)),0);
+        // Every copied voice starts at the same tick, so the longest one decides how much room the measure needs.
+        const measureDuration=Math.max(...measure.voices.map(voice=>voice.beats.reduce((sum,beat)=>sum+rhythmTicks(beat,measure.masterBar.calculateDuration(false)),0)));
         if(measureDuration===0)continue;
         if(measureDuration>master().calculateDuration(false))throw new Error('A copied beat is longer than the complete destination measure.');
         if(tick+measureDuration>master().calculateDuration(false)){restBeats(master().calculateDuration(false)-tick);nextBar();if(measureDuration>master().calculateDuration(false))throw new Error('A copied beat is longer than the complete destination measure.');}
@@ -263,7 +253,8 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
       let onset=0;
       const retained:Array<{tick:number;beat:model.Beat}>=[];
       for(const beat of voice.beats){
-        if(index!==target.bar||beat.index>=target.beat)retained.push({tick:onset,beat});
+        // Beat indices only line up in the target voice; the other voices are cut at the same tick.
+        if(index!==target.bar||(destVoice===target.voice?beat.index>=target.beat:onset>=targetTick))retained.push({tick:onset,beat});
         onset+=rhythmTicks(beat);
       }
       metadata.set(`${index}/${destVoice}`,retained);
@@ -307,6 +298,8 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
       }
       const capacity=score.masterBars[index].calculateDuration(false);
       if(onset<capacity)output.push(...restBeats(capacity-onset));
+      // A beat that straddles the paste start in another voice is dropped too, so its notes let go of their links.
+      for(const item of originalBeatsWithTicks)if(!output.includes(item.beat))for(const note of item.beat.notes)detachNote(note);
       voice.beats=output;
       output.forEach((beat,beatIndex)=>{beat.voice=voice;beat.index=beatIndex;beat.automations=beat.automations.filter(value=>!isGpMixAutomation(value));});
       for(const saved of metadata.get(`${index}/${destVoice}`)??[]){
@@ -366,13 +359,14 @@ function plannedTracks(score:model.Score,source:model.Score,command:ClipboardCom
 function createTracks(score:model.Score,clip:MusicClip,planned:PasteDestination[]) {
   if(!planned.length)return;
   const context=decode(clip),used=new Set(score.tracks.flatMap(track=>[track.playbackInfo.primaryChannel,track.playbackInfo.secondaryChannel]));
-  const channel=()=>{let value=0;while(value===9||used.has(value))value++;if(value>15)throw new Error('No free MIDI channel remains for a new destination track.');used.add(value);return value;};
+  // With every channel taken a new track shares one, as a duplicated track does, instead of refusing the paste.
+  const channel=(shared:number)=>{let value=0;while(value===9||used.has(value))value++;if(value>15)return integer(shared,0,15)&&shared!==9?shared:0;used.add(value);return value;};
   const reference=score.tracks[0]?.staves[0];
   for(const mapping of planned){
     const track=context.tracks[mapping.sourceTrack],voices=track.staves.map(staff=>Math.max(1,...staff.bars.map(bar=>bar.voices.length)));
     const percussion=track.staves.some(staff=>staff.isPercussion);
     track.playbackInfo.isMute=false;track.playbackInfo.isSolo=false;
-    track.playbackInfo.primaryChannel=percussion?9:channel();track.playbackInfo.secondaryChannel=percussion?9:channel();
+    track.playbackInfo.primaryChannel=percussion?9:channel(track.playbackInfo.primaryChannel);track.playbackInfo.secondaryChannel=percussion?9:channel(track.playbackInfo.primaryChannel);
     const clefs=track.staves.map(staff=>({clef:staff.bars[0]?.clef??(staff.isPercussion?model.Clef.Neutral:model.Clef.G2),ottava:staff.bars[0]?.clefOttava??model.Ottavia.Regular}));
     for(const staff of track.staves){staff.bars=[];staff.chords=new Map();}
     score.addTrack(track);

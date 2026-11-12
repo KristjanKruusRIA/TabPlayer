@@ -2349,13 +2349,10 @@ describe('GP8 voice, track, transport and technique keys', () => {
     await waitFor(() => expect(cursor().voice).toBe(2));
   });
 
-  it('toggles multivoice mode with Ctrl+M', async () => {
+  it('announces no multivoice mode on Ctrl+M', async () => {
     await setup(twoTracks());
     press({ key: 'm', ctrlKey: true });
-    expect(await screen.findByText('Multivoice editing on')).toBeInTheDocument();
-
-    press({ key: 'm', ctrlKey: true });
-    expect(await screen.findByText('Multivoice editing off')).toBeInTheDocument();
+    expect(screen.queryByText(/multivoice/i)).not.toBeInTheDocument();
   });
 
   it('switches tracks with Ctrl+Up and Ctrl+Down', async () => {

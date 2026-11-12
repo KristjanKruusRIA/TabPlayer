@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { model, Settings } from '@coderline/alphatab';
+import { music } from './fixtures';
 import { gp8CursorTarget, gp8Key, planTechniqueToggle } from './gp8-keys';
 import { blankProject, type BeatTarget } from '../project';
 import { buildDocument } from '../engine';
@@ -29,11 +31,9 @@ describe('GP8 keys', () => {
     expect(key('7', { ctrlKey: true })).toBeNull();
     expect(key('1', { ctrlKey: true, shiftKey: true })).toBeNull();
   });
-  it('recognises multivoice toggle (Ctrl+M, Meta+M)', () => {
-    expect(key('m', { ctrlKey: true })).toEqual({ kind: 'multivoice' });
-    expect(key('M', { metaKey: true })).toEqual({ kind: 'multivoice' });
-    expect(key('m')).toBeNull();
-    expect(key('m', { ctrlKey: true, altKey: true })).toBeNull();
+  it('leaves Ctrl+M alone: there is no multivoice editing mode to toggle', () => {
+    expect(key('m', { ctrlKey: true })).toBeNull();
+    expect(key('M', { metaKey: true })).toBeNull();
   });
   it('recognises track navigation (Ctrl+Up/Down, Meta+Up/Down)', () => {
     expect(key('ArrowUp', { ctrlKey: true })).toEqual({ kind: 'track', direction: -1 });
@@ -142,5 +142,15 @@ describe('GP8 keys', () => {
 
     // When beat has no note on string 2
     expect(planTechniqueToggle(score, target, 2, null, 'palmMute')).toBeNull();
+  });
+  it('addresses the only note of a staff without strings by its index', () => {
+    const score = music(), staff = score.tracks[0].staves[0];
+    staff.stringTuning.tunings = [];
+    for (const bar of staff.bars) for (const beat of bar.voices[0].beats) for (const note of beat.notes) { note.string = -1; note.fret = -1; note.octave = 5; note.tone = 0; }
+    score.finish(new Settings());
+    const target: BeatTarget = { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 };
+    expect(planTechniqueToggle(score, target, null, null, 'vibrato')).toEqual({
+      type: 'setNoteTechniquesByIndex', target, noteIndex: 0, patch: { vibrato: model.VibratoType.Slight },
+    });
   });
 });

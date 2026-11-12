@@ -2,7 +2,7 @@ import { model,Settings } from '@coderline/alphatab';
 import { scoreFromJson } from '../model-clone';
 import { validateMusicClipEnvelope } from '../parity-commands';
 import { isGpMixAutomation,trackMixAutomations } from '../interchange/automation';
-import { durationValues,enumValue,integer,rhythmTicks,validateCapacity } from './common';
+import { durationValues,enumValue,integer,restBeats,rhythmTicks,validateCapacity } from './common';
 import { allNotes,captureNoteLinks,restoreNoteLinks } from './links';
 import { resolveSelectionBeats,resolveSelectionNotes,validateMusicSelection } from './range-selection';
 import { resolvePercussionArticulation } from './percussion-catalog';
@@ -190,6 +190,8 @@ export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:Cl
     for(const group of new Set(projection.masterBars.map(master=>master.repeatGroup))){if(!group.isOpened&&!group.closings.length&&!group.masterBars.some(master=>master.alternateEndings))continue;const start=group.opening!.index;let end=group.closings.at(-1)?.index??group.masterBars.at(-1)!.index;while(end+1<projection.masterBars.length&&projection.masterBars[end+1].alternateEndings)end++;if(first<=end&&last>=start&&(first>start||last<end))throw new Error('Copy the complete repeat group and endings.');}
   }
   const clone=scoreFromJson(json(score),settings()),snapshot=new model.Score(),keptIds=new Set<number>(),spans=new Map<number,{start:number;end:number}>(),harmony:ClipboardHarmony[]=[];
+  // Padding rests need beat IDs no copied beat uses; every ID is renumbered on paste.
+  let lastPadId=0;for(const track of clone.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)lastPadId=Math.max(lastPadId,beat.id);const padId=()=>++lastPadId;
   for(let index=first;index<=last;index++){const master=clone.masterBars[index];master.syncPoints=undefined;master.nextMasterBar=null;master.previousMasterBar=null;
     if(mode==='singleTrack'){master.isRepeatStart=false;master.repeatCount=0;master.alternateEndings=0;master.section=null;master.tempoAutomations=[];master.directions=null;}
     snapshot.addMasterBar(master);
@@ -217,8 +219,10 @@ export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:Cl
           spans.set(barIndex,{start:barStartTick,end:barEndTick});
           bar.voices=[];
           for(let vi=0;vi<selectedVoiceIndices.length;vi++){
-            const {voice,oldBeats,originalVoice,start,end}=voiceData[vi];
+            const {voice,oldBeats,originalVoice,positions,start,end}=voiceData[vi];
             voice.beats=[];
+            // A voice whose first selected beat comes later keeps that offset as leading rests, so paste lines the voices up.
+            for(const rest of restBeats(positions[start]-barStartTick)){rest.id=padId();voice.addBeat(rest);}
             for(let beatIndex=start;beatIndex<=end;beatIndex++){
               const beat=oldBeats[beatIndex],originalBeat=originalVoice.beats[beatIndex];
               if(selection.kind==='notes'&&!selectedBeats.includes(originalBeat)){

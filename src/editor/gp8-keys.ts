@@ -2,7 +2,6 @@ import { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
 import type { EditCommand, IndexedNoteTarget, NoteTarget, NoteTechniques } from '../edit-types';
 import { describeSelection } from '../engine';
-import { selectedNote } from './score-entry';
 import { nextLinkedNote } from './techniques';
 
 /** The Guitar Pro 8 edit and cursor keys that are not note entry. */
@@ -12,7 +11,6 @@ export type Gp8Key =
   | { kind: 'edit'; edit: 'removeNote' | 'deleteBeats' | 'insertBeat' | 'eraseNotes' }
   | { kind: 'cursor'; edge: 'barStart' | 'barEnd' | 'scoreStart' | 'scoreEnd'; extend: boolean }
   | { kind: 'voice'; voiceIndex: number }
-  | { kind: 'multivoice' }
   | { kind: 'track'; direction: -1 | 1 }
   | { kind: 'bar'; direction: -1 | 1; extend: boolean }
   | { kind: 'playBar' }
@@ -33,11 +31,6 @@ export function gp8Key(event: KeyLike): Gp8Key | null {
     if (digitNum !== null) {
       return { kind: 'voice', voiceIndex: digitNum - 1 };
     }
-  }
-
-  // Multivoice toggle: Ctrl+M / Meta+M (no Alt, no Shift)
-  if (ctrl && !alt && !shift && (key === 'm' || key === 'M')) {
-    return { kind: 'multivoice' };
   }
 
   // Track navigation: Ctrl+Up / Ctrl+Down (no Alt, no Shift)
@@ -121,8 +114,9 @@ export function planTechniqueToggle(
   };
 
   const patchNote = (patch: NoteTechniques): EditCommand => {
-    return indexed && noteIndex !== null
-      ? { type: 'setNoteTechniquesByIndex', target, noteIndex, patch }
+    // A staff without strings has no string to address, also when the beat's only note was found without an index.
+    return indexed
+      ? { type: 'setNoteTechniquesByIndex', target, noteIndex: beat.notes.indexOf(note), patch }
       : { type: 'setNoteTechniques', target, string: string ?? note.string, patch };
   };
 

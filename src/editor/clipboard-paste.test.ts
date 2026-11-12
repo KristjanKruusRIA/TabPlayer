@@ -284,6 +284,66 @@ it('pastes a multi-voice phrase overwriting multiple destination voices simultan
   expect(bar1.voices[1].beats[3].notes[0].fret).toBe(1);
 });
 
+function twoVoices(fret:(beat:number)=>number,string=2){
+  const score=music();
+  for(const bar of score.tracks[0].staves[0].bars){
+    const voice=new model.Voice();
+    for(let i=0;i<4;i++){const beat=new model.Beat(),note=new model.Note();beat.duration=4;note.string=string;note.fret=fret(i);beat.addNote(note);voice.addBeat(beat);}
+    bar.addVoice(voice);
+  }
+  score.finish(new Settings());return score;
+}
+const noteAt=(voice:number,beat:number)=>({target:{track:0,staff:0,bar:0,voice,beat},noteIndex:0});
+const onsets=(voice:model.Voice)=>{let tick=0;return voice.beats.map(beat=>{const at=tick;tick+=rhythmTicks(beat);return {at,beat};});};
+it('keeps the offset between copied voices that start on different beats',()=>{
+  const clip=makeMusicClip(twoVoices(i=>10+i),{kind:'notes',notes:[noteAt(0,0),noteAt(0,1),noteAt(1,1)]},'singleTrack');
+  const edit=command(clip);
+  const bar=preparePasteMusic(rebuild(twoVoices(()=>1,3)),edit).score.tracks[0].staves[0].bars[1];
+  const second=onsets(bar.voices[1]);
+  // The second voice was copied from its second beat, so its note lands one beat after the paste start.
+  expect(second.find(item=>item.at===960)!.beat.notes.map(note=>note.fret)).toEqual([11]);
+  expect(second.find(item=>item.at===0)!.beat.notes).toHaveLength(0);
+  expect(second.at(-1)!.at+rhythmTicks(second.at(-1)!.beat)).toBe(3840);
+});
+it('moves a multi-voice phrase to the next bar when a later voice is the longest',()=>{
+  const clip=makeMusicClip(twoVoices(i=>10+i),{kind:'notes',notes:[noteAt(0,0),noteAt(1,0),noteAt(1,1)]},'singleTrack');
+  const edit=command(clip);edit.options.target.beat=3;
+  const staff=preparePasteMusic(rebuild(twoVoices(()=>1,3)),edit).score.tracks[0].staves[0];
+  for(const bar of staff.bars)for(const voice of bar.voices)expect(voice.beats.reduce((sum,beat)=>sum+rhythmTicks(beat),0)).toBeLessThanOrEqual(3840);
+  expect(onsets(staff.bars[2].voices[1]).filter(item=>item.beat.notes.some(note=>note.fret>=10)).map(item=>[item.at,item.beat.notes[0].fret])).toEqual([[0,10],[960,11]]);
+});
+it('keeps the text of a later-voice rest that the paste does not reach',()=>{
+  const clip=makeMusicClip(twoVoices(i=>10+i),{kind:'notes',notes:[noteAt(0,0),noteAt(1,0)]},'singleTrack');
+  const destination=twoVoices(()=>1,3),voices=destination.tracks[0].staves[0].bars[1].voices;
+  // Eighth notes in the first voice put its fifth beat on the third quarter, so the second voice's last rest has a lower index than the paste target.
+  voices[0].beats.splice(0);for(let i=0;i<8;i++){const beat=new model.Beat(),note=new model.Note();beat.duration=8;note.string=6;note.fret=3;beat.addNote(note);voices[0].addBeat(beat);}
+  for(const beat of voices[1].beats.slice(2))beat.notes=[];voices[1].beats[3].text='Keep';
+  const edit=command(clip);edit.options.target.beat=4;
+  const bar=preparePasteMusic(rebuild(destination),edit).score.tracks[0].staves[0].bars[1],second=onsets(bar.voices[1]);
+  expect(second.find(item=>item.at===1920)!.beat.notes.map(note=>note.fret)).toEqual([10]);
+  expect(second.find(item=>item.at===2880)!.beat.text).toBe('Keep');
+});
+it('still pastes a phrase recorded at the position just past the last beat',()=>{
+  const destination=rests(music(),2),edit=command(phrase());edit.options.target.beat=4;
+  const staff=preparePasteMusic(destination,edit).score.tracks[0].staves[0];
+  expect(staff.bars[1].voices[0].beats.map(beat=>beat.notes.length)).toEqual([1,1,1,1]);
+  expect(staff.bars[2].voices[0].beats.slice(0,2).map(beat=>beat.notes.length)).toEqual([1,1]);
+});
+it('appends a track when every free MIDI channel is taken',()=>{
+  const source=music(),extra=music().tracks[0];extra.name='Second';source.addTrack(extra);source.finish(new Settings());
+  const clip=makeMusicClip(source,{kind:'bars',tracks:[0,1],firstBar:0,lastBar:0},'multiTrack');
+  const destination=music(),channels=[0,1,2,3,4,5,6,7,8,10,11,12,13,14,15];
+  for(let index=1;index<8;index++)destination.addTrack(music().tracks[0]);
+  destination.tracks.forEach((track,index)=>{track.playbackInfo.primaryChannel=channels[index*2];track.playbackInfo.secondaryChannel=channels[index*2+1]??channels[14];});
+  const used=new Set(destination.tracks.flatMap(track=>[track.playbackInfo.primaryChannel,track.playbackInfo.secondaryChannel]));
+  expect([...Array(16).keys()].filter(channel=>channel!==9&&!used.has(channel))).toEqual([]);
+  const edit:ClipboardCommand={type:'pasteMusic',clip,options:{target:{track:7,staff:0,bar:0,voice:0,beat:0},destinations:[{sourceTrack:0,track:7,staffMap:[0]},{sourceTrack:1,track:8,staffMap:[0]}],count:1,placement:'beforeBar',filters:{...all,masterAutomations:true,sections:true}}};
+  const result=preparePasteMusic(rebuild(destination),edit);
+  expect(result.addedTracks).toBe(1);
+  const added=result.score.tracks[8].playbackInfo;
+  expect(added.primaryChannel).toBeGreaterThanOrEqual(0);expect(added.primaryChannel).toBeLessThanOrEqual(15);expect(added.primaryChannel).not.toBe(9);
+  expect(added.secondaryChannel).toBeLessThanOrEqual(15);expect(added.secondaryChannel).not.toBe(9);
+});
 it('rejects pasting a multi-voice phrase when destination lacks the required voices',()=>{
   const source=music(),staff=source.tracks[0].staves[0];
   for(const bar of staff.bars){

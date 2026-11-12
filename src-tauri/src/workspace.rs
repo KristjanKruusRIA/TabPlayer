@@ -423,6 +423,11 @@ impl DocumentWorkspace {
         }
     }
 
+    /// Whether a document with this id is open.
+    pub fn is_open(&self, id: &str) -> bool {
+        self.documents.iter().any(|entry| entry.id == id)
+    }
+
     fn entry(&self, id: &str) -> Result<&DocumentEntry, String> {
         self.documents
             .iter()

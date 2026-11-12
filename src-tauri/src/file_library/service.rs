@@ -161,10 +161,34 @@ impl FileLibrary {
             Self::cancel_job(&mut core);
             core.generation += 1;
             core.drops.retire();
-            core.receipts.clear();
         }
         locked(workspace)?.retire_intake();
         Ok(())
+    }
+    /// Forgets the receipts of documents that are no longer open, once a close or shutdown has run. A score that stays
+    /// open keeps its receipt: opening one closes the untouched blank tab, and its details must still be recorded
+    /// afterwards. Call it before `resume`, while no new receipt can arrive. `metadata_ack` still checks every receipt
+    /// against the document's current revision, path and digest, so a receipt left behind here authorizes nothing.
+    pub(crate) fn forget_closed(&self, workspace: &Mutex<DocumentWorkspace>) {
+        let Ok(held) = locked(&self.core).map(|core| {
+            core.receipts
+                .iter()
+                .map(|record| record.native.document.document_id.clone())
+                .collect::<Vec<_>>()
+        }) else {
+            return;
+        };
+        let Ok(closed) = locked(workspace).map(|state| {
+            held.into_iter()
+                .filter(|id| !state.is_open(id))
+                .collect::<Vec<_>>()
+        }) else {
+            return;
+        };
+        if let Ok(mut core) = locked(&self.core) {
+            core.receipts
+                .retain(|record| !closed.contains(&record.native.document.document_id));
+        }
     }
     pub(crate) fn resume(&self) {
         if let Ok(_core) = self.core.lock() {

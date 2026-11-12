@@ -50,6 +50,7 @@ Implemented by Sonnet subagents and reviewed by a Fable subagent.
 
 - **Golpe commit.** Confirmed by reading: a golpe on a track routed to an external MIDI output was allocated a melodic channel and sent as a pitched note, with the knock itself silent. Fixed in the following commit. Confirmed by running: the MIDI round trip yields a drum part, recorded above as a limit.
 - **Routing fix commit.** Reviewed by reading only. The blocking defect was confirmed fixed, with allocation unchanged for scores without golpe and no new work on the audio thread. Found: the knock lane wrote the guitar's volume, pan and the Standard kit onto the shared percussion channel, so a guitar's fader could move the drums and a drum track listed first lost its kit on each restatement. Fixed in the following commit, with tests for a drum track on a Power kit in both track orders.
+- **Knock-lane fix commit.** No defect found; `cargo test --lib midi_out` (83 passed) and `--test audio_midi_out` (15 passed) were run by the reviewer on merged `develop`. Noted and left: a golpe guitar alone on a port states the Standard kit but no level on channel 10, so the knock plays at whatever volume the device last held there; and after a drum track is muted or unrouted mid-play nothing is restated until the next start or seek.
 - **Probe commit.** Found sound: the cases separate the hypotheses, the MIDI reader handled 20,000 random tracks and two 8 MB degenerate files without throwing, and nothing is written into tracked folders.
 
 ## Verification

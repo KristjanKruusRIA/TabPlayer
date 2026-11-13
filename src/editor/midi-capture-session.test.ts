@@ -91,6 +91,15 @@ describe('MIDI capture session',()=>{
     expect(session.get().chords).toBe(0);
   });
 
+  it('hands every accepted chord, in order, to its chord listeners, and none that are stale',async()=>{
+    const {bridge,handlers}=fake(),session=createMidiCaptureSession(bridge),heard:number[]=[],off=session.onChord(chord=>heard.push(chord.seq));
+    await session.start('USB MIDI',settings);
+    handlers.chord(chordOf(7,1));handlers.chord(chordOf(6,2));handlers.chord(chordOf(7,1));handlers.chord(chordOf(7,3));
+    expect(heard).toEqual([1,3]);
+    off();handlers.chord(chordOf(7,4));
+    expect(heard).toEqual([1,3]);
+  });
+
   it('drops a status notice that arrives after a newer one, so Running never follows Stopped',async()=>{
     const {bridge,handlers}=fake(),session=createMidiCaptureSession(bridge);
     await session.start('USB MIDI',settings);

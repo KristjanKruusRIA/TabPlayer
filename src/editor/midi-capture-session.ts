@@ -24,6 +24,10 @@ export interface MidiCaptureState {
   dropped:number;
   /** What went wrong with a command, not with the device. */
   problem:string;
+  /** Chords that arrived while edits could not take them, or that were turned away because the queue was full. */
+  notWritten:number;
+  /** Chords are being turned away because a header menu is open, so the panel can say why. */
+  blocked:boolean;
 }
 export interface MidiCaptureSession {
   subscribe(listener:()=>void):()=>void;
@@ -36,6 +40,12 @@ export interface MidiCaptureSession {
   stop():Promise<void>;
   /** Passes new sensitivity to a running session. */
   configure(settings:CaptureSettings):void;
+  /** Counts a chord the score could not take, so the panel can say so. */
+  countNotWritten(by?:number):void;
+  /** Records whether chords are being turned away because a menu is open. */
+  setBlocked(blocked:boolean):void;
+  /** Hears every chord of the running session, in order, once each; stale and repeated ones never arrive. */
+  onChord(listener:(chord:MidiChord)=>void):()=>void;
   dispose():void;
 }
 const text=(error:unknown)=>error instanceof Error?error.message:String(error);
@@ -46,9 +56,9 @@ const text=(error:unknown)=>error instanceof Error?error.message:String(error);
  * the running session's events count, with a chord counting only if its sequence number is new.
  */
 export function createMidiCaptureSession(bridge:MidiInBridge):MidiCaptureSession {
-  let state:MidiCaptureState={ports:null,listError:'',listAlert:false,unavailable:'',phase:'stopped',session:0,port:'',message:'',last:null,chords:0,dropped:0,problem:''};
+  let state:MidiCaptureState={ports:null,listError:'',listAlert:false,unavailable:'',phase:'stopped',session:0,port:'',message:'',last:null,chords:0,dropped:0,problem:'',notWritten:0,blocked:false};
   let lastSeq=0,lastNotice=0,detach:(()=>void)|null=null,attaching:Promise<void>|null=null,cancelled=false,disposed=false;
-  const listeners=new Set<()=>void>();
+  const listeners=new Set<()=>void>(),chordListeners=new Set<(chord:MidiChord)=>void>();
   // Read through a function: events change `state` while an await is pending, which narrowing cannot see.
   const phase=():MidiCapturePhase=>state.phase;
   const set=(change:Partial<MidiCaptureState>)=>{state={...state,...change};listeners.forEach(listener=>listener());};
@@ -65,6 +75,7 @@ export function createMidiCaptureSession(bridge:MidiInBridge):MidiCaptureSession
     if(!accept(chord.session)||chord.seq<=lastSeq||state.phase==='lost'||state.phase==='error'||state.phase==='stopped')return;
     lastSeq=chord.seq;
     set({last:chord,chords:state.chords+1,dropped:chord.dropped,phase:state.phase==='starting'?'running':state.phase});
+    for(const listener of [...chordListeners])try{listener(chord);}catch(error){console.error('A MIDI chord listener failed.',error);}
   };
   const onStatus=(status:MidiInStatusEvent)=>{
     // Notices are numbered as they are decided; one that arrives after a newer one (Running after Stopped) is stale.
@@ -92,7 +103,7 @@ export function createMidiCaptureSession(bridge:MidiInBridge):MidiCaptureSession
     await attach();
     if(!detach){set({problem:state.unavailable});return;}
     cancelled=false;lastSeq=0;
-    set({phase:'starting',port,message:'',problem:'',last:null,chords:0,dropped:0});
+    set({phase:'starting',port,message:'',problem:'',last:null,chords:0,dropped:0,notWritten:0,blocked:false});
     try{
       const session=await bridge.start(port,settings);
       if(cancelled){set({phase:'stopped'});return;}
@@ -113,6 +124,9 @@ export function createMidiCaptureSession(bridge:MidiInBridge):MidiCaptureSession
     subscribe:listener=>{listeners.add(listener);return ()=>{listeners.delete(listener);};},
     get:()=>state,
     attach,refresh,start,stop,
+    countNotWritten:(by=1)=>{if(by>0)set({notWritten:state.notWritten+by});},
+    setBlocked:blocked=>{if(state.blocked!==blocked)set({blocked});},
+    onChord:listener=>{chordListeners.add(listener);return ()=>{chordListeners.delete(listener);};},
     configure:settings=>{
       if(state.phase!=='running')return;
       bridge.configure(state.session,settings).catch(error=>set({problem:text(error)}));

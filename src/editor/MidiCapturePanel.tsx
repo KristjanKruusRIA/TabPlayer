@@ -78,7 +78,7 @@ export function MidiCapturePanel({bridge=nativeMidiIn}:MidiCapturePanelProps):Re
     :state.phase==='starting'?t('midi_in.starting')
     :state.phase==='lost'?t('midi_in.lost',{port})
     :state.phase==='stopped'?t('midi_in.idle'):'';
-  return <details ref={root} className="input-preferences midi-capture-panel"><summary>{t('midi_in.title')}</summary>
+  return <details ref={root} className="input-preferences midi-capture-panel" data-menu-keep=""><summary>{t('midi_in.title')}</summary>
     <label>{t('midi_in.input')}<select value={preferences.port} {...busySelect(running||starting)} onChange={event=>{if(!running&&!starting)change({port:event.target.value});}}>
       <option value="">{t('midi_in.choose')}</option>
       {state.ports?.map(entry=><option key={entry.id} value={entry.name}>{entry.name}</option>)}
@@ -93,6 +93,10 @@ export function MidiCapturePanel({bridge=nativeMidiIn}:MidiCapturePanelProps):Re
     {status&&<p className="hint" role="status">{status}</p>}
     {state.phase==='error'&&<p role="alert">{startError(state.message,port,t)}</p>}
     {running&&<p className="midi-capture-last">{chord?t('midi_in.last_chord',chord):t('midi_in.no_chord')}</p>}
+    {state.blocked&&<p className="hint">{t('midi_in.blocked_menu')}</p>}
+    {/* The number changes with every lost chord, so it is not live; the fixed line is announced once, when the first chord is lost. */}
+    {state.notWritten>0&&<p className="hint">{t(`midi_in.not_written_${state.notWritten===1?'one':'other'}` as MessageKey,{count:state.notWritten})}</p>}
+    <span className="tp-sr" aria-live="polite">{state.notWritten>0?t('midi_in.not_written_alert'):''}</span>
     {state.dropped>0&&<p className="hint">{t('midi_in.dropped',{count:state.dropped})}</p>}
     {state.unavailable&&<p className="hint" role="status">{t('midi_in.unavailable',{error:state.unavailable})}</p>}
     {state.listError&&<p className="hint" role={state.listAlert?'alert':'status'}>{t('midi_out.ports_failed',{error:state.listError})}</p>}

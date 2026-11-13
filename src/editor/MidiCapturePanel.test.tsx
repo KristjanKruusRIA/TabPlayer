@@ -206,3 +206,21 @@ describe('MidiCapturePanel',()=>{
     }
   });
 });
+
+describe('MidiCapturePanel chords that did not reach the score',()=>{
+  it('says how many, with the right plural, and announces it once through a line that never changes',async()=>{
+    const {bridge}=fake();
+    const {container}=render(<MidiCapturePanel bridge={bridge}/>);
+    openSection(container);
+    const {midiCaptureSession}=await import('./midi-capture-session');
+    const session=midiCaptureSession(bridge),live=container.querySelector('[aria-live="polite"]') as HTMLElement;
+    expect(live).toHaveTextContent('');
+    act(()=>session.countNotWritten());
+    expect(screen.getByText('1 chord did not reach the score.')).not.toHaveAttribute('role');
+    expect(live).toHaveTextContent('Some chords did not reach the score.');
+    act(()=>session.countNotWritten(4));
+    expect(screen.getByText('5 chords did not reach the score.')).toBeInTheDocument();
+    expect(live).toHaveTextContent('Some chords did not reach the score.');
+    expect(screen.getByText(/With note entry on|Shows what the device plays\. With note entry on, each chord is written at the cursor\./)).toBeInTheDocument();
+  });
+});

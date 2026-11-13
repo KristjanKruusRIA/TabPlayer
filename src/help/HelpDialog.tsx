@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { foldText, getHelpTopics, searchHelp, updateStatus, type HelpResult, type HelpTopicId } from './help-topics';
+import { getHelpTopics, searchHelp, searchTokens, updateStatus, type HelpResult, type HelpTopicId } from './help-topics';
 import { Dialog } from '../ui/Dialog';
 import { useI18n } from '../i18n';
 
@@ -19,7 +19,7 @@ export function HelpDialog({ initial, initialSection, onClose }: { initial: Help
   pending.current = query;
   const topics = useMemo(() => getHelpTopics(t), [t]);
   const current = topics.find(entry => entry.id === topic) ?? topics[0];
-  const searching = foldText(query).trim().length >= 2;
+  const searching = searchTokens(query).length > 0;
   const found = useMemo(() => (searching ? searchHelp(topics, query) : []), [topics, query, searching]);
   const matching = new Set(found.map(result => result.topic));
   const shown = searching ? topics.filter(entry => matching.has(entry.id)) : topics;
@@ -28,7 +28,7 @@ export function HelpDialog({ initial, initialSection, onClose }: { initial: Help
   // Escape clears a search before it closes the dialog; the dialog's own handler listens on the document, so this one is earlier.
   useEffect(() => {
     const clear = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape' || !pending.current) return;
+      if (event.key !== 'Escape' || !pending.current.trim()) return;
       event.preventDefault(); event.stopPropagation();
       setQuery('');
       input.current?.focus({ preventScroll: true });
@@ -75,7 +75,7 @@ export function HelpDialog({ initial, initialSection, onClose }: { initial: Help
         <p className="help-live" aria-live="polite" aria-atomic="true">{announcement}</p>
         {searching ? (found.length > 0 && <ul ref={results} className="help-results" aria-label={t('help.results_heading')} onKeyDown={fromResults}>{found.map(result => <li key={`${result.topic}/${result.section}`}>
           <button type="button" onClick={() => open(result)}>
-            <span className="help-result-where">{result.topicTitle}</span>
+            <span className="help-result-where">{result.whereParts.map((part, index) => part.match ? <mark key={index}>{part.text}</mark> : <span key={index}>{part.text}</span>)}</span>
             <span className="help-result-heading">{result.heading}</span>
             <span className="help-result-excerpt">{result.excerpt.map((part, index) => part.match ? <mark key={index}>{part.text}</mark> : <span key={index}>{part.text}</span>)}</span>
           </button>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getMessage, type SupportedLanguage } from '../i18n';
-import { foldText, getHelpTopics, searchHelp, type HelpTopic } from './help-topics';
+import { foldText, getHelpTopics, searchHelp, searchTokens, type HelpTopic } from './help-topics';
 
 const topic = (id: string, title: string, sections: Array<[string, string, string[]]>): HelpTopic => ({
   id: id as HelpTopic['id'], title,
@@ -85,6 +85,26 @@ describe('searchHelp', () => {
   });
 });
 
+describe('search words', () => {
+  it('drops words of one letter and searches nothing when none is left', () => {
+    expect(searchTokens('a b')).toEqual([]);
+    expect(searchTokens(' Á  bc d ')).toEqual(['bc']);
+    expect(searchHelp(sample, 'a b')).toEqual([]);
+    expect(searchHelp(sample, 'a loop').map(result => result.section)).toEqual(searchHelp(sample, 'loop').map(result => result.section));
+    const many = topic('start', 'Start', Array.from({ length: 80 }, (_, index) => [`s${index}`, `Section ${index}`, ['a b c']] as [string, string, string[]]));
+    expect(searchHelp([many], 'a b')).toEqual([]);
+  });
+});
+
+describe('topic titles', () => {
+  it('finds a topic by its own name, ahead of section matches, and opens it at its first section', () => {
+    const found = searchHelp(sample, 'playback');
+    expect(found[0]).toMatchObject({ topic: 'playback', section: 'loop', topicTitle: 'Playback' });
+    expect(found[0].whereParts.filter(part => part.match).map(part => part.text)).toEqual(['Playback']);
+    expect(searchHelp(sample, 'files')[0]).toMatchObject({ topic: 'files', section: 'open' });
+  });
+});
+
 describe('searchHelp in the real help', () => {
   const topicsIn = (lang: SupportedLanguage) => getHelpTopics((key, params) => getMessage(lang, key, params));
   const where = (lang: SupportedLanguage, query: string) => searchHelp(topicsIn(lang), query).map(result => `${result.topic}#${result.section}`);
@@ -108,6 +128,20 @@ describe('searchHelp in the real help', () => {
       const loop = getMessage(lang, 'transport.loop_selection');
       expect(where(lang, loop), `${lang} ${loop}`).toContain('playback#loop');
     }
+  });
+
+  it('returns every topic, in every language, as the first result for its own title', () => {
+    for (const lang of ['en', 'et', 'de'] as const) for (const entry of topicsIn(lang)) {
+      const first = searchHelp(topicsIn(lang), entry.title)[0];
+      expect(first?.topic, `${lang}: ${entry.title}`).toBe(entry.id);
+      expect(first.section, `${lang}: ${entry.title}`).toBe(entry.sections[0].id);
+    }
+  });
+
+  it('finds the small-window text by its own words in each language', () => {
+    expect(where('en', 'small window')).toContain('display#small');
+    expect(where('et', 'väike aken')).toContain('display#small');
+    expect(where('de', 'kleines fenster')).toContain('display#small');
   });
 
   it('says nothing for words the help does not use', () => {

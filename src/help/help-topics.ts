@@ -31,10 +31,10 @@ function topic(id: HelpTopicId, sections: ReadonlyArray<readonly [string, readon
 export const helpSpec: readonly TopicSpec[] = [
   topic('start', [['window', ['p1', 'p2']], ['first', ['p1']], ['help', ['p1', 'p2']]]),
   topic('files', [['open', ['p1', 'p2', 'p3', 'p4', 'p5']], ['import', ['ascii', 'midi']], ['batch', ['p1']], ['save', ['p1', 'p2', 'p3', 'p4']], ['recovery', ['p1', 'p2', 'p3']]]),
-  topic('display', [['modes', ['p1', 'p2']], ['tracks', ['p1']], ['zoom', ['p1', 'p2']], ['defaults', ['p1']]]),
-  topic('playback', [['play', ['p1', 'p2']], ['loop', ['p1', 'p2', 'p3']], ['speed', ['p1', 'p2']], ['practice', ['p1', 'p2', 'p3', 'p4']], ['backing', ['p1', 'p2']], ['mixing', ['p1', 'p2', 'p3']], ['tuner', ['p1', 'p2', 'p3']]]),
+  topic('display', [['modes', ['p1', 'p2']], ['tracks', ['p1']], ['zoom', ['p1', 'p2', 'p3']], ['small', ['p1', 'p2']], ['defaults', ['p1']]]),
+  topic('playback', [['play', ['p1', 'p2', 'p3']], ['loop', ['p1', 'p2', 'p3']], ['speed', ['p1', 'p2']], ['practice', ['p1', 'p2', 'p3', 'p4']], ['backing', ['p1', 'p2']], ['mixing', ['p1', 'p2', 'p3']], ['tuner', ['p1', 'p2', 'p3']]]),
   topic('editing', [['move', ['p1']], ['entry', ['p1', 'p2', 'p3', 'p4']], ['keys', ['intro', 'p1', 'p2', 'p3', 'p4', 'p5', 'p6']], ['palette', ['help.topic.editing.p3', 'p2']], ['tools', ['p1']], ['undo', ['p1']]]),
-  topic('selection', [['select', ['p1', 'p2']], ['clipboard', ['p1', 'p2', 'p3']]]),
+  topic('selection', [['select', ['p1', 'p2']], ['clipboard', ['p1', 'p2', 'p3', 'p4']]]),
   topic('tracks', [['settings', ['p1', 'p2']], ['tuning', ['p1', 'p2', 'p3', 'p4']], ['sound', ['p1', 'p2', 'p3']], ['nam', ['p1', 'p2']], ['interpretation', ['p1']], ['midi', ['p1', 'p2']]]),
   topic('inspector', [['tabs', ['p1']], ['apply', ['p1']], ['practice', ['p1']]]),
   topic('instruments', [['views', ['p1', 'p2', 'p3', 'p4']]]),
@@ -133,7 +133,7 @@ function folded(text: string): { text: string; start: number[]; end: number[] } 
 }
 
 export interface ExcerptPart { text: string; match: boolean }
-export interface HelpResult { topic: HelpTopicId; topicTitle: string; section: string; heading: string; excerpt: ExcerptPart[] }
+export interface HelpResult { topic: HelpTopicId; topicTitle: string; whereParts: ExcerptPart[]; section: string; heading: string; excerpt: ExcerptPart[] }
 export const MAX_RESULTS = 40;
 const BEFORE = 50, AFTER = 110, HEAD = 160;
 
@@ -174,22 +174,47 @@ function excerptOf(paragraphs: readonly string[], tokens: readonly string[]): Ex
   return [{ text: first.length > HEAD ? `${first.slice(0, HEAD)}…` : first, match: false }];
 }
 
-/** Sections whose heading and text hold every word of the query, headings first. Words match inside longer words. */
+/** The words a query searches for: folded, and at least two characters each, so a stray letter cannot match everything. */
+export function searchTokens(query: string): string[] {
+  return foldText(query).split(/\s+/).filter(word => word.length >= 2);
+}
+
+function titleParts(title: string, tokens: readonly string[]): ExcerptPart[] {
+  const parts: ExcerptPart[] = [];
+  let cursor = 0;
+  for (const [a, b] of ranges(folded(title), tokens)) {
+    if (a > cursor) parts.push({ text: title.slice(cursor, a), match: false });
+    parts.push({ text: title.slice(a, b), match: true });
+    cursor = b;
+  }
+  if (cursor < title.length) parts.push({ text: title.slice(cursor), match: false });
+  return parts;
+}
+
+/**
+ * Results for a query: a topic whose title holds every word comes first and opens at its first section, then sections whose heading
+ * and text hold every word, headings before text. Words match inside longer words. At most 40 results.
+ */
 export function searchHelp(topics: readonly HelpTopic[], query: string): HelpResult[] {
-  const folds = foldText(query).trim();
-  if (folds.length < 2) return [];
-  const tokens = folds.split(/\s+/);
+  const tokens = searchTokens(query);
+  if (!tokens.length) return [];
   const scored: Array<{ score: number; order: number; result: HelpResult }> = [];
   let order = 0;
-  for (const entry of topics) for (const section of entry.sections) {
-    order++;
-    const heading = foldText(section.title), body = foldText(section.paragraphs.join('\n'));
-    let score = 0, all = true;
-    for (const token of tokens) {
-      if (heading.includes(token)) score += 10; else if (body.includes(token)) score += 1; else { all = false; break; }
+  for (const entry of topics) {
+    const first = entry.sections[0];
+    const named = !!first && tokens.every(token => foldText(entry.title).includes(token));
+    if (named) scored.push({ score: 1000, order: order++, result: { topic: entry.id, topicTitle: entry.title, whereParts: titleParts(entry.title, tokens), section: first.id, heading: first.title, excerpt: excerptOf(first.paragraphs.slice(0, 1), []) } });
+    for (const section of entry.sections) {
+      order++;
+      if (named && section === first) continue;
+      const heading = foldText(section.title), body = foldText(section.paragraphs.join(String.fromCharCode(10)));
+      let score = 0, all = true;
+      for (const token of tokens) {
+        if (heading.includes(token)) score += 10; else if (body.includes(token)) score += 1; else { all = false; break; }
+      }
+      if (!all) continue;
+      scored.push({ score, order, result: { topic: entry.id, topicTitle: entry.title, whereParts: [{ text: entry.title, match: false }], section: section.id, heading: section.title, excerpt: excerptOf(section.paragraphs, tokens) } });
     }
-    if (!all) continue;
-    scored.push({ score, order, result: { topic: entry.id, topicTitle: entry.title, section: section.id, heading: section.title, excerpt: excerptOf(section.paragraphs, tokens) } });
   }
   return scored.sort((a, b) => b.score - a.score || a.order - b.order).slice(0, MAX_RESULTS).map(entry => entry.result);
 }

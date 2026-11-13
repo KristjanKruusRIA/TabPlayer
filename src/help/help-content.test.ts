@@ -81,7 +81,7 @@ describe('help coverage', () => {
   it('describes the parts of the app a new user looks for', () => {
     expect(sections).toEqual(expect.arrayContaining([
       'files#open', 'files#import', 'files#batch', 'files#save', 'files#recovery',
-      'display#modes', 'display#zoom',
+      'display#modes', 'display#zoom', 'display#small',
       'playback#loop', 'playback#speed', 'playback#practice', 'playback#backing', 'playback#mixing', 'playback#tuner',
       'editing#entry', 'editing#keys', 'editing#palette',
       'selection#select', 'selection#clipboard',
@@ -107,6 +107,26 @@ describe('help coverage', () => {
 
   it('flattens the sections into the topic paragraphs', () => {
     for (const topic of getHelpTopics(key => table('en')[key])) expect(topic.paragraphs).toEqual(topic.sections.flatMap(section => section.paragraphs));
+  });
+
+  it('names the Guitar Pro export question by the title the app gives it', () => {
+    for (const lang of languages) {
+      const section = getHelpTopics((key, params) => getMessage(lang, key, params)).find(topic => topic.id === 'export')!.sections.find(entry => entry.id === 'guitar-pro')!;
+      expect(section.paragraphs.join(' '), lang).toContain(gpWarning(['x']).title);
+    }
+  });
+
+  it('refers to the score display button and the fret label through the catalog', () => {
+    const small = table('en')['help.topic.display.small.p1'];
+    expect(labelKeysIn(small)).toContain('track_display.toolbar_aria');
+    const text = (key: string) => table('en')[key].replace(/\{@[^}]+\}/g, '');
+    for (const lang of languages) for (const key of specKeys()) {
+      const raw = table(lang)[key].replace(/\{@[^}]+\}/g, '');
+      if (lang === 'et') expect(raw, key).not.toMatch(/krihv/i);
+      if (lang === 'de') expect(raw, key).not.toMatch(/Bund/);
+      if (lang === 'en' && key !== 'help.topic.editing.p3') expect(text(key), key).not.toMatch(/frets?/i);
+    }
+    expect(labelKeysIn(table('en')['help.topic.editing.move.p1'])).toContain('editor.fret');
   });
 
   it('tells the Guitar Pro export warning heading as the app writes it, in every language', () => {

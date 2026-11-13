@@ -125,3 +125,29 @@ it('scrolls to the section named by context help without moving focus', () => {
   expect(scroll).toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Getting started' })).toHaveFocus();
 });
+
+it('does not swallow Escape when the field holds only spaces', () => {
+  const { search, onClose } = open();
+  search.focus();
+  type(search, '   ');
+  fireEvent.keyDown(search, { key: 'Escape' });
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('does not search for single letters', () => {
+  const { search } = open();
+  type(search, 'a b');
+  expect(screen.queryByRole('list', { name: 'Search results' })).toBeNull();
+  expect(live().textContent).toBe('');
+  expect(screen.getByRole('article')).toBeInTheDocument();
+});
+
+it('shows a topic title match in the result and opens the topic at its first section', () => {
+  const { search } = open();
+  type(search, 'Exporting');
+  const first = within(screen.getByRole('list', { name: 'Search results' })).getAllByRole('button')[0];
+  expect(first.querySelector('.help-result-where mark')!.textContent).toBe('Exporting');
+  fireEvent.keyDown(search, { key: 'Enter' });
+  expect(screen.getByRole('button', { name: 'Exporting' })).toHaveAttribute('aria-current', 'true');
+  expect(screen.getByRole('heading', { name: 'Starting an export', level: 4 })).toHaveFocus();
+});

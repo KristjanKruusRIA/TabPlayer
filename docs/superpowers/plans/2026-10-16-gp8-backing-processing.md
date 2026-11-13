@@ -9,7 +9,7 @@
 
 ## Global constraints
 
-- Authoritative checkout C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer; feat/gp8-parity. All scoped work approved; no approval question. Root owns Git/full checks/build/apps/actual acceptance.
+- Authoritative checkout <checkout>; feat/gp8-parity. All scoped work approved; no approval question. Root owns Git/full checks/build/apps/actual acceptance.
 - Preserve P16 clocks, source-frame gates, current-source byte identity, strict unknown-field rejection, owner/revision/generation protections and legacy payloads. No score/global tonality changes or invented GP metadata.
 - Numeric local policy: integer semitones[-12,12], integer cents[-100,100], additive with no carry; filter wire values and exact curve/response contract come from spec.
 - Actual GenAI backing-pitch-filter-concept.png and provenance were generated and root-inspected before UI. Keep left sidebar placement; no P16 visual freshness recheck.

@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- Authoritative worktree `C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer`, feature branch only; root owns Git/publication and serialized native-check slots. All scoped changes are authorized; no further approval gate.
+- Authoritative worktree `<checkout>`, feature branch only; root owns Git/publication and serialized native-check slots. All scoped changes are authorized; no further approval gate.
 - Optional `DocumentViewState.scoreDisplay` has exactly `{layout,zoomMode}`. Missing/null means absence in Rust; frontend repair drops invalid/null objects. Untouched old views and initialDocumentView retain their exact omitted-field shape.
 - Layout values: `verticalPage`, `horizontalPage`, `grid`, `parchment`, `verticalScreen`, `horizontalScreen`. Zoom policy values: `manual`, `fitWidth`, `fitPage`. Missing preference resolves to `parchment/manual`; frontend resolves endless fitPage to fitWidth. Native accepts structurally valid pairs; no transport behavior.
 - Numeric manual zoom remains finite fractional25–300%, independent of fit policy. No document/settings/edit/IPC/audio schema, App/ScoreView/UI, dependency, export or renderer changes.

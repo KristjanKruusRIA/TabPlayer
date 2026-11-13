@@ -346,64 +346,64 @@ Each row links a specific official manual page; `pp.` refers to its printed PDF 
 
 Paths/line numbers are baseline-source anchors. SHA-256 and exact anchor strings are retained in JSON. Existing tests were inspected, not rerun.
 
-- **cmd** — [src/edit-types.ts:43](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/edit-types.ts:43): Finite command union: basic/technique/rhythm/structure/annotation/audio/print only; omitted authoring fields are absent here.
-- **app** — [src/App.tsx:23](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/App.tsx:23): Single DocumentController and selected track, local zoom/profile; no desktop menu/workspace/library/preferences routes.
-- **keys** — [src/App.tsx:64](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/App.tsx:64): Handles arrows, digit fret drafts and Enter; other shortcuts are not implemented.
-- **view** — [src/ScoreView.tsx:6](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/ScoreView.tsx:6): One selected track passed to native player view; beat/note click selection, fixed notation engine and scale/profile.
-- **engine** — [src/engine.ts:135](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/engine.ts:135): Basic note/rest/rhythm/beat/bar/track edits and finite advanced adapter.
-- **initial** — [src/engine.ts:57](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/engine.ts:57): Creates stringed Staff with supplied tuning; does not create percussion/unpitched/keyboard tracks.
-- **import** — [src/engine.ts:71](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/engine.ts:71): Imports source through alphaTab public ScoreLoader; no dedicated format options.
-- **gpwrite** — [src/engine.ts:291](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/engine.ts:291): Gp7Exporter is the sole GP writer.
-- **nativeio** — [src-tauri/src/lib.rs:39](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/src/lib.rs:39): Native Open filter: tabplayer, gp, gpx, gp3, gp4, gp5. No alternate import UI.
-- **nativewrite** — [src-tauri/src/lib.rs:173](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/src/lib.rs:173): Native .tabplayer Save/Save As with source guards and atomic write path.
-- **controller** — [src/controller.ts:9](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/controller.ts:9): Transactional single document open/new/edit/undo/redo/save/export.
-- **session** — [src-tauri/src/project.rs:176](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/src/project.rs:176): Immutable source plus edit history/project session, not multi-document application state.
-- **editor** — [src/EditorPanel.tsx:14](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/EditorPanel.tsx:14): Selected string/fret editor; Set note disabled for percussion or zero tuning; single tuplet ratio/grace/text/chord controls.
-- **tech** — [src/editor/techniques.ts:36](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/techniques.ts:36): Validated selected-note flags/enums/curves/harmonic/trill; finite supported fields.
-- **beattech** — [src/editor/techniques.ts:55](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/techniques.ts:55): Beat fields: pick, brush, whammy, tremolo only.
-- **links** — [src/editor/techniques.ts:23](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/techniques.ts:23): Forward tie/hammer/slur links in same staff/voice, pitch/string rules and endpoint repair.
-- **techui** — [src/editor/TechniquePanel.tsx:13](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/TechniquePanel.tsx:13): Controls for supported note fields plus explicit ties/slurs and curves.
-- **notation** — [src/editor/notation.ts:5](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/notation.ts:5): Single-level beat ratio, meter/pickup/free-time/repeat/endings/section/tempo, key/clef, text/manual chord only.
-- **structure** — [src/editor/structure.ts:6](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/structure.ts:6): Retuning preserves string count; staff/voice creation/removal/copy and system breaks; no pitch refingering.
-- **track** — [src/TrackPanel.tsx:10](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/TrackPanel.tsx:10): Track rename/program/tuning/mix UI; new track takes name, program and string tuning.
-- **tunings** — [src/tuning-presets.ts:5](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/tuning-presets.ts:5): 25 built-in presets for guitar 6–9 and bass 4–6; Custom uses note-name entry.
-- **transport** — [src/Transport.tsx:5](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/Transport.tsx:5): Play/pause/stop, 7 relative speed choices, whole-measure seek/loop and metronome on/off.
-- **player** — [src/audio/NativePlaybackController.ts:12](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/audio/NativePlaybackController.ts:12): Native sample-clock transport, plans, selected-track cursor, controls and settings.
-- **plan** — [src/audio/plan.ts:336](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/audio/plan.ts:336): Prepared alphaTab musical/MIDI stream drives native plan; imported support is distinct from authoring controls.
-- **sound** — [src/audio/SoundPanel.tsx:26](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/audio/SoundPanel.tsx:26): 4 recorded voice overrides, GM, 5 preset IDs and fixed 8-block effects with output-device choice.
-- **settings** — [src/edit-types.ts:39](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/edit-types.ts:39): Only static track sounds/mixes, backing and print settings; no master, drum-element mix, automation/preset libraries.
-- **fx** — [src/edit-types.ts:23](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/edit-types.ts:23): Gate/compressor/4 amp models/3 cabinets/3-band EQ/chorus/delay/reverb in fixed structure.
-- **backing** — [src/audio/BackingPanel.tsx:9](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/audio/BackingPanel.tsx:9): Import/remove/replace/embedded backing, offset/anchors and static gain/pan/mute/solo; no waveform UI.
-- **backingio** — [src-tauri/src/runtime.rs:203](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/src/runtime.rs:203): Audio input filters accept WAV, FLAC, MP3, OGG.
-- **instrument** — [src/instruments/InstrumentView.tsx:7](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/instruments/InstrumentView.tsx:7): Read-only score/track/staff/active PlanNote props; no editing callback.
-- **liveinstrument** — [src/instruments/LiveInstrumentView.tsx:9](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/instruments/LiveInstrumentView.tsx:9): Selected track active native-playback note sampling drives read-only instrument views.
-- **formats** — [src/export/types.ts:7](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/export/types.ts:7): Public exports: GP, MIDI, PDF, print handoff, WAV, stems only.
-- **exportui** — [src/export/ExportDialog.tsx:4](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/export/ExportDialog.tsx:4): Selection and paper/audio export options; no alternate score/image/audio format encoders.
-- **pdf** — [src/export/pdf.ts:30](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/export/pdf.ts:30): Vector systems packed into physical pages with own headers/footer; constrained layout settings.
-- **print** — [src-tauri/src/export/print.rs:24](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/src/export/print.rs:24): Writes PDF then opens external default viewer; does not invoke a native printer dialog itself.
-- **midiexport** — [src/export/midi.ts:27](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/export/midi.ts:27): Standard MIDI generation/export; its own channel allocation and selected occurrences.
-- **readme** — [README.md:1](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/README.md:1): Project overview and current scope; overview text alone is not behavior proof.
-- **validation** — [docs/validation/2026-10-14-tabplayer-expansion.md:54](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/docs/validation/2026-10-14-tabplayer-expansion.md:54): Explicit GP export losses, 15 melodic MIDI-track limit, platform/audio/printing/signing limits; old scope completion is not parity.
-- **techtest** — [src/editor/techniques.test.ts:19](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/techniques.test.ts:19): Inspected assertions exercise supported enums, independent curves, link endpoint repair and musical duration.
-- **notationtest** — [src/editor/notation.test.ts:5](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/notation.test.ts:5): Assertions check 1800/320 ticks, meter overflow rejection, endings bitmask, tempos, key/text/chord reopen.
-- **structuretest** — [src/editor/structure.test.ts:12](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/structure.test.ts:12): Assertions cover voice limits/alignment, internal links, staff/capo/transposition and layout.
-- **replaytest** — [src/editor/replay.test.ts:22](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/replay.test.ts:22): Assertions cover explicit slur reconstruction, relationship repair, program stream and attack/timing effects.
-- **editortest** — [src/editor/panels.test.tsx:13](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/panels.test.tsx:13): UI dispatch/readback assertions for selected-string fields, curves, structure, meter and chord dialog.
-- **enginetest** — [src/engine.test.ts:1](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/engine.test.ts:1): Existing basic command assertions cover note/rest/duration/track/bar replay and capacity.
-- **tunetest** — [src/tuning-presets.test.ts:1](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/tuning-presets.test.ts:1): Preset inventory/order/pitches/filtering/readback assertions, not complete vendor catalog parity.
-- **transporttest** — [src/Transport.test.tsx:2](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/Transport.test.tsx:2): UI transport seek/loop/speed/metronome dispatch and validation assertions.
-- **plantest** — [src/audio/plan.test.ts:30](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/audio/plan.test.ts:30): Generated attacks/off events compared to independent public MIDI generator, plus repeat/tempo/channel/provenance tests.
-- **rendertest** — [src-tauri/tests/audio_render.rs:174](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/tests/audio_render.rs:174): Native assertions measure voice pitch/energy/envelopes/independent curves/controller sustain; not vendor sound comparison.
-- **dsptest** — [src-tauri/tests/audio_dsp.rs:216](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/tests/audio_dsp.rs:216): Native spectral/level assertions exercise implemented fixed effects; no missing FX family proof.
-- **backingtest** — [src-tauri/tests/audio_backing.rs:11](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/tests/audio_backing.rs:11): Backing decode/anchors/time-stretch tests; does not exercise absent waveform editor.
-- **instrumenttest** — [src/instruments/InstrumentView.test.tsx:30](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/instruments/InstrumentView.test.tsx:30): Assertions inspect actual string/fret/key geometry, simultaneous voices and kit element highlights.
-- **pdftest** — [src/export/pdf.test.ts:12](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/export/pdf.test.ts:12): Page dimensions, escaped text, vector systems and slur geometry assertions; no paper-print result.
-- **miditest** — [src/export/midi.test.ts:13](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/export/midi.test.ts:13): Independent byte decoder asserts event pitches/ticks/programs/tempos/selected boundaries/channel limits.
-- **coverage** — [src/editor/gp-coverage.test.ts:16](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/editor/gp-coverage.test.ts:16): Records before/after GP values for 21 groups; only asserts count/bytes, so NOT a passing fidelity test.
-- **selecttest** — [src/export/selection.test.ts:41](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src/export/selection.test.ts:41): Separately asserts selected model relationships and probes GP phrase slur/automation retention limits.
-- **filetest** — [src-tauri/tests/project_files.rs:7](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/src-tauri/tests/project_files.rs:7): Atomic source/history/file preservation assertions; not autosave or crash recovery.
-- **advanceddesktop** — [tests/desktop/advanced-editor.mjs:1](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/tests/desktop/advanced-editor.mjs:1): Desktop authored/history/restart fixture; scope is supported fields, not all GP symbols.
-- **exportdesktop** — [tests/desktop/exports.mjs:1](C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/tests/desktop/exports.mjs:1): Desktop file export snapshot/cancellation/current-speed workflows for existing formats.
+- **cmd** — [src/edit-types.ts:43](../../src/edit-types.ts:43): Finite command union: basic/technique/rhythm/structure/annotation/audio/print only; omitted authoring fields are absent here.
+- **app** — [src/App.tsx:23](../../src/App.tsx:23): Single DocumentController and selected track, local zoom/profile; no desktop menu/workspace/library/preferences routes.
+- **keys** — [src/App.tsx:64](../../src/App.tsx:64): Handles arrows, digit fret drafts and Enter; other shortcuts are not implemented.
+- **view** — [src/ScoreView.tsx:6](../../src/ScoreView.tsx:6): One selected track passed to native player view; beat/note click selection, fixed notation engine and scale/profile.
+- **engine** — [src/engine.ts:135](../../src/engine.ts:135): Basic note/rest/rhythm/beat/bar/track edits and finite advanced adapter.
+- **initial** — [src/engine.ts:57](../../src/engine.ts:57): Creates stringed Staff with supplied tuning; does not create percussion/unpitched/keyboard tracks.
+- **import** — [src/engine.ts:71](../../src/engine.ts:71): Imports source through alphaTab public ScoreLoader; no dedicated format options.
+- **gpwrite** — [src/engine.ts:291](../../src/engine.ts:291): Gp7Exporter is the sole GP writer.
+- **nativeio** — [src-tauri/src/lib.rs:39](../../src-tauri/src/lib.rs:39): Native Open filter: tabplayer, gp, gpx, gp3, gp4, gp5. No alternate import UI.
+- **nativewrite** — [src-tauri/src/lib.rs:173](../../src-tauri/src/lib.rs:173): Native .tabplayer Save/Save As with source guards and atomic write path.
+- **controller** — [src/controller.ts:9](../../src/controller.ts:9): Transactional single document open/new/edit/undo/redo/save/export.
+- **session** — [src-tauri/src/project.rs:176](../../src-tauri/src/project.rs:176): Immutable source plus edit history/project session, not multi-document application state.
+- **editor** — [src/EditorPanel.tsx:14](../../src/EditorPanel.tsx:14): Selected string/fret editor; Set note disabled for percussion or zero tuning; single tuplet ratio/grace/text/chord controls.
+- **tech** — [src/editor/techniques.ts:36](../../src/editor/techniques.ts:36): Validated selected-note flags/enums/curves/harmonic/trill; finite supported fields.
+- **beattech** — [src/editor/techniques.ts:55](../../src/editor/techniques.ts:55): Beat fields: pick, brush, whammy, tremolo only.
+- **links** — [src/editor/techniques.ts:23](../../src/editor/techniques.ts:23): Forward tie/hammer/slur links in same staff/voice, pitch/string rules and endpoint repair.
+- **techui** — [src/editor/TechniquePanel.tsx:13](../../src/editor/TechniquePanel.tsx:13): Controls for supported note fields plus explicit ties/slurs and curves.
+- **notation** — [src/editor/notation.ts:5](../../src/editor/notation.ts:5): Single-level beat ratio, meter/pickup/free-time/repeat/endings/section/tempo, key/clef, text/manual chord only.
+- **structure** — [src/editor/structure.ts:6](../../src/editor/structure.ts:6): Retuning preserves string count; staff/voice creation/removal/copy and system breaks; no pitch refingering.
+- **track** — [src/TrackPanel.tsx:10](../../src/TrackPanel.tsx:10): Track rename/program/tuning/mix UI; new track takes name, program and string tuning.
+- **tunings** — [src/tuning-presets.ts:5](../../src/tuning-presets.ts:5): 25 built-in presets for guitar 6–9 and bass 4–6; Custom uses note-name entry.
+- **transport** — [src/Transport.tsx:5](../../src/Transport.tsx:5): Play/pause/stop, 7 relative speed choices, whole-measure seek/loop and metronome on/off.
+- **player** — [src/audio/NativePlaybackController.ts:12](../../src/audio/NativePlaybackController.ts:12): Native sample-clock transport, plans, selected-track cursor, controls and settings.
+- **plan** — [src/audio/plan.ts:336](../../src/audio/plan.ts:336): Prepared alphaTab musical/MIDI stream drives native plan; imported support is distinct from authoring controls.
+- **sound** — [src/audio/SoundPanel.tsx:26](../../src/audio/SoundPanel.tsx:26): 4 recorded voice overrides, GM, 5 preset IDs and fixed 8-block effects with output-device choice.
+- **settings** — [src/edit-types.ts:39](../../src/edit-types.ts:39): Only static track sounds/mixes, backing and print settings; no master, drum-element mix, automation/preset libraries.
+- **fx** — [src/edit-types.ts:23](../../src/edit-types.ts:23): Gate/compressor/4 amp models/3 cabinets/3-band EQ/chorus/delay/reverb in fixed structure.
+- **backing** — [src/audio/BackingPanel.tsx:9](../../src/audio/BackingPanel.tsx:9): Import/remove/replace/embedded backing, offset/anchors and static gain/pan/mute/solo; no waveform UI.
+- **backingio** — [src-tauri/src/runtime.rs:203](../../src-tauri/src/runtime.rs:203): Audio input filters accept WAV, FLAC, MP3, OGG.
+- **instrument** — [src/instruments/InstrumentView.tsx:7](../../src/instruments/InstrumentView.tsx:7): Read-only score/track/staff/active PlanNote props; no editing callback.
+- **liveinstrument** — [src/instruments/LiveInstrumentView.tsx:9](../../src/instruments/LiveInstrumentView.tsx:9): Selected track active native-playback note sampling drives read-only instrument views.
+- **formats** — [src/export/types.ts:7](../../src/export/types.ts:7): Public exports: GP, MIDI, PDF, print handoff, WAV, stems only.
+- **exportui** — [src/export/ExportDialog.tsx:4](../../src/export/ExportDialog.tsx:4): Selection and paper/audio export options; no alternate score/image/audio format encoders.
+- **pdf** — [src/export/pdf.ts:30](../../src/export/pdf.ts:30): Vector systems packed into physical pages with own headers/footer; constrained layout settings.
+- **print** — [src-tauri/src/export/print.rs:24](../../src-tauri/src/export/print.rs:24): Writes PDF then opens external default viewer; does not invoke a native printer dialog itself.
+- **midiexport** — [src/export/midi.ts:27](../../src/export/midi.ts:27): Standard MIDI generation/export; its own channel allocation and selected occurrences.
+- **readme** — [README.md:1](../../README.md:1): Project overview and current scope; overview text alone is not behavior proof.
+- **validation** — [docs/validation/2026-10-14-tabplayer-expansion.md:54](../../docs/validation/2026-10-14-tabplayer-expansion.md:54): Explicit GP export losses, 15 melodic MIDI-track limit, platform/audio/printing/signing limits; old scope completion is not parity.
+- **techtest** — [src/editor/techniques.test.ts:19](../../src/editor/techniques.test.ts:19): Inspected assertions exercise supported enums, independent curves, link endpoint repair and musical duration.
+- **notationtest** — [src/editor/notation.test.ts:5](../../src/editor/notation.test.ts:5): Assertions check 1800/320 ticks, meter overflow rejection, endings bitmask, tempos, key/text/chord reopen.
+- **structuretest** — [src/editor/structure.test.ts:12](../../src/editor/structure.test.ts:12): Assertions cover voice limits/alignment, internal links, staff/capo/transposition and layout.
+- **replaytest** — [src/editor/replay.test.ts:22](../../src/editor/replay.test.ts:22): Assertions cover explicit slur reconstruction, relationship repair, program stream and attack/timing effects.
+- **editortest** — [src/editor/panels.test.tsx:13](../../src/editor/panels.test.tsx:13): UI dispatch/readback assertions for selected-string fields, curves, structure, meter and chord dialog.
+- **enginetest** — [src/engine.test.ts:1](../../src/engine.test.ts:1): Existing basic command assertions cover note/rest/duration/track/bar replay and capacity.
+- **tunetest** — [src/tuning-presets.test.ts:1](../../src/tuning-presets.test.ts:1): Preset inventory/order/pitches/filtering/readback assertions, not complete vendor catalog parity.
+- **transporttest** — [src/Transport.test.tsx:2](../../src/Transport.test.tsx:2): UI transport seek/loop/speed/metronome dispatch and validation assertions.
+- **plantest** — [src/audio/plan.test.ts:30](../../src/audio/plan.test.ts:30): Generated attacks/off events compared to independent public MIDI generator, plus repeat/tempo/channel/provenance tests.
+- **rendertest** — [src-tauri/tests/audio_render.rs:174](../../src-tauri/tests/audio_render.rs:174): Native assertions measure voice pitch/energy/envelopes/independent curves/controller sustain; not vendor sound comparison.
+- **dsptest** — [src-tauri/tests/audio_dsp.rs:216](../../src-tauri/tests/audio_dsp.rs:216): Native spectral/level assertions exercise implemented fixed effects; no missing FX family proof.
+- **backingtest** — [src-tauri/tests/audio_backing.rs:11](../../src-tauri/tests/audio_backing.rs:11): Backing decode/anchors/time-stretch tests; does not exercise absent waveform editor.
+- **instrumenttest** — [src/instruments/InstrumentView.test.tsx:30](../../src/instruments/InstrumentView.test.tsx:30): Assertions inspect actual string/fret/key geometry, simultaneous voices and kit element highlights.
+- **pdftest** — [src/export/pdf.test.ts:12](../../src/export/pdf.test.ts:12): Page dimensions, escaped text, vector systems and slur geometry assertions; no paper-print result.
+- **miditest** — [src/export/midi.test.ts:13](../../src/export/midi.test.ts:13): Independent byte decoder asserts event pitches/ticks/programs/tempos/selected boundaries/channel limits.
+- **coverage** — [src/editor/gp-coverage.test.ts:16](../../src/editor/gp-coverage.test.ts:16): Records before/after GP values for 21 groups; only asserts count/bytes, so NOT a passing fidelity test.
+- **selecttest** — [src/export/selection.test.ts:41](../../src/export/selection.test.ts:41): Separately asserts selected model relationships and probes GP phrase slur/automation retention limits.
+- **filetest** — [src-tauri/tests/project_files.rs:7](../../src-tauri/tests/project_files.rs:7): Atomic source/history/file preservation assertions; not autosave or crash recovery.
+- **advanceddesktop** — [tests/desktop/advanced-editor.mjs:1](../../tests/desktop/advanced-editor.mjs:1): Desktop authored/history/restart fixture; scope is supported fields, not all GP symbols.
+- **exportdesktop** — [tests/desktop/exports.mjs:1](../../tests/desktop/exports.mjs:1): Desktop file export snapshot/cancellation/current-speed workflows for existing formats.
 
 ## Independent next work groups
 

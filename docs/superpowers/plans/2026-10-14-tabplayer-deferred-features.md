@@ -35,9 +35,9 @@ Execute independent work in [advanced editor](2026-10-14-tabplayer-advanced-edit
 
 The editor plan defines the matching Rust/TypeScript project, asset, sound and print DTOs used by later plans. The audio plan defines `PlaybackPlan`, `AudioResources`, `Renderer`, `AudioService` and `NativePlaybackController`. The exports plan consumes those exact interfaces. Keep stable track identity from `engine.ts`; do not create another identity scheme for mixer/export.
 
-Use the already attached clean managed worktree at `C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer`, branch `codex/tabplayer-rust`. Base expansion commit is `f2f77f143f38a94c44d5cc87091ee7d0044f278e`. Preserve the original completed milestone and its tests. Use the using-git-worktrees skill to validate/reuse this checkout, without creating an unnecessary second worktree.
+Use the already attached clean managed worktree at `<checkout>`, branch `codex/tabplayer-rust`. Base expansion commit is `f2f77f143f38a94c44d5cc87091ee7d0044f278e`. Preserve the original completed milestone and its tests. Use the using-git-worktrees skill to validate/reuse this checkout, without creating an unnecessary second worktree.
 
-Verification commands run from the worktree. On this Windows host, Cargo is `C:/Users/krist/.cargo/bin/cargo.exe`; add that directory to the task's PATH before `npm run tauri`. Use `npm test`, `npm run typecheck`, `cargo test --manifest-path src-tauri/Cargo.toml --tests`, `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` and `git diff --check` for complete checkpoints. Targeted red/green commands are specified in each task. Commit only after its relevant checks pass.
+Verification commands run from the worktree. On this Windows host, Cargo is `~/.cargo/bin/cargo.exe`; add that directory to the task's PATH before `npm run tauri`. Use `npm test`, `npm run typecheck`, `cargo test --manifest-path src-tauri/Cargo.toml --tests`, `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` and `git diff --check` for complete checkpoints. Targeted red/green commands are specified in each task. Commit only after its relevant checks pass.
 
 ## Requirement closure
 

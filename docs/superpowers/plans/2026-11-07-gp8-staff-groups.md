@@ -21,7 +21,7 @@
 - New UI text goes through `src/i18n` with `en`, `et`, `de`. Busy uses `busyGuard` (buttons), `busySelect` (selects) and `aria-disabled` with ignored changes (checkboxes, inputs), never `disabled`. One gesture is one `setEngraving`; choosing the current value records nothing.
 - A staff-gap-only edit must not re-render alphaTab and must not restart native audio. A group edit re-renders the notation (it changes bracket mode and reserve) but stays a settings edit.
 - No `it` may ship without an `expect`.
-- Rust: `cargo test --locked --manifest-path src-tauri/Cargo.toml --test engraving_protocol`, `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib style_library`, `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib export::pdf`, `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`, in the default `src-tauri/target` (or `E:/cargo-target/slot-1..3` for tests only). Never a scratchpad target.
+- Rust: `cargo test --locked --manifest-path src-tauri/Cargo.toml --test engraving_protocol`, `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib style_library`, `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib export::pdf`, `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`, in the default `src-tauri/target` (or `<cargo-target>/slot-1..3` for tests only). Never a scratchpad target.
 - TypeScript: `npm run typecheck` and the touched Vitest files via `npx vitest run <files>`.
 
 ## Review Focus

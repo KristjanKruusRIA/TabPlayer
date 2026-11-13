@@ -10,7 +10,7 @@
     "pretest": "node scripts/fetch-fixtures.mjs",
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test scripts/prepare-audio.test.mjs scripts/prepare-library.test.mjs scripts/build-plugin-host.test.mjs scripts/verify-packaged-resources.test.mjs scripts/cabinet-ir-assets.test.mjs scripts/font-coverage.test.mjs && vitest run",
+    "test": "node --test scripts/prepare-audio.test.mjs scripts/prepare-library.test.mjs scripts/build-plugin-host.test.mjs scripts/verify-packaged-resources.test.mjs scripts/cabinet-ir-assets.test.mjs scripts/font-coverage.test.mjs scripts/secret-scan.test.mjs && vitest run",
     "prepare:audio": "node scripts/prepare-audio.mjs",
     "prepare:plugin-host": "node scripts/build-plugin-host.mjs --debug",
     "test:audio-assets": "node --test scripts/prepare-audio.test.mjs",

@@ -50,7 +50,7 @@ Computed from the token values (WCAG relative luminance):
 
 ## Real app
 
-Driver: `tests/desktop/selection-loop-drawing.mjs` (opens the Windowline example through the test open hook, presses Fit width, selects from the last note of bar 4, the end of the first system, to the first note of bar 5, loops it with Loop selection, then photographs). Built with `scripts/build-desktop-test.ps1`; port 9223 was free before and the app was closed after. Screenshots are in `E:\claude-tmp\the-193\` (not committed).
+Driver: `tests/desktop/selection-loop-drawing.mjs` (opens the Windowline example through the test open hook, presses Fit width, selects from the last note of bar 4, the end of the first system, to the first note of bar 5, loops it with Loop selection, then photographs). Built with `scripts/build-desktop-test.ps1`; port 9223 was free before and the app was closed after. Screenshots are in `<scratch>/the-193\` (not committed).
 
 What I saw:
 

@@ -14,7 +14,7 @@ Start them after `develop` is pushed. Task 2 and task 5 add UI text, so start th
 
 ## Starting a task
 
-Each task gets a worktree, so Antigravity never touches your root checkout. From `E:\git\TabPlayer` in Git Bash, using task 1 as the example:
+Each task gets a worktree, so Antigravity never touches your root checkout. From `<checkout>` in Git Bash, using task 1 as the example:
 
 ```bash
 git worktree add -b agy/s13-tuning-library .worktrees/s13 develop

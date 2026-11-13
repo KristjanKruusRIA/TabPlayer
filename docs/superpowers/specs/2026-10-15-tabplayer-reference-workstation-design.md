@@ -4,7 +4,7 @@ Date: 2026-10-15. Mode: **Operate**. Status: implementation preparation for root
 
 ## Intent and authority
 
-The user asked: **“Please use these images as the base for the UI.”** The supplied collage is `e:/git/jeopardy/.codex-remote-attachments/01a13a5f-2744-7412-b854-bffaad5f5d85/dc0af941-4ef8-4586-bc2b-e33864b0c32e/1-1000013371.jpg`. It was inspected directly. This direction replaces the earlier instruction to keep the layout, while preserving working tools and the authorized full GP8 parity effort. The user's standing authorization to proceed and use parallel work governs execution; no additional design permission round is required.
+The user asked: **“Please use these images as the base for the UI.”** The supplied collage is a local attachment (not in the repository). It was inspected directly. This direction replaces the earlier instruction to keep the layout, while preserving working tools and the authorized full GP8 parity effort. The user's standing authorization to proceed and use parallel work governs execution; no additional design permission round is required.
 
 TabPlayer should feel like a compact music workstation where a player can read and edit a score, rehearse an exact passage, shape a track's real sound, and inspect the performing instrument without losing their musical location. The score remains the dominant artifact. Dense controls are organized by task and remain readable rather than copying the collage's tiny text.
 

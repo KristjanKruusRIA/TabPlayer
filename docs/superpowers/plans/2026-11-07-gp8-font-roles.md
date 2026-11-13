@@ -19,7 +19,7 @@
 - No family name with a digit token reaches alphaTab `Font.families` (alias names only).
 - New UI text goes through `src/i18n` with `en`, `et` and `de`; the English wording of existing labels does not change. No `disabled` for busy: `busyRegion`, `busyGuard`, `busySelect`.
 - Do not touch `src-tauri/src/audio/tone.rs`, `src-tauri/gen/`, `src-tauri/resources/audio/`, `.analysis/compatibility/`, `vendor/usvg/`.
-- Checks per task: `npm run typecheck`, the named Vitest or Node files, and for Rust `cargo test --locked --manifest-path src-tauri/Cargo.toml` with `--lib <module>` or `--test engraving_protocol`, plus `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`. Use the default `src-tauri/target` (or `E:/cargo-target/slot-1..3` if busy); never a scratchpad or per-task target folder.
+- Checks per task: `npm run typecheck`, the named Vitest or Node files, and for Rust `cargo test --locked --manifest-path src-tauri/Cargo.toml` with `--lib <module>` or `--test engraving_protocol`, plus `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`. Use the default `src-tauri/target` (or `<cargo-target>/slot-1..3` if busy); never a scratchpad or per-task target folder.
 - Commits: named files only, a BOM-free message file, `git commit -F`, message ending with a blank line and `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Review focus

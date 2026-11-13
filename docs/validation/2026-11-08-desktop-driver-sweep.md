@@ -90,7 +90,7 @@ Runs counts the sweep-level runs that reached a verdict: first sweep, rerun of e
 | `parity-sound-preview` | PASS | 2 | P/P | sound preview: Lead previewed on Guitar9 while playing (peak 0.810, generation 6 kept), canceled back to the s | none |
 | `parity-staff-groups` | PASS | 2 | P/P | staff-groups: 47 passed, 0 failed. | none |
 | `parity-stroke-patterns` | PASS | 2 | P/P | stroke patterns: Guitar9 4 sounding beats alternate D/U and take brush D D U -; drums refused; undo/redo kept. | none |
-| `parity-stylesheet` | PASS | 2 | P/P | {"authored":true,"originalGp8RuntimeAcceptance":false,"fixtures":{"true":{"path":"E:\\git\\TabPlayer\\.worktre | none |
+| `parity-stylesheet` | PASS | 2 | P/P | {"authored":true,"originalGp8RuntimeAcceptance":false,"fixtures":{"true":{"path":"<checkout>\\.worktre | none |
 | `parity-sustain-pedal` | PASS | 2 | P/P | sustain pedal: MIDI CC64 0/ch2=0, 0/ch5=0, 3840/ch2=127, 3840/ch5=127, 6720/ch2=0, 6720/ch5=0; undo cleared th | none |
 | `parity-symbol-editing` | PASS | 2 | P/P | symbol editing: title, tempo, chord name and clef were edited in place and from a context menu as undoable edi | none |
 | `parity-system-gaps` | PASS | 2 | P/P | system-gaps: 24 passed, 0 failed. | none |
@@ -217,7 +217,7 @@ The product still lists the dead `.workstation-left` selector in `src/help/help-
   - **Not exercised:** the `NEEDS FOREGROUND` branch itself. Foreground was never refused after the change, so only the granted path ran live.
   - **THE-191 (2026-11-08, same worktree and build; fresh `--prepare` state and nothing listening on port 9223 before each launch): fixed, the driver passes.** The three questions the follow-up left open have an answer: the cause was the helper's design, not WebView2, Tauri or the product.
     - **Root cause.** `DoDragDrop` only runs on mouse messages delivered to the thread that called it: through the implicit capture after a button goes down in one of that thread's windows, or while the pointer is over one. The old helper had no window, pressed no button and sent zero-motion input, so it received none and Windows never queried the source (`queries=0`) however many inputs were inserted.
-    - **Evidence** (throwaway scripts in `E:\claude-tmp\the-191`, not committed; a plain WinForms window in its own process as the drop target):
+    - **Evidence** (throwaway scripts in `<scratch>/the-191`, not committed; a plain WinForms window in its own process as the drop target):
       - Window-less helper, same `DoDragDrop` code: zero-motion, alternating 1 px relative motion and an absolute move to the same point each gave 0 queries in 6.5 s (102 to 104 inputs inserted). Primary button down plus motion, still without a helper window: 0 queries.
       - Helper with its own non-activating 56 px window, primary button pressed on it, absolute pointer path to the target, release over the target: 31 to 52 queries, effect Copy, `DRAGDROP_S_DROP` (0x40100), and the target saw DragEnter and DragDrop. Same with the target staying foreground.
       - Own window but no button: the loop ran (129 queries) but the target never saw DragEnter and feedback stayed at no-drop, because messages reach the thread only while the pointer is over its window.

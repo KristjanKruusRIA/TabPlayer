@@ -30,7 +30,7 @@ All of it is under `.analysis/vst-spikes/`, which git ignores. None of it is com
   - `libloading =0.9.0`;
   - `log =0.4.35`;
   - `windows-sys =0.61.2`. SoundCraft's editor window needs it; it was already in the local cargo cache, and the app's lockfile already has it transitively.
-- **Build:** `RUSTUP_TOOLCHAIN=1.90.0`, `CARGO_TARGET_DIR=E:/cargo-target/slot-1`, release profile.
+- **Build:** `RUSTUP_TOOLCHAIN=1.90.0`, `CARGO_TARGET_DIR=<cargo-target>/slot-1`, release profile.
 
 ## Plug-ins
 
@@ -120,7 +120,7 @@ What the columns mean:
 These commands assume `.analysis/vst-spikes/` as rebuilt from the description above; it is not committed.
 
 ```powershell
-$env:RUSTUP_TOOLCHAIN = '1.90.0'; $env:CARGO_TARGET_DIR = 'E:/cargo-target/slot-1'
+$env:RUSTUP_TOOLCHAIN = '1.90.0'; $env:CARGO_TARGET_DIR = '<cargo-target>/slot-1'
 cargo build --release --manifest-path .analysis/vst-spikes/host-rust/Cargo.toml
 cargo build --release --manifest-path .analysis/vst-spikes/gain-example/Cargo.toml
 # copy gain.dll to plugins/gain.vst3 and the exe to host.exe, then for each plug-in:
@@ -171,7 +171,7 @@ All of it is under `.analysis/vst-spikes/ipc/`, which git ignores. None of it is
   - The app also counts echo mismatches, bit-exact against the regenerated input, in echo and synthetic modes.
   - CPU use is the kernel plus user time from `GetProcessTimes` and `GetThreadTimes` over the timed span, as a percentage of one core.
 - **Step 1 checks (10 s each).** Echo and the `vst3` gain example (`plugins/gain.vst3`) both ran on the ring with 8 helpers, with zero underruns and zero mismatches in echo.
-- **Build.** `RUSTUP_TOOLCHAIN=1.90.0`, `CARGO_TARGET_DIR=E:/cargo-target/slot-1`, release, `--offline`. Dependencies are the Spike 1 pins plus `cpal =0.18.2`, which the app already locks and which was already in the cache, for the device-paced run. Nothing was downloaded.
+- **Build.** `RUSTUP_TOOLCHAIN=1.90.0`, `CARGO_TARGET_DIR=<cargo-target>/slot-1`, release, `--offline`. Dependencies are the Spike 1 pins plus `cpal =0.18.2`, which the app already locks and which was already in the cache, for the device-paced run. Nothing was downloaded.
 
 ## Load
 
@@ -253,7 +253,7 @@ What the columns mean:
 These commands assume `.analysis/vst-spikes/ipc/` as described above; it is not committed.
 
 ```powershell
-$env:RUSTUP_TOOLCHAIN = '1.90.0'; $env:CARGO_TARGET_DIR = 'E:/cargo-target/slot-1'
+$env:RUSTUP_TOOLCHAIN = '1.90.0'; $env:CARGO_TARGET_DIR = '<cargo-target>/slot-1'
 cargo build --release --offline --features device --manifest-path .analysis/vst-spikes/ipc/Cargo.toml
 # copy vst-spike-ipc.exe to .analysis/vst-spikes/ipc/ipc.exe, then:
 .analysis/vst-spikes/ipc/run-all.ps1 -Seconds 600
@@ -421,7 +421,7 @@ No licence, activation or login dialog appeared in any run.
 
 ## Method
 
-Everything is under `.analysis/vst-spikes/editor/` (git-ignored, not committed), built with `cargo +1.90.0` into `E:/cargo-target/slot-1`. The desktop test app was built from this worktree with `scripts/build-desktop-test.ps1` (default target).
+Everything is under `.analysis/vst-spikes/editor/` (git-ignored, not committed), built with `cargo +1.90.0` into `<cargo-target>/slot-1`. The desktop test app was built from this worktree with `scripts/build-desktop-test.ps1` (default target).
 
 - **`helper.exe`** is Spike 1's SoundCraft-derived FFI in its own process. The main thread runs a `GetMessage` loop. A reader thread takes commands on stdin, queues them and posts `WM_APP` to an `HWND_MESSAGE` window (P5). Commands are `open`, `close`, `raise`, `info`, `snap`, `quit`. It sets per-monitor v2 DPI awareness first (`SetProcessDpiAwarenessContext(-4)`), creates the editor with a null owner, and is told the app's pid (P29).
 - **`app.exe`** is a stand-in parent: a plain top-level window that counts `WM_KEYDOWN`, `WM_CHAR` and `WM_PAINT`, and a driver that spawns a helper per scenario. It reads `GetForegroundWindow`, `GetWindowThreadProcessId` and `GetGUIThreadInfo`, and synthesizes input with `SendInput` (typing only while `GetForegroundWindow` is the editor). The stand-in is needed because the real app has no plug-in code yet, so nothing in it can call `AllowSetForegroundWindow(helper)`.
@@ -540,7 +540,7 @@ So the blank windows in Spike 1 were not caused by the Spike 1 host's code, its 
 These commands assume `.analysis/vst-spikes/editor/` as rebuilt from the description above; it is not committed.
 
 ```powershell
-$env:RUSTUP_TOOLCHAIN = '1.90.0'; $env:CARGO_TARGET_DIR = 'E:/cargo-target/slot-1'
+$env:RUSTUP_TOOLCHAIN = '1.90.0'; $env:CARGO_TARGET_DIR = '<cargo-target>/slot-1'
 cargo build --release --manifest-path .analysis/vst-spikes/editor/Cargo.toml   # helper.exe, app.exe
 # copy src-tauri/target/debug/tabplayer_test_plugin.dll to .analysis/vst-spikes/editor/plugins/testplug.vst3
 # (a), (c), (d) shortcuts, (e), (f) with the stand-in; add --click "x,y;x,y" --text tabplayer for a text field:

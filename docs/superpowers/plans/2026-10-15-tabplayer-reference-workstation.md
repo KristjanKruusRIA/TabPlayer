@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- The authoritative checkout is `C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer`, branch `feat/gp8-parity`; root resolves current source/integration state before execution.
+- The authoritative checkout is `<checkout>`, branch `feat/gp8-parity`; root resolves current source/integration state before execution.
 - Mode is Operate. The user's reference is pinned. Their later instruction requires generated UI images before implementing views absent from the collage; model those views after the images while retaining actual product controls. No approval round.
 - Each implementation worker reads Impeccable's `reference/craft-floor.md` immediately before its first UI edit. This preparation pass does not edit UI and does not invoke the craft-floor or a new context/init run.
 - Preserve the Rust/Tauri native score/history/audio/export authority. React panels present real state and invoke existing commands.

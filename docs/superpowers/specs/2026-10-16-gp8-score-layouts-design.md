@@ -1,6 +1,6 @@
 # Interactive score layouts and fit
 
-Date: 2026-10-16. Architectural tranche for reviewed-partial D01/D02. The ongoing request authorizes scoped parity changes, parallel delivery and independent review without additional approval questions. Work remains in `C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer`, branch `feat/gp8-parity`; root owns Git, joins, builds and actual-app admission.
+Date: 2026-10-16. Architectural tranche for reviewed-partial D01/D02. The ongoing request authorizes scoped parity changes, parallel delivery and independent review without additional approval questions. Work remains in `<checkout>`, branch `feat/gp8-parity`; root owns Git, joins, builds and actual-app admission.
 
 ## Intended result
 

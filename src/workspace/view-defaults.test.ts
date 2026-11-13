@@ -1,5 +1,5 @@
 import { afterEach,expect,it } from 'vitest';
-import { forgetSessionViewDefaults,standardViewDefaults,readViewDefaults,writeViewDefaults,viewDefaultsFrom,defaultDocumentView } from './view-defaults';
+import { forgetSessionViewDefaults,standardViewDefaults,readViewDefaults,writeViewDefaults,viewDefaultsFrom,defaultDocumentView,hasSavedViewDefaults } from './view-defaults';
 import { initialDocumentView } from './view-state';
 
 afterEach(forgetSessionViewDefaults);
@@ -44,4 +44,25 @@ it('applies the last saved defaults even when storage refused them',()=>{
 
 it('forgets the session copy between tests',()=>{
   expect(initialDocumentView()).toEqual(defaultDocumentView(standardViewDefaults));
+});
+
+it('tells a saved default from the standard view, even when the saved values equal the standard ones (THE-196)',()=>{
+  const storage=memory();
+  expect(hasSavedViewDefaults(storage)).toBe(false);
+  expect(writeViewDefaults({...standardViewDefaults},storage)).toBe(true);
+  expect(hasSavedViewDefaults(storage)).toBe(true);
+  forgetSessionViewDefaults();
+  expect(hasSavedViewDefaults(storage)).toBe(true);
+});
+
+it('counts a default saved in this run when storage refuses it, and ignores damaged or unreadable storage (THE-196)',()=>{
+  const refusing={getItem:()=>null,setItem:()=>{throw new Error('denied');}};
+  expect(hasSavedViewDefaults(refusing)).toBe(false);
+  expect(writeViewDefaults({...standardViewDefaults},refusing)).toBe(false);
+  expect(hasSavedViewDefaults(refusing)).toBe(true);
+  forgetSessionViewDefaults();
+  const storage=memory();
+  for(const raw of ['nope','[]','null','7']){storage.values.set('tabplayer.viewDefaults',raw);expect(hasSavedViewDefaults(storage)).toBe(false);}
+  expect(hasSavedViewDefaults({getItem:()=>{throw new Error('denied');},setItem:()=>{}})).toBe(false);
+  expect(hasSavedViewDefaults(undefined)).toBe(false);
 });

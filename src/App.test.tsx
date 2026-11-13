@@ -3,6 +3,7 @@ import {withSystemGaps} from './engraving/system-gaps';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act,cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { forgetSessionPanelSizes } from './workstation/panel-sizes';
+import { forgetSessionViewDefaults,standardViewDefaults,writeViewDefaults } from './workspace/view-defaults';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import type { BarDesign } from './ScoreView';
@@ -105,7 +106,7 @@ it('shows score only when a template baseline removed original embedded backing'
 const activeController=()=>testWorkspace.getState().documents.find(entry=>entry.id===testWorkspace.getState().active.documentId)!.controller;
 /** The protection the next document set up starts with; the fake bridge keeps its own state from there. */
 const startingProtection:{value:Protection|undefined}={value:undefined};
-async function setup(initial=blankProject(),openProject?:Project,options:{width?:number;session?:WorkspaceSession;workspaceHeight?:number;instrumentVisible?:boolean}={}) {
+async function setup(initial=blankProject(),openProject?:Project,options:{width?:number;session?:WorkspaceSession;workspaceHeight?:number;instrumentVisible?:boolean;view?:Partial<import('./workspace/types').DocumentViewState>}={}) {
   Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:options.width??1280});
   vi.stubGlobal('ResizeObserver',class {
     constructor(private callback:ResizeObserverCallback){}
@@ -132,7 +133,7 @@ async function setup(initial=blankProject(),openProject?:Project,options:{width?
   const stage=(project:Project,path:string|null,token:string)=>{const candidate={project,path,token};staged.set(token,candidate);return candidate;};
   activate(add(initial));
   const bridge:NativeWorkspaceBridge={snapshot:async()=>snapshot(),readDocument:async()=>openProject?{kind:'candidate',candidate:stage(openProject,'saved.tabplayer','opened-document')}:null,createBlankDocument:async()=>stage(blankProject(),null,'new-document'),cancelDocument:async token=>staged.delete(token),addDocument:async token=>{const candidate=staged.get(token);if(!candidate)throw new Error('Missing document candidate');staged.delete(token);return activate(add(candidate.project,candidate.path));},activateDocument:async id=>activate(id),closeDocuments:async decisions=>{const order=[...records.keys()],index=order.indexOf(active.documentId);for(const decision of decisions)records.delete(decision.documentId);if(!records.size)add(blankProject());return records.has(active.documentId)?snapshot():activate([...records.keys()][Math.min(index,records.size-1)]);}};
-  testWorkspace=await WorkspaceController.create(bridge);if(options.instrumentVisible){const entry=testWorkspace.getState().documents[0];testWorkspace.setView(entry.id,{...entry.view,instrumentVisible:true});}const controller=activeController();appRender=render(<WorkspaceApp workspace={testWorkspace} session={options.session}/>);return controller;
+  testWorkspace=await WorkspaceController.create(bridge);if(options.instrumentVisible||options.view){const entry=testWorkspace.getState().documents[0];testWorkspace.setView(entry.id,{...entry.view,...options.view,...options.instrumentVisible?{instrumentVisible:true}:{}});}const controller=activeController();appRender=render(<WorkspaceApp workspace={testWorkspace} session={options.session}/>);return controller;
 }
 const dockButton=(name:string)=>within(document.querySelector<HTMLElement>('.workstation-dock')!).getByRole('button',{name,hidden:true});
 const scoreTabs=()=>within(screen.getByRole('tablist',{name:'Open scores'}));
@@ -2424,4 +2425,149 @@ it('runs the practice shortcut commands from the command palette',async()=>{
   fireEvent.change(screen.getByRole('combobox',{name:'Command'}),{target:{value:'slower'}});
   fireEvent.keyDown(screen.getByRole('combobox',{name:'Command'}),{key:'Enter'});
   expect(integration.setSpeed).toHaveBeenCalledWith(75);
+});
+describe('small windows (THE-196)',()=>{
+  const heightKey=Object.getOwnPropertyDescriptor(window,'innerHeight');
+  const setHeight=(value:number)=>Object.defineProperty(window,'innerHeight',{configurable:true,writable:true,value});
+  const resize=()=>act(()=>{fireEvent(window,new Event('resize'));});
+  const sizesKey='tabplayer.panelSizes',defaultsKey='tabplayer.viewDefaults';
+  const forget=()=>{window.localStorage.removeItem(sizesKey);window.localStorage.removeItem(defaultsKey);forgetSessionPanelSizes();forgetSessionViewDefaults();};
+  beforeEach(forget);
+  afterEach(()=>{forget();if(heightKey)Object.defineProperty(window,'innerHeight',heightKey);});
+  const inspector=()=>document.querySelector<HTMLElement>('.workstation-inspector')!;
+  const display=()=>screen.queryByLabelText('Display mode',{selector:'select'});
+  const lastScoreProps=()=>engravingView.mock.lastCall![0];
+
+  describe('fit to the window when nothing chose a zoom',()=>{
+    it('asks the score view to fit a page wider than its area, and shows that as Fit width without saving it',async()=>{
+      const c=await setup(),before=c.getState(),setView=vi.spyOn(testWorkspace,'setView');
+      expect(lastScoreProps()).toMatchObject({autoFit:true,display:{layout:'parchment',zoomMode:'manual'}});
+      expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','false');expect(screen.queryByLabelText('Actual zoom')).not.toBeInTheDocument();
+      act(()=>lastScoreProps().onAutoFit(true));act(()=>lastScoreProps().onDisplayStatus({zoomPercent:68.2,fitLimited:false,pageError:null}));
+      expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','true');expect(screen.getByLabelText('Actual zoom')).toHaveTextContent('68.2%');
+      expect(lastScoreProps().display).toEqual({layout:'parchment',zoomMode:'manual'});
+      expect(setView).not.toHaveBeenCalled();expect(testWorkspace.getState().documents[0].view).not.toHaveProperty('scoreDisplay');expect(testWorkspace.getState().documents[0].view.zoom).toBe(100);
+      expect(c.getState()).toBe(before);expect(c.getState().snapshot).toMatchObject({dirty:false,canUndo:false});
+    });
+    it('does not apply when the user saved a view default, even one equal to the standard view',async()=>{
+      writeViewDefaults({...standardViewDefaults});
+      await setup();expect(lastScoreProps()).toMatchObject({autoFit:false});
+    });
+    it('does not apply to a score whose view already has a display of its own or a zoom of its own',async()=>{
+      await setup(blankProject(),undefined,{view:{scoreDisplay:{layout:'grid',zoomMode:'manual'}}});expect(lastScoreProps()).toMatchObject({autoFit:false});cleanup();
+      await setup(blankProject(),undefined,{view:{zoom:135}});expect(lastScoreProps()).toMatchObject({autoFit:false});
+    });
+    it('stops for good once the user chooses a zoom, and a later resize does not bring it back',async()=>{
+      await setup();
+      act(()=>lastScoreProps().onAutoFit(true));change('Zoom (%)','90');
+      expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:90});expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','false');
+      Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:960});resize();
+      expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:90});
+    });
+    it('treats an explicit 100% as a choice and saves that, so the page keeps 100% after a tab switch',async()=>{
+      await setup();change('Zoom (%)','90');change('Zoom (%)','100');
+      expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:100});
+      expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:100,scoreDisplay:{layout:'parchment',zoomMode:'manual'}});
+    });
+    it('stops when the user chooses a display mode, which is saved as the user chose it',async()=>{
+      await setup();change('Display mode','grid');
+      expect(lastScoreProps()).toMatchObject({autoFit:false,display:{layout:'grid',zoomMode:'manual'}});expect(testWorkspace.getState().documents[0].view.scoreDisplay).toEqual({layout:'grid',zoomMode:'manual'});
+    });
+    it('keeps what the user was looking at when a layout is chosen while the page is fitted',async()=>{
+      await setup();act(()=>lastScoreProps().onAutoFit(true));change('Display mode','grid');
+      expect(testWorkspace.getState().documents[0].view.scoreDisplay).toEqual({layout:'grid',zoomMode:'fitWidth'});
+    });
+  });
+
+  describe('little height',()=>{
+    it.each([[600,true],[610,true],[611,false],[620,false],[900,false]])('at a window height of %i the score display row is folded: %s',async(height,folded)=>{
+      setHeight(height);await setup();
+      expect(screen.queryByRole('button',{name:'Score display'})!==null).toBe(folded);expect(display()!.closest('[hidden]')!==null).toBe(folded);
+    });
+    it('folds the display controls into one menu button, with the same controls inside it',async()=>{
+      setHeight(600);const c=await setup(),before=c.getState();
+      const button=screen.getByRole('button',{name:'Score display'});expect(button).toHaveAttribute('aria-expanded','false');
+      fireEvent.click(button);for(const name of ['Display mode','Displayed tracks','Zoom (%)'])expect(screen.getByLabelText(name)).toBeVisible();
+      expect(screen.getByRole('button',{name:'Fit width'})).toBeVisible();expect(screen.getByRole('button',{name:'Fit page'})).toBeVisible();
+      change('Zoom (%)','120');expect(lastScoreProps()).toMatchObject({zoom:120});expect(c.getState()).toBe(before);
+    });
+    it('starts with the inspector and the overview closed, and growing the window restores the row',async()=>{
+      setHeight(600);const c=await setup(),before=c.getState();
+      expect(inspector()).toHaveAttribute('hidden');expect(screen.queryByRole('region',{name:'Bottom dock'})).not.toBeInTheDocument();
+      setHeight(900);resize();
+      expect(screen.queryByRole('button',{name:'Score display'})).not.toBeInTheDocument();expect(display()).toBeVisible();
+      expect(c.getState()).toBe(before);expectSilentNavigation();
+    });
+    it('leaves a panel the user opened open when the window grows or shrinks',async()=>{
+      setHeight(600);await setup();viewToggle('Inspector');expect(inspector()).not.toHaveAttribute('hidden');
+      setHeight(900);resize();expect(inspector()).not.toHaveAttribute('hidden');
+      setHeight(600);resize();expect(inspector()).not.toHaveAttribute('hidden');expect(screen.queryByRole('region',{name:'Bottom dock'})).not.toBeInTheDocument();
+    });
+    it('opens the panels when an untouched small window grows, and closes them when it shrinks again',async()=>{
+      setHeight(600);await setup();setHeight(900);resize();
+      expect(inspector()).not.toHaveAttribute('hidden');expect(screen.getByRole('region',{name:'Bottom dock'})).toBeVisible();
+      setHeight(600);resize();expect(inspector()).toHaveAttribute('hidden');expect(screen.queryByRole('region',{name:'Bottom dock'})).not.toBeInTheDocument();
+    });
+    it('keeps a panel open when the user remembered a size for it',async()=>{
+      window.localStorage.setItem(sizesKey,JSON.stringify({inspector:320,dock:null}));
+      setHeight(600);await setup();
+      expect(inspector()).not.toHaveAttribute('hidden');expect(screen.queryByRole('region',{name:'Bottom dock'})).not.toBeInTheDocument();cleanup();forgetSessionPanelSizes();
+      window.localStorage.setItem(sizesKey,JSON.stringify({inspector:null,dock:150}));
+      await setup();expect(inspector()).toHaveAttribute('hidden');expect(screen.getByRole('region',{name:'Bottom dock'})).toBeVisible();
+    });
+    it('keeps the bottom dock for a score whose instrument view was left open',async()=>{
+      setHeight(600);await setup(blankProject(),undefined,{instrumentVisible:true,workspaceHeight:470});
+      expect(screen.getByRole('region',{name:'Bottom dock'})).toBeVisible();
+    });
+    it('moves focus to the menu button when a focused display control folds away, and leaves the document untouched',async()=>{
+      const c=await setup(),before=c.getState();screen.getByLabelText('Zoom (%)').focus();
+      setHeight(600);resize();expect(screen.getByRole('button',{name:'Score display'})).toHaveFocus();expect(c.getState()).toBe(before);
+    });
+  });
+  describe('saving a default and choosing 100% while fitted',()=>{
+    const saved=()=>JSON.parse(window.localStorage.getItem(defaultsKey)!);
+    it('Use current view while the page is fitted saves fit width, as shown, and the open score keeps its fit',async()=>{
+      const c=await setup(),before=c.getState();act(()=>lastScoreProps().onAutoFit(true));
+      click('Use current view');click('Save default view');
+      expect(saved()).toEqual({layout:'parchment',zoomMode:'fitWidth',zoom:100,tracks:'selected'});
+      expect(lastScoreProps()).toMatchObject({autoFit:false,display:{layout:'parchment',zoomMode:'fitWidth'}});
+      expect(testWorkspace.getState().documents[0].view.scoreDisplay).toEqual({layout:'parchment',zoomMode:'fitWidth'});
+      expect(c.getState()).toBe(before);expect(c.getState().snapshot.dirty).toBe(false);
+    });
+    it('a new score then opens fitted by the saved default, not by automatic fit',async()=>{
+      await setup();act(()=>lastScoreProps().onAutoFit(true));click('Use current view');click('Save default view');
+      const first=testWorkspace.getState().active.documentId;
+      fireEvent.click(within(openCommand('File')).getByRole('button',{name:'New'}));await waitFor(()=>expect(testWorkspace.getState().active.documentId).not.toBe(first));
+      const view=testWorkspace.getState().documents.find(entry=>entry.id===testWorkspace.getState().active.documentId)!.view;
+      expect(view.scoreDisplay).toEqual({layout:'parchment',zoomMode:'fitWidth'});expect(lastScoreProps()).toMatchObject({autoFit:false,display:{layout:'parchment',zoomMode:'fitWidth'}});
+    });
+    it('saving any default ends automatic fit in the open score at once, without changing what it shows',async()=>{
+      await setup();expect(lastScoreProps()).toMatchObject({autoFit:true});
+      click('Save default view');
+      expect(lastScoreProps()).toMatchObject({autoFit:false,display:{layout:'parchment',zoomMode:'manual'}});
+    });
+    it('pressing the pressed Fit width while automatically fitted chooses an explicit 100% and saves it',async()=>{
+      const c=await setup(),before=c.getState();act(()=>lastScoreProps().onAutoFit(true));
+      const fit=screen.getByRole('button',{name:'Fit width'});expect(fit).toHaveAttribute('aria-pressed','true');fireEvent.click(fit);
+      expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','false');
+      expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:100,display:{layout:'parchment',zoomMode:'manual'}});
+      expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:100,scoreDisplay:{layout:'parchment',zoomMode:'manual'}});
+      expect(c.getState()).toBe(before);expect(c.getState().snapshot).toMatchObject({dirty:false,canUndo:false});
+    });
+    it('pressing the pressed Fit width after choosing it also returns to 100%',async()=>{
+      await setup();change('Zoom (%)','90');click('Fit width');
+      expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','true');click('Fit width');
+      expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:100,scoreDisplay:{zoomMode:'manual'}});
+    });
+    it('Enter in the zoom field while fitted chooses the shown 100% as an explicit zoom',async()=>{
+      await setup();act(()=>lastScoreProps().onAutoFit(true));
+      const field=screen.getByLabelText('Zoom (%)');fireEvent.keyDown(field,{key:'Enter'});
+      expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:100});expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:100,scoreDisplay:{layout:'parchment',zoomMode:'manual'}});
+    });
+    it('an explicit 100% survives reopening the score and is not fitted again',async()=>{
+      await setup();act(()=>lastScoreProps().onAutoFit(true));fireEvent.click(screen.getByRole('button',{name:'Fit width'}));
+      const view=testWorkspace.getState().documents[0].view;cleanup();
+      await setup(blankProject(),undefined,{view});expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:100,display:{zoomMode:'manual'}});
+    });
+  });
 });

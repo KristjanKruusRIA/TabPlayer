@@ -49,7 +49,7 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
  }this.postRenderFinished.emit();}
 }}));
 const page:PageLayout={widthMm:210,heightMm:210,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
-function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void;onFontStatus?:(status:{failed:string[];substituted:string[]})=>void;wrap?:(node:ReactNode)=>ReactNode;score?:model.Score;projection?:EngravingProjection;trackIds?:readonly string[];visibleTracks?:number[]}={}){
+function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void;onFontStatus?:(status:{failed:string[];substituted:string[]})=>void;wrap?:(node:ReactNode)=>ReactNode;score?:model.Score;projection?:EngravingProjection;trackIds?:readonly string[];visibleTracks?:number[];autoFit?:boolean;onAutoFit?:(active:boolean)=>void}={}){
  const {wrap=(node:ReactNode)=>node,...rest}=extra;
  vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.width:0;});
  vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.height:0;});
@@ -780,4 +780,55 @@ it('scales line and page wheel deltas', () => {
   scrollHost.scrollLeft = 0;
   wheel(scrollHost, { deltaY: 1, deltaMode: 2 });
   expect(scrollHost.scrollLeft).toBe(500);
+});
+
+describe('fitting to the window by default (THE-196)',()=>{
+ // Pages are 210mm wide, 793.7px at 100%; the host pads 10px a side, so a 700px area leaves 680px.
+ const pageWidth=210*96/25.4;
+ it('fits the width when nothing was chosen and the page is wider than the score area',()=>{
+  state.width=700;const onAutoFit=vi.fn(),{props}=setup('parchment',100,{autoFit:true,onAutoFit});
+  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:680/pageWidth*100,fitLimited:false,pageError:null});
+  expect(onAutoFit).toHaveBeenLastCalledWith(true);
+ });
+ it('leaves 100% alone when the page already fits, and says so',()=>{
+  const onAutoFit=vi.fn(),{props}=setup('parchment',100,{autoFit:true,onAutoFit});
+  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:100,fitLimited:false,pageError:null});
+  expect(onAutoFit).toHaveBeenLastCalledWith(false);
+ });
+ it('does nothing without the flag, so a chosen zoom and a saved default keep the page at their size',()=>{
+  state.width=700;const onAutoFit=vi.fn(),{props}=setup('parchment',100,{onAutoFit});
+  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:100,fitLimited:false,pageError:null});
+  expect(onAutoFit).toHaveBeenLastCalledWith(false);
+ });
+ it('stops at the legible floor of fit width (THE-201) and reports the limit',()=>{
+  state.width=500;const {props}=setup('parchment',100,{autoFit:true});
+  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:tabDigitFloorPercent(null),fitLimited:true,pageError:null});
+ });
+ it('follows the window while nothing is chosen: growing it returns to 100%',()=>{
+  state.width=700;const onAutoFit=vi.fn(),{props}=setup('grid',100,{autoFit:true,onAutoFit});
+  state.width=900;act(()=>state.resize());
+  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:100,fitLimited:false,pageError:null});expect(onAutoFit).toHaveBeenLastCalledWith(false);
+ });
+ it('never applies to the screen layouts, which reflow or scroll by design',()=>{
+  state.width=700;const onAutoFit=vi.fn();
+  for(const layout of ['verticalScreen','horizontalScreen'] as const){
+   const {props,unmount}=setup(layout,100,{autoFit:true,onAutoFit});
+   expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:100,fitLimited:false,pageError:null});expect(onAutoFit).toHaveBeenLastCalledWith(false);unmount();
+  }
+ });
+ it('yields to an explicit mode in the display preferences',()=>{
+  state.width=700;const onAutoFit=vi.fn(),{props,tree,rerender}=setup('parchment',100,{autoFit:true,onAutoFit});
+  rerender(tree({...props,zoom:150,display:{layout:'parchment',zoomMode:'manual'},autoFit:false} as never));
+  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:150,fitLimited:false,pageError:null});expect(onAutoFit).toHaveBeenLastCalledWith(false);
+ });
+ it('does not flip back and forth when fitting changes the area by a scrollbar: it lets go only a clear margin past the page',()=>{
+  const resizeTo=(width:number)=>{state.width=width;act(()=>state.resize());};
+  state.width=790;const onAutoFit=vi.fn(),{props}=setup('parchment',100,{autoFit:true,onAutoFit}),last=()=>props.onDisplayStatus.mock.lastCall![0].zoomPercent;
+  expect(onAutoFit).toHaveBeenLastCalledWith(true);
+  resizeTo(830);expect(onAutoFit).toHaveBeenLastCalledWith(true);expect(last()).toBe(100);
+  resizeTo(790);expect(onAutoFit).toHaveBeenLastCalledWith(true);
+  resizeTo(840);expect(onAutoFit).toHaveBeenLastCalledWith(false);expect(last()).toBe(100);
+  resizeTo(830);expect(onAutoFit).toHaveBeenLastCalledWith(false);expect(last()).toBe(100);
+  resizeTo(800);expect(onAutoFit).toHaveBeenLastCalledWith(true);
+ });
 });

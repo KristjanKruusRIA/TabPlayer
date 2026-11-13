@@ -76,12 +76,23 @@ export async function loadCatalog(lang, root = ROOT) {
   catch (error) { throw new Error(`Cannot import ${file}. This script needs Node 22.18 or newer (type stripping). ${error.message}`); }
   const catalog = mod[lang];
   if (!catalog || typeof catalog !== 'object') throw new Error(`${file} does not export an object named "${lang}".`);
-  const lines = keyLinesIn(readFileSync(file, 'utf8'));
+  const source = readFileSync(file, 'utf8');
+  const lines = keyLinesIn(source);
+  // A catalog may spread in a part kept in a file of its own (`...helpEt` from './help-et'). Those keys are checked the same way,
+  // but carry no line number: the number would be in another file than the one named.
+  const own = new Set(lines.map((l) => l.key));
+  for (const m of source.matchAll(/^import\s*\{[^}]*\}\s*from\s*'\.\/([\w-]+)';/gm)) {
+    const part = join(root, 'src', 'i18n', `${m[1]}.ts`);
+    for (const { key } of keyLinesIn(readFileSync(part, 'utf8'))) {
+      if (own.has(key)) throw new Error(`${part}: key "${key}" is also in ${file}.`);
+      lines.push({ key, line: null, part });
+    }
+  }
   const keys = Object.keys(catalog);
   for (const key of keys) if (typeof catalog[key] !== 'string') throw new Error(`${file}: value of "${key}" is ${typeof catalog[key]}, not a string.`);
   const seen = new Set();
   for (const { key, line } of lines) {
-    if (seen.has(key)) throw new Error(`${file}:${line}: duplicate key "${key}".`);
+    if (seen.has(key)) throw new Error(`${file}:${line ?? 'spread part'}: duplicate key "${key}".`);
     seen.add(key);
     if (!(key in catalog)) throw new Error(`${file}:${line}: key "${key}" is in the source but not in the imported object.`);
   }

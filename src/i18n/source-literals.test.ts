@@ -15,6 +15,7 @@ import { resolve } from 'node:path';
 export const sweepFiles = [
   'src/App.tsx',
   'src/Transport.tsx',
+  'src/help/HelpDialog.tsx',
   'src/audio/BackingPanel.tsx',
   'src/audio/BackingProcessingControls.tsx',
   'src/audio/BackingWaveform.tsx',

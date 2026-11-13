@@ -102,7 +102,7 @@ export async function runPartialCapoAcceptance({buildPath}={}){
     assert.equal(initial.snapshot.project.partialCapo,undefined,'An unedited project carries no marker');
 
     // The file's own capo (2) and partial capo (fret 5, strings 1-3): the plan sounds each string by its own rule.
-    await button('Show instrument');await view().getByRole('img',{name:'Guitar fretboard',exact:true}).waitFor();
+    await button('Show instrument');await view().getByRole('group',{name:'Guitar fretboard',exact:true}).waitFor();
     await view().getByRole('combobox',{name:/^Show/}).selectOption('beat');
     assert.match(await view().locator('.instrument-detail').innerText(),/Capo 2.*Partial capo 5 on strings 1, 2, 3/s,'The readout names both capos');
     const opened=await keys(),expectedOpen=combinedKeys(2,5,[1,2,3]);

@@ -201,6 +201,21 @@ it('extends an existing programmatic range when Shift is the first view interact
   const initial:MusicSelection={kind:'range',range:{start:{bar:0,tick:960},end:{bar:0,tick:2880},lanes:[{track:0,staff:0,voice:0}]}};
   const {down,changes}=setup(initial);down(3,{shiftKey:true});expect(changes.at(-1)).toEqual({kind:'range',range:{start:{bar:0,tick:960},end:{bar:1,tick:0},lanes:[{track:0,staff:0,voice:0}]}});
 });
+it('extends Shift selection from a selection set from outside, not from an older click of its own',()=>{
+  // Click beat 2 in the score, then something else (the instrument view) selects beat 3, then Shift+click beat 4: the range is 3 to 4.
+  const score=music(),changes:(MusicSelection|null)[]=[],onSelect=vi.fn();
+  const tree=(selected:MusicSelection|null)=><ScoreView score={score} track={0} zoom={100} profile="ScoreTab" playback={null} onSelect={onSelect} editorSelection={selected} onEditorSelection={next=>changes.push(next)}/>;
+  const rendered=render(tree(null)),notation=screen.getByLabelText('Music notation'),beat=(index:number)=>score.tracks[0].staves[0].bars[0].voices[0].beats[index];
+  const down=(index:number,options:Record<string,unknown>={})=>{fireEvent.mouseDown(notation,{button:0,...options});act(()=>{view.beat?.(beat(index));});};
+  down(1);rendered.rerender(tree(changes.at(-1)!));
+  const outside:MusicSelection={kind:'range',range:{start:{bar:0,tick:1920},end:{bar:0,tick:2880},lanes:[{track:0,staff:0,voice:0}]}};
+  rendered.rerender(tree(outside));
+  down(3,{shiftKey:true});
+  expect(changes.at(-1)).toEqual({kind:'range',range:{start:{bar:0,tick:1920},end:{bar:1,tick:0},lanes:[{track:0,staff:0,voice:0}]}});
+  // A selection the view published itself keeps its anchor, as before.
+  const own=changes.at(-1)!;rendered.rerender(tree(own));down(1,{shiftKey:true});
+  expect(changes.at(-1)).toEqual({kind:'range',range:{start:{bar:0,tick:960},end:{bar:0,tick:2880},lanes:[{track:0,staff:0,voice:0}]}});
+});
 it('uses fresh model/callback props and ignores delayed hits from a replaced score',()=>{
   const old=music(),next=music(),first=vi.fn(),second=vi.fn(),onSelect=vi.fn(),props={score:old,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect};const rendered=render(<ScoreView {...props} onEditorSelection={first}/>);
   rendered.rerender(<ScoreView {...props} score={next} onEditorSelection={second}/>);const notation=screen.getByLabelText('Music notation');fireEvent.mouseDown(notation,{button:0});

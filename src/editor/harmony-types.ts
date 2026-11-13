@@ -1,6 +1,7 @@
 import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
-import type { IndexedNoteTarget } from '../edit-types';
+import type { EditCommand, IndexedNoteTarget } from '../edit-types';
+import type { EntryFollow } from '../instruments/entry';
 import type { MusicSelection } from './range-types';
 import type { ScaleDiagramCommand } from '../harmony/scale-diagram';
 
@@ -42,6 +43,8 @@ export interface ScaleToolPanelProps {
   score:model.Score;staff?:model.Staff;selection:MusicSelection|null;busy:boolean;onClose:()=>void;
   /** With these, the browser also authors the scale diagram of the selected beat. */
   target?:BeatTarget;beat?:model.Beat;onEdit?:(command:ScaleDiagramCommand)=>void;
+  /** With these too, a position of the scale preview can be clicked to put that note on the selected beat. The follow says what the editor should select afterwards. */
+  onNote?:(command:EditCommand,follow:EntryFollow)=>void;
 }
 export interface HarmonyTransposePanelProps {score:model.Score;selection:MusicSelection|null;busy:boolean;onEdit:(command:Extract<HarmonyCommand,{type:'transposeHarmony'}>)=>void}
 export interface ChordDiagramPreviewProps {

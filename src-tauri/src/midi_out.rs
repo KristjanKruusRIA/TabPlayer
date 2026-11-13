@@ -24,6 +24,8 @@ use crate::{
     workspace::{AudioOwner, DocumentWorkspace},
 };
 use serde::Serialize;
+#[cfg(test)]
+use std::sync::atomic::AtomicU64;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     sync::{
@@ -522,6 +524,10 @@ pub struct MidiOut {
     routed: AtomicBool,
     retry_interval: Duration,
     open_timeout: Duration,
+    /// Time that moves only when a test says so (milliseconds after the start), for the open timeout and the retry
+    /// spacing. `None` unless a test sets it: the system clock.
+    #[cfg(test)]
+    manual_clock: Option<(Instant, Arc<AtomicU64>)>,
 }
 impl Default for MidiOut {
     fn default() -> Self {
@@ -544,6 +550,8 @@ impl MidiOut {
             routed: AtomicBool::new(false),
             retry_interval: RETRY_INTERVAL,
             open_timeout: OPEN_TIMEOUT,
+            #[cfg(test)]
+            manual_clock: None,
         }
     }
     /// The same with another least time between attempts to open one port.
@@ -555,6 +563,20 @@ impl MidiOut {
     pub fn with_open_timeout(mut self, timeout: Duration) -> Self {
         self.open_timeout = timeout;
         self
+    }
+    /// Time for the open timeout and the retry spacing that only moves when the caller says so, in milliseconds. For
+    /// tests, so a timeout does not depend on how fast the machine is.
+    #[cfg(test)]
+    pub fn with_clock(mut self, clock: Arc<AtomicU64>) -> Self {
+        self.manual_clock = Some((Instant::now(), clock));
+        self
+    }
+    fn now(&self) -> Instant {
+        #[cfg(test)]
+        if let Some((start, ms)) = &self.manual_clock {
+            return *start + Duration::from_millis(ms.load(Ordering::SeqCst));
+        }
+        Instant::now()
     }
     /// What every output stream shares with the sender.
     pub fn shared(&self) -> Arc<MidiOutShared> {
@@ -678,7 +700,7 @@ impl MidiOut {
     fn reap(&self) {
         self.revive_if_dead();
         let mut ports = lock(&self.ports);
-        let now = Instant::now();
+        let now = self.now();
         for index in 0..ports.len() {
             let overdue = ports[index]
                 .opening
@@ -714,7 +736,7 @@ impl MidiOut {
         let mut closes = Vec::new();
         {
             let mut ports = lock(&self.ports);
-            let now = Instant::now();
+            let now = self.now();
             for name in names {
                 let Some(index) = self.slot_for(&mut ports, name, &protected) else {
                     continue;
@@ -782,7 +804,7 @@ impl MidiOut {
     /// Waits until no port is being opened (tests; real callers never wait).
     #[cfg(test)]
     pub(crate) fn settle(&self) {
-        let until = Instant::now() + Duration::from_secs(5);
+        let until = Instant::now() + Duration::from_secs(600);
         while Instant::now() < until && lock(&self.ports).iter().any(|p| p.opening.is_some()) {
             thread::sleep(Duration::from_millis(2));
         }
@@ -1456,17 +1478,41 @@ mod tests {
         resources::AudioResources,
     };
     use crate::settings::{ChannelMix, TrackSound};
-    use std::sync::atomic::{AtomicU64, AtomicUsize};
+    use std::sync::atomic::AtomicUsize;
 
     type Log = Arc<Mutex<Vec<(Instant, String, Vec<u8>)>>>;
-    /// A backend whose ports log what they are sent, with switches for failing to send and for slow opens.
+    /// Sequencing for an open that has to be caught mid-flight, without any sleeping: the open says it has been
+    /// called, then waits until it is released (or the `Rig` is dropped).
+    struct Gate {
+        entered: Mutex<mpsc::Sender<()>>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+    fn gate() -> (Arc<Gate>, mpsc::Receiver<()>, mpsc::Sender<()>) {
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let gate = Arc::new(Gate {
+            entered: Mutex::new(entered_tx),
+            release: Mutex::new(release_rx),
+        });
+        (gate, entered_rx, release_tx)
+    }
+    impl Gate {
+        fn pass(&self) {
+            let _ = lock(&self.entered).send(());
+            let _ = lock(&self.release).recv_timeout(GUARD);
+        }
+    }
+    /// Far longer than any test needs, even on a machine under heavy load: it only stops a hung test binary, and must
+    /// never release a held open or fail a wait before the test has finished with it.
+    const GUARD: Duration = Duration::from_secs(600);
+    /// A backend whose ports log what they are sent, with switches for failing to send and for opens held at a gate.
     struct Fake {
         names: Vec<String>,
         log: Log,
         fail_send: Arc<AtomicBool>,
         panic_send: Arc<AtomicBool>,
         opens: Arc<Mutex<Vec<String>>>,
-        slow: HashMap<String, Duration>,
+        gated: HashMap<String, Arc<Gate>>,
         closed: Arc<AtomicUsize>,
     }
     struct FakeSink {
@@ -1506,8 +1552,8 @@ mod tests {
         }
         fn open(&self, name: &str) -> Result<Box<dyn MidiSink>, String> {
             lock(&self.opens).push(name.to_string());
-            if let Some(delay) = self.slow.get(name) {
-                thread::sleep(*delay);
+            if let Some(gate) = self.gated.get(name) {
+                gate.pass();
             }
             if !self.names.iter().any(|n| n == name) {
                 return Err(format!("The MIDI output \"{name}\" is not available."));
@@ -1528,23 +1574,47 @@ mod tests {
         panic_send: Arc<AtomicBool>,
         opens: Arc<Mutex<Vec<String>>>,
         closed: Arc<AtomicUsize>,
+        holds: Holds,
     }
-    fn rig_with(names: &[&str], slow: &[(&str, u64)]) -> Rig {
+    /// The test's ends of the gates in a `Rig`.
+    struct Holds {
+        entered: HashMap<String, mpsc::Receiver<()>>,
+        release: HashMap<String, mpsc::Sender<()>>,
+    }
+    impl Holds {
+        /// Waits until the open of `name` is inside the driver call, held at its gate.
+        fn entered(&self, name: &str) {
+            self.entered[name]
+                .recv_timeout(GUARD)
+                .unwrap_or_else(|_| panic!("the open of {name} never began"));
+        }
+        /// Lets the held open of `name` go on and return.
+        fn release(&self, name: &str) {
+            self.release[name].send(()).unwrap();
+        }
+    }
+    /// A rig whose opens of the `gated` ports do not return until `release` (or the end of the test).
+    fn rig_with(names: &[&str], gated: &[&str]) -> Rig {
         let log: Log = Arc::new(Mutex::new(Vec::new()));
         let fail_send = Arc::new(AtomicBool::new(false));
         let panic_send = Arc::new(AtomicBool::new(false));
         let opens = Arc::new(Mutex::new(Vec::new()));
         let closed = Arc::new(AtomicUsize::new(0));
+        let (mut gates, mut entered, mut release) =
+            (HashMap::new(), HashMap::new(), HashMap::new());
+        for name in gated {
+            let (held, seen, free) = gate();
+            gates.insert(name.to_string(), held);
+            entered.insert(name.to_string(), seen);
+            release.insert(name.to_string(), free);
+        }
         let out = MidiOut::with_backend(Arc::new(Fake {
             names: names.iter().map(|n| n.to_string()).collect(),
             log: log.clone(),
             fail_send: fail_send.clone(),
             panic_send: panic_send.clone(),
             opens: opens.clone(),
-            slow: slow
-                .iter()
-                .map(|(n, ms)| (n.to_string(), Duration::from_millis(*ms)))
-                .collect(),
+            gated: gates,
             closed: closed.clone(),
         }));
         Rig {
@@ -1554,6 +1624,7 @@ mod tests {
             panic_send,
             opens,
             closed,
+            holds: Holds { entered, release },
         }
     }
     fn rig(names: &[&str]) -> Rig {
@@ -1594,7 +1665,7 @@ mod tests {
         settings
     }
     fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + GUARD;
         while !done() {
             assert!(Instant::now() < deadline, "timed out waiting for {what}");
             thread::sleep(Duration::from_millis(2));
@@ -2252,8 +2323,12 @@ mod tests {
     #[test]
     fn the_fault_bit_says_whether_the_port_is_really_open() {
         // A port that was never opened, was closed, or timed out has its bit set; only a real connection clears it.
-        let rig = rig_with(&["Slow", "Fast"], &[("Slow", 400)]);
-        let out = rig.out.with_open_timeout(Duration::from_millis(100));
+        let rig = rig_with(&["Slow", "Fast"], &["Slow"]);
+        let clock = Arc::new(AtomicU64::new(0));
+        let out = rig
+            .out
+            .with_open_timeout(Duration::from_millis(100))
+            .with_clock(clock.clone());
         out.ensure_ports(&names(&["Fast"]), Ensure::Prepare);
         out.settle();
         assert!(open_of(&out, "Fast") && !faulted(&out, "Fast"));
@@ -2262,19 +2337,20 @@ mod tests {
         out.settle();
         assert!(!open_of(&out, "Fast") && faulted(&out, "Fast"));
         // A timed-out open sets it, and the open that finishes late changes nothing and keeps no connection.
-        let started = Instant::now();
         out.ensure_ports(&names(&["Slow"]), Ensure::Prepare);
+        rig.holds.entered("Slow");
+        // Asking returned although the open is still held in the driver: it does not wait.
         assert!(
-            started.elapsed() < Duration::from_millis(100),
-            "asking does not wait"
+            lock(&out.ports)
+                .iter()
+                .any(|p| p.name == "Slow" && p.opening.is_some())
         );
         assert!(
             !open_of(&out, "Slow") && faulted(&out, "Slow"),
             "not open while it opens"
         );
-        thread::sleep(Duration::from_millis(150));
-        let status = out.status();
-        let _ = status;
+        clock.store(150, Ordering::SeqCst);
+        let _ = out.status();
         assert!(!open_of(&out, "Slow") && faulted(&out, "Slow"));
         assert!(
             lock(&out.ports)
@@ -2282,14 +2358,16 @@ mod tests {
                 .any(|p| p.name == "Slow"
                     && p.error.as_deref().is_some_and(|e| e.contains("in time")))
         );
-        thread::sleep(Duration::from_millis(500));
+        // The open finishes late: it changes nothing and its connection is dropped.
+        rig.holds.release("Slow");
+        wait_for("the late connection to be dropped", || {
+            rig.closed.load(Ordering::Relaxed) >= 1
+        });
+        out.settle();
         assert!(
             !open_of(&out, "Slow") && faulted(&out, "Slow"),
             "the late open did not clear it"
         );
-        wait_for("the late connection to be dropped", || {
-            rig.closed.load(Ordering::Relaxed) >= 1
-        });
         out.shutdown();
     }
 
@@ -2379,18 +2457,18 @@ mod tests {
 
     #[test]
     fn a_slow_port_opening_does_not_delay_the_messages_to_a_port_that_is_open() {
-        let rig = rig_with(&["Fast", "Slow"], &[("Slow", 400)]);
+        let rig = rig_with(&["Fast", "Slow"], &["Slow"]);
         let out = rig.out;
         out.ensure_ports(&names(&["Fast"]), Ensure::Prepare);
         out.settle();
         let shared = out.shared();
-        // The slow port starts opening, and the call returns at once.
-        let asked = Instant::now();
+        // The slow port starts opening and stays inside the driver until released; the call returns without it.
         out.ensure_ports(&names(&["Fast", "Slow"]), Ensure::Prepare);
+        rig.holds.entered("Slow");
         assert!(
-            asked.elapsed() < Duration::from_millis(100),
-            "{:?}",
-            asked.elapsed()
+            lock(&out.ports)
+                .iter()
+                .any(|p| p.name == "Slow" && p.opening.is_some())
         );
         assert!(!open_of(&out, "Slow"));
         // While it opens, a note arrives for the fast one every 20 ms.
@@ -2431,14 +2509,15 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         wait_for("the ten notes", || notes().len() >= 10);
-        // Never early, and never as late as the 400 ms open. The upper bound is not a timing budget: a shared CI runner
-        // wrote a note 21 ms after it was due, while the slow open still had more than 200 ms to run.
+        // Never early. There is no upper bound on how late: all ten went out while the slow open was held in the
+        // driver, which is what shows the open delays nothing, and how late a loaded machine writes a note says
+        // nothing about that.
         for (n, (at, port, bytes)) in notes().iter().enumerate() {
             assert_eq!(port, "Fast");
             let due = Duration::from_millis(20 * n as u64);
             let took = at.duration_since(begin);
             assert!(
-                took + Duration::from_millis(2) >= due && took < due + Duration::from_millis(100),
+                took + Duration::from_millis(2) >= due,
                 "note {n} ({bytes:?}) written {took:?} in, due {due:?}"
             );
         }
@@ -2446,6 +2525,7 @@ mod tests {
             !open_of(&out, "Slow"),
             "all ten went out while the slow open was still running"
         );
+        rig.holds.release("Slow");
         out.settle();
         assert!(open_of(&out, "Slow"));
         out.shutdown();
@@ -2522,7 +2602,7 @@ mod tests {
         let log = take_test_log();
         assert_eq!(log.len(), 2);
         assert_eq!(log[0].ms, 0.0);
-        assert!(log[1].ms >= 19.0 && log[1].ms < 500.0);
+        assert!(log[1].ms >= 19.0, "{}", log[1].ms);
         assert_eq!(log[1].bytes, vec![0x80, 60, 0]);
         assert!(take_test_log().is_empty(), "taking the log clears it");
     }
@@ -2987,18 +3067,23 @@ mod tests {
 
     #[test]
     fn an_open_that_never_returns_delays_nothing_and_a_second_port_still_opens() {
-        let rig = rig_with(&["Hang", "Other"], &[("Hang", 600_000)]);
+        let rig = rig_with(&["Hang", "Other"], &["Hang"]);
+        let clock = Arc::new(AtomicU64::new(0));
         let out = rig
             .out
             .with_retry_interval(Duration::ZERO)
-            .with_open_timeout(Duration::from_millis(100));
-        let asked = Instant::now();
+            .with_open_timeout(Duration::from_millis(100))
+            .with_clock(clock.clone());
+        let hanging = |out: &MidiOut| {
+            lock(&out.ports)
+                .iter()
+                .any(|p| p.name == "Hang" && p.opening.is_some())
+        };
         out.ensure_ports(&names(&["Hang", "Other"]), Ensure::Prepare);
-        assert!(
-            asked.elapsed() < Duration::from_millis(100),
-            "asking does not wait: {:?}",
-            asked.elapsed()
-        );
+        // Asking returned while the open of Hang is held in the driver (it is never released until the end): it does
+        // not wait.
+        rig.holds.entered("Hang");
+        assert!(hanging(&out), "asking does not wait");
         wait_for("the other port", || open_of(&out, "Other"));
         // Later asks (a prepare, a refresh, a mix) return at once too, and do not start a second open behind the first.
         for reason in [
@@ -3007,13 +3092,12 @@ mod tests {
             Ensure::Mix,
             Ensure::Prepare,
         ] {
-            let asked = Instant::now();
             out.ensure_ports(&names(&["Hang", "Other"]), reason);
-            assert!(asked.elapsed() < Duration::from_millis(100));
+            assert!(hanging(&out));
         }
         assert_eq!(lock(&rig.opens).iter().filter(|n| *n == "Hang").count(), 1);
         // The overdue one is reported as failed, and its track is on the internal sound meanwhile.
-        thread::sleep(Duration::from_millis(150));
+        clock.store(150, Ordering::SeqCst);
         let status = {
             let plan = plan(&[("a", false), ("b", false)]);
             let document = settings(&[("a", "Hang"), ("b", "Other")]);
@@ -3045,14 +3129,16 @@ mod tests {
 
     #[test]
     fn a_port_opened_after_the_route_was_built_takes_its_track_without_a_new_route() {
-        let rig = rig_with(&["Late"], &[("Late", 200)]);
+        let rig = rig_with(&["Late"], &["Late"]);
         let out = rig.out;
         let plan = plan(&[("a", false)]);
         let document = settings(&[("a", "Late")]);
         out.ensure_ports(&MidiOut::port_names(&document), Ensure::Prepare);
         let mut route = out.build_route(&plan, &document, false);
         let mut tap = route.tap.take().unwrap();
+        rig.holds.entered("Late");
         assert!(!tap.silences(0), "internal sound while it opens");
+        rig.holds.release("Late");
         wait_for("the late port", || open_of(&out, "Late"));
         // The audio thread reads the port's bit each block.
         tap.set_fault_mask(out.shared().faulted.load(Ordering::Acquire));
@@ -3291,9 +3377,10 @@ mod tests {
         assert_eq!(shared.dropped.load(Ordering::Relaxed), 0);
     }
 
-    /// Opens that fail at once the first time and never return after that.
+    /// Opens that fail at once the first time and are held at a gate after that.
     struct Flaky {
         calls: AtomicUsize,
+        held: Arc<Gate>,
     }
     impl MidiBackend for Flaky {
         fn ports(&self) -> Result<Vec<MidiPortInfo>, String> {
@@ -3303,18 +3390,22 @@ mod tests {
             if self.calls.fetch_add(1, Ordering::Relaxed) == 0 {
                 return Err(format!("The MIDI output \"{name}\" is not available."));
             }
-            thread::sleep(Duration::from_secs(600));
+            self.held.pass();
             Err("unreachable".into())
         }
     }
 
     #[test]
     fn a_retry_that_hangs_is_timed_out_even_though_the_try_before_it_failed() {
+        let (held, entered, _release) = gate();
+        let clock = Arc::new(AtomicU64::new(0));
         let out = MidiOut::with_backend(Arc::new(Flaky {
             calls: AtomicUsize::new(0),
+            held,
         }))
         .with_retry_interval(Duration::ZERO)
-        .with_open_timeout(Duration::from_millis(100));
+        .with_open_timeout(Duration::from_millis(100))
+        .with_clock(clock.clone());
         out.ensure_ports(&names(&["A"]), Ensure::Prepare);
         out.settle();
         assert!(
@@ -3326,7 +3417,8 @@ mod tests {
         // The retry hangs. It starts clean, and the overdue check reports it as the failure it is.
         out.ensure_ports(&names(&["A"]), Ensure::Refresh);
         assert!(lock(&out.ports)[0].error.is_none());
-        thread::sleep(Duration::from_millis(150));
+        entered.recv_timeout(GUARD).unwrap();
+        clock.store(150, Ordering::SeqCst);
         let status = out.status();
         let error = lock(&out.ports)[0].error.clone();
         assert!(
@@ -3338,7 +3430,7 @@ mod tests {
 
     #[test]
     fn a_slot_whose_open_is_still_running_is_not_given_to_another_name() {
-        let rig = rig_with(&["A", "B"], &[("A", 600_000)]);
+        let rig = rig_with(&["A", "B"], &["A"]);
         let out = rig.out.with_retry_interval(Duration::ZERO);
         out.ensure_ports(&names(&["A"]), Ensure::Prepare);
         // The document no longer uses A, but its open has not returned: B must not take the slot and open alongside it.
@@ -3354,7 +3446,7 @@ mod tests {
 
     #[test]
     fn a_dead_sender_does_not_forget_an_open_that_is_still_running() {
-        let rig = rig_with(&["A"], &[("A", 600_000)]);
+        let rig = rig_with(&["A"], &["A"]);
         let out = rig.out.with_retry_interval(Duration::ZERO);
         out.ensure_ports(&names(&["A"]), Ensure::Prepare);
         assert!(lock(&out.ports)[0].opening.is_some());

@@ -2684,6 +2684,19 @@ const keyboardChord=(keys:number[],session=1)=>({session,seq:++midiSeq,atMs:midi
 const startCapture=async()=>{const session=midiCaptureSession(nativeMidiIn);await act(async()=>{await session.stop();await session.start('Keys',{chordWindowMs:60,minVelocity:1});});return session;};
 const sendChord=(...chords:ReturnType<typeof keyboardChord>[])=>act(()=>{for(const chord of chords)midiIn.chord(chord);});
 describe('MIDI capture in the score',()=>{
+  // Queued entry keys older than two seconds are dropped by design (ENTRY_QUEUE_STALE_MS). Each queued chord is a render of the whole
+  // workspace, so on a loaded machine a queue of six outlasts two seconds and a typed key is dropped without being counted. The clock
+  // stands still here, so no test races that rule; the entry key queue tests above move the clock themselves to test it.
+  let frozenClock:ReturnType<typeof vi.spyOn>|undefined,clockNow=1_700_000_000_000;
+  beforeEach(()=>{clockNow=1_700_000_000_000;frozenClock=vi.spyOn(Date,'now').mockImplementation(()=>clockNow);});
+  afterEach(()=>{frozenClock?.mockRestore();});
+  /** Holds every edit the document is asked to record until the test lets it through, one at a time. */
+  function holdCaptureEdits(c:DocumentController){
+    const bridge=documentBridges.get(c.getState().documentId)!,original=bridge.applyEdit.bind(bridge);
+    const held:(()=>void)[]=[];
+    vi.spyOn(bridge,'applyEdit').mockImplementation((command,expected,token)=>new Promise((resolve,reject)=>{held.push(()=>void original(command,expected,token).then(resolve,reject));}));
+    return {held,next:async()=>{await waitFor(()=>expect(held.length).toBeGreaterThan(0));held.shift()!();}};
+  }
   it('writes a chord on the selected beat as one edit that one undo removes with the cursor back, and moves on',async()=>{
     const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
     fireEvent.keyDown(workspace,{key:'n'});await startCapture();
@@ -2814,6 +2827,38 @@ describe('MIDI capture in the score',()=>{
     fireEvent.keyDown(workspace,{key:'n'});
     await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before+session.get().notWritten).toBe(4));
     expect(session.get().notWritten).toBeGreaterThan(0);
+  });
+  it('judges each waiting item by its own age: stale chords are counted and dropped, a fresh typed key behind them is still written',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const hold=holdCaptureEdits(c),before=c.getState().snapshot.project.edits.length;
+    sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    sendChord(keyboardChord([41]),keyboardChord([42]));
+    clockNow+=2500;
+    fireEvent.keyDown(workspace,{key:'e'});
+    await hold.next();
+    // The two old chords are turned away and counted; the key typed just now is not thrown out with them.
+    await waitFor(()=>expect(session.get().notWritten).toBe(2));
+    await hold.next();
+    await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before).toBe(2));
+    expect(currentBeat(c,0).notes).toHaveLength(1);expect(currentBeat(c,1).notes).toHaveLength(1);expect(currentBeat(c,2).notes).toHaveLength(0);
+    expect(screen.queryByText(/queued keys? (was|were) dropped/)).toBeNull();
+  });
+  it('drops everything that waited too long: chords are counted, the typed key is named in the notice, and no key is counted twice',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const hold=holdCaptureEdits(c),before=c.getState().snapshot.project.edits.length;
+    sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    sendChord(keyboardChord([41]),keyboardChord([42]));
+    fireEvent.keyDown(workspace,{key:'e'});
+    clockNow+=2500;
+    await hold.next();
+    expect(await screen.findByText(/1 queued key was dropped: it waited too long/)).toBeInTheDocument();
+    expect(session.get().notWritten).toBe(2);
+    await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before).toBe(1));
+    expect(hold.held).toHaveLength(0);
   });
   it('does not let a flood of chords starve a typed key',async()=>{
     const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});

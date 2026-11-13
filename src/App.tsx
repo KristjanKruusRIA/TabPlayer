@@ -779,7 +779,22 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(!queue.length){refusing.current=false;return;}
     if(editLocked||workspaceBusy||queue[0].documentId!==state.documentId){discardEntryQueue(null,'dropped');return;}
     if(failure){discardEntryQueue(failure.text,'discarded');return;}
-    if(Date.now()-queue[0].at>ENTRY_QUEUE_STALE_MS){discardEntryQueue(null,'stale');return;}
+    if(Date.now()-queue[0].at>ENTRY_QUEUE_STALE_MS){
+      // Each waiting item is judged by its own age, so a key typed just now is not thrown out with chords that have waited too long. A chord that
+      // is too old is counted. A typed key that is too old is dropped, and so are the typed keys after it, which assumed it landed.
+      const now=Date.now();let keysDropped=0,chordsDropped=0,brokenRun=false;
+      const kept=queue.filter(waiting=>{
+        const old=now-waiting.at>ENTRY_QUEUE_STALE_MS;
+        if(waiting.item.kind==='capture'){if(old)chordsDropped++;return !old;}
+        if(old)brokenRun=true;
+        if(brokenRun){keysDropped++;return false;}
+        return true;
+      });
+      queue.splice(0,queue.length,...kept);
+      if(chordsDropped)midiCaptureSession().countNotWritten(chordsDropped);
+      if(keysDropped)setInputNotice({text:t(`editor.entry_queue_stale_${keysDropped===1?'one':'other'}` as MessageKey,{count:keysDropped}),at:JSON.stringify(target)});
+      if(!kept.length){refusing.current=false;return;}
+    }
     const next=queue.shift()!,before=ownEdits.current;
     draining.current=true;
     try{performItem(next.item,next.at);}

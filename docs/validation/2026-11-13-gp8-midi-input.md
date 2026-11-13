@@ -70,3 +70,50 @@ Also fixed here: opening the MIDI input section inside the View menu closed the 
 - Banjo drone placement is checked by sounding pitch in unit tests only, not in the real app.
 - Capture with a dialog open, with an open menu, in a text field and with a finalized score is tested in the app's component tests (each chord counted, none written); with a document switch the test shows the chord going to the active score only. None of these four was exercised in the real app.
 - The 60 ms window and the placement cost weights are not tuned on real playing.
+
+## Slice 3: channel-to-string mapping for MIDI guitars (U17)
+
+Scope: a "MIDI guitar strings" select in the capture panel (`Off (keyboard)`, `Channel 1 is the bottom tab line`, `Channel 1 is the top tab line`; default Off) and a "Reset to defaults" button. With a mapping on, a note arriving on a mapped channel is written on that string at the fret that gives its pitch (capo, partial capo and banjo drone honoured). A chord is still one `sequence` of existing steps and one undo; no edit type, schema, Rust or dependency changed. Refusals and fallbacks live in `planMidiCapture`, never in replay.
+
+Behaviour for the cases a MIDI guitar raises (a note is identified by string and pitch):
+
+| Case | Result |
+|---|---|
+| Mapped string cannot play the pitch (below open string or capo, past the last fret, banjo drone gap), even if another string could | whole chord refused, message names note and string, counted |
+| Two different notes on one mapped channel | whole chord refused (`channel_shared`), counted |
+| Mapped string already holds another note on the beat | whole chord refused (`string_taken`), counted |
+| Same pitch on two mapped channels, or already on the beat on another string | written on each mapped string |
+| Channel with no string on the track, or channel 10 | placed by the fingering rule (never on a pinned string), notice names note and channel, panel counts "written on another string" |
+| Copy of a pitch on such a channel, pitch already pinned or on the beat | not written again; notice and panel count |
+| Mapped string already holds that same pitch | skipped; a chord adding nothing records nothing |
+| Track with other than six strings | panel shows where channels 1 to 6 land; `lowestFirst` is shifted up by strings beyond six |
+| Pitched staff | mapping ignored |
+| Mapping Off | slice 2 behaviour (tested against explicit placements; channels ignored) |
+
+Help: the MIDI input section gained a paragraph (en, et, de) using catalog references for the control names.
+
+### Evidence
+
+2026-11-13, Windows, this worktree, after the review fixes:
+
+| Check | Result |
+|---|---|
+| Unit tests (`midi-capture-guitar.test.ts` 20, `MidiCapturePanel.mapping.test.tsx` 10, two App tests) | pass; planner and panel tests were seen failing before the code |
+| `npm run typecheck` | no errors |
+| `npm test` | `Test Files  402 passed | 4 skipped (406)`, `Tests  7031 passed | 8 skipped (7039)` |
+| Desktop test build | `done-0`, binary rebuilt at the time of the run |
+| `parity-midi-in.mjs`, `parity-midi-in-entry.mjs` (real app, test port) | passed |
+| `parity-midi-in-guitar.mjs` | passed: lowest-first chord `[[1,3],[2,5],[3,7]]` and note `[[2,12]]`; unreachable pitch, two notes on a channel and a taken string each refused with note and string named, nothing written, counted; a channel 10 note placed by the fingering rule and counted; undo checked against the notes in the score; highest-first `[[6,0],[1,0],[5,0]]`; Reset restores defaults (input kept); mapping off `[[1,0],[2,2],[3,2]]`; a real click and choice on the select, and Reset, left the View menu open |
+
+### Not verified in slice 3
+
+- **No real MIDI guitar was available.** U17 is verified with injected messages only: unit tests of the planner and the panel, App tests, and a driver that injects note-ons on chosen channels through the test port. Which channel a real pickup uses for the lowest string, pitch bends and strum timing are untested, so the tracker row is not moved to a hardware-verified state.
+- The capo, partial capo, banjo and 4, 5, 7 and 8 string cases are unit-tested only, not exercised in the real app.
+- The panel at 960x600 was not checked by screenshot; it is the existing View menu section.
+- macOS and Linux are untested.
+
+### Stated limits
+
+- No first-channel setting: a device on channels 11 to 16 is unmapped and placed by the fingering rule (with a notice and a count).
+- `lowestFirst` assumes a 6-string device; a 7-string MIDI guitar on a 7-string track should use `highestFirst`.
+- After two undos the next chord lands on the next beat, not the first (slice 2 behaviour: the cursor-restore mark covers only the last chord).

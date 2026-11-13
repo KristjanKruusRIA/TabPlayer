@@ -86,7 +86,8 @@ const commands:Command[]=[
 
 /** Lower case without accents, so a keyboard without ä, ö, ü or õ still finds Rückgängig, Määra and Über. */
 const fold=(text:string)=>text.toLowerCase().normalize('NFD').replace(/\p{M}/gu,'');
-const wordsOf=(text:string)=>fold(text).split(/\s+/).filter(Boolean);
+/** Hyphens split a word, so Tabulatur is found inside ASCII-Tabulatur. */
+const wordsOf=(text:string)=>fold(text).split(/[\s-]+/).filter(Boolean);
 
 /**
  * Matches typed text against command words by prefix; one trailing number or fraction is the command's argument.
@@ -101,12 +102,12 @@ export function searchCommands(query:string,context:PaletteContext,t:Translate=e
   const words=argumentIndex<0?tokens:tokens.slice(0,argumentIndex),argument=argumentIndex<0?'':tokens.slice(argumentIndex).join(' ');
   const holding=(candidates:string[])=>words.filter(word=>candidates.some(candidate=>candidate.startsWith(word))).length;
   const ranked=commands.flatMap((command,order)=>{
-    const titleKey=`palette.command_${command.id}` as MessageKey,title=t(titleKey),titleWords=wordsOf(title),englishWords=wordsOf(english(titleKey)),own=[...titleWords,...englishWords,...command.words.split(/\s+/)];
+    const titleKey=`palette.command_${command.id}` as MessageKey,title=t(titleKey),currentWords=[...wordsOf(title),...wordsOf(t(`palette.aliases_${command.id}` as MessageKey))],englishWords=wordsOf(english(titleKey)),own=[...currentWords,...englishWords,...command.words.split(/\s+/)];
     // Commands without a parameter, shown by an empty hint, drop out once one is typed.
     if(argument&&!command.hint||!words.every(word=>own.some(candidate=>candidate.startsWith(word))))return [];
     // Separate numbers are refused rather than merged, so "measure 1 2" never means measure 12.
     const result:Result=argument.includes(' ')?{error:t('palette.error_single_value')}:command.run(argument,context,t);
-    return [{order,titleHits:holding(titleWords),englishHits:holding(englishWords),match:{id:command.id,title,hint:command.hint?t(`palette.hint_${command.id}` as MessageKey):'',...(command.keys?{keys:command.keys}:{}),...('action' in result?{action:result.action}:{error:result.error})}}];
+    return [{order,titleHits:holding(currentWords),englishHits:holding(englishWords),match:{id:command.id,title,hint:command.hint?t(`palette.hint_${command.id}` as MessageKey):'',...(command.keys?{keys:command.keys}:{}),...('action' in result?{action:result.action}:{error:result.error})}}];
   });
   // Commands whose title holds the typed words come before those matched only by an alias.
   const sorted=ranked.sort((a,b)=>b.titleHits-a.titleHits||a.order-b.order),expression=readExpression(query,context);

@@ -4,8 +4,9 @@ import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { CommandPalette } from './CommandPalette';
 import { music,target } from './fixtures';
+import { setLanguagePreference } from '../i18n';
 
-afterEach(cleanup);
+afterEach(()=>{cleanup();setLanguagePreference('en');});
 const context={score:music(),target,string:6,canUndo:true,canRedo:false};
 const setup=(busy=false)=>{const onRun=vi.fn(),onClose=vi.fn();render(<CommandPalette context={context} busy={busy} onRun={onRun} onClose={onClose}/>);return {onRun,onClose,input:screen.getByRole('combobox',{name:'Command'})};};
 
@@ -101,4 +102,31 @@ it('closes when the backdrop is pressed but not when the panel is',()=>{
   const {onClose}=setup();
   fireEvent.mouseDown(screen.getByRole('dialog'));expect(onClose).not.toHaveBeenCalled();
   fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('shows titles, hints and errors in the chosen language and still takes English words',()=>{
+  setLanguagePreference('de');
+  const onRun=vi.fn();render(<CommandPalette context={context} busy={false} onRun={onRun} onClose={vi.fn()}/>);
+  const input=screen.getByRole('combobox',{name:'Befehl'});
+  const rows=()=>screen.getAllByRole('option').map(option=>option.textContent);
+  fireEvent.change(input,{target:{value:'takt 9'}});
+  expect(rows()).toEqual(['Gehe zu Takt — Geben Sie eine Taktnummer von 1 bis 4 ein.']);
+  fireEvent.change(input,{target:{value:'takt'}});
+  expect(rows()).toEqual(['Gehe zu Takt — Geben Sie eine Taktnummer von 1 bis 4 ein.','Takt anhängen','Takt entfernen']);
+  // The English title still finds the command, which is shown under its German title.
+  fireEvent.change(input,{target:{value:'measure 3'}});
+  expect(rows()).toEqual(['Gehe zu Takt — Takt 12']);
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(onRun).toHaveBeenCalledWith({kind:'select',target:{...target,bar:2}});
+});
+
+it('translates the Estonian palette, including a refused undo',()=>{
+  setLanguagePreference('et');
+  const onRun=vi.fn();render(<CommandPalette context={{...context,canUndo:false}} busy={false} onRun={onRun} onClose={vi.fn()}/>);
+  const input=screen.getByRole('combobox',{name:'Käsk'});
+  fireEvent.change(input,{target:{value:'tagasi'}});
+  expect(screen.getByRole('option')).toHaveTextContent('Võta tagasi — Pole midagi tagasi võtta.');
+  fireEvent.change(input,{target:{value:'undo'}});
+  expect(screen.getByRole('option')).toHaveTextContent('Võta tagasi — Pole midagi tagasi võtta.');
+  expect(screen.getByRole('option')).toHaveAttribute('aria-disabled','true');
 });

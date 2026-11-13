@@ -24,6 +24,9 @@ import { canonicalDrumKitMix, defaultDrumElement } from './audio/drum-kit';
 import type { DrumElementMix, DrumKitElement } from './edit-types';
 import { DEFAULT_PRACTICE } from './audio/practice-types';
 import type { PlaybackState } from './audio/types';
+import { nativeMidiIn } from './audio/midi-in';
+import { midiCaptureSession } from './editor/midi-capture-session';
+import * as midiCapture from './editor/midi-capture';
 import type { BackingWaveform as WaveformReceipt,BackingWaveformProps,NativeBackingWaveformBridge,WaveformSourceInput } from './audio/backing-waveform-types';
 import {getHarmonyChord} from './harmony/chord-source';
 import type {HarmonyLibrary,HarmonyLibraryEntry} from './editor/harmony-types';
@@ -50,7 +53,8 @@ const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>Pla
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
 // No MIDI service in jsdom: the inspector's MIDI output panel finds no ports instead of showing a listing error.
 vi.mock('./audio/midi-out',async original=>({...await original<typeof import('./audio/midi-out')>(),nativeMidiOut:{ports:async()=>[],setDelay:async()=>{},status:async()=>({ports:[],sent:0,dropped:0,late:0,maxLateMs:0}),testLog:async()=>[]}}));
-vi.mock('./audio/midi-in',async original=>({...await original<typeof import('./audio/midi-in')>(),nativeMidiIn:{ports:async()=>[],start:async()=>1,configure:async()=>{},stop:async()=>{},status:async()=>({session:0,state:'stopped' as const,port:'',message:'',chords:0,dropped:0,belowFloor:0}),subscribe:async()=>()=>{}}}));
+const midiIn=vi.hoisted(()=>({chord:(_chord:unknown)=>{},status:(_status:unknown)=>{}}));
+vi.mock('./audio/midi-in',async original=>({...await original<typeof import('./audio/midi-in')>(),nativeMidiIn:{ports:async()=>[],start:async()=>1,configure:async()=>{},stop:async()=>{},status:async()=>({session:0,state:'stopped' as const,port:'',message:'',chords:0,dropped:0,belowFloor:0}),subscribe:async(onChord:(chord:unknown)=>void,onStatus:(status:unknown)=>void)=>{midiIn.chord=onChord;midiIn.status=onStatus;return ()=>{};}}}));
 vi.mock('./export/bridge',()=>({createDocumentExportBridge:vi.fn(()=>({exportPdf:vi.fn(async()=>null),exportMidi:vi.fn(async()=>false),exportMusicXml:vi.fn(async()=>false),exportAsciiTab:vi.fn(async()=>false),exportGp5:vi.fn(async()=>false),exportSvg:vi.fn(async()=>false),exportPng:vi.fn(async()=>false),exportTrackFiles:vi.fn(async()=>false),exportAudio:vi.fn(async()=>null),status:vi.fn(async()=>null),cancel:vi.fn(async()=>{})} satisfies ExportNativeBridge))}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
@@ -2671,4 +2675,219 @@ it('hands the score the instrument pick as the new selection after a score click
   fireEvent.click(mark);
   await waitFor(()=>expect(engravingView.mock.lastCall?.[0]).toMatchObject({editTarget:farTarget,editorSelection:{kind:'range',range:{start:{bar:1,tick:0},lanes:[{track:0,staff:0,voice:0}]}}}));
   integration.activeNotes.mockImplementation(()=>[]);
+});
+
+
+// ----- MIDI capture writes chords through note entry -----
+let midiSeq=0;
+const keyboardChord=(keys:number[],session=1)=>({session,seq:++midiSeq,atMs:midiSeq*100,dropped:0,notes:keys.map(key=>({key,velocity:90,channel:0}))});
+const startCapture=async()=>{const session=midiCaptureSession(nativeMidiIn);await act(async()=>{await session.stop();await session.start('Keys',{chordWindowMs:60,minVelocity:1});});return session;};
+const sendChord=(...chords:ReturnType<typeof keyboardChord>[])=>act(()=>{for(const chord of chords)midiIn.chord(chord);});
+describe('MIDI capture in the score',()=>{
+  it('writes a chord on the selected beat as one edit that one undo removes with the cursor back, and moves on',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});await startCapture();
+    const before=c.getState().snapshot.project.edits.length;
+    sendChord(keyboardChord([40,47,52]));
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(3));
+    expect(c.getState().snapshot.project.edits).toHaveLength(before+1);
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:0}));
+    expect(c.getState().snapshot.project.edits).toHaveLength(before);
+  });
+  it('writes nothing while note entry is off',async()=>{
+    const c=await setup();await startCapture();
+    const before=c.getState().snapshot.project.edits.length;
+    sendChord(keyboardChord([40,47]));await new Promise(resolve=>setTimeout(resolve,30));
+    expect(currentBeat(c).notes).toHaveLength(0);expect(c.getState().snapshot.project.edits).toHaveLength(before);
+  });
+  it('writes while the score plays, as typed entry does',async()=>{
+    integration.running=true;
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});await startCapture();
+    sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  });
+  it('writes nothing while a text field has the focus, and does not take the focus',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});await startCapture();
+    const field=document.createElement('input');document.body.appendChild(field);field.focus();
+    sendChord(keyboardChord([40]));await new Promise(resolve=>setTimeout(resolve,30));
+    expect(currentBeat(c).notes).toHaveLength(0);expect(document.activeElement).toBe(field);
+    field.blur();sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    expect(document.activeElement).not.toBe(field);field.remove();
+  });
+  it('applies chords that arrive together in order, one edit each',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});await startCapture();
+    sendChord(keyboardChord([40,47,52]),keyboardChord([45,52]));
+    await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(2));
+    expect(currentBeat(c,0).notes).toHaveLength(3);
+  });
+  it('counts and reports chords it had to drop when edits cannot keep up',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const before=c.getState().snapshot.project.edits.length;
+    sendChord(...Array.from({length:14},(_,index)=>keyboardChord([40+index])));
+    await waitFor(()=>expect(session.get().notWritten).toBeGreaterThan(0));
+    // Every chord is either written or counted, none lost silently.
+    await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before+session.get().notWritten).toBe(14));
+    expect(session.get().notWritten).toBeGreaterThan(0);
+    await screen.findByText(/^\d+ chords? did not reach the score\.$/);
+  });
+  it('counts a chord it could not write, whatever the reason: a dialog, an open menu, a locked score, a text field',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const before=c.getState().snapshot.project.edits.length,counted=()=>session.get().notWritten;
+    // A header menu is open: the chord is shown by the panel, not written behind the menu.
+    const view=openCommand('View');
+    sendChord(keyboardChord([40]));
+    expect(counted()).toBe(1);expect(currentBeat(c).notes).toHaveLength(0);
+    fireEvent.keyDown(view.querySelector('summary')!,{key:'Escape'});
+    // A dialog is open.
+    click('Export score');await screen.findByRole('dialog',{name:'Export score'});
+    sendChord(keyboardChord([40]));
+    expect(counted()).toBe(2);
+    click('Cancel');await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).toBeNull());
+    // A text field has the focus.
+    const field=document.createElement('input');document.body.appendChild(field);field.focus();
+    sendChord(keyboardChord([40]));
+    expect(counted()).toBe(3);field.remove();
+    // A finalized score.
+    await act(async()=>{await c.setLock({kind:'finalized'});});
+    sendChord(keyboardChord([40]));
+    expect(counted()).toBe(4);
+    expect(c.getState().snapshot.project.edits).toHaveLength(before);
+    expect(await screen.findByText(/^4 chords did not reach the score\.$/)).toBeInTheDocument();
+  });
+  it('counts the chords it discards when the queue is cleared, so every chord is written or counted',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const before=c.getState().snapshot.project.edits.length;
+    sendChord(...Array.from({length:4},(_,index)=>keyboardChord([40+index])));
+    // Turning note entry off while they wait clears the queue.
+    fireEvent.keyDown(workspace,{key:'n'});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before+session.get().notWritten).toBe(4));
+    expect(session.get().notWritten).toBeGreaterThan(0);
+  });
+  it('does not let a flood of chords starve a typed key',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const before=c.getState().snapshot.project.edits.length;
+    sendChord(...Array.from({length:14},(_,index)=>keyboardChord([40+index])));
+    fireEvent.keyDown(workspace,{key:'e'});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before+session.get().notWritten).toBe(15));
+    expect(screen.queryByText(/Still entering the previous note/)).toBeNull();
+  });
+  it('does not merge the next chord into the last beat of the score, and says so',async()=>{
+    const c=await setup(blankProject(),undefined,{view:{target:{track:0,staff:0,bar:3,voice:0,beat:3}}}),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(c.getState().score.tracks[0].staves[0].bars[3].voices[0].beats[3].notes).toHaveLength(1));
+    expect(await screen.findByText(/end of the score was reached/)).toBeInTheDocument();
+    const written=c.getState().snapshot.project.edits.length;
+    sendChord(keyboardChord([47]));
+    expect(await screen.findByText(/the cursor is at the end of the score/)).toBeInTheDocument();
+    expect(c.getState().snapshot.project.edits).toHaveLength(written);
+    expect(session.get().notWritten).toBe(1);
+  });
+  it('puts the cursor back on undo only for the chord it wrote, not after another edit',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});await startCapture();
+    sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));
+    fireEvent.keyDown(workspace,{key:'e'});
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:2}));
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(0));
+    expect(entryProps().editTarget).not.toMatchObject({beat:0});
+  });
+  it('writes a chord into the score that is active now, never into one that was switched away from',async()=>{
+    const a=await setup();
+    fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'n'});await startCapture();
+    await act(async()=>{await testWorkspace.newDocument();});
+    await waitFor(()=>expect(activeController()).not.toBe(a));
+    const other=activeController();
+    fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'n'});
+    sendChord(keyboardChord([40,47]));
+    await waitFor(()=>expect(other.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes).toHaveLength(2));
+    expect(a.getState().score.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(beat=>beat.notes)).toHaveLength(0);
+  });
+  it('never lets a chord set the refusal latch or push out an earlier one: a full queue turns chords away, newest first, and typed keys still get in',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const before=c.getState().snapshot.project.edits.length;
+    // One chord runs at once; four typed keys and four more chords fill the eight slots; the next chord finds the queue full.
+    sendChord(keyboardChord([40]));
+    for(const letter of ['e','f','g','a'])fireEvent.keyDown(workspace,{key:letter});
+    sendChord(keyboardChord([41]),keyboardChord([42]),keyboardChord([43]),keyboardChord([44]));
+    expect(session.get().notWritten).toBe(0);
+    sendChord(keyboardChord([45]));
+    expect(session.get().notWritten).toBe(1);
+    // A typed key at a full queue takes the place of the NEWEST waiting chord, so the chords played first stay in order.
+    fireEvent.keyDown(workspace,{key:'b'});
+    expect(session.get().notWritten).toBe(2);
+    // Neither the chord that found the queue full nor the typed key that evicted one says the editor is busy or refuses later keys.
+    expect(screen.queryByText(/Still entering the previous note/)).toBeNull();
+    // Let the queue run (or go stale); then the chords that were written are the first ones, in order, and the evicted ones are not among them.
+    let seen=-1;
+    await waitFor(()=>{const now=c.getState().snapshot.project.edits.length;const settled=now===seen;seen=now;expect(settled).toBe(true);},{timeout:8000,interval:600});
+    const low=c.getState().snapshot.project.edits.slice(before).flatMap(edit=>edit.type==='sequence'?edit.commands:[edit]).filter(step=>step.type==='setNote'&&(step as {string:number}).string===1).map(step=>(step as {fret:number}).fret);
+    expect(low).toEqual([...low].sort((x,y)=>x-y));
+    expect(low).not.toContain(4);expect(low).not.toContain(5);
+    expect(screen.queryByText(/Still entering the previous note/)).toBeNull();
+  });
+  it('counts a chord that throws while it is being written',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const spy=vi.spyOn(midiCapture,'planMidiCapture').mockImplementationOnce(()=>{throw new Error('planner failure');});
+    const quiet=vi.spyOn(console,'error').mockImplementation(()=>{});
+    sendChord(keyboardChord([40]));
+    expect(session.get().notWritten).toBe(1);
+    spy.mockRestore();quiet.mockRestore();
+    sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  });
+  it('tells the player why chords are not written while a menu is open, and stops saying so once one is written',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const view=openCommand('View');
+    sendChord(keyboardChord([40]));
+    expect(session.get().blocked).toBe(true);
+    expect(within(view).getByText('A menu is open, so chords are not written to the score. Close the menu to write them.')).toBeInTheDocument();
+    fireEvent.keyDown(view.querySelector('summary')!,{key:'Escape'});
+    sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    expect(session.get().blocked).toBe(false);
+  });
+  it('ignores a chord of another session',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});await startCapture();
+    sendChord(keyboardChord([40],99));await new Promise(resolve=>setTimeout(resolve,30));
+    expect(currentBeat(c).notes).toHaveLength(0);
+  });
+});
+
+describe('menus with sections inside them',()=>{
+  it('keeps the View menu open when a section inside it is opened or its buttons are pressed, and still closes another menu',async()=>{
+    await setup();
+    const menus=[...document.querySelectorAll<HTMLDetailsElement>('header details.command-menu')];
+    const view=menus.find(menu=>menu.querySelector(':scope > summary')?.textContent==='View')!,other=menus.find(menu=>menu!==view)!;
+    // A click on a summary opens its details and then announces it with a toggle event, as a browser does.
+    const click=(details:HTMLDetailsElement)=>{fireEvent.click(details.querySelector(':scope > summary')!);fireEvent(details,new Event('toggle'));};
+    click(view);
+    const section=view.querySelector<HTMLDetailsElement>('details.midi-capture-panel')!;
+    expect(section).not.toBeNull();expect(view.open).toBe(true);
+    click(section);
+    expect(section.open).toBe(true);expect(view.open).toBe(true);
+    // Pressing a button in the section does not dismiss the menu either, as a command button does.
+    fireEvent.click(within(section).getByRole('button',{name:'Refresh MIDI ports'}));
+    expect(section.open).toBe(true);expect(view.open).toBe(true);
+    // Opening a different menu still closes this one, and the section with it.
+    click(other);
+    expect(other.open).toBe(true);expect(view.open).toBe(false);
+  });
 });

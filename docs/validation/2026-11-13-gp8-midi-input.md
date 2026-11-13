@@ -45,3 +45,28 @@ The Rust tests use a fake driver: grouping (window, extension, span cap, 8-note 
 - An open the system never answers keeps a thread and a sink until it returns and cannot be cancelled. Starts for that port are refused meanwhile (a Start for another port is allowed; at most 4 opens may be outstanding in all), and after 30 s the message says TabPlayer must be restarted to use that port again.
 - A listing the driver never finishes makes later Refreshes fail with "still in progress" and the watchdog skip its tick; a watchdog thread stuck inside the driver stays stuck.
 - U17 will be verified with injected messages only (slice 3).
+
+## Slice 2: capture into the score (U16)
+
+Scope: with MIDI capture running and note entry on, each captured chord is written at the cursor as one edit through the note-entry path (`planMidiCapture`, `dispatchEntryItem`, the entry queue), and the cursor moves on. No new edit type and no schema change: a chord is a `sequence` of `setNote` (or `addPitchedNote`) steps, with a `setDuration` step first and an `insertBeat` step last when they are needed. Channel-to-string mapping (U17) is slice 3 and is not done.
+
+Behaviour: one chord is one undo, and the undo puts the cursor back; a chord that adds nothing records nothing; a pitch the staff cannot play refuses the whole chord with a message (nothing is clamped); drum tracks are refused with a message; capture is not blocked while the score plays, as typed entry is not (the owner's decision stands); nothing is written with note entry off or outside the score view (the chord is only shown), and nothing is written, with the chord counted, while a header menu or dialog is open or focus is in a text field; chords queued behind an edit are applied in order in their own small lane, and every chord that does not reach the score is counted and shown in the panel. No pitch is dropped to fit the eight steps of one edit: the duration, then the added beat, give way. Help: a "MIDI input" section under Editing in en, et and de.
+
+Also fixed here: opening the MIDI input section inside the View menu closed the menu (found by running the slice 1 driver in the real app; jsdom did not show it). The menu bar's click and toggle handlers now close only the details that neither contain nor sit inside the one opened, and buttons inside a `data-menu-keep` section do not dismiss the menu. A Vitest test reproduces the click and toggle sequence.
+
+### Evidence (2026-11-13, Windows, this worktree)
+
+| Check | Result |
+|---|---|
+| Desktop test build (`scripts/build-desktop-test.ps1`) | built, `done-0` |
+| `node tests/desktop/parity-midi-in.mjs` (real app, test port) | passed: `{"ports":["Test MIDI input"],"chords":74,"dropped":99479,"burstInjectMs":2194,"slowestFrameMs":151,"probes":178}` |
+| `node tests/desktop/parity-midi-in-entry.mjs` (real app, test port) | passed after the review fixes (a chord is not written while a menu is open and is counted; Escape closes the menu and its section and the focus goes to the View button; placement `[[1,0],[2,2],[3,2]]` asserted; no second edit follows the chord): chord written as one `sequence` of three `setNote` steps at strings and frets `[1,0] [2,2] [3,2]`; the next chord on the next beat; one undo took the chord back and the same chord landed on that beat again; an out-of-range pitch showed its message and wrote nothing |
+| `npm run typecheck` | no errors |
+| `npm test` | `Test Files  399 passed | 4 skipped (403)`, `Tests  6963 passed | 8 skipped (6971)` |
+
+### Not verified in slice 2
+
+- No real MIDI device. Both drivers inject into the sink the driver callback calls, so midir and the operating system's MIDI driver are not exercised.
+- Banjo drone placement is checked by sounding pitch in unit tests only, not in the real app.
+- Capture with a dialog open, with an open menu, in a text field and with a finalized score is tested in the app's component tests (each chord counted, none written); with a document switch the test shows the chord going to the active score only. None of these four was exercised in the real app.
+- The 60 ms window and the placement cost weights are not tuned on real playing.

@@ -115,9 +115,13 @@ export interface EntryPlan {
   notice: string | null;
   /** The rhythm the next entry uses. */
   entry: EntryDuration | null;
+  /** Where the fretting hand ended up (MIDI capture), so the next chord is placed near it; absent when the chord had no fretted note. */
+  hand?: number;
+  /** MIDI capture: the cursor could not move on because the score ends here. */
+  end?: boolean;
 }
 /** Why an entry or move wrote nothing; the app words it. `name` is the pitch. */
-export type EntryRefusal = { refused: 'cannot_enter' | 'no_string' | 'refused' | 'present' | 'cannot_move'; name: string };
+export type EntryRefusal = { refused: 'cannot_enter' | 'no_string' | 'refused' | 'present' | 'cannot_move' | 'percussion' | 'unreachable'; name: string };
 export interface EntryRequest {
   project: Project; score: model.Score; target: BeatTarget; entered: EntryPitch;
   preferences: InputPreferences; entry: EntryDuration | null;
@@ -127,6 +131,30 @@ export interface EntryRequest {
 
 const tryPreview = (project: Project, command: EditCommand) => { try { return previewEdit(project, command); } catch { return null; } };
 const isPlain = (beat: model.Beat) => beat.graceType === model.GraceType.None && (beat.tupletNumerator <= 0 || beat.tupletNumerator === 1 && beat.tupletDenominator === 1);
+
+/** Whether the bar the cursor is at the end of still has room for another beat. */
+export function barHasRoomAfter(score: model.Score, target: BeatTarget): boolean {
+  const voice = score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice], master = score.masterBars[target.bar];
+  if (target.beat < voice.beats.length - 1) return false;
+  const ticks = voiceTicks(voice, master.calculateDuration(false));
+  return Boolean(ticks && ticks[0] < master.calculateDuration(false) * ticks[1]);
+}
+/**
+ * Where the cursor goes after a write, and the steps that get it there: the next beat of the bar; at the last beat of a bar
+ * that still has room, a new beat (one more step, when the whole edit still applies) to write into; otherwise the first beat
+ * of the next bar. `written` is the score the steps leave. Typed entry and MIDI capture both use it.
+ */
+export function advanceAfter(project: Project, written: model.Score, target: BeatTarget, steps: SequenceStep[], rhythm: EntryDuration | null): { steps: SequenceStep[]; next: BeatTarget } {
+  const voice = written.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice];
+  if (target.beat < voice.beats.length - 1) return { steps, next: { ...target, beat: target.beat + 1 } };
+  const insert: SequenceStep | null = barHasRoomAfter(written, target) && rhythm ? { type: 'insertBeat', target: { ...target, beat: target.beat + 1 }, duration: rhythm.duration, dots: rhythm.dots } : null;
+  if (insert && tryPreview(project, oneEdit([...steps, insert]))) return { steps: [...steps, insert], next: insert.target };
+  if (target.bar + 1 < written.masterBars.length) {
+    const following = written.tracks[target.track].staves[target.staff].bars[target.bar + 1];
+    return { steps, next: { ...target, bar: target.bar + 1, voice: following.voices[target.voice] ? target.voice : 0, beat: 0 } };
+  }
+  return { steps, next: target };
+}
 
 /**
  * Plans writing `entered` on a beat as one edit: an auto-duration rhythm, the note, the spelling it needs, and, when the
@@ -149,19 +177,7 @@ export function planScoreEntry(request: EntryRequest): EntryPlan | EntryRefusal 
   if (spelled.step) steps.push(spelled.step);
   const rhythm = steps[0] === lead && lead?.type === 'setDuration' ? { duration: lead.duration, dots: lead.dots } : isPlain(beat) ? { duration: beat.duration, dots: beat.dots } : request.entry;
   let next = target;
-  if (!chord && preferences.advance) {
-    const voice = written.score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice], master = written.score.masterBars[target.bar];
-    if (target.beat < voice.beats.length - 1) next = { ...target, beat: target.beat + 1 };
-    else {
-      const ticks = voiceTicks(voice, master.calculateDuration(false)), room = ticks && ticks[0] < master.calculateDuration(false) * ticks[1];
-      const insert: SequenceStep | null = room && rhythm ? { type: 'insertBeat', target: { ...target, beat: target.beat + 1 }, duration: rhythm.duration, dots: rhythm.dots } : null;
-      if (insert && tryPreview(project, oneEdit([...steps, insert]))) { steps.push(insert); next = insert.target; }
-      else if (target.bar + 1 < written.score.masterBars.length) {
-        const following = written.score.tracks[target.track].staves[target.staff].bars[target.bar + 1];
-        next = { ...target, bar: target.bar + 1, voice: following.voices[target.voice] ? target.voice : 0, beat: 0 };
-      }
-    }
-  }
+  if (!chord && preferences.advance) ({ steps, next } = advanceAfter(project, written.score, target, steps, rhythm));
   return { command: oneEdit(steps), follow, next, name: entered.name, removes: false, notice, entry: rhythm };
 }
 

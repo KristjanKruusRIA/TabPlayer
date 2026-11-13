@@ -96,6 +96,9 @@ describe('planMidiCapture with a MIDI guitar mapping',()=>{
   it('writes the same pitch on two strings when it came on two channels',()=>{
     expect(placed(planned(withStaff(),guitar(0),[...on(0,45),...on(1,45)],'lowestFirst').command)).toEqual([{string:1,fret:5},{string:2,fret:0}]);
   });
+  it('names a pitch once in the notice when it came on two channels',()=>{
+    expect(planned(withStaff(),guitar(0),[...on(0,45),...on(1,45)],'lowestFirst').name).toBe('A2');
+  });
   it('treats a note as (string, pitch): a pitch already on the beat on another string is still written on its own string',()=>{
     const base=withStaff(standard,{type:'setNote',target:guitar(0),string:1,fret:5});
     expect(placed(planned(base,guitar(0),on(1,45),'lowestFirst').command)).toEqual([{string:2,fret:0}]);

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { mkdirSync,writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { launch,connect,stop,directory } from './harness.mjs';
 import { closeWelcomeLibrary,waitForWorkspaceIdle,revealPlaybackControls,clickWorkstationButton } from './workstation-commands.mjs';
 
 // THE-193: the selected passage and the running loop are drawn on the score, the overview and the position display.
 // Select a passage that crosses a line break, loop it, and photograph the three places at 1280x800 and 960x600.
-// Screenshots go outside the repository (THE193_SHOTS, default E:\claude-tmp\the-193).
-const shots=process.env.THE193_SHOTS??'E:/claude-tmp/the-193';
+// Screenshots go outside the repository (THE193_SHOTS, default: tabplayer-the-193 under the operating system's temp folder).
+const shots=process.env.THE193_SHOTS??resolve(tmpdir(),'tabplayer-the-193');
 mkdirSync(shots,{recursive:true});
 const example=resolve(directory,'library/examples/example-windowline.tabplayer');
 const id=launch({TABPLAYER_TEST_OPEN:example});

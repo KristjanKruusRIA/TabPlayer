@@ -81,7 +81,7 @@ const accoladeOverlay=(plan:AccoladePlan,metrics:AccoladeMetrics,systems:readonl
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,autoFit=false,onAutoFit,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -91,6 +91,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   /** The document's track identities, in track order. With `projection` they let staff groups and staff gaps be drawn; without either, neither is. */
   trackIds?:readonly string[];
   display?:ScoreDisplayPreferences;page?:PageLayout;onDisplayStatus?:(status:{zoomPercent:number;fitLimited:boolean;pageError:string|null})=>void;
+  /** Nothing chose a zoom for this score (no saved default, no choice of its own): a page layout wider than the score area then fits its width, and `onAutoFit` says whether it does. Not part of the display preferences, so it is never saved. */
+  autoFit?:boolean;onAutoFit?:(active:boolean)=>void;
   editTarget?:BeatTarget;editString?:number;editNoteIndex?:number|null;editPendingFret?:string|null;
   /** Measures to mark as score errors; empty when the viewer turned marking off. */
   errors?:readonly ScoreError[];
@@ -147,10 +149,12 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   useEffect(()=>()=>{if(reported.current!==undefined&&reported.current!=='null')reportSystems.current?.(null);},[]);
   const screenLayout=display.layout==='verticalScreen'||display.layout==='horizontalScreen';
   const baseWidth=natural?.score===renderedScore&&natural.tracks===trackKey&&natural.layout===display.layout&&natural.width===available.width&&natural.engraving===engraving&&natural.profile===profile?natural.value:null;
-  const fitMode=pageError?'manual':display.zoomMode;
+  // Auto fit is the same fit width as the button, at the same legible floor (THE-201), but only for a page layout that is wider than its area; the screen layouts already reflow or scroll by design.
+  const autoFitting=autoFit&&display.zoomMode==='manual'&&!screenLayout&&!pageError&&available.width>0&&geometry.width*zoom/100>available.width;
+  const fitMode=pageError?'manual':autoFitting?'fitWidth':display.zoomMode;
   const fit=fitMode==='manual'||!available.width||(fitMode==='fitPage'&&!available.height)?{percent:zoom,limited:false}:screenLayout?
     baseWidth===null?{percent:100,limited:false}:resolveScreenZoom({zoomMode:'fitWidth',manualPercent:zoom,available:{...available,width:display.layout==='verticalScreen'?Math.min(available.width,baseWidth):available.width},natural:{width:baseWidth},minPercent:display.layout==='horizontalScreen'?tabDigitFloorPercent(engraving?typographyOf(engraving).tabScale:null):25}):
-    resolveScreenZoom({zoomMode:fitMode,manualPercent:zoom,available,natural:{width:geometry.width,height:geometry.height}});
+    resolveScreenZoom({zoomMode:fitMode,manualPercent:zoom,available,natural:{width:geometry.width,height:geometry.height},...autoFitting?{minPercent:tabDigitFloorPercent(engraving?typographyOf(engraving).tabScale:null)}:{}});
   const measureBase=screenLayout&&fitMode!=='manual'&&baseWidth===null;
   const factor=fit.percent/100,sourcePhysical=physicalRequested&&!pageError;
   const sourceWidth=sourcePhysical?geometry.usableWidth:display.layout==='horizontalScreen'?(baseWidth!==null?Math.max(available.width,baseWidth*factor):available.width):screenLayout?available.width:geometry.width*factor;
@@ -226,6 +230,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     return()=>host.removeEventListener('wheel',onWheel);
   },[display.layout]);
   useEffect(()=>{onDisplayStatus?.({zoomPercent:fit.percent,fitLimited:fit.limited,pageError});},[onDisplayStatus,fit.percent,fit.limited,pageError]);
+  useEffect(()=>{onAutoFit?.(autoFitting);},[onAutoFit,autoFitting]);
   // Horizontal screen only: entering fit mode (or arriving in it from another layout) starts the strip at bar 1, so a scroll offset left over from manual zoom cannot keep a phantom range.
   const prevFit=useRef({mode:fitMode,layout:display.layout});
   useLayoutEffect(()=>{

@@ -24,6 +24,11 @@ export function readViewDefaults(storage:PreferenceStorage|undefined=browserStor
 /** The defaults saved in this run; they still apply when storage refuses them. */
 let session:ViewDefaults|null=null;
 export const currentViewDefaults=():ViewDefaults=>session??readViewDefaults();
+/** Whether the user ever saved a view default (in this run, or kept in storage). A saved default that equals the standard view still counts: the user chose it. */
+export function hasSavedViewDefaults(storage:PreferenceStorage|undefined=browserStorage()):boolean {
+  if(session)return true;
+  try{const value:unknown=JSON.parse(storage?.getItem(key)??'null');return !!value&&typeof value==='object'&&!Array.isArray(value);}catch{return false;}
+}
 /** Test isolation only: forgets the defaults saved in this run. */
 export const forgetSessionViewDefaults=()=>{session=null;};
 /** Returns false when storage refuses the write. */

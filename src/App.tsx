@@ -81,7 +81,8 @@ import { HelpDialog } from './help/HelpDialog';
 import { topicFor,type HelpTopicId } from './help/help-topics';
 import type { PaletteAction } from './editor/command-palette';
 import { ViewDefaultsPanel } from './workspace/ViewDefaultsPanel';
-import { currentViewDefaults,writeViewDefaults } from './workspace/view-defaults';
+import { currentViewDefaults,hasSavedViewDefaults,standardViewDefaults,writeViewDefaults } from './workspace/view-defaults';
+import { compactWindowHeight } from './shell/small-window';
 import { findScoreErrors,readScoreErrorDisplay,writeScoreErrorDisplay } from './editor/score-errors';
 import { editAudition,readAuditionWhileEditing,tuningAudition,writeAuditionWhileEditing,type TuningAudition } from './audio/audition';
 import { musicClipSelection,scoreFromMusicClip } from './editor/clipboard-source';
@@ -204,11 +205,14 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const onDisplayStatus=useCallback((status:{zoomPercent:number;fitLimited:boolean;pageError:string|null})=>{
     setDisplayStatus(old=>old&&old.zoomPercent===status.zoomPercent&&old.fitLimited===status.fitLimited&&old.pageError===status.pageError?old:status);
   },[]);
-  const manualZoom=(value:number)=>{setZoom(value);setScoreDisplay(old=>old&&old.zoomMode!=='manual'?{...old,zoomMode:'manual'}:old);};
+  // A page layout wider than the score area fits its width while nothing chose a zoom: no view default was saved, this score's view has no display or zoom of its own.
+  // It is never saved. Choosing any zoom or display ends it; an explicit 100% is saved as a manual display, because 100% alone cannot be told from never having chosen.
+  const [savedViewDefaults]=useState(hasSavedViewDefaults),autoFit=scoreDisplay===undefined&&zoom===standardViewDefaults.zoom&&!savedViewDefaults,[autoFitted,setAutoFitted]=useState(false);
+  const shownDisplay=autoFit&&autoFitted&&display.zoomMode==='manual'?{...display,zoomMode:'fitWidth' as const}:display;
+  const manualZoom=(value:number)=>{setZoom(value);setScoreDisplay(old=>old?old.zoomMode!=='manual'?{...old,zoomMode:'manual'}:old:value===standardViewDefaults.zoom?{layout:standardViewDefaults.layout,zoomMode:'manual'}:old);};
   const [instrumentVisible,setInstrumentVisible]=useState(documentView.instrumentVisible);
   const [paletteVisible,setPaletteVisible]=useState(true),[paletteHost,setPaletteHost]=useState<HTMLElement|null>(null);
   const [songHost,setSongHost]=useState<HTMLElement|null>(null),[practiceHost,setPracticeHost]=useState<HTMLElement|null>(null);
-  const [inspectorVisible,setInspectorVisible]=useState(true),[dockVisible,setDockVisible]=useState(true);
   /** The inspector shows the whole song, the current track, or the editors for the selection, as GP's Song and Track tabs do. */
   const [inspectorTab,setInspectorTab]=useState<InspectorTab>('selection');
   /** The centre region shows the score or the Sound rig; the transport and the rest of the shell stay as they are. */
@@ -222,7 +226,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{void nativeMidiOut.setDelay(readMidiOutDelay()).catch(()=>{});},[]);
   const paneFocusIntent=useRef<InspectorTab|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
   const [workspaceHeight,setWorkspaceHeight]=useState(Infinity),[workspaceWidth,setWorkspaceWidth]=useState(Infinity),[clipboardFocus,setClipboardFocus]=useState(0);
-  const narrow=viewport.width<1180,inspectorShown=inspectorVisible;
+  const narrow=viewport.width<1180;
   const autoDockHeight=instrumentVisible?(viewport.height<800?160:184):(viewport.height<800?dockMode==='backing'?176:144:viewport.width>=1440?192:176);
   // A height the user dragged to stays within reach of the score: it never grows into the collapse threshold below.
   // Dragged sizes are kept for the user between runs; a kept size is clamped to the current window, never rewritten by it.
@@ -230,6 +234,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const setDockSize=(dock:number|null)=>setPanelSizes(old=>old.dock===dock?old:{...old,dock});
   const setInspectorSize=(inspector:number|null)=>setPanelSizes(old=>old.inspector===inspector?old:{...old,inspector});
   useEffect(()=>{writePanelSizes(panelSizes);},[panelSizes]);
+  // A short window starts without the inspector and the overview, unless the user kept a size for that panel (the one panel preference remembered between runs) or left the instrument view open in the dock.
+  // Until the user shows or hides a panel, it follows the window: growing it brings the panel back, shrinking it takes it away again.
+  const compactHeight=viewport.height<=compactWindowHeight;
+  const [inspectorChoice,setInspectorVisible]=useState<boolean|null>(null),[dockChoice,setDockVisible]=useState<boolean|null>(null);
+  const inspectorVisible=inspectorChoice??!(compactHeight&&panelSizes.inspector===null),inspectorShown=inspectorVisible,dockVisible=dockChoice??!(compactHeight&&panelSizes.dock===null&&!instrumentVisible);
   // The inspector never squeezes the score below 480px; at the 960px minimum window it can still reach 480px itself.
   const autoInspectorWidth=narrow?264:304,inspectorMin=240,inspectorMax=Math.max(inspectorMin,Math.min(560,Number.isFinite(workspaceWidth)?workspaceWidth-480:560));
   const inspectorWidth=panelSizes.inspector===null?autoInspectorWidth:Math.min(inspectorMax,Math.max(inspectorMin,panelSizes.inspector));
@@ -885,7 +894,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       editorSelection(null);setPendingAccidental(null);clearEntryQueue();event.preventDefault();
     }
   }
-  return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
+  return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys}>
     <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><nav className="gp-menus" aria-label={t('menu.file_and_history')}><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>{t('action.new')}</button>
@@ -970,7 +979,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <button type="button" title={t('toolbar.print')} aria-label={t('toolbar.print')} {...busyGuard({busy:controlsBusy||exports.busy,onClick:()=>openModal('export')})}><ExportGlyph/></button>
         <span className="tp-sr score-tools">{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
       </div>
-      <div className="gp-toolbar-display"><TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={display} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError}/></div>
+      <div className="gp-toolbar-display"><TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={shownDisplay} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError} compact={compactHeight}/></div>
       {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection} display={transportDisplay}/>}
       <div className="gp-toolbar-right">
         <details ref={practiceMenu} className="gp-practice" onToggle={event=>{if(event.currentTarget.open)event.currentTarget.querySelectorAll<HTMLDetailsElement>('.gp-practice-body details:not([open])').forEach(inner=>{inner.open=true;});}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} aria-label={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} data-line-in={lineInOn||undefined}><PracticeGlyph/>{lineInOn&&<span className="line-in-badge" aria-hidden="true"/>}</summary><div ref={setPracticeHost} className="gp-practice-body"/></details>
@@ -996,7 +1005,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label={t('workspace.score_workspace')} tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
-        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
+        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
         {pendingFret!==null?<div className="score-hint score-hint-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</div>:inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}
       </section>
       {inspectorShown&&<InspectorResizeHandle width={inspectorWidth} min={inspectorMin} max={inspectorMax} onWidth={setInspectorSize} onReset={()=>setInspectorSize(null)}/>}

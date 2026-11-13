@@ -1,19 +1,38 @@
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useI18n } from '../i18n';
 import { resolveVisibleTracks, type TrackView } from './view';
 import { formatZoomPercent,isPhysicalPageLayout,resolveScoreDisplay,type ScoreDisplayPreferences } from './screen-view';
 
-export function TrackDisplayControls({ids,names,selected,view,zoom,disabled,onView,onZoom,display,onDisplay,actualZoom,fitLimited=false,pageError=null}:{
+/** `compact` folds the whole row behind one button for windows too short to spare it. The controls stay the same elements in the same order, so folding and unfolding keep their state. */
+export function TrackDisplayControls({ids,names,selected,view,zoom,disabled,onView,onZoom,display,onDisplay,actualZoom,fitLimited=false,pageError=null,compact=false}:{
   ids:readonly string[];names:readonly string[];selected:number;view:TrackView;zoom:number;disabled:boolean;
   onView:(view:TrackView)=>void;onZoom:(zoom:number)=>void;
-  display?:ScoreDisplayPreferences;onDisplay?:(display:ScoreDisplayPreferences)=>void;actualZoom?:number;fitLimited?:boolean;pageError?:string|null;
+  display?:ScoreDisplayPreferences;onDisplay?:(display:ScoreDisplayPreferences)=>void;actualZoom?:number;fitLimited?:boolean;pageError?:string|null;compact?:boolean;
 }) {
   const { t } = useI18n();
   const visible=resolveVisibleTracks(ids,selected,view),[zoomDraft,setZoomDraft]=useState(String(zoom));
   const current=resolveScoreDisplay(display),physical=isPhysicalPageLayout(current.layout),pageFitAvailable=physical&&!pageError,fitHelp=useId();
   useEffect(()=>setZoomDraft(String(zoom)),[zoom]);
-  return <fieldset disabled={disabled} aria-label={t('track_display.toolbar_aria')}><div className="pair">
-    <label><span className="score-tools-caption">{t('track_display.display_mode')}</span><select title={t('track_display.display_mode')} className="score-layout-select" value={current.layout} onChange={e=>{
+  const [open,setOpen]=useState(false),panelId=useId(),host=useRef<HTMLDivElement>(null),toggle=useRef<HTMLButtonElement>(null),panel=useRef<HTMLFieldSetElement>(null),firstControl=useRef<HTMLSelectElement>(null);
+  const folded=compact&&!open,toggleHadFocus=useRef(false);
+  useEffect(()=>{if(!compact)setOpen(false);},[compact]);
+  // Folding takes a control the player is on out of reach, so focus moves to the button; unfolding takes the button away, so focus moves to the first control.
+  useLayoutEffect(()=>{
+    if(compact){if(panel.current?.contains(document.activeElement)&&folded)toggle.current?.focus();}
+    else if(toggleHadFocus.current){toggleHadFocus.current=false;firstControl.current?.focus();}
+  },[compact,folded]);
+  useEffect(()=>{
+    if(!compact||!open)return;
+    const outside=(event:PointerEvent)=>{if(event.target instanceof Node&&!host.current?.contains(event.target))setOpen(false);};
+    document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);
+  },[compact,open]);
+  return <div ref={host} className="score-display-host" data-compact={compact||undefined} data-open={compact&&open||undefined} onKeyDown={event=>{
+    if(event.key!=='Escape'||!compact||!open)return;
+    event.preventDefault();event.stopPropagation();setOpen(false);toggle.current?.focus();
+  }}>
+  {compact&&<button ref={toggle} type="button" className="score-display-toggle" aria-expanded={open} aria-controls={panelId} onFocus={()=>{toggleHadFocus.current=true;}} onBlur={()=>{toggleHadFocus.current=false;}} onClick={()=>setOpen(value=>!value)}>{t('track_display.toolbar_aria')}</button>}
+  <fieldset ref={panel} id={panelId} hidden={folded} disabled={disabled} aria-label={t('track_display.toolbar_aria')}><div className="pair">
+    <label><span className="score-tools-caption">{t('track_display.display_mode')}</span><select ref={firstControl} title={t('track_display.display_mode')} className="score-layout-select" value={current.layout} onChange={e=>{
       if(disabled)return;
       onDisplay?.(resolveScoreDisplay({...current,layout:e.target.value}));
     }}>
@@ -53,5 +72,5 @@ export function TrackDisplayControls({ids,names,selected,view,zoom,disabled,onVi
   })}</div></details>{!physical&&<p className="muted score-fit-help" id={fitHelp}>{t('track_display.fit_page_help')}</p>}
   {pageError&&<p className="score-fit-help" id={physical?fitHelp:undefined} role="alert">{pageError}</p>}
   {current.zoomMode!=='manual'&&fitLimited&&!pageError&&actualZoom!==undefined&&<p className="muted score-fit-help" role="status">{t('track_display.fit_limited_status',{zoom:formatZoomPercent(actualZoom)})}</p>}
-  {ids.length>0&&!visible.includes(selected)&&<p className="muted" role="status">{t('track_display.track_hidden_status',{name:names[selected]||t('track_display.track_fallback',{index:selected+1})})}</p>}</fieldset>;
+  {ids.length>0&&!visible.includes(selected)&&<p className="muted" role="status">{t('track_display.track_hidden_status',{name:names[selected]||t('track_display.track_fallback',{index:selected+1})})}</p>}</fieldset></div>;
 }

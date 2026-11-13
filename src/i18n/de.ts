@@ -1,4 +1,5 @@
 import type { MessageCatalog } from './en';
+import { helpDe } from './help-de';
 
 export const de: MessageCatalog = {
   // App brand & title
@@ -338,52 +339,13 @@ export const de: MessageCatalog = {
   'help.workflow_description': 'Der blaue Rahmen markiert Ihr Bearbeitungsziel. Grün folgt der Wiedergabe oder einer Auswahl. Werkzeuge finden Sie in den Reitern Song, Spur und Auswahl des Inspektors sowie unter Übungseinstellungen in der Werkzeugleiste; die meisten Änderungen werden erst mit Aktionsschaltflächen wirksam.',
 
   // Help Topics Content
-  'help.topic.start.title': 'Erste Schritte',
-  'help.topic.start.p1': 'Öffnen Sie eine Partitur über Datei → Öffnen, erstellen Sie eine neue über Datei → Neu oder wählen Sie ein Beispiel aus der Bibliothek.',
-  'help.topic.start.p2': 'Die Partitur liegt in der Mitte, darunter die Wiedergabeleiste. Der Inspektor ist rechts: Der Reiter Song enthält die Einstellungen der Partitur, Spur die der ausgewählten Spur und Auswahl die Bearbeitungswerkzeuge. Mischpult, Instrumentenansicht und Begleitung liegen im unteren Dock. Ansicht blendet jedes Fenster ein oder aus.',
-  'help.topic.start.p3': 'Drücken Sie F1 für Hilfe zum aktiven Bereich des Fensters. Schließen Sie andere Dialoge zuvor.',
 
-  'help.topic.editing.title': 'Partitur bearbeiten',
-  'help.topic.editing.p1': 'Klicken Sie auf einen Schlag oder nutzen Sie die Pfeiltasten, um das blaue Ziel zu bewegen. Oben und Unten wechseln die Saite; tippen Sie eine Bundnummer und drücken Sie Enter.',
-  'help.topic.editing.p2': 'Shift mit Links oder Rechts erweitert die Auswahl zum Kopieren, Einfügen und für Auswahlwerkzeuge. Escape hebt sie auf.',
-  'help.topic.editing.p3': 'Strg/Cmd + Shift + P öffnet die Befehlspalette für Befehle wie measure 12, fret 5 oder tempo 96.',
-  'help.topic.editing.p4': 'Jede Änderung kann mit Strg/Cmd + Z rückgängig gemacht und mit Strg/Cmd + Shift + Z wiederholt werden.',
 
-  'help.topic.tracks.title': 'Spuren und Sounds',
-  'help.topic.tracks.p1': 'Der Reiter Spur im Inspektor enthält die Einstellungen der ausgewählten Spur. Wählen Sie eine Spur in der Liste Spuren im unteren Dock oder klicken Sie sie in der Partitur an. Unter Informationen können Sie die Spur verschieben, duplizieren oder entfernen, Name, Farbe, Instrument und Stimmung ändern und ein Instrument hinzufügen; mit Tonhöhe beibehalten klingen die Noten nach dem Umstimmen unverändert.',
-  'help.topic.tracks.p2': 'Unter Klänge wählen Sie Instrumentenklang, Effekte und Audioausgabe; unter Interpretation und MIDI-Ausgang legen Sie fest, wie die Spur spielt und wohin sie gesendet wird. Sound in Ansicht zeigt das vollständige Rig der Spur, und die Ansicht Begleitung im unteren Dock synchronisiert eine Audioaufnahme mit den Noten.',
-  'help.topic.tracks.p3': 'Spuränderungen werden im Partiturverlauf festgehalten und lassen sich rückgängig machen.',
 
-  'help.topic.inspector.title': 'Der Inspektor',
-  'help.topic.inspector.p1': 'Der Inspektor hat drei Reiter. Song enthält die Informationen der Partitur, ihre Notationseinstellungen (Layout, Standardzoom, Notenschrift und Standardansicht; der Zoom über der Partitur ändert die Ansicht sofort) und das Klang-Mastering. Spur enthält die Einstellungen der ausgewählten Spur, siehe Spuren und Sounds. Auswahl bietet Werkzeuge für Note, Schlag, Takt, Notensystem und Partitur am blauen Ziel oder an der Auswahl, einschließlich Kapodaster.',
-  'help.topic.inspector.p2': 'Die meisten Felder ändern erst etwas, wenn Sie die Aktionsschaltfläche des Fensters wie Anwenden oder Speichern betätigen.',
-  'help.topic.inspector.p3': 'Vorzähler, Metronom und Tempo-Trainer zum Üben einer wiederholten Passage finden Sie unter Übungseinstellungen in der Werkzeugleiste, nicht im Inspektor.',
 
-  'help.topic.playback.title': 'Wiedergabe und Mischen',
-  'help.topic.playback.p1': 'Leertaste startet oder pausiert. Die Leiste unten spielt ab, stoppt und wiederholt Passagen; Weitere Wiedergabeoptionen hält zusätzliche Einstellungen bereit.',
-  'help.topic.playback.p2': 'Das untere Dock mischt Spuren mit Lautstärke, Panorama, Stummschaltung und Solo, zeigt das Griffbrett und steuert die Begleitaufnahme.',
-  'help.topic.playback.p3': 'Mixer in Ansicht gibt jeder Spur einen Kanalzug und ergänzt den Masterausgang. Fader- und Panoramabewegungen sind sofort hörbar und lassen sich rückgängig machen.',
 
-  'help.topic.files.title': 'Dateien, Import und Export',
-  'help.topic.files.p1': 'TabPlayer öffnet Guitar Pro (.gp, .gpx, .gp3–.gp5) und MusicXML-Dateien und speichert eigene .tabplayer-Projekte. Jede Partitur öffnet in einem eigenen Tab.',
-  'help.topic.files.p2': 'Datei → ASCII-Tabulatur importieren… liest Texttabulatur in eine neue unbenannte Partitur ein.',
-  'help.topic.files.p3': 'Datei → MIDI importieren… liest Standard-MIDI-Dateien (Format 0 oder 1) ein; wählen Sie zuerst Quantisierung, Triolen, Stimmen und Tabulatur.',
-  'help.topic.files.p4': 'Datei → Stapelkonvertierung… wandelt einen Ordner älterer Partituren in neue .gp-Dateien um. Die Originale werden nie verändert.',
-  'help.topic.files.p5': 'Datei → Partitur exportieren schreibt PDF, Bilder, MIDI, MusicXML, ASCII-Tabulatur oder Audio; GP exportieren schreibt eine Guitar-Pro-Datei.',
-  'help.topic.files.p6': 'Partitur exportieren → Guitar Pro 5 erzeugt eine .gp5-Datei für ältere Programme und warnt vor Format-Einschränkungen vor dem Speichern.',
-  'help.topic.files.p7': 'Ungespeicherte Änderungen werden in der Wiederherstellung gesichert; vor dem Schließen geänderter Partituren wird nachgefragt.',
 
-  'help.topic.shortcuts.title': 'Tastaturkürzel',
-  'help.topic.shortcuts.p1': 'Strg/Cmd + N, O, S: Neu, Öffnen, Speichern (mit Shift Speichern unter). Strg/Cmd + W schließt die Partitur; Strg/Cmd + Tab wechselt zwischen Tabs.',
-  'help.topic.shortcuts.p2': 'Strg/Cmd + Z macht rückgängig, Strg/Cmd + Shift + Z oder Strg/Cmd + Y wiederholt. Leertaste startet oder pausiert.',
-  'help.topic.shortcuts.practice': 'Shift + L wiederholt die markierte Passage oder, ohne Auswahl, die Takte der Schleifenfelder und beendet eine laufende Schleife. [ spielt langsamer und ] schneller. Auf der deutschen Tastatur liegt [ auf der Taste Ü und wirkt dort; die Taste, die + tippt, ist die Notenschreibtaste und ändert die Tempostufe nicht.',
-  'help.topic.shortcuts.p3': 'Strg/Cmd + C, X, V kopieren, schneiden aus und fügen Musik ein; mit Shift über alle ausgewählten Spuren.',
-  'help.topic.shortcuts.tie': 'Strg/Cmd + T bindet die ausgewählten Noten an die vorangehenden Noten und gibt jeder den früheren Bund; Strg/Cmd + Shift + T löst die Bindungen.',
-  'help.topic.shortcuts.p4': 'Strg/Cmd + Shift + P öffnet die Befehlspalette. F1 öffnet diese Hilfe.',
 
-  'help.topic.about.title': 'Über & Updates',
-  'help.topic.about.p1': 'TabPlayer {version} für Desktop.',
-  'help.topic.about.p2': 'Dieser Build besitzt keinen Update-Dienst. TabPlayer lädt oder installiert niemals selbstständig Updates, und die Überprüfung verändert keine geöffneten Partituren.',
 
   // Recovery Prompt Dialog
   'recovery.unavailable_title': 'Wiederherstellung nicht verfügbar',
@@ -2520,4 +2482,5 @@ export const de: MessageCatalog = {
   'scales.overlay_put_key': '{note} auf den ausgewählten Beat setzen',
   'scales.overlay_result_put': '{note} auf den ausgewählten Beat gesetzt.',
   'scales.overlay_result_held': '{note} liegt schon auf dem ausgewählten Beat. Nichts wurde geändert.',
+  ...helpDe,
 };

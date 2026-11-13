@@ -95,7 +95,11 @@ export const allowlist = [
   { rule: 'local-folder', path: 'src-tauri/examples/tone_ab/main.rs', reason: 'default output folder of an example; needs a code change' },
   { rule: 'local-folder', path: 'tests/desktop/display-modes.mjs', reason: 'default output folder of a driver; needs a code change' },
   { rule: 'local-folder', path: 'tests/desktop/selection-loop-drawing.mjs', reason: 'default screenshot folder of a driver; needs a code change' },
-  { rule: 'local-folder', path: '.vitest/json/output.json', reason: 'generated test output; to be removed from the index (git rm --cached)' },
+  // The scanner's own rules and tests spell out the shapes they look for, so they match themselves.
+  { rule: 'minisign-secret-key', path: 'scripts/secret-scan.mjs', reason: 'the rule text itself' },
+  { rule: 'home-path', path: 'scripts/secret-scan.mjs', reason: 'the rule text itself' },
+  { rule: 'local-folder', path: 'scripts/secret-scan.mjs', reason: 'the rule text itself' },
+  { rule: 'minisign-secret-key', path: 'scripts/secret-scan.test.mjs', reason: 'synthetic samples for the rule, built at test time' },
 ];
 
 export const isAllowed = (finding, list) =>

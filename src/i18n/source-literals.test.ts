@@ -28,6 +28,7 @@ export const sweepFiles = [
   'src/batch/BatchConvertDialog.tsx',
   'src/editor/BarGesturePanel.tsx',
   'src/editor/CommandPalette.tsx',
+  'src/editor/command-palette.ts',
   'src/editor/SectionsPanel.tsx',
   'src/engraving/BarWidthsPanel.tsx',
   'src/engraving/EngravingPanel.tsx',

@@ -10,7 +10,7 @@ import { useI18n } from '../i18n';
 export function CommandPalette({context,busy,onRun,onClose}:{context:PaletteContext;busy:boolean;onRun:(action:PaletteAction)=>void;onClose:()=>void}) {
   const { t } = useI18n();
   const [query,setQuery]=useState(''),[active,setActive]=useState(0),input=useRef<HTMLInputElement>(null),list=useId();
-  const matches=useMemo(()=>searchCommands(query,context).map(match=>{
+  const matches=useMemo(()=>searchCommands(query,context,t).map(match=>{
     if(context.locked&&match.action&&(match.action.kind==='edit'||match.action.kind==='app'&&(match.action.name==='undo'||match.action.name==='redo'))){
       return {...match,action:undefined,error:t('project.finalized')};
     }

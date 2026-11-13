@@ -196,6 +196,7 @@ fn practice(speed: f64) -> PracticeSettings {
             bars: 0,
             between_loops: false,
         },
+        tonality: 0,
     }
 }
 
@@ -1084,4 +1085,53 @@ fn a_routed_guitars_knock_reaches_the_percussion_channel_not_the_speakers_and_is
     rig.run(0.1);
     messages.extend(rig.messages());
     assert_eq!(sounding(&messages), vec![]);
+}
+
+#[test]
+fn a_shifted_plan_sends_melodic_keys_in_the_practice_key_and_leaves_channel_ten_alone() {
+    let shifted = tabplayer_lib::audio::tonality::transposed_plan(&Arc::new(plan(1)), 5);
+    let mut rig = Rig::with_plan(&all_routed(), (*shifted).clone());
+    rig.play();
+    rig.run(3.5);
+    let messages = rig.messages();
+    let has = |bytes: &[u8]| messages.iter().any(|m| m.bytes == bytes);
+    assert!(has(&[0x90, 65, 90]) && has(&[0x90, 67, 90]), "lead moved");
+    assert!(has(&[0x91, 45, 90]), "bass moved");
+    assert!(
+        !has(&[0x90, 60, 90]) && !has(&[0x91, 40, 90]),
+        "originals are gone"
+    );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m.bytes == [0x99, 36, 90])
+            .count(),
+        3,
+        "the drums stay where they were"
+    );
+}
+
+#[test]
+fn a_shift_applied_while_playing_releases_the_old_keys_and_sounds_the_new_ones() {
+    let mut rig = Rig::new(&all_routed());
+    rig.play();
+    rig.run(0.5);
+    let before = rig.messages();
+    assert!(sounding(&before).contains(&(0, 0, 60)));
+    let shifted = tabplayer_lib::audio::tonality::transposed_plan(&Arc::new(plan(1)), 5);
+    let mut renderer = renderer_of((*shifted).clone(), DocumentSettings::default());
+    renderer.replace_midi(tap(&all_routed()));
+    assert!(rig.transport.install(renderer, 1, true).is_some());
+    rig.run(0.5);
+    let mut all = before;
+    all.extend(rig.messages());
+    let held = sounding(&all);
+    assert!(
+        !held.contains(&(0, 0, 60)) && !held.contains(&(0, 0, 62)),
+        "{held:?}"
+    );
+    assert!(
+        held.contains(&(0, 0, 65)) && held.contains(&(0, 0, 67)),
+        "{held:?}"
+    );
 }

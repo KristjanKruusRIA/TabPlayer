@@ -19,6 +19,7 @@ use super::{
     reference_sync::ReferenceSyncMap,
     renderer::{PreparedMix, Renderer},
     resources::AudioResources,
+    tonality::transposed_plan,
     voices::{drum_kit_for_track, resource_requests, track_locked, voice_id_for_track},
 };
 use crate::{
@@ -35,7 +36,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicI8, AtomicU8, AtomicU32, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -298,6 +299,7 @@ struct SharedPractice {
     sound: AtomicU8,
     bars: AtomicU8,
     between: AtomicBool,
+    tonality: AtomicI8,
 }
 impl SharedPractice {
     fn new() -> Self {
@@ -313,6 +315,7 @@ impl SharedPractice {
             sound: AtomicU8::new(0),
             bars: AtomicU8::new(0),
             between: AtomicBool::new(false),
+            tonality: AtomicI8::new(0),
         }
     }
     fn store(&self, value: PracticeSettings) {
@@ -342,6 +345,7 @@ impl SharedPractice {
         self.bars.store(value.count_in.bars, Ordering::Relaxed);
         self.between
             .store(value.count_in.between_loops, Ordering::Relaxed);
+        self.tonality.store(value.tonality, Ordering::Relaxed);
     }
     fn read(&self) -> PracticeSettings {
         let a = f64::from_bits(self.a.load(Ordering::Relaxed));
@@ -366,6 +370,7 @@ impl SharedPractice {
                 bars: self.bars.load(Ordering::Relaxed),
                 between_loops: self.between.load(Ordering::Relaxed),
             },
+            tonality: self.tonality.load(Ordering::Relaxed),
         }
     }
 }
@@ -465,6 +470,7 @@ struct SharedStatus {
     device: Mutex<Option<String>>,
     backing_duration: AtomicU64,
     settings: SharedPractice,
+    key: KeyChanges,
     phase: AtomicU8,
     resume_count: AtomicBool,
     count: SharedCount,
@@ -525,6 +531,7 @@ impl SharedStatus {
             device: Mutex::new(None),
             backing_duration: AtomicU64::new(f64::NAN.to_bits()),
             settings: SharedPractice::new(),
+            key: KeyChanges::new(),
             phase: AtomicU8::new(0),
             resume_count: AtomicBool::new(false),
             count: SharedCount::new(),
@@ -1062,6 +1069,7 @@ impl CallbackTransport {
             || generation < self.generation
             || generation < self.shared.desired.load(Ordering::Acquire)
             || accepted.validate(renderer.has_backing()).is_err()
+            || !(-12..=12).contains(&practice.tonality)
         {
             return Some(renderer);
         }
@@ -1083,6 +1091,8 @@ impl CallbackTransport {
             if let Some(old) = self.renderer.as_mut() {
                 renderer.continue_from(old);
             }
+            // The renderer sounds the key shift its document carries; the echo says the same from here on.
+            self.practice.tonality = practice.tonality;
         } else {
             self.draining = 0;
             self.playing = false;
@@ -1335,7 +1345,12 @@ impl CallbackTransport {
             TransportCommand::SetPractice { settings, .. } => {
                 settings.validate(self.renderer.as_ref().is_some_and(|r| r.has_backing()))?;
                 let tempo_changed = self.practice.tempo != settings.tempo;
-                self.practice = settings;
+                // The key shift changes only with the renderer that sounds it, through `Install`, so a practice
+                // command alone can never make the echo claim a shift the sound does not have.
+                self.practice = PracticeSettings {
+                    tonality: self.practice.tonality,
+                    ..settings
+                };
                 if tempo_changed {
                     self.reset_passes();
                 } else {
@@ -1964,6 +1979,36 @@ struct PreparedDocument {
         Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
     )>,
 }
+impl PreparedDocument {
+    /// The plan the renderer and its sample requests are built from: the stored plan moved by the practice key shift.
+    /// Runs on the control side only. The stored `plan` stays the original for ticks, occurrences and routing.
+    fn render_plan(&self) -> Arc<PlaybackPlan> {
+        transposed_plan(&self.plan, self.practice.tonality)
+    }
+}
+/// Control-side bookkeeping of key changes. Only the control thread (under the control lock) uses it; the callback never
+/// touches it. The counters are there for tests to see which way a wait ended without timing it.
+struct KeyChanges {
+    /// How long a key change waits for the callback's echo, in milliseconds.
+    wait_ms: AtomicU64,
+    acknowledged: AtomicU64,
+    timed_out: AtomicU64,
+    /// The generation and shift of the last install queued, until the echo shows it or the generation changes.
+    outstanding: Mutex<Option<(u64, i8)>>,
+}
+impl KeyChanges {
+    fn new() -> Self {
+        Self {
+            wait_ms: AtomicU64::new(KEY_ACK_WAIT.as_millis() as u64),
+            acknowledged: AtomicU64::new(0),
+            timed_out: AtomicU64::new(0),
+            outstanding: Mutex::new(None),
+        }
+    }
+}
+const KEY_SUPERSEDED: &str = "A newer score preparation superseded the key change.";
+/// How long a key change waits, holding the control lock, for the callback to take its renderer.
+const KEY_ACK_WAIT: Duration = Duration::from_millis(250);
 struct ControlState {
     producer: Option<HeapProd<CallbackCommand>>,
     document: Option<PreparedDocument>,
@@ -2539,15 +2584,16 @@ impl AudioService {
         if generation != self.shared.desired.load(Ordering::Acquire) {
             return Err("A newer score preparation superseded this request.".into());
         }
+        let plan = Arc::new(plan);
         let resources = Arc::new(AudioResources::load_for_requests(
             &self.root,
-            &resource_requests(&plan, &settings),
+            &resource_requests(&transposed_plan(&plan, practice.tonality), &settings),
         )?);
         let backing = backing_bytes
             .map(|bytes| decode_audio(&bytes, None).map(Arc::new))
             .transpose()?;
         let document = PreparedDocument {
-            plan: Arc::new(plan),
+            plan,
             settings,
             resources,
             backing,
@@ -2626,7 +2672,7 @@ impl AudioService {
             ReferenceSyncMap::new(settings, &document.plan)?.validate_audio(audio)?;
         }
         let mut renderer = Renderer::new_with_plugins(
-            document.plan.clone(),
+            document.render_plan(),
             document.resources.clone(),
             document.settings.clone(),
             rate,
@@ -2652,7 +2698,13 @@ impl AudioService {
                 .as_ref()
                 .and_then(|backing| backing.processing.clone())
                 .unwrap_or_default();
-            renderer.install_processed_backing(audio.clone(), map, mix, processing)?;
+            renderer.install_processed_backing_shifted(
+                audio.clone(),
+                map,
+                mix,
+                processing,
+                document.practice.tonality,
+            )?;
         }
         Ok(Box::new(renderer))
     }
@@ -2807,7 +2859,7 @@ impl AudioService {
             let resources = if voice_changed {
                 Arc::new(AudioResources::load_for_requests(
                     &self.root,
-                    &resource_requests(&old.plan, &settings),
+                    &resource_requests(&old.render_plan(), &settings),
                 )?)
             } else {
                 old.resources.clone()
@@ -2930,6 +2982,36 @@ impl AudioService {
         if self.shared.is_faulted() {
             return Err("Audio output stopped. Select an output device to recover.".into());
         }
+        if let TransportCommand::SetPractice { settings, .. } = &command {
+            // A shift the document has but the echo does not show is sent again, unless its install is still
+            // outstanding (queued for this generation and not yet shown), so a stalled callback is not asked to
+            // rebuild for every practice send. The note is dropped once the echo shows the shift or the generation
+            // changes.
+            let echo = self.shared.read();
+            let generation = document.plan.generation;
+            let queued = {
+                let mut outstanding = self.shared.key.outstanding.lock().unwrap();
+                if let Some((queued_generation, queued_shift)) = *outstanding {
+                    if queued_generation != generation
+                        || (echo.generation == generation
+                            && echo.practice.settings.tonality == queued_shift)
+                    {
+                        *outstanding = None;
+                    }
+                }
+                *outstanding == Some((generation, settings.tonality))
+            };
+            let unacknowledged = !queued
+                && echo.generation == generation
+                && echo.practice.settings.tonality != settings.tonality;
+            if settings.tonality != document.practice.tonality || unacknowledged {
+                let next = PreparedDocument {
+                    practice: *settings,
+                    ..document.clone()
+                };
+                return self.apply_key_shift(&mut state, command, next);
+            }
+        }
         let accepted = command.clone();
         Self::enqueue(&mut state, CallbackCommand::Transport(command))?;
         match accepted {
@@ -2938,6 +3020,103 @@ impl AudioService {
             }
             _ => {}
         }
+        Ok(())
+    }
+    /// A `SetPractice` that changes the key shift: the samples the shifted keys ask for are loaded, a renderer for the
+    /// shifted plan is built, and only then the practice and a preserved install are queued, in that order, so playback
+    /// carries on at the same tick. Control side only: the callback receives the finished renderer through `Install`.
+    ///
+    /// The shift travels with the renderer. The queued `SetPractice` keeps the shift the callback already has (see its
+    /// handling in `CallbackTransport::command`), and `Install` adopts the new one only when it accepts the renderer, so
+    /// the echoed shift, the document and the sound change together or not at all. Whether that happened is waited for
+    /// for a moment under the control lock, as a device switch waits for its callback; a newer preparation that
+    /// superseded the install in the meantime rolls the document back and reports it.
+    ///
+    /// Nothing is loaded, built or queued when the queue cannot take both commands, and a failure before the queue
+    /// leaves the document, the renderer and the shown shift as they were. The rebuild's plug-in refusals are not
+    /// stored: the plug-in plans are the document's own, so they are what the last prepare or mix already reported.
+    fn apply_key_shift(
+        &self,
+        state: &mut ControlState,
+        command: TransportCommand,
+        mut next: PreparedDocument,
+    ) -> Result<(), String> {
+        let generation = next.plan.generation;
+        let previous = state
+            .document
+            .as_ref()
+            .map_or(0, |document| document.practice.tonality);
+        if state
+            .producer
+            .as_ref()
+            .ok_or("Audio output is not ready.")?
+            .vacant_len()
+            < 2
+        {
+            return Err("Audio control queue is full; retry the control.".into());
+        }
+        next.resources = Arc::new(AudioResources::load_for_requests(
+            &self.root,
+            &resource_requests(&next.render_plan(), &next.settings),
+        )?);
+        let callback_frames = self.max_callback_frames().unwrap_or(512) as usize;
+        let mut renderer = Self::renderer_with_callback_frames(&next, state.rate, callback_frames)?;
+        let mut route = self.midi.build_route(&next.plan, &next.settings, false);
+        if let Some(tap) = route.tap.take() {
+            renderer.replace_midi(tap);
+        }
+        if self.shared.desired.load(Ordering::Acquire) != generation {
+            return Err(KEY_SUPERSEDED.into());
+        }
+        let command = match command {
+            TransportCommand::SetPractice {
+                generation,
+                settings,
+            } => TransportCommand::SetPractice {
+                generation,
+                settings: PracticeSettings {
+                    tonality: previous,
+                    ..settings
+                },
+            },
+            other => other,
+        };
+        Self::enqueue(state, CallbackCommand::Transport(command))?;
+        Self::enqueue(
+            state,
+            CallbackCommand::Install {
+                renderer,
+                generation,
+                preserve: true,
+                practice: next.practice,
+            },
+        )?;
+        let wanted = next.practice.tonality;
+        let until = std::time::Instant::now()
+            + Duration::from_millis(self.shared.key.wait_ms.load(Ordering::Relaxed));
+        loop {
+            // The echo first: a callback that took the install has the shift whatever a newer preparation has
+            // announced since, and the document must say so. Only an echo that does not show it can be superseded.
+            let echo = self.shared.read();
+            if echo.generation == generation && echo.practice.settings.tonality == wanted {
+                self.shared.key.acknowledged.fetch_add(1, Ordering::Relaxed);
+                break;
+            }
+            if self.shared.desired.load(Ordering::Acquire) != generation {
+                return Err(KEY_SUPERSEDED.into());
+            }
+            // A callback that is not running (nothing consumes the queue) cannot answer: the install waits in the
+            // queue for it, exactly as every other queued control does.
+            if std::time::Instant::now() >= until {
+                self.shared.key.timed_out.fetch_add(1, Ordering::Relaxed);
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        self.midi.commit(route);
+        self.set_backing_duration(&next);
+        *self.shared.key.outstanding.lock().unwrap() = Some((generation, wanted));
+        state.document = Some(next);
         Ok(())
     }
     fn open(
@@ -4169,6 +4348,7 @@ mod tests {
                 bars: 0,
                 between_loops: false,
             },
+            tonality: 0,
         }
     }
 
@@ -4825,6 +5005,698 @@ mod tests {
         assert_eq!(next.passes, 2);
         assert!((next.count.unwrap().snapshot().bpm - 84.0).abs() < 1e-12);
         assert_eq!(next.count.unwrap().snapshot().elapsed_frames, 0);
+    }
+    /// A service with a document (one melodic note, key 57) and a producer whose queue the test reads.
+    fn keyed_service() -> (AudioService, HeapCons<CallbackCommand>) {
+        let service = AudioService::new(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+            Arc::new(|_| {}),
+        );
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"gm","program":0,"percussion":false},{"id":"d","program":0,"percussion":true}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[{"id":"n","trackId":"gm","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"startTick":0,"endTick":480,"key":57,"velocity":100,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]}],"midi":[{"type":"noteOn","trackId":"gm","tick":0,"channel":0,"key":57,"velocity":100},{"type":"noteOff","trackId":"gm","tick":480,"channel":0,"key":57,"velocity":0}]})).unwrap();
+        service.shared.desired.store(1, Ordering::Release);
+        // A hang guard only: the tests below prove the acknowledged path by the counters, not by elapsed time.
+        service.shared.key.wait_ms.store(10_000, Ordering::Relaxed);
+        let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        {
+            let mut state = service.control.lock().unwrap();
+            state.rate = 48_000;
+            state.producer = Some(producer);
+            state.document = Some(PreparedDocument {
+                plan: Arc::new(plan),
+                settings: DocumentSettings::default(),
+                resources: Arc::new(AudioResources::load_for_requests(&service.root, &[]).unwrap()),
+                backing: None,
+                practice: PracticeSettings::default(),
+                plugin_plans: Vec::new(),
+            });
+        }
+        (service, controls)
+    }
+    #[test]
+    fn the_render_plan_follows_the_documents_shift_and_the_stored_plan_does_not() {
+        let (service, _controls) = keyed_service();
+        let mut document = service.control.lock().unwrap().document.clone().unwrap();
+        assert!(Arc::ptr_eq(&document.render_plan(), &document.plan));
+        document.practice.tonality = 5;
+        assert_eq!(document.render_plan().notes[0].key, 62);
+        assert_eq!(document.plan.notes[0].key, 57);
+    }
+    #[test]
+    fn with_no_callback_answering_a_changed_shift_queues_the_practice_then_a_preserved_install_and_commits_after_the_wait()
+     {
+        let (service, mut controls) = keyed_service();
+        service.shared.key.wait_ms.store(40, Ordering::Relaxed);
+        let original = service.control.lock().unwrap().document.clone().unwrap();
+        let mut settings = PracticeSettings::default();
+        settings.tonality = 3;
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings,
+            })
+            .unwrap();
+        assert_eq!(service.shared.key.timed_out.load(Ordering::Relaxed), 1);
+        assert_eq!(service.shared.key.acknowledged.load(Ordering::Relaxed), 0);
+        let Some(CallbackCommand::Transport(TransportCommand::SetPractice {
+            settings: queued,
+            ..
+        })) = controls.try_pop()
+        else {
+            panic!("the practice goes first")
+        };
+        assert_eq!(
+            queued.tonality, 0,
+            "the practice command never carries the new shift"
+        );
+        let Some(CallbackCommand::Install {
+            generation,
+            preserve,
+            practice,
+            ..
+        }) = controls.try_pop()
+        else {
+            panic!("then the renderer")
+        };
+        assert_eq!((generation, preserve, practice.tonality), (1, true, 3));
+        assert!(controls.try_pop().is_none());
+        let state = service.control.lock().unwrap();
+        let document = state.document.as_ref().unwrap();
+        assert_eq!(document.practice.tonality, 3);
+        assert!(Arc::ptr_eq(&document.plan, &original.plan));
+    }
+    #[test]
+    fn a_shift_that_cannot_be_queued_whole_changes_nothing_and_queues_nothing() {
+        let (service, mut controls) = keyed_service();
+        // The queue has room for the practice but not the install: nothing at all is queued.
+        for _ in 0..CONTROL_CAPACITY - 1 {
+            service
+                .command(TransportCommand::Pause { generation: 1 })
+                .unwrap();
+        }
+        let mut settings = PracticeSettings::default();
+        settings.tonality = 3;
+        let error = service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings,
+            })
+            .unwrap_err();
+        assert!(error.contains("queue is full"), "{error}");
+        let mut queued = 0;
+        while let Some(command) = controls.try_pop() {
+            assert!(matches!(
+                command,
+                CallbackCommand::Transport(TransportCommand::Pause { .. })
+            ));
+            queued += 1;
+        }
+        assert_eq!(queued, CONTROL_CAPACITY - 1);
+        let tonality = |service: &AudioService| {
+            service
+                .control
+                .lock()
+                .unwrap()
+                .document
+                .as_ref()
+                .unwrap()
+                .practice
+                .tonality
+        };
+        assert_eq!(tonality(&service), 0);
+        // An out-of-range shift is refused before anything is built.
+        settings.tonality = 13;
+        assert!(
+            service
+                .command(TransportCommand::SetPractice {
+                    generation: 1,
+                    settings,
+                })
+                .is_err()
+        );
+        assert!(controls.try_pop().is_none());
+        assert_eq!(tonality(&service), 0);
+    }
+    #[test]
+    fn a_practice_change_without_a_new_shift_does_not_reinstall() {
+        let (service, mut controls) = keyed_service();
+        let mut settings = PracticeSettings::default();
+        settings.tempo = PracticeTempo::Relative { ratio: 0.5 };
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings,
+            })
+            .unwrap();
+        assert!(matches!(
+            controls.try_pop(),
+            Some(CallbackCommand::Transport(
+                TransportCommand::SetPractice { .. }
+            ))
+        ));
+        assert!(controls.try_pop().is_none());
+    }
+    /// What the callback would do with each command the service queued: the practice and the install, in order.
+    fn deliver(controls: &mut HeapCons<CallbackCommand>, transport: &mut CallbackTransport) {
+        while let Some(command) = controls.try_pop() {
+            match command {
+                CallbackCommand::Transport(command) => transport.command(command).unwrap(),
+                CallbackCommand::Install {
+                    renderer,
+                    generation,
+                    preserve,
+                    practice,
+                } => {
+                    transport.install_with_practice(renderer, generation, preserve, practice);
+                }
+                _ => {}
+            }
+        }
+    }
+    fn shifted_by(settings: PracticeSettings, tonality: i8) -> PracticeSettings {
+        PracticeSettings {
+            tonality,
+            ..settings
+        }
+    }
+    fn heard(transport: &mut CallbackTransport, frames: usize) -> Vec<[f32; 2]> {
+        let mut output = vec![[0.0f32; 2]; frames];
+        transport.render_into(&mut output);
+        output
+    }
+    fn cycles(output: &[[f32; 2]]) -> f64 {
+        let crossings: Vec<f64> = output
+            .windows(2)
+            .enumerate()
+            .filter(|(_, w)| w[0][0] <= 0.0 && w[1][0] > 0.0)
+            .map(|(i, w)| i as f64 - w[0][0] as f64 / (w[1][0] - w[0][0]) as f64)
+            .collect();
+        (crossings.len() - 1) as f64 * 48_000.0 / (crossings.last().unwrap() - crossings[0])
+    }
+    #[test]
+    fn a_practice_command_alone_never_changes_the_echoed_key_shift() {
+        let mut transport = CallbackTransport::headless(48_000);
+        let document = counted_document();
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: shifted_by(document.practice, 4),
+            })
+            .unwrap();
+        assert_eq!(transport.status().practice.settings.tonality, 0);
+        assert_eq!(transport.practice.tonality, 0);
+    }
+    #[test]
+    fn an_accepted_install_adopts_the_shift_and_a_refused_one_leaves_the_echo_alone() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        service.shared.desired.store(2, Ordering::Release);
+        let document = counted_document();
+        let mut transport = CallbackTransport::new(48_000, service.shared.clone());
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            2,
+            false,
+            document.practice,
+        );
+        let fresh = || AudioService::renderer(&document, 48_000).unwrap();
+        let stale =
+            transport.install_with_practice(fresh(), 1, true, shifted_by(document.practice, 4));
+        assert!(
+            stale.is_some(),
+            "an install of a stale generation is handed back"
+        );
+        assert_eq!(service.status().practice.settings.tonality, 0);
+        let refused =
+            transport.install_with_practice(fresh(), 2, true, shifted_by(document.practice, 13));
+        assert!(refused.is_some(), "a shift out of range is handed back");
+        assert_eq!(service.status().practice.settings.tonality, 0);
+        let accepted =
+            transport.install_with_practice(fresh(), 2, true, shifted_by(document.practice, 4));
+        assert!(accepted.is_some(), "the replaced renderer is handed back");
+        assert_eq!(service.status().practice.settings.tonality, 4);
+        assert_eq!(transport.practice.tonality, 4);
+        // The echo then follows the sounding shift: a practice command keeps it.
+        transport
+            .command(TransportCommand::SetPractice {
+                generation: 2,
+                settings: shifted_by(document.practice, 0),
+            })
+            .unwrap();
+        assert_eq!(transport.practice.tonality, 4);
+    }
+    /// How a consuming callback races a key change.
+    #[derive(Clone, Copy, PartialEq)]
+    enum Race {
+        None,
+        /// A newer preparation bumps `desired` just before the callback takes the install.
+        BeforeInstall,
+        /// A newer preparation bumps `desired` just after the callback accepted the install.
+        AfterInstall,
+    }
+    /// A thread standing in for the audio callback: it drains what the service queues into `transport`, as the real
+    /// callback does, until `finish`. `delay` lets the control thread settle into its wait first.
+    struct CallbackThread {
+        stop: Arc<AtomicBool>,
+        handle: thread::JoinHandle<(CallbackTransport, HeapCons<CallbackCommand>)>,
+    }
+    impl CallbackThread {
+        fn start(
+            service: &Arc<AudioService>,
+            mut transport: CallbackTransport,
+            mut controls: HeapCons<CallbackCommand>,
+            race: Race,
+            delay: Duration,
+        ) -> Self {
+            let stop = Arc::new(AtomicBool::new(false));
+            let handle = {
+                let (stop, service) = (stop.clone(), service.clone());
+                thread::spawn(move || {
+                    thread::sleep(delay);
+                    loop {
+                        let stopping = stop.load(Ordering::Acquire);
+                        while let Some(command) = controls.try_pop() {
+                            match command {
+                                CallbackCommand::Transport(command) => {
+                                    let _ = transport.command(command);
+                                }
+                                CallbackCommand::Install {
+                                    renderer,
+                                    generation,
+                                    preserve,
+                                    practice,
+                                } => {
+                                    if race == Race::BeforeInstall {
+                                        service.shared.desired.store(2, Ordering::Release);
+                                    }
+                                    transport.install_with_practice(
+                                        renderer, generation, preserve, practice,
+                                    );
+                                    if race == Race::AfterInstall {
+                                        service.shared.desired.store(2, Ordering::Release);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        if stopping {
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    (transport, controls)
+                })
+            };
+            Self { stop, handle }
+        }
+        fn finish(self) -> (CallbackTransport, HeapCons<CallbackCommand>) {
+            self.stop.store(true, Ordering::Release);
+            self.handle.join().unwrap()
+        }
+    }
+    /// A transport for the service's document, installed into the service's shared state.
+    fn transport_for(service: &AudioService) -> CallbackTransport {
+        let document = service.control.lock().unwrap().document.clone().unwrap();
+        let mut transport = CallbackTransport::new(48_000, service.shared.clone());
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport
+    }
+    /// What a renderer built for the document with the key shift `tonality` sounds from tick 0.
+    fn reference_heard(service: &AudioService, tonality: i8, frames: usize) -> Vec<[f32; 2]> {
+        let mut document = service.control.lock().unwrap().document.clone().unwrap();
+        document.practice.tonality = tonality;
+        let mut reference = CallbackTransport::headless(48_000);
+        reference.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        reference
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        heard(&mut reference, frames)
+    }
+    fn replay_from_start(transport: &mut CallbackTransport, frames: usize) -> Vec<[f32; 2]> {
+        transport
+            .command(TransportCommand::SeekTick {
+                generation: 1,
+                tick: 0.0,
+            })
+            .unwrap();
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        heard(transport, frames)
+    }
+    #[test]
+    fn a_shift_driven_through_the_service_and_a_callback_changes_what_is_heard() {
+        let (service, controls) = keyed_service();
+        let service = Arc::new(service);
+        let mut transport = transport_for(&service);
+        let plain = replay_from_start(&mut transport, 4_800);
+        let consumer =
+            CallbackThread::start(&service, transport, controls, Race::None, Duration::ZERO);
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: shifted_by(PracticeSettings::default(), 5),
+            })
+            .unwrap();
+        assert_eq!(
+            service.shared.key.acknowledged.load(Ordering::Relaxed),
+            1,
+            "the echo acknowledged the install"
+        );
+        assert_eq!(service.shared.key.timed_out.load(Ordering::Relaxed), 0);
+        assert_eq!(service.status().practice.settings.tonality, 5);
+        let (mut transport, _controls) = consumer.finish();
+        assert_eq!(transport.practice.tonality, 5);
+        let moved = replay_from_start(&mut transport, 4_800);
+        assert_ne!(plain, moved, "the shifted renderer sounds different");
+        assert_eq!(reference_heard(&service, 5, 4_800), moved);
+        let state = service.control.lock().unwrap();
+        assert_eq!(state.document.as_ref().unwrap().practice.tonality, 5);
+    }
+    #[test]
+    fn a_shift_the_callback_took_stays_applied_when_a_newer_preparation_follows_at_once() {
+        // The callback accepts the install and a newer preparation bumps `desired` before the control thread polls:
+        // the echo shows the shift, so the document, the route, the echo and the sound all agree on it.
+        let (service, controls) = keyed_service();
+        let service = Arc::new(service);
+        let transport = transport_for(&service);
+        let consumer = CallbackThread::start(
+            &service,
+            transport,
+            controls,
+            Race::AfterInstall,
+            Duration::from_millis(30),
+        );
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: shifted_by(PracticeSettings::default(), 5),
+            })
+            .unwrap();
+        let (mut transport, _controls) = consumer.finish();
+        assert_eq!(
+            service
+                .control
+                .lock()
+                .unwrap()
+                .document
+                .as_ref()
+                .unwrap()
+                .practice
+                .tonality,
+            5
+        );
+        assert_eq!(transport.practice.tonality, 5);
+        assert_eq!(transport.status().practice.settings.tonality, 5);
+        service.shared.desired.store(1, Ordering::Release);
+        let moved = replay_from_start(&mut transport, 4_800);
+        assert_eq!(reference_heard(&service, 5, 4_800), moved);
+    }
+    #[test]
+    fn a_shift_the_callback_refused_because_a_newer_preparation_came_first_changes_nothing() {
+        let (service, controls) = keyed_service();
+        let service = Arc::new(service);
+        let mut transport = transport_for(&service);
+        let plain = replay_from_start(&mut transport, 4_800);
+        let consumer = CallbackThread::start(
+            &service,
+            transport,
+            controls,
+            Race::BeforeInstall,
+            Duration::from_millis(30),
+        );
+        let error = service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: shifted_by(PracticeSettings::default(), 5),
+            })
+            .unwrap_err();
+        assert!(error.contains("superseded"), "{error}");
+        let (mut transport, _controls) = consumer.finish();
+        assert_eq!(
+            service
+                .control
+                .lock()
+                .unwrap()
+                .document
+                .as_ref()
+                .unwrap()
+                .practice
+                .tonality,
+            0
+        );
+        assert_eq!(transport.practice.tonality, 0);
+        assert_eq!(transport.status().practice.settings.tonality, 0);
+        service.shared.desired.store(1, Ordering::Release);
+        assert_eq!(replay_from_start(&mut transport, 4_800), plain);
+    }
+    #[test]
+    fn a_stalled_callback_is_not_asked_to_rebuild_for_every_practice_send() {
+        // A live callback that does not answer, and a committed shift its echo does not show yet: further practice
+        // sends (a speed change, the same shift) only queue the practice, until the install lands or the generation
+        // changes. Nothing is reloaded or rebuilt, and nothing waits.
+        let (service, mut controls) = keyed_service();
+        service.shared.key.wait_ms.store(40, Ordering::Relaxed);
+        let service = Arc::new(service);
+        let transport = transport_for(&service);
+        let settings = shifted_by(PracticeSettings::default(), 3);
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings,
+            })
+            .unwrap();
+        assert_eq!(service.status().practice.settings.tonality, 0);
+        assert_eq!(service.shared.key.timed_out.load(Ordering::Relaxed), 1);
+        assert!(matches!(
+            controls.try_pop(),
+            Some(CallbackCommand::Transport(
+                TransportCommand::SetPractice { .. }
+            ))
+        ));
+        assert!(matches!(
+            controls.try_pop(),
+            Some(CallbackCommand::Install { .. })
+        ));
+        for ratio in [0.9, 0.8] {
+            service
+                .command(TransportCommand::SetPractice {
+                    generation: 1,
+                    settings: PracticeSettings {
+                        tempo: PracticeTempo::Relative { ratio },
+                        ..settings
+                    },
+                })
+                .unwrap();
+            assert!(matches!(
+                controls.try_pop(),
+                Some(CallbackCommand::Transport(
+                    TransportCommand::SetPractice { .. }
+                ))
+            ));
+            assert!(controls.try_pop().is_none(), "no install was queued again");
+        }
+        assert_eq!(
+            service.shared.key.timed_out.load(Ordering::Relaxed),
+            1,
+            "and nothing waited"
+        );
+        // A different shift is a new change and goes through; once its echo shows it, a shift that equals the echo is
+        // the plain path again.
+        service.shared.key.wait_ms.store(10_000, Ordering::Relaxed);
+        let callback =
+            CallbackThread::start(&service, transport, controls, Race::None, Duration::ZERO);
+        let other = shifted_by(PracticeSettings::default(), 4);
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: other,
+            })
+            .unwrap();
+        assert_eq!(service.status().practice.settings.tonality, 4);
+        assert_eq!(service.shared.key.acknowledged.load(Ordering::Relaxed), 1);
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: other,
+            })
+            .unwrap();
+        let (_transport, mut controls) = callback.finish();
+        assert!(controls.try_pop().is_none());
+        assert_eq!(service.shared.key.acknowledged.load(Ordering::Relaxed), 1);
+    }
+    #[test]
+    fn a_shift_moves_the_backing_with_everything_else() {
+        let (service, controls) = keyed_service();
+        let rate = 48_000u32;
+        let audio = Arc::new(DecodedAudio {
+            sample_rate: rate,
+            channels: 2,
+            frames: Arc::new(
+                (0..rate as usize * 2)
+                    .map(|n| {
+                        let x = (std::f64::consts::TAU * 440.0 * n as f64 / rate as f64).sin()
+                            as f32
+                            * 0.3;
+                        [x, x]
+                    })
+                    .collect(),
+            ),
+        });
+        {
+            let mut state = service.control.lock().unwrap();
+            let document = state.document.as_mut().unwrap();
+            let mut plan = (*document.plan).clone();
+            plan.notes.clear();
+            plan.midi.clear();
+            document.plan = Arc::new(plan);
+            document.backing = Some(audio);
+        }
+        let service = Arc::new(service);
+        let mut transport = transport_for(&service);
+        let plain = replay_from_start(&mut transport, 24_000);
+        assert!((cycles(&plain[2_400..]) - 440.0).abs() < 3.0);
+        let consumer =
+            CallbackThread::start(&service, transport, controls, Race::None, Duration::ZERO);
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: shifted_by(PracticeSettings::default(), 12),
+            })
+            .unwrap();
+        let (mut transport, _controls) = consumer.finish();
+        let moved = replay_from_start(&mut transport, 24_000);
+        let frequency = cycles(&moved[2_400..]);
+        assert!((frequency - 880.0).abs() < 6.0, "{frequency}");
+        assert!(moved.iter().all(|f| f[0].is_finite() && f[1].is_finite()));
+    }
+    #[test]
+    fn a_sound_change_and_a_device_rebuild_keep_the_shift() {
+        let (service, controls) = keyed_service();
+        let service = Arc::new(service);
+        let transport = transport_for(&service);
+        let consumer =
+            CallbackThread::start(&service, transport, controls, Race::None, Duration::ZERO);
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: shifted_by(PracticeSettings::default(), 5),
+            })
+            .unwrap();
+        let (_transport, mut controls) = consumer.finish();
+        // A change of sound rebuilds the renderer; it must be built from the shifted plan and keep the shift.
+        let mut settings = DocumentSettings::default();
+        settings.sounds.insert(
+            "gm".into(),
+            crate::settings::TrackSound {
+                voice_id: Some("green-guitar".into()),
+                ..Default::default()
+            },
+        );
+        service.set_mix(settings, 1).unwrap();
+        let Some(CallbackCommand::Install {
+            practice, preserve, ..
+        }) = controls.try_pop()
+        else {
+            panic!("a sound change reinstalls")
+        };
+        assert!(preserve);
+        assert_eq!(practice.tonality, 5);
+        let document = service.control.lock().unwrap().document.clone().unwrap();
+        assert_eq!(document.practice.tonality, 5);
+        assert_eq!(document.render_plan().notes[0].key, 62);
+        assert_eq!(document.plan.notes[0].key, 57);
+        // The samples it loaded are those of the shifted key, which is what a device switch rebuilds from too.
+        let requested: Vec<u8> = resource_requests(&document.render_plan(), &document.settings)
+            .iter()
+            .filter(|request| request.instrument_id == "green-guitar")
+            .map(|request| request.key)
+            .collect();
+        assert!(
+            requested.contains(&62) && !requested.contains(&57),
+            "{requested:?}"
+        );
+        // A renderer for the document, as `SelectDevice` and every open builds it, sounds the shifted key.
+        let mut shifted = CallbackTransport::headless(48_000);
+        shifted.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        assert_eq!(shifted.status().practice.settings.tonality, 5);
+    }
+    #[test]
+    fn a_shift_whose_samples_cannot_be_loaded_changes_nothing() {
+        let (mut service, mut controls) = keyed_service();
+        {
+            let mut state = service.control.lock().unwrap();
+            let document = state.document.as_mut().unwrap();
+            document.settings.sounds.insert(
+                "gm".into(),
+                crate::settings::TrackSound {
+                    voice_id: Some("green-guitar".into()),
+                    ..Default::default()
+                },
+            );
+        }
+        service.root = PathBuf::from("no-such-audio-folder");
+        let refusals = service.plugin_refusals.lock().unwrap().len();
+        let error = service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: shifted_by(PracticeSettings::default(), 3),
+            })
+            .unwrap_err();
+        assert!(!error.is_empty());
+        assert!(controls.try_pop().is_none(), "nothing was queued");
+        let state = service.control.lock().unwrap();
+        assert_eq!(state.document.as_ref().unwrap().practice.tonality, 0);
+        assert_eq!(service.plugin_refusals.lock().unwrap().len(), refusals);
+    }
+    #[test]
+    fn a_refused_shift_has_no_side_effects_before_the_queue_is_checked() {
+        let (mut service, mut controls) = keyed_service();
+        for _ in 0..CONTROL_CAPACITY - 1 {
+            service
+                .command(TransportCommand::Pause { generation: 1 })
+                .unwrap();
+        }
+        // A root that cannot load anything: if the samples were loaded first, the error would be about them.
+        service.root = PathBuf::from("no-such-audio-folder");
+        {
+            let mut state = service.control.lock().unwrap();
+            let document = state.document.as_mut().unwrap();
+            document.settings.sounds.insert(
+                "gm".into(),
+                crate::settings::TrackSound {
+                    voice_id: Some("green-guitar".into()),
+                    ..Default::default()
+                },
+            );
+        }
+        let error = service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: shifted_by(PracticeSettings::default(), 3),
+            })
+            .unwrap_err();
+        assert!(error.contains("queue is full"), "{error}");
+        while controls.try_pop().is_some() {}
     }
     #[test]
     fn healthy_device_barrier_acknowledges_queued_settings_and_freezes_clock() {

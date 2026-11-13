@@ -1,5 +1,5 @@
 import { useEffect,useId,useState } from 'react';
-import { CLICK_SOUNDS,clickSoundOf,type ClickSound,type PracticeSettings } from './practice-types';
+import { CLICK_SOUNDS,clickSoundOf,tonalityOf,type ClickSound,type PracticeSettings } from './practice-types';
 import { useI18n } from '../i18n';
 import { PracticeError,validatePractice } from './practice';
 
@@ -18,7 +18,7 @@ const numeric=(value:string)=>value.trim()?Number(value):NaN;
 const percentage=(value:string,accepted?:number)=>accepted!==undefined&&value===String(accepted*100)?accepted:numeric(value)/100;
 
 export function PracticePanel({settings,busy,hasBacking,onChange}:PracticePanelProps):React.JSX.Element {
-  const tempo=settings.tempo,accepted=draftFor(settings),acceptedKey=JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,clickSoundOf(settings.metronome),settings.countIn.bars,settings.countIn.betweenLoops]),backingReason=useId(),{t}=useI18n();
+  const tempo=settings.tempo,accepted=draftFor(settings),acceptedKey=JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,clickSoundOf(settings.metronome),settings.countIn.bars,settings.countIn.betweenLoops,tonalityOf(settings)]),backingReason=useId(),{t}=useI18n();
   const [draft,setDraft]=useState(accepted),[error,setError]=useState('');
   useEffect(()=>{setDraft(accepted);setError('');},[acceptedKey]);
   const changeTempo=(kind:TempoDraft['kind'])=>setDraft(value=>({...value,tempo:kind==='relative'?{kind,ratio:'100'}:kind==='fixed'?{kind,bpm:'120'}:{kind,start:'50',end:'100',step:'10',repetitions:'1'}}));
@@ -26,7 +26,7 @@ export function PracticePanel({settings,busy,hasBacking,onChange}:PracticePanelP
     if(busy)return;
     const tempo=draft.tempo;
     const source=settings.tempo;
-    const value:PracticeSettings={tempo:tempo.kind==='relative'?{kind:tempo.kind,ratio:percentage(tempo.ratio,source.kind==='relative'?source.ratio:undefined)}:tempo.kind==='fixed'?{kind:tempo.kind,bpm:numeric(tempo.bpm)}:{kind:tempo.kind,start:percentage(tempo.start,source.kind==='progressive'?source.start:undefined),end:percentage(tempo.end,source.kind==='progressive'?source.end:undefined),step:percentage(tempo.step,source.kind==='progressive'?source.step:undefined),repetitions:numeric(tempo.repetitions)},metronome:{enabled:draft.enabled,volume:percentage(draft.volume,settings.metronome.volume),visual:draft.visual,sound:draft.sound},countIn:{bars:numeric(draft.bars),betweenLoops:draft.betweenLoops}};
+    const value:PracticeSettings={tempo:tempo.kind==='relative'?{kind:tempo.kind,ratio:percentage(tempo.ratio,source.kind==='relative'?source.ratio:undefined)}:tempo.kind==='fixed'?{kind:tempo.kind,bpm:numeric(tempo.bpm)}:{kind:tempo.kind,start:percentage(tempo.start,source.kind==='progressive'?source.start:undefined),end:percentage(tempo.end,source.kind==='progressive'?source.end:undefined),step:percentage(tempo.step,source.kind==='progressive'?source.step:undefined),repetitions:numeric(tempo.repetitions)},metronome:{enabled:draft.enabled,volume:percentage(draft.volume,settings.metronome.volume),visual:draft.visual,sound:draft.sound},countIn:{bars:numeric(draft.bars),betweenLoops:draft.betweenLoops},...(settings.tonality===undefined?{}:{tonality:settings.tonality})};
     try {validatePractice(value,hasBacking);setError('');onChange(value);}catch(reason){setError(reason instanceof PracticeError?t(`practice.error_${reason.code}`):reason instanceof Error?reason.message:String(reason));}
   };
   return <details><summary>{t('practice.settings_summary')}</summary><fieldset disabled={busy}>

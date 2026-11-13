@@ -2456,6 +2456,7 @@ export const et: MessageCatalog = {
   'practice.error_repetitions': 'Kordusi kiiruse kohta peab olema täisarv vahemikus 1–100.',
   'practice.error_volume': 'Metronoomi helitugevus peab olema vahemikus 0–100%.',
   'practice.error_count_in': 'Sissetaktid peavad olema täisarv vahemikus 0–16.',
+  'practice.error_tonality': 'Helistiku nihe peab olema täisarv pooltoone vahemikus -12 kuni 12.',
   'practice.error_fixed_backing': 'Fikseeritud tempo pole saadaval, kui partituuril on taustalugu.',
   'keys.chord_new_open': 'Ctrl/Cmd + N / O',
   'keys.chord_save': 'Ctrl/Cmd + S',

@@ -2456,6 +2456,7 @@ export const de: MessageCatalog = {
   'practice.error_repetitions': 'Wiederholungen pro Geschwindigkeit müssen eine ganze Zahl von 1 bis 100 sein.',
   'practice.error_volume': 'Die Metronom-Lautstärke muss zwischen 0% und 100% liegen.',
   'practice.error_count_in': 'Einzähltakte müssen eine ganze Zahl von 0 bis 16 sein.',
+  'practice.error_tonality': 'Die Tonartverschiebung muss eine ganze Zahl von Halbtönen zwischen -12 und 12 sein.',
   'practice.error_fixed_backing': 'Festes Tempo ist nicht verfügbar, wenn eine Begleitspur vorhanden ist.',
   'keys.chord_new_open': 'Strg/Cmd + N / O',
   'keys.chord_save': 'Strg/Cmd + S',

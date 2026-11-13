@@ -22,6 +22,7 @@ fn practice(speed: f64, enabled: bool) -> PracticeSettings {
             bars: 0,
             between_loops: false,
         },
+        tonality: 0,
     }
 }
 fn renderer(generation: u64) -> Box<Renderer> {

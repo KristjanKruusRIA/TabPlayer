@@ -31,7 +31,7 @@ try{
   const marks=()=>view.locator('g[data-note-id]').evaluateAll(nodes=>nodes.map(node=>({fret:Number(node.dataset.fret),x:node.getBoundingClientRect().x})).sort((a,b)=>a.fret-b.fret));
   let right=await numbers(),rightMarks=await marks();assert.ok(right[0]<right[12],'right-handed nut on the left');assert.ok(rightMarks[0].x<rightMarks[3].x);
   const left=view.getByRole('checkbox',{name:'Left-handed'});await left.check();
-  await view.getByRole('img',{name:'Guitar fretboard, left-handed'}).waitFor();
+  await view.getByRole('group',{name:'Guitar fretboard, left-handed'}).waitFor();
   const mirrored=await numbers(),mirroredMarks=await marks();
   assert.ok(mirrored[0]>mirrored[12],'left-handed nut on the right');assert.ok(mirroredMarks[0].x>mirroredMarks[3].x,'higher frets to the left');
   assert.deepEqual(mirroredMarks.map(mark=>mark.fret),[0,1,2,3]);
@@ -41,7 +41,7 @@ try{
   assert.equal(await view.getByRole('checkbox',{name:'Left-handed'}).isChecked(),true,'the choice is remembered');
   await view.getByRole('combobox',{name:'Show'}).selectOption('bar');
   await view.getByRole('combobox',{name:'Instrument view mode'}).selectOption('both');
-  await view.getByRole('img',{name:'Guitar fretboard, left-handed'}).waitFor();await view.getByRole('img',{name:'Keyboard'}).waitFor();
+  await view.getByRole('group',{name:'Guitar fretboard, left-handed'}).waitFor();await view.getByRole('group',{name:'Keyboard'}).waitFor();
   await view.getByRole('heading').filter({hasText:'Neck + keys'}).waitFor();
   const frets=await view.locator('g[data-note-id]').evaluateAll(nodes=>nodes.map(node=>Number(node.dataset.key)).sort((a,b)=>a-b));
   const keys=await view.locator('g[data-key][data-active="true"]').evaluateAll(nodes=>nodes.map(node=>Number(node.dataset.key)).sort((a,b)=>a-b));

@@ -1,7 +1,7 @@
 import { expect,it } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
 import { music,target } from './fixtures';
-import { rangeFromBeats,resolveSelectionBeats,resolveSelectionNotes,selectionForBars,selectionForTrack,validateMusicSelection } from './range-selection';
+import { rangeFromBeats,resolveSelectionBeats,resolveSelectionNotes,selectionForBars,selectionForTrack,singleBeatSelection,validateMusicSelection } from './range-selection';
 import type { MusicSelection } from './range-types';
 
 const lane={track:0,staff:0,voice:0};
@@ -61,4 +61,11 @@ it('does not treat empty carriers as attacks or a bar-end seam as a nonempty ran
   const value:MusicSelection={kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:960},lanes:[lane]}};
   expect(resolveSelectionBeats(score,value).map(beat=>beat.index)).toEqual([1]);
   expect(()=>validateMusicSelection(score,{kind:'range',range:{start:{bar:0,tick:3840},end:{bar:1,tick:0},lanes:[lane]}})).toThrow(/nonempty/i);
+});
+
+it('selects a single beat the way a click on the score does, and falls back to its bar when the beat has no range', () => {
+  const score = music();
+  expect(singleBeatSelection(score, { ...target, beat: 1 })).toEqual({ kind: 'range', range: rangeFromBeats(score, { ...target, beat: 1 }, { ...target, beat: 1 }, [lane]) });
+  score.tracks[0].staves[0].bars[0].voices[0].beats[1].isEmpty = true;
+  expect(singleBeatSelection(score, { ...target, beat: 1 })).toEqual(selectionForBars(score, [0], 0, 0));
 });

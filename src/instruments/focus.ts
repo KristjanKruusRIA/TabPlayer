@@ -1,3 +1,4 @@
+import type { model } from '@coderline/alphatab';
 import type { PlanNote } from '../audio/types';
 import type { PerformedBeat, PlaybackSpan } from '../audio/selection-playback-types';
 import type { BeatTarget } from '../project';
@@ -79,4 +80,29 @@ export function focusNotes(focus: InstrumentFocus, {active,notes,beats,tick,coun
   }
   if (start === Infinity) start = Math.min(...inBeat().map(note => note.startTick));
   return start === Infinity ? [] : onset(staff, starts(), start + 1e-6, Infinity);
+}
+
+/** A note the view shows as held: the continuation of an earlier note by a tie. */
+export type HeldNote = Pick<PlanNote, 'id' | 'key' | 'source'> & { /** Its place in the beat's notes. */ index: number };
+/**
+ * The tied continuations of the selected beat or bar. The playback plan sounds a tied note once, at its first attack, so
+ * a beat that only continues a tie has no planned note of its own; the score still has it. Playing and next-beat views follow
+ * the plan, where the earlier note is still sounding, and show none.
+ */
+export function heldNotes(score: model.Score, focus: InstrumentFocus, target: BeatTarget | null): HeldNote[] {
+  if (!target || (focus !== 'beat' && focus !== 'bar')) return [];
+  const bar = score.tracks[target.track]?.staves[target.staff]?.bars[target.bar];
+  if (!bar) return [];
+  const held: HeldNote[] = [];
+  bar.voices.forEach((voice, voiceIndex) => {
+    if (focus === 'beat' && voiceIndex !== target.voice) return;
+    voice.beats.forEach((beat, beatIndex) => {
+      if (focus === 'beat' && beatIndex !== target.beat) return;
+      beat.notes.forEach((note, index) => {
+        if (!note.isTieDestination) return;
+        held.push({ index, id: `held/${target.track}/${target.staff}/${target.bar}/${voiceIndex}/${beatIndex}/${index}`, key: note.realValue, source: { target: { track: target.track, staff: target.staff, bar: target.bar, voice: voiceIndex, beat: beatIndex }, string: Math.max(0, note.string) } });
+      });
+    });
+  });
+  return held;
 }

@@ -22,3 +22,9 @@ g.entry-target:focus-visible{outline:2px solid #7fb2ff;outline-offset:-2px}
 .entry-target[aria-disabled="true"]{cursor:not-allowed}
 rect.entry-target[aria-disabled="true"]:hover{fill:transparent}
 .drum-hits-slot{min-height:30px}
+/* A tied continuation is held, not struck: a hollow dashed ring on the neck and a hollow dashed pad on the keys, against the filled marks of fresh notes. */
+.fret-note.held circle:not(.fret-note-halo){fill:transparent;stroke:var(--tp-on,#b8e45f);stroke-width:2;stroke-dasharray:2.5 2}.fret-note.held .fret-note-halo{opacity:.12}
+.piano-key.held .key-hit{fill:transparent;stroke:var(--tp-on,#b8e45f);stroke-width:1.5;stroke-dasharray:3 2}
+/* A neck pick is an invisible 14-unit target over its position; it only shows on hover and focus. */
+.fret-pick{cursor:pointer;outline:none}.fret-pick .fret-hit{stroke:transparent;stroke-width:2}.fret-pick:hover .fret-hit{fill:#b8e45f33}.fret-pick:focus-visible .fret-hit{fill:#7fb2ff33;stroke:#7fb2ff}
+.piano-key.selectable{cursor:pointer;outline:none}.piano-key.selectable:hover>.key-area{fill:#b8e45f33}.piano-key.selectable:focus-visible>.key-area{stroke:#7fb2ff;stroke-width:2}

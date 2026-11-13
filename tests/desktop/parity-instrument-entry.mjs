@@ -69,7 +69,7 @@ export async function runInstrumentEntryAcceptance({buildPath}={}){
     const initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
 
     // Read-only by default: the view is a picture with no click targets.
-    await button('Show instrument');await view().getByRole('img',{name:'Guitar fretboard',exact:true}).waitFor();
+    await button('Show instrument');await view().getByRole('group',{name:'Guitar fretboard',exact:true}).waitFor();
     assert.equal(await view().locator('[data-entry-target]').count(),0,'No targets until edit mode');
     const editing=view().getByRole('checkbox',{name:'Click to edit notes',exact:true});assert.equal(await editing.isChecked(),false,'Edit mode defaults off');
     await editing.check();await view().getByRole('group',{name:'Guitar fretboard',exact:true}).waitFor();

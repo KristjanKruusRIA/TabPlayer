@@ -9,6 +9,9 @@ import { resolvePercussionArticulation } from './percussion-catalog';
 import { nextLinkedNote,validateCurve } from './techniques';
 import { getHarmonyChord,setHarmonyChordSource,validateHarmonyChord } from '../harmony/chord-source';
 import type { MusicSelection } from './range-types';
+import { setNoteAudio } from './note-audio';
+import { directionProblem } from './clipboard-structure';
+import { rangeCutsBeat,subdivideRange } from './clipboard-subdivide';
 import type { ClipboardHarmony,ClipboardLink,ClipboardMode,MusicClip } from './clipboard-types';
 
 type RecordValue=Record<string,unknown>;
@@ -71,7 +74,7 @@ function context(score:model.Score,mode:ClipboardMode) {
     if(bar.simileMark===model.SimileMark.SecondOfDouble&&staff.bars[bar.index-1]?.simileMark!==model.SimileMark.FirstOfDouble)throw new Error('Clipboard contains a split double simile.');
   }
   if(mode==='multiTrack'){
-    if(score.masterBars.some(master=>master.directions?.size))throw new Error('Direction-bearing multitrack clipboard is not supported.');
+    const problem=directionProblem(score.masterBars);if(problem)throw new Error(problem);
     const stack:number[]=[];for(const master of score.masterBars){if(master.isRepeatStart)stack.push(master.index);if(master.repeatCount){if(!stack.length)throw new Error('Copy the complete repeat group.');stack.pop();}if(master.alternateEndings&&!stack.length&&!score.masterBars.slice(0,master.index+1).some(previous=>previous.repeatCount))throw new Error('Copy the complete repeat endings.');}if(stack.length)throw new Error('Copy the complete repeat group.');
   }else if(score.masterBars.some(master=>master.isRepeatStart||master.repeatCount||master.alternateEndings||master.section||master.tempoAutomations.length||master.directions?.size))throw new Error('Single track clipboard must omit global structure.');
 }
@@ -171,8 +174,14 @@ export function musicClipSelection(score:model.Score,selection:MusicSelection,mo
 }
 
 /** Build a new selected-music score, never a document plus a selection mask. */
-export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:ClipboardMode):MusicClip {
-  selection=musicClipSelection(score,selection,mode);
+export function makeMusicClip(source:model.Score,selection:MusicSelection,mode:ClipboardMode,options:{cut?:boolean}={}):MusicClip {
+  selection=musicClipSelection(source,selection,mode);
+  // A range edge inside a sustained beat copies exactly the selected time from a detached, subdivided copy; the source is never touched.
+  let score=source,pieces=new Set<number>();
+  if(selection.kind==='range'&&mode==='singleTrack'){
+    if(options.cut&&rangeCutsBeat(source,selection.range))throw new Error('Cut needs a range that starts and ends on beat boundaries. Copy it instead, or select whole beats.');
+    ({score,pieces}=subdivideRange(source,selection.range));
+  }
   const selectedBeats=resolveSelectionBeats(score,selection),selectedNotes=new Set(resolveSelectionNotes(score,selection));
   const tracks=selection.kind==='bars'?selection.tracks:selection.kind==='range'?selection.range.lanes.map(lane=>lane.track):selection.notes.map(note=>note.target.track);
   const indices=[...new Set(tracks)].sort((a,b)=>a-b),kind=mode==='multiTrack'||selection.kind==='bars'?'bars':'phrase';
@@ -254,6 +263,8 @@ export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:Cl
   for(const note of allNotes(score))if(keptIds.has(note.id)&&note.isContinuedBend&&(!note.bendOrigin||!keptIds.has(note.bendOrigin.id)))throw new Error('Continued bend needs its external origin; copy the full chain.');
   for(const note of allNotes(snapshot)){note.tieOrigin=null;note.tieDestination=null;note.isTieDestination=false;note.slurOrigin=null;note.slurDestination=null;note.isSlurDestination=false;note.hammerPullOrigin=null;note.hammerPullDestination=null;note.isHammerPullOrigin=false;note.slideOrigin=null;note.slideTarget=null;if(note.slideOutType===model.SlideOutType.Shift||note.slideOutType===model.SlideOutType.Legato)note.slideOutType=model.SlideOutType.None;note.bendOrigin=null;}
   restoreNoteLinks(snapshot,links.map(link=>({...link,slideOutType:link.slideOutType??undefined})));
+  // A note that continues a tie takes its audio settings from the first note of the tie, so a cut piece still tied on keeps none of its own.
+  for(const note of allNotes(snapshot))if(pieces.has(note.id)&&note.isTieDestination)setNoteAudio(note,null);
   const base={format:'TabPlayerClip' as const,engineVersion:'1.8.4' as const,mode,kind:kind as MusicClip['kind'],scoreJson:json(snapshot),links};
   const clip:MusicClip=harmony.length?{...base,version:2,harmony}:{...base,version:1};return readMusicClip(clip);
 }

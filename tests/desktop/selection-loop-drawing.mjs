@@ -35,7 +35,9 @@ try {
   await page.waitForTimeout(800);
 
   // The page is wider than the score area at 1280 (a known friction), so fit it to the width; select on a tall window so both systems are on screen, then go back to the size under test.
-  await page.getByRole('button',{name:'Fit width',exact:true}).click();
+  // An untouched score now opens fitted when the page is wider than its area, so press Fit width only if it is not on already (a second press turns it off).
+  const fitWidth=page.getByRole('button',{name:'Fit width',exact:true});
+  if(await fitWidth.getAttribute('aria-pressed')!=='true')await fitWidth.click();
   await page.setViewportSize({width:1280,height:1300});await page.waitForTimeout(900);
   // A passage across a line break: from a note in the last bar of the first system to one in the first bar of the second.
   const rows=await systems();

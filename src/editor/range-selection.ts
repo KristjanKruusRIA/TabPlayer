@@ -104,3 +104,8 @@ export function selectionForBars(score:model.Score,tracks:number[],first:number,
 export function selectionForTrack(score:model.Score,track:number):MusicSelection {
   trackAt(score,track);return selectionForBars(score,[track],0,score.masterBars.length-1);
 }
+/** What a plain click on a beat of the score selects: that one beat in its voice, or its whole bar when the beat cannot be a range (an empty beat, say). */
+export function singleBeatSelection(score:model.Score,point:BeatTarget):MusicSelection {
+  try{return {kind:'range',range:rangeFromBeats(score,point,point,[{track:point.track,staff:point.staff,voice:point.voice}])};}
+  catch{return selectionForBars(score,[point.track],point.bar,point.bar);}
+}

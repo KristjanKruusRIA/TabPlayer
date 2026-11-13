@@ -46,14 +46,26 @@
 .app-shell .gp-toolbar .score-actual-zoom { font-size:11px; color:var(--ws-muted); white-space:nowrap; }
 .app-shell .gp-toolbar [aria-label='Score display']>details>summary { list-style:none; padding:0 6px; font-size:12px; color:var(--ws-muted); cursor:pointer; white-space:nowrap; }
 .app-shell .gp-toolbar [aria-label='Score display']>details[open]>.track-list { position:absolute; z-index:40; top:calc(100% + 6px); left:0; display:grid; gap:4px; min-width:200px; padding:10px; border:1px solid var(--ws-border); border-radius:var(--tp-radius-s); background:var(--ws-panel); box-shadow:0 8px 24px rgb(0 0 0/.35); }
-.app-shell .gp-toolbar [aria-label='Score display']>p.muted { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-.app-shell .gp-toolbar [aria-label='Score display']>p:not(.muted) { position:absolute; z-index:40; top:calc(100% + 6px); left:0; margin:0; padding:4px 8px; border-radius:var(--tp-radius-s); background:var(--ws-error-surface); color:var(--ws-error); font-size:12px; white-space:nowrap; }
+.app-shell .gp-toolbar [aria-label='Score display'][hidden] { display:none; }
+/* Folded at a small height: one button, and the controls open below it. */
+.app-shell .gp-toolbar .score-display-host { position:relative; display:flex; align-items:center; min-width:0; }
+.app-shell .gp-toolbar .score-display-toggle { min-height:28px; padding:0 10px; border:1px solid transparent; border-radius:5px; background:var(--ws-raised); color:var(--ws-text); font:400 12px/1 var(--tp-font-ui); white-space:nowrap; cursor:pointer; }
+.app-shell .gp-toolbar .score-display-toggle[aria-expanded=true] { background:var(--ws-accent); border-color:var(--ws-accent); color:var(--ws-accent-ink); }
+/* Fixed, so the window clips it and the page never scrolls sideways; the component sets top and left from the button and keeps its right edge inside the window. */
+.app-shell .gp-toolbar .score-display-host[data-compact]>[aria-label='Score display'] { position:fixed; z-index:40; flex-wrap:wrap; width:max-content; max-width:calc(100vw - 16px); padding:8px 10px; border:1px solid var(--ws-border); border-radius:var(--tp-radius-s); background:var(--ws-panel); box-shadow:0 8px 24px rgb(0 0 0/.35); }
+.app-shell .gp-toolbar .score-display-host[data-compact] .pair { flex-wrap:wrap; }
+.app-shell .gp-toolbar .score-display-host>.score-display-messages>p.muted { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.app-shell .gp-toolbar .score-display-host>.score-display-messages>p:not(.muted) { position:absolute; z-index:40; top:calc(100% + 6px); left:0; margin:0; padding:4px 8px; border-radius:var(--tp-radius-s); background:var(--ws-error-surface); color:var(--ws-error); font-size:12px; white-space:nowrap; }
 
 /* The transport sits inside the toolbar: icon buttons, captions read by screen readers only. */
 .app-shell .gp-toolbar .transport { min-height:48px; padding:0; border:0; background:transparent; }
 .app-shell .gp-toolbar .transport>.transport-primary { min-height:48px; align-items:center; }
 .app-shell .gp-toolbar .transport-group { padding:0 6px; border-left:0; }
 .gp-toolbar .transport-caption:not(.transport-bar-number) { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.app-shell .gp-toolbar .transport-group:is(.transport-loop,.transport-click,.transport-speed) { position:relative; }
+/* Loop, Click and Speed keep a compact caption above their controls. It is out of the flow, so it adds no width and no height. The transport box is 48px with 28px groups centred, leaving 10px above a group; the caption (12px tall, 2px of it in the toolbar's own top padding) fills that and paints over no other row: a long translation is clipped with an ellipsis rather than widening the transport. */
+.app-shell .gp-toolbar .transport-group:is(.transport-loop,.transport-click,.transport-speed)>.transport-caption { position:absolute; left:6px; right:6px; top:-12px; display:block; width:auto; height:auto; min-height:0; margin:0; overflow:hidden; clip-path:none; text-overflow:ellipsis; white-space:nowrap; font-size:11px; line-height:12px; color:var(--ws-muted); pointer-events:none; }
+.app-shell .gp-toolbar .transport-speed>.transport-caption .transport-tempo { margin-left:6px; }
 .gp-toolbar .transport-label { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .app-shell .gp-toolbar .transport button { border-color:transparent; background:transparent; }
 .app-shell .gp-toolbar .transport .transport-playbutton { width:36px; min-width:36px; height:36px; min-height:36px; padding:0; font-size:0; gap:0; border:2px solid var(--tp-on); border-radius:50%; background:transparent; color:var(--tp-on); }
@@ -105,6 +117,12 @@
 @media (max-width:1099px) {
   .gp-toolbar { grid-template-areas:'transport transport transport' 'left left right' 'display display display'; }
   .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
+}
+
+/* A short window (data-compact-height, set from the window height): the display controls are one button, which joins the edit and view buttons instead of taking a row of its own. */
+@media (max-width:1099px) {
+  .app-shell[data-compact-height=true] .gp-toolbar { grid-template-areas:'transport transport transport' 'left display right'; }
+  .app-shell[data-compact-height=true] .gp-toolbar>.gp-toolbar-display { padding-bottom:0; }
 }
 
 /* Editing palette: 232px, 8 cells of 26×30 per row, icons with tooltips. */

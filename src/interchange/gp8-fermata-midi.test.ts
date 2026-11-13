@@ -10,7 +10,7 @@ const files=[120,60].map(bpm=>({bpm,smf:load(bpm)}));
 const onTrack=(smf:ReturnType<typeof load>,index:number)=>smf.notes.filter(n=>n.track===index).sort((a,b)=>a.on-b.on);
 const QUARTER=480,HALF=960,EIGHTH=240,WHOLE=1920,BAR=1920;
 
-it("Guitar Pro 8's MIDI export applies no hold for any fermata type or length: the structure of the two committed exports",()=>{
+it("the MIDI Guitar Pro 8 exported from the fermata probe contains no hold, whether or not it read the fermatas: the structure of the two committed exports",()=>{
   for(const {bpm,smf} of files){
     expect(smf.warnings).toEqual([]);
     expect(smf.format).toBe(1);expect(smf.tracks).toBe(3);expect(smf.declaredTracks).toBe(3);expect(smf.ppq).toBe(480);
@@ -62,7 +62,7 @@ it('the analyser reads both exports by track, finds no mechanism in any of the 1
     expect(describeFile('x',result).join('\n')).toContain('Matched by track and note count');
   }
   const out=conclude(analysed).join('\n');
-  expect(out.match(/Guitar Pro's MIDI export applies no hold for any fermata type or length/g)).toHaveLength(2);
+  expect(out.match(/The MIDI Guitar Pro exported from this probe contains no hold for any fermata type or length tried; it is not established that Guitar Pro read the fermatas/g)).toHaveLength(2);
   expect(out.match(/Caveat 1: these notes were matched by track and note count/g)).toHaveLength(2);
   expect(out.match(/the first probe wrote notes that Guitar Pro exported at key 0/g)).toHaveLength(2);
   expect(out.match(/Caveat 2: nothing in the MIDI shows whether Guitar Pro read the fermatas at all/g)).toHaveLength(2);

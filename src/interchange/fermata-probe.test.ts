@@ -87,7 +87,7 @@ it('finds no difference when the export contains no hold',()=>{
   expect(none.result.cases.every(c=>c.mechanism==='none')).toBe(true);
   const out=text([none]);
   expect(out).toContain('No difference at all');
-  expect(out).toContain('does not express the fermata in MIDI');
+  expect(out).toContain('contains no hold for any fermata type or length tried');
 });
 
 it('recognises longer notes at constant tempo with later events and the sustain track unmoved',()=>{

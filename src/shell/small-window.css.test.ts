@@ -35,7 +35,7 @@ describe('the display controls folded at small heights (THE-196, friction 8)',()
   });
   it('lays the folded menu out as a popover below its button, wrapping its controls',()=>{
     const body=bodies('.score-display-host[data-compact]>').join(';');
-    expect(body).toMatch(/position:absolute/);expect(body).toMatch(/z-index:40/);expect(body).toMatch(/flex-wrap:wrap/);expect(body).toMatch(/max-width:min\(/);
+    expect(body).toMatch(/position:fixed/);expect(body).toMatch(/z-index:40/);expect(body).toMatch(/flex-wrap:wrap/);expect(body).toMatch(/max-width:calc\(/);
   });
   it('gives the button a row-height box, and the open state the pressed colour',()=>{
     expect(bodies('.score-display-toggle').join(';')).toMatch(/min-height:28px/);expect(css).toMatch(/\.score-display-toggle\[aria-expanded=true\]/);
@@ -71,5 +71,23 @@ describe('where the display messages and the captions sit (THE-196)',()=>{
   it('is no smaller than the own caption size of the transport',()=>{
     const own=num(readFileSync('src/shell/transport.css','utf8').match(/\.transport-caption \{[^}]*\}/)![0],/font-size:(\d+)px/);
     expect(num(caption,/font-size:(\d+)px/)).toBeGreaterThanOrEqual(own);
+  });
+});
+
+describe('after looking at the real window (THE-196)',()=>{
+  const transport=readFileSync('src/shell/transport.css','utf8').replace(/\/\*[\s\S]*?\*\//g,'');
+  it('sets the speed value and its percent sign on one row: the global label rule makes a label a column',()=>{
+    const rule=[...transport.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(match=>match[1].trim()==='.transport-speed-field').map(match=>match[2]).join(';');
+    expect(rule).toMatch(/flex-direction:row/);
+  });
+  it('separates the tempo readout from the Speed caption',()=>{
+    expect(bodies('.transport-speed>.transport-caption .transport-tempo').join(';')).toMatch(/margin-left:\d+px/);
+  });
+  it('keeps the opened menu inside the window: fixed, wrapping, never wider than the window, with its position set by the component',()=>{
+    const body=bodies(".score-display-host[data-compact]>[aria-label='Score display']").join(';');
+    expect(body).toMatch(/position:fixed/);expect(body).toMatch(/flex-wrap:wrap/);expect(body).toMatch(/max-width:calc\(100vw - 16px\)/);expect(body).not.toMatch(/position:absolute/);expect(body).not.toMatch(/left:0/);
+  });
+  it('has no selector that repeats the shell prefix, which would never match (a comment once split one in two)',()=>{
+    expect(css).not.toMatch(/\.app-shell \.gp-toolbar\s+\.app-shell/);
   });
 });

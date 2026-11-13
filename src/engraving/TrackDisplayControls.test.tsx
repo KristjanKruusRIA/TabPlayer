@@ -232,3 +232,18 @@ describe('getting back to an unfitted 100% (THE-196)',()=>{
     view.rerender(<TrackDisplayControls {...p} disabled display={{layout:'parchment',zoomMode:'fitWidth'}} onDisplay={vi.fn()}/>);fireEvent.keyDown(field,{key:'Enter'});expect(p.onZoom).not.toHaveBeenCalled();
   });
 });
+
+describe('placing the opened menu inside the window (THE-196)',()=>{
+  const place=(buttonLeft:number,panelWidth:number,windowWidth:number)=>{
+    vi.spyOn(HTMLElement.prototype,'offsetWidth','get').mockReturnValue(panelWidth);
+    vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){return (this.classList.contains('score-display-toggle')?{left:buttonLeft,bottom:110,top:80,right:buttonLeft+90,width:90,height:30,x:buttonLeft,y:80}:{left:0,bottom:0,top:0,right:0,width:0,height:0,x:0,y:0}) as DOMRect;});
+    Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:windowWidth});
+    render(<TrackDisplayControls {...props()} compact/>);fireEvent.click(screen.getByRole('button',{name:'Score display'}));
+    return document.getElementById(screen.getByRole('button',{name:'Score display'}).getAttribute('aria-controls')!)!;
+  };
+  afterEach(()=>vi.restoreAllMocks());
+  it('opens below the button, level with it when there is room',()=>{const panel=place(300,400,960);expect(panel.style.top).toBe('116px');expect(panel.style.left).toBe('300px');});
+  it('shifts left so its right edge stays inside the window',()=>{const panel=place(468,560,960);expect(panel.style.left).toBe('392px');});
+  it('never starts left of the window edge, however wide it is',()=>{const panel=place(468,2000,960);expect(panel.style.left).toBe('8px');});
+});
+

@@ -21,6 +21,15 @@ export function TrackDisplayControls({ids,names,selected,view,zoom,disabled,onVi
     if(compact){if(panel.current?.contains(document.activeElement)&&folded)toggle.current?.focus();}
     else if(toggleHadFocus.current){toggleHadFocus.current=false;firstControl.current?.focus();}
   },[compact,folded]);
+  // The opened menu is fixed to the window: below the button, level with it, and shifted left so its right edge stays inside the window.
+  useLayoutEffect(()=>{
+    const box=panel.current,anchor=toggle.current;
+    if(!compact||!open||!box||!anchor)return;
+    const place=()=>{const rect=anchor.getBoundingClientRect();box.style.top=`${Math.round(rect.bottom+6)}px`;box.style.left=`${Math.round(Math.max(8,Math.min(rect.left,window.innerWidth-8-box.offsetWidth)))}px`;};
+    place();window.addEventListener('resize',place);
+    const watch=typeof ResizeObserver==='undefined'?null:new ResizeObserver(place);watch?.observe(box);
+    return()=>{window.removeEventListener('resize',place);watch?.disconnect();box.style.top='';box.style.left='';};
+  },[compact,open]);
   useEffect(()=>{
     if(!compact||!open)return;
     const outside=(event:PointerEvent)=>{if(event.target instanceof Node&&!host.current?.contains(event.target))setOpen(false);};

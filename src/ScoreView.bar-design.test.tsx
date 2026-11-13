@@ -46,6 +46,15 @@ it('puts one width handle on the right edge of each bar, only in design mode and
   cleanup();setup({layout:'horizontalScreen'});expect(screen.queryAllByRole('slider')).toHaveLength(0);
 });
 
+it('moves the width handles with the page when the score area changes width and nothing renders again (THE-208)',()=>{
+  const {container}=setup();const api=view.api as {uiFacade:{getOffset:()=>{x:number;y:number;w:number;h:number}}};
+  expect(screen.getAllByRole('slider').map(h=>h.style.left)).toEqual(['225px','425px','625px']);
+  api.uiFacade.getOffset=()=>({x:230,y:40,w:600,h:300});
+  Object.defineProperty(container.querySelector('.score-presentation')!.parentElement!,'clientWidth',{configurable:true,value:1500});
+  act(()=>{window.dispatchEvent(new Event('resize'));});
+  expect(screen.getAllByRole('slider').map(h=>h.style.left)).toEqual(['425px','625px','825px']);
+});
+
 it('shows the weight a bar has, including one an imported score gave it',()=>{
   saved.set(1,1.5);imported.set(2,2);setup();
   expect(screen.getByRole('slider',{name:'Bar 2 width'}).getAttribute('aria-valuenow')).toBe('150');

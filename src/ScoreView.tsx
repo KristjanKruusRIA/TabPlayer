@@ -277,7 +277,10 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(first)view.highlightPlaybackRange(first,first);
     view.clearPlaybackRangeHighlight();
   };
+  /** The canvas offset is read once per refresh pass, not once per box: the layout read is the costly part of placing a mark. */
+  const passOffset=useRef<{x:number;y:number}|null>(null);
   const offset=()=>{
+    if(passOffset.current)return passOffset.current;
     const view=api.current,root=wrapper.current;if(!view||!root)return {x:0,y:0};
     const canvas=view.uiFacade.getOffset(null,view.canvasElement),bounds=root.getBoundingClientRect();
     return {x:canvas.x-bounds.left-window.scrollX,y:canvas.y-bounds.top-window.scrollY};
@@ -475,7 +478,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
         }
       }
-      refresh.current();refreshCaret.current();refreshErrors.current();refreshLoop.current();refreshDiagrams.current();refreshDesign.current();
+      refreshOverlays();
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
@@ -487,6 +490,18 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // A selection this view did not publish (an instrument pick, say) ends the click that anchored Shift selection.
   useEffect(()=>{if(!editorSelection||editorSelection!==published.current)anchor.current=null;refresh.current();},[editorSelection,score,track,zoom,profile,projection,visibleTracks]);
   useEffect(()=>{revealCaret.current=true;},[score,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
+  // The page is centred in the score area, so a change of its width (the window, or a panel opened or closed beside it) moves a live page
+  // without alphaTab drawing it again, and everything placed from the canvas offset has to follow: nothing else says the page moved.
+  // Paged layouts place their marks from the arrangement, which is rebuilt for the new width and refreshes them below. While a render is
+  // under way each refresh stands down and the render's own finish places the marks. Height moves nothing in a live layout.
+  useLayoutEffect(()=>{
+    if(presentation.current.physical)return;
+    refreshOverlays();
+    // A note-entry preview and an open symbol popover sit where the page was: the preview comes back with the next mouse move, and the popover,
+    // which stays beside its symbol only while the page stays put, closes once the page has moved.
+    setGhost(old=>old&&null);
+    const base=symbolOffset.current;if(symbolOpen.current&&base){const now=offset();if(Math.abs(now.x-base.x)>1||Math.abs(now.y-base.y)>1)closeSymbol(!!wrapper.current?.querySelector('.score-symbol-popover')?.contains(document.activeElement));}
+  },[available.width]);
   useEffect(()=>{refreshCaret.current();},[score,track,zoom,profile,projection,visibleTracks,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
   useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){const host=scrollHost.current;if(host){const box=caretElement.current.getBoundingClientRect(),viewport=host.getBoundingClientRect();if(box.top<viewport.top)host.scrollTop+=box.top-viewport.top;else if(box.bottom>viewport.bottom)host.scrollTop+=box.bottom-viewport.bottom;if(box.left<viewport.left)host.scrollLeft+=box.left-viewport.left;else if(box.right>viewport.right)host.scrollLeft+=box.right-viewport.right;}revealCaret.current=false;}},[caret]);
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
@@ -543,10 +558,17 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     });
     return()=>{renderGeneration.current++;};
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page,idsKey]);
-  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshLoop.current();refreshDiagrams.current();refreshDesign.current();},[pagination,arrangement,pageError]);
+  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refreshOverlays();},[pagination,arrangement,pageError]);
+  /** Places every mark drawn over the score again from where the renderer now has it. The last pass's cost is kept as a user-timing measure. */
+  const refreshOverlays=()=>{
+    const started=performance.now();passOffset.current=offset();
+    try{refresh.current();refreshCaret.current();refreshErrors.current();refreshLoop.current();refreshDiagrams.current();refreshDesign.current();}
+    finally{passOffset.current=null;}
+    try{performance.clearMeasures('tabplayer:overlay-refresh');performance.measure('tabplayer:overlay-refresh',{start:started,end:performance.now()});}catch{/* timing is optional */}
+  };
   designing.current=barDesign;
   const tabBar=barHandles.some(handle=>handle.bar===activeBar)?activeBar:barHandles[0]?.bar;
-  useEffect(()=>{refreshDesign.current();},[!!barDesign,display.layout,zoom,renderedScore,available.width,available.height]);
+  useEffect(()=>{refreshDesign.current();},[!!barDesign,display.layout,zoom,renderedScore]);
   // A drag belongs to the document and the free state it started in: a busy score or a changed score or width ends it unrecorded.
   useEffect(()=>{if(dragging.current)cancelBarDrag();},[barDesign?.busy,renderedScore,engraving,!!barDesign,display.layout]);
   useEffect(()=>{if(dragging.current&&!barHandles.some(handle=>handle.bar===dragging.current!.bar))cancelBarDrag();},[barHandles]);
@@ -634,7 +656,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const now=design.scaleOf(handle.bar),target=reset?design.defaultOf(handle.bar):clampBarScale(now+direction*step);
     if(target!==now){restoreBar.current=handle.bar;design.onScale(handle.bar,target);}
   };
-  const [symbolUi,setSymbolUi]=useState<SymbolView|null>(null),symbolReturn=useRef<HTMLElement|null>(null),symbolSeen=useRef(symbols?.request??0),symbolOpen=useRef(false),symbolGeneration=useRef(0),symbolArea=useRef<{width:number;height:number}|null>(null);
+  const [symbolUi,setSymbolUi]=useState<SymbolView|null>(null),symbolReturn=useRef<HTMLElement|null>(null),symbolSeen=useRef(symbols?.request??0),symbolOpen=useRef(false),symbolGeneration=useRef(0),symbolArea=useRef<{width:number;height:number}|null>(null),symbolOffset=useRef<{x:number;y:number}|null>(null);
   /** Closing puts focus back where it was before the popover opened, unless focus already went somewhere else. */
   const closeSymbol=useCallback((restore:boolean,id?:number)=>{
     // A second close (the edit landing after the score changed) must not move focus again, and one for a popover that has been replaced must not close its successor.
@@ -644,7 +666,12 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   },[]);
   const openSymbol=(next:SymbolView)=>{
     if(!symbolReturn.current){const active=document.activeElement;symbolReturn.current=active instanceof HTMLElement&&active!==document.body&&!active.closest('.score-symbol-popover')?active:wrapper.current;}
-    symbolArea.current={width:available.width,height:available.height};symbolOpen.current=true;symbolGeneration.current+=1;setSymbolUi({...next,id:symbolGeneration.current});
+    symbolArea.current={width:available.width,height:available.height};symbolOpen.current=true;symbolGeneration.current+=1;
+    // The baseline for "the page moved" is taken once the popover has been laid out and settled: a popover taller than the score area adds a scrollbar of its
+    // own, which moves a centred page a few pixels as it opens, and that is not the page moving away from the symbol.
+    symbolOffset.current=null;const generation=symbolGeneration.current;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>{if(symbolOpen.current&&symbolGeneration.current===generation&&!presentation.current.physical)symbolOffset.current=offset();}));
+    setSymbolUi({...next,id:symbolGeneration.current});
   };
   // The popover is placed in the score's own coordinates, so anything that moves or removes the symbol being edited closes it unrecorded:
   // a new score or set of shown tracks, a change of layout, zoom or page, or a resize of the score area. Focus goes back to where it was

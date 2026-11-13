@@ -19,7 +19,7 @@ import {planAccolades} from './engraving/accolades';
 import {withStaffGaps,withStaffGroups} from './engraving/staff-groups';
 import {threeTrackScore} from './engraving/staff-fixtures';
 import {engravingRenderKey,withSystemGaps} from './engraving/system-gaps';
-const state=vi.hoisted(()=>({music:((_id:string)=>new Promise<unknown>(()=>{})) as (id:string)=>Promise<unknown>,loadedMusic:new Map<string,unknown>(),roles:((_fonts?:unknown)=>new Promise<{failed:string[]}>(()=>{})) as (fonts?:unknown)=>Promise<{failed:string[]}>,fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn(),chunkTops:[] as number[]}));
+const state=vi.hoisted(()=>({music:((_id:string)=>new Promise<unknown>(()=>{})) as (id:string)=>Promise<unknown>,loadedMusic:new Map<string,unknown>(),roles:((_fonts?:unknown)=>new Promise<{failed:string[]}>(()=>{})) as (fonts?:unknown)=>Promise<{failed:string[]}>,fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,offset:0,resize:()=>{},loads:vi.fn(),renders:vi.fn(),chunkTops:[] as number[]}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
 vi.mock('./engraving/font-loading',async original=>({...await original<typeof import('./engraving/font-loading')>(),loadRoleFaces:(fonts?:unknown)=>state.roles(fonts),
  loadMusicFont:(id:string)=>state.music(id).then(data=>{state.loadedMusic.set(id,data);return data;}),
@@ -31,7 +31,7 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
  settings=new Settings();score:model.Score|null=null;tracks:number[]=[0];constructor(){state.api=this;}
  beatMouseDown=event<model.Beat>();noteMouseDown=event<model.Note>();beatMouseMove=event<model.Beat>();beatMouseUp=event<void>();renderStarted=event<void>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
  renderer={width:0,partialRenderFinished:event<unknown>()};boundsLookup={staffSystems:[] as rendering.StaffSystemBounds[],findBeats:(beat:model.Beat)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars.flatMap(m=>m.bars.flatMap(b=>b.beats))).filter(b=>b.beat===beat),findBeat:(beat:model.Beat)=>this.boundsLookup.findBeats(beat)[0],findMasterBarByIndex:(index:number)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars).find(m=>m.index===index)??null,getBeatAtPos:()=>null};
- uiFacade={getOffset:()=>({x:0,y:0}),highlightElements(){},removeHighlights(){}};canvasElement={};customCursorHandler=undefined;customScrollHandler=undefined;
+ uiFacade={getOffset:()=>({x:state.offset,y:0}),highlightElements(){},removeHighlights(){}};canvasElement={};customCursorHandler=undefined;customScrollHandler=undefined;
  updateSettings(){} destroy(){}
  highlightPlaybackRange(start:model.Beat,end:model.Beat){const first=this.boundsLookup.findBeat(start),last=this.boundsLookup.findBeat(end);if(first&&last)this.playbackRangeHighlightChanged.emit({startBeat:start,endBeat:end,startBeatBounds:first,endBeatBounds:last,highlightBlocks:this.boundsLookup.staffSystems.filter(s=>s.bars[0].index>=start.voice.bar.index&&s.bars[0].index<=end.voice.bar.index).map(s=>s.realBounds)});}
  clearPlaybackRangeHighlight(){this.playbackRangeHighlightChanged.emit({});}
@@ -58,7 +58,7 @@ function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageL
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
  const result=render(wrap(tree()) as ReactElement);return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});state.music=()=>new Promise<unknown>(()=>{});state.loadedMusic.clear();});
+afterEach(()=>{state.offset=0;cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});state.music=()=>new Promise<unknown>(()=>{});state.loadedMusic.clear();});
 it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'] as const)('renders %s without a playback controller',layout=>{
  const {api}=setup(layout);expect(state.loads).toHaveBeenCalledTimes(1);
  expect(api.settings.display.layoutMode).toBe(layout==='horizontalScreen'?LayoutMode.Horizontal:layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment);
@@ -132,6 +132,16 @@ it.each(['parchment','verticalScreen','horizontalScreen','verticalPage'] as cons
  const bands=[...document.querySelectorAll<HTMLElement>('.score-range-block')];
  expect(bands).toHaveLength(3);expect(bands.every(band=>band.getAttribute('aria-hidden')==='true')).toBe(true);
  const tops=bands.map(band=>parseFloat(band.style.top));expect([...tops].sort((a,b)=>a-b)).toEqual(tops);expect(new Set(tops).size).toBe(3);
+});
+it('moves the selection and loop bands with a live page when the score area changes width, without a render (THE-208)',()=>{
+ const {props,tree,rerender}=setup('parchment');
+ rerender(tree({...props,loop:loopOf(1,2),editorSelection:rangeOver(0,1),onEditorSelection:vi.fn(),errors:[{track:0,staff:0,bar:1,voice:0,beat:0,kind:'incomplete',ticks:960,place:'Guitar'}]} as never));
+ const lefts=(selector:string)=>[...document.querySelectorAll<HTMLElement>(selector)].map(band=>parseFloat(band.style.left));
+ const loop=lefts('.score-loop-band'),range=lefts('.score-range-block'),error=lefts('.score-error-bar');expect(loop.length).toBeGreaterThan(0);expect(error.length).toBeGreaterThan(0);expect(range.length).toBeGreaterThan(0);
+ const renders=state.renders.mock.calls.length;
+ state.offset=200;state.width=1300;act(()=>state.resize());
+ expect(lefts('.score-loop-band')).toEqual(loop.map(left=>left+200));expect(lefts('.score-range-block')).toEqual(range.map(left=>left+200));expect(lefts('.score-error-bar')).toEqual(error.map(left=>left+200));
+ expect(state.renders).toHaveBeenCalledTimes(renders);
 });
 it('removes the selection bands when the selection is cleared',()=>{
  const {props,tree,rerender}=setup('parchment');

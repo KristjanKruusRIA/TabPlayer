@@ -9,12 +9,12 @@ import type { EditCommand } from './edit-types';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => { throw new Error('Symbol editing must not invoke native IPC.'); }) }));
 
-const fake = vi.hoisted(() => ({ systems: [] as unknown[] }));
+const fake = vi.hoisted(() => ({ systems: [] as unknown[], offset: 0 }));
 vi.mock('@coderline/alphatab', async original => ({ ...await original<typeof import('@coderline/alphatab')>(), AlphaTabApi: class {
   settings = new Settings();
   beatMouseDown = event<model.Beat>(); noteMouseDown = event<model.Note>(); beatMouseMove = event<model.Beat>(); beatMouseUp = event<model.Beat | null>();
   renderStarted = event<boolean>(); postRenderFinished = event<void>(); playbackRangeHighlightChanged = event<unknown>();
-  canvasElement = {}; uiFacade = { getOffset: () => ({ x: 0, y: 0, w: 600, h: 300 }), highlightElements() {}, removeHighlights() {} };
+  canvasElement = {}; uiFacade = { getOffset: () => ({ x: fake.offset, y: 0, w: 600, h: 300 }), highlightElements() {}, removeHighlights() {} };
   renderer = { width: 0, partialRenderFinished: event<never>() }; renderScore() {} render() {}
   get boundsLookup() { return { staffSystems: fake.systems, findBeat: () => null, findBeats: () => [], getBeatAtPos: () => null }; }
   highlightPlaybackRange() {} clearPlaybackRangeHighlight() {} destroy() {} updateSettings() {}
@@ -66,7 +66,7 @@ function setup(patch: Partial<SymbolEditing> = {}, score = document_()) {
   const wrapper = notation.closest('.score-presentation') as HTMLElement;
   return { ...result, props, symbols, score, onEdit, onChordEditor, onSelect, notation, draw, wrapper, rerender: (next: Partial<SymbolEditing>) => result.rerender(<ScoreView {...props} symbols={{ ...symbols, ...next }}/>), rerenderScore: (next: model.Score) => result.rerender(<ScoreView {...props} score={next} symbols={symbols}/>), rerenderProps: (next: Record<string, unknown>) => result.rerender(<ScoreView {...props} {...next} symbols={symbols}/>) };
 }
-afterEach(() => { cleanup(); vi.clearAllMocks(); fake.systems = []; });
+afterEach(() => { cleanup(); vi.clearAllMocks(); fake.systems = []; fake.offset = 0; });
 
 it('edits the title in place: Enter records one setScoreInfo and focus returns to the score', () => {
   const view = setup();
@@ -452,6 +452,36 @@ it('closes unrecorded when the zoom or layout changes under it', () => {
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
+const frames = () => act(async () => { await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))); });
+it('closes when the page moves under it by a few pixels, though the score area changed by less than a resize (THE-208)', async () => {
+  const view = setup();
+  const host = view.wrapper.parentElement as HTMLElement;
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  await frames();
+  // The page is centred, so a 20 px change of width moves it 10 px: under the resize threshold, yet the popover would stand 10 px off its symbol.
+  fake.offset = 10;
+  Object.defineProperty(host, 'clientWidth', { configurable: true, value: 20 });
+  act(() => { window.dispatchEvent(new Event('resize')); });
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+it('stays open when the scrollbar the popover itself brings shifts the page as it opens (THE-208)', async () => {
+  const view = setup();
+  const host = view.wrapper.parentElement as HTMLElement;
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  // A score area shorter than the popover: it overflows, a vertical scrollbar appears, and the centred page moves about 8 px, all before the popover has settled.
+  fake.offset = 8;
+  Object.defineProperty(host, 'clientWidth', { configurable: true, value: 17 });
+  act(() => { window.dispatchEvent(new Event('resize')); });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  await frames();
+  // Once settled, the page moving again is a real move and closes it.
+  fake.offset = 20;
+  Object.defineProperty(host, 'clientWidth', { configurable: true, value: 40 });
+  act(() => { window.dispatchEvent(new Event('resize')); });
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
 it('closes when the score area is resized or the popover is scrolled out of sight', () => {
   const view = setup();
   const host = view.wrapper.parentElement as HTMLElement;

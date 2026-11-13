@@ -79,3 +79,86 @@ it('cut refuses a range that cuts a sustained beat but cut of whole beats is unc
   expect(()=>makeMusicClip(score,range([0,480],[1,0]),'singleTrack',{cut:true})).toThrow(/beat boundaries/);
   expect(makeMusicClip(score,range([0,1920],[1,0]),'singleTrack',{cut:true}).kind).toBe('phrase');
 });
+
+// Round two: sustained properties, plain written values, and what stays on the attack.
+const note0=(score:model.Score,bar=0,beat=0)=>beatsOf(score,bar)[beat].notes[0];
+function decorate(score:model.Score) {
+  const beat=beatsOf(score,0)[0],note=beat.notes[0];
+  note.dynamics=model.DynamicValue.PP;note.isPalmMute=true;note.isLetRing=true;note.vibrato=model.VibratoType.Slight;note.isGhost=true;note.accentuated=model.AccentuationType.Normal;
+  beat.dynamics=model.DynamicValue.PP;beat.vibrato=model.VibratoType.Slight;beat.pickStroke=model.PickStroke.Down;beat.text='attack text';
+  return note;
+}
+const sustainedProps=(note:model.Note)=>[note.dynamics,note.isPalmMute,note.isLetRing,note.vibrato,note.isGhost,note.beat.dynamics,note.beat.vibrato];
+const expectedProps=[model.DynamicValue.PP,true,true,model.VibratoType.Slight,true,model.DynamicValue.PP,model.VibratoType.Slight];
+it('a tail copied from inside a sustained note keeps its dynamics and sustained techniques but not the attack marks',()=>{
+  const score=sustained(2,0,2);decorate(score);const copy=decode(makeMusicClip(score,range([0,960],[1,0]),'singleTrack')),tail=note0(copy);
+  expect(sustainedProps(tail)).toEqual(expectedProps);expect(tail.accentuated).toBe(model.AccentuationType.None);expect(tail.beat.pickStroke).toBe(model.PickStroke.None);expect(tail.beat.text).toBeNull();
+});
+it('every piece of a head that needs two written values carries the sustained properties, and only the first the attack marks',()=>{
+  const score=sustained(2,0,0);decorate(score);const copy=decode(makeMusicClip(score,range([0,0],[0,1200]),'singleTrack')),pieces=beatsOf(copy,0);
+  expect(pieces).toHaveLength(2);for(const piece of pieces)expect(sustainedProps(piece.notes[0])).toEqual(expectedProps);
+  expect(pieces[0].notes[0].accentuated).toBe(model.AccentuationType.Normal);expect(pieces[0].text).toBe('attack text');expect(pieces[1].notes[0].accentuated).toBe(model.AccentuationType.None);expect(pieces[1].text).toBeNull();expect(pieces[1].pickStroke).toBe(model.PickStroke.None);
+});
+it('a range wholly inside one whole note keeps the sustained properties and no attack marks',()=>{
+  const score=sustained(1);decorate(score);const copy=decode(makeMusicClip(score,range([0,960],[0,2880]),'singleTrack')),middle=note0(copy);
+  expect(sustainedProps(middle)).toEqual(expectedProps);expect(middle.accentuated).toBe(model.AccentuationType.None);expect(middle.beat.text).toBeNull();
+});
+it('text and a chord diagram stay on the first piece of a cut beat only',()=>{
+  const score=sustained(2,0,0),staff=score.tracks[0].staves[0],chord=new model.Chord();chord.name='Am';staff.addChord('am',chord);
+  const beat=beatsOf(score,0)[0];beat.text='head only';beat.chordId='am';
+  const head=beatsOf(decode(makeMusicClip(score,range([0,0],[0,1200]),'singleTrack')),0);expect([head[0].text,head[0].chordId,head[1].text,head[1].chordId]).toEqual(['head only','am',null,null]);
+  const tail=beatsOf(decode(makeMusicClip(score,range([0,480],[1,0]),'singleTrack')),0);expect([tail[0].text,tail[0].chordId]).toEqual([null,null]);
+});
+it('a two-voice bar cuts both voices and keeps each voice\'s properties',()=>{
+  const score=sustained(2,0,2),voice=new model.Voice();
+  for(let index=0;index<4;index++){const beat=new model.Beat();beat.duration=4;beat.isEmpty=false;const note=new model.Note();note.string=4;note.fret=7;note.dynamics=model.DynamicValue.MF;beat.addNote(note);voice.addBeat(beat);}
+  score.tracks[0].staves[0].bars[0].addVoice(voice);for(const bar of score.tracks[0].staves[0].bars.slice(1)){const extra=new model.Voice();for(let index=0;index<4;index++){const beat=new model.Beat();beat.duration=4;beat.isEmpty=false;extra.addBeat(beat);}bar.addVoice(extra);}
+  const prepared=scoreFromJson(json(score),new Settings());decorate(prepared);
+  const selection={kind:'range' as const,range:{start:{bar:0,tick:480},end:{bar:1,tick:0},lanes:[{track:0,staff:0,voice:0},{track:0,staff:0,voice:1}]}};
+  const copy=decode(makeMusicClip(prepared,selection,'singleTrack')),voices=copy.tracks[0].staves[0].bars[0].voices;
+  expect(voices).toHaveLength(2);expect(voices[0].beats.reduce((sum,beat)=>sum+rhythmTicks(beat),0)).toBe(3360);expect(voices[1].beats.reduce((sum,beat)=>sum+rhythmTicks(beat),0)).toBe(3360);
+  expect(sustainedProps(voices[0].beats[0].notes[0])).toEqual(expectedProps);expect(voices[1].beats[0].notes[0].dynamics).toBe(model.DynamicValue.MF);expect(voices[1].beats[0].notes[0].fret).toBe(7);
+});
+it('a cut that is not on a plain or dotted written boundary is refused, not written as tiny tied pieces',()=>{
+  const score=sustained(2,1,0);
+  expect(()=>makeMusicClip(score,range([0,0],[0,640]),'singleTrack')).toThrow(/no exact written length/);
+  expect(()=>makeMusicClip(score,range([0,640],[1,0]),'singleTrack')).toThrow(/no exact written length/);
+});
+it('a long tail is written with single dots at most',()=>{
+  const score=sustained(1),copy=decode(makeMusicClip(score,range([0,480],[1,0]),'singleTrack'));
+  expect(shapes(copy,0)).toEqual([[2,1],[8,0]]);expect(total(copy,0)).toBe(3360);
+});
+
+it('a cut needing more than four tied notes on one side is refused',()=>{
+  const score=music();score.masterBars[0].timeSignatureNumerator=6;const voice=score.tracks[0].staves[0].bars[0].voices[0],lead=voice.beats[0];lead.duration=1;lead.dots=1;voice.beats=[lead];
+  const six=scoreFromJson(json(score),new Settings());
+  expect(()=>makeMusicClip(six,range([0,0],[0,5190]),'singleTrack')).toThrow(/more than 4 tied notes/);
+});
+it('the tie leaving a cut note leaves from its final piece and reaches the next note',()=>{
+  const score=sustained(2,0,1),first=note0(score,0,0),next=note0(score,0,1);first.tieDestination=next;next.tieOrigin=first;next.isTieDestination=true;next.fret=first.fret;next.string=first.string;
+  const clip=makeMusicClip(score,range([0,480],[1,0]),'singleTrack'),copy=decode(clip),beats=beatsOf(copy,0);
+  expect(clip.links.map(link=>link.kind)).toEqual(['tie']);expect(beats[0].notes[0].tieDestination).toBe(beats[1].notes[0]);expect(beats[1].notes[0].isTieDestination).toBe(true);
+});
+it('refuses beats whose written length, curve or note kind cannot be cut',()=>{
+  const cut=(change:(score:model.Score)=>void)=>{const score=sustained(2,0,0);change(score);return ()=>makeMusicClip(score,range([0,0],[0,480]),'singleTrack');};
+  expect(cut(score=>{beatsOf(score,0)[0].overrideDisplayDuration=1920;})).toThrow(/overridden written length/);
+  expect(cut(score=>{const beat=beatsOf(score,0)[0];beat.whammyBarType=model.WhammyType.Dive;beat.addWhammyBarPoint(new model.BendPoint(0,0));beat.addWhammyBarPoint(new model.BendPoint(60,-4));})).toThrow(/whammy/);
+  expect(cut(score=>{note0(score).trillValue=5;})).toThrow(/trilled/);
+  expect(cut(score=>{note0(score).isDead=true;})).toThrow(/dead note/);
+  expect(cut(score=>{score.masterBars[0].isFreeTime=true;})).toThrow(/free-time/);
+});
+
+it('every sustained note and beat field is carried to every piece, and a harmonic keeps the pitch tie-equal',()=>{
+  const score=sustained(2,0,0),beat=beatsOf(score,0)[0],note=beat.notes[0];
+  note.harmonicType=model.HarmonicType.Natural;note.harmonicValue=12;note.string=5;note.fret=12;note.durationPercent=.5;note.accidentalMode=model.NoteAccidentalMode.ForceSharp;
+  beat.ottava=model.Ottavia._8va;beat.crescendo=model.CrescendoType.Crescendo;beat.slashed=true;beat.wahPedal=model.WahPedal.Open;beat.tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:1});
+  const copy=decode(makeMusicClip(score,range([0,0],[0,1200]),'singleTrack')),second=beatsOf(copy,0)[1],tail=second.notes[0];
+  expect([tail.harmonicType,tail.harmonicValue,tail.durationPercent,tail.accidentalMode,tail.realValue]).toEqual([model.HarmonicType.Natural,12,.5,model.NoteAccidentalMode.ForceSharp,beatsOf(copy,0)[0].notes[0].realValue]);
+  expect([second.ottava,second.crescendo,second.slashed,second.wahPedal,second.tremoloPicking?.marks]).toEqual([model.Ottavia._8va,model.CrescendoType.Crescendo,true,model.WahPedal.Open,1]);
+});
+it('slur and hammer links leave from the final piece too',()=>{
+  const score=sustained(2,0,1),first=note0(score,0,0),next=note0(score,0,1);next.string=first.string;next.fret=first.fret+2;
+  first.slurDestination=next;next.slurOrigin=first;next.isSlurDestination=true;first.hammerPullDestination=next;next.hammerPullOrigin=first;first.isHammerPullOrigin=true;
+  const clip=makeMusicClip(score,range([0,480],[1,0]),'singleTrack'),copy=decode(clip),beats=beatsOf(copy,0),tail=beats[0].notes[0],following=beats[1].notes[0];
+  expect(beats).toHaveLength(2);expect(clip.links.map(link=>link.kind).sort()).toEqual(['hammerPull','slur']);expect(tail.slurDestination).toBe(following);expect(tail.hammerPullDestination).toBe(following);expect(tail.isHammerPullOrigin).toBe(true);
+});

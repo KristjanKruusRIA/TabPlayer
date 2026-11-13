@@ -8,7 +8,7 @@ import { allNotes,captureNoteLinks,detachNote,restoreNoteLinks,type NoteLinks } 
 import { applyMeasureEdit,planMeasureMap } from './measures';
 import { mapLyricsMeasures } from './lyrics-measures';
 import { integer,restBeats,rhythmTicks } from './common';
-import { directionPasteProblem } from './clipboard-structure';
+import { alternateEndingProblem,directionPasteProblem } from './clipboard-structure';
 import { copyHarmonyChord } from '../harmony/chord-source';
 import type { ClipboardCommand,MusicClip,PasteDestination,PasteFilters,PreparedMusicPaste } from './clipboard-types';
 import type { BarIndexMap } from './measures-types';
@@ -140,10 +140,6 @@ function pasteBars(score:model.Score,clip:MusicClip,source:model.Score,command:C
   if(clip.mode==='multiTrack'&&source.masterBars.some(master=>master.isRepeatStart||master.repeatCount||master.alternateEndings)){
     for(const master of score.masterBars){const group=master.repeatGroup;if((group.isOpened||group.closings.length)&&group.opening&&group.opening.index<target.bar&&(group.closings.at(-1)?.index??score.masterBars.length)>=target.bar)throw new Error('Copied repeats cannot be nested into a destination repeat context.');}
   }
-  if(clip.mode==='multiTrack'){const problem=directionPasteProblem(score.masterBars,source.masterBars,count);if(problem)throw new Error(problem);}
-  // Bars inserted between a repeat's closing bar and a following alternate ending would cut the ending off from its repeat.
-  const here=score.masterBars[target.bar],before=score.masterBars[target.bar-1];
-  if(here?.alternateEndings&&before&&(before.alternateEndings||before.repeatCount))throw new Error('Paste before the repeat, not between its alternate endings.');
   const state=stateAt(score,target.bar,mappings),allocate=reserveIds(score),links=captureNoteLinks(score),retainedLinks=protectedLinks(score,links),pastedLinks:NoteLinks=[],barMap=insert(score,target.bar,total),changed=new Map<number,Set<model.AutomationType>>(),pedals=new Set<model.Staff>();let changedTempo=false;
   // Inserted rests must follow copied meter even on unmapped destination staves.
   if(clip.mode==='multiTrack')for(let offset=0;offset<total;offset++)for(const track of score.tracks)for(const staff of track.staves){const measure=staff.bars[target.bar+offset];for(const voice of measure.voices){voice.beats=[];const rest=new model.Beat();rest.duration=1;rest.isEmpty=voice.index!==0||source.masterBars[offset%source.masterBars.length].isFreeTime;voice.addBeat(rest);}}
@@ -392,4 +388,16 @@ export function preparePasteMusic(score:model.Score,command:ClipboardCommand):Pr
   const destination=clone(score),preserved=preserveObjects(destination);createTracks(destination,clip,planned);
   const mappings=targetAndMappings(destination,source,{...command,clip});
   const result=clip.kind==='bars'?pasteBars(destination,clip,source,command,mappings):pastePhrase(destination,clip,source,command,mappings);finishFreshIds(result.score,preserved);return {...result,addedTracks:planned.length};
+}
+
+/**
+ * Refusals that belong to the gesture of pasting, not to the recorded edit: they keep a new paste from leaving an
+ * unbalanced repeat or navigation structure. `preparePasteMusic` never calls this, so projects that already hold
+ * such a paste replay exactly as they did before. Returns the message to show, or null.
+ */
+export function pasteGestureProblem(score:model.Score,command:ClipboardCommand):string|null {
+  const clip=readMusicClip(command.clip);if(clip.kind!=='bars')return null;
+  const bar=command.options?.target?.bar;if(!integer(bar,0,0xffffffff))return null;
+  const ending=alternateEndingProblem(score.masterBars,bar);if(ending)return ending;
+  return clip.mode==='multiTrack'?directionPasteProblem(score.masterBars,scoreFromMusicClip(clip).masterBars,command.options.count):null;
 }

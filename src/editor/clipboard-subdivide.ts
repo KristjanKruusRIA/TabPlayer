@@ -1,7 +1,7 @@
 import { model,Settings } from '@coderline/alphatab';
 import { scoreFromJson } from '../model-clone';
 import { copyGpInterchangeSource } from '../interchange/gp';
-import { restBeats,rhythmTicks } from './common';
+import { rhythmTicks } from './common';
 import { captureNoteLinks,restoreNoteLinks } from './links';
 import type { BeatRange,MusicPoint } from './range-types';
 
@@ -30,7 +30,15 @@ export function rangeCutsBeat(score:model.Score,range:BeatRange):boolean {
   return false;
 }
 
-const identityFields=['string','fret','octave','tone','percussionArticulation','harmonicType','harmonicValue','accidentalMode'] as const;
+/**
+ * Note fields that describe how the note sounds for its whole length; every piece carries them.
+ * Everything else on a note is an attack mark and stays on the first piece, or is refused (bend, trill, dead),
+ * or moves with the outgoing link to the last piece (slide out, hammer or pull, tie, slur).
+ * Fields not listed (ids, indices, link pointers, derived getters, `style`) are bookkeeping.
+ */
+const noteFields=['string','fret','octave','tone','percussionArticulation','harmonicType','harmonicValue','accidentalMode','dynamics','isPalmMute','isLetRing','vibrato','isGhost','durationPercent'] as const;
+/** Beat fields that last the whole beat: dynamics, vibrato, octave sign, hairpin, tremolo picking, slash notation, wah pedal. */
+const beatFields=['dynamics','vibrato','ottava','crescendo','slashed','wahPedal'] as const;
 function refuseUnsplittable(beat:model.Beat) {
   if(beat.overrideDisplayDuration!==undefined)throw new Error('A beat with an overridden written length cannot be split at the range edge. Select whole beats.');
   if(beat.whammyBarPoints?.length)throw new Error('A beat with a whammy bar cannot be split at the range edge. Select whole beats.');
@@ -45,16 +53,25 @@ function writtenTicks(piece:model.Beat) {
   const base=Math.trunc(3840/(piece.duration<0?1/-piece.duration:piece.duration));let ticks=base;for(let dot=1;dot<=piece.dots;dot++)ticks+=Math.trunc(base/2**dot);
   return piece.tupletNumerator>0&&piece.tupletDenominator>0?Math.trunc(ticks*piece.tupletDenominator/piece.tupletNumerator):ticks;
 }
+/** Written values a person would write: plain or single-dotted, whole note down to a 64th. */
+const written=[1,2,4,8,16,32,64].flatMap(duration=>[0,1].map(dots=>{const base=3840/duration;return {duration,dots,ticks:base+base/2*dots};})).sort((a,b)=>b.ticks-a.ticks);
+/** The fewest written values that add up to `ticks` exactly, longest first, or null. */
+function decompose(ticks:number):Array<{duration:number;dots:number}>|null {
+  if(!Number.isInteger(ticks)||ticks<=0)return null;
+  const best=new Array<number>(ticks+1).fill(-1),count=new Array<number>(ticks+1).fill(Infinity);count[0]=0;
+  for(let amount=1;amount<=ticks;amount++)for(let index=0;index<written.length;index++){const previous=amount-written[index].ticks;if(previous>=0&&count[previous]+1<count[amount]){count[amount]=count[previous]+1;best[amount]=index;}}
+  if(best[ticks]<0)return null;
+  const result=[];for(let amount=ticks;amount>0;amount-=written[best[amount]].ticks)result.push({duration:written[best[amount]].duration,dots:written[best[amount]].dots});
+  return result.sort((a,b)=>(3840/b.duration)*(1+b.dots/2)-(3840/a.duration)*(1+a.dots/2));
+}
 /** Exact written pieces for `ticks`; a tuplet beat keeps its ratio so its pieces stay inside the group. */
 function pieces(beat:model.Beat,ticks:number,total:number):model.Beat[] {
-  const tuplet=beat.tupletNumerator>0&&beat.tupletDenominator>0,nominal=tuplet?ticks*beat.tupletNumerator/beat.tupletDenominator:ticks;
-  let result:model.Beat[];
-  try{if(!Number.isInteger(nominal))throw new Error('fraction');result=restBeats(nominal);}
-  catch{throw new Error(`The sustained beat cannot be cut at the range edge: ${ticks} of its ${total} ticks have no exact written length.`);}
-  if(result.length>MAX_PIECES_PER_SIDE)throw new Error(`The sustained beat cannot be cut at the range edge: ${ticks} of its ${total} ticks would need more than ${MAX_PIECES_PER_SIDE} tied notes.`);
-  if(tuplet)for(const piece of result){piece.tupletNumerator=beat.tupletNumerator;piece.tupletDenominator=beat.tupletDenominator;}
-  const sum=result.reduce((acc,piece)=>acc+writtenTicks(piece),0);
-  if(sum!==ticks)throw new Error(`The sustained beat cannot be cut at the range edge: ${ticks} of its ${total} ticks have no exact written length.`);
+  const refuse=()=>new Error(`The sustained beat cannot be cut at the range edge: ${ticks} of its ${total} ticks have no exact written length.`);
+  const tuplet=beat.tupletNumerator>0&&beat.tupletDenominator>0,nominal=tuplet?ticks*beat.tupletNumerator/beat.tupletDenominator:ticks,values=decompose(nominal);
+  if(!values)throw refuse();
+  if(values.length>MAX_PIECES_PER_SIDE)throw new Error(`The sustained beat cannot be cut at the range edge: ${ticks} of its ${total} ticks would need more than ${MAX_PIECES_PER_SIDE} tied notes.`);
+  const result=values.map(value=>Object.assign(new model.Beat(),{duration:value.duration,dots:value.dots,isEmpty:false,...tuplet?{tupletNumerator:beat.tupletNumerator,tupletDenominator:beat.tupletDenominator}:{}}));
+  if(result.reduce((acc,piece)=>acc+writtenTicks(piece),0)!==ticks)throw refuse();
   return result;
 }
 
@@ -71,7 +88,7 @@ function splitBeat(found:Straddle,tick:number,ids:{beat:number;note:number}) {
   if(!beat.tupletNumerator||beat.tupletNumerator<=0){beat.tupletNumerator=-1;beat.tupletDenominator=-1;}
   const chain:model.Beat[]=[beat];
   for(const piece of sequence.slice(1)){
-    const next=new model.Beat();next.id=++ids.beat;next.duration=piece.duration;next.dots=piece.dots;next.tupletNumerator=piece.tupletNumerator;next.tupletDenominator=piece.tupletDenominator;next.isEmpty=false;
+    const next=new model.Beat();next.id=++ids.beat;next.duration=piece.duration;next.dots=piece.dots;next.tupletNumerator=piece.tupletNumerator;next.tupletDenominator=piece.tupletDenominator;next.isEmpty=false;for(const key of beatFields)Object.assign(next,{[key]:beat[key]});if(beat.tremoloPicking)next.tremoloPicking=Object.assign(new model.TremoloPickingEffect(),beat.tremoloPicking);
     chain.push(next);
   }
   const last=chain[chain.length-1];
@@ -79,7 +96,7 @@ function splitBeat(found:Straddle,tick:number,ids:{beat:number;note:number}) {
     const outgoing={tie:origin.tieDestination,slur:origin.slurDestination,slide:origin.slideTarget,slideOut:origin.slideOutType,hammer:origin.hammerPullDestination,hammerOrigin:origin.isHammerPullOrigin};
     let previous=origin;
     for(const piece of chain.slice(1)){
-      const note=new model.Note();note.id=++ids.note;for(const key of identityFields)Object.assign(note,{[key]:origin[key]});
+      const note=new model.Note();note.id=++ids.note;for(const key of noteFields)Object.assign(note,{[key]:origin[key]});
       piece.addNote(note);note.tieOrigin=previous;previous.tieDestination=note;note.isTieDestination=true;previous=note;
     }
     if(previous!==origin){

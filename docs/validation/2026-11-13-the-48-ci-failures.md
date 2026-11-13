@@ -13,7 +13,11 @@ The four failures reported on 788cb88 (1 November) were already handled by 5cc70
 
 ## The timing limit that changed, and why
 
-`stays linear with a long moved part beside many empty parts` had an absolute bound of 40 s. An absolute bound measures the runner, not the algorithm, so it is now a ratio: after a warm-up, four times the input (2400 bars with 180,000 parts against 600 bars with 45,000) must take less than six times as long, taking the faster of two runs at each size. Linear behaviour measured 2.4 to 4.5 over ten runs; a single measurement once exceeded 8, which is why two runs are taken. A temporary quadratic step in the code under test gave 7.75 and failed the check. The 120 s test timeout stays as the guard against a hang.
+`stays linear with a long moved part beside many empty parts` had an absolute bound of 40 s. An absolute bound measures the runner, not the algorithm, so it is now a ratio: after a warm-up, four times the input (2400 bars with 180,000 parts against 600 bars with 45,000) must take less than six times as long, taking the faster of two runs at each size. Linear behaviour measured 2.4 to 4.5 over ten runs by the implementer and 3.76 to 4.72 over eight runs by the reviewer; a single measurement once exceeded 8, which is why two runs are taken. The worst linear case seen leaves a margin of about 1.3 below the limit on an idle machine. With the original quadratic loop restored the ratio was 9.1 to 9.9 in three runs, so the check still guards the regression it was written for; a temporary quadratic step gave 7.75. The 120 s test timeout stays as the guard against a hang.
+
+## Status of the ticket
+
+The two test changes are reviewed and merged. **THE-48 stays open**: its done condition is that each failure is fixed or shown to be specific to the runner, and for the timing items that is inferred from local timings under synthetic load, and for the macOS item from a simulated platform. One CI run that passes on Windows, macOS and Linux with these changes is the missing proof. If the ratio check proves unsteady there, fit an exponent over five doubling sizes instead: the reviewer measured 0.98 for the current code and 1.78 with the regression restored, at about 20 s more test time.
 
 ## Limits
 

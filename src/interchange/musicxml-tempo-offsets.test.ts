@@ -292,7 +292,7 @@ describe('a file written to stall the offset match',()=>{
   });
   // A quadratic scan shows as growth, not as a number of seconds, so this compares two sizes on the same machine instead of
   // holding one run to a wall-clock limit (a 40 s limit failed at 42.6 s on a slow Windows CI runner, THE-48). Four times the
-  // input took 2.4 to 4.5 times as long in ten runs here; a quadratic pass over the parts or bars would take well over 6 times as long (the limit).
+  // input took 2.4 to 4.7 times as long over eighteen runs here; the quadratic pass this test was written for takes about 9 times as long, over the limit of 6.
   // The 120 s test limit stays as the hang guard.
   it('stays linear with a long moved part beside many empty parts',()=>{
     const source=musicXml(480),bar=source.match(/<measure[\s\S]*<\/measure>/)![0];

@@ -1529,3 +1529,123 @@ fn acknowledging_metadata_for_a_sealed_score_scrubs_the_folder_index_under_its_c
             .all(|text| !text.contains("Indexed Study") && !text.contains("Secret Title"))
     );
 }
+
+#[test]
+fn a_score_opened_from_the_bundled_folder_is_never_recorded_and_its_details_are_not_an_error() {
+    // Opening a score that lives in the app's own protected folder (an example opened by path, or by the desktop test hook)
+    // records no receipt, so the details the page sends afterwards have nothing to enrich. That is not a failure.
+    let directory = tempfile::tempdir().unwrap();
+    let bundled = directory.path().join("resources").join("library");
+    fs::create_dir_all(&bundled).unwrap();
+    let library = FileLibrary::open(
+        directory.path().join("file-library-v1"),
+        bundled.clone(),
+        Arc::new(|_| {}),
+    );
+    library.resume();
+    let workspace = Mutex::new(DocumentWorkspace::new().unwrap());
+    let path = bundled.join("example.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let opened = add(&library, &workspace, &path);
+    success(&library, &workspace, &opened);
+    let snapshot = library
+        .metadata_ack(&opened, metadata("Bundled"), &workspace)
+        .expect("a protected score's details are dropped quietly");
+    assert!(snapshot.recents.is_empty());
+}
+
+fn bundled_fixture() -> (
+    tempfile::TempDir,
+    PathBuf,
+    FileLibrary,
+    Mutex<DocumentWorkspace>,
+) {
+    let directory = tempfile::tempdir().unwrap();
+    let bundled = directory.path().join("resources").join("library");
+    fs::create_dir_all(&bundled).unwrap();
+    let library = FileLibrary::open(
+        directory.path().join("file-library-v1"),
+        bundled.clone(),
+        Arc::new(|_| {}),
+    );
+    library.resume();
+    let workspace = Mutex::new(DocumentWorkspace::new().unwrap());
+    (directory, bundled, library, workspace)
+}
+
+#[test]
+fn a_score_without_a_receipt_outside_protected_storage_is_still_refused() {
+    let (directory, _bundled, library, workspace) = bundled_fixture();
+    let path = directory.path().join("plain.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let opened = add(&library, &workspace, &path);
+    // No `success`: nothing recorded this open, and the path is not protected.
+    let error = library
+        .metadata_ack(&opened, metadata("Plain"), &workspace)
+        .unwrap_err();
+    assert!(error.contains("exact successful file operation"), "{error}");
+}
+
+fn make_alias(alias: &Path, target: &Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, alias).unwrap();
+    #[cfg(windows)]
+    {
+        let made = std::process::Command::new("cmd")
+            .args(["/c", "mklink", "/J"])
+            .arg(alias)
+            .arg(target)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "{made:?}");
+    }
+}
+fn remove_alias(alias: &Path) {
+    #[cfg(unix)]
+    fs::remove_file(alias).unwrap();
+    #[cfg(windows)]
+    fs::remove_dir(alias).unwrap();
+}
+
+#[test]
+fn a_score_without_a_receipt_whose_path_cannot_be_checked_is_still_refused() {
+    let (directory, _bundled, library, workspace) = bundled_fixture();
+    // A dangling alias (a drive that went away behaves alike) is a check that cannot tell, not one that says "protected".
+    let real = directory.path().join("real");
+    fs::create_dir(&real).unwrap();
+    let alias = directory.path().join("alias");
+    make_alias(&alias, &real);
+    let path = alias.join("away.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let opened = add(&library, &workspace, &path);
+    fs::remove_file(real.join("away.tabplayer")).unwrap();
+    fs::remove_dir(&real).unwrap();
+    assert!(
+        library
+            .protected
+            .as_ref()
+            .unwrap()
+            .is_protected(&path)
+            .is_err()
+    );
+    let error = library
+        .metadata_ack(&opened, metadata("Away"), &workspace)
+        .unwrap_err();
+    assert!(error.contains("exact successful file operation"), "{error}");
+    remove_alias(&alias);
+}
+
+#[test]
+fn a_score_opened_through_an_alias_of_the_bundled_folder_is_let_go_quietly() {
+    let (directory, bundled, library, workspace) = bundled_fixture();
+    write_project(&bundled.join("example.tabplayer"), &Project::blank()).unwrap();
+    let alias = directory.path().join("alias");
+    make_alias(&alias, &bundled);
+    let opened = add(&library, &workspace, &alias.join("example.tabplayer"));
+    success(&library, &workspace, &opened);
+    let snapshot = library
+        .metadata_ack(&opened, metadata("Aliased"), &workspace)
+        .expect("an alias of protected storage is protected storage");
+    assert!(snapshot.recents.is_empty());
+    remove_alias(&alias);
+}

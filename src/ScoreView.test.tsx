@@ -106,6 +106,38 @@ it('waits for a layout in progress before reusing edit bounds for a moved target
   rendered.rerender(<ScoreView {...props} editTarget={{...target,beat:1}}/>);expect(screen.queryByLabelText('Edit target')).toBeNull();
   act(()=>api.postRenderFinished.emit());expect(screen.getByLabelText('Edit target').style.left).toBe('85px');
 });
+it('moves the edit target with the page when the score area is resized and nothing renders again (THE-208)',()=>{
+  const score=music(),props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
+  const rendered=render(<ScoreView {...props}/>),api=view.api as unknown as {uiFacade:{getOffset:()=>{x:number;y:number;w:number;h:number}}};
+  const host=rendered.container.querySelector('.score-presentation')!.parentElement!;
+  expect(screen.getByLabelText('Edit target').style.left).toBe('35px');
+  // The page is centred in the score area: a wider area moves the page right. Only the page moves, so alphaTab has no reason to render again.
+  api.uiFacade.getOffset=()=>({x:230,y:40,w:600,h:300});
+  Object.defineProperty(host,'clientWidth',{configurable:true,value:1500});
+  act(()=>{window.dispatchEvent(new Event('resize'));});
+  expect(screen.getByLabelText('Edit target').style.left).toBe('235px');
+  api.uiFacade.getOffset=()=>({x:10,y:40,w:600,h:300});
+  Object.defineProperty(host,'clientWidth',{configurable:true,value:700});
+  act(()=>{window.dispatchEvent(new Event('resize'));});
+  expect(screen.getByLabelText('Edit target').style.left).toBe('15px');
+});
+it('moves every mark placed from the canvas offset when the page moves and nothing renders again (THE-208)',()=>{
+  const score=music(),beat=score.tracks[0].staves[0].bars[0].voices[0].beats[1];
+  setScaleDiagram(beat,{name:'Shape',strings:6,frets:5,firstFret:1,orientation:'horizontal',showFretMarkers:true,marks:[newMark(1,3)]});
+  const selected:MusicSelection={kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:2880},lanes:[{track:0,staff:0,voice:0}]}};
+  const props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),onEditorSelection:vi.fn(),editorSelection:selected,editTarget:target};
+  const rendered=render(<ScoreView {...props}/>),api=view.api as unknown as FakeView&{uiFacade:{getOffset:()=>{x:number;y:number;w:number;h:number}}};
+  act(()=>api.postRenderFinished.emit());
+  const host=rendered.container.querySelector('.score-presentation')!.parentElement!;
+  const left=(node:Element)=>parseFloat((node as HTMLElement).style.left);
+  const read=()=>({handle:left(screen.getByRole('button',{name:'Resize selection end'})),diagram:left(document.querySelector('.score-scale-diagram')!),edit:left(screen.getByLabelText('Edit target'))});
+  const before=read();
+  api.uiFacade.getOffset=()=>({x:230,y:40,w:600,h:300});
+  Object.defineProperty(host,'clientWidth',{configurable:true,value:1500});
+  act(()=>{window.dispatchEvent(new Event('resize'));});
+  const after=read();
+  for(const key of Object.keys(before) as (keyof typeof before)[])expect(after[key],key).toBe(before[key]+200);
+});
 it('uses public external media output and keeps viewport changes out of native plan loading',()=>{
   const score=music(),playback={attachView:vi.fn(),replaceScore:vi.fn(),setRenderedScore:vi.fn()},onSelect=vi.fn();const props={score,track:0,zoom:100,profile:'ScoreTab',onSelect,playback:playback as never};const rendered=render(<ScoreView {...props}/>);
   expect(view.options).toMatchObject({player:{playerMode:'EnabledExternalMedia',enableCursor:false}});expect((view.options as {player:object}).player).not.toHaveProperty('soundFont');expect(playback.attachView).toHaveBeenCalledTimes(1);

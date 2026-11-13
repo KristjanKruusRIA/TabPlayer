@@ -536,7 +536,15 @@ impl FileLibrary {
         };
         let (actual, sealed) = actual;
         let snapshot = self.catalog(Some(epoch), |store, core| {
-            let record = core.receipts.iter().find(|record| record.native.document == *document && record.native.path == actual.path && record.native.digest == actual.digest).ok_or("Metadata requires the exact successful file operation for this document revision.")?;
+            let Some(record) = core.receipts.iter().find(|record| record.native.document == *document && record.native.path == actual.path && record.native.digest == actual.digest) else {
+                // A score kept in the app's own storage (a bundled example opened by path) is never recorded as a file
+                // operation, so there is nothing to enrich and nothing wrong. Only a path that is definitely protected
+                // is let go: a check that cannot tell keeps the refusal.
+                if self.protected.as_ref().is_ok_and(|paths| paths.is_protected(&actual.path) == Ok(true)) {
+                    return store.snapshot();
+                }
+                return Err("Metadata requires the exact successful file operation for this document revision.".into());
+            };
             if sealed {
                 // The catalog is a plain file: a protected score leaves no details in it, and loses any it had.
                 if let Ok(index) = core.index.as_ref() {

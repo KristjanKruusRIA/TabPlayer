@@ -32,8 +32,21 @@ impl ProtectedPaths {
     }
 
     pub fn check(&self, path: &Path) -> Result<(), String> {
+        if self.is_protected(path)? {
+            return Err(
+                "Choose a destination outside TabPlayer's protected library and recovery storage."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    /// `Ok(true)` when `path` is inside protected storage, `Ok(false)` when it is not, and an error when that
+    /// cannot be told (a volume that is gone, a path that does not resolve). An error is not an answer: a caller
+    /// that would act on "protected" must not act on it.
+    pub fn is_protected(&self, path: &Path) -> Result<bool, String> {
         if self.roots.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         let destination = destination_identity(path)?;
         // Atomic writes replace the parent directory's leaf entry, not a symlink target.
@@ -51,10 +64,7 @@ impl ProtectedPaths {
             if [&destination, &entry].iter().any(|destination| {
                 within(destination, &root.identity) || within(destination, &current)
             }) {
-                return Err(
-                    "Choose a destination outside TabPlayer's protected library and recovery storage."
-                        .into(),
-                );
+                return Ok(true);
             }
             // Names differ for one folder (a share spelling of this machine, for one), so compare the folders themselves.
             if [&destination, &entry]
@@ -63,13 +73,10 @@ impl ProtectedPaths {
                     Ok::<_, String>(found || reaches(resolved, &root.path)?)
                 })?
             {
-                return Err(
-                    "Choose a destination outside TabPlayer's protected library and recovery storage."
-                        .into(),
-                );
+                return Ok(true);
             }
         }
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -267,6 +274,23 @@ mod tests {
         assert!(protection.check(&redirected.join("catalog.json")).is_err());
         // The captured namespace is retained even after the configured path redirects.
         assert!(protection.check(&old.join("payload.tabplayer")).is_err());
+    }
+
+    #[test]
+    fn says_protected_only_when_it_can_tell() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("library");
+        std::fs::create_dir(&root).unwrap();
+        let protection = ProtectedPaths::new(vec![root.clone()]).unwrap();
+        assert_eq!(protection.is_protected(&root.join("a.tabplayer")), Ok(true));
+        assert_eq!(
+            protection.is_protected(&directory.path().join("b.tabplayer")),
+            Ok(false)
+        );
+        // A path that cannot be resolved is neither: it is an error, and `check` still refuses it.
+        let unresolved = directory.path().join("gone").join("..").join("c.tabplayer");
+        assert!(protection.is_protected(&unresolved).is_err());
+        assert!(protection.check(&unresolved).is_err());
     }
 
     #[test]

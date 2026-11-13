@@ -4,7 +4,7 @@ import type { EditCommand,StaffSettings } from '../edit-types';
 import { blankProject,type BeatTarget,type Project } from '../project';
 import { entryNotes } from '../instruments/entry';
 import { DEFAULT_INPUT_PREFERENCES } from './input-preferences';
-import { planChordFingering,planMidiCapture,type CapturedNote } from './midi-capture';
+import { lastFingeringSearchNodes,NODE_LIMIT,planChordFingering,planMidiCapture,type CapturedNote } from './midi-capture';
 
 const guitar=(beat:number,bar=0):BeatTarget=>({track:0,staff:0,bar,voice:0,beat});
 const piano=(beat:number,bar=0):BeatTarget=>({track:1,staff:0,bar,voice:0,beat});
@@ -192,16 +192,20 @@ describe('planMidiCapture',()=>{
     const base:Project={...blankProject(),edits:[{type:'setStringCount',track:0,tuning,keep:'high'}]};
     const staff=describeSelection(buildDocument(base).score,guitar(0)).staff;
     const chord=[30,40,50,55,60,64,69,72].map(key=>({key,string:null}));
+    // The bound is the work done (the search visits at most NODE_LIMIT nodes, plus the one that stops it), not the time it takes,
+    // which on a loaded runner says nothing about the search; the clock only guards against a hang.
     const began=performance.now();
     const result=planChordFingering(staff,chord,new Set(),null);
-    expect(performance.now()-began).toBeLessThan(500);
+    expect(lastFingeringSearchNodes()).toBeLessThanOrEqual(NODE_LIMIT+1);
+    expect(performance.now()-began).toBeLessThan(60_000);
     expect(result).not.toBeNull();
     expect(new Set(result!.map(place=>place.string)).size).toBe(8);
     // Every pitch that can be played somewhere is placed, however large the search: a feasible chord is never refused.
     const hard=[35,43,51,57,62,66,71,75].map(key=>({key,string:null}));
     const startedHard=performance.now();
     expect(planChordFingering(staff,hard,new Set(),null)).not.toBeNull();
-    expect(performance.now()-startedHard).toBeLessThan(500);
+    expect(lastFingeringSearchNodes()).toBeLessThanOrEqual(NODE_LIMIT+1);
+    expect(performance.now()-startedHard).toBeLessThan(60_000);
     // Eight notes that only six strings can reach have no placement, and say so.
     expect(planChordFingering(staff,[40,41,42,43,44,45,46,47].map(key=>({key,string:null})),new Set(),null)).toBeNull();
   });

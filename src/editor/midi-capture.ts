@@ -50,7 +50,10 @@ function fretOn(staff:model.Staff,string:number,key:number):number|null {
   const plain=key-openStringKey(staff,string),fret=string===droneString&&plain>0?plain+getBanjoDrone(staff):plain;
   return fret>=0&&fret<=maxEntryFret&&fretExists(staff,string,fret)?fret:null;
 }
-const NODE_LIMIT=200_000;
+export const NODE_LIMIT=200_000;
+let lastNodes=0;
+/** How many nodes the most recent `planChordFingering` search visited (the work done, which a test can bound without a clock). */
+export const lastFingeringSearchNodes=()=>lastNodes;
 /** One string for each pitch, if there is any way to do it (augmenting paths), so a chord that can be played is never refused for want of search. */
 function anyAssignment(options:readonly (readonly Placement[])[]):Placement[]|null {
   const owner=new Map<number,number>();
@@ -121,6 +124,7 @@ export function planChordFingering(staff:model.Staff,notes:readonly {key:number;
     }
   };
   search(0,[],0,empty);
+  lastNodes=nodes;
   // The search visits strings in ascending order and keeps the first of equal costs, so ties go to the lower string; the first valid assignment is the answer only if the search found nothing at least as good.
   if(!best||bestCost>total(first))best=first;
   // Back to the order the notes were given in.

@@ -26,14 +26,21 @@ export function directionTargets(masters:model.MasterBar[]):Set<Kind> {
 }
 /** A reason the measures' navigation marks cannot stand alone, or null when every jump finds its targets inside them. */
 export function directionProblem(masters:model.MasterBar[]):string|null {
-  const first=new Map<Kind,number>(),last=new Map<Kind,number>();
-  masters.forEach((master,index)=>{for(const direction of master.directions??[]){const kind=targets.get(direction);if(!kind)continue;if(!first.has(kind))first.set(kind,index);last.set(kind,index);}});
+  const at=new Map<Kind,number[]>();
+  masters.forEach((master,index)=>{for(const direction of master.directions??[]){const kind=targets.get(direction);if(kind)at.set(kind,[...at.get(kind)??[],index]);}});
   for(const [index,master] of masters.entries())for(const direction of master.directions??[]){
     const rule=needs.get(direction);if(!rule)continue;
-    if(rule.origin&&!((first.get(rule.origin)??Infinity)<=index))return `Copy the ${rule.origin} this navigation direction jumps back to, at or before the direction, or leave the direction out.`;
+    const origin=rule.origin?at.get(rule.origin)?.[0]:undefined;
+    if(rule.origin&&!(origin!==undefined&&origin<=index))return `Copy the ${rule.origin} this navigation direction jumps back to, at or before the direction, or leave the direction out.`;
     for(const kind of rule.also){
-      if(!last.has(kind))return `Copy the ${kind} this navigation direction needs, or leave the direction out.`;
-      if(!(last.get(kind)!>index))return `Put the ${kind} after the navigation direction that uses it, or leave the direction out.`;
+      const places=at.get(kind);
+      if(!places)return `Copy the ${kind} this navigation direction needs, or leave the direction out.`;
+      if(kind==='Fine'){
+        // Written music puts the Fine before the jump: the player goes back, plays on and stops there.
+        const reachable=places.filter(place=>place<=index);
+        if(!reachable.length)return 'Put the Fine at or before the navigation direction that uses it, or leave the direction out.';
+        if(origin!==undefined&&!reachable.some(place=>place>=origin))return `Put the Fine after its ${rule.origin}, or leave the direction out.`;
+      }else if(!(places[places.length-1]>index))return `Put the ${kind} after the navigation direction that uses it, or leave the direction out.`;
     }
   }
   return null;

@@ -8,6 +8,7 @@ A single-track range whose start or end falls strictly inside a beat of one of i
 
 - Pieces are plain or single-dotted values from a whole note down to a 64th, fewest pieces, longest first, at most four per side. A tuplet beat keeps its ratio. A cut point with no such exact value (for example 640 ticks into a dotted half) is refused: "...have no exact written length."
 - Ties run through the pieces. A tie, slur, slide-out or hammer/pull that left the note now leaves from its last piece; links to a piece outside the range are dropped, so a tail copied from mid-note starts as a plain attack.
+- A cut on a triplet position inside a plain (non-tuplet) note is refused, because its pieces would need tuplets the source does not have.
 - Refused: bent or continued-bend notes, trilled notes, dead notes, whammy beats, beats with an overridden written length, and beats in a free-time measure.
 - Cut refuses such a range ("Cut needs a range that starts and ends on beat boundaries..."), because the erase edit works on whole beats.
 - The editor still produces attack-aligned ranges only, so this is reachable through the API, not by dragging.
@@ -27,7 +28,7 @@ A single-track range whose start or end falls strictly inside a beat of one of i
 
 ## Structure at paste (E09)
 
-- A complete navigation-direction group (Fine, Segno, Coda and the jumps that use them) now travels in a multi-track bar clip. At copy time a Segno must be at or before its jump, a Coda or Fine strictly after it, and every jump needs its targets in the clip. Single-track clips still drop directions.
+- A complete navigation-direction group (Fine, Segno, Coda and the jumps that use them) now travels in a multi-track bar clip. At copy time a Segno must be at or before its jump, a Coda or Double Coda strictly after it, a Fine at or before it (for Dal Segno and Dal Segno Segno al Fine, also at or after the Segno), and every jump needs its targets in the clip. This is the written order for every "al Fine" direction alphaTab models (D.C., D.S., D.S.S. al Fine). Single-track clips still drop directions.
 - At paste, a new gesture is refused for a clip target the destination already has, any jump in the clip when the destination already has one, a repeat count above one for a clip with targets or jumps, and a position between a repeat's closing bar and its next ending ("Paste before the repeat, not between its alternate endings.") or inside a multi-bar ending ("Paste before or after the whole alternate ending, not inside it.").
 - These refusals live in `pasteGestureProblem` (`clipboard-paste.ts`), called by `DocumentController.edit` before the edit is recorded. `preparePasteMusic`, which replays recorded edits, never calls it, so a project that already holds such a paste builds exactly as before (pinned in `controller.test.ts`).
 - Copy-time checks in `readMusicClip` cannot reach a recorded paste: before this round every clip with directions was refused, so no recorded clip carries any.

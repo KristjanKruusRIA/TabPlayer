@@ -180,7 +180,7 @@
     "clipboard_scope": {
       "path": "docs/validation/2026-11-13-gp8-clipboard-scope.md",
       "start_line": 1,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "clipboard_limits": {
@@ -552,7 +552,7 @@
     "workstation_backing_check": {
       "path": "docs/validation/2026-10-15-tabplayer-reference-workstation.md",
       "start_line": 35,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "backing_existing_foundation": {
@@ -720,7 +720,7 @@
     "backing_processing_pitch_native": {
       "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
       "start_line": 60,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "backing_processing_actual": {
@@ -948,7 +948,7 @@
     "wah_limits": {
       "path": "docs/validation/2026-10-22-gp8-wah.md",
       "start_line": 40,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "pedal_behavior": {
@@ -1086,7 +1086,7 @@
     "strokes_evidence": {
       "path": "docs/validation/2026-10-22-gp8-stroke-patterns.md",
       "start_line": 19,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "strokes_limits": {
@@ -1230,7 +1230,7 @@
     "expressions_evidence": {
       "path": "docs/validation/2026-10-23-gp8-expressions.md",
       "start_line": 28,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "expressions_limits": {
@@ -1596,7 +1596,7 @@
     "normalize_export_limits": {
       "path": "docs/validation/2026-10-24-gp8-normalize-export.md",
       "start_line": 54,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "flac_export_behavior": {
@@ -2160,7 +2160,7 @@
     "editing_gaps_evidence": {
       "path": "docs/validation/2026-10-31-gp8-editing-gaps.md",
       "start_line": 29,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "editing_gaps_limits": {
@@ -2220,7 +2220,7 @@
     "password_locks_limits": {
       "path": "docs/validation/2026-10-31-gp8-password-locks.md",
       "start_line": 30,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "tuning_library_behavior": {

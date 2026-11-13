@@ -3,6 +3,7 @@ import { scoreFromJson } from '../model-clone';
 import { copyGpInterchangeSource } from '../interchange/gp';
 import { rhythmTicks } from './common';
 import { captureNoteLinks,restoreNoteLinks } from './links';
+import { getNoteAudio,setNoteAudio } from './note-audio';
 import type { BeatRange,MusicPoint } from './range-types';
 
 /** One beat that a tick cut falls strictly inside. */
@@ -80,7 +81,7 @@ function pieces(beat:model.Beat,ticks:number,total:number):model.Beat[] {
  * The first piece is the original beat and keeps every beat property. Techniques on notes stay on it, except
  * that outgoing ties, slurs, slides and hammer or pull links leave from the final piece, where the sound ends.
  */
-function splitBeat(found:Straddle,tick:number,ids:{beat:number;note:number}) {
+function splitBeat(found:Straddle,tick:number,ids:{beat:number;note:number;pieces:Set<number>}) {
   const {beat,start,length}=found,voice=beat.voice;refuseUnsplittable(beat);
   if(voice.bar.masterBar.isFreeTime)throw new Error('A sustained beat in a free-time measure cannot be split at the range edge.');
   const before=pieces(beat,tick-start,length),after=pieces(beat,start+length-tick,length),sequence=[...before,...after];
@@ -97,7 +98,11 @@ function splitBeat(found:Straddle,tick:number,ids:{beat:number;note:number}) {
     let previous=origin;
     for(const piece of chain.slice(1)){
       const note=new model.Note();note.id=++ids.note;for(const key of noteFields)Object.assign(note,{[key]:origin[key]});
-      piece.addNote(note);note.tieOrigin=previous;previous.tieDestination=note;note.isTieDestination=true;previous=note;
+      piece.addNote(note);ids.pieces.add(note.id);
+      // Per-note audio (length, start shift, velocity) lives in a side table keyed by note. A piece starting a copied tail keeps
+      // the length and velocity; the start shift belongs to the original attack. Pieces still tied on get theirs cleared on copy.
+      const audio=getNoteAudio(origin);if(audio)setNoteAudio(note,{length:audio.length,offset:0,velocity:audio.velocity});
+      note.tieOrigin=previous;previous.tieDestination=note;note.isTieDestination=true;previous=note;
     }
     if(previous!==origin){
       const tail=previous;
@@ -119,14 +124,14 @@ function splitBeat(found:Straddle,tick:number,ids:{beat:number;note:number}) {
  * A detached copy of `score` whose beats are cut at both range edges, so the copied phrase holds exactly the
  * selected time. Returns `score` itself when no lane has a beat that an edge falls inside.
  */
-export function subdivideRange(score:model.Score,range:BeatRange):model.Score {
-  if(!rangeCutsBeat(score,range))return score;
+export function subdivideRange(score:model.Score,range:BeatRange):{score:model.Score;pieces:Set<number>} {
+  if(!rangeCutsBeat(score,range))return {score,pieces:new Set()};
   const work=scoreFromJson(model.JsonConverter.scoreToJson(score),new Settings());restoreNoteLinks(work,captureNoteLinks(score));copyGpInterchangeSource(score,work);
-  const ids={beat:0,note:0};
+  const ids={beat:0,note:0,pieces:new Set<number>()};
   for(const track of work.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats){ids.beat=Math.max(ids.beat,beat.id);for(const note of beat.notes)ids.note=Math.max(ids.note,note.id);}
   for(const lane of range.lanes)for(const point of cutPoints(range)){
     const voice=work.tracks[lane.track].staves[lane.staff].bars[point.bar].voices[lane.voice],found=straddling(voice,point.tick);
     if(found)splitBeat(found,point.tick,ids);
   }
-  return work;
+  return {score:work,pieces:ids.pieces};
 }

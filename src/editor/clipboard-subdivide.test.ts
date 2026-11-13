@@ -1,4 +1,5 @@
-import { expect,it } from 'vitest';
+import { describe,expect,it } from 'vitest';
+import { getNoteAudio,setNoteAudio } from './note-audio';
 import { model,Settings } from '@coderline/alphatab';
 import { music } from './fixtures';
 import { makeMusicClip } from './clipboard-source';
@@ -161,4 +162,23 @@ it('slur and hammer links leave from the final piece too',()=>{
   first.slurDestination=next;next.slurOrigin=first;next.isSlurDestination=true;first.hammerPullDestination=next;next.hammerPullOrigin=first;first.isHammerPullOrigin=true;
   const clip=makeMusicClip(score,range([0,480],[1,0]),'singleTrack'),copy=decode(clip),beats=beatsOf(copy,0),tail=beats[0].notes[0],following=beats[1].notes[0];
   expect(beats).toHaveLength(2);expect(clip.links.map(link=>link.kind).sort()).toEqual(['hammerPull','slur']);expect(tail.slurDestination).toBe(following);expect(tail.hammerPullDestination).toBe(following);expect(tail.isHammerPullOrigin).toBe(true);
+});
+
+it('a cut on a triplet position inside a plain note is refused',()=>{
+  const score=sustained(1);
+  expect(()=>makeMusicClip(score,range([0,0],[0,1280]),'singleTrack')).toThrow(/no exact written length/);
+  expect(()=>makeMusicClip(score,range([0,320],[1,0]),'singleTrack')).toThrow(/no exact written length/);
+});
+describe('per-note audio settings (length, offset, velocity) on a cut note',()=>{
+  const audio={length:50,offset:10,velocity:5};
+  const audible=()=>{const score=sustained(2,0,2);setNoteAudio(note0(score),audio);return score;};
+  it('stay on the first piece, and a tail copied from mid-note keeps length and velocity but not the shifted start',()=>{
+    const head=decode(makeMusicClip(audible(),range([0,0],[0,480]),'singleTrack'));expect(getNoteAudio(note0(head))).toEqual(audio);
+    const tail=decode(makeMusicClip(audible(),range([0,960],[1,0]),'singleTrack'));expect(getNoteAudio(note0(tail))).toEqual({length:50,offset:0,velocity:5});
+  });
+  it('a piece tied on to the first one carries none, as the editor already requires for a tie',()=>{
+    const pieces=beatsOf(decode(makeMusicClip(audible(),range([0,0],[0,1200]),'singleTrack')),0);
+    expect(getNoteAudio(pieces[0].notes[0])).toEqual(audio);expect(getNoteAudio(pieces[1].notes[0])).toBeNull();
+  });
+  it('a whole-beat copy still keeps them',()=>{expect(getNoteAudio(note0(decode(makeMusicClip(audible(),range([0,0],[0,1920]),'singleTrack'))))).toEqual(audio);});
 });

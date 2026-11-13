@@ -36,7 +36,7 @@ export const CASES = [
 ];
 const T1_KEYS = [72, 74, 76, 77];
 const T2_KEYS = [48, 50, 52, 53];
-const T2_WHOLE = 36;
+const T2_WHOLE = 40;
 const SHAPES = {
   quarter: () => T1_KEYS.map((key, i) => ({ start: i, dur: 1, key })),
   rest: () => [{ start: 0, dur: 1, key: 72 }, { start: 1, dur: 1, key: 74 }, { start: 3, dur: 1, key: 77 }],
@@ -45,7 +45,7 @@ const SHAPES = {
 };
 
 /** Bar-by-bar layout: bar 0 is a control, then each case bar is followed by a control bar. Track 1 (keys 60+) carries the
- *  fermata; track 2 (keys under 60) sustains a whole note (key 36) across the case bar and plays quarters in control bars. */
+ *  fermata; track 2 (keys under 60) sustains a whole note (key 40) across the case bar and plays quarters in control bars. */
 export function probePlan() {
   const bars = [];
   const add = (probeCase) => {
@@ -62,6 +62,23 @@ export function probePlan() {
 }
 const barName = (bar) => (bar.case ? `${bar.case.id}: ${bar.case.label}` : bar.index === 0 ? 'control (lead-in)' : 'control');
 
+// Both tracks are stringed notes on a standard-tuned six-string guitar staff (high string first, as alphaTab lists them), because
+// that is what TabPlayer users export. The first probe wrote bare pitched notes (octave and tone, no string or fret) on a staff
+// with no tuning, and Guitar Pro 8 exported every one of them at MIDI key 0 (see src/interchange/fixtures/fermata-probe.gp8.README.md).
+// alphaTab numbers strings from the lowest (string 1); a note sounds at the string's tuning plus its fret.
+export const GUITAR_TUNING = [64, 59, 55, 50, 45, 40];
+export const MAX_FRET = 24;
+/** The highest string that reaches `key` without going below its open pitch, as alphaTab's 1-based string number and a fret. */
+export function stringAndFret(key) {
+  for (let string = GUITAR_TUNING.length; string >= 1; string -= 1) {
+    const fret = key - GUITAR_TUNING[GUITAR_TUNING.length - string];
+    if (fret >= 0) {
+      if (fret > MAX_FRET) break;
+      return { string, fret };
+    }
+  }
+  throw new Error(`Key ${key} cannot be played on a standard-tuned guitar within ${MAX_FRET} frets.`);
+}
 const DURATIONS = new Map([[4, model.Duration.Whole], [2, model.Duration.Half], [1, model.Duration.Quarter], [0.5, model.Duration.Eighth]]);
 function fillRests(notes) {
   const out = [];
@@ -88,7 +105,7 @@ function buildScore(bpm, settings) {
   [['Fermata track', 'notes1'], ['Sustain track', 'notes2']].forEach(([name, field]) => {
     const track = new model.Track(), staff = new model.Staff();
     track.name = name; track.shortName = name.slice(0, 4);
-    staff.stringTuning.tunings = []; staff.showTablature = false;
+    staff.stringTuning.tunings = [...GUITAR_TUNING]; staff.showTablature = true;
     score.addTrack(track); track.addStaff(staff);
     const first = field === 'notes1' ? 't1' : 't2';
     for (const bar of plan) {
@@ -100,7 +117,8 @@ function buildScore(bpm, settings) {
         voice.addBeat(beat);
         if (entry.key !== null) {
           const note = new model.Note();
-          note.octave = Math.floor(entry.key / 12); note.tone = entry.key % 12;
+          const { string, fret } = stringAndFret(entry.key);
+          note.string = string; note.fret = fret;
           beat.addNote(note);
         }
         if (first === 't1' && i === 0 && bar.case) beat.text = bar.case.id;
@@ -321,11 +339,28 @@ export function analyseSmf(smf, nominalBpm) {
   for (const bar of plan) for (const [track, key] of [['t1', 't1'], ['t2', 't2']]) {
     bar[key].forEach((note) => expected[track].push({ bar: bar.index, note }));
   }
-  const a1 = align(smf.notes.filter((n) => n.key >= 60), expected.t1, 'Fermata track (keys 60 and up)');
-  const a2 = align(smf.notes.filter((n) => n.key < 60), expected.t2, 'Sustain track (keys under 60)');
-  if (a1.problem) problems.push(a1.problem);
-  if (a2.problem) problems.push(a2.problem);
-  if (problems.length) return { ppq, bpm, problems, cases: [], tickTol };
+  let matchedBy = 'keys', keyNote = null;
+  let a1 = align(smf.notes.filter((n) => n.key >= 60), expected.t1, 'Fermata track (keys 60 and up)');
+  let a2 = align(smf.notes.filter((n) => n.key < 60), expected.t2, 'Sustain track (keys under 60)');
+  if (a1.problem || a2.problem) {
+    // The keys do not match the layout (Guitar Pro exported every note of the first probe at key 0). Fall back to the tracks:
+    // the one whose note count equals the fermata track's, and the one whose count equals the sustain track's.
+    const byTrack = new Map();
+    for (const note of smf.notes) { if (!byTrack.has(note.track)) byTrack.set(note.track, []); byTrack.get(note.track).push(note); }
+    const withCount = (count) => [...byTrack.entries()].filter(([, list]) => list.length === count);
+    const m1 = withCount(expected.t1.length), m2 = withCount(expected.t2.length);
+    if (expected.t1.length !== expected.t2.length && m1.length === 1 && m2.length === 1 && m1[0][0] !== m2[0][0]) {
+      const keys = [...new Set(smf.notes.map((n) => n.key))].sort((x, y) => x - y);
+      matchedBy = 'track';
+      keyNote = `Matched by track and note count because the keys did not match the layout: track ${m1[0][0]} has ${expected.t1.length} notes (the fermata track) and track ${m2[0][0]} has ${expected.t2.length} (the sustain track). Keys seen: ${keys.length > 12 ? `${keys.slice(0, 12).join(', ')}, ...` : keys.join(', ')} (the layout expects 60 and up on the fermata track, under 60 on the sustain track).`;
+      a1 = { notes: [...m1[0][1]].sort((x, y) => x.on - y.on || x.key - y.key) };
+      a2 = { notes: [...m2[0][1]].sort((x, y) => x.on - y.on || x.key - y.key) };
+    } else {
+      const counts = [...byTrack.entries()].sort((x, y) => x[0] - y[0]).map(([t, list]) => `track ${t}: ${list.length}`).join(', ') || 'no notes';
+      problems.push(...[a1.problem, a2.problem].filter(Boolean), `Matching by track and note count did not work either: the probe has ${expected.t1.length} notes on the fermata track and ${expected.t2.length} on the sustain track, the file has ${counts}.`);
+    }
+  }
+  if (problems.length) return { ppq, bpm, problems, cases: [], tickTol, matchedBy: null, keyNote: null };
   const observed = (list, entries) => entries.map((entry, i) => ({ ...entry, obs: list[i] }));
   const t1 = observed(a1.notes, expected.t1), t2 = observed(a2.notes, expected.t2);
   const byBar = (rows) => plan.map((bar) => rows.filter((row) => row.bar === bar.index));
@@ -395,7 +430,7 @@ export function analyseSmf(smf, nominalBpm) {
       baseline: { ticks: s1[b].ticks, seconds: s1[b].seconds },
     });
   });
-  return { ppq, bpm, problems, cases, tickTol, baseline: s1[0] };
+  return { ppq, bpm, problems, cases, tickTol, baseline: s1[0], matchedBy, keyNote };
 }
 
 const close = (a, b) => Math.abs(a - b) <= Math.max(0.01, 0.03 * Math.max(Math.abs(a), Math.abs(b)));
@@ -414,6 +449,7 @@ export function describeFile(name, result) {
     lines.push('Could not compare this file with the probe layout:', ...result.problems.map((p) => `  - ${p}`));
     return lines;
   }
+  if (result.keyNote) lines.push(result.keyNote);
   lines.push(`Constant offset of the first bar (count-in or similar, not a hold): ${sign(result.baseline.ticks, 0)} ticks, ${sign(result.baseline.seconds)} s.`);
   for (const c of result.cases) {
     const span0 = (c.bar * 4 + c.beat) * result.ppq;
@@ -425,7 +461,7 @@ export function describeFile(name, result) {
       lines.push(`    ${n.key}${n.start === c.beat ? '*' : ' '} ${n.expOn}-${n.expOff} -> ${n.obsOn}-${n.obsOff}  on ${sign(n.dOnTicks, 0)} t / ${sign(n.dOnSeconds)} s, off ${sign(n.dOffTicks, 0)} t / ${sign(n.dOffSeconds)} s, length ${n.lengthTicks} t (${f(n.lengthSeconds)} s, plain ${n.expLengthTicks} t)`);
     }
     if (c.fermataNote === null) lines.push('    (no note at the fermata beat: it is a rest)');
-    lines.push(`  sustain track whole note (key 36): expected ${c.sustain.expOn}-${c.sustain.expOff} -> observed ${c.sustain.obsOn}-${c.sustain.obsOff}; length ${f(c.sustain.lengthSeconds)} s vs plain ${f(c.sustain.expLengthSeconds)} s`);
+    lines.push(`  sustain track whole note (key ${T2_WHOLE}): expected ${c.sustain.expOn}-${c.sustain.expOff} -> observed ${c.sustain.obsOn}-${c.sustain.obsOff}; length ${f(c.sustain.lengthSeconds)} s vs plain ${f(c.sustain.expLengthSeconds)} s`);
     lines.push(`  next (control) bar starts later by: fermata track ${sign(c.added1.ticks, 0)} ticks / ${sign(c.added1.seconds)} s (${sign(c.addedBeats)} beats at ${result.bpm} BPM); sustain track ${sign(c.added2.ticks, 0)} ticks / ${sign(c.added2.seconds)} s`);
     lines.push(`  control bar drift inside the following plain bar: max ${c.controlDrift.ticks} ticks, ${f(c.controlDrift.seconds)} s`);
     lines.push(`  tempo events across bars ${c.bar + 1}-${c.bar + 2}: ${c.tempoEvents.length ? c.tempoEvents.map((t) => `${f(t.bpm, 2)} BPM @tick ${t.tick}`).join(', ') : 'none'}`);
@@ -476,7 +512,9 @@ export function conclude(files) {
     lines.push('', `${name}: ${summary} of ${result.cases.length} cases.`);
     const changed = result.cases.filter((c) => c.mechanism !== 'none');
     if (!changed.length) {
-      lines.push('  No difference at all: every fermata bar has the same note positions, lengths, tempo events and timing as the plain grid. In this export Guitar Pro does not express the fermata in MIDI. This is a valid finding: any hold would be Guitar Pro playback behaviour that its MIDI export leaves out (or an export option not chosen).');
+      lines.push("  No difference at all: every fermata bar has the same note positions, lengths, tempo events and timing as the plain grid, for every fermata Type and Length tried, on notes, a rest, a half note and an eighth note. The MIDI Guitar Pro exported from this probe contains no hold for any fermata type or length tried; it is not established that Guitar Pro read the fermatas. This is a valid finding: any hold would be Guitar Pro playback behaviour that its MIDI export leaves out (or an export option not chosen).");
+      if (result.matchedBy === 'track') lines.push('  Caveat 1: these notes were matched by track and note count, not by key, because the keys did not match the probe layout (see the key line above); the first probe wrote notes that Guitar Pro exported at key 0. The timing is still read from the real note-on and note-off ticks.');
+      lines.push('  Caveat 2: nothing in the MIDI shows whether Guitar Pro read the fermatas at all. Unless someone confirmed the fermata symbols were visible in Guitar Pro when the file was opened, "no hold" cannot be told apart from "the fermatas were never read".');
       continue;
     }
     for (const mech of new Set(changed.map((c) => c.mechanism))) {

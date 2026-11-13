@@ -1,0 +1,189 @@
+[
+ {
+  "bar": 1,
+  "name": "control (lead-in)",
+  "fermata": null
+ },
+ {
+  "bar": 2,
+  "name": "short-0: Short, Length 0, beat 3",
+  "fermata": {
+   "type": "Short",
+   "length": 0,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 3,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 4,
+  "name": "medium-0: Medium, Length 0, beat 3",
+  "fermata": {
+   "type": "Medium",
+   "length": 0,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 5,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 6,
+  "name": "long-0: Long, Length 0, beat 3",
+  "fermata": {
+   "type": "Long",
+   "length": 0,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 7,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 8,
+  "name": "medium-0.5: Medium, Length 0.5, beat 3",
+  "fermata": {
+   "type": "Medium",
+   "length": 0.5,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 9,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 10,
+  "name": "medium-1: Medium, Length 1, beat 3",
+  "fermata": {
+   "type": "Medium",
+   "length": 1,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 11,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 12,
+  "name": "medium-2: Medium, Length 2, beat 3",
+  "fermata": {
+   "type": "Medium",
+   "length": 2,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 13,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 14,
+  "name": "short-2: Short, Length 2, beat 3",
+  "fermata": {
+   "type": "Short",
+   "length": 2,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 15,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 16,
+  "name": "long-2: Long, Length 2, beat 3",
+  "fermata": {
+   "type": "Long",
+   "length": 2,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 17,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 18,
+  "name": "rest: Medium, Length 0, on a rest at beat 3",
+  "fermata": {
+   "type": "Medium",
+   "length": 0,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 19,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 20,
+  "name": "last-beat: Medium, Length 0, last beat (beat 4)",
+  "fermata": {
+   "type": "Medium",
+   "length": 0,
+   "offsetTicks": 2880
+  }
+ },
+ {
+  "bar": 21,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 22,
+  "name": "mid-bar: Medium, Length 0, mid-bar (beat 2)",
+  "fermata": {
+   "type": "Medium",
+   "length": 0,
+   "offsetTicks": 960
+  }
+ },
+ {
+  "bar": 23,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 24,
+  "name": "half-note: Medium, Length 0, on a half note at beat 3",
+  "fermata": {
+   "type": "Medium",
+   "length": 0,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 25,
+  "name": "control",
+  "fermata": null
+ },
+ {
+  "bar": 26,
+  "name": "eighth-note: Medium, Length 0, on an eighth note at beat 3",
+  "fermata": {
+   "type": "Medium",
+   "length": 0,
+   "offsetTicks": 1920
+  }
+ },
+ {
+  "bar": 27,
+  "name": "control",
+  "fermata": null
+ }
+]

@@ -42,7 +42,23 @@ The notation design ([2026-10-15-gp8-notation-design.md](../superpowers/specs/20
 - The copy extracted in `.analysis/guitar-pro-8.1.5-31` carries a valid Arobas Music signature. Started with the probe file, it opened to a Software Activation window. It was closed again; no licence was entered and activation was not worked around.
 - Another executable on the machine was not run, because its origin could not be vouched for.
 
-So the hold waits for two MIDI files exported by the user from an activated Guitar Pro 8. The analyser has read only synthetic MIDI. Whether Guitar Pro reads the written `Offset` as the intended beat is also unconfirmed; the README asks the user to check that the symbols sit over the labelled notes.
+So the probe could not be run from here; the owner ran it, as recorded below. Whether Guitar Pro reads the written `Offset` as the intended beat is also unconfirmed; the README asks the user to check that the symbols sit over the labelled notes.
+
+### What Guitar Pro 8 exported (2026-11-12)
+
+The owner then exported both probe files as MIDI from an activated Guitar Pro 8. The two exports are committed as `src/interchange/fixtures/fermata-probe-120.gp8.mid` and `fermata-probe-60.gp8.mid`, with the layout they were made from, and pinned by `src/interchange/gp8-fermata-midi.test.ts`.
+
+- Each file is format 1 with three tracks at 480 ticks per quarter, one tempo event (120 or 60) and one 4/4 time signature.
+- The fermata track has 107 notes and the sustain track 69. Every onset is on the written grid and every note has its written length (quarter 480, half 960, eighth 240, whole 1920). The last note-off is at tick 51840, exactly 27 bars.
+- The 120 and 60 BPM files are identical in every tick.
+
+So **the MIDI Guitar Pro 8 exported from this probe contains no hold**, for Short, Medium or Long, for Length 0, 0.5, 1 or 2, on a note, a rest, a half note or an eighth. That is all it establishes:
+
+- **It is not established that Guitar Pro read the fermatas.** Nothing in the MIDI shows it, nobody confirmed the symbols were visible, and there is no fermata placed by Guitar Pro itself in the same export as a positive control. No Guitar Pro-authored file with a fermata is available to compare the written element with.
+- **Guitar Pro exported every note at MIDI key 0**, although the probe wrote each pitch three ways. The cause is not established. The probe now writes stringed notes on a tuned guitar staff, one possible cause; that version has not been through Guitar Pro.
+- It says nothing about how Guitar Pro plays a fermata itself, only about its MIDI export.
+
+TabPlayer's playback ignoring the fermata therefore matches Guitar Pro's MIDI export of our file, with the read unconfirmed. It is not established parity, and **no hold is implemented**. One step would settle the caveats: open the regenerated probe (`node scripts/fermata-probe.mjs write`) in Guitar Pro 8, confirm the symbols show on the case bars, add one fermata by hand on a control bar, save as `.gp` and export MIDI again.
 
 ## Review
 
@@ -51,6 +67,7 @@ Implemented by Sonnet subagents and reviewed by a Fable subagent.
 - **Golpe commit.** Confirmed by reading: a golpe on a track routed to an external MIDI output was allocated a melodic channel and sent as a pitched note, with the knock itself silent. Fixed in the following commit. Confirmed by running: the MIDI round trip yields a drum part, recorded above as a limit.
 - **Routing fix commit.** Reviewed by reading only. The blocking defect was confirmed fixed, with allocation unchanged for scores without golpe and no new work on the audio thread. Found: the knock lane wrote the guitar's volume, pan and the Standard kit onto the shared percussion channel, so a guitar's fader could move the drums and a drum track listed first lost its kit on each restatement. Fixed in the following commit, with tests for a drum track on a Power kit in both track orders.
 - **Knock-lane fix commit.** No defect found; `cargo test --lib midi_out` (83 passed) and `--test audio_midi_out` (15 passed) were run by the reviewer on merged `develop`. Noted and left: a golpe guitar alone on a port states the Standard kit but no level on channel 10, so the knock plays at whatever volume the device last held there; and after a drum track is muted or unrouted mid-play nothing is restated until the next start or seek.
+- **Evidence commit.** The reviewer decoded both exports with its own reader and confirmed every number above. It found the first wording ("Guitar Pro 8's MIDI export applies no hold") stronger than the data, and the key-0 cause stated as fact; both are reworded. It judged the fixtures appropriate to commit: 1.7 KB each of timing data from our own synthetic probe, with no personal data.
 - **Probe commit.** Found sound: the cases separate the hypotheses, the MIDI reader handled 20,000 random tracks and two 8 MB degenerate files without throwing, and nothing is written into tracked folders.
 
 ## Verification

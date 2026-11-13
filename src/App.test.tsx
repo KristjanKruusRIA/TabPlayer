@@ -2425,3 +2425,52 @@ it('runs the practice shortcut commands from the command palette',async()=>{
   fireEvent.keyDown(screen.getByRole('combobox',{name:'Command'}),{key:'Enter'});
   expect(integration.setSpeed).toHaveBeenCalledWith(75);
 });
+
+// Instrument views: selecting from the instrument, the keyboard's own panel and per-user view options (THE-58).
+const instrumentViewKey='tabplayer.instrumentView';
+it('selects the beat of a clicked instrument note in the score, as a click on the score does',async()=>{
+  window.localStorage.removeItem(instrumentEditKey);
+  const c=await setup(seededProject(),undefined,{instrumentVisible:true});
+  integration.activeNotes.mockImplementation(()=>[{id:'n0',trackId:'base/0',source:{target:origin,string:6},occurrence:0,startTick:0,endTick:960,key:69,velocity:90,articulation:'normal',legatoFrom:null,pitch:[]}] as never);
+  change('Measure','3');expect(screen.getByLabelText('Measure')).toHaveValue(3);
+  fireEvent.click(screen.getByRole('button',{name:'Hide instrument'}));fireEvent.click(screen.getByRole('button',{name:'Show instrument'}));
+  const mark=await screen.findByRole('button',{name:/^Select A4 in the score/});
+  const before=c.getState().snapshot;fireEvent.click(mark);
+  await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(1));
+  expect(c.getState().snapshot).toBe(before);expect(integration.commits).not.toHaveBeenCalled();
+  integration.activeNotes.mockImplementation(()=>[]);
+});
+it('gives the keyboard its own dock panel, apart from the neck, and remembers it for the user',async()=>{
+  window.localStorage.removeItem(instrumentViewKey);
+  try{
+    const c=await setup(),before=c.getState().snapshot;
+    fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));
+    const panel=screen.getByRole('region',{name:'Keyboard panel'});expect(panel).toBeVisible();
+    expect(within(panel).getByRole('img',{name:'Keyboard'})).toBeInTheDocument();expect(within(panel).queryByRole('img',{name:/fretboard/})).not.toBeInTheDocument();
+    expect(within(panel).queryByLabelText('Instrument view mode')).not.toBeInTheDocument();
+    expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Keyboard'})).toHaveAttribute('aria-pressed','true');expect(screen.getByRole('button',{name:'Instrument'})).toHaveAttribute('aria-pressed','false');expect(screen.getByRole('button',{name:'Overview'})).toHaveAttribute('aria-pressed','false');
+    expect(JSON.parse(window.localStorage.getItem(instrumentViewKey)!)).toMatchObject({keyboardPanel:true});
+    expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(false);
+    cleanup();await setup();
+    expect(screen.getByRole('region',{name:'Keyboard panel'})).toBeVisible();
+    fireEvent.click(screen.getByRole('button',{name:'Instrument'}));
+    expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(screen.queryByRole('region',{name:'Keyboard panel'})).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(instrumentViewKey)!)).toMatchObject({keyboardPanel:false});
+    fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));fireEvent.click(screen.getByRole('button',{name:'Overview'}));
+    expect(screen.queryByRole('region',{name:'Keyboard panel'})).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Overview'})).toHaveAttribute('aria-pressed','true');
+    expect(c.getState().snapshot).toBe(before);
+  }finally{window.localStorage.removeItem(instrumentViewKey);}
+});
+it('edits the score by clicking a scale overlay position: one undoable edit, and nothing for the note already there',async()=>{
+  const c=await setup(seededProject());
+  click('Browse scales');const dialog=await screen.findByRole('dialog',{name:'Scale browser'});
+  const position=()=>within(dialog).getByRole('button',{name:'Put F2 on string 1, fret 1 of the selected beat'});
+  fireEvent.click(position());
+  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
+  expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().snapshot.project.edits.at(-1)).toEqual({type:'setNote',target:origin,string:1,fret:1});
+  fireEvent.click(position());
+  expect(integration.commits).toHaveBeenCalledTimes(1);expect(currentBeat(c).notes).toHaveLength(2);
+  click('Close scales');click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  expect(c.getState().snapshot.project.edits).toEqual(seededProject().edits);
+});

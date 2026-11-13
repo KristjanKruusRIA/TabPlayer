@@ -28,6 +28,12 @@ export interface MidiCaptureState {
   notWritten:number;
   /** Chords are being turned away because a header menu is open, so the panel can say why. */
   blocked:boolean;
+  /** Notes of the MIDI guitar mapping written on another string than their channel's, because that channel has no string on the track. */
+  relocated:number;
+  /** Notes of the MIDI guitar mapping left out because their pitch was already on the beat. */
+  skipped:number;
+  /** The string count of the track the cursor is on, or null (no fretted track), so the panel can say where channels land. */
+  trackStrings:number|null;
 }
 export interface MidiCaptureSession {
   subscribe(listener:()=>void):()=>void;
@@ -42,6 +48,11 @@ export interface MidiCaptureSession {
   configure(settings:CaptureSettings):void;
   /** Counts a chord the score could not take, so the panel can say so. */
   countNotWritten(by?:number):void;
+  /** Count notes of a written chord that took another string, or were not written again. */
+  countRelocated(by?:number):void;
+  countSkipped(by?:number):void;
+  /** Tells the panel how many strings the selected track has. */
+  setTrackStrings(count:number|null):void;
   /** Records whether chords are being turned away because a menu is open. */
   setBlocked(blocked:boolean):void;
   /** Hears every chord of the running session, in order, once each; stale and repeated ones never arrive. */
@@ -56,7 +67,7 @@ const text=(error:unknown)=>error instanceof Error?error.message:String(error);
  * the running session's events count, with a chord counting only if its sequence number is new.
  */
 export function createMidiCaptureSession(bridge:MidiInBridge):MidiCaptureSession {
-  let state:MidiCaptureState={ports:null,listError:'',listAlert:false,unavailable:'',phase:'stopped',session:0,port:'',message:'',last:null,chords:0,dropped:0,problem:'',notWritten:0,blocked:false};
+  let state:MidiCaptureState={ports:null,listError:'',listAlert:false,unavailable:'',phase:'stopped',session:0,port:'',message:'',last:null,chords:0,dropped:0,problem:'',notWritten:0,blocked:false,relocated:0,skipped:0,trackStrings:null};
   let lastSeq=0,lastNotice=0,detach:(()=>void)|null=null,attaching:Promise<void>|null=null,cancelled=false,disposed=false;
   const listeners=new Set<()=>void>(),chordListeners=new Set<(chord:MidiChord)=>void>();
   // Read through a function: events change `state` while an await is pending, which narrowing cannot see.
@@ -103,7 +114,7 @@ export function createMidiCaptureSession(bridge:MidiInBridge):MidiCaptureSession
     await attach();
     if(!detach){set({problem:state.unavailable});return;}
     cancelled=false;lastSeq=0;
-    set({phase:'starting',port,message:'',problem:'',last:null,chords:0,dropped:0,notWritten:0,blocked:false});
+    set({phase:'starting',port,message:'',problem:'',last:null,chords:0,dropped:0,notWritten:0,blocked:false,relocated:0,skipped:0});
     try{
       const session=await bridge.start(port,settings);
       if(cancelled){set({phase:'stopped'});return;}
@@ -125,6 +136,9 @@ export function createMidiCaptureSession(bridge:MidiInBridge):MidiCaptureSession
     get:()=>state,
     attach,refresh,start,stop,
     countNotWritten:(by=1)=>{if(by>0)set({notWritten:state.notWritten+by});},
+    countRelocated:(by=1)=>{if(by>0)set({relocated:state.relocated+by});},
+    countSkipped:(by=1)=>{if(by>0)set({skipped:state.skipped+by});},
+    setTrackStrings:count=>{if(state.trackStrings!==count)set({trackStrings:count});},
     setBlocked:blocked=>{if(state.blocked!==blocked)set({blocked});},
     onChord:listener=>{chordListeners.add(listener);return ()=>{chordListeners.delete(listener);};},
     configure:settings=>{

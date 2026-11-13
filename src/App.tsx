@@ -93,6 +93,7 @@ import { TunerPanel } from './audio/TunerPanel';
 import { LineInPanel,useLineInRunning } from './audio/LineInPanel';
 import { MidiCaptureIndicator,MidiCapturePanel } from './editor/MidiCapturePanel';
 import { planMidiCapture } from './editor/midi-capture';
+import { activeStringMapping } from './editor/midi-capture-preferences';
 import { midiCaptureSession } from './editor/midi-capture-session';
 import { useMidiCapture } from './editor/useMidiCapture';
 import type { MidiChord } from './audio/midi-in';
@@ -325,6 +326,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{if(player)void player.loadDocument(state.snapshot.project,state,target.track,state.documentEpoch,playbackResumeEpoch);},[player,state.snapshot.project,state.score,state.settings,state.embeddedBacking,target.track,state.documentEpoch,playbackResumeEpoch]);
   const location=describeSelection(state.score,target);
   const indexed=location.staff.isPercussion||!location.staff.tuning.length;
+  const trackStrings=location.staff.isPercussion?0:location.staff.tuning.length;
+  useEffect(()=>{midiCaptureSession().setTrackStrings(trackStrings||null);},[trackStrings]);
   const noteIndex=selectedNoteIndex!==null&&location.beat?.notes[selectedNoteIndex]?selectedNoteIndex:null;
   const string=Math.max(1,Math.min(selectedString,location.staff.tuning.length));
   // A click in the instrument view leaves its clicked fret as the entry fret, even when that note was just removed.
@@ -584,7 +587,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     moveTo(point);
     if('refused' in plan){if(captured)midiCaptureSession().countNotWritten();refuse(t(`score_entry.${plan.refused}` as MessageKey,{name:plan.name}),JSON.stringify(point));return;}
     setInputNotice(plan.notice?{text:plan.notice,at:JSON.stringify(plan.next)}:null);
-    void edit(plan.command,score=>{if(sameBeat(cursorNow.current,placed)&&userMoves.current===moves){setSelection(repairSelection(score,plan.next));setNoteIndex(null);}if(plan.entry)entryDuration.current=plan.entry;if(pitch!==undefined&&!plan.removes)entryNear.current=pitch;if(captured){if(plan.hand!==undefined)handFret.current=plan.hand;const revision=controller.getState().revision;captureUndo.current={documentId:state.documentId,revision,from:placed,at:plan.next};captureEnd.current=plan.end?{documentId:state.documentId,revision,at:plan.next}:null;}})
+    void edit(plan.command,score=>{if(sameBeat(cursorNow.current,placed)&&userMoves.current===moves){setSelection(repairSelection(score,plan.next));setNoteIndex(null);}if(plan.entry)entryDuration.current=plan.entry;if(pitch!==undefined&&!plan.removes)entryNear.current=pitch;if(captured){if(plan.moved)midiCaptureSession().countRelocated(plan.moved);if(plan.skipped)midiCaptureSession().countSkipped(plan.skipped);if(plan.hand!==undefined)handFret.current=plan.hand;const revision=controller.getState().revision;captureUndo.current={documentId:state.documentId,revision,from:placed,at:plan.next};captureEnd.current=plan.end?{documentId:state.documentId,revision,at:plan.next}:null;}})
       .then(landed=>{if(!landed){if(captured)midiCaptureSession().countNotWritten();const text=t('score_entry.refused',{name:plan.name});setInputNotice({text,at:JSON.stringify(point)});if(entryFailure.current)entryFailure.current.text=text;}});
   };
   const entryBlocked=(point:BeatTarget)=>{
@@ -687,7 +690,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       moveTo(point);lose();refuse(t('score_entry.capture_end_blocked'),JSON.stringify(point));return;
     }
     setPendingAccidental(null);
-    runEntryPlan(point,planMidiCapture({project:current.snapshot.project,score:current.score,target:point,notes:chord.notes,preferences:inputPrefs,entry:entryDuration.current,hand:handFret.current}),undefined,true);
+    runEntryPlan(point,planMidiCapture({project:current.snapshot.project,score:current.score,target:point,notes:chord.notes,preferences:inputPrefs,entry:entryDuration.current,hand:handFret.current,mapping:activeStringMapping()}),undefined,true);
   };
   /** One keyboard entry key, live or from the queue: both run this, so a queued key reads the preferences and the pending accidental when its turn comes. */
   const performItem=(item:EntryItem,at:number)=>{

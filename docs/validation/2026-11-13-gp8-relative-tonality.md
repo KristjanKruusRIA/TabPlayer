@@ -1,6 +1,6 @@
 # GP8 parity P12: global relative tonality (2026-11-13)
 
-Slice 1 of `docs/superpowers/specs/2026-11-13-relative-tonality-design.md` (THE-57). The native core applies a playback-only key shift of -12 to +12 semitones. There is no user interface yet (slice 2), so the tracker rows P12 and P20 stay partial and are not updated by this note.
+Slice 1 of `docs/superpowers/specs/2026-11-13-relative-tonality-design.md` (THE-57). The native core applies a playback-only key shift of -12 to +12 semitones. Slice 2 (the interface, below) is built, and the tracker rows P12 and P20 were updated on 2026-11-13; both stay partial.
 
 ## What is built
 
@@ -46,7 +46,7 @@ A Key group in the transport (lower, value, raise, original key), three command-
 - The width of the transport at 960 by 600 and whether the Key group fits there. The driver `tests/desktop/parity-key-shift.mjs` checks it (and the rest of the real-app flow: acknowledged in `audio_status`, kept tick, loop and generation while playing, reset, no edit and no dirty mark); it was syntax-checked and **not run**.
 - The look of the group and its pending state in the real window, and use with a screen reader.
 - The German and Estonian wording was written for this slice and has not been reviewed by a speaker; "Tonart" and "Helistik" were chosen as the nearest existing terms.
-- Everything listed under Limits above still stands: nobody has listened, and the P12 and P20 tracker rows are not updated until the driver has run and the sound has been heard.
+- Everything listed under Limits above still stands: nobody has listened, and the P12 and P20 tracker rows (updated 2026-11-13) stay partial until the sound has been heard.
 
 ### After review (2026-11-13)
 

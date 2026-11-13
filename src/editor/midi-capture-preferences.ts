@@ -41,7 +41,9 @@ export function readMidiCapturePreferences(storage:PreferenceStorage|undefined=b
 let unsaved:StringMapping|null=null;
 export function saveMidiCapturePreferences(preferences:MidiCapturePreferences,storage:PreferenceStorage|undefined=browserStorage()):void {
   try{
-    storage?.setItem(MIDI_CAPTURE_KEY,JSON.stringify({port:preferences.port,chordWindowMs:preferences.chordWindowMs,minVelocity:preferences.minVelocity,stringMapping:preferences.stringMapping}));
+    // No storage at all (the browser refused to hand it out) keeps nothing either: the session's choice stands.
+    if(!storage){unsaved=preferences.stringMapping;return;}
+    storage.setItem(MIDI_CAPTURE_KEY,JSON.stringify({port:preferences.port,chordWindowMs:preferences.chordWindowMs,minVelocity:preferences.minVelocity,stringMapping:preferences.stringMapping}));
     unsaved=null;
   }catch{/* Storage can be unavailable; the choice then lasts for this session only. */unsaved=preferences.stringMapping;}
 }

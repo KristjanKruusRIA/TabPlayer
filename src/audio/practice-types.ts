@@ -8,7 +8,8 @@ export const CLICK_SOUNDS:readonly ClickSound[]=['beep','woodblock','cowbell','s
 /** `sound` is absent in settings written before it could be chosen, and then means the beep. */
 export interface MetronomeSettings {enabled:boolean;volume:number;visual:boolean;sound?:ClickSound}
 export interface CountInSettings {bars:number;betweenLoops:boolean}
-export interface PracticeSettings {tempo:PracticeTempo;metronome:MetronomeSettings;countIn:CountInSettings}
+/** `tonality` is the playback-only key shift in whole semitones (-12 to 12); absent means the original key. Session-only, never saved with the score. */
+export interface PracticeSettings {tempo:PracticeTempo;metronome:MetronomeSettings;countIn:CountInSettings;tonality?:number}
 export interface PracticePulse {serial:number;beat:number;beatsPerBar:number;accent:boolean;counting:boolean}
 export interface PracticeStatus {
   settings:PracticeSettings;phase:'idle'|'countIn'|'playing'|'paused'|'ended';countInRemaining:number;completedPasses:number;
@@ -16,4 +17,5 @@ export interface PracticeStatus {
 }
 export interface PracticeLoop {startTick:number;endTick:number}
 export const DEFAULT_PRACTICE:PracticeSettings={tempo:{kind:'relative',ratio:1},metronome:{enabled:false,volume:.4,visual:false,sound:'beep'},countIn:{bars:0,betweenLoops:false}};
+export const tonalityOf=(settings:PracticeSettings):number=>settings.tonality??0;
 export const clickSoundOf=(metronome:MetronomeSettings):ClickSound=>metronome.sound??'beep';

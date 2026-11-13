@@ -195,6 +195,66 @@
           "betweenLoops": false
         }
       }
+    },
+    {
+      "name": "key shift 0",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "tonality": 0
+      }
+    },
+    {
+      "name": "key shift -12",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "tonality": -12
+      }
+    },
+    {
+      "name": "key shift 12",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "tonality": 12
+      }
     }
   ],
   "invalid": [
@@ -713,6 +773,106 @@
           "bars": 0,
           "betweenLoops": null
         }
+      }
+    },
+    {
+      "name": "key shift 13",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "tonality": 13
+      }
+    },
+    {
+      "name": "key shift -13",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "tonality": -13
+      }
+    },
+    {
+      "name": "key shift 1.5",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "tonality": 1.5
+      }
+    },
+    {
+      "name": "key shift null",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "tonality": null
+      }
+    },
+    {
+      "name": "key shift text",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "tonality": "2"
       }
     }
   ]

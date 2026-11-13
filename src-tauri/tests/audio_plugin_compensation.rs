@@ -500,6 +500,7 @@ fn practice_settings(bars: u8, between_loops: bool) -> PracticeSettings {
             bars,
             between_loops,
         },
+        tonality: 0,
     }
 }
 

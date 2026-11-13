@@ -2482,6 +2482,7 @@ export const en = {
   'practice.error_repetitions': 'Repetitions per speed must be a whole number from 1 to 100.',
   'practice.error_volume': 'Metronome volume must be between 0% and 100%.',
   'practice.error_count_in': 'Count-in bars must be a whole number from 0 to 16.',
+  'practice.error_tonality': 'The key shift must be a whole number of semitones from -12 to 12.',
   'practice.error_fixed_backing': 'Fixed tempo is unavailable while a backing track is present.',
   'keys.chord_new_open': 'Ctrl/Cmd + N / O',
   'keys.chord_save': 'Ctrl/Cmd + S',

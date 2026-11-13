@@ -84,6 +84,9 @@ pub struct PracticeSettings {
     pub tempo: PracticeTempo,
     pub metronome: MetronomeSettings,
     pub count_in: CountInSettings,
+    /// Playback-only key shift in whole semitones (-12 to 12). Settings written without it mean the original key.
+    #[serde(default)]
+    pub tonality: i8,
 }
 
 impl Default for PracticeSettings {
@@ -100,6 +103,7 @@ impl Default for PracticeSettings {
                 bars: 0,
                 between_loops: false,
             },
+            tonality: 0,
         }
     }
 }
@@ -144,6 +148,9 @@ impl PracticeSettings {
         }
         if self.count_in.bars > 16 {
             return Err("Count-in must be between 0 and 16 bars.");
+        }
+        if !(-12..=12).contains(&self.tonality) {
+            return Err("Key shift must be between -12 and 12 semitones.");
         }
         Ok(())
     }

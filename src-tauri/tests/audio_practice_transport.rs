@@ -71,9 +71,14 @@ fn settings(tempo: PracticeTempo, bars: u8, between_loops: bool) -> PracticeSett
             bars,
             between_loops,
         },
+        tonality: 0,
     }
 }
 fn recorded_renderer(sustain: bool, backing: bool) -> Box<Renderer> {
+    recorded_renderer_shifted(sustain, backing, 0)
+}
+/// The renderer of `recorded_renderer` for the plan moved by the practice key shift `shift`.
+fn recorded_renderer_shifted(sustain: bool, backing: bool, shift: i8) -> Box<Renderer> {
     use tabplayer_lib::audio::{
         decode::DecodedAudio,
         resources::{Instrument, Region},
@@ -120,7 +125,7 @@ fn recorded_renderer(sustain: bool, backing: bool) -> Box<Renderer> {
     );
     let plan = Arc::new(plan);
     let mut renderer = Renderer::new(
-        plan.clone(),
+        tabplayer_lib::audio::tonality::transposed_plan(&plan, shift),
         Arc::new(resources),
         DocumentSettings::default(),
         48_000,
@@ -839,4 +844,103 @@ fn partial_loop_state_oracle_rejects_missing_sustain_bend_delay_and_program() {
             );
         }
     }
+}
+
+#[test]
+fn a_key_shift_applied_while_playing_keeps_tick_loop_and_generation_and_changes_what_is_heard() {
+    let mut transport = CallbackTransport::headless(48_000);
+    let practice = settings(PracticeTempo::Relative { ratio: 1.0 }, 0, false);
+    transport.install_with_practice(recorded_renderer(true, false), 1, false, practice);
+    transport
+        .command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: 3840.0,
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    transport.render_into(&mut [[0.0; 2]; 24_000]);
+    let before = transport.status();
+    assert_eq!(before.practice.settings.tonality, 0);
+    let shifted = PracticeSettings {
+        tonality: 4,
+        ..practice
+    };
+    // What the service queues: the practice, then the preserved install of the shifted renderer. The practice
+    // command alone does not move the echoed shift; only the renderer that sounds it does.
+    transport
+        .command(TransportCommand::SetPractice {
+            generation: 1,
+            settings: shifted,
+        })
+        .unwrap();
+    assert_eq!(transport.status().practice.settings.tonality, 0);
+    // A refused install (a generation that is not the live one) changes neither the echo nor the sound.
+    assert!(
+        transport
+            .install_with_practice(recorded_renderer_shifted(true, false, 4), 0, true, shifted)
+            .is_some()
+    );
+    assert_eq!(transport.status().practice.settings.tonality, 0);
+    let replaced = transport.install_with_practice(
+        recorded_renderer_shifted(true, false, 4),
+        1,
+        true,
+        shifted,
+    );
+    assert!(replaced.is_some(), "the old renderer is handed back");
+    let after = transport.status();
+    assert_eq!(after.practice.settings.tonality, 4);
+    assert_eq!(after.generation, before.generation);
+    assert!(before.r#loop.is_some());
+    assert_eq!(after.r#loop, before.r#loop);
+    assert!(after.playing);
+    assert!(
+        (after.tick - before.tick).abs() < 1.0,
+        "{} {}",
+        after.tick,
+        before.tick
+    );
+    // The new renderer plays the shifted key: from the same tick, the impulse of the recording arrives at a
+    // different time than the unshifted renderer's.
+    let mut unshifted = CallbackTransport::headless(48_000);
+    unshifted.install_with_practice(recorded_renderer(true, false), 1, false, practice);
+    unshifted
+        .command(TransportCommand::SeekTick {
+            generation: 1,
+            tick: 960.0,
+        })
+        .unwrap();
+    unshifted
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut moved = CallbackTransport::headless(48_000);
+    moved.install_with_practice(recorded_renderer_shifted(true, false, 4), 1, false, shifted);
+    moved
+        .command(TransportCommand::SeekTick {
+            generation: 1,
+            tick: 960.0,
+        })
+        .unwrap();
+    moved
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut plain = vec![[0.0; 2]; 96_000];
+    let mut keyed = vec![[0.0; 2]; 96_000];
+    unshifted.render_into(&mut plain);
+    moved.render_into(&mut keyed);
+    assert_ne!(plain, keyed, "the shifted renderer sounds a different key");
+    // A change of speed alone leaves the shift where it was.
+    transport
+        .command(TransportCommand::SetPractice {
+            generation: 1,
+            settings: PracticeSettings {
+                tempo: PracticeTempo::Relative { ratio: 0.5 },
+                ..shifted
+            },
+        })
+        .unwrap();
+    assert_eq!(transport.status().practice.settings.tonality, 4);
 }

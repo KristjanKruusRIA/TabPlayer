@@ -2201,11 +2201,28 @@ impl Renderer {
         mix: ChannelMix,
         processing: BackingProcessing,
     ) -> Result<(), String> {
+        self.install_processed_backing_shifted(audio, map, mix, processing, 0)
+    }
+    /// As `install_processed_backing`, with the practice key shift added to the backing's saved pitch.
+    pub fn install_processed_backing_shifted(
+        &mut self,
+        audio: Arc<DecodedAudio>,
+        map: BackingMap,
+        mix: ChannelMix,
+        processing: BackingProcessing,
+        extra_semitones: i8,
+    ) -> Result<(), String> {
         if matches!(self.tempo, RenderTempo::Fixed { .. }) {
             return Err("Fixed tempo is unavailable while a backing track is present.".into());
         }
         validate_mix(&mix)?;
-        let mut voice = BackingVoice::new_with_processing(audio, map, self.rate, processing)?;
+        let mut voice = BackingVoice::new_with_processing_shifted(
+            audio,
+            map,
+            self.rate,
+            processing,
+            extra_semitones,
+        )?;
         voice.seek(self.seconds);
         let any_solo = mix.solo || self.mix.channels.iter().any(|c| c.mix.solo);
         for channel in &mut self.mix.channels {

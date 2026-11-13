@@ -103,6 +103,103 @@ fn equivalent_pairs_and_cancellation_are_exact() {
     );
 }
 
+fn render_shifted(
+    audio: Arc<DecodedAudio>,
+    rate: u32,
+    semitones: f64,
+    cents: f64,
+    extra: i8,
+) -> Vec<[f32; 2]> {
+    let mut voice = BackingVoice::new_with_processing_shifted(
+        audio,
+        BackingMap::new(&[], 0.0, &plan()).unwrap(),
+        rate,
+        BackingProcessing {
+            semitones,
+            cents,
+            filter: BackingFilter::None,
+        },
+        extra,
+    )
+    .unwrap();
+    (0..rate * 3)
+        .map(|n| voice.next_frame(n as f64 / rate as f64))
+        .collect()
+}
+#[test]
+fn an_extra_shift_of_zero_is_bit_identical_to_the_unshifted_voice() {
+    let audio = tone(48000);
+    for (semitones, cents) in [(0., 0.), (3., 0.), (-2., 37.), (12., 100.)] {
+        assert_eq!(
+            render_shifted(audio.clone(), 48000, semitones, cents, 0),
+            render(audio.clone(), 48000, 1.0, semitones, cents),
+            "{semitones}/{cents}"
+        );
+    }
+}
+#[test]
+fn the_key_shift_adds_to_the_saved_pitch_and_cancellation_is_exact() {
+    let audio = tone(48000);
+    // Manual +3 with a key of -3 is the unprocessed voice, bit for bit.
+    assert_eq!(
+        render_shifted(audio.clone(), 48000, 3., 0., -3),
+        render(audio.clone(), 48000, 1.0, 0., 0.)
+    );
+    // A non-zero key shift with non-zero cents: the total is summed in whole cents and divided once.
+    assert_eq!(
+        render_shifted(audio.clone(), 48000, 3., 50., -3),
+        render(audio.clone(), 48000, 1.0, 0., 50.)
+    );
+    assert_eq!(
+        render_shifted(audio.clone(), 48000, -1., 40., -1),
+        render(audio.clone(), 48000, 1.0, -2., 40.)
+    );
+    assert_eq!(
+        render_shifted(audio.clone(), 48000, 1., -50., -1),
+        render(audio.clone(), 48000, 1.0, 0., -50.)
+    );
+    // The same total reached either way is the same audio.
+    assert_eq!(
+        render_shifted(audio.clone(), 48000, 2., 50., 3),
+        render(audio.clone(), 48000, 1.0, 5., 50.)
+    );
+    // Manual +12 with a key of +12 is two octaves, and stays finite.
+    let x = render_shifted(audio.clone(), 48000, 12., 0., 12);
+    assert!(x.iter().all(|f| f[0].is_finite() && f[1].is_finite()));
+    let actual = frequency(&x[48000..], 48000);
+    assert!((actual - 1760.0).abs() <= 1760.0 * 0.003, "{actual}");
+    let x = render_shifted(audio, 48000, -12., 0., -12);
+    let actual = frequency(&x[48000..], 48000);
+    assert!((actual - 110.0).abs() <= 1.0, "{actual}");
+}
+#[test]
+fn the_saved_processing_is_validated_and_never_rewritten_by_the_key_shift() {
+    let audio = tone(48000);
+    let map = BackingMap::new(&[], 0.0, &plan()).unwrap();
+    let processing = BackingProcessing {
+        semitones: 13.,
+        cents: 0.,
+        filter: BackingFilter::None,
+    };
+    assert!(
+        BackingVoice::new_with_processing_shifted(
+            audio.clone(),
+            map.clone(),
+            48000,
+            processing,
+            -3
+        )
+        .is_err()
+    );
+    let saved = BackingProcessing {
+        semitones: 4.,
+        cents: -20.,
+        filter: BackingFilter::None,
+    };
+    let before = saved.clone();
+    BackingVoice::new_with_processing_shifted(audio, map, 48000, saved.clone(), 5).unwrap();
+    assert_eq!(saved, before);
+}
 #[test]
 fn voice_filter_changes_pcm_and_resets_at_excluded_eof_and_seek() {
     let rate = 48000;
@@ -593,6 +690,56 @@ fn processed_reference_ranges_and_loops_keep_excluded_pcm_out_at_rates_and_speed
                     assert_eq!(a.status().tick, 144.);
                     assert!(x[interval..].iter().all(|x| *x == [0.; 2]));
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_largest_effective_shift_is_finite_and_in_tune_at_every_speed() {
+    // Saved pitch +-12 semitones and +-100 cents plus the key shift of +-12 reaches +-25 semitones.
+    let audio = tone(48000);
+    for (semitones, cents, extra, target) in [
+        (12., 100., 12i8, 440.0 * 2.0_f64.powf(25.0 / 12.0)),
+        (-12., -100., -12, 440.0 * 2.0_f64.powf(-25.0 / 12.0)),
+        (12., 0., 12, 1760.0),
+        (-12., 0., -12, 110.0),
+    ] {
+        for speed in [0.1, 1.0, 3.0] {
+            let mut voice = BackingVoice::new_with_processing_shifted(
+                audio.clone(),
+                BackingMap::new(&[], 0.0, &plan()).unwrap(),
+                48000,
+                BackingProcessing {
+                    semitones,
+                    cents,
+                    filter: BackingFilter::None,
+                },
+                extra,
+            )
+            .unwrap();
+            let x: Vec<[f32; 2]> = (0..48000 * 3)
+                .map(|n| voice.next_frame(n as f64 / 48000.0 * speed))
+                .collect();
+            assert!(
+                x.iter()
+                    .all(|f| f[0].is_finite() && f[1].is_finite() && f[0] == -f[1]),
+                "{semitones}/{cents}/{extra} speed {speed}"
+            );
+            assert!(
+                x.iter().any(|f| f[0].abs() > 0.01),
+                "silent at {semitones}/{extra}"
+            );
+            assert!(
+                x.iter().all(|f| f[0].abs() < 0.2),
+                "overshoot at {semitones}/{extra}"
+            );
+            {
+                let actual = frequency(&x[48000..], 48000);
+                assert!(
+                    (actual - target).abs() <= 1.0_f64.max(target * 0.01),
+                    "{semitones}/{cents}/{extra} speed {speed}: {actual} expected {target}"
+                );
             }
         }
     }

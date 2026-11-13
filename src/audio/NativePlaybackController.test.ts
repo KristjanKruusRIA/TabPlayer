@@ -630,3 +630,21 @@ it('mixes drum kit elements for percussion tracks with volume, pan, mute, and so
 
   player.destroy();
 });
+
+it('a key shift is sent whole, acknowledged only by an echo that carries it, kept by later settings and reset by a new document',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();vi.mocked(bridge.command).mockClear();
+  const shifted={...defaults(),tonality:4};
+  player.setPractice(shifted);
+  expect(bridge.command).toHaveBeenCalledExactlyOnceWith({type:'setPractice',generation:player.generation,settings:shifted});
+  emit({practice:practiceStatus(defaults())});expect(player.getState().practicePending).toBe(true);
+  emit({practice:practiceStatus({...defaults(),tonality:0})});expect(player.getState().practicePending).toBe(true);
+  emit({practice:practiceStatus(structuredClone(shifted))});
+  expect(player.getState()).toMatchObject({practicePending:false,practice:{settings:{tonality:4}}});
+  // The same shift again is not a change; an echo of 0 acknowledges a settings object that never named a shift.
+  vi.mocked(bridge.command).mockClear();player.setPractice(structuredClone(shifted));expect(bridge.command).not.toHaveBeenCalled();
+  player.setPractice({...defaults(),tonality:0});emit({practice:practiceStatus({...defaults(),tonality:0})});
+  expect(player.getState().practicePending).toBe(false);
+  player.setPractice(shifted);emit({practice:practiceStatus(structuredClone(shifted))});
+  const other=blankProject();vi.mocked(bridge.prepare).mockClear();await player.loadDocument(other,buildDocument(other),0,1);
+  expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual(DEFAULT_PRACTICE);player.destroy();
+});

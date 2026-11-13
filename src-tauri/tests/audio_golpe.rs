@@ -265,3 +265,38 @@ fn a_pitched_track_on_channel_nine_with_no_golpe_plays_its_notes_as_any_other_ch
     let (a_gm, _) = stems(two_guitars(9, false), general);
     assert!(energy(&a_gm, 0.0, 0.2) > 1e-8);
 }
+
+#[test]
+fn a_practice_key_shift_leaves_the_knocks_alone_and_moves_the_written_note() {
+    use tabplayer_lib::audio::tonality::transposed_plan;
+    let knocks = plan(false, &[(0.0, 77, 80), (960.0, 37, 80)]);
+    let plain = render(knocks.clone());
+    assert!(energy(&plain, 0.0, 0.1) > 1e-8);
+    for shift in [-12, 5, 12] {
+        assert_eq!(
+            render(transposed_plan(&knocks, shift)),
+            plain,
+            "shift {shift}"
+        );
+    }
+    // The written note of the same plan does move (this fixture's region has no keytrack, so only the key shows).
+    let written = plan(true, &[(0.0, 77, 80)]);
+    let shifted = transposed_plan(&written, 2);
+    assert_eq!(shifted.notes[0].key, 69);
+    assert!(shifted.midi.iter().any(|e| matches!(
+        e,
+        tabplayer_lib::audio::plan::PlanMidiEvent::NoteOn {
+            channel: 0,
+            key: 69,
+            ..
+        }
+    )));
+    assert!(shifted.midi.iter().any(|e| matches!(
+        e,
+        tabplayer_lib::audio::plan::PlanMidiEvent::NoteOn {
+            channel: 9,
+            key: 77,
+            ..
+        }
+    )));
+}

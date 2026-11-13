@@ -216,6 +216,18 @@ impl BackingVoice {
         sample_rate: u32,
         processing: BackingProcessing,
     ) -> Result<Self, String> {
+        Self::new_with_processing_shifted(audio, map, sample_rate, processing, 0)
+    }
+    /// As `new_with_processing`, with the practice key shift `extra_semitones` added to the saved pitch. The saved
+    /// `processing` is validated as it stands (the shift never loosens it) and is not rewritten; the total can reach
+    /// 25 semitones either way. With a shift of 0 the pitch is exactly the saved value's.
+    pub fn new_with_processing_shifted(
+        audio: Arc<DecodedAudio>,
+        map: BackingMap,
+        sample_rate: u32,
+        processing: BackingProcessing,
+        extra_semitones: i8,
+    ) -> Result<Self, String> {
         processing.validate()?;
         if audio.sample_rate == 0
             || audio.frames.is_empty()
@@ -266,7 +278,15 @@ impl BackingVoice {
             }
         }
         let mut step = audio.sample_rate as f64 / sample_rate as f64;
-        let pitch = processing.semitones + processing.cents / 100.0;
+        let pitch = if extra_semitones == 0 {
+            processing.semitones + processing.cents / 100.0
+        } else {
+            // Whole cents, summed as integers and divided once, so a cancelling pair is exactly neutral.
+            let cents = processing.semitones as i64 * 100
+                + processing.cents as i64
+                + i64::from(extra_semitones) * 100;
+            cents as f64 / 100.0
+        };
         if pitch != 0.0 {
             step *= 2.0_f64.powf(pitch / 12.0);
         }

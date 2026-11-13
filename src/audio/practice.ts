@@ -12,6 +12,7 @@ const PRACTICE_MESSAGES={
   repetitions:'Repetitions per speed must be a whole number from 1 to 100.',
   volume:'Metronome volume must be between 0% and 100%.',
   count_in:'Count-in bars must be a whole number from 0 to 16.',
+  tonality:'Key shift must be a whole number of semitones from -12 to 12.',
   fixed_backing:'Fixed tempo is unavailable while a backing track is present.',
 } as const;
 export type PracticeErrorCode=keyof typeof PRACTICE_MESSAGES;
@@ -35,7 +36,7 @@ function number(value:unknown,min:number,max:number,code:PracticeErrorCode):numb
 function flag(value:unknown) {if(typeof value!=='boolean')throw new Error('Invalid practice setting flag.');}
 
 export function validatePractice(settings:PracticeSettings,hasBacking:boolean):void {
-  const value=exact(settings,['tempo','metronome','countIn']),tempo=object(value.tempo);
+  const value=exact(settings,Object.hasOwn(settings,'tonality')?['tempo','metronome','countIn','tonality']:['tempo','metronome','countIn']),tempo=object(value.tempo);
   if(tempo.kind==='relative'){
     exact(tempo,['kind','ratio']);number(tempo.ratio,.1,3,'relative');
   }else if(tempo.kind==='fixed'){
@@ -52,11 +53,12 @@ export function validatePractice(settings:PracticeSettings,hasBacking:boolean):v
   flag(metronome.enabled);flag(metronome.visual);number(metronome.volume,0,1,'volume');
   const count=exact(value.countIn,['bars','betweenLoops']);flag(count.betweenLoops);
   if(!Number.isInteger(number(count.bars,0,16,'count_in')))throw new PracticeError('count_in');
+  if(Object.hasOwn(value,'tonality')&&!Number.isInteger(number(value.tonality,-12,12,'tonality')))throw new PracticeError('tonality');
   if(hasBacking&&tempo.kind==='fixed')throw new PracticeError('fixed_backing');
 }
 
 export function practiceForBacking(settings:PracticeSettings,hasBacking:boolean):{settings:PracticeSettings;notice:PracticeNotice|null} {
   validatePractice(settings,false);
   const disabled=hasBacking&&settings.tempo.kind==='fixed';
-  return {settings:{tempo:disabled?{kind:'relative',ratio:1}:{...settings.tempo},metronome:{...settings.metronome},countIn:{...settings.countIn}},notice:disabled?'fixed_tempo_disabled_backing':null};
+  return {settings:{tempo:disabled?{kind:'relative',ratio:1}:{...settings.tempo},metronome:{...settings.metronome},countIn:{...settings.countIn},...(settings.tonality===undefined?{}:{tonality:settings.tonality})},notice:disabled?'fixed_tempo_disabled_backing':null};
 }

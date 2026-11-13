@@ -3,7 +3,7 @@ import { en } from './en';
 import { et } from './et';
 import { de } from './de';
 import {
-  buildRows, countFlags, csvField, edgeDifference, groupByArea, loadCatalog, parseCsv, placeholders, planApply, rowsToCsv, rowsToMarkdown, COLUMNS,
+  buildRows, countFlags, csvField, edgeDifference, groupByArea, loadCatalog, parseCsv, placeholders, planApply, protectCell, rowsToCsv, rowsToMarkdown, unprotectCell, COLUMNS,
 } from '../../scripts/i18n-review-table.mjs';
 
 const english = en as Record<string, string>;
@@ -98,5 +98,52 @@ describe('--apply planning', () => {
   it('refuses a correction that drops a placeholder, and a stale row', () => {
     expect(planApply('et', csv({ 'a.x': 'Takt' }), e, t).refused[0].reason).toContain('placeholders');
     expect(planApply('et', csv({ 'a.y': 'x' }), e, { ...t, 'a.y': 'Muu' }).refused[0].reason).toContain('current translation');
+  });
+});
+
+describe('edges flag ignores placeholder position', () => {
+  const edge = (en: string, tr: string) => buildRows('et', { 'a.x': en }, { 'a.x': tr }, [])[0].flags.includes('edges');
+  it('does not flag a row whose only difference is where the {name} sits', () => {
+    expect(edge('{count} quarters remaining', 'Veel {count} veerandnooti')).toBe(false);
+    expect(edge('Bar {n}', '{n} takt')).toBe(false);
+    expect(edge('Go to {name}', '{name} juurde')).toBe(false);
+  });
+  it('still flags real differences in whitespace and punctuation', () => {
+    expect(edge('Save {name}.', 'Salvesta {name}')).toBe(true);
+    expect(edge('Open…', 'Ava')).toBe(true);
+    expect(edge('{n} items', '{n} asja ')).toBe(true);
+  });
+});
+
+describe('spreadsheet formula protection', () => {
+  const cell = (value: string) => parseCsv(rowsToCsv(buildRows('et', { 'a.x': value }, { 'a.x': value + '!' }, [])))[1];
+  it.each(['=', '+', '-', '@'])('prefixes an apostrophe on a cell starting with %s and removes exactly that on read', (c) => {
+    const row = cell(`${c}1+2`);
+    expect(row[1]).toBe(`'${c}1+2`);
+    expect(unprotectCell(row[1])).toBe(`${c}1+2`);
+  });
+  it('round-trips a value that genuinely starts with an apostrophe before one of the four', () => {
+    for (const c of ['=', '+', '-', '@']) {
+      const value = `'${c}x`;
+      expect(unprotectCell(protectCell(value))).toBe(value);
+      expect(protectCell(value)).toBe(`''${c}x`);
+    }
+    expect(protectCell("'plain")).toBe("'plain");
+    expect(unprotectCell("'plain")).toBe("'plain");
+  });
+  it('leaves normal text alone', () => {
+    expect(protectCell('Save')).toBe('Save');
+    expect(unprotectCell('Save')).toBe('Save');
+    expect(protectCell('')).toBe('');
+    for (const v of ['1 bar', '.5', ',x', '<b>', '?']) expect(protectCell(v)).toBe(v);
+  });
+  it('--apply sees the exact catalog values back, and decodes a correction typed with the same prefix', () => {
+    const e = { 'a.x': '=Sum', 'a.y': "'-odd", 'a.z': 'Save' }, t = { 'a.x': '+Summa', 'a.y': '@x', 'a.z': 'Salvesta' };
+    const rows = parseCsv(rowsToCsv(buildRows('et', e, t, [])));
+    const last = rows[0].length - 1;
+    for (const row of rows.slice(1)) row[last] = row[0] === 'a.x' ? "'=Summa" : row[0] === 'a.y' ? "'+y" : '';
+    const plan = planApply('et', rows, e, t);
+    expect(plan.refused).toEqual([]);
+    expect(plan.changes.map((c) => [c.key, c.from, c.to])).toEqual([['a.x', '+Summa', '=Summa'], ['a.y', '@x', '+y']]);
   });
 });

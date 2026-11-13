@@ -12,6 +12,8 @@ export function countFlags(rows: ReviewRow[]): Record<string, number>;
 export function areaOf(key: string): string;
 export function groupByArea(rows: ReviewRow[]): Map<string, ReviewRow[]>;
 export function csvField(value: unknown): string;
+export function protectCell(value: string): string;
+export function unprotectCell(value: string): string;
 export function csvLine(fields: unknown[]): string;
 export function rowsToCsv(rows: ReviewRow[]): string;
 export function rowsToMarkdown(lang: string, rows: ReviewRow[]): string;

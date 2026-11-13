@@ -6,7 +6,7 @@ Ticket THE-76, tracker row W20. This note describes the tooling that lets a nati
 
 - `scripts/i18n-review-table.mjs`: builds the review files and checks a filled-in CSV.
 - `scripts/i18n-review-table.d.mts`: type declarations for the test.
-- `src/i18n/review-table.test.ts`: Vitest test of the builder (17 tests).
+- `src/i18n/review-table.test.ts`: Vitest test of the builder.
 
 ## Run it
 
@@ -31,7 +31,7 @@ All are computed from the catalogs.
 | `missing` | key absent from the translation, or empty or blank |
 | `identical` | translation equals the English text exactly (often fine, for example "MIDI") |
 | `placeholders` | the set of `{name}` tokens differs from English |
-| `edges` | the run of whitespace, punctuation and symbols at the start or end differs from English (for example `…` against `...`) |
+| `edges` | the run of whitespace, punctuation and symbols at the start or end differs from English (for example `…` against `...`). `{name}` tokens, with the spaces next to them, are ignored, so a placeholder at the start in one language and the end in the other is not flagged (the first version counted 71 Estonian and 67 German rows, most of them only that) |
 | `inconsistent` | the same English text is translated differently under another key in this language; `details` lists those keys |
 | `term:<id>` | the text matches a term that a validation note asks a reviewer to check or records as chosen |
 | `forbidden-term:<id>` | the text contains a wording a note says must not appear |
@@ -42,7 +42,7 @@ The term table is `REVIEW_TERMS` in the script. Each entry names the note that r
 - `2026-10-31-gp8-localization-complete.md`: Estonian Flazolett, Kolmekümnekahend-, Jäta alles, and the forbidden patterns medikaator, flazool, Balkeni, fermat, kolmekümnekahjandik, puhver; German Haltebogen (not Bindung), "Tapping mit der linken Hand", "Explizites Bogenziel".
 - `2026-11-13-the-203-command-palette-i18n.md`: every `palette.command_*`, `palette.hint_*`, `palette.aliases_*` and `palette.error_*` key; Estonian `krihv` and `astmetraat`; German "Beat".
 
-`2026-11-13-the-203` says "Estonian fret is `krihv`, not astmetraat" for the palette. The catalog still uses "Astmetraat" in 14 rows, so that entry is a `check` flag, not `forbidden`. The reviewer should choose one term.
+`2026-11-13-the-203` says "Estonian fret is `krihv`, not astmetraat" for the palette. The catalog still uses "Astmetraat" in 16 keys (see "Decisions the reviewer is asked for"), so that entry is a `check` flag, not `forbidden`. The reviewer should choose one term.
 
 ## What the reviewer does
 
@@ -52,7 +52,7 @@ The term table is `REVIEW_TERMS` in the script. Each entry names the note that r
 4. Keep every `{name}` token exactly as in English. The token is code; it is filled in at run time. Word order around it may change.
 5. Do not edit any other column. Save as CSV (UTF-8). Do not rename the file; the language is read from `review-et` or `review-de` in the name.
 
-No English or current-translation cell begins with `=`, `+`, `-` or `@` (checked on the current catalogs: 0 rows), so Excel will not read any as a formula. A correction that starts with one of those characters could be read as one; the reviewer should avoid starting a correction that way.
+A spreadsheet reads a cell that starts with `=`, `+`, `-` or `@` as a formula. Such cells (English, current translation and the other text columns) are written with one leading apostrophe, so `=Sum` appears as `'=Sum`. A value that already starts with apostrophes followed by one of those characters gets one more, so the change is exactly reversible. `--apply` removes exactly that one apostrophe from the English, current-translation and correction cells before it compares or plans anything. A reviewer who wants a correction that starts with one of the four characters types the apostrophe first. On the current catalogs no cell needs it (0 rows), so this is a safeguard. The leading apostrophe is visible in the sheet; the sheet does not hide it.
 
 ## How corrections come back
 
@@ -71,18 +71,49 @@ Both catalogs hold 2433 keys, the same as English (the English file has 2509 lin
 | flag (rows) | et | de |
 |---|---|---|
 | keys | 2433 | 2433 |
-| rows with any flag | 408 | 445 |
+| rows with any flag | 411 | 425 |
 | missing | 0 | 0 |
 | identical to English | 107 | 167 |
 | placeholders differ | 0 | 0 |
-| edges differ | 71 | 67 |
+| edges differ | 67 | 45 |
 | inconsistent | 167 | 105 |
-| term | 113 | 146 |
+| term | 115 | 146 |
 | forbidden-term | 0 | 1 |
 
 The one German `forbidden-term` is `help.topic.shortcuts.tie`, which ends "löst die Bindungen". The notes say German tie is "Haltebogen", never "Bindung". This looks like a leftover; it was not changed.
 
 No placeholder mismatch exists in either catalog, so the test's list of known mismatches is empty and a new one fails the test.
+
+## Decisions the reviewer is asked for
+
+Two choices the earlier notes left open, with the keys the script finds on this branch. The catalogs are unchanged.
+
+### Estonian: fret
+
+`2026-11-13-the-203-command-palette-i18n.md` chose "krihv" for the palette and said "astmetraat" was wrong there. The rest of the catalog still uses "astmetraat". The reviewer is asked to pick one term for fret (and say what the plural and case forms should be), and for the nearby "krihvinumbrid".
+
+"astmetra..." (astmetraat, astmetraati, astmetraatidega, astmetraadid, astmetraatide; 16 keys, flag `term:et-astmetraat`):
+
+- editor fret field and related: `editor.fret`, `editor.barre_fret`, `editor.maximum_fret`, `editor.err_max_fret`
+- pending fret: `score.pending_fret_label`, `editor.pending_fret`
+- partial capo: `editor.partial_capo_fret`, `editor.partial_capo_fret_range`, `editor.partial_capo_enter_fret`
+- banjo drone: `editor.drone_fret_range`, `editor.drone_fret_numbering`, `engine.banjo_drone_no_frets`, `engine.banjo_drone_assert`
+- engine error: `engine.fret_outside_midi_range`
+- instruments: `instruments.cant_enter_drums_on_pitched`
+- typography: `typography.blank_note`
+
+"krihv..." (12 keys, flag `term:et-krihv`):
+
+- command palette (6): `palette.command_fret`, `palette.hint_fret`, `palette.error_fret_unfretted`, `palette.error_fret`, `palette.error_fret_pitch`, `palette.aliases_fret`
+- help (3): `help.shortcut_fret`, `help.topic.editing.p1`, `help.shortcut_tie`
+- refinger (2): `refinger.reason_harmonic`, `refinger.chord_diagram`
+- engraving (1): `engraving.preset_rock_description`
+
+The palette hint is `krihv 5`, and the palette accepts typed words through its alias list, so changing the palette term also means changing `palette.aliases_fret`.
+
+### German: tie
+
+`2026-10-31-gp8-localization-complete.md` records "Haltebogen" for a tie and says never "Bindung". "Haltebogen" is in 9 keys. The only "Bindung" in the German catalog is one key, `help.topic.shortcuts.tie`, which ends "löst die Bindungen" (flag `forbidden-term:de-bindung`). The reviewer is asked to confirm "Haltebogen" and to say how that sentence should read ("bindet" in the same sentence is a verb for tying notes; say if it should change too).
 
 ## Limits
 

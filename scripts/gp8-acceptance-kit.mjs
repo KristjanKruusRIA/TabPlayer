@@ -1,21 +1,23 @@
 #!/usr/bin/env node
 // THE-61 Guitar Pro 8 acceptance kit.
-//   node scripts/gp8-acceptance-kit.mjs write [dir]     writes small authored .gp files, checklist.md and kit-manifest.json (default .analysis/gp8-acceptance/)
+//   node scripts/gp8-acceptance-kit.mjs write [dir]     writes the authored .gp files, kit-manifest.json and checklist.md (default .analysis/gp8-acceptance/)
 //   node scripts/gp8-acceptance-kit.mjs collect [dir]   reads what came back from Guitar Pro 8 (re-saved .gp, exported .mid) and writes results.md and results.json
-// Nothing here has been opened in Guitar Pro 8. The files are written with alphaTab's public Guitar Pro 7/8 writer, not with TabPlayer's
-// own exporter: that exporter is TypeScript with extensionless imports and a plain Node script cannot load it (the same limit as
-// scripts/fermata-probe.mjs, whose helpers this script reuses). So TabPlayer-only additions (TabPlayerCurves, partial capo, harmony
-// carriers) are NOT exercised here. Fermatas are patched into score.gpif by hand, exactly as the fermata probe does.
-// `collect` compares the GPIF XML of the file written with the XML of the file Guitar Pro saved, for the named elements only, and
-// reads the exported MIDI with the probe's Standard MIDI File reader. It never throws on a returned file: every problem is reported.
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+// Nothing here has been opened in Guitar Pro 8. The .gp files come from TabPlayer's own exporter (exportGpInterchange), so they carry its
+// private additions. That exporter is TypeScript with extensionless imports, which plain Node cannot load, so `write` runs
+// `vitest run src/interchange/gp8-acceptance-kit-write.test.ts` with GP8_KIT_OUT set; the builder is src/interchange/gp8-acceptance-families.ts.
+// `collect` stays here: it compares the GPIF XML (and named archive members) of the file written with the file Guitar Pro saved, for the
+// named elements only, and reads the exported MIDI with the fermata probe's Standard MIDI File reader. It never throws on a returned file.
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
-import { exporter, model, Settings } from '@coderline/alphatab';
-import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
-import { fermataXml, GUITAR_TUNING, MAX_MIDI_BYTES, parseSmf, stringAndFret, tempoMap, tickToSeconds } from './fermata-probe.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { strFromU8, unzipSync } from 'fflate';
+import { MAX_MIDI_BYTES, parseSmf, tempoMap, tickToSeconds } from './fermata-probe.mjs';
 
+export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+export const WRITE_TEST = 'src/interchange/gp8-acceptance-kit-write.test.ts';
+export const MAX_MEMBER_BYTES = 2 * 1024 * 1024;
 export const DEFAULT_DIR = '.analysis/gp8-acceptance';
 export const MAX_GP_BYTES = 64 * 1024 * 1024;
 export const MAX_GPIF_BYTES = 48 * 1024 * 1024;
@@ -24,337 +26,48 @@ export const MAX_XML_DEPTH = 256;
 export const GPIF = 'Content/score.gpif';
 export const BPM = 120;
 
-// ---------------------------------------------------------------------------------------------------------------------
-// Authoring helpers
-// ---------------------------------------------------------------------------------------------------------------------
-/** Enum member by name; throws with the member list if alphaTab no longer has it, so the kit never writes `undefined`. */
-const E = (enumObject, enumName, name) => {
-  const value = enumObject?.[name];
-  if (typeof value !== 'number') throw new Error(`alphaTab model.${enumName}.${name} does not exist. Members: ${Object.keys(enumObject ?? {}).filter((k) => Number.isNaN(Number(k))).join(', ')}`);
-  return value;
-};
-const M = (enumName, name) => E(model[enumName], enumName, name);
-const point = (offset, value) => new model.BendPoint(offset, value);
-
-const DURATION_VALUE = { 2: 'Half', 4: 'Quarter', 8: 'Eighth', 16: 'Sixteenth' };
-/** Quarter notes a beat lasts, from its duration, dots and tuplet ratio. */
-export function beatQuarters(beat) {
-  const base = 4 / beat.duration;
-  let q = base * (beat.dots === 1 ? 1.5 : beat.dots === 2 ? 1.75 : 1);
-  if (beat.tupletNumerator > 0 && beat.tupletDenominator > 0) q = (q * beat.tupletDenominator) / beat.tupletNumerator;
-  return q;
-}
-
-/** A bar's default beats: one note per beat, quarters in x/4, eighths in x/8, halves in x/2. */
-function shapeOf(testCase) {
-  const [num, den] = testCase.time ?? [4, 4];
-  return { num, den, count: testCase.beats ?? num, duration: M('Duration', DURATION_VALUE[den] ?? 'Quarter') };
-}
-const noteFor = (index, tuning) => {
-  const strings = tuning.length;
-  const string = Math.max(1, strings - (index % 3));
-  return { string, fret: 2 + (index % 5) };
-};
-
-/** Family definitions. `cases` is one bar each, in order. `build(c)` receives {score, track, staff, bar, masterBar, beats, notes, index};
- *  `elements` are the GPIF elements the family is about (selectors, see `select`). `midi.timing` false means collect does not judge timing. */
-const link = (from, to, flags) => { Object.assign(from, flags.from ?? {}); Object.assign(to, flags.to ?? {}); };
-export const FAMILIES = [
-  {
-    id: 'structure', title: 'Bar structure: meter, free time, triplet feel, tempo, key',
-    look: 'Time signatures (3/4, 6/8, cut time), the double bar, free time, the swing feel mark, a tempo change to 90 and key signatures. Common time and cut time are look-only: collect does not compare them, because the symbol is not an element of score.gpif.',
-    cases: [
-      { name: '3/4', time: [3, 4], build: () => {} },
-      { name: '6/8', time: [6, 8], build: () => {} },
-      { name: 'common time', build: (c) => { c.masterBar.timeSignatureCommon = true; } },
-      { name: 'cut time 2/2', time: [2, 2], build: (c) => { c.masterBar.timeSignatureCommon = true; } },
-      { name: 'double bar', build: (c) => { c.masterBar.isDoubleBar = true; } },
-      { name: 'free time', build: (c) => { c.masterBar.isFreeTime = true; } },
-      { name: 'triplet feel 8th', build: (c) => { c.masterBar.tripletFeel = M('TripletFeel', 'Triplet8th'); } },
-      { name: 'tempo 90', build: (c) => { c.masterBar.tempoAutomations.push(model.Automation.buildTempoAutomation(false, 0, 90, 2)); } },
-      { name: 'key 3 sharps major', build: (c) => { c.bar.keySignature = 3; c.bar.keySignatureType = M('KeySignatureType', 'Major'); } },
-      { name: 'key 2 flats minor', build: (c) => { c.bar.keySignature = -2; c.bar.keySignatureType = M('KeySignatureType', 'Minor'); } },
-    ],
-    elements: ['MasterBar>Time', 'MasterBar>Key', 'MasterBar>DoubleBar', 'MasterBar>FreeTime', 'MasterBar>TripletFeel', 'MasterBar>Section', 'Automation'],
-  },
-  {
-    id: 'repeats', title: 'Repeats, alternate endings and jumps',
-    look: 'Start repeat, end repeat with 3 plays, first and second endings, Segno, Coda and D.S. al Coda marks.',
-    midi: { timing: false, why: 'Guitar Pro expands repeats and jumps in a MIDI export, so the length differs from the written bars.' },
-    cases: [
-      { name: 'repeat start', build: (c) => { c.masterBar.isRepeatStart = true; } },
-      { name: 'repeat end x3 with ending 1', build: (c) => { c.masterBar.repeatCount = 3; c.masterBar.alternateEndings = 1; } },
-      { name: 'ending 2', build: (c) => { c.masterBar.alternateEndings = 2; } },
-      { name: 'segno target', build: (c) => { c.masterBar.addDirection(M('Direction', 'TargetSegno')); } },
-      { name: 'coda target', build: (c) => { c.masterBar.addDirection(M('Direction', 'TargetCoda')); } },
-      { name: 'D.S. al Coda', build: (c) => { c.masterBar.addDirection(M('Direction', 'JumpDalSegnoAlCoda')); } },
-    ],
-    elements: ['MasterBar>Repeat', 'MasterBar>AlternateEndings', 'Directions>Target', 'Directions>Jump', 'MasterBar>Section'],
-  },
-  {
-    id: 'fermata', title: 'Fermatas written by the kit (Short, Medium, Long)',
-    look: 'A fermata symbol over the first beat of the three labelled bars. Do not add or remove any.',
-    midi: { timing: false, why: 'A fermata may lengthen playback; that question belongs to the fermata control (file fermata-control) and to scripts/fermata-probe.mjs.' },
-    cases: [
-      { name: 'Short, Length 0', fermata: { type: 'Short', length: 0 }, build: () => {} },
-      { name: 'Medium, Length 0', fermata: { type: 'Medium', length: 0 }, build: () => {} },
-      { name: 'Long, Length 1', fermata: { type: 'Long', length: 1 }, build: () => {} },
-    ],
-    elements: ['Fermata', 'Fermata>Type', 'Fermata>Length', 'Fermata>Offset'],
-  },
-  {
-    id: 'fermata-control', title: 'Fermata positive control: add ONE fermata by hand',
-    look: 'This file has no fermata. In Guitar Pro 8 add a single fermata to the first beat of bar 2 by hand, then save and export as described. It shows how Guitar Pro itself writes a fermata and whether its own MIDI export holds the note.',
-    midi: { timing: false, why: 'The point of this file is to measure whether a hold appears; collect reports the numbers instead of a verdict.' },
-    control: true,
-    cases: [
-      { name: 'plain bar 1', build: () => {} },
-      { name: 'plain bar 2 (add the fermata here)', build: () => {} },
-      { name: 'plain bar 3', build: () => {} },
-      { name: 'plain bar 4', build: () => {} },
-    ],
-    elements: ['Fermata', 'Fermata>Type', 'Fermata>Length', 'Fermata>Offset'],
-  },
-  {
-    id: 'dynamics', title: 'Dynamics, crescendo, fades, beat text and lyrics',
-    look: 'Dynamic marks pp and ff, a crescendo, a fade in, the words "Solo" over a beat and a lyric syllable under each beat of the last bar.',
-    cases: [
-      { name: 'dynamics pp', build: (c) => { c.beats[0].dynamics = M('DynamicValue', 'PP'); } },
-      { name: 'dynamics ff', build: (c) => { c.beats[0].dynamics = M('DynamicValue', 'FF'); } },
-      { name: 'crescendo', build: (c) => { c.beats[0].crescendo = M('CrescendoType', 'Crescendo'); } },
-      { name: 'fade in', build: (c) => { c.beats[0].fade = M('FadeType', 'FadeIn'); } },
-      { name: 'beat text "Solo"', build: (c) => { c.beats[0].text = 'Solo'; } },
-      { name: 'lyrics', build: (c) => { ['La', 'la', 'laa', 'la'].forEach((t, i) => { c.beats[i].lyrics = [t]; }); } },
-    ],
-    elements: ['Beat>Dynamic', 'Hairpin', 'Fadding', 'FreeText', 'Lyrics>Line'],
-  },
-  {
-    id: 'bends', title: 'Bends and whammy bar',
-    look: 'Bend shapes (bend, bend and release, pre-bend, pre-bend and release) and whammy dive and dip on the first beat of each bar.',
-    cases: [
-      { name: 'bend up 1 tone', build: (c) => { Object.assign(c.notes[0], { bendType: M('BendType', 'Bend'), bendPoints: [point(0, 0), point(60, 4)] }); } },
-      { name: 'bend and release', build: (c) => { Object.assign(c.notes[0], { bendType: M('BendType', 'BendRelease'), bendPoints: [point(0, 0), point(30, 4), point(60, 0)] }); } },
-      { name: 'pre-bend', build: (c) => { Object.assign(c.notes[0], { bendType: M('BendType', 'Prebend'), bendPoints: [point(0, 4), point(60, 4)] }); } },
-      { name: 'pre-bend and release', build: (c) => { Object.assign(c.notes[0], { bendType: M('BendType', 'PrebendRelease'), bendPoints: [point(0, 4), point(30, 4), point(60, 0)] }); } },
-      { name: 'whammy dive', build: (c) => { c.beats[0].whammyBarType = M('WhammyType', 'Dive'); c.beats[0].whammyBarPoints = [point(0, 0), point(60, -4)]; } },
-      { name: 'whammy dip', build: (c) => { c.beats[0].whammyBarType = M('WhammyType', 'Dip'); c.beats[0].whammyBarPoints = [point(0, 0), point(30, -4), point(60, 0)]; } },
-    ],
-    elements: ['Property[Bended]', 'Property[BendOriginValue]', 'Property[BendOriginOffset]', 'Property[BendMiddleValue]', 'Property[BendMiddleOffset1]', 'Property[BendMiddleOffset2]', 'Property[BendDestinationValue]', 'Property[BendDestinationOffset]', 'Whammy'],
-  },
-  {
-    id: 'links', title: 'Ties, hammer-ons and slides',
-    look: 'A tie, a hammer-on/pull-off, a shift slide, a legato slide, slides into the note from below and out downward.',
-    cases: [
-      { name: 'tie', build: (c) => { const [a, b] = c.notes; b.fret = a.fret; b.string = a.string; link(a, b, { from: { tieDestination: b }, to: { tieOrigin: a, isTieDestination: true } }); } },
-      { name: 'hammer-on', build: (c) => { const [a, b] = c.notes; b.string = a.string; b.fret = a.fret + 2; link(a, b, { from: { isHammerPullOrigin: true, hammerPullDestination: b }, to: { hammerPullOrigin: a } }); } },
-      { name: 'shift slide', build: (c) => { c.notes[0].slideOutType = M('SlideOutType', 'Shift'); } },
-      { name: 'legato slide', build: (c) => { c.notes[0].slideOutType = M('SlideOutType', 'Legato'); } },
-      { name: 'slide in from below', build: (c) => { c.notes[0].slideInType = M('SlideInType', 'IntoFromBelow'); } },
-      { name: 'slide out down', build: (c) => { c.notes[0].slideOutType = M('SlideOutType', 'OutDown'); } },
-    ],
-    elements: ['Tie', 'Property[HopoOrigin]', 'Property[HopoDestination]', 'Property[Slide]'],
-  },
-  {
-    id: 'note-marks', title: 'Note marks: muting, ghost, dead, accents, vibrato, fingering',
-    look: 'Palm mute, let ring, dead note, ghost note, staccato, normal and heavy accent, vibrato, left-hand tap and finger numbers.',
-    cases: [
-      { name: 'palm mute', build: (c) => { c.notes[0].isPalmMute = true; } },
-      { name: 'let ring', build: (c) => { c.notes[0].isLetRing = true; } },
-      { name: 'dead note', build: (c) => { c.notes[0].isDead = true; } },
-      { name: 'ghost note', build: (c) => { c.notes[0].isGhost = true; } },
-      { name: 'staccato', build: (c) => { c.notes[0].isStaccato = true; } },
-      { name: 'accent normal', build: (c) => { c.notes[0].accentuated = M('AccentuationType', 'Normal'); } },
-      { name: 'accent heavy', build: (c) => { c.notes[0].accentuated = M('AccentuationType', 'Heavy'); } },
-      { name: 'note vibrato wide', build: (c) => { c.notes[0].vibrato = M('VibratoType', 'Wide'); } },
-      { name: 'left-hand tap', build: (c) => { c.notes[0].isLeftHandTapped = true; } },
-      { name: 'fingering', build: (c) => { Object.assign(c.notes[0], { leftHandFinger: M('Fingers', 'IndexFinger'), rightHandFinger: M('Fingers', 'Thumb') }); } },
-    ],
-    elements: ['Property[PalmMuted]', 'LetRing', 'Property[Muted]', 'AntiAccent', 'Accent', 'Vibrato', 'Property[LeftHandTapped]', 'LeftFingering', 'RightFingering'],
-  },
-  {
-    id: 'harmonics-ornaments', title: 'Harmonics, trill and ornaments',
-    look: 'Natural, artificial, pinch, tap, semi and feedback harmonics, a trill and a turn.',
-    cases: [
-      { name: 'natural harmonic 12', build: (c) => { Object.assign(c.notes[0], { harmonicType: M('HarmonicType', 'Natural'), harmonicValue: 12 }); } },
-      { name: 'artificial harmonic', build: (c) => { Object.assign(c.notes[0], { harmonicType: M('HarmonicType', 'Artificial'), harmonicValue: 12 }); } },
-      { name: 'pinch harmonic', build: (c) => { Object.assign(c.notes[0], { harmonicType: M('HarmonicType', 'Pinch'), harmonicValue: 12 }); } },
-      { name: 'tap harmonic', build: (c) => { Object.assign(c.notes[0], { harmonicType: M('HarmonicType', 'Tap'), harmonicValue: 12 }); } },
-      { name: 'semi harmonic', build: (c) => { Object.assign(c.notes[0], { harmonicType: M('HarmonicType', 'Semi'), harmonicValue: 12 }); } },
-      { name: 'feedback harmonic', build: (c) => { Object.assign(c.notes[0], { harmonicType: M('HarmonicType', 'Feedback'), harmonicValue: 12 }); } },
-      { name: 'trill', build: (c) => { Object.assign(c.notes[0], { trillValue: 68, trillSpeed: M('Duration', 'Sixteenth') }); } },
-      { name: 'turn ornament', build: (c) => { c.notes[0].ornament = M('NoteOrnament', 'Turn'); } },
-    ],
-    elements: ['Property[HarmonicType]', 'Property[HarmonicFret]', 'Trill', 'Ornament'],
-  },
-  {
-    id: 'strokes-gestures', title: 'Strokes, tremolo picking and gestures',
-    look: 'Brush up/down, pick-stroke up/down, tremolo picking with 1 and 3 marks, rasgueado, slap, pop, tap, wah, barre and timer.',
-    cases: [
-      { name: 'brush down', build: (c) => { c.beats[0].brushType = M('BrushType', 'BrushDown'); c.beats[0].brushDuration = 30; } },
-      { name: 'arpeggio up', build: (c) => { c.beats[0].brushType = M('BrushType', 'ArpeggioUp'); c.beats[0].brushDuration = 30; } },
-      { name: 'pick stroke up', build: (c) => { c.beats[0].pickStroke = M('PickStroke', 'Up'); } },
-      { name: 'pick stroke down', build: (c) => { c.beats[0].pickStroke = M('PickStroke', 'Down'); } },
-      { name: 'tremolo picking 1 mark', build: (c) => { c.beats[0].tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks: 1 }); } },
-      { name: 'tremolo picking 3 marks', build: (c) => { c.beats[0].tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks: 3 }); } },
-      { name: 'rasgueado ii', build: (c) => { c.beats[0].rasgueado = M('Rasgueado', 'Ii'); } },
-      { name: 'slap', build: (c) => { c.beats[0].slap = true; } },
-      { name: 'pop', build: (c) => { c.beats[0].pop = true; } },
-      { name: 'tap', build: (c) => { c.beats[0].tap = true; } },
-      { name: 'wah open', build: (c) => { c.beats[0].wahPedal = M('WahPedal', 'Open'); } },
-      { name: 'barre full at fret 3', build: (c) => { c.beats[0].barreFret = 3; c.beats[0].barreShape = M('BarreShape', 'Full'); } },
-      { name: 'timer 45 s', build: (c) => { c.beats[0].showTimer = true; c.beats[0].timer = 45; } },
-    ],
-    elements: ['Property[Brush]', 'Arpeggio', 'XProperty', 'Property[PickStroke]', 'Tremolo', 'Property[Rasgueado]', 'Property[Slapped]', 'Property[Popped]', 'Property[Tapped]', 'Wah', 'Property[BarreFret]', 'Property[BarreString]', 'Timer'],
-  },
-  {
-    id: 'rhythm', title: 'Rhythm: dots, tuplets, octave marks',
-    look: 'Dotted eighths, a triplet, a quintuplet, sixteenth notes and an 8va octave mark.',
-    cases: [
-      { name: 'dotted eighth + sixteenth', beats: 8, build: (c) => { c.beats.forEach((b, i) => { b.duration = M('Duration', i % 2 ? 'Sixteenth' : 'Eighth'); b.dots = i % 2 ? 0 : 1; }) } },
-      { name: 'triplet eighths', beats: 3, build: (c) => { c.beats.forEach((b) => { b.duration = M('Duration', 'Eighth'); b.tupletNumerator = 3; b.tupletDenominator = 2; }); } },
-      { name: 'quintuplet sixteenths', beats: 5, build: (c) => { c.beats.forEach((b) => { b.duration = M('Duration', 'Sixteenth'); b.tupletNumerator = 5; b.tupletDenominator = 4; }); } },
-      { name: 'sixteenths', beats: 16, build: (c) => { c.beats.forEach((b) => { b.duration = M('Duration', 'Sixteenth'); }); } },
-      { name: 'octave 8va', build: (c) => { c.beats[0].ottava = M('Ottavia', '_8va'); } },
-    ],
-    elements: ['Rhythm', 'Rhythm>NoteValue', 'Rhythm>AugmentationDot', 'Rhythm>PrimaryTuplet', 'Ottavia'],
-  },
-  {
-    id: 'tracks-tuning', title: 'Tracks, tuning, capo and staff display',
-    look: 'Two tracks: "Capo 3" (capo on fret 3, orange) and "Drop D" (low string tuned to D, blue, mixer volume and pan changed, program 30). Check the track names, colours, tunings, capo and mixer values.',
-    tracks: [
-      { name: 'Capo 3', short: 'Cap', color: [220, 110, 40], build: (t) => { t.staff.capo = 3; } },
-      { name: 'Drop D', short: 'DrpD', color: [40, 110, 220], tuning: [64, 59, 55, 50, 45, 38], volume: 12, balance: 4, program: 30, build: () => {} },
-    ],
-    cases: [{ name: 'plain bar 1', build: () => {} }, { name: 'plain bar 2', build: () => {} }],
-    elements: ['Track>Name', 'Track>ShortName', 'Track>Color', 'Property[CapoFret]', 'Property[Tuning]', 'Program', 'ChannelStrip>Parameters'],
-  },
-  {
-    id: 'chord-diagram', title: 'Chord diagram',
-    look: 'A C major chord diagram named "C" over the first beat of bar 1.',
-    cases: [{ name: 'chord C', build: (c) => {
-      const chord = Object.assign(new model.Chord(), { name: 'C', firstFret: 1, strings: [0, 1, 0, 2, 3, -1], barreFrets: [], showName: true, showDiagram: true, showFingering: false });
-      chord.staff = c.staff; c.staff.addChord('c1', chord); c.beats[0].chordId = 'c1';
-    } }],
-    elements: ['Item', 'Diagram', 'Chord'],
-  },
-];
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Building the files
-// ---------------------------------------------------------------------------------------------------------------------
-function buildScore(family) {
-  // alphaTab numbers bars, voices, beats and notes from process-wide counters; reset them so the same family always gives the same bytes.
-  model.Bar._globalBarId = 0; model.Beat._globalBeatId = 0; model.Note.globalNoteId = 0; model.Voice._globalVoiceId = 0;
-  const settings = new Settings(), score = new model.Score();
-  score.title = `GP8 acceptance: ${family.id}`; score.artist = 'TabPlayer acceptance kit';
-  const trackDefs = family.tracks ?? [{ name: 'Guitar', short: 'Gtr', build: () => {} }];
-  const shapes = family.cases.map(shapeOf);
-  family.cases.forEach((testCase, i) => {
-    const master = new model.MasterBar();
-    master.timeSignatureNumerator = shapes[i].num; master.timeSignatureDenominator = shapes[i].den;
-    if (i === 0) master.tempoAutomations = [model.Automation.buildTempoAutomation(false, 0, BPM, 2)];
-    master.section = new model.Section(); master.section.marker = String(i + 1); master.section.text = `${family.id}: ${testCase.name}`;
-    score.addMasterBar(master);
-  });
-  const expected = { notes: 0, onsets: [], quarters: 0 };
-  trackDefs.forEach((def, trackIndex) => {
-    const track = new model.Track(), staff = new model.Staff(), tuning = def.tuning ?? GUITAR_TUNING;
-    track.name = def.name; track.shortName = def.short ?? def.name.slice(0, 4);
-    track.playbackInfo.program = def.program ?? 25;
-    if (def.volume !== undefined) track.playbackInfo.volume = def.volume;
-    if (def.balance !== undefined) track.playbackInfo.balance = def.balance;
-    if (def.color) track.color = new model.Color(def.color[0], def.color[1], def.color[2], 255);
-    staff.stringTuning.tunings = [...tuning]; staff.showTablature = true;
-    score.addTrack(track); track.addStaff(staff);
-    def.build?.({ track, staff });
-    let cursor = 0;
-    family.cases.forEach((testCase, i) => {
-      const shape = shapes[i], bar = new model.Bar(), voice = new model.Voice();
-      staff.addBar(bar); bar.addVoice(voice);
-      const beats = [], notes = [];
-      for (let b = 0; b < shape.count; b += 1) {
-        const beat = new model.Beat(); beat.duration = shape.duration; beat.isEmpty = false;
-        const spec = noteFor(b, tuning), note = new model.Note();
-        note.string = spec.string; note.fret = spec.fret; beat.addNote(note);
-        voice.addBeat(beat); beats.push(beat); notes.push(note);
-      }
-      const context = { score, track, staff, bar, masterBar: score.masterBars[i], beats, notes, index: i };
-      if (trackIndex === 0 || family.tracks) testCase.build(context);
-      // A case may drop beats (c.beats.length = n); remove the excess from the voice too.
-      while (voice.beats.length > beats.length) voice.beats.pop();
-      // Fill the bar with rests where a tuplet or short case leaves it under-full.
-      const length = beats.reduce((sum, beat) => sum + beatQuarters(beat), 0), barQuarters = (shape.num * 4) / shape.den;
-      const rest = barQuarters - length;
-      if (rest > 1e-9) {
-        let remaining = rest; const fills = [];
-        while (remaining >= 1 - 1e-9) { const r = new model.Beat(); r.duration = M('Duration', 'Quarter'); r.isEmpty = false; fills.push(r); remaining -= 1; }
-        while (remaining >= 0.5 - 1e-9) { const r = new model.Beat(); r.duration = M('Duration', 'Eighth'); r.isEmpty = false; fills.push(r); remaining -= 0.5; }
-        while (remaining >= 0.25 - 1e-9) { const r = new model.Beat(); r.duration = M('Duration', 'Sixteenth'); r.isEmpty = false; fills.push(r); remaining -= 0.25; }
-        for (const r of fills) { voice.addBeat(r); }
-      }
-      if (trackIndex === 0) {
-        let at = cursor;
-        for (const beat of beats) {
-          const sounding = beat.notes.filter((n) => !n.isTieDestination);
-          if (sounding.length) { expected.onsets.push(round(at)); expected.notes += sounding.length; }
-          at += beatQuarters(beat);
-        }
-        cursor += barQuarters; expected.quarters = cursor;
-      }
-    });
-  });
-  score.finish(settings);
-  return { score, settings, expected };
-}
 const round = (x) => Math.round(x * 1000) / 1000;
-
-/** Bytes of one authored file. Fermata cases are patched into score.gpif as the fermata probe does. */
-export function buildFamilyFile(family) {
-  const { score, settings, expected } = buildScore(family);
-  const entries = unzipSync(new exporter.Gp7Exporter().export(score, settings));
-  const fermataCases = family.cases.map((c) => c.fermata ?? null);
-  if (fermataCases.some(Boolean)) {
-    const parts = strFromU8(entries[GPIF]).replace(/<Fermatas>[\s\S]*?<\/Fermatas>/g, '').split('</MasterBar>');
-    if (parts.length !== family.cases.length + 1) throw new Error(`Expected ${family.cases.length} master bars in the written GPIF of ${family.id}, found ${parts.length - 1}.`);
-    entries[GPIF] = strToU8(parts.map((part, i) => (i < family.cases.length && fermataCases[i] ? part + fermataXml({ type: fermataCases[i].type, length: fermataCases[i].length, beat: 0 }) : part)).join('</MasterBar>'));
-  }
-  return { bytes: zipSync(entries, { mtime: new Date(Date.UTC(2020, 0, 1)) }), expected };
-}
-
-export const fileName = (index, family) => `${String(index + 1).padStart(2, '0')}-${family.id}`;
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Checklist
 // ---------------------------------------------------------------------------------------------------------------------
-export function checklistText(entries) {
+const memberOf = (element) => (element.startsWith('@') ? element.slice(1) : null);
+const describeElement = (element) => (memberOf(element) ? `archive member \`${memberOf(element)}\` (compared byte for byte)` : `\`${element}\``);
+/** The checklist, from the manifest's families. */
+export function checklistText(families) {
   const out = [
     '# Guitar Pro 8 acceptance checklist (THE-61)', '',
-    'Nothing in this kit has been opened in Guitar Pro 8. You need an activated Guitar Pro 8. Do not edit the `.gp` files this kit wrote; open each, look, then save and export under the new names below, in this same folder.', '',
-    'Before you start: in Guitar Pro 8, switch off any count-in, metronome click or extra repeats for MIDI export, and write down the export options you chose (the Guitar Pro version, build and the option names). Take the settings once and keep them the same for every file.', '',
+    'Nothing in this kit has been opened in Guitar Pro 8. You need an activated Guitar Pro 8. The `.gp` files were written by TabPlayer\'s own exporter. Do not edit them; open each, look, then save and export under the new names below, in this same folder.', '',
+    'Before you start: in Guitar Pro 8, switch off any count-in, metronome click or extra repeats for MIDI export, and write down the export options you chose (the Guitar Pro version, build and the option names). Use the same options for every file.', '',
     'For every file:', '',
     '1. Open it. Note any warning on opening (say which file and the exact text).',
     '2. Look at the things named for that file. Write down anything missing or different from what is named. The bar labels (section names) say which case each bar is.',
     '3. File, Save as, type Guitar Pro 7/8 (`.gp`), the name shown as "save as", in this folder.',
     '4. File, Export, MIDI, the name shown as "export as", in this folder. Use the default MIDI options.',
     '5. Close the file without saving again.', '',
-    'Then run `node scripts/gp8-acceptance-kit.mjs collect <this folder>` and read `results.md`.', '',
+    'Then run `node scripts/gp8-acceptance-kit.mjs collect <this folder>` and read `results.md`. For each file it compares the elements listed under "After Guitar Pro saves it" below, and nothing else.', '',
     '| # | File to open | What to look at | Save as (.gp) | Export as (MIDI) |', '|---|---|---|---|---|',
   ];
-  entries.forEach(({ family, name }) => out.push(`| ${name.slice(0, 2)} | \`${name}.gp\` | ${family.look.replace(/\|/g, '/')} | \`${name}.saved.gp\` | \`${name}.mid\` |`));
+  families.forEach((f) => out.push(`| ${f.name.slice(0, 2)} | \`${f.name}.gp\` | ${f.look.replace(/\|/g, '/')} | \`${f.name}.saved.gp\` | \`${f.name}.mid\` |`));
   out.push('');
-  entries.forEach(({ family, name }) => {
-    out.push(`## ${name.slice(0, 2)} ${family.title}`, '', `File \`${name}.gp\`. ${family.look}`, '', 'Bars, in order (each is labelled in the file by its section name):', '');
-    family.cases.forEach((c, i) => out.push(`${i + 1}. ${family.id}: ${c.name}`));
-    if (family.tracks) out.push('', 'Tracks: ' + family.tracks.map((t) => t.name).join(', ') + '.');
-    out.push('', `Save as \`${name}.saved.gp\`; export MIDI as \`${name}.mid\`.`, '');
-    if (family.control) {
+  families.forEach((f) => {
+    out.push(`## ${f.name.slice(0, 2)} ${f.title}`, '', `File \`${f.name}.gp\`. ${f.look}`, '', 'Bars, in order (each is labelled in the file by its section name):', '');
+    f.cases.forEach((c, i) => out.push(`${i + 1}. ${f.id}: ${c}`));
+    if (f.tracks?.length > 1 || (f.tracks?.length === 1 && f.tracks[0] !== 'Guitar')) out.push('', `Tracks: ${f.tracks.join(', ')}.`);
+    out.push('', `Save as \`${f.name}.saved.gp\`; export MIDI as \`${f.name}.mid\`.`, '');
+    if (f.warnings?.length) {
+      out.push('TabPlayer\'s own export warning for this score (the text the app shows before writing a Guitar Pro 7/8 file):', '', ...f.warnings.map((w) => `> ${w}`), '');
+    }
+    for (const note of f.notes ?? []) out.push(`Note: ${note}`, '');
+    out.push('After Guitar Pro saves it, `collect` compares these standard GPIF elements between the file TabPlayer wrote and the file Guitar Pro saved:', '', ...(f.elements ?? []).map((e) => `- ${describeElement(e)}${(f.expectAbsent ?? []).includes(e) ? ' (not in the written file; shows where Guitar Pro puts it)' : ''}`), '');
+    if (f.control) {
       out.push('### Fermata positive control (do these exact steps)', '',
-        '1. Open `' + name + '.gp`. It has four plain bars and no fermata.',
+        `1. Open \`${f.name}.gp\`. It has four plain bars and no fermata.`,
         '2. Select the first beat of bar 2 and add one fermata by hand with Guitar Pro 8\'s own fermata tool. Write down which type and length you chose (the defaults are fine; say so).',
-        '3. Do not change anything else. Save as `' + name + '.saved.gp`.',
-        '4. Export MIDI with the default options as `' + name + '.mid`.',
-        '5. If the MIDI export dialog offers an option that changes tempo, repeat or fermata handling, export once more with the other setting as `' + name + '-alt.mid` and write down which option it was.',
+        `3. Do not change anything else. Save as \`${f.name}.saved.gp\`.`,
+        `4. Export MIDI with the default options as \`${f.name}.mid\`.`,
+        `5. If the MIDI export dialog offers an option that changes tempo, repeat or fermata handling, export once more with the other setting as \`${f.name}-alt.mid\` and write down which option it was.`,
         '', 'This answers three open questions from `docs/validation/2026-11-12-gp8-golpe-sound-fermata-probe.md`: how Guitar Pro itself writes a fermata, whether its MIDI export holds the note, and by how much. The earlier probe had no fermata placed by Guitar Pro itself.', '');
     }
   });
@@ -363,34 +76,27 @@ export function checklistText(entries) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
-// write
+// write: the builder runs under Vitest (it needs TabPlayer's TypeScript exporter)
 // ---------------------------------------------------------------------------------------------------------------------
+/** Runs the opt-in Vitest file that writes the .gp files and manifest, then writes the checklist. Returns { out, files, warnings, log }. */
 export function writeKit(dir) {
   const out = resolve(dir ?? DEFAULT_DIR);
-  mkdirSync(out, { recursive: true });
-  const files = [], manifest = { kit: 'gp8-acceptance', bpm: BPM, ppqNote: 'Expected MIDI onsets are in quarter notes from the start.', families: [] };
-  const entries = [];
+  const vitest = join(ROOT, 'node_modules', 'vitest', 'vitest.mjs');
+  if (!existsSync(vitest)) throw new Error(`Vitest is not installed at ${vitest}; run npm ci.`);
+  const before = new Map();
+  for (const name of existsSync(out) ? readdirSync(out) : []) if (/\.gp$/.test(name) && !/\.saved\.gp$/.test(name)) before.set(name, sha256(readFileSync(join(out, name))));
+  const run = spawnSync(process.execPath, [vitest, 'run', WRITE_TEST], { cwd: ROOT, env: { ...process.env, GP8_KIT_OUT: out }, encoding: 'utf8', maxBuffer: 1 << 26 });
+  if (run.status !== 0) throw new Error(`The builder failed (exit ${run.status}).\n${run.stdout}\n${run.stderr}`);
+  const manifest = JSON.parse(readFileSync(join(out, 'kit-manifest.json'), 'utf8'));
   const warnings = [];
-  FAMILIES.forEach((family, index) => {
-    const name = fileName(index, family), { bytes, expected } = buildFamilyFile(family);
-    const path = join(out, `${name}.gp`);
-    if (existsSync(path) && sha256(readFileSync(path)) !== sha256(bytes) && (existsSync(join(out, `${name}.saved.gp`)) || existsSync(join(out, `${name}.mid`)))) {
-      warnings.push(`${name}.gp already existed with different bytes and has returned files beside it; the new file replaces it, so those returned files no longer match.`);
-    }
-    writeFileSync(path, bytes); files.push(path);
-    entries.push({ family, name });
-    manifest.families.push({
-      id: family.id, index, name, title: family.title, file: `${name}.gp`, sha256: sha256(bytes), bytes: bytes.length,
-      cases: family.cases.map((c) => c.name), tracks: family.tracks?.map((t) => t.name) ?? ['Guitar'],
-      elements: [...new Set(family.elements)], control: !!family.control,
-      midi: { notes: expected.notes, onsets: expected.onsets, quarters: expected.quarters, timing: family.midi?.timing !== false, why: family.midi?.why ?? null },
-    });
-  });
+  for (const f of manifest.families) {
+    const old = before.get(f.file);
+    if (old && old !== f.sha256 && (existsSync(join(out, `${f.name}.saved.gp`)) || existsSync(join(out, `${f.name}.mid`)))) warnings.push(`${f.file} was replaced with different bytes and has returned files beside it; those no longer match.`);
+  }
   const checklist = join(out, 'checklist.md');
-  writeFileSync(checklist, checklistText(entries)); files.push(checklist);
-  const manifestPath = join(out, 'kit-manifest.json');
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 1)); files.push(manifestPath);
-  return { out, files, warnings };
+  writeFileSync(checklist, checklistText(manifest.families));
+  const files = [...manifest.families.map((f) => join(out, f.file)), join(out, 'kit-manifest.json'), checklist];
+  return { out, files, warnings, families: manifest.families };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -466,13 +172,13 @@ export function readGpFile(path) {
     const bytes = readFileSync(path);
     if (bytes.length < 22 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) return { status: 'unreadable', detail: 'not a zip archive (no PK header). A .gpx file is a different container and is not read by this kit; save as .gp.' };
     let entries;
-    try { entries = unzipSync(bytes, { filter: (file) => file.name === GPIF && file.originalSize <= MAX_GPIF_BYTES }); }
+    try { entries = unzipSync(bytes, { filter: (file) => (file.name === GPIF && file.originalSize <= MAX_GPIF_BYTES) || (/^Content\/(Stylesheets\/|BinaryStylesheet$)/.test(file.name) && file.originalSize <= MAX_MEMBER_BYTES) }); }
     catch (error) { return { status: 'unreadable', detail: `zip could not be read: ${error?.message ?? error}` }; }
     const gpif = entries[GPIF];
     if (!gpif) return { status: 'unreadable', detail: `no ${GPIF} inside the archive, or it is larger than ${MAX_GPIF_BYTES} bytes` };
     const xml = parseXml(strFromU8(gpif));
     if (xml.error) return { status: 'unreadable', detail: `score.gpif is not readable XML: ${xml.error}`, xml };
-    return { status: 'ok', detail: '', xml, bytes: bytes.length };
+    return { status: 'ok', detail: '', xml, bytes: bytes.length, members: entries };
   } catch (error) { return { status: 'unreadable', detail: `unexpected error: ${error?.message ?? error}` }; }
 }
 export function readMidiFile(path) {
@@ -490,6 +196,17 @@ export function readMidiFile(path) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Comparison
 // ---------------------------------------------------------------------------------------------------------------------
+/** Byte comparison of one archive member (the stylesheets), for selectors written `@Content/...`. */
+export function compareMember(selector, writtenMembers, returnedMembers) {
+  const name = selector.slice(1), w = writtenMembers?.[name], r = returnedMembers?.[name];
+  const hex = (b) => Buffer.from(b).toString('hex');
+  if (!w && !r) return { selector, written: 0, returned: 0, status: 'none', detail: 'no such member in either file' };
+  if (w && !r) return { selector, written: 1, returned: 0, status: 'absent', detail: `written ${w.length} bytes` };
+  if (!w) return { selector, written: 0, returned: 1, status: 'added', detail: `Guitar Pro added ${r.length} bytes` };
+  if (hex(w) === hex(r)) return { selector, written: 1, returned: 1, status: 'same', detail: '' };
+  let at = 0; while (at < w.length && at < r.length && w[at] === r[at]) at += 1;
+  return { selector, written: 1, returned: 1, status: 'changed', detail: `${w.length} bytes written, ${r.length} returned; first difference at byte ${at}` };
+}
 const counts = (list) => { const m = new Map(); for (const x of list) m.set(x, (m.get(x) ?? 0) + 1); return m; };
 /** Compares the canonical text of the elements a selector finds in the written and the returned file. Describes only what it compared. */
 export function compareSelector(selector, writtenRoot, returnedRoot) {
@@ -568,7 +285,7 @@ export function collectKit(dir) {
     record.saved = { status: saved.status, detail: saved.detail };
     if (original.status === 'ok' && saved.status === 'ok') {
       for (const selector of fam.elements ?? []) {
-        try { record.selectors.push(compareSelector(selector, original.xml.root, saved.xml.root)); }
+        try { record.selectors.push(selector.startsWith('@') ? compareMember(selector, original.members, saved.members) : compareSelector(selector, original.xml.root, saved.xml.root)); }
         catch (error) { record.selectors.push({ selector, written: 0, returned: 0, status: 'error', detail: String(error?.message ?? error) }); }
       }
     }
@@ -627,8 +344,10 @@ export function resultsMarkdown(result) {
 export function main(argv) {
   const [command, dir] = argv;
   if (command === 'write') {
-    const { out, files, warnings } = writeKit(dir);
-    console.log(`Wrote ${FAMILIES.length} Guitar Pro files, checklist.md and kit-manifest.json to ${out}`);
+    let made;
+    try { made = writeKit(dir); } catch (error) { console.error(`error: ${error.message}`); return 1; }
+    const { out, files, warnings, families } = made;
+    console.log(`Wrote ${families.length} Guitar Pro files from TabPlayer's exporter, checklist.md and kit-manifest.json to ${out}`);
     for (const f of files) console.log(`  ${f}`);
     for (const w of warnings) console.log(`warning: ${w}`);
     console.log('Next: follow checklist.md in an activated Guitar Pro 8, then run `collect`.');

@@ -50,7 +50,7 @@ export const REVIEW_TERMS = [
     note: 'Command palette titles, hints, errors and native search alias words. The notes say the alias words are a first choice and may miss forms a speaker expects.', source: '2026-11-13-the-203-command-palette-i18n.md, Limits' },
   { id: 'et-krihv', lang: 'et', side: 'translation', kind: 'chosen', match: 'krihv',
     note: 'Estonian fret is "krihv", not "astmetraat".', source: '2026-11-13-the-203-command-palette-i18n.md, Terms' },
-  { id: 'et-astmetraat', lang: 'et', side: 'translation', kind: 'check', match: 'astmetraat',
+  { id: 'et-astmetraat', lang: 'et', side: 'translation', kind: 'check', match: 'astmetra',
     note: 'The palette note chose "krihv" for fret over "astmetraat", but other catalog text still uses "astmetraat"; the reviewer should pick one term.', source: '2026-11-13-the-203-command-palette-i18n.md, Terms' },
   { id: 'de-beat', lang: 'de', side: 'translation', kind: 'check', match: /\bBeat\b/,
     note: '"Beat einfügen" and "Beat löschen" match the editor buttons and were kept.', source: '2026-11-13-the-203-command-palette-i18n.md, Terms' },
@@ -101,9 +101,10 @@ export function placeholders(text) {
 }
 const sameList = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** The run of whitespace, punctuation and symbols at each end of a message. */
+/** The run of whitespace, punctuation and symbols at each end of a message, ignoring {name} tokens. */
 export function edges(text) {
-  const s = String(text ?? '');
+  // {name} tokens move with word order, so they are removed before the ends are read.
+  const s = String(text ?? '').replace(/\s*\{[A-Za-z_][A-Za-z0-9_]*\}\s*/g, '');
   return { lead: /^[\s\p{P}\p{S}]*/u.exec(s)[0], trail: /[\s\p{P}\p{S}]*$/u.exec(s)[0] };
 }
 /** Describes how the ends differ, or '' when they match. */
@@ -195,12 +196,17 @@ export function csvField(value) {
   const s = String(value ?? '');
   return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
+/** A spreadsheet reads a cell that starts with = + - or @ as a formula. Such cells get one leading apostrophe; so that this is exactly
+ *  reversible, a value that already starts with apostrophes followed by one of those characters gets one more. */
+export const protectCell = (value) => (/^'*[=+@-]/.test(value) ? `'${value}` : value);
+/** Removes exactly the apostrophe protectCell added. */
+export const unprotectCell = (value) => (/^'+[=+@-]/.test(value) ? value.slice(1) : value);
 export const csvLine = (fields) => fields.map(csvField).join(',');
 /** UTF-8 with a byte order mark so Excel reads it as UTF-8. Rows are grouped by area. */
 export function rowsToCsv(rows) {
   const lines = [csvLine(COLUMNS)];
   for (const list of groupByArea(rows).values()) {
-    for (const row of list) lines.push(csvLine([row.key, row.english, row.translation, row.phEnglish.join(' '), row.phTranslation.join(' '), row.flags.join(' '), row.details.join(' | '), '']));
+    for (const row of list) lines.push(csvLine([row.key, row.english, row.translation, row.phEnglish.join(' '), row.phTranslation.join(' '), row.flags.join(' '), row.details.join(' | ')].map(protectCell).concat('')));
   }
   return `﻿${lines.join('\r\n')}\r\n`;
 }
@@ -261,7 +267,7 @@ export function planApply(lang, csvRows, english, translated, lineOf = new Map()
   let unchanged = 0;
   csvRows.slice(1).forEach((cells, n) => {
     const rowNo = n + 2;
-    const key = cells[iKey] ?? '', correction = cells[iCorr] ?? '';
+    const key = cells[iKey] ?? '', correction = unprotectCell(cells[iCorr] ?? '');
     if (key === '') { if (cells.some((c) => c !== '')) refused.push({ row: rowNo, key, reason: 'row has no key' }); return; }
     if (correction.trim() === '') return;
     const refuse = (reason) => refused.push({ row: rowNo, key, reason });
@@ -269,8 +275,8 @@ export function planApply(lang, csvRows, english, translated, lineOf = new Map()
     seen.add(key);
     if (!Object.prototype.hasOwnProperty.call(english, key)) return refuse('key is not in the English catalog');
     if (!Object.prototype.hasOwnProperty.call(translated, key)) return refuse(`key is not in the ${lang} catalog`);
-    if ((cells[iEn] ?? '') !== english[key]) return refuse('the English text in the CSV is not the current English text (the catalog changed after this CSV was exported)');
-    if ((cells[iCur] ?? '') !== translated[key]) return refuse('the current translation in the CSV is not the current catalog text (the catalog changed after this CSV was exported)');
+    if (unprotectCell(cells[iEn] ?? '') !== english[key]) return refuse('the English text in the CSV is not the current English text (the catalog changed after this CSV was exported)');
+    if (unprotectCell(cells[iCur] ?? '') !== translated[key]) return refuse('the current translation in the CSV is not the current catalog text (the catalog changed after this CSV was exported)');
     const want = placeholders(english[key]), got = placeholders(correction);
     if (!sameList(want, got)) return refuse(`placeholders do not match English: expected ${want.map((p) => `{${p}}`).join(' ') || 'none'}, correction has ${got.map((p) => `{${p}}`).join(' ') || 'none'}`);
     if (correction === translated[key]) { unchanged += 1; return; }

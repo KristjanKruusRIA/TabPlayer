@@ -23,3 +23,82 @@ src-tauri/icons/Square*Logo.png
 .impeccable/hook.cache.json
 .agents/
 src-tauri/binaries/
+
+# ---------------------------------------------------------------------------
+# Keep stray private material out of the repository (THE-72).
+#
+# Three layers, in this order (a later rule wins):
+#   1. Score, audio and archive types are ignored everywhere by extension.
+#   2. Five directories that legitimately track such files re-include them.
+#   3. Executables, installers and secrets are ignored everywhere again, so the
+#      re-includes can never expose a key, an .env file or a binary.
+# Ignoring never un-tracks a file that is already committed, and the re-includes
+# cover every location that tracks one today, so
+# `git ls-files -ci --exclude-standard` lists nothing new. To add a fixture, put
+# it in one of the re-included directories (or add a path-scoped "!" rule here
+# and the matching entry in scripts/secret-scan.mjs). Never commit private
+# scores, extracted binaries or generated test output.
+# ---------------------------------------------------------------------------
+
+# 1. Scores and exchange formats (the formats src/interchange reads and writes)
+*.gp
+*.gp3
+*.gp4
+*.gp5
+*.gp8
+*.gpx
+*.gpif
+*.ptb
+*.tg
+*.tabplayer
+*.musicxml
+*.mxl
+*.mid
+*.midi
+
+# 1. Audio
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.m4a
+*.aif
+*.aiff
+*.nam
+
+# 1. Archives
+*.zip
+*.7z
+*.rar
+*.tar
+*.tgz
+*.gz
+
+# 2. Legitimate locations that track files of the types above
+!/assets/library/**
+!/src-tauri/resources/cabinet-irs/**
+!/src-tauri/tests/fixtures/**
+!/src/interchange/fixtures/**
+!/tests/fixtures/**
+
+# 3. Executables, installers and plug-ins: ignored everywhere
+*.exe
+*.msi
+*.dmg
+*.dll
+*.so
+*.dylib
+*.vst3
+
+# 3. Secrets and signing keys (including the Tauri updater signing key): ignored everywhere
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.p8
+*.jks
+*.keystore
+.tauri/

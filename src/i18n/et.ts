@@ -1,4 +1,5 @@
 import type { MessageCatalog } from './en';
+import { helpEt } from './help-et';
 
 export const et: MessageCatalog = {
   // App brand & title
@@ -73,6 +74,7 @@ export const et: MessageCatalog = {
   'menu.dock_overview': 'Üldvaade: rajad',
   'menu.dock_mixer_window': 'Üldvaade: mikser',
   'menu.dock_instrument_window': 'Üldvaade: pill',
+  'menu.dock_keyboard': 'Üldvaade: klahvistik',
   'menu.dock_backing': 'Üldvaade: taustaheli',
   'toolbar.main': 'Põhitööriistariba',
   'toolbar.toggle_palette': 'Näita või peida noodistuspalett',
@@ -364,52 +366,13 @@ export const et: MessageCatalog = {
   'help.workflow_description': 'Sinine kontuur tähistab toimetamise sihtmärki. Roheline jälgib esitust või valitud lõiku. Tööriistadeni jõuate inspektori vahekaartidelt Lugu, Rada ja Valik ning tööriistaribalt valikust Harjutamise seaded; enamik muudatusi rakendub alles toimingunuppude vajutamisel.',
 
   // Help Topics Content
-  'help.topic.start.title': 'Alustamine',
-  'help.topic.start.p1': 'Ava partituur menüüst Fail → Ava, alusta uut menüüst Fail → Uus või vali näide või mall Teegist.',
-  'help.topic.start.p2': 'Partituur asub keskel ning esitusnupud ribal allservas. Inspektor on paremal: vahekaart Lugu sisaldab partituuri sätteid, Rada valitud raja sätteid ja Valik toimetamise tööriistu. Mikser, pilli vaade ja taustheli on alumises dokis. Vaade näitab või peidab iga paneeli.',
-  'help.topic.start.p3': 'Vajuta F1, et saada abi akna aktiivse osa kohta. Teises dialoogis olles sulge see esmalt.',
 
-  'help.topic.editing.title': 'Partituuri toimetamine',
-  'help.topic.editing.p1': 'Klõpsa löögile või liiguta sinist toimetamismärki nooleklahvidega. Üles ja Alla vahetavad keelt; noodi seadmiseks sisesta krihvinumber ja vajuta Enter.',
-  'help.topic.editing.p2': 'Shift koos Vasaku või Parema noolega laiendab valikut kopeerimiseks, asetamiseks ja valikutööriistadeks. Escape tühistab valiku.',
-  'help.topic.editing.p3': 'Ctrl/Cmd + Shift + P avab käsupaleti, kuhu saab sisestada käske nagu measure 12, fret 5 või tempo 96.',
-  'help.topic.editing.p4': 'Iga muudatuse saab tagasi võtta klahvidega Ctrl/Cmd + Z ja uuesti teha klahvidega Ctrl/Cmd + Shift + Z.',
 
-  'help.topic.tracks.title': 'Rajad ja helid',
-  'help.topic.tracks.p1': 'Inspektori vahekaart Rada sisaldab valitud raja sätteid. Vali rada alumise doki loendist Rajad või klõpsa sellel partituuris. Jaotis Teave võimaldab rada liigutada, duplitseerida või eemaldada, muuta selle nime, värvi, pilli ja häälestust ning lisada pilli; märgi Säilita helikõrgus, et noodid kõlaksid pärast ümberhäälestamist samamoodi.',
-  'help.topic.tracks.p2': 'Jaotis Helid valib pilli tämbri, efektid ja heliväljundi; Tõlgendus ja MIDI-väljund määravad, kuidas rada mängib ja kuhu see saadetakse. Heli valimine Vaate menüüst avab valitud raja täieliku heliseadmestiku ning alumise doki vaade Taustheli seab helisalvestise partituuriga kohakuti.',
-  'help.topic.tracks.p3': 'Raja muudatused salvestatakse partituuri ajaloos, mistõttu saab neid tagasi võtta.',
 
-  'help.topic.inspector.title': 'Inspektor',
-  'help.topic.inspector.p1': 'Inspektoril on kolm vahekaarti. Lugu sisaldab partituuri teavet, noodikirja sätteid (paigutus, vaikesuum, noodikiri ja vaikevaade; partituuri kohal olev suum muudab vaadet kohe) ning heli masterdamist. Rada sisaldab valitud raja sätteid, mida kirjeldab jaotis Rajad ja helid. Valik sisaldab noodi, löögi, takti, noodirea ja partituuri tööriistu toimetamismärgi või valiku jaoks, sealhulgas kapodastrit.',
-  'help.topic.inspector.p2': 'Enamik välju ei muuda midagi enne paneeli toimingunupu (näiteks Rakenda või Salvesta) vajutamist.',
-  'help.topic.inspector.p3': 'Eellöökide, metronoomi ja kiirustreeneri sätted korduva lõigu harjutamiseks on tööriistaribal valikus Harjutamise seaded, mitte inspektoris.',
 
-  'help.topic.playback.title': 'Esitus ja miksimine',
-  'help.topic.playback.p1': 'Tühikuklahv käivitab või peatab esituse. Alumine juhtriba esitab, peatab ja kordab valitud lõiku ning Rohkem esituse valikuid sisaldab lisasätteid. Esitus liigub partituuril rohelise kursoriga.',
-  'help.topic.playback.p2': 'Alumine dokk miksib radu helitugevuse, panoraami, vaigistuse ja soologa, kuvab pillivaadet ja juhib taustasalvestist.',
-  'help.topic.playback.p3': 'Mikseri valimine Vaate menüüst annab igale rajale kanaliriba ning lisab peaväljundi. Liuguri või panoraaminupu lohistamist on kohe kuulda ning see salvestub ühe tagasivõetava muudatusena.',
 
-  'help.topic.files.title': 'Failid, import ja eksport',
-  'help.topic.files.p1': 'TabPlayer avab Guitar Pro (.gp, .gpx, .gp3–.gp5) ja MusicXML-faile ning salvestab oma .tabplayer-projekte. Iga partituur avaneb eraldi vahekaardil.',
-  'help.topic.files.p2': 'Fail → Impordi ASCII tabulatuur… loeb kleebitud või failist laaditud tekstitabulatuuri uueks nimetuks partituuriks.',
-  'help.topic.files.p3': 'Fail → Impordi MIDI… loeb standardse MIDI-faili (formaat 0 või 1) uueks nimetuks partituuriks; vali esmalt kvantimine, trioolid, hääled ja tabulatuur.',
-  'help.topic.files.p4': 'Fail → Hulgikonverteerimine… muudab vanemate partituuride kausta (koos alamkaustadega) uuteks .gp-failideks eraldi sihtkaustas. Algfaile ei muudeta kunagi.',
-  'help.topic.files.p5': 'Fail → Ekspordi partituur salvestab PDF-, pildi-, MIDI-, MusicXML-, ASCII-tabulatuuri või helifailina; Ekspordi GP kirjutab Guitar Pro faili.',
-  'help.topic.files.p6': 'Ekspordi partituur → Guitar Pro 5 kirjutab .gp5-faili vanemate programmide jaoks ja loetleb enne salvestamist, mis sellest formaadist välja jääb.',
-  'help.topic.files.p7': 'Salvestamata muudatused säilitatakse taastes ja muudetud partituuri sulgemisel küsitakse kinnitust.',
 
-  'help.topic.shortcuts.title': 'Kiirklahvid',
-  'help.topic.shortcuts.p1': 'Ctrl/Cmd + N, O, S: Uus, Ava, Salvesta (koos Shiftiga Salvesta nimega). Ctrl/Cmd + W sulgeb partituuri; Ctrl/Cmd + Tab liigub partituuride vahel.',
-  'help.topic.shortcuts.p2': 'Ctrl/Cmd + Z võtab tagasi ja Ctrl/Cmd + Shift + Z või Ctrl/Cmd + Y teeb uuesti. Tühik mängib või peatab.',
-  'help.topic.shortcuts.practice': 'Shift + L kordab valitud lõiku või kordusväljade taktide vahemikku, kui midagi pole valitud, ja lõpetab käiva kordamise. [ mängib aeglasemalt ja ] kiiremini.',
-  'help.topic.shortcuts.p3': 'Ctrl/Cmd + C, X, V kopeerivad, lõikavad ja asetavad muusikat; lisa Shift kopeerimiseks/lõikamiseks kõigil valitud radadel.',
-  'help.topic.shortcuts.tie': 'Ctrl/Cmd + T seob valitud noodid neile eelnevate nootidega ja annab igaühele eelmise noodi kriipsu; Ctrl/Cmd + Shift + T eemaldab sidemed.',
-  'help.topic.shortcuts.p4': 'Ctrl/Cmd + Shift + P avab käsupaleti. F1 avab abi.',
 
-  'help.topic.about.title': 'Teave ja uuendused',
-  'help.topic.about.p1': 'TabPlayer {version} töölauale.',
-  'help.topic.about.p2': 'Sellel versioonil puudub uuendusteenus. TabPlayer ei laadi ega paigalda uuendusi iseseisvalt ning uuenduste kontrollimine ei muuda avatud partituure.',
 
   // Recovery Prompt Dialog
   'recovery.unavailable_title': 'Taaste pole saadaval',
@@ -712,6 +675,14 @@ export const et: MessageCatalog = {
   'instruments.mode_both': 'Kael + klahvid',
   'instruments.left_handed': 'Vasakukäeline',
   'instruments.left_handed_suffix': ', vasakukäeline',
+  'instruments.note_names': 'Nootide nimed',
+  'instruments.note_names_octave': 'Oktaviga',
+  'instruments.note_names_letter': 'Ainult tähed',
+  'instruments.note_tied': '{note} (seotud)',
+  'instruments.held_note': '{pitch} · keel {string} · astmetraat {fret} · seotud, jätkab eelmist nooti',
+  'instruments.select_note': 'Vali noot {note} partituuris, takt {bar}, löök {beat}',
+  'instruments.keyboard_panel': 'Klahvistiku paneel',
+  'instruments.keyboard_percussion': 'Klahvistik näitab helikõrgusega noodiridu. Selle löökpillirea jaoks kasuta vaadet Trummid.',
   'instruments.expand_view': 'Laienda pillivaadet',
   'instruments.compact_view': 'Ahenda pillivaadet',
   'instruments.expand': 'Laienda',
@@ -2148,6 +2119,7 @@ export const et: MessageCatalog = {
   'dock.overview': 'Ülevaade',
   'dock.mixer': 'Mikser',
   'dock.instrument': 'Instrument',
+  'dock.keyboard': 'Klahvistik',
   'dock.backing': 'Taustheli',
   'dock.expand_aria': 'Laienda alumist dokki',
   'dock.hide_aria': 'Peida alumine dokk',
@@ -2511,6 +2483,7 @@ export const et: MessageCatalog = {
   'practice.error_repetitions': 'Kordusi kiiruse kohta peab olema täisarv vahemikus 1–100.',
   'practice.error_volume': 'Metronoomi helitugevus peab olema vahemikus 0–100%.',
   'practice.error_count_in': 'Sissetaktid peavad olema täisarv vahemikus 0–16.',
+  'practice.error_tonality': 'Helistiku nihe peab olema täisarv pooltoone vahemikus -12 kuni 12.',
   'practice.error_fixed_backing': 'Fikseeritud tempo pole saadaval, kui partituuril on taustalugu.',
   'keys.chord_new_open': 'Ctrl/Cmd + N / O',
   'keys.chord_save': 'Ctrl/Cmd + S',
@@ -2532,4 +2505,10 @@ export const et: MessageCatalog = {
   'keys.chord_gp8_techniques': 'H, S, V, P, I, X',
   'app.chord_library_error': 'Akordiraamatukogu: {error}',
   'app.print_layout_error': 'Salvestatud prindipaigutust ei saa eksportida: {error} Rakenda kehtiv leheküljepaigutus.',
+  'scales.overlay_hint': 'Klõpsa heliredeli kohal, et panna see noot valitud löögile. Keelel asendab uus noot sealse noodi. Löögil juba olevad kohad on märgitud.',
+  'scales.overlay_put': 'Pane {note} valitud löögi keelele {string}, astmetraadile {fret}',
+  'scales.overlay_put_key': 'Pane {note} valitud löögile',
+  'scales.overlay_result_put': '{note} pandi valitud löögile.',
+  'scales.overlay_result_held': '{note} on valitud löögil juba olemas. Midagi ei muudetud.',
+  ...helpEt,
 };

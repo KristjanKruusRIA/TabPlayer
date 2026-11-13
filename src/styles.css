@@ -42,6 +42,12 @@ input[aria-invalid="true"]{border-color:var(--tp-danger)}
 .help-layout nav button{width:100%;text-align:left}
 .help-layout nav button[aria-current="true"]{border-color:var(--tp-focus);background:var(--tp-raised);font-weight:600}
 .help-layout h3{margin:0 0 8px}
+.help-search{margin-bottom:12px}.help-search input{width:100%;box-sizing:border-box}
+.help-main h4{margin:18px 0 6px;font-size:14px}.help-main article>section:first-of-type h4{margin-top:4px}.help-main h4:focus-visible{outline:2px solid var(--tp-focus);outline-offset:2px}
+.help-live{margin:0 0 8px;color:var(--tp-muted,#b0bdca)}.help-live:empty{display:none}
+.help-results button{width:100%;text-align:left;display:flex;flex-direction:column;gap:2px}
+.help-result-where{font-size:12px;opacity:.75}.help-result-heading{font-weight:600}.help-result-excerpt{font-size:13px}
+.help-result-excerpt mark{background:transparent;color:inherit;font-weight:700;text-decoration:underline}
 .help-actions{display:flex;gap:8px;flex-wrap:wrap}
 @media (max-width:600px){.help-layout{grid-template-columns:1fr}}
 /* Command palette and ASCII/MIDI import */

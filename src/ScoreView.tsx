@@ -244,7 +244,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     prevFit.current={mode:fitMode,layout:display.layout};
   },[fitMode,display.layout]);
   const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop};
-  const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null);
+  const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null),published=useRef<MusicSelection|null>(null);
   const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
   const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{}),refreshLoop=useRef(()=>{});
@@ -434,7 +434,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     // Reuse the facade's public DOM surface classes so its instance-specific font CSS also applies to copied SVGs.
     setSurfaceClass(container.current?.querySelector('.at-surface')?.className??'');
     let chunks:ScreenRenderChunk[]=[],collecting=false,generation:typeof layoutCurrent.current|null=null,planned:{plan:AccoladePlan|null;metrics:AccoladeMetrics}|null=null;
-    const publish=(next:MusicSelection|null)=>{current.current.editorSelection=next;current.current.onEditorSelection?.(next);};
+    const publish=(next:MusicSelection|null)=>{published.current=next;current.current.editorSelection=next;current.current.onEditorSelection?.(next);};
     const chooseRange=(from:BeatTarget,to:BeatTarget,lanes:VoiceAddress[])=>{try{publish({kind:'range',range:rangeFromBeats(current.current.score,from,to,lanes)});}catch{return false;}return true;};
     const move=(beat:model.Beat)=>{
       const active=drag.current,source=canonicalBeat(beat);if(!active||!source)return;const to=address(source);if(!sameLane(active.anchor,to)||sameBeat(active.last,to))return;
@@ -484,7 +484,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     return ()=>{for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);adapter.dispose();playbackPresentation.current=null;roots.current.clear();view.destroy();api.current=null;loaded.current=null;};
   },[]);
   useEffect(()=>{anchor.current=null;drag.current=null;},[score,track,projection,visibleTracks]);
-  useEffect(()=>{if(!editorSelection)anchor.current=null;refresh.current();},[editorSelection,score,track,zoom,profile,projection,visibleTracks]);
+  // A selection this view did not publish (an instrument pick, say) ends the click that anchored Shift selection.
+  useEffect(()=>{if(!editorSelection||editorSelection!==published.current)anchor.current=null;refresh.current();},[editorSelection,score,track,zoom,profile,projection,visibleTracks]);
   useEffect(()=>{revealCaret.current=true;},[score,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
   useEffect(()=>{refreshCaret.current();},[score,track,zoom,profile,projection,visibleTracks,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
   useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){const host=scrollHost.current;if(host){const box=caretElement.current.getBoundingClientRect(),viewport=host.getBoundingClientRect();if(box.top<viewport.top)host.scrollTop+=box.top-viewport.top;else if(box.bottom>viewport.bottom)host.scrollTop+=box.bottom-viewport.bottom;if(box.left<viewport.left)host.scrollLeft+=box.left-viewport.left;else if(box.right>viewport.right)host.scrollLeft+=box.right-viewport.right;}revealCaret.current=false;}},[caret]);

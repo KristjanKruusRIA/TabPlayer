@@ -404,7 +404,7 @@ it('applies a named harmony interval through one native history command',async()
 });
 it('uses the selected staff for scale preview without inventing a passage selection',async()=>{
   const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28]}]});click('Track 2: Bass');const before=c.getState().snapshot;click('Browse scales');
-  const svg=await screen.findByRole('img',{name:'Scale fretboard'}),labels=Array.from(svg.querySelectorAll('text')).filter(node=>node.getAttribute('x')==='3').map(node=>node.textContent);
+  const svg=await screen.findByRole('group',{name:'Scale fretboard'}),labels=Array.from(svg.querySelectorAll('text')).filter(node=>node.getAttribute('x')==='3').map(node=>node.textContent);
   expect(labels).toEqual(['G2','D2','A1','E1']);expect(screen.getByText('Select melodic notes to match scales.')).toBeInTheDocument();expect(c.getState().snapshot).toBe(before);
 });
 it('keeps a late previous-dialog library response from replacing newer records',async()=>{
@@ -1343,7 +1343,7 @@ const seededProject=():Project=>({...blankProject(),edits:[{type:'setNote',targe
 async function editingInstrument(){
   window.localStorage.removeItem(auditionKey);window.localStorage.removeItem(instrumentEditKey);
   const c=await setup(seededProject(),undefined,{instrumentVisible:true});
-  expect(screen.getByRole('img',{name:'Guitar fretboard'})).toBeInTheDocument();
+  expect(screen.getByRole('group',{name:'Guitar fretboard'})).toBeInTheDocument();
   fireEvent.click(screen.getByRole('checkbox',{name:'Click to edit notes'}));
   expect(screen.getByRole('group',{name:'Guitar fretboard'})).toBeInTheDocument();
   return c;
@@ -2571,4 +2571,104 @@ describe('small windows (THE-196)',()=>{
       await setup(blankProject(),undefined,{view});expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:100,display:{zoomMode:'manual'}});
     });
   });
+});
+
+// Instrument views: selecting from the instrument, the keyboard's own panel and per-user view options (THE-58).
+const instrumentViewKey='tabplayer.instrumentView';
+it('selects the beat of a clicked instrument note in the score, as a click on the score does',async()=>{
+  window.localStorage.removeItem(instrumentEditKey);
+  const c=await setup(seededProject(),undefined,{instrumentVisible:true});
+  integration.activeNotes.mockImplementation(()=>[{id:'n0',trackId:'base/0',source:{target:origin,string:6},occurrence:0,startTick:0,endTick:960,key:69,velocity:90,articulation:'normal',legatoFrom:null,pitch:[]}] as never);
+  change('Measure','3');expect(screen.getByLabelText('Measure')).toHaveValue(3);
+  fireEvent.click(screen.getByRole('button',{name:'Hide instrument'}));fireEvent.click(screen.getByRole('button',{name:'Show instrument'}));
+  const mark=await screen.findByRole('button',{name:/^Select A4/});
+  const before=c.getState().snapshot;fireEvent.click(mark);
+  await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(1));
+  expect(c.getState().snapshot).toBe(before);expect(integration.commits).not.toHaveBeenCalled();
+  integration.activeNotes.mockImplementation(()=>[]);
+});
+it('gives the keyboard its own dock panel, apart from the neck, for this open document only',async()=>{
+  window.localStorage.removeItem(instrumentViewKey);
+  const c=await setup(),before=c.getState().snapshot;
+  fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));
+  const panel=screen.getByRole('region',{name:'Keyboard panel'});expect(panel).toBeVisible();
+  expect(within(panel).getByRole('group',{name:'Keyboard'})).toBeInTheDocument();expect(within(panel).queryByRole('img',{name:/fretboard/})).not.toBeInTheDocument();
+  expect(within(panel).queryByLabelText('Instrument view mode')).not.toBeInTheDocument();
+  expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Keyboard'})).toHaveAttribute('aria-pressed','true');expect(screen.getByRole('button',{name:'Instrument'})).toHaveAttribute('aria-pressed','false');expect(screen.getByRole('button',{name:'Overview'})).toHaveAttribute('aria-pressed','false');
+  // The toolbar button tells the truth about it too.
+  expect(screen.getByRole('button',{name:'Hide instrument'})).toHaveAttribute('aria-pressed','true');expect(screen.queryByRole('button',{name:'Show instrument'})).not.toBeInTheDocument();
+  expect(window.localStorage.getItem(instrumentViewKey)??'{}').not.toContain('keyboardPanel');
+  expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(false);
+  // A document opened afterwards, or the same one reopened, starts on its own view, not on the keyboard.
+  cleanup();await setup();
+  expect(screen.queryByRole('region',{name:'Keyboard panel'})).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Overview'})).toHaveAttribute('aria-pressed','true');expect(screen.getByRole('button',{name:'Show instrument'})).toHaveAttribute('aria-pressed','false');
+  fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));fireEvent.click(screen.getByRole('button',{name:'Instrument'}));
+  expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(screen.queryByRole('region',{name:'Keyboard panel'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));fireEvent.click(screen.getByRole('button',{name:'Hide instrument'}));
+  expect(screen.queryByRole('region',{name:'Keyboard panel'})).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Show instrument'})).toHaveAttribute('aria-pressed','false');
+  fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));fireEvent.click(screen.getByRole('button',{name:'Overview'}));
+  expect(screen.queryByRole('region',{name:'Keyboard panel'})).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Overview'})).toHaveAttribute('aria-pressed','true');
+  expect(c.getState().snapshot).toBe(before);
+});
+it('edits the score by clicking a scale overlay position: one undoable edit, and nothing for the note already there',async()=>{
+  const c=await setup(seededProject());
+  click('Browse scales');const dialog=await screen.findByRole('dialog',{name:'Scale browser'});
+  const position=()=>within(dialog).getByRole('button',{name:'Put F2 on string 1, fret 1 of the selected beat'});
+  fireEvent.click(position());
+  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
+  expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().snapshot.project.edits.at(-1)).toEqual({type:'setNote',target:origin,string:1,fret:1});
+  fireEvent.click(position());
+  expect(integration.commits).toHaveBeenCalledTimes(1);expect(currentBeat(c).notes).toHaveLength(2);
+  click('Close scales');click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  expect(c.getState().snapshot.project.edits).toEqual(seededProject().edits);
+});
+
+// Review round: a click in the instrument publishes the selection a score click publishes.
+const farTarget={track:0,staff:0,bar:1,voice:0,beat:0};
+const planNote=(at:typeof origin,key:number,string=6)=>({id:`base/0/0/${at.bar}/0/${at.beat}/0/${at.bar}/0/0`,trackId:'base/0',source:{target:at,string},occurrence:0,startTick:0,endTick:960,key,velocity:90,articulation:'normal',legatoFrom:null,pitch:[]});
+const twoBarProject=():Project=>({...blankProject(),edits:[{type:'setNote',target:origin,string:6,fret:5},{type:'setNote',target:farTarget,string:6,fret:5}]});
+const barNotes=(c:DocumentController,bar:number)=>c.getState().score.tracks[0].staves[0].bars[bar].voices[0].beats[0].notes.length;
+async function instrumentWithNoteAt(at:typeof origin){
+  window.localStorage.removeItem(instrumentEditKey);
+  const c=await setup(twoBarProject(),undefined,{instrumentVisible:true});
+  integration.activeNotes.mockImplementation(()=>[planNote(at,69)] as never);
+  fireEvent.click(screen.getByRole('button',{name:'Hide instrument'}));fireEvent.click(screen.getByRole('button',{name:'Show instrument'}));
+  return {c,mark:await screen.findByRole('button',{name:/^Select A4/})};
+}
+it('replaces an earlier range selection when an instrument note is clicked, so a cut only takes that beat',async()=>{
+  const {c,mark}=await instrumentWithNoteAt(farTarget),workspace=screen.getByRole('region',{name:'Score workspace'});
+  click('Select bar');fireEvent.click(mark);
+  fireEvent.keyDown(workspace,{key:'x',ctrlKey:true});
+  await waitFor(()=>expect(barNotes(c,1)).toBe(0));
+  expect(barNotes(c,0)).toBe(1);
+  integration.activeNotes.mockImplementation(()=>[]);
+});
+it('copies the clicked instrument note like a click on the score does when nothing was selected',async()=>{
+  const {mark}=await instrumentWithNoteAt(farTarget),workspace=screen.getByRole('region',{name:'Score workspace'});
+  expect(screen.queryByLabelText('Paste repetitions')).not.toBeInTheDocument();
+  fireEvent.click(mark);fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
+  await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
+  integration.activeNotes.mockImplementation(()=>[]);
+});
+
+it('hands the keys back to the score after a pointer pick, and keeps the focus on the instrument after a key pick',async()=>{
+  const {mark}=await instrumentWithNoteAt(farTarget),score=screen.getByRole('region',{name:'Score workspace'});
+  mark.focus();expect(mark).toHaveFocus();
+  // A click with no pointer behind it (detail 0: assistive technology) keeps the focus where it is.
+  fireEvent.click(mark);expect(mark).toHaveFocus();expect(score).not.toHaveFocus();
+  fireEvent.click(mark,{detail:1});
+  await waitFor(()=>expect(score).toHaveFocus());
+  // Keys now reach the score pane: the cursor moves with an arrow.
+  const mark2=await screen.findByRole('button',{name:/^Select A4/});mark2.focus();
+  fireEvent.keyDown(mark2,{key:'Enter'});
+  expect(mark2).toHaveFocus();expect(score).not.toHaveFocus();
+  integration.activeNotes.mockImplementation(()=>[]);
+});
+it('hands the score the instrument pick as the new selection after a score click, so a Shift+click extends from the pick',async()=>{
+  const {mark}=await instrumentWithNoteAt(farTarget);
+  click('Select rendered note');
+  fireEvent.click(mark);
+  await waitFor(()=>expect(engravingView.mock.lastCall?.[0]).toMatchObject({editTarget:farTarget,editorSelection:{kind:'range',range:{start:{bar:1,tick:0},lanes:[{track:0,staff:0,voice:0}]}}}));
+  integration.activeNotes.mockImplementation(()=>[]);
 });

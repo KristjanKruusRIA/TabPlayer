@@ -71,3 +71,15 @@ it('chooses_the_metronome_sound_and_reads_old_settings_as_the_beep',()=>{
   rerender(<PracticePanel settings={{...old,metronome:{...old.metronome,sound:'cowbell'}}} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
   expect(screen.getByLabelText('Metronome sound')).toHaveValue('cowbell');
 });
+
+it('applying_the_panel_never_resets_a_key_shift_and_adds_none_when_there_is_none',()=>{
+  const changes:PracticeSettings[]=[];
+  const view=render(<PracticePanel settings={{...settings(),tonality:5}} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
+  change('Relative speed (%)','80');apply();
+  expect(changes).toHaveLength(1);expect(changes[0].tonality).toBe(5);expect(changes[0].tempo).toEqual({kind:'relative',ratio:.8});
+  // A new shift from elsewhere is a changed accepted setting: the panel's draft restarts from it and keeps it.
+  view.rerender(<PracticePanel settings={{...settings(),tonality:-2}} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
+  apply();expect(changes[1].tonality).toBe(-2);
+  view.rerender(<PracticePanel settings={settings()} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
+  apply();expect(Object.hasOwn(changes[2],'tonality')).toBe(false);
+});

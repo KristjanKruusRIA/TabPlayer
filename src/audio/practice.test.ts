@@ -45,3 +45,16 @@ it('accepts settings with or without a metronome sound and refuses unknown sound
   expect(()=>validatePractice({...base,metronome:{...base.metronome,sound:'gong' as never}},false)).toThrow('Invalid metronome sound.');
   expect(()=>validatePractice({...base,metronome:{...base.metronome,sound:undefined}},false)).toThrow('Invalid metronome sound.');
 });
+
+it('accepts_an_optional_whole_key_shift_from_minus_twelve_to_twelve_and_refuses_the_rest',()=>{
+  for(const tonality of [-12,0,7,12])expect(()=>validatePractice({...settings(),tonality},false)).not.toThrow();
+  for(const tonality of [-13,13,1.5,NaN,Infinity,'2',null,undefined])expect(()=>validatePractice({...settings(),tonality} as never,false)).toThrow();
+  expect(()=>validatePractice({...settings(),tonality:13},false)).toThrow('Key shift');
+});
+it('practice_for_backing_keeps_the_key_shift_and_adds_none_when_absent',()=>{
+  const shifted={...settings(),tonality:-5},copy=practiceForBacking(shifted,true);
+  expect(copy.settings.tonality).toBe(-5);expect(copy.settings).toEqual(shifted);
+  expect(Object.hasOwn(practiceForBacking(settings(),true).settings,'tonality')).toBe(false);
+  const fixed:PracticeSettings={...settings(),tempo:{kind:'fixed',bpm:90},tonality:3};
+  expect(practiceForBacking(fixed,true).settings).toEqual({...settings(),tonality:3});
+});

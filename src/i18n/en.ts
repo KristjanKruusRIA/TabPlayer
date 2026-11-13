@@ -1,3 +1,5 @@
+import { helpEn } from './help-en';
+
 export const en = {
   // App brand & title
   'score.untitled': 'Untitled',
@@ -71,6 +73,7 @@ export const en = {
   'menu.dock_overview': 'Global view: tracks',
   'menu.dock_mixer_window': 'Global view: mixer',
   'menu.dock_instrument_window': 'Global view: instrument',
+  'menu.dock_keyboard': 'Global view: keyboard',
   'menu.dock_backing': 'Global view: backing audio',
   'toolbar.main': 'Main toolbar',
   'toolbar.toggle_palette': 'Show or hide the editing palette',
@@ -362,52 +365,13 @@ export const en = {
   'help.workflow_description': 'The blue outline marks your edit target. Green follows playback or a selected passage. Use the inspector’s Song, Track and Selection tabs and Practice settings on the toolbar to reach tools; most changes apply only when you use their action buttons.',
 
   // Help Topics Content
-  'help.topic.start.title': 'Getting started',
-  'help.topic.start.p1': 'Open a score with File → Open, start one with File → New, or pick an example or template from the Library.',
-  'help.topic.start.p2': 'The score sits in the middle, with the playback controls in a bar along the bottom. The inspector is on the right: Song holds the score’s settings, Track holds the settings of the selected track and Selection holds the editing tools. Mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
-  'help.topic.start.p3': 'Press F1 for help about the part of the window you are using. Inside another dialog, close it first.',
 
-  'help.topic.editing.title': 'Editing the score',
-  'help.topic.editing.p1': 'Click a beat or use the arrow keys to move the blue edit target. Up and Down change the string; type a fret number and press Enter to set the note.',
-  'help.topic.editing.p2': 'Shift with Left or Right extends a selection for copying, pasting and selection tools. Escape clears it.',
-  'help.topic.editing.p3': 'Ctrl/Cmd + Shift + P opens the command palette, where you can type commands such as measure 12, fret 5 or tempo 96.',
-  'help.topic.editing.p4': 'Every edit can be undone with Ctrl/Cmd + Z and redone with Ctrl/Cmd + Shift + Z.',
 
-  'help.topic.tracks.title': 'Tracks and sounds',
-  'help.topic.tracks.p1': 'The Track tab of the inspector holds the settings of the selected track. Select a track in the Tracks list in the bottom dock, or click it in the score. Information moves, duplicates or removes the track, changes its name, color, instrument and tuning, and adds an instrument; tick Keep pitch to retune without changing how the notes sound.',
-  'help.topic.tracks.p2': 'Sounds chooses the instrument sound, the effects and the audio output; Interpretation and MIDI output set how the track plays and where it is sent. Choosing Sound in View shows the full rig for the selected track, and the Backing view in the bottom dock aligns an audio recording with the score.',
-  'help.topic.tracks.p3': 'Track changes are recorded in the score history, so Undo reverses them.',
 
-  'help.topic.inspector.title': 'The inspector',
-  'help.topic.inspector.p1': 'The inspector has three tabs. Song holds the score’s information, its musical notation (layout, default zoom, notation and default view; the zoom above the score changes the view at once) and sound mastering. Track holds the settings of the selected track, described under Tracks and sounds. Selection holds note, beat, measure, staff and score tools for the edit target or selection, including the capo.',
-  'help.topic.inspector.p2': 'Most fields change nothing until you use the panel’s action button, such as Apply or Save.',
-  'help.topic.inspector.p3': 'Count-in, metronome and speed-trainer settings for rehearsing a looped passage are in Practice settings on the toolbar, not in the inspector.',
 
-  'help.topic.playback.title': 'Playback and mixing',
-  'help.topic.playback.p1': 'Space plays or pauses. The playback bar along the bottom plays, stop and loop a selected passage, and More playback holds further options. Playback follows the score with a green cursor.',
-  'help.topic.playback.p2': 'The bottom dock mixes tracks with volume, pan, mute and solo, shows the instrument view, and controls a backing recording.',
-  'help.topic.playback.p3': 'Choosing Mixer in View gives every track a channel strip and adds the master output. Dragging a fader or pan knob is heard as it moves and saved as one change that Undo reverses; Focus is for this session only and is not saved.',
 
-  'help.topic.files.title': 'Files, import and export',
-  'help.topic.files.p1': 'TabPlayer opens Guitar Pro (.gp, .gpx, .gp3–.gp5) and MusicXML files and saves its own .tabplayer projects. Each score opens in its own tab.',
-  'help.topic.files.p2': 'File → Import ASCII tab… reads pasted or loaded text tablature into a new untitled score.',
-  'help.topic.files.p3': 'File → Import MIDI… reads a Standard MIDI file (format 0 or 1) into a new untitled score; choose the quantization, tuplets, voices and tablature first.',
-  'help.topic.files.p4': 'File → Batch convert… turns a folder of older scores (and its subfolders) into new .gp files in a separate destination folder. The originals are never changed, and the report lists every file.',
-  'help.topic.files.p5': 'File → Export score writes PDF, images, MIDI, MusicXML, ASCII tab or audio; Export GP writes a Guitar Pro file.',
-  'help.topic.files.p6': 'Export score → Guitar Pro 5 writes a .gp5 file for older programs. It lists what that format leaves out of your score, such as extra staves or tempo changes inside a beat, and asks before saving; Guitar Pro 6 (.gpx) export is not available.',
-  'help.topic.files.p7': 'Unsaved changes are kept in recovery and you are asked before a changed score is closed.',
 
-  'help.topic.shortcuts.title': 'Keyboard shortcuts',
-  'help.topic.shortcuts.p1': 'Ctrl/Cmd + N, O, S: New, Open, Save (add Shift for Save As). Ctrl/Cmd + W closes the score; Ctrl/Cmd + Tab moves between scores.',
-  'help.topic.shortcuts.p2': 'Ctrl/Cmd + Z undoes and Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y redoes. Space plays or pauses.',
-  'help.topic.shortcuts.practice': 'Shift + L loops the selected passage, or the bars in the Loop fields when nothing is selected, and clears an active loop. [ plays slower and ] plays faster.',
-  'help.topic.shortcuts.p3': 'Ctrl/Cmd + C, X, V copy, cut and paste music; add Shift to Copy or Cut for all selected tracks.',
-  'help.topic.shortcuts.tie': 'Ctrl/Cmd + T ties the selected notes to the notes before them, giving each the earlier fret; Ctrl/Cmd + Shift + T unties them.',
-  'help.topic.shortcuts.p4': 'Ctrl/Cmd + Shift + P opens the command palette. F1 opens this help.',
 
-  'help.topic.about.title': 'About and updates',
-  'help.topic.about.p1': 'TabPlayer {version} for desktop.',
-  'help.topic.about.p2': 'This build has no update service. TabPlayer never downloads or installs updates by itself, and checking for updates never changes your open scores.',
 
   // Recovery Prompt Dialog
   'recovery.unavailable_title': 'Recovery unavailable',
@@ -710,6 +674,14 @@ export const en = {
   'instruments.mode_both': 'Neck + keys',
   'instruments.left_handed': 'Left-handed',
   'instruments.left_handed_suffix': ', left-handed',
+  'instruments.note_names': 'Note names',
+  'instruments.note_names_octave': 'With octave',
+  'instruments.note_names_letter': 'Letters only',
+  'instruments.note_tied': '{note} (tied)',
+  'instruments.held_note': '{pitch} · string {string} · fret {fret} · tied, held from an earlier note',
+  'instruments.select_note': 'Select {note} in the score, bar {bar}, beat {beat}',
+  'instruments.keyboard_panel': 'Keyboard panel',
+  'instruments.keyboard_percussion': 'The keyboard shows pitched staves. Use the Drums view for this percussion staff.',
   'instruments.expand_view': 'Expand instrument view',
   'instruments.compact_view': 'Compact instrument view',
   'instruments.expand': 'Expand',
@@ -2146,6 +2118,7 @@ export const en = {
   'dock.overview': 'Overview',
   'dock.mixer': 'Mixer',
   'dock.instrument': 'Instrument',
+  'dock.keyboard': 'Keyboard',
   'dock.backing': 'Backing',
   'dock.expand_aria': 'Expand bottom dock',
   'dock.hide_aria': 'Hide bottom dock',
@@ -2509,6 +2482,7 @@ export const en = {
   'practice.error_repetitions': 'Repetitions per speed must be a whole number from 1 to 100.',
   'practice.error_volume': 'Metronome volume must be between 0% and 100%.',
   'practice.error_count_in': 'Count-in bars must be a whole number from 0 to 16.',
+  'practice.error_tonality': 'The key shift must be a whole number of semitones from -12 to 12.',
   'practice.error_fixed_backing': 'Fixed tempo is unavailable while a backing track is present.',
   'keys.chord_new_open': 'Ctrl/Cmd + N / O',
   'keys.chord_save': 'Ctrl/Cmd + S',
@@ -2530,6 +2504,12 @@ export const en = {
   'keys.chord_gp8_techniques': 'H, S, V, P, I, X',
   'app.chord_library_error': 'Chord library: {error}',
   'app.print_layout_error': 'Saved print layout cannot be exported: {error} Apply a valid page layout.',
+  'scales.overlay_hint': 'Click a scale position to put that note on the selected beat. On a string the new note replaces the one there. Positions the beat already holds are marked.',
+  'scales.overlay_put': 'Put {note} on string {string}, fret {fret} of the selected beat',
+  'scales.overlay_put_key': 'Put {note} on the selected beat',
+  'scales.overlay_result_put': 'Put {note} on the selected beat.',
+  'scales.overlay_result_held': '{note} is already on the selected beat. Nothing changed.',
+  ...helpEn,
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -44,7 +44,7 @@ try{
   for(const width of [960,1280,1600]){
     await page.setViewportSize({width,height:900});await snapshot(`compact-${width}`);
     assert.ok((await page.locator('.score-tools').boundingBox()).height<=120,'Score toolbar must stay compact');
-    const artwork=await page.getByRole('img',{name:'Guitar fretboard'}).boundingBox(),canvas=await page.locator('.instrument-canvas').boundingBox();
+    const artwork=await page.getByRole('group',{name:'Guitar fretboard'}).boundingBox(),canvas=await page.locator('.instrument-canvas').boundingBox();
     assert.ok(artwork&&canvas&&artwork.width<=canvas.width+.5,'Fretted artwork must fit available width');
   }
   await page.setViewportSize({width:1280,height:900});await click('Expand instrument view');await snapshot('expanded-1280');await click('Compact instrument view');

@@ -83,7 +83,7 @@ export function focusNotes(focus: InstrumentFocus, {active,notes,beats,tick,coun
 }
 
 /** A note the view shows as held: the continuation of an earlier note by a tie. */
-export type HeldNote = Pick<PlanNote, 'id' | 'key' | 'source'>;
+export type HeldNote = Pick<PlanNote, 'id' | 'key' | 'source'> & { /** Its place in the beat's notes. */ index: number };
 /**
  * The tied continuations of the selected beat or bar. The playback plan sounds a tied note once, at its first attack, so
  * a beat that only continues a tie has no planned note of its own; the score still has it. Playing and next-beat views follow
@@ -100,7 +100,7 @@ export function heldNotes(score: model.Score, focus: InstrumentFocus, target: Be
       if (focus === 'beat' && beatIndex !== target.beat) return;
       beat.notes.forEach((note, index) => {
         if (!note.isTieDestination) return;
-        held.push({ id: `held/${target.track}/${target.staff}/${target.bar}/${voiceIndex}/${beatIndex}/${index}`, key: note.realValue, source: { target: { track: target.track, staff: target.staff, bar: target.bar, voice: voiceIndex, beat: beatIndex }, string: Math.max(0, note.string) } });
+        held.push({ index, id: `held/${target.track}/${target.staff}/${target.bar}/${voiceIndex}/${beatIndex}/${index}`, key: note.realValue, source: { target: { track: target.track, staff: target.staff, bar: target.bar, voice: voiceIndex, beat: beatIndex }, string: Math.max(0, note.string) } });
       });
     });
   });

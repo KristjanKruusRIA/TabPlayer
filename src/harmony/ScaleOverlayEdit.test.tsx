@@ -17,15 +17,17 @@ it('puts a clicked scale position on the selected beat through the existing set-
   fireEvent.click(screen.getByRole('button', { name: 'Put F2 on string 1, fret 1 of the selected beat' }));
   expect(onNote).toHaveBeenCalledTimes(1);
   expect(onNote).toHaveBeenCalledWith({ type: 'setNote', target, string: 1, fret: 1 }, { string: 1, fret: 1 });
-  expect(screen.getByText(/Click a scale position to put that note on the selected beat/)).toBeInTheDocument();
+  expect(screen.getByText(/Click a scale position to put that note on the selected beat. On a string the new note replaces the one there/)).toBeInTheDocument();
+  expect(screen.getByRole('status')).toHaveTextContent('Put F2 on the selected beat.');
 });
 
 it('records nothing for a position the beat already holds, and leaves other states alone', () => {
   const score = music(), onNote = vi.fn(); render(panel(score, onNote));
   // String 6 is the highest string (open E4): fret 3 is G4.
-  fireEvent.click(screen.getByRole('button', { name: 'Put G4 on string 6, fret 3 of the selected beat' }));
+  const held = screen.getByRole('button', { name: 'Put G4 on string 6, fret 3 of the selected beat' });
+  fireEvent.click(held);
   expect(onNote).not.toHaveBeenCalled();
-  const before = model.JsonConverter.scoreToJson(score); fireEvent.click(screen.getByRole('button', { name: 'Put F2 on string 1, fret 1 of the selected beat' })); expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+  expect(screen.getByRole('status')).toHaveTextContent('G4 is already on the selected beat. Nothing changed.');
 });
 
 it('is plain browsing without an edit handler, a selected written beat, or while busy, and refuses the keys of other staves', () => {
@@ -54,4 +56,28 @@ it('lets a keyboard user put a scale position on the beat', () => {
   const position = screen.getByRole('button', { name: 'Put F2 on string 1, fret 1 of the selected beat' });
   expect(position).toHaveAttribute('tabindex', '0'); fireEvent.keyDown(position, { key: 'Enter' }); fireEvent.keyDown(position, { key: ' ' }); fireEvent.keyDown(position, { key: 'x' });
   expect(onNote).toHaveBeenCalledTimes(2);
+});
+
+it('marks the positions the beat already holds with a pressed state and a visible ring, and no others', () => {
+  const score = music(); const { container } = render(panel(score, vi.fn()));
+  expect(screen.getByRole('button', { name: 'Put G4 on string 6, fret 3 of the selected beat' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('button', { name: 'Put F2 on string 1, fret 1 of the selected beat' })).toHaveAttribute('aria-pressed', 'false');
+  expect(container.querySelectorAll('svg[aria-label="Scale fretboard"] circle[r="13"]')).toHaveLength(1);
+});
+
+it('exposes the preview as a group, not an image, once its positions can be pressed, and numbers strings as the rest of the app does', () => {
+  const score = music(), plain = render(panel(score)); expect(screen.getByRole('img', { name: 'Scale fretboard' })).toBeInTheDocument(); expect(screen.queryByRole('group', { name: 'Scale fretboard' })).toBeNull();
+  // Browsing names string 1 as the lowest string, like the writable names and the instrument view.
+  expect(screen.getByLabelText('String 1 fret 1: F2')).toBeInTheDocument(); expect(screen.getByLabelText('String 6 fret 3: G4')).toBeInTheDocument(); plain.unmount();
+  render(panel(score, vi.fn())); expect(screen.getByRole('group', { name: 'Scale fretboard' })).toBeInTheDocument(); expect(screen.queryByRole('img', { name: 'Scale fretboard' })).toBeNull();
+});
+
+it('exposes the keyboard preview as a group once it is writable, and marks the key the beat holds', () => {
+  const score = new model.Score(), track = new model.Track(), staff = new model.Staff(); track.name = 'Piano'; track.addStaff(staff); score.addTrack(track); score.addMasterBar(new model.MasterBar());
+  const bar = new model.Bar(), voice = new model.Voice(), beat = new model.Beat(); beat.duration = model.Duration.Quarter;
+  const held = new model.Note(); held.octave = 5; held.tone = 4; beat.addNote(held); voice.addBeat(beat); bar.addVoice(voice); staff.addBar(bar); score.finish(new Settings());
+  const { container } = render(<ScaleToolPanel score={score} selection={null} busy={false} onClose={() => {}} target={target} beat={beat} onNote={vi.fn()} />);
+  expect(screen.getByRole('group', { name: 'Scale keyboard' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Put E4 on the selected beat' })).toHaveAttribute('aria-pressed', 'true');
+  expect(container.querySelectorAll('svg[aria-label="Scale keyboard"] rect[stroke="var(--tp-on)"]')).toHaveLength(1);
 });

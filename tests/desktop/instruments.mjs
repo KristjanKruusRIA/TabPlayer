@@ -45,12 +45,12 @@ try {
     const expected=active(track,native.tick);assert.ok(expected.length,`Authored ${track.name} notes at actual tick ${native.tick}`);
     await view.getByRole('heading').filter({hasText:track.name}).waitFor();
     if(requested==='guitar'||requested==='bass') {
-      await view.getByRole('img',{name:requested==='guitar'?'Guitar fretboard':'Bass fretboard'}).waitFor();assert.equal(await view.locator('[data-string-row]').count(),track.tuning.length);
+      await view.getByRole('group',{name:requested==='guitar'?'Guitar fretboard':'Bass fretboard'}).waitFor();assert.equal(await view.locator('[data-string-row]').count(),track.tuning.length);
       const desired=expected.map(note=>{const authored=metadata.notes.find(item=>item.trackId===note.trackId&&item.key===note.key&&item.startTick===note.startTick&&item.source.string===note.source.string);assert.ok(authored);return {id:note.id,string:String(note.source.string),fret:String(authored.fret),key:String(note.key)};}).sort((a,b)=>a.id.localeCompare(b.id));
       await page.waitForFunction(ids=>{const actual=[...document.querySelectorAll('.instrument-view g[data-note-id]')].map(node=>node.dataset.noteId).sort();return JSON.stringify(actual)===JSON.stringify(ids);},desired.map(note=>note.id).sort());
       const actual=await view.locator('g[data-note-id]').evaluateAll(nodes=>nodes.map(node=>({id:node.dataset.noteId,string:node.dataset.string,fret:node.dataset.fret,key:node.dataset.key})).sort((a,b)=>a.id.localeCompare(b.id)));assert.deepEqual(actual,desired);
     } else if(requested==='keys') {
-      await view.getByRole('img',{name:'Keyboard'}).waitFor();const keys=[...new Set(expected.map(note=>note.key))].sort((a,b)=>a-b);
+      await view.getByRole('group',{name:'Keyboard'}).waitFor();const keys=[...new Set(expected.map(note=>note.key))].sort((a,b)=>a-b);
       await page.waitForFunction(keys=>JSON.stringify([...document.querySelectorAll('.instrument-view g[data-key][data-active="true"]')].map(node=>Number(node.dataset.key)).sort((a,b)=>a-b))===JSON.stringify(keys),keys);
     } else {
       await view.getByRole('img',{name:'Drum kit'}).waitFor();const labels=expected.map(note=>metadata.notes.find(item=>item.trackId===note.trackId&&item.key===note.key&&item.startTick===note.startTick)?.drum).filter(Boolean);

@@ -7,15 +7,15 @@ import type { BeatTarget } from '../project';
 import { focusNotes, heldNotes, type InstrumentFocus } from './focus';
 import type { EditCommand } from '../edit-types';
 import type { EntryFollow } from './entry';
-import { InstrumentView } from './InstrumentView';
+import { InstrumentView, type PickBy } from './InstrumentView';
 import { readInstrumentViewPreferences, writeInstrumentViewPreferences } from './view-preferences';
 
 const noSubscribe=()=>()=>{};
 const noState=()=>null;
-export function LiveInstrumentView({score,track,staff,target=null,player,onEdit,onSelect,busy=false,locked=false,string,panel}: {
+export function LiveInstrumentView({score,track,staff,target=null,noteIndex=null,player,onEdit,onSelect,busy=false,locked=false,string,panel}: {
   score:model.Score;track:number;staff:number;target?:BeatTarget|null;
   /** Sends an edit made from the view through the app's edit path; without it the view cannot edit. */
-  onEdit?:(command:EditCommand,follow:EntryFollow)=>void;/** Selects in the score the beat, string and note of a mark clicked in the view. */onSelect?:(target:BeatTarget,string:number|undefined,noteIndex:number|undefined)=>void;busy?:boolean;/** The document is finalized: entry mode is unavailable. */locked?:boolean;string?:number;/** Shows one instrument alone, as its own dock panel. */panel?:'keyboard';
+  onEdit?:(command:EditCommand,follow:EntryFollow)=>void;/** Selects in the score the beat, string and note of a mark clicked in the view. */onSelect?:(target:BeatTarget,string:number|undefined,noteIndex:number|undefined,by:PickBy)=>void;/** The note selected in the score: a pick of the same position then moves on from it. */noteIndex?:number|null;busy?:boolean;/** The document is finalized: entry mode is unavailable. */locked?:boolean;string?:number;/** Shows one instrument alone, as its own dock panel. */panel?:'keyboard';
   player:(Pick<NativePlaybackController,'subscribe'|'getState'|'activeNotes'>&Partial<Pick<NativePlaybackController,'scheduledNotes'>>)|null;
 }) {
   const { t } = useI18n();
@@ -42,7 +42,7 @@ export function LiveInstrumentView({score,track,staff,target=null,player,onEdit,
   const empty=editMode||focus==='playing'?shown.empty:state?.error?t('instruments.playback_unavailable'):!state?.ready||!scheduled?t('instruments.playback_not_ready'):shown.empty;
   return <section className="live-instrument-view" aria-label={panel==='keyboard'?t('instruments.keyboard_panel'):t('instruments.instrument_view')}>
     <InstrumentView lockedMode={panel==='keyboard'?'keys':undefined} score={score} track={track} staff={staff} notes={notes} held={held} caption={shown.caption} empty={empty}
-      onSelect={onSelect} entry={editing&&onEdit&&!locked?{target,busy,string,onEdit}:undefined}
+      onSelect={onSelect} selected={target?{target,noteIndex}:null} entry={editing&&onEdit&&!locked?{target,busy,string,onEdit}:undefined}
       controls={<>{onEdit?<label className="instrument-check"><input type="checkbox" checked={editing&&!locked} disabled={locked} title={locked?t('project.finalized'):undefined} onChange={event=>chooseEditing(event.target.checked)}/>{t('instruments.click_to_edit')}</label>:null}<label>{t('instruments.show_focus')}<select value={focus} disabled={editMode} onChange={event=>setFocus(event.target.value as InstrumentFocus)}>{Object.entries(focuses).map(([value,{label}])=><option key={value} value={value}>{label}</option>)}</select></label></>}/>
   </section>;
 }

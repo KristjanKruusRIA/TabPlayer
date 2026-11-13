@@ -7,10 +7,8 @@ export type NoteNames = 'octave' | 'letter';
 export interface InstrumentViewPreferences {
   leftHanded: boolean; noteNames: NoteNames; neck: 'guitar' | 'bass' | null; expanded: boolean;
   focus: InstrumentFocus; clickToEdit: boolean;
-  /** The dock was last left on the keyboard panel. */
-  keyboardPanel: boolean;
 }
-export const instrumentViewDefaults: InstrumentViewPreferences = Object.freeze({ leftHanded: false, noteNames: 'octave', neck: null, expanded: false, focus: 'playing', clickToEdit: false, keyboardPanel: false });
+export const instrumentViewDefaults: InstrumentViewPreferences = Object.freeze({ leftHanded: false, noteNames: 'octave', neck: null, expanded: false, focus: 'playing', clickToEdit: false });
 
 const key = 'tabplayer.instrumentView';
 /** Click to edit keeps its own key, as it always has. Handedness used to have one too; it is read until a new choice is stored. */
@@ -22,22 +20,19 @@ const flag = (value: unknown) => typeof value === 'boolean' ? value : undefined;
 
 /** Keeps each valid field; anything else reads as that option's default. */
 export function readInstrumentViewPreferences(storage: PreferenceStorage | undefined = browserStorage()): InstrumentViewPreferences {
-  let stored: Record<string, unknown> = {}, clickToEdit = false; const legacy: Partial<InstrumentViewPreferences> = {};
-  try {
-    const value: unknown = JSON.parse(storage?.getItem(key) ?? 'null');
-    if (value && typeof value === 'object' && !Array.isArray(value)) stored = value as Record<string, unknown>;
-    if (!('leftHanded' in stored) && storage?.getItem(legacyHandedness) === 'left') legacy.leftHanded = true;
-    clickToEdit = storage?.getItem(editingKey) === 'on';
-  } catch { /* unreadable storage reads as the defaults */ }
+  // Each value is read on its own, so a damaged record never hides the older keys and an unreadable key never hides the record.
+  const read = (name: string) => { try { return storage?.getItem(name) ?? null; } catch { return null; } };
+  let stored: Record<string, unknown> = {};
+  try { const value: unknown = JSON.parse(read(key) ?? 'null'); if (value && typeof value === 'object' && !Array.isArray(value)) stored = value as Record<string, unknown>; } catch { /* a damaged record reads as the defaults */ }
+  const legacyLeft = read(legacyHandedness) === 'left' ? true : undefined, clickToEdit = read(editingKey) === 'on';
   const d = instrumentViewDefaults;
   return {
-    leftHanded: flag(stored.leftHanded) ?? legacy.leftHanded ?? d.leftHanded,
+    leftHanded: flag(stored.leftHanded) ?? legacyLeft ?? d.leftHanded,
     noteNames: oneOf(stored.noteNames, ['octave', 'letter'] as const) ?? d.noteNames,
     neck: oneOf(stored.neck, ['guitar', 'bass'] as const) ?? d.neck,
     expanded: flag(stored.expanded) ?? d.expanded,
     focus: oneOf(stored.focus, ['playing', 'beat', 'bar', 'next'] as const) ?? d.focus,
     clickToEdit,
-    keyboardPanel: flag(stored.keyboardPanel) ?? d.keyboardPanel,
   };
 }
 /** Stores the changed options beside the ones already kept. Returns false when storage refuses the write; the choice still applies to the view that made it. */

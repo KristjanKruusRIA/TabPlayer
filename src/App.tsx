@@ -58,10 +58,9 @@ import { barCompletion } from './editor/bar-completion';
 import { DockResizeHandle,InspectorResizeHandle } from './workstation/DockResizeHandle';
 import { readPanelSizes,writePanelSizes } from './workstation/panel-sizes';
 import { LiveInstrumentView } from './instruments/LiveInstrumentView';
-import { readInstrumentViewPreferences, writeInstrumentViewPreferences } from './instruments/view-preferences';
 import { followEntry, type EntryFollow } from './instruments/entry';
 import type { MusicSelection } from './editor/range-types';
-import { rangeFromBeats,resolveSelectionBeats,resolveSelectionNotes,selectionForTrack } from './editor/range-selection';
+import { rangeFromBeats,resolveSelectionBeats,resolveSelectionNotes,selectionForTrack,singleBeatSelection } from './editor/range-selection';
 import { beatAddress,gp8CursorTarget,gp8Key,planTechniqueToggle } from './editor/gp8-keys';
 import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
@@ -207,8 +206,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   },[]);
   const manualZoom=(value:number)=>{setZoom(value);setScoreDisplay(old=>old&&old.zoomMode!=='manual'?{...old,zoomMode:'manual'}:old);};
   const [instrumentVisible,setInstrumentVisible]=useState(documentView.instrumentVisible);
-  /** The keyboard's own dock panel. Its visibility is the user's, not the document's: it is kept with the instrument view options. */
-  const [keyboardVisible,setKeyboardVisible]=useState(()=>!documentView.instrumentVisible&&readInstrumentViewPreferences().keyboardPanel);
+  /** The keyboard's own dock panel. Neither the document nor the user's settings keep it: it is a choice for this open document only. */
+  const [keyboardVisible,setKeyboardVisible]=useState(false);
   const dockPanelVisible=instrumentVisible||keyboardVisible;
   const [paletteVisible,setPaletteVisible]=useState(true),[paletteHost,setPaletteHost]=useState<HTMLElement|null>(null);
   const [songHost,setSongHost]=useState<HTMLElement|null>(null),[practiceHost,setPracticeHost]=useState<HTMLElement|null>(null);
@@ -240,7 +239,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const dockMin=96,dockMax=Math.max(dockMin,Math.min(460,Number.isFinite(workspaceHeight)?workspaceHeight-200:460));
   const dockHeight=dockSize===null?autoDockHeight:Math.min(dockMax,Math.max(dockMin,dockSize));
   const dockCollapsed=dockVisible&&!dockForced&&workspaceHeight-dockHeight<200;
-  const instrumentShown=instrumentVisible&&dockVisible&&!dockCollapsed;
+  const instrumentShown=dockPanelVisible&&dockVisible&&!dockCollapsed;
   const requestPaneFocus=(tab:InspectorTab)=>{paneFocusIntent.current=tab;setPaneFocusTick(value=>value+1);};
   useEffect(()=>{const resize=()=>setViewport({width:window.innerWidth,height:window.innerHeight});window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[]);
   useLayoutEffect(()=>{if(!workspace.current||typeof ResizeObserver==='undefined')return;const observer=new ResizeObserver(entries=>{const rect=entries[0]?.contentRect;if(rect?.height>0)setWorkspaceHeight(rect.height);if(rect?.width>0)setWorkspaceWidth(rect.width);});observer.observe(workspace.current);return()=>observer.disconnect();},[]);
@@ -254,7 +253,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   // The dock's + opens the Track tab with Add instrument unfolded and its name field focused.
   const startAddTrack=()=>{openInspector('track');setTimeout(()=>{const details=document.querySelector<HTMLDetailsElement>('.workstation-inspector details.track-add');if(!details)return;details.open=true;details.scrollIntoView?.({block:'nearest'});details.querySelector<HTMLInputElement>('input')?.focus();},0);};
   const showInspector=()=>openInspector();
-  const chooseDock=(mode:'overview'|'mixer'|'instrument'|'keyboard'|'backing')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');setKeyboardVisible(mode==='keyboard');writeInstrumentViewPreferences({keyboardPanel:mode==='keyboard'});if(mode!=='instrument'&&mode!=='keyboard')setDockMode(mode);if(mode==='backing')setWaveformOpened(true);};
+  const chooseDock=(mode:'overview'|'mixer'|'instrument'|'keyboard'|'backing')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');setKeyboardVisible(mode==='keyboard');if(mode!=='instrument'&&mode!=='keyboard')setDockMode(mode);if(mode==='backing')setWaveformOpened(true);};
   const hideDock=()=>{setDockVisible(false);viewMenu.current?.querySelector('summary')?.focus();};
   const [harmonyOpen,setHarmonyOpen]=useState(false),[scaleOpen,setScaleOpen]=useState(false),[libraryLoading,setLibraryLoading]=useState(false),[libraryError,setLibraryError]=useState<string|null>(null);
   const [library,setLibrary]=useState<HarmonyLibrary>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]});
@@ -529,7 +528,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   /** A selection the user made: it also drops any keys still waiting, which were typed for the old cursor. Entry itself moves the cursor with `moveTo`. */
   const select=(next:BeatTarget,s=string,index?:number)=>{userMoves.current++;clearEntryQueue();moveTo(next,s,index);};
   /** A mark clicked in the instrument view selects its beat, string and note like a click on the score does. */
-  const selectFromInstrument=(next:BeatTarget,s:number|undefined,index:number|undefined)=>select(next,s,index);
+  const selectFromInstrument=(next:BeatTarget,s:number|undefined,index:number|undefined,by:'pointer'|'keyboard')=>{
+    select(next,s,index);
+    // Like a click on the score it replaces any earlier range with that one beat, so a cut or copy takes what was picked.
+    editorSelection(singleBeatSelection(state.score,repairSelection(state.score,next)));
+    // A pointer pick hands the keys back to the score, as the track overview does; a key press stays on the instrument.
+    if(by==='pointer')scorePane.current?.focus();
+  };
   /** Shows why a key did nothing; for a queued key it also records that the rest of the queue was typed for a result that did not happen. */
   const refuse=(text:string,at:string)=>{setInputNotice({text,at});if(draining.current)entryFailure.current={text};};
   /** Records a planned entry as one edit, then moves the cursor where the plan says; a refusal keeps the cursor on the beat and says why. */
@@ -982,7 +987,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <div className="gp-toolbar-right">
         <details ref={practiceMenu} className="gp-practice" onToggle={event=>{if(event.currentTarget.open)event.currentTarget.querySelectorAll<HTMLDetailsElement>('.gp-practice-body details:not([open])').forEach(inner=>{inner.open=true;});}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} aria-label={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} data-line-in={lineInOn||undefined}><PracticeGlyph/>{lineInOn&&<span className="line-in-badge" aria-hidden="true"/>}</summary><div ref={setPracticeHost} className="gp-practice-body"/></details>
         <Segmented className="view-switch" label={t('view.view_label')} value={view} onChange={setView} options={[{value:'score',label:<><ScoreGlyph/><span className="tp-sr">{t('view.score')}</span></>,title:t('view.score')},{value:'sound',label:<><AmpGlyph/><span className="tp-sr">{t('view.sound')}</span></>,title:t('view.sound')},{value:'mixer',label:<><MixerGlyph/><span className="tp-sr">{t('view.mixer')}</span></>,title:t('view.mixer')}]}/>
-        <button type="button" className="gp-instrument" aria-pressed={instrumentShown} title={t('toolbar.instrument')} aria-label={instrumentShown?t('toolbar.hide_instrument'):t('toolbar.show_instrument')} onClick={()=>instrumentShown?setInstrumentVisible(false):chooseDock('instrument')}><FretboardGlyph/></button>
+        <button type="button" className="gp-instrument" aria-pressed={instrumentShown} title={t('toolbar.instrument')} aria-label={instrumentShown?t('toolbar.hide_instrument'):t('toolbar.show_instrument')} onClick={()=>{if(instrumentShown){setInstrumentVisible(false);setKeyboardVisible(false);}else chooseDock('instrument');}}><FretboardGlyph/></button>
       </div>
     </div>
     {documentTabs}
@@ -1042,8 +1047,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <nav aria-label={t('dock.views_group')}><button aria-pressed={!dockPanelVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>{t('dock.overview')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>{t('dock.mixer')}</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>{t('dock.instrument')}</button><button aria-pressed={keyboardVisible} onClick={()=>chooseDock('keyboard')}>{t('dock.keyboard')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>{t('dock.backing')}</button><button className="dock-collapse" aria-label={t(dockCollapsed?'dock.expand_aria':'dock.hide_aria')} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{t(dockCollapsed?'dock.expand':'dock.hide')}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
           <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}</div>
-          {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
-          {keyboardVisible&&<LiveInstrumentView panel="keyboard" score={state.score} track={target.track} staff={target.staff} target={target} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
+          {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
+          {keyboardVisible&&<LiveInstrumentView panel="keyboard" score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           <div className="workstation-dock-backing" hidden={dockPanelVisible||dockMode!=='backing'}>
             <div className="workstation-dock-backing-settings"><BackingPanel visible={referenceVisible} settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={editBusy} durationMs={sourceDurationMs??undefined} reference={reference} onShowWaveform={()=>chooseDock('backing')}/>{referenceVisible&&sourceMetadataStatus}</div>
 

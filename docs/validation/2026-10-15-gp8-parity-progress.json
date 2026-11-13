@@ -2336,6 +2336,24 @@
       "start_line": 53,
       "end_line": 86,
       "kind": "validation_report"
+    },
+    "the58_instrument_views_u13": {
+      "path": "docs/validation/2026-11-13-the-58-instrument-views.md",
+      "start_line": 7,
+      "end_line": 15,
+      "kind": "validation_report"
+    },
+    "the58_instrument_views_u14": {
+      "path": "docs/validation/2026-11-13-the-58-instrument-views.md",
+      "start_line": 17,
+      "end_line": 22,
+      "kind": "validation_report"
+    },
+    "the58_instrument_views_u15": {
+      "path": "docs/validation/2026-11-13-the-58-instrument-views.md",
+      "start_line": 24,
+      "end_line": 29,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -10320,12 +10338,13 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "The instrument view has a Show list: Playing notes, Selected beat, Selected bar and Next beat. The selected beat and bar show the edit target’s notes on its staff (first pass of repeats; repeat-bar notes in their own measure) while stopped or playing. Next beat follows the selected beat while stopped and the playback position while playing or paused, including count-in, loop wrap and range end. It reads the playback plan without editing the score.",
-      "remaining_gap": "No click-to-select on the instrument itself; Selected beat follows one voice; tied continuations show nothing; Show changes are not announced; no original-GP8 comparison.",
+      "current_behavior": "The instrument view has a Show list: Playing notes, Selected beat, Selected bar and Next beat, reading the playback plan without editing the score. A lit neck position or key is now a button: a click or Enter/Space selects that note in the score and publishes the single-beat range a score click publishes. One button stands for a position repeated in the bar; it selects the first occurrence, and a further click while that note is selected moves to the next, wrapping, with the beat in its accessible name. Each instrument is one tab stop with arrow keys in musical order; a pointer pick hands focus to the score pane. Tied continuations of the selected beat or bar, and in edit mode, are drawn held (dashed ring or pad).",
+      "remaining_gap": "Drums are not clickable; held notes are not shown in Playing and Next beat; Selected beat follows one voice; Show changes are not announced; the held ring’s legibility at dock size and all new behavior are unseen in the desktop app; no original-GP8 comparison.",
       "current_evidence": [
         "instrument_focus_behavior",
         "instrument_focus_evidence",
-        "instrument_focus_limits"
+        "instrument_focus_limits",
+        "the58_instrument_views_u13"
       ],
       "runtime_rechecked_by_this_audit": false
     },
@@ -10351,12 +10370,13 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "A remembered Left-handed checkbox mirrors the guitar or bass neck (nut on the right, upright fret numbers, marks on the same strings and frets). A Neck + keys mode shows the neck above a keyboard marking the same notes of the current staff for every Show focus; it is disabled for percussion and keeps the user’s chosen neck.",
-      "remaining_gap": "The keyboard sits under the neck rather than in its own panel; one neck only; handedness is stored per browser profile rather than in app settings; compact views may scroll in a short dock; no original-GP8 comparison.",
+      "current_behavior": "A remembered Left-handed checkbox mirrors the guitar or bass neck (nut on the right, upright fret numbers, marks on the same strings and frets); the choice is kept in one instrument-view record in the WebView’s localStorage, with the other view options. A Neck + keys mode shows the neck above a keyboard of the same notes, and the dock has a Keyboard tab that shows the keyboard alone (a message on percussion staves). The keyboard panel is per open document and per session only; the toolbar instrument button reports either panel.",
+      "remaining_gap": "Handedness is still in the WebView profile (moved to one record, not out of the browser profile; app settings need a native store and Rust work); the keyboard panel is not remembered per document (needs a DocumentViewState field and Rust); one neck only; compact views may scroll in a short dock; not run in the desktop app; no original-GP8 comparison.",
       "current_evidence": [
         "instrument_handedness_behavior",
         "instrument_handedness_evidence",
-        "instrument_handedness_limits"
+        "instrument_handedness_limits",
+        "the58_instrument_views_u14"
       ],
       "runtime_rechecked_by_this_audit": false
     },
@@ -10380,13 +10400,14 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Scale browsing previews root/interval notes on selected-staff fretboard/keyboard views without score history.",
-      "remaining_gap": "Editing through overlays, persistent note-name/view options and the complete instrument-view scale workflow are absent.",
+      "current_behavior": "Scale browsing previews root/interval notes on selected-staff fretboard/keyboard views. With a written beat selected, pressing a previewed position puts that note on the beat through setNote or addPitchedNote as one undoable edit (a string’s note is replaced; positions the beat already holds are marked and record nothing; the result is announced). A Note names choice (With octave, Letters only), neck choice, size and Show focus persist in the same WebView record as handedness; the view mode does not persist.",
+      "remaining_gap": "Overlays are only in the Scale browser, not on the main instrument view; the complete instrument-view scale workflow (audition, insert) is absent; view mode is not persisted; options live in the WebView profile, not native app settings; et and de texts unreviewed by a native speaker; not run in the desktop app.",
       "current_evidence": [
         "harmony",
         "harmony_validation",
         "harmony_limits",
-        "scale_source"
+        "scale_source",
+        "the58_instrument_views_u15"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",

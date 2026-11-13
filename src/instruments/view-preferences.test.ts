@@ -14,7 +14,7 @@ it('starts from the defaults and keeps each stored option separately', () => {
 });
 
 it('repairs unknown values field by field instead of dropping the rest', () => {
-  const storage = memory({ 'tabplayer.instrumentView': JSON.stringify({ leftHanded: true, noteNames: 'solfege', viewMode: 'banjo', neck: 'bass', expanded: 'yes', focus: 'bar', keyboardPanel: 1 }) });
+  const storage = memory({ 'tabplayer.instrumentView': JSON.stringify({ leftHanded: true, noteNames: 'solfege', viewMode: 'banjo', neck: 'bass', expanded: 'yes', focus: 'bar' }) });
   expect(readInstrumentViewPreferences(storage)).toEqual({ ...instrumentViewDefaults, leftHanded: true, neck: 'bass', focus: 'bar' });
   expect(readInstrumentViewPreferences(memory({ 'tabplayer.instrumentView': '{not json' }))).toEqual(instrumentViewDefaults);
 });
@@ -38,4 +38,19 @@ it('reports a refusing store instead of throwing, and reads defaults without one
 it('uses the browser store by default', () => {
   writeInstrumentViewPreferences({ expanded: true });
   expect(readInstrumentViewPreferences().expanded).toBe(true);
+});
+
+it('reads each stored value on its own: a corrupt record does not hide the older keys, and an invalid flag falls back per field', () => {
+  const corrupt = memory({ 'tabplayer.instrumentView': '{not json', 'tabplayer.instrument.leftHanded': 'left', 'tabplayer.instrument.editNotes': 'on' });
+  expect(readInstrumentViewPreferences(corrupt)).toEqual({ ...instrumentViewDefaults, leftHanded: true, clickToEdit: true });
+  const invalid = memory({ 'tabplayer.instrumentView': JSON.stringify({ leftHanded: 'yes', expanded: true }), 'tabplayer.instrument.leftHanded': 'left' });
+  expect(readInstrumentViewPreferences(invalid)).toEqual({ ...instrumentViewDefaults, leftHanded: true, expanded: true });
+  const throwing = { getItem: (name: string) => { if (name === 'tabplayer.instrumentView') throw new Error('blocked'); return name === 'tabplayer.instrument.editNotes' ? 'on' : null; }, setItem: () => {} };
+  expect(readInstrumentViewPreferences(throwing)).toMatchObject({ clickToEdit: true });
+});
+
+it('does not keep which dock panel was open: the keyboard panel is a choice for the running session only', () => {
+  const storage = memory(); writeInstrumentViewPreferences({ leftHanded: true }, storage);
+  expect(JSON.parse(storage.data.get('tabplayer.instrumentView')!)).not.toHaveProperty('keyboardPanel');
+  expect(instrumentViewDefaults).not.toHaveProperty('keyboardPanel');
 });

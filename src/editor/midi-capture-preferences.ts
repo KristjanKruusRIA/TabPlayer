@@ -37,6 +37,13 @@ export function readMidiCapturePreferences(storage:PreferenceStorage|undefined=b
   if(text&&JSON.stringify(preferences)!==text)saveMidiCapturePreferences(preferences,storage);
   return preferences;
 }
+/** The mapping chosen when storage refused to keep it: this session's choice stands, so the select and the chords agree. */
+let unsaved:StringMapping|null=null;
 export function saveMidiCapturePreferences(preferences:MidiCapturePreferences,storage:PreferenceStorage|undefined=browserStorage()):void {
-  try{storage?.setItem(MIDI_CAPTURE_KEY,JSON.stringify({port:preferences.port,chordWindowMs:preferences.chordWindowMs,minVelocity:preferences.minVelocity,stringMapping:preferences.stringMapping}));}catch{/* Storage can be unavailable; the choice then lasts for this session only. */}
+  try{
+    storage?.setItem(MIDI_CAPTURE_KEY,JSON.stringify({port:preferences.port,chordWindowMs:preferences.chordWindowMs,minVelocity:preferences.minVelocity,stringMapping:preferences.stringMapping}));
+    unsaved=null;
+  }catch{/* Storage can be unavailable; the choice then lasts for this session only. */unsaved=preferences.stringMapping;}
 }
+/** The string mapping in force now: the stored one, unless the last save failed, when the unsaved choice is. */
+export const activeStringMapping=():StringMapping=>unsaved??readMidiCapturePreferences().stringMapping;

@@ -4,7 +4,8 @@ import { nativeMidiIn,type MidiChord,type MidiInBridge } from '../audio/midi-in'
 import { useI18n,type MessageKey } from '../i18n';
 import { formatPitch } from '../tuning';
 import { busyGuard,busySelect } from '../ui/useBusyGuard';
-import { CHORD_WINDOW_MAX,CHORD_WINDOW_MIN,VELOCITY_MAX,VELOCITY_MIN,readMidiCapturePreferences,saveMidiCapturePreferences,type MidiCapturePreferences } from './midi-capture-preferences';
+import { CHORD_WINDOW_MAX,CHORD_WINDOW_MIN,DEFAULT_MIDI_CAPTURE,activeStringMapping,VELOCITY_MAX,VELOCITY_MIN,readMidiCapturePreferences,saveMidiCapturePreferences,type MidiCapturePreferences,type StringMapping } from './midi-capture-preferences';
+import { channelString } from './midi-capture';
 import { midiCaptureSession,useMidiCaptureBadge,useMidiCaptureState } from './midi-capture-session';
 
 /** The toolbar's sign that MIDI input is on, and that it was lost: the dot changes and a live region says so, with the View menu closed. */
@@ -47,7 +48,7 @@ export function MidiCapturePanel({bridge=nativeMidiIn}:MidiCapturePanelProps):Re
   const {t}=useI18n();
   const session=midiCaptureSession(bridge);
   const state=useMidiCaptureState(session);
-  const [preferences,setPreferences]=useState(()=>readMidiCapturePreferences());
+  const [preferences,setPreferences]=useState(()=>({...readMidiCapturePreferences(),stringMapping:activeStringMapping()}));
   const root=useRef<HTMLDetailsElement>(null);
   // Listing creates a system MIDI client, so it waits until the player opens this section (or presses Refresh).
   useEffect(()=>{
@@ -66,6 +67,15 @@ export function MidiCapturePanel({bridge=nativeMidiIn}:MidiCapturePanelProps):Re
     change(next);
     session.configure({chordWindowMs:merged.chordWindowMs,minVelocity:merged.minVelocity});
   };
+  // The mapping lives on the page only (each chord reads it as it is written), so running sessions are told only about the sensitivity.
+  const reset=()=>{
+    change({chordWindowMs:DEFAULT_MIDI_CAPTURE.chordWindowMs,minVelocity:DEFAULT_MIDI_CAPTURE.minVelocity,stringMapping:DEFAULT_MIDI_CAPTURE.stringMapping});
+    session.configure({chordWindowMs:DEFAULT_MIDI_CAPTURE.chordWindowMs,minVelocity:DEFAULT_MIDI_CAPTURE.minVelocity});
+  };
+  // A MIDI guitar has six strings; on a track with another count the channels land elsewhere, so the player is told where.
+  const landing=state.trackStrings&&preferences.stringMapping!=='off'&&state.trackStrings!==6
+    ?[0,1,2,3,4,5].map(channel=>channelString(channel,state.trackStrings!,preferences.stringMapping)).filter((string):string is number=>string!==null):[];
+  const stringsWarning=landing.length?t('midi_in.strings_warning',{count:state.trackStrings!,mapped:landing.length,first:landing[0],last:landing[landing.length-1]}):'';
   const running=state.phase==='running',starting=state.phase==='starting';
   const known=state.ports?.some(port=>port.name===preferences.port)??false;
   const toggle=()=>{
@@ -90,6 +100,14 @@ export function MidiCapturePanel({bridge=nativeMidiIn}:MidiCapturePanelProps):Re
     <p className="hint">{t('midi_in.window_hint')}</p>
     <label>{t('midi_in.velocity')}<input type="range" min={VELOCITY_MIN} max={VELOCITY_MAX} step={1} value={preferences.minVelocity} onChange={event=>sensitivity({minVelocity:Number(event.target.value)})}/><output>{preferences.minVelocity}</output></label>
     <p className="hint">{t('midi_in.velocity_hint')}</p>
+    <label>{t('midi_in.mapping')}<select value={preferences.stringMapping} onChange={event=>change({stringMapping:event.target.value as StringMapping})}>
+      <option value="off">{t('midi_in.mapping_off')}</option>
+      <option value="lowestFirst">{t('midi_in.mapping_lowest')}</option>
+      <option value="highestFirst">{t('midi_in.mapping_highest')}</option>
+    </select></label>
+    <p className="hint">{t('midi_in.mapping_hint')}</p>
+    <button type="button" {...busyGuard({busy:false,onClick:reset})}>{t('midi_in.reset')}</button>
+    {stringsWarning&&<p className="hint" role="status">{stringsWarning}</p>}
     {status&&<p className="hint" role="status">{status}</p>}
     {state.phase==='error'&&<p role="alert">{startError(state.message,port,t)}</p>}
     {running&&<p className="midi-capture-last">{chord?t('midi_in.last_chord',chord):t('midi_in.no_chord')}</p>}
@@ -97,6 +115,8 @@ export function MidiCapturePanel({bridge=nativeMidiIn}:MidiCapturePanelProps):Re
     {/* The number changes with every lost chord, so it is not live; the fixed line is announced once, when the first chord is lost. */}
     {state.notWritten>0&&<p className="hint">{t(`midi_in.not_written_${state.notWritten===1?'one':'other'}` as MessageKey,{count:state.notWritten})}</p>}
     <span className="tp-sr" aria-live="polite">{state.notWritten>0?t('midi_in.not_written_alert'):''}</span>
+    {state.relocated>0&&<p className="hint">{t(`midi_in.relocated_${state.relocated===1?'one':'other'}` as MessageKey,{count:state.relocated})}</p>}
+    {state.skipped>0&&<p className="hint">{t(`midi_in.skipped_${state.skipped===1?'one':'other'}` as MessageKey,{count:state.skipped})}</p>}
     {state.dropped>0&&<p className="hint">{t('midi_in.dropped',{count:state.dropped})}</p>}
     {state.unavailable&&<p className="hint" role="status">{t('midi_in.unavailable',{error:state.unavailable})}</p>}
     {state.listError&&<p className="hint" role={state.listAlert?'alert':'status'}>{t('midi_out.ports_failed',{error:state.listError})}</p>}

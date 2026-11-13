@@ -113,6 +113,9 @@ export interface EntryPlan {
   removes: boolean;
   /** Something the person should know though the entry went ahead, or null. */
   notice: string | null;
+  /** MIDI capture with a string mapping: notes written on another string than their channel's (the channel has no string here), and notes left out because their pitch was already there. */
+  moved?: number;
+  skipped?: number;
   /** The rhythm the next entry uses. */
   entry: EntryDuration | null;
   /** Where the fretting hand ended up (MIDI capture), so the next chord is placed near it; absent when the chord had no fretted note. */
@@ -121,7 +124,7 @@ export interface EntryPlan {
   end?: boolean;
 }
 /** Why an entry or move wrote nothing; the app words it. `name` is the pitch. */
-export type EntryRefusal = { refused: 'cannot_enter' | 'no_string' | 'refused' | 'present' | 'cannot_move' | 'percussion' | 'unreachable'; name: string };
+export type EntryRefusal = { refused: 'cannot_enter' | 'no_string' | 'refused' | 'present' | 'cannot_move' | 'percussion' | 'unreachable' | 'channel_shared' | 'string_taken'; name: string };
 export interface EntryRequest {
   project: Project; score: model.Score; target: BeatTarget; entered: EntryPitch;
   preferences: InputPreferences; entry: EntryDuration | null;

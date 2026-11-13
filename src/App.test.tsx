@@ -2697,6 +2697,48 @@ describe('MIDI capture in the score',()=>{
     await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:0}));
     expect(c.getState().snapshot.project.edits).toHaveLength(before);
   });
+  it('writes each note on the string of its channel when the player chose a MIDI guitar mapping, and by the fingering rule otherwise',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});await startCapture();
+    const strings=()=>currentBeat(c,0).notes.map(note=>[note.string,note.fret]);
+    const undo=async()=>{fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(0));};
+    const sent=(channel:number)=>({...keyboardChord([52]),notes:[{key:52,velocity:90,channel}]});
+    try{
+      expect(midiCaptureSession().get().trackStrings).toBe(6);
+      sendChord(sent(5));
+      await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));
+      expect(strings()).toEqual([[3,2]]);
+      await undo();
+      localStorage.setItem('tabplayer.midiCapture',JSON.stringify({port:'',chordWindowMs:60,minVelocity:1,stringMapping:'highestFirst'}));
+      sendChord(sent(5));
+      await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));
+      expect(strings()).toEqual([[1,12]]);
+      await undo();
+      localStorage.setItem('tabplayer.midiCapture',JSON.stringify({port:'',chordWindowMs:60,minVelocity:1,stringMapping:'lowestFirst'}));
+      sendChord(sent(0));
+      await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));
+      expect(strings()).toEqual([[1,12]]);
+    }finally{localStorage.removeItem('tabplayer.midiCapture');}
+  });
+  it('refuses a chord whose mapped string cannot play a note, counts it, and counts a note a channel without a string had to move',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    localStorage.setItem('tabplayer.midiCapture',JSON.stringify({port:'',chordWindowMs:60,minVelocity:1,stringMapping:'lowestFirst'}));
+    try{
+      const before=c.getState().snapshot.project.edits.length,lost=session.get().notWritten;
+      // A 69 is fret 29 on string 1: refused whole, although string 6 could play it.
+      sendChord({...keyboardChord([69]),notes:[{key:69,velocity:90,channel:0}]});
+      await waitFor(()=>expect(session.get().notWritten).toBe(lost+1));
+      expect(c.getState().snapshot.project.edits).toHaveLength(before);
+      expect(currentBeat(c,0).notes).toHaveLength(0);
+      expect(await screen.findByText(/on string 1 is outside what this instrument can play/)).toBeInTheDocument();
+      // Channel 10 has no string: the note is placed by the fingering rule, written, and counted.
+      sendChord({...keyboardChord([52]),notes:[{key:52,velocity:90,channel:9}]});
+      await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));
+      expect(session.get().relocated).toBe(1);
+      expect(currentBeat(c,0).notes.map(note=>[note.string,note.fret])).toEqual([[3,2]]);
+    }finally{localStorage.removeItem('tabplayer.midiCapture');}
+  });
   it('writes nothing while note entry is off',async()=>{
     const c=await setup();await startCapture();
     const before=c.getState().snapshot.project.edits.length;

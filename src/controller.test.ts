@@ -398,3 +398,32 @@ it('tells the player where the bars went for an edit, its undo and its redo, and
   await controller.undo();await controller.undo();
   expect(beforeChange).toHaveBeenLastCalledWith(undefined);
 });
+
+// Structure-aware paste refusals belong to the gesture; a recorded paste must replay exactly as it always did.
+const measureEdit=(bar:number,over:Partial<Extract<EditCommand,{type:'setMeasureSettings'}>>={}):EditCommand=>({type:'setMeasureSettings',bar,numerator:4,denominator:4,pickup:false,freeTime:false,repeatStart:false,repeatCount:0,endings:[],section:'',tempos:[],...over});
+const pasteOptions=(bar:number,count=1,masterAutomations=false)=>({target:{track:0,staff:0,bar,voice:0,beat:0},destinations:[{sourceTrack:0,track:0,staffMap:[0]}],count,placement:'beforeBar' as const,filters:{diagrams:true,texts:true,timers:true,trackAutomations:true,masterAutomations,sections:masterAutomations}});
+async function plainClip() {const {makeMusicClip}=await import('./editor/clipboard-source'),{music}=await import('./editor/fixtures');return makeMusicClip(music(),{kind:'bars',tracks:[0],firstBar:0,lastBar:0},'singleTrack');}
+const endingsProject=(inside:boolean):Project=>({...blankProject(),edits:[...inside?[{type:'insertMeasures',beforeBar:1,count:1} as EditCommand]:[],measureEdit(1,{repeatStart:true}),...inside?[measureEdit(2,{endings:[1]}),measureEdit(3,{endings:[1],repeatCount:2}),measureEdit(4,{endings:[2]})]:[measureEdit(2,{endings:[1],repeatCount:2}),measureEdit(3,{endings:[2]})]]});
+const endingsOf=(score:{masterBars:{alternateEndings:number;repeatCount:number;isRepeatStart:boolean}[]})=>score.masterBars.map(master=>[Number(master.isRepeatStart),master.repeatCount,master.alternateEndings]);
+
+it('replays a recorded paste between repeat endings exactly as before',async()=>{
+  const {buildDocument}=await import('./engine'),clip=await plainClip(),base=endingsProject(false),before=endingsOf(buildDocument(base).score);
+  expect(before).toEqual([[0,0,0],[1,0,0],[0,2,1],[0,0,2]]);
+  const recorded:Project={...base,edits:[...base.edits,{type:'pasteMusic',clip,options:pasteOptions(3)} as EditCommand]};
+  expect(endingsOf(buildDocument(recorded).score)).toEqual([[0,0,0],[1,0,0],[0,2,1],[0,0,0],[0,0,2]]);
+});
+it('replays a recorded paste inside a multi-bar first ending exactly as before',async()=>{
+  const {buildDocument}=await import('./engine'),clip=await plainClip(),base=endingsProject(true);
+  const recorded:Project={...base,edits:[...base.edits,{type:'pasteMusic',clip,options:pasteOptions(3)} as EditCommand]};
+  expect(endingsOf(buildDocument(recorded).score)).toEqual([[0,0,0],[1,0,0],[0,0,1],[0,0,0],[0,2,1],[0,0,2]]);
+});
+it('refuses the same paste as a new gesture, before anything is recorded, and says what is true there',async()=>{
+  const clip=await plainClip();
+  const between=makeBridge(endingsProject(false)),controller=await DocumentController.create(between);
+  await expect(controller.edit({type:'pasteMusic',clip,options:pasteOptions(3)})).rejects.toThrow('Paste before the repeat, not between its alternate endings.');
+  expect(between.applyEdit).not.toHaveBeenCalled();
+  const inside=makeBridge(endingsProject(true)),second=await DocumentController.create(inside);
+  await expect(second.edit({type:'pasteMusic',clip,options:pasteOptions(3)})).rejects.toThrow('Paste before or after the whole alternate ending, not inside it.');
+  expect(inside.applyEdit).not.toHaveBeenCalled();
+  await second.edit({type:'pasteMusic',clip,options:pasteOptions(1)});expect(inside.applyEdit).toHaveBeenCalledOnce();
+});

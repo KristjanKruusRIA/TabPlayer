@@ -177,6 +177,12 @@
       "end_line": 27,
       "kind": "validation_report"
     },
+    "clipboard_scope": {
+      "path": "docs/validation/2026-11-13-gp8-clipboard-scope.md",
+      "start_line": 1,
+      "end_line": 44,
+      "kind": "validation_report"
+    },
     "clipboard_limits": {
       "path": "docs/validation/2026-10-15-gp8-clipboard.md",
       "start_line": 29,
@@ -546,7 +552,7 @@
     "workstation_backing_check": {
       "path": "docs/validation/2026-10-15-tabplayer-reference-workstation.md",
       "start_line": 35,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "backing_existing_foundation": {
@@ -714,7 +720,7 @@
     "backing_processing_pitch_native": {
       "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
       "start_line": 60,
-      "end_line": 60,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "backing_processing_actual": {
@@ -942,7 +948,7 @@
     "wah_limits": {
       "path": "docs/validation/2026-10-22-gp8-wah.md",
       "start_line": 40,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "pedal_behavior": {
@@ -1080,7 +1086,7 @@
     "strokes_evidence": {
       "path": "docs/validation/2026-10-22-gp8-stroke-patterns.md",
       "start_line": 19,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "strokes_limits": {
@@ -1224,7 +1230,7 @@
     "expressions_evidence": {
       "path": "docs/validation/2026-10-23-gp8-expressions.md",
       "start_line": 28,
-      "end_line": 60,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "expressions_limits": {
@@ -1590,7 +1596,7 @@
     "normalize_export_limits": {
       "path": "docs/validation/2026-10-24-gp8-normalize-export.md",
       "start_line": 54,
-      "end_line": 60,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "flac_export_behavior": {
@@ -2154,7 +2160,7 @@
     "editing_gaps_evidence": {
       "path": "docs/validation/2026-10-31-gp8-editing-gaps.md",
       "start_line": 29,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "editing_gaps_limits": {
@@ -2214,7 +2220,7 @@
     "password_locks_limits": {
       "path": "docs/validation/2026-10-31-gp8-password-locks.md",
       "start_line": 30,
-      "end_line": 43,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "tuning_library_behavior": {
@@ -4199,12 +4205,13 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Half-open tick ranges, indexed multi-note sets and whole-bar multi-track selections support reverse/drag/keyboard selection and transactional edits across lanes.",
-      "remaining_gap": "Selection resolves attacks and authored boundaries; arbitrary sustained-beat subdivision is not implemented.",
+      "current_behavior": "Half-open tick ranges, indexed multi-note sets and whole-bar multi-track selections support reverse/drag/keyboard selection and transactional edits across lanes. A range edge inside a sustained beat copies exactly the selected time as tied pieces of plain or dotted written lengths; bent, trilled, dead, whammy, overridden-length and free-time beats, and cut points with no plain written length, are refused.",
+      "remaining_gap": "The editor still selects attacks only, so a range edge inside a sustained beat is reachable through the API; Cut refuses such ranges.",
       "current_evidence": [
         "range",
         "range_validation",
-        "clipboard_limits"
+        "clipboard_limits",
+        "clipboard_scope"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -4395,13 +4402,14 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Single-track phrases (supporting up to 4 simultaneous voices) and whole-bar all-voice copy/cut/paste are self-contained across New/Open, with destination context, sounding overwrite, undo and restart replay.",
-      "remaining_gap": "Beat subdivision remains open.",
+      "current_behavior": "Single-track phrases (supporting up to 4 simultaneous voices) and whole-bar all-voice copy/cut/paste are self-contained across New/Open, with destination context, sounding overwrite, undo and restart replay. Copying from inside a sustained note keeps its dynamics and sustained techniques.",
+      "remaining_gap": "Cut cannot split a sustained beat in the source; Copy can.",
       "current_evidence": [
         "clipboard",
         "clipboard_validation",
         "clipboard_limits",
-        "paste_source"
+        "paste_source",
+        "clipboard_scope"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -4428,13 +4436,14 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Whole-bar multi-track clips preserve source meter/key/tempo and selected content, insert aligned global bars, map destination staves, append missing destination tracks with the copied instrument context, and preserve destination provenance.",
-      "remaining_gap": "Arbitrary repeat/direction/context groups and conflicting program lanes are rejected; unrestricted clipboard structure is not delivered.",
+      "current_behavior": "Whole-bar multi-track clips preserve source meter/key/tempo and selected content, insert aligned global bars, map destination staves, append missing destination tracks with the copied instrument context, and preserve destination provenance. Complete navigation-direction groups travel in multi-track clips; a new paste is refused for a second target or jump, a repeated jump, or a position inside or between alternate endings. Contradictory program lanes are refused only while track automations are pasted.",
+      "remaining_gap": "Two conflicting instrument lanes are never merged, and unrestricted clipboard structure is not delivered.",
       "current_evidence": [
         "clipboard",
         "clipboard_validation",
         "clipboard_limits",
-        "paste_source"
+        "paste_source",
+        "clipboard_scope"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -4493,11 +4502,12 @@
       "historical_status": "missing",
       "current_status": "partial",
       "current_behavior": "In-app music clipboard survives New/Open and can paste independently after source replacement; restart replay needs no ambient clipboard.",
-      "remaining_gap": "OS musical clipboard and MIDI clipboard interchange/independent decoding are absent. The app clipboard itself is intentionally empty after process restart.",
+      "remaining_gap": "OS text clipboard (needs a clipboard plugin, a capability and Rust) and MIDI clipboard interchange/independent decoding are absent. The app clipboard itself is intentionally empty after process restart.",
       "current_evidence": [
         "clipboard",
         "clipboard_validation",
-        "clipboard_limits"
+        "clipboard_limits",
+        "clipboard_scope"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",

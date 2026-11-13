@@ -13,6 +13,7 @@ import type { ProtectionRequest } from './protection/protection';
 import type { ClipboardMode,MusicClip } from './editor/clipboard-types';
 import type { MusicSelection } from './editor/range-types';
 import { makeMusicClip,musicClipSelection } from './editor/clipboard-source';
+import { pasteGestureProblem } from './editor/clipboard-paste';
 import type {NativeBackingWaveformBridge} from './audio/backing-waveform-types';
 import {backingLocationsForScore} from './audio/plan';
 import {backingProcessingKey} from './audio/backing-processing';
@@ -100,6 +101,7 @@ export class DocumentController {
       const mark=this.needsPartialCapoMark();
       const current=mark?{...this.state.snapshot.project,partialCapo:true as const}:this.state.snapshot.project;
       const project=asset?{...current,assets:{...current.assets,[asset.assetId]:asset.info}}:current;
+      if(command.type==='pasteMusic'){const problem=pasteGestureProblem(this.state.score,command);if(problem)throw new Error(problem);}
       candidate=previewEdit(project,command,mark?{...this.state,snapshot:{...this.state.snapshot,project:current}}:this.state);forgetPreview();
       if(command.type==='setBacking'&&backingState(command.backing)===backingState(effectiveAudioSettings(this.state.snapshot.project,this.state).backing)){
         if(asset)await this.bridge.cancelAsset(asset.token);return;
@@ -147,7 +149,7 @@ export class DocumentController {
   cutMusic(selection:MusicSelection,mode:ClipboardMode):Promise<MusicClip> {
     const requested=structuredClone(selection);
     return this.run(async()=>{
-      const scope=musicClipSelection(this.state.score,requested,mode),clip=makeMusicClip(this.state.score,scope,mode);
+      const scope=musicClipSelection(this.state.score,requested,mode),clip=makeMusicClip(this.state.score,scope,mode,{cut:true});
       const bars=scope as Extract<MusicSelection,{kind:'bars'}>;
       await this.editNow(mode==='multiTrack'?{type:'removeMeasures',firstBar:bars.firstBar,lastBar:bars.lastBar}:{type:'eraseSelection',selection:scope});
       return clip;

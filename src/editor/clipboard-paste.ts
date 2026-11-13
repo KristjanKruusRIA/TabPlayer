@@ -8,6 +8,7 @@ import { allNotes,captureNoteLinks,detachNote,restoreNoteLinks,type NoteLinks } 
 import { applyMeasureEdit,planMeasureMap } from './measures';
 import { mapLyricsMeasures } from './lyrics-measures';
 import { integer,restBeats,rhythmTicks } from './common';
+import { alternateEndingProblem,directionPasteProblem } from './clipboard-structure';
 import { copyHarmonyChord } from '../harmony/chord-source';
 import type { ClipboardCommand,MusicClip,PasteDestination,PasteFilters,PreparedMusicPaste } from './clipboard-types';
 import type { BarIndexMap } from './measures-types';
@@ -387,4 +388,16 @@ export function preparePasteMusic(score:model.Score,command:ClipboardCommand):Pr
   const destination=clone(score),preserved=preserveObjects(destination);createTracks(destination,clip,planned);
   const mappings=targetAndMappings(destination,source,{...command,clip});
   const result=clip.kind==='bars'?pasteBars(destination,clip,source,command,mappings):pastePhrase(destination,clip,source,command,mappings);finishFreshIds(result.score,preserved);return {...result,addedTracks:planned.length};
+}
+
+/**
+ * Refusals that belong to the gesture of pasting, not to the recorded edit: they keep a new paste from leaving an
+ * unbalanced repeat or navigation structure. `preparePasteMusic` never calls this, so projects that already hold
+ * such a paste replay exactly as they did before. Returns the message to show, or null.
+ */
+export function pasteGestureProblem(score:model.Score,command:ClipboardCommand):string|null {
+  const clip=readMusicClip(command.clip);if(clip.kind!=='bars')return null;
+  const bar=command.options?.target?.bar;if(!integer(bar,0,0xffffffff))return null;
+  const ending=alternateEndingProblem(score.masterBars,bar);if(ending)return ending;
+  return clip.mode==='multiTrack'?directionPasteProblem(score.masterBars,scoreFromMusicClip(clip).masterBars,command.options.count):null;
 }

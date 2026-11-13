@@ -82,3 +82,15 @@ it('lets the live view show tied continuations for the selected beat and bar', (
   fireEvent.change(screen.getByRole('combobox', { name: 'Show' }), { target: { value: 'bar' } });
   expect(container.querySelectorAll('g[data-note-id][data-held="true"]')).toHaveLength(2);
 });
+
+it('keeps the hover text on the transparent picks: the pitch, string and fret of a struck position, the tied wording of a held one', () => {
+  const { score, plan } = music(), held = heldNotes(score, 'bar', at(0, 0)), { container } = render(<InstrumentView score={score} track={0} staff={0} notes={inBar(plan)} held={held} onSelect={() => {}} />);
+  const titles = (selector: string) => [...container.querySelectorAll(`.fret-pick${selector} > title`)].map(title => title.textContent);
+  // G2 (string 1 fret 3) is struck in beat 1 and held in beat 2: the struck mark is the one on top, so its text wins.
+  expect(titles('[data-string="1"][data-fret="3"]')).toEqual(['G2 · string 1 · fret 3']);
+  expect(container.querySelectorAll('.fret-pick')).toHaveLength(2);
+  // A position that is only ever held says so.
+  cleanup();
+  const only = render(<InstrumentView score={score} track={0} staff={0} notes={[]} held={held} onSelect={() => {}} />);
+  expect([...only.container.querySelectorAll('.fret-pick > title')].map(title => title.textContent)).toEqual(['G2 · string 1 · fret 3 · tied, held from an earlier note', 'A2 · string 2 · fret 0 · tied, held from an earlier note']);
+});

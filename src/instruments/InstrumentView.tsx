@@ -1,5 +1,5 @@
 import { useI18n, type MessageKey } from '../i18n';
-import { useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { PlanNote } from '../audio/types';
 import type { EditCommand } from '../edit-types';
@@ -57,7 +57,9 @@ function groupPicks<T extends { note?: ShownNote }>(items: readonly T[], idOf: (
   for (const item of items) {
     if (!item.note) continue;
     const id = idOf(item), group = groups.get(id);
-    if (group) group.notes.push(item.note); else groups.set(id, { id, first: item, notes: [item.note], rank: rankOf(item) });
+    // Tremolo picking and rasgueado give one planned note per attack; they are one note of the score, so a position lists it once.
+    if (group) { if (!group.notes.some(note => note.index !== undefined && note.index === item.note!.index && sameBeat(note.source.target, item.note!.source.target))) group.notes.push(item.note); }
+    else groups.set(id, { id, first: item, notes: [item.note], rank: rankOf(item) });
   }
   const list = [...groups.values()];
   for (const group of list) group.notes.sort(inScoreOrder);
@@ -104,7 +106,8 @@ function pickProps(roving: Roving, id: string, order: readonly string[], picking
   const chosen = nextOccurrence(notes, picking.selected);
   return {
     ref: roving.ref(id), role: 'button' as const, tabIndex: roving.active === id ? 0 : -1, 'aria-label': label(chosen), 'data-pick': id,
-    onFocus: () => roving.setCurrent(id), onClick: () => picking.send(chosen, 'pointer'),
+    onFocus: () => roving.setCurrent(id), // A click with detail 0 has no pointer behind it (assistive technology activating the button, or a key): focus stays here.
+    onClick: (event: ReactMouseEvent) => picking.send(chosen, event.detail === 0 ? 'keyboard' : 'pointer'),
     onKeyDown: (event: ReactKeyboardEvent) => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); picking.send(chosen, 'keyboard'); return; }
       const to = stepKeys(order, event.key, id, ['ArrowRight','ArrowDown'], ['ArrowLeft','ArrowUp']);
@@ -158,7 +161,17 @@ function Fretboard({staff, notes, mode, leftHanded, pick, entry}: {staff: model.
         <circle className="fret-note-halo" cx={position(fret)} cy={top+(staff.tuning.length-string)*row} r="6.6"/><circle cx={position(fret)} cy={top+(staff.tuning.length-string)*row} r="4"/><title>{tied?t('instruments.held_note',{pitch:formatPitch(key),string,fret}):`${formatPitch(key)} · string ${string} · fret ${fret}`}</title>
       </g>)}
       {/* The marks are only drawn; each pick is an invisible target of 14 units over its position, so it can be hit without changing the look. */}
-      {pick ? picks.map(group=>{const {string,fret}=group.first;return <g key={group.id} className="fret-pick" data-string={string} data-fret={fret} {...pickProps(roving,group.id,pickOrder,pick,group.notes,note=>t('instruments.select_note',{note:formatPitch(note.key),bar:note.source.target.bar+1,beat:note.source.target.beat+1}))}><circle className="fret-hit" cx={position(fret)} cy={top+(staff.tuning.length-string)*row} r="7" fill="transparent"/></g>;}) : null}
+      {pick ? picks.map(group=>{
+        const {string,fret}=group.first, cy=top+(staff.tuning.length-string)*row, tied=group.notes.every(note=>note.held);
+        // Each pick fills the fret cell and reaches up and down as far as it can without meeting a neighbouring pick: halfway to the next marked string in its fret, or 7 units when none is there.
+        let up=7, down=7;
+        for (const other of picks) if (other!==group && other.first.fret===fret) { const gap=top+(staff.tuning.length-other.first.string)*row-cy; if (gap<0) up=Math.min(up,-gap/2); else down=Math.min(down,gap/2); }
+        const x=fret===0 ? left-31 : boundary(fret-1), cell=fret===0 ? 28 : boundary(fret)-boundary(fret-1);
+        return <g key={group.id} className="fret-pick" data-string={string} data-fret={fret} {...pickProps(roving,group.id,pickOrder,pick,group.notes,note=>t('instruments.select_note',{note:formatPitch(note.key),bar:note.source.target.bar+1,beat:note.source.target.beat+1}))}>
+          <title>{tied?t('instruments.held_note',{pitch:formatPitch(group.first.key),string,fret}):`${formatPitch(group.first.key)} · string ${string} · fret ${fret}`}</title>
+          <rect className="fret-hit" x={x} y={cy-up} width={cell} height={up+down} fill="transparent"/>
+        </g>;
+      }) : null}
       {entry ? staff.tuning.map((_,index)=>{
         // Neighbouring strings split the space between them; only the outer strings reach further out, to a 12-unit target.
         const string = staff.tuning.length-index, y = top+index*row, outer = Math.max(row/2, 6);

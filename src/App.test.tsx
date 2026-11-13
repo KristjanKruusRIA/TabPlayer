@@ -2508,11 +2508,20 @@ it('copies the clicked instrument note like a click on the score does when nothi
 it('hands the keys back to the score after a pointer pick, and keeps the focus on the instrument after a key pick',async()=>{
   const {mark}=await instrumentWithNoteAt(farTarget),score=screen.getByRole('region',{name:'Score workspace'});
   mark.focus();expect(mark).toHaveFocus();
-  fireEvent.click(mark);
+  // A click with no pointer behind it (detail 0: assistive technology) keeps the focus where it is.
+  fireEvent.click(mark);expect(mark).toHaveFocus();expect(score).not.toHaveFocus();
+  fireEvent.click(mark,{detail:1});
   await waitFor(()=>expect(score).toHaveFocus());
   // Keys now reach the score pane: the cursor moves with an arrow.
   const mark2=await screen.findByRole('button',{name:/^Select A4/});mark2.focus();
   fireEvent.keyDown(mark2,{key:'Enter'});
   expect(mark2).toHaveFocus();expect(score).not.toHaveFocus();
+  integration.activeNotes.mockImplementation(()=>[]);
+});
+it('hands the score the instrument pick as the new selection after a score click, so a Shift+click extends from the pick',async()=>{
+  const {mark}=await instrumentWithNoteAt(farTarget);
+  click('Select rendered note');
+  fireEvent.click(mark);
+  await waitFor(()=>expect(engravingView.mock.lastCall?.[0]).toMatchObject({editTarget:farTarget,editorSelection:{kind:'range',range:{start:{bar:1,tick:0},lanes:[{track:0,staff:0,voice:0}]}}}));
   integration.activeNotes.mockImplementation(()=>[]);
 });

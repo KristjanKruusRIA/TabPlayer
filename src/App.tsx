@@ -533,7 +533,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     // Like a click on the score it replaces any earlier range with that one beat, so a cut or copy takes what was picked.
     editorSelection(singleBeatSelection(state.score,repairSelection(state.score,next)));
     // A pointer pick hands the keys back to the score, as the track overview does; a key press stays on the instrument.
-    if(by==='pointer')scorePane.current?.focus();
+    if(by==='pointer')scorePane.current?.focus({preventScroll:true});
   };
   /** Shows why a key did nothing; for a queued key it also records that the rest of the queue was typed for a result that did not happen. */
   const refuse=(text:string,at:string)=>{setInputNotice({text,at});if(draining.current)entryFailure.current={text};};

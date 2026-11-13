@@ -1,4 +1,4 @@
-import { expect,it } from 'vitest';
+import { afterEach,expect,it,vi } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
 import { music,target } from './fixtures';
 import { searchCommands,shortcutModifier,type PaletteContext } from './command-palette';
@@ -61,10 +61,13 @@ it('names the shortcut modifier Cmd on Apple platforms and Ctrl elsewhere',()=>{
   expect(shortcutModifier('Win32')).toBe('Ctrl');expect(shortcutModifier('Linux x86_64')).toBe('Ctrl');expect(shortcutModifier(undefined)).toBe('Ctrl');
 });
 
-it('lists keyboard shortcuts beside the commands that have them',()=>{
-  const keys=Object.fromEntries(searchCommands('',context()).map(match=>[match.title,match.keys]));
-  // The labels follow the machine running the test: Cmd on macOS, Ctrl elsewhere.
-  const mod=shortcutModifier(typeof navigator!=='undefined'?navigator.platform:undefined);
+afterEach(()=>{vi.unstubAllGlobals();vi.resetModules();});
+// The palette fixes its modifier label when the module loads, so each case sets the platform first and loads a fresh copy.
+// That runs the same on every OS: the macOS branch is exercised here on Windows and Linux, the Ctrl branch on macOS.
+it.each([['MacIntel','Cmd'],['iPad','Cmd'],['Win32','Ctrl'],['Linux x86_64','Ctrl']])('lists keyboard shortcuts beside the commands that have them on %s with %s',async(platform,mod)=>{
+  vi.stubGlobal('navigator',{platform});vi.resetModules();
+  const {searchCommands:search}=await import('./command-palette');
+  const keys=Object.fromEntries(search('',context()).map(match=>[match.title,match.keys]));
   expect(keys).toMatchObject({Undo:`${mod}+Z`,Redo:`${mod}+Shift+Z`,'Play or pause':'Space','New score':`${mod}+N`,'Open score':`${mod}+O`,Save:`${mod}+S`,'Save As':`${mod}+Shift+S`,'Help topics':'F1'});
   expect(keys['Go to measure']).toBeUndefined();
 });

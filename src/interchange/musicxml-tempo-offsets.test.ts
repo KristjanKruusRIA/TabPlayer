@@ -290,12 +290,21 @@ describe('a file written to stall the offset match',()=>{
     expect(strFromU8(prepareMusicXmlTempoOffsets(strToU8(xml),settings))).not.toBe(xml);
     expect(performance.now()-started).toBeLessThan(20000);
   });
+  // A quadratic scan shows as growth, not as a number of seconds, so this compares two sizes on the same machine instead of
+  // holding one run to a wall-clock limit (a 40 s limit failed at 42.6 s on a slow Windows CI runner, THE-48). Four times the
+  // input took 2.4 to 4.5 times as long in ten runs here; a quadratic pass over the parts or bars would take well over 6 times as long (the limit).
+  // The 120 s test limit stays as the hang guard.
   it('stays linear with a long moved part beside many empty parts',()=>{
-    const source=musicXml(480),bar=source.match(/<measure[\s\S]*<\/measure>/)![0],count=8000;
-    const bars=Array.from({length:count},(_,index)=>bar.replace(/number="[^"]*"/,`number="${index+2}"`)).join('');
-    const xml=source.replace('</part>',`${bars}</part>${'<part/>'.repeat(600000)}`);
-    const started=performance.now();
-    prepareMusicXmlTempoOffsets(strToU8(xml),settings);
-    expect(performance.now()-started).toBeLessThan(40000);
+    const source=musicXml(480),bar=source.match(/<measure[\s\S]*<\/measure>/)![0];
+    const run=(count:number,parts:number)=>{
+      const bars=Array.from({length:count},(_,index)=>bar.replace(/number="[^"]*"/,`number="${index+2}"`)).join('');
+      const bytes=strToU8(source.replace('</part>',`${bars}</part>${'<part/>'.repeat(parts)}`));
+      const started=performance.now();prepareMusicXmlTempoOffsets(bytes,settings);return performance.now()-started;
+    };
+    run(150,11000); // warm-up, so compilation does not make the small run look slow
+    // The faster of two runs per size leaves out a pause from garbage collection or another process.
+    const best=(count:number,parts:number)=>Math.min(run(count,parts),run(count,parts));
+    const small=best(600,45000),large=best(2400,180000);
+    expect(large/small).toBeLessThan(6);
   },120000);
 });

@@ -119,7 +119,7 @@ it('contextual_similes_and_partial_multitrack_repeats_reject',()=>{
   score.tracks[0].staves[0].bars[1].simileMark=model.SimileMark.None;score.masterBars[0].isRepeatStart=true;score.masterBars[2].repeatCount=2;
   expect(()=>makeMusicClip(score,bars(1),'multiTrack')).toThrow(/repeat/i);
   expect(makeMusicClip(score,bars(0,2),'multiTrack').kind).toBe('bars');expect(()=>makeMusicClip(score,bars(0,2),'singleTrack')).not.toThrow();
-  score.masterBars[0].directions=new Set([model.Direction.TargetSegno]);expect(()=>makeMusicClip(score,bars(0,2),'multiTrack')).toThrow(/direction/i);
+  score.masterBars[0].directions=new Set([model.Direction.JumpDalSegno]);expect(()=>makeMusicClip(score,bars(0,2),'multiTrack')).toThrow(/direction/i);
 });
 it('reader_validates_ids_links_rhythm_pitch_privacy_and_preserves_note_dynamics',()=>{
   const valid=makeMusicClip(music(),notes(0,1),'singleTrack'),json=JSON.parse(valid.scoreJson),beat=json.tracks[0].staves[0].bars[0].voices[0].beats[0];

@@ -8,6 +8,7 @@ import { allNotes,captureNoteLinks,detachNote,restoreNoteLinks,type NoteLinks } 
 import { applyMeasureEdit,planMeasureMap } from './measures';
 import { mapLyricsMeasures } from './lyrics-measures';
 import { integer,restBeats,rhythmTicks } from './common';
+import { directionPasteProblem } from './clipboard-structure';
 import { copyHarmonyChord } from '../harmony/chord-source';
 import type { ClipboardCommand,MusicClip,PasteDestination,PasteFilters,PreparedMusicPaste } from './clipboard-types';
 import type { BarIndexMap } from './measures-types';
@@ -139,6 +140,10 @@ function pasteBars(score:model.Score,clip:MusicClip,source:model.Score,command:C
   if(clip.mode==='multiTrack'&&source.masterBars.some(master=>master.isRepeatStart||master.repeatCount||master.alternateEndings)){
     for(const master of score.masterBars){const group=master.repeatGroup;if((group.isOpened||group.closings.length)&&group.opening&&group.opening.index<target.bar&&(group.closings.at(-1)?.index??score.masterBars.length)>=target.bar)throw new Error('Copied repeats cannot be nested into a destination repeat context.');}
   }
+  if(clip.mode==='multiTrack'){const problem=directionPasteProblem(score.masterBars,source.masterBars,count);if(problem)throw new Error(problem);}
+  // Bars inserted between a repeat's closing bar and a following alternate ending would cut the ending off from its repeat.
+  const here=score.masterBars[target.bar],before=score.masterBars[target.bar-1];
+  if(here?.alternateEndings&&before&&(before.alternateEndings||before.repeatCount))throw new Error('Paste before the repeat, not between its alternate endings.');
   const state=stateAt(score,target.bar,mappings),allocate=reserveIds(score),links=captureNoteLinks(score),retainedLinks=protectedLinks(score,links),pastedLinks:NoteLinks=[],barMap=insert(score,target.bar,total),changed=new Map<number,Set<model.AutomationType>>(),pedals=new Set<model.Staff>();let changedTempo=false;
   // Inserted rests must follow copied meter even on unmapped destination staves.
   if(clip.mode==='multiTrack')for(let offset=0;offset<total;offset++)for(const track of score.tracks)for(const staff of track.staves){const measure=staff.bars[target.bar+offset];for(const voice of measure.voices){voice.beats=[];const rest=new model.Beat();rest.duration=1;rest.isEmpty=voice.index!==0||source.masterBars[offset%source.masterBars.length].isFreeTime;voice.addBeat(rest);}}

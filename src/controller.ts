@@ -147,7 +147,7 @@ export class DocumentController {
   cutMusic(selection:MusicSelection,mode:ClipboardMode):Promise<MusicClip> {
     const requested=structuredClone(selection);
     return this.run(async()=>{
-      const scope=musicClipSelection(this.state.score,requested,mode),clip=makeMusicClip(this.state.score,scope,mode);
+      const scope=musicClipSelection(this.state.score,requested,mode),clip=makeMusicClip(this.state.score,scope,mode,{cut:true});
       const bars=scope as Extract<MusicSelection,{kind:'bars'}>;
       await this.editNow(mode==='multiTrack'?{type:'removeMeasures',firstBar:bars.firstBar,lastBar:bars.lastBar}:{type:'eraseSelection',selection:scope});
       return clip;

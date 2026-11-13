@@ -151,3 +151,23 @@ it('shows a topic title match in the result and opens the topic at its first sec
   expect(screen.getByRole('button', { name: 'Exporting' })).toHaveAttribute('aria-current', 'true');
   expect(screen.getByRole('heading', { name: 'Starting an export', level: 4 })).toHaveFocus();
 });
+
+it('lets Escape close the dialog when one letter is typed, because no results are shown', () => {
+  const { search, onClose } = open();
+  search.focus();
+  type(search, 'm');
+  fireEvent.keyDown(search, { key: 'Escape' });
+  expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('clears the search with Escape when the focus is on the dialog panel itself', () => {
+  const { search, onClose } = open();
+  type(search, 'metronome');
+  const panel = screen.getByRole('dialog');
+  panel.focus();
+  fireEvent.keyDown(panel, { key: 'Escape' });
+  expect(search.value).toBe('');
+  expect(onClose).not.toHaveBeenCalled();
+  fireEvent.keyDown(panel, { key: 'Escape' });
+  expect(onClose).toHaveBeenCalledTimes(1);
+});

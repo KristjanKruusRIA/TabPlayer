@@ -37,7 +37,7 @@ export const helpSpec: readonly TopicSpec[] = [
   topic('selection', [['select', ['p1', 'p2']], ['clipboard', ['p1', 'p2', 'p3', 'p4']]]),
   topic('tracks', [['settings', ['p1', 'p2']], ['tuning', ['p1', 'p2', 'p3', 'p4']], ['sound', ['p1', 'p2', 'p3']], ['nam', ['p1', 'p2']], ['interpretation', ['p1']], ['midi', ['p1', 'p2']]]),
   topic('inspector', [['tabs', ['p1']], ['apply', ['p1']], ['practice', ['p1']]]),
-  topic('instruments', [['views', ['p1', 'p2', 'p3', 'p4']]]),
+  topic('instruments', [['views', ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7']]]),
   topic('engraving', [['panel', ['p1', 'p2']], ['page', ['p1']]]),
   topic('export', [['start', ['p1']], ['formats', ['p1', 'p2', 'p3', 'p4', 'p5']], ['audio', ['p1', 'p2', 'p3']], ['guitar-pro', ['p1', 'p2', 'p3']]]),
   topic('palette', [['commands', ['p1', 'p2', 'p3']]]),
@@ -174,10 +174,16 @@ function excerptOf(paragraphs: readonly string[], tokens: readonly string[]): Ex
   return [{ text: first.length > HEAD ? `${first.slice(0, HEAD)}…` : first, match: false }];
 }
 
-/** The words a query searches for: folded, and at least two characters each, so a stray letter cannot match everything. */
+/**
+ * The words a query searches for, folded. A one-letter word is kept when a longer word comes with it ("ctrl k"), because it then
+ * narrows the result; a query of one-letter words alone searches nothing, since it would match nearly every section.
+ */
 export function searchTokens(query: string): string[] {
-  return foldText(query).split(/\s+/).filter(word => word.length >= 2);
+  const words = foldText(query).split(/\s+/).filter(Boolean);
+  return words.some(word => word.length >= 2) ? words : [];
 }
+/** The words worth marking in a result: one-letter words would mark every such letter in the text. */
+const marked = (tokens: readonly string[]) => tokens.filter(word => word.length >= 2);
 
 function titleParts(title: string, tokens: readonly string[]): ExcerptPart[] {
   const parts: ExcerptPart[] = [];
@@ -203,7 +209,7 @@ export function searchHelp(topics: readonly HelpTopic[], query: string): HelpRes
   for (const entry of topics) {
     const first = entry.sections[0];
     const named = !!first && tokens.every(token => foldText(entry.title).includes(token));
-    if (named) scored.push({ score: 1000, order: order++, result: { topic: entry.id, topicTitle: entry.title, whereParts: titleParts(entry.title, tokens), section: first.id, heading: first.title, excerpt: excerptOf(first.paragraphs.slice(0, 1), []) } });
+    if (named) scored.push({ score: 1000, order: order++, result: { topic: entry.id, topicTitle: entry.title, whereParts: titleParts(entry.title, marked(tokens)), section: first.id, heading: first.title, excerpt: excerptOf(first.paragraphs.slice(0, 1), []) } });
     for (const section of entry.sections) {
       order++;
       if (named && section === first) continue;
@@ -213,7 +219,7 @@ export function searchHelp(topics: readonly HelpTopic[], query: string): HelpRes
         if (heading.includes(token)) score += 10; else if (body.includes(token)) score += 1; else { all = false; break; }
       }
       if (!all) continue;
-      scored.push({ score, order, result: { topic: entry.id, topicTitle: entry.title, whereParts: [{ text: entry.title, match: false }], section: section.id, heading: section.title, excerpt: excerptOf(section.paragraphs, tokens) } });
+      scored.push({ score, order, result: { topic: entry.id, topicTitle: entry.title, whereParts: [{ text: entry.title, match: false }], section: section.id, heading: section.title, excerpt: excerptOf(section.paragraphs, marked(tokens)) } });
     }
   }
   return scored.sort((a, b) => b.score - a.score || a.order - b.order).slice(0, MAX_RESULTS).map(entry => entry.result);

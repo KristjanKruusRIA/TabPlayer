@@ -28,7 +28,8 @@ export function HelpDialog({ initial, initialSection, onClose }: { initial: Help
   // Escape clears a search before it closes the dialog; the dialog's own handler listens on the document, so this one is earlier.
   useEffect(() => {
     const clear = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape' || !pending.current.trim()) return;
+      // Only a search whose results are shown is cleared first: with one letter typed the viewer shows the topic, so Escape closes.
+      if (event.key !== 'Escape' || searchTokens(pending.current).length === 0) return;
       event.preventDefault(); event.stopPropagation();
       setQuery('');
       input.current?.focus({ preventScroll: true });

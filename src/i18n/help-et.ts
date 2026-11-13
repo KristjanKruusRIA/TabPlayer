@@ -12,7 +12,7 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
   'help.topic.start.title': 'Alustamine',
   'help.topic.start.window.title': 'Aken',
   'help.topic.start.window.p1': 'Menüüribal on „{@menu.file}“, „{@menu.edit}“, „{@menu.track}“, „{@menu.bar}“, „{@menu.note}“, „{@menu.effects}“, „{@menu.section}“, „{@menu.tools}“, „{@menu.sound}“, „{@menu.view}“, „{@menu.window}“ ja „{@menu.help}“. Selle all olevas tööriistaribas on taasesituse juhtnupud, partituuri kuvamise juhtnupud, harjutamise seaded ja vaatelüliti.',
-  'help.topic.start.window.p2': 'Partituur on keskel. Paremal asuval inspektoril on kaardid „{@inspector.song}“, „{@inspector.track}“ ja „{@inspector.selection}“. Alumises dokis on vaated „{@dock.overview}“, „{@dock.mixer}“, „{@dock.instrument}“ ja „{@dock.backing}“. Menüü „{@menu.view}“ näitab või peidab elemendid „{@view.inspector}“, „{@view.bottom_dock}“ ja „{@view.edition_palette}“.',
+  'help.topic.start.window.p2': 'Partituur on keskel. Paremal asuval inspektoril on kaardid „{@inspector.song}“, „{@inspector.track}“ ja „{@inspector.selection}“. Alumises dokis on vaated „{@dock.overview}“, „{@dock.mixer}“, „{@dock.instrument}“, „{@dock.keyboard}“ ja „{@dock.backing}“. Menüü „{@menu.view}“ näitab või peidab elemendid „{@view.inspector}“, „{@view.bottom_dock}“ ja „{@view.edition_palette}“.',
   'help.topic.start.first.title': 'Esimene pala',
   'help.topic.start.first.p1': 'Ava pala käsuga „{@menu.file}“ → „{@action.open}“, alusta tühja palaga käsuga „{@menu.file}“ → „{@action.new}“ või vali näide või mall menüü „{@menu.file}“ kaudu: „{@library.menu_library}“.',
   'help.topic.start.help.title': 'Abi saamine',
@@ -53,7 +53,7 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
   'help.topic.display.zoom.p3': 'Pala, millel pole salvestatud vaadet ega oma suumi, avaneb laiusele mahutatuna, kui selle leht on partituuriala omast laiem. See kehtib lehepaigutuste kohta, mitte režiimide „{@track_display.layout_vertical_screen}“ ja „{@track_display.layout_horizontal_screen}“ kohta. „{@track_display.fit_width}“ vajutamine, kui mahutamine on sees, viib tagasi tavalise 100% juurde, ja Enter väljal „{@track_display.zoom_label}“ jätab näidatud väärtuse alles.',
   'help.topic.display.small.title': 'Väike aken',
   'help.topic.display.small.p1': 'Kui akna kõrgus on 610 pikslit või vähem, on kuvamise juhtnupud tööriistaribal kokku volditud üheks nupuks „{@track_display.toolbar_aria}“. See avab samad juhtnupud; Escape või klõps väljaspool sulgeb selle. Teated lehe, piiratud mahutamise või peidetud raja kohta jäävad nähtavaks.',
-  'help.topic.display.small.p2': 'Sellises aknas algavad inspektor ja alumine dokk suletuna, kui sa pole neid suuruselt muutnud ega jätnud instrumendivaadet lahti; menüü „{@menu.view}“ näitab neid. Sildid „{@transport.loop_bars}“, „{@transport.click}“ ja „{@transport.speed}“ jäävad juhtnuppude kohal nähtavaks igas akna suuruses.',
+  'help.topic.display.small.p2': 'Sellises aknas algab inspektor suletuna, kui sa pole seda suuruselt muutnud. Alumine dokk algab suletuna, kui sa pole seda suuruselt muutnud ning instrumendivaade või paneel „{@dock.keyboard}“ pole avatud. Menüü „{@menu.view}“ näitab neid. Sildid „{@transport.loop_bars}“, „{@transport.click}“ ja „{@transport.speed}“ jäävad juhtnuppude kohal nähtavaks igas akna suuruses.',
   'help.topic.display.defaults.title': 'Vaikevaade',
   'help.topic.display.defaults.p1': 'Kaardil „{@inspector.song}“, jaotises „{@inspector.musical_notation}“ seab „{@view_defaults.summary}“ vaate, milles uued palad algavad. {@view_defaults.hint}',
 
@@ -88,7 +88,7 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
 
   'help.topic.editing.title': 'Pala muutmine',
   'help.topic.editing.move.title': 'Liikumine ja nootide seadmine',
-  'help.topic.editing.move.p1': 'Klõpsa löögil või kasuta nooleklahve, et liigutada sinist muutmissihtmärki. Üles ja alla vahetavad keelt; kirjuta „{@editor.fret}“ number ja vajuta Enter, et noot seada.',
+  'help.topic.editing.move.p1': 'Klõpsa löögil või kasuta nooleklahve, et liigutada sinist muutmissihtmärki. Üles ja alla vahetavad keelt; kirjuta number väljale „{@editor.fret}“ ja vajuta Enter, et noot seada.',
   'help.topic.editing.entry.title': 'Noodisisestus',
   'help.topic.editing.entry.p1': '„{@score_entry.toggle}“, mille lülitad sisse tööriistariba vasakpoolse nupuga või klahviga N, kirjutab noote noodijoonestikul klõpsates või klahvidega A kuni G.',
   'help.topic.editing.entry.p2': '{@help.shortcut_note_entry}',
@@ -155,7 +155,10 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
   'help.topic.instruments.views.p1': '„{@toolbar.show_instrument}“, nupp tööriistariba paremas servas, või „{@dock.instrument}“ alumises dokis näitab valitud rada kitarri- või bassikaelal, trummikomplektil või klaviatuuril. Selle noodid järgivad taasesitust, sealhulgas kiiruse muutmist, hüppamist ja kordusi.',
   'help.topic.instruments.views.p2': '„{@instruments.view_mode}“: „{@instruments.mode_auto}“ järgib raja instrumenti. Võid valida ka „{@instruments.mode_guitar}“, „{@instruments.mode_bass}“, „{@instruments.mode_drums}“, „{@instruments.mode_keys}“ või „{@instruments.mode_both}“. „{@instruments.left_handed}“ näitab kaela vasakukäelisele.',
   'help.topic.instruments.views.p3': '„{@instruments.show_focus}“ valib, milliseid noote näidatakse: „{@instruments.focus_playing}“, „{@instruments.focus_beat}“, „{@instruments.focus_bar}“ või „{@instruments.focus_next}“. Kitarri- ja bassivaade kasutavad noodijoonestiku häälestust ja kapodastrit.',
-  'help.topic.instruments.views.p4': 'Märgi „{@instruments.click_to_edit}“, et sisestada noote instrumendil klõpsates.',
+  'help.topic.instruments.views.p4': 'Märgi „{@instruments.click_to_edit}“, et kirjutada noote instrumendil klõpsates. Märgituna sisestab klõps noodi; märkimata jättes klõps valib (vt allpool).',
+  'help.topic.instruments.views.p5': 'Kui „{@instruments.click_to_edit}“ on märkimata, valib klõps helendaval positsioonil kaelal või helendaval klahvil selle noodi partituuril. Sama positsiooni uuesti klõpsamine liigub selle järgmise esinemiskohani taktis ja pärast viimast naaseb esimese juurde. Trummikomplekti ei saa klõpsata.',
+  'help.topic.instruments.views.p6': 'Sidekaarega hoitud noot joonistatakse õõnsa katkendlikuna sõrmuse või klahvina ja nimetatakse sidestatuks. See on näha valikute „{@instruments.focus_beat}“ ja „{@instruments.focus_bar}“ all, kuid mitte valikute „{@instruments.focus_playing}“ ja „{@instruments.focus_next}“ all.',
+  'help.topic.instruments.views.p7': 'Alumise doki vaade „{@dock.keyboard}“ näitab ainult klaviatuuri, ilma kaela ja selle valikuteta. Seda valikut palaga ei salvestata. „{@instruments.note_names}“ lülitab klahvide siltide ja nootide loendi vahel „{@instruments.note_names_octave}“ ja „{@instruments.note_names_letter}“.',
 
   'help.topic.engraving.title': 'Noodigraveerimine ja lehe paigutus',
   'help.topic.engraving.panel.title': 'Graveerimisseaded',

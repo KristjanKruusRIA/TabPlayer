@@ -118,15 +118,26 @@ describe('help coverage', () => {
 
   it('refers to the score display button and the fret label through the catalog', () => {
     const small = table('en')['help.topic.display.small.p1'];
+    expect(labelKeysIn(table('en')['help.topic.start.window.p2'])).toContain('dock.keyboard');
+    expect(labelKeysIn(table('en')['help.topic.display.small.p2'])).toContain('dock.keyboard');
+    for (const key of ['instruments.click_to_edit', 'dock.keyboard', 'instruments.note_names', 'instruments.note_names_octave', 'instruments.note_names_letter', 'instruments.focus_beat', 'instruments.focus_bar']) {
+      expect(labelKeysIn(['p4', 'p5', 'p6', 'p7'].map(name => table('en')[`help.topic.instruments.views.${name}`]).join(' ')), key).toContain(key);
+    }
     expect(labelKeysIn(small)).toContain('track_display.toolbar_aria');
     const text = (key: string) => table('en')[key].replace(/\{@[^}]+\}/g, '');
     for (const lang of languages) for (const key of specKeys()) {
       const raw = table(lang)[key].replace(/\{@[^}]+\}/g, '');
       if (lang === 'et') expect(raw, key).not.toMatch(/krihv/i);
-      if (lang === 'de') expect(raw, key).not.toMatch(/Bund/);
-      if (lang === 'en' && key !== 'help.topic.editing.p3') expect(text(key), key).not.toMatch(/frets?/i);
+      if (lang === 'de') expect(raw, key).not.toMatch(/\bBund/);
+      if (lang === 'en' && key !== 'help.topic.editing.p3') expect(text(key), key).not.toMatch(/\bfrets?\b/i);
     }
-    expect(labelKeysIn(table('en')['help.topic.editing.move.p1'])).toContain('editor.fret');
+    for (const lang of languages) for (const key of ['help.topic.editing.move.p1', 'help.topic.export.formats.p5'] as const) {
+      expect(labelKeysIn(table(lang)[key]), `${lang} ${key}`).toContain('editor.fret');
+      const shown = getHelpTopics((k, params) => getMessage(lang, k, params)).flatMap(topic => topic.paragraphs).join('\n');
+      expect(shown, lang).toContain(table(lang)['editor.fret']);
+    }
+    expect(table('en')['help.topic.editing.move.p1']).toContain('“{@editor.fret}”');
+    expect(table('en')['help.topic.export.formats.p5']).toContain('“{@editor.fret}”');
   });
 
   it('tells the Guitar Pro export warning heading as the app writes it, in every language', () => {

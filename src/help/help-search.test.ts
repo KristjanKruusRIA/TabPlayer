@@ -86,11 +86,16 @@ describe('searchHelp', () => {
 });
 
 describe('search words', () => {
-  it('drops words of one letter and searches nothing when none is left', () => {
+  it('searches nothing when every word is one letter, and keeps a one-letter word that accompanies a longer one', () => {
     expect(searchTokens('a b')).toEqual([]);
-    expect(searchTokens(' Á  bc d ')).toEqual(['bc']);
+    expect(searchTokens(' Á  bc d ')).toEqual(['a', 'bc', 'd']);
+    expect(searchTokens('ctrl k')).toEqual(['ctrl', 'k']);
     expect(searchHelp(sample, 'a b')).toEqual([]);
-    expect(searchHelp(sample, 'a loop').map(result => result.section)).toEqual(searchHelp(sample, 'loop').map(result => result.section));
+    expect(searchHelp(sample, 'loop x')).toEqual([]);
+    expect(searchHelp(sample, 'loop s').map(result => result.section)).toEqual(['loop', 'speed']);
+    const keys = topic('start', 'Start', [['a', 'Keys', ['Press Ctrl K to open it.']], ['b', 'Other', ['Press Ctrl and then Enter.']]]);
+    expect(searchHelp([keys], 'ctrl k').map(result => result.section)).toEqual(['a']);
+    expect(searchHelp([keys], 'ctrl k')[0].excerpt.filter(part => part.match).map(part => part.text)).toEqual(['Ctrl']);
     const many = topic('start', 'Start', Array.from({ length: 80 }, (_, index) => [`s${index}`, `Section ${index}`, ['a b c']] as [string, string, string[]]));
     expect(searchHelp([many], 'a b')).toEqual([]);
   });

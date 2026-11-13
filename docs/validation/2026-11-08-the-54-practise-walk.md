@@ -7,7 +7,7 @@ Date: 2026-11-08. Branch `ux/the-54-practise-walk`, based on `develop` at 6556f7
 - Real desktop test app built with `scripts/build-desktop-test.ps1` (`desktop-test` feature), driven over CDP on port 9223 with Playwright, using real mouse and keyboard input. Window 1440 by 900 for the main walk. 1280 by 800 and 960 by 600 were checked by emulating the viewport size over CDP; the native window was not resized, so the native minimum-size behaviour is not exercised.
 - Score: the bundled CC0 Library example "Windowline" (6-string guitar, 4-string bass, drums, 8 bars). No private score.
 - Persona: a bass player who opens the app for the first time, wants to learn bars 5 to 7, slow them down, loop them and fix one note.
-- Screenshots were kept outside the repo (`E:\claude-tmp\the-54\`) and are not committed.
+- Screenshots were kept outside the repo (`<scratch>/the-54\`) and are not committed.
 - Audio was running, but this walk judges the interface only. It does not judge sound, timing accuracy or how the app feels on a physical output device. Keyboard coverage is partial: Enter on Library rows, fret digits plus Enter, Escape on More playback, Stop. Tab order and screen-reader output were not walked.
 
 ## The walk

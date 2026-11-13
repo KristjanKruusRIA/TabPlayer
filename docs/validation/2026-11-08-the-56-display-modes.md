@@ -16,8 +16,8 @@
   - **Overlap and clipping**: tab digits that cover each other by more than a fifth of the smaller digit are counted; the score must not run past the area's edge without a scrollbar.
 - **Per-document restore**: document A is set to Vertical screen at 135%, document B to Grid with Fit page. Both are read back after switching tabs, after `page.reload()`, and after the app is ended abruptly and started again over the same session folder and profile, answering "Recover unsaved work?" with Restore. Before the restart the recovery checkpoint is read from disk and must hold both documents' display preferences.
 - **Resize**: `page.setViewportSize` to 1440x900, 1280x800 and 960x600, for both scores, every mode, fit width, fit page (page layouts) and fixed 100%. **The native window was not resized**: the viewport is emulated (`Emulation.setDeviceMetricsOverride`). `outerWidth x outerHeight` was 1440x901 before and after. Menus, the dock and the toolbars reflow under emulation, but real window resizing, a different monitor scale or a different DPI were not run.
-- Legibility is measured, not judged by eye alone: the height in screen pixels of the drawn tab digits (median and minimum), the count of overlapping digits, and whether anything is clipped. A digit under 6 px tall is flagged as hard to read. That limit is a working heuristic, not a standard. Screenshots were taken at every combination and looked at for a sample; they are in `E:\claude-tmp\the-56\shots\` and are not committed.
-- Totals of the final run: 607 checks in the main run, 9 flagged (all findings below, none a driver fault); the resize run was repeated with fit page added (387 checks, 23 flagged: fit page under 6 px, the two Horizontal screen cases). Raw results are in `E:\claude-tmp\the-56\result-full.json` and `resize-run\result.json`, outside the repository.
+- Legibility is measured, not judged by eye alone: the height in screen pixels of the drawn tab digits (median and minimum), the count of overlapping digits, and whether anything is clipped. A digit under 6 px tall is flagged as hard to read. That limit is a working heuristic, not a standard. Screenshots were taken at every combination and looked at for a sample; they are in `<scratch>/the-56\shots\` and are not committed.
+- Totals of the final run: 607 checks in the main run, 9 flagged (all findings below, none a driver fault); the resize run was repeated with fit page added (387 checks, 23 flagged: fit page under 6 px, the two Horizontal screen cases). Raw results are in `<scratch>/the-56\result-full.json` and `resize-run\result.json`, outside the repository.
 
 ## Results by mode
 
@@ -160,4 +160,4 @@ powershell -File scripts/build-desktop-test.ps1
 node tests/desktop/display-modes.mjs      # about 25 minutes; --quick skips cursor and dense scrolling; --only=resize
 ```
 
-Output goes to `E:/claude-tmp/the-56` (override with `DISPLAY_MODES_OUT`). Only one app may use port 9223.
+Output goes to `<scratch>/the-56` (override with `DISPLAY_MODES_OUT`). Only one app may use port 9223.

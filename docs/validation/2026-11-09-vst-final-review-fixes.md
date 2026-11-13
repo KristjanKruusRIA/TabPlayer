@@ -31,7 +31,7 @@ Branch `fix/vst-d`, from `feature/vst-hosting` at `5852a0e`. Fixes M1, M2, L1, L
 
 ## Evidence
 
-All runs on Windows 11, x86_64-pc-windows-msvc, `CARGO_TARGET_DIR=E:/cargo-target/slot-1`, `-j 4`.
+All runs on Windows 11, x86_64-pc-windows-msvc, `CARGO_TARGET_DIR=<cargo-target>/slot-1`, `-j 4`.
 
 | Check | Result |
 | --- | --- |

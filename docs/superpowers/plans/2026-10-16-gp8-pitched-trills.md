@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- Authoritative checkout: `C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer`. All scoped parity changes are authorized; no additional approval gate. Root starts this only after releasing P17/P18 delivery and owns Git/publication.
+- Authoritative checkout: `<checkout>`. All scoped parity changes are authorized; no additional approval gate. Root starts this only after releasing P17/P18 delivery and owns Git/publication.
 - Production edits only `src/interchange/pitched.ts` `preparePitchedGpScore` and `src/audio/plan.ts` `prepareMidiScore` plus its necessary import. Canonical written pitches, dynamics, IDs, relationships and source data remain exact; stringed/percussion staves are untouched.
 - Normalize both pitched main and active alternate exactly once in detached copies; preserve display offset and incumbent negative-duration tremolo behavior. Supported normalized MIDI domain 0–127; no new broad range/clamping policy.
 - No new UI, dependency, schema, IPC, renderer, native DSP or transport work. No app/browser/audio capture/build/Cargo/whole-suite run by the producer or reviewer.

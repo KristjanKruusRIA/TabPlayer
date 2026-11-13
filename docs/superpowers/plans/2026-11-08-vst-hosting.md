@@ -71,7 +71,7 @@
     - The copyright line is "Copyright (c) 2026 ArtCraft Team and the SoundCraft contributors".
     - The `NOTICE` says the ArtCraft name, wordmark and logos are trademarks outside the licence, so we use none of them.
     - The third-party material listed in `NOTICE` and `ATTRIBUTION.md` is fonts and assets, none of it in `crates/vst3-host`.
-    - These were read on 2026-11-08 from the existing read-only clone at `E:/claude-tmp/research/soundcraft`.
+    - These were read on 2026-11-08 from the existing read-only clone at `<scratch>/research/soundcraft`.
     - We take it under MIT. Every vendored file keeps that copyright and permission notice in its header, and the notice also goes into `THIRD_PARTY_NOTICES.md`. Task 8 checks that the pinned files still match.
   - **The test plug-in** derives from the `vst3` crate's `examples/gain.rs` (MIT OR Apache-2.0) and keeps that notice.
 - **Isolation.** No plug-in code ever runs in the app process. One helper runs per plug-in instance, at most 8 per document. An editor window is never owned by or parented to the Tauri window.

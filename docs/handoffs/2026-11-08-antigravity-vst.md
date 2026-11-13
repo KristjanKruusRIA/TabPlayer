@@ -20,7 +20,7 @@ The tasks build on each other. Do them **one per job, in order**: 12, 13, 14, 15
 
 ## Starting a task
 
-The worktree already exists, with `node_modules` linked. From `E:\git\TabPlayer\.worktrees\vst-hosting`, in Git Bash:
+The worktree already exists, with `node_modules` linked. From `<checkout>\.worktrees\vst-hosting`, in Git Bash:
 
 ```bash
 agy-job.sh start --tier pro --yolo --dir . --timeout 180m "Read docs/handoffs/2026-11-08-antigravity-vst.md. Follow its Shared rules, then do Task 12 only."
@@ -35,7 +35,7 @@ Change the task number for each job. `agy-job.sh status <id>` shows progress, an
 - **Tests first:** write the task's failing tests, run them and see them fail, then implement. Never delete, skip, loosen or `#[ignore]` an existing test to get a pass. If a test seems wrong, explain why in the report and leave it alone.
 - **Real-time safety:** code on the audio thread must not allocate, lock, block or make system calls. Use the counting allocator from `src-tauri/tests/audio_tone.rs` as Task 11 does. Do not retune `src-tauri/src/audio/tone.rs`. With no plug-in, audio must stay bit-identical.
 - **Untrusted input:** everything the helper or a plug-in sends is untrusted: indices, sizes, latency, samples, names and state. Imported files are untrusted too.
-- **Cargo:** keep build output in the default `src-tauri/target`. If it is busy, use `E:/cargo-target/slot-1` to `slot-3`, but only for `cargo test`. Never use a temp or scratch folder for builds. Never run a full `cargo test --workspace`. Run single targets (`--lib`, `--test <name>`) with `-j 2`. `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` must pass.
+- **Cargo:** keep build output in the default `src-tauri/target`. If it is busy, use `<cargo-target>/slot-1` to `slot-3`, but only for `cargo test`. Never use a temp or scratch folder for builds. Never run a full `cargo test --workspace`. Run single targets (`--lib`, `--test <name>`) with `-j 2`. `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` must pass.
 - **Vitest:** run the files you touched. Restore `src/audio/__snapshots__/plan.performance.test.ts.snap` with `git restore` if a run rewrites it.
 - **Missing fixtures:** this worktree has no `.analysis/compatibility` fixtures, so `plan.test.ts` and some audio Rust tests fail here for that reason alone. Name them; don't "fix" them.
 - **Project rules:**

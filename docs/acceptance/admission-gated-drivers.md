@@ -132,7 +132,7 @@ Run everything from the checkout root in PowerShell. Never launch an old executa
    npm run tauri -- build --no-bundle --features desktop-test --config <absolute config path>
    ```
 
-   Keep the Cargo output in the default `src-tauri/target` (or `E:/cargo-target/slot-1`..`3`). Copy `target/release/tabplayer.exe` into the fresh folder and copy `audio` and `library` from `src-tauri/resources` beside it as real files (`dereference`). `string-count-build.mjs` itself writes a different packet (`TabPlayerStringCountBuild`) for a different driver and sets no review flag; do not reuse its output as an admission for these three.
+   Keep the Cargo output in the default `src-tauri/target` (or `<cargo-target>/slot-1` to `slot-3`). Copy `target/release/tabplayer.exe` into the fresh folder and copy `audio` and `library` from `src-tauri/resources` beside it as real files (`dereference`). `string-count-build.mjs` itself writes a different packet (`TabPlayerStringCountBuild`) for a different driver and sets no review flag; do not reuse its output as an admission for these three.
 4. **Review the frozen source.** Read the diff since the last accepted run. This is the step `rootReviewed` and `sourceReview` attest.
 5. **Write the admission by hand** (an editor, not a script that fills in `rootReviewed`). Compute every hash from the real files. Record `builtAtUtc` after the build and after the executable copy.
 6. **Prepare**, once per run:

@@ -39,12 +39,12 @@ Date: 2026-10-31. Scope: score model field preservation test matrix and evidence
 
 ### Knowingly dropped fields (traced limitations)
 
-- `MasterBar.displayScale & displayWidth` (layout, `gp`): Stated limit in [docs/validation/2026-10-31-gp8-bar-widths.md:18](file:///E:/git/TabPlayer/.worktrees/f27/docs/validation/2026-10-31-gp8-bar-widths.md#L18). alphaTab's GPIF writer does not write `displayScale` or `displayWidth`; custom bar widths are persisted in native `.tabplayer` projects and rendered to PDF, not to interchange `.gp`.
-- `Bar.displayScale & displayWidth` (layout, `gp`): Stated limit in [docs/validation/2026-10-31-gp8-bar-widths.md:18](file:///E:/git/TabPlayer/.worktrees/f27/docs/validation/2026-10-31-gp8-bar-widths.md#L18). Same as MasterBar widths.
-- `Bar.barLineLeft & barLineRight` (layout, `gp`): Stated limit in [src/export/gp5.test.ts:576](file:///E:/git/TabPlayer/.worktrees/f27/src/export/gp5.test.ts#L576). GPIF XML format expresses barlines via `MasterBar.isDoubleBar` and repeat boundaries; arbitrary individual barline styles are not stored in GPIF.
-- `Staff.transpositionPitch` (audio, `gp`): Stated limit in [PRODUCT.md:44](file:///E:/git/TabPlayer/.worktrees/f27/PRODUCT.md#L44). GPIF format holds only display transposition (`<Transpose>`), which maps to `Staff.displayTranspositionPitch`. Sounding transposition is kept in native projects.
-- `Track.lineBreaks` (layout, `gp`): Stated limit in [src/export/gp5.test.ts:587](file:///E:/git/TabPlayer/.worktrees/f27/src/export/gp5.test.ts#L587). Track line breaks are session layout configuration, not stored in `score.gpif`.
-- `Score.backingTrack` (audio, `gp5`): Stated limit in [docs/validation/2026-10-30-gp8-gp5-export.md:32](file:///E:/git/TabPlayer/.worktrees/f27/docs/validation/2026-10-30-gp8-gp5-export.md#L32). Guitar Pro 5 binary format lacks a container for backing audio files; reported in export losses.
+- `MasterBar.displayScale & displayWidth` (layout, `gp`): Stated limit in [docs/validation/2026-10-31-gp8-bar-widths.md:18](../../docs/validation/2026-10-31-gp8-bar-widths.md#L18). alphaTab's GPIF writer does not write `displayScale` or `displayWidth`; custom bar widths are persisted in native `.tabplayer` projects and rendered to PDF, not to interchange `.gp`.
+- `Bar.displayScale & displayWidth` (layout, `gp`): Stated limit in [docs/validation/2026-10-31-gp8-bar-widths.md:18](../../docs/validation/2026-10-31-gp8-bar-widths.md#L18). Same as MasterBar widths.
+- `Bar.barLineLeft & barLineRight` (layout, `gp`): Stated limit in [src/export/gp5.test.ts:576](../../src/export/gp5.test.ts#L576). GPIF XML format expresses barlines via `MasterBar.isDoubleBar` and repeat boundaries; arbitrary individual barline styles are not stored in GPIF.
+- `Staff.transpositionPitch` (audio, `gp`): Stated limit in [PRODUCT.md:44](../../PRODUCT.md#L44). GPIF format holds only display transposition (`<Transpose>`), which maps to `Staff.displayTranspositionPitch`. Sounding transposition is kept in native projects.
+- `Track.lineBreaks` (layout, `gp`): Stated limit in [src/export/gp5.test.ts:587](../../src/export/gp5.test.ts#L587). Track line breaks are session layout configuration, not stored in `score.gpif`.
+- `Score.backingTrack` (audio, `gp5`): Stated limit in [docs/validation/2026-10-30-gp8-gp5-export.md:32](../../docs/validation/2026-10-30-gp8-gp5-export.md#L32). Guitar Pro 5 binary format lacks a container for backing audio files; reported in export losses.
 
 ## Evidence
 

@@ -17,7 +17,7 @@ Date: 2026-10-31. Status: **experimental and partial; verified only against synt
 - Branch merged with `develop` (`--no-ff`); conflicts in `engine.ts`, `App.tsx`, `lib.rs` and `styles.css` resolved by keeping `develop` and re-adding the Power Tab hooks (`initialScore` branch before the interchange loader, `.ptb` in the dialog filter, notice banner after the error banner, archive-gate bypass).
 - `npx tsc --noEmit` passes. Full `vitest run --testTimeout=40000 --maxWorkers=2` after the merge: 4628 passed, 26 failed; every failure I inspected is `ENOENT` for `.analysis/compatibility` fixtures that are absent in this worktree (`compatibility`, `audio/plan`, `export/midi`, `export/musicxml`). Those suites were not run against the real fixtures, so GP/GPX behaviour after the merge is covered only by the suites that do run.
 - `cargo test --locked --lib intake` passes (11 tests, including the signature cap). The full lib run (with empty stand-in `resources/audio` and `resources/library` directories, removed afterwards) had 31 failures: audio device, drum-kit, runtime and one file-library speed test. They need the real audio resources or a real device and were not investigated; none is in the intake path.
-- No `.ptb` file exists under `E:\git\TabPlayer\.analysis\compatibility` or elsewhere I searched.
+- No `.ptb` file exists under `<checkout>\.analysis\compatibility` or elsewhere I searched.
 
 ## Review
 

@@ -4,7 +4,7 @@ Status: normal runtime/visual, actual **32-track/2,000-measure long-score**, sel
 
 ## Scope and source identity
 
-Authoritative checkout: `C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer`, supplied branch `feat/gp8-parity`. The accepted design is `docs/superpowers/specs/2026-10-15-tabplayer-reference-workstation-design.md`; execution plan is `docs/superpowers/plans/2026-10-15-tabplayer-reference-workstation.md`. The user's original collage remains the reference for the charcoal shell, cream score, task panes and lower overview/mixer/instrument hierarchy. Generated recovery/export concepts cover those additional dialogs; generated incidental content is not product truth.
+Authoritative checkout: `<checkout>`, supplied branch `feat/gp8-parity`. The accepted design is `docs/superpowers/specs/2026-10-15-tabplayer-reference-workstation-design.md`; execution plan is `docs/superpowers/plans/2026-10-15-tabplayer-reference-workstation.md`. The user's original collage remains the reference for the charcoal shell, cream score, task panes and lower overview/mixer/instrument hierarchy. Generated recovery/export concepts cover those additional dialogs; generated incidental content is not product truth.
 
 Root owns the app, diagnostic build, native execution, screenshot inspection, review and Git. This report records retained receipts; its author ran no apps, tests, builds, Cargo or Git for this documentation pass.
 

@@ -78,7 +78,7 @@ import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
 import { MidiImportDialog } from './workspace/MidiImportDialog';
 import { BatchConvertDialog } from './batch/BatchConvertDialog';
 import { HelpDialog } from './help/HelpDialog';
-import { topicFor,type HelpTopicId } from './help/help-topics';
+import { helpTargetFor,type HelpTopicId } from './help/help-topics';
 import type { PaletteAction } from './editor/command-palette';
 import { ViewDefaultsPanel } from './workspace/ViewDefaultsPanel';
 import { currentViewDefaults,writeViewDefaults } from './workspace/view-defaults';
@@ -358,9 +358,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const openProtection=(kind:'manage'|'unlock')=>{protectionReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setProtectionDialog(kind);};
   const closeProtection=()=>{setProtectionDialog(null);const back=protectionReturn.current;protectionReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false),[batchOpen,setBatchOpen]=useState(false);
-  const [helpTopic,setHelpTopic]=useState<HelpTopicId|null>(null),helpReturn=useRef<HTMLElement|null>(null);
+  const [helpTopic,setHelpTopic]=useState<HelpTopicId|null>(null),[helpSection,setHelpSection]=useState<string|undefined>(undefined),helpReturn=useRef<HTMLElement|null>(null);
   /** Opens help on the topic for what had focus; help only reads, so open scores and edits are untouched. */
-  const openHelp=(topic?:HelpTopicId)=>{const focused=document.activeElement instanceof HTMLElement?document.activeElement:null;helpReturn.current=focused;closeCommands(false);setHelpTopic(topic??topicFor(focused));};
+  const openHelp=(topic?:HelpTopicId)=>{const focused=document.activeElement instanceof HTMLElement?document.activeElement:null;helpReturn.current=focused;closeCommands(false);const target=topic?{topic}:helpTargetFor(focused);setHelpSection(target.section);setHelpTopic(target.topic);};
   // F1 is heard on the window so it works with nothing focused; it never opens help over another dialog.
   const helpKey=useRef<(event:globalThis.KeyboardEvent)=>void>(()=>{});
   helpKey.current=event=>{
@@ -1046,7 +1046,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     </div>
     {exportOpen&&<ExportDialog layoutLocked={editLocked} layoutLockedNote={finalized?undefined:t('export.layout_locked_note')} plainNote={state.snapshot.protection&&(state.snapshot.protection.open||state.snapshot.protection.edit!=='none')?t('export.plain_protection_note'):undefined} sounds={state.settings.sounds} trackNames={trackNames} pluginWarnings={pluginStatuses} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
-    {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}
+    {helpTopic!==null&&<HelpDialog initial={helpTopic} initialSection={helpSection} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}
     {batchOpen&&<BatchConvertDialog busy={controlsBusy} onClose={closeBatch}/>}
     {protectionDialog==='manage'&&<ProtectionDialog protection={state.snapshot.protection??{edit:'none',open:false}} dirty={state.snapshot.dirty} onRequest={request=>controller.protect(request)} onClose={closeProtection}/>}

@@ -1,0 +1,7 @@
+.midi-capture-panel{display:grid;gap:6px;min-width:0}
+.midi-capture-panel label{display:grid;gap:4px;min-width:0}
+.midi-capture-panel input[type=range]{width:100%}
+.midi-capture-panel .hint{margin:0}
+.midi-capture-last{margin:0;font-variant-numeric:tabular-nums}
+.midi-in-badge.is-lost{background:var(--tp-danger,#F2907A)}
+.midi-in-badge{flex:none;width:8px;height:8px;border-radius:50%;background:var(--tp-on);box-shadow:0 0 0 1.5px var(--tp-panel)}

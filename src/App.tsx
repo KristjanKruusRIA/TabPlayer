@@ -91,6 +91,11 @@ import type { ClipboardMode,PasteOptions } from './editor/clipboard-types';
 import { PracticePanel } from './audio/PracticePanel';
 import { TunerPanel } from './audio/TunerPanel';
 import { LineInPanel,useLineInRunning } from './audio/LineInPanel';
+import { MidiCaptureIndicator,MidiCapturePanel } from './editor/MidiCapturePanel';
+import { planMidiCapture } from './editor/midi-capture';
+import { midiCaptureSession } from './editor/midi-capture-session';
+import { useMidiCapture } from './editor/useMidiCapture';
+import type { MidiChord } from './audio/midi-in';
 import { EngravingPanel } from './engraving/EngravingPanel';
 import { PageLayoutPanel } from './engraving/PageLayoutPanel';
 import { BarWidthsPanel } from './engraving/BarWidthsPanel';
@@ -121,9 +126,12 @@ type EntryItem=
   |{kind:'keypad';keypad:NonNullable<ReturnType<typeof numpadKey>>}
   |{kind:'entry';key:ScoreEntryKey;shift:boolean}
   |{kind:'digit';digit:string}
-  |{kind:'enter'};
+  |{kind:'enter'}
+  |{kind:'capture';chord:MidiChord};
 interface QueuedEntryKey{item:EntryItem;at:number;documentId:string}
 const ENTRY_QUEUE_MAX=8,ENTRY_QUEUE_STALE_MS=2000;
+/** Chords that may wait in the entry queue at once; more are counted as not written. */
+const CHORD_QUEUE_MAX=4;
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)&&!(target instanceof HTMLInputElement&&target.type==='range')||target.isContentEditable);
 
 export interface AppProps {
@@ -187,8 +195,15 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const entryQueue=useRef<QueuedEntryKey[]>([]),ownEdits=useRef(0),draining=useRef(false),entryFailure=useRef<{text:string|null}|null>(null),[settled,setSettled]=useState(0);
   // `unseenSettles` are edits whose follow-up has run but whose render has not committed yet; they stay in `ownEdits` until the drain effect (which runs after that commit) takes them off.
   const unseenSettles=useRef(0),refusing=useRef(false);
+  // MIDI capture: where the fretting hand last was, and the cursor an undo of the last captured chord puts back.
+  const handFret=useRef<number|null>(null),captureUndo=useRef<{documentId:string;revision:number;from:BeatTarget;at:BeatTarget}|null>(null),captureEnd=useRef<{documentId:string;revision:number;at:BeatTarget}|null>(null);
   // Clearing the queue also lifts the refusal latch (see `refusing` in `keys`).
-  const clearEntryQueue=()=>{entryQueue.current=[];refusing.current=false;};
+  const clearEntryQueue=()=>{
+    // A chord that was waiting and is thrown away never reaches the score, so it is counted.
+    const lost=entryQueue.current.filter(waiting=>waiting.item.kind==='capture').length;
+    entryQueue.current=[];refusing.current=false;
+    if(lost)midiCaptureSession().countNotWritten(lost);
+  };
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]),sections=useMemo(()=>listSections(state.score),[state.score]);
   const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
@@ -255,8 +270,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const requestPaneFocus=(tab:InspectorTab)=>{paneFocusIntent.current=tab;setPaneFocusTick(value=>value+1);};
   useEffect(()=>{const resize=()=>setViewport({width:window.innerWidth,height:window.innerHeight});window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[]);
   useLayoutEffect(()=>{if(!workspace.current||typeof ResizeObserver==='undefined')return;const observer=new ResizeObserver(entries=>{const rect=entries[0]?.contentRect;if(rect?.height>0)setWorkspaceHeight(rect.height);if(rect?.width>0)setWorkspaceWidth(rect.width);});observer.observe(workspace.current);return()=>observer.disconnect();},[]);
-  const closeCommands=(focus=false)=>{commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(details=>{details.open=false;if(focus)details.querySelector('summary')?.focus();});};
-  const commandToggle=(current:HTMLDetailsElement)=>{if(current.open)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==current)other.open=false;});};
+  const closeCommands=(focus=false)=>{commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(details=>{details.open=false;if(focus&&!details.parentElement?.closest('details'))details.querySelector<HTMLElement>(':scope > summary')?.focus();});};
+  // Opening a menu closes the other menus. A section inside a menu is part of it: it neither closes the menu around it nor is closed with it by its own opening.
+  const commandToggle=(current:HTMLDetailsElement)=>{if(current.open)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==current&&!other.contains(current)&&!current.contains(other))other.open=false;});};
   useEffect(()=>{const outside=(event:PointerEvent)=>{if(event.target instanceof Node&&!commandBar.current?.contains(event.target))closeCommands(true);};document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);},[]);
   useLayoutEffect(()=>{const tab=paneFocusIntent.current;if(!tab)return;paneFocusIntent.current=null;if(document.activeElement instanceof Element&&document.activeElement.closest('[role="dialog"]'))return;inspectorPane.current?.querySelector<HTMLElement>(`[data-inspector-tab="${tab}"]`)?.focus();},[paneFocusTick,inspectorShown,inspectorTab]);
   useLayoutEffect(()=>{if(!clipboardFocus)return;const section=clipboardSection.current?.querySelector('details');if(section){for(let parent=section.parentElement;parent;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)parent.open=true;section.open=true;section.querySelector('summary')?.focus();section.scrollIntoView?.({block:'nearest'});}},[clipboardFocus]);
@@ -317,6 +333,14 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const kept=entryFret.current;entryFret.current=null;
     setFret(kept&&kept.score===state.score&&kept.string===string?kept.fret:location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);endPending();
   },[state.score,target.track,target.staff,target.bar,target.voice,target.beat,string]);
+  /** Undo; when it takes back the chord MIDI capture just wrote and the cursor has not been moved since, the cursor goes back to where the chord was written. */
+  const undoEdit=()=>{
+    const mark=captureUndo.current,hit=mark!==null&&mark.documentId===state.documentId&&mark.revision===controller.getState().revision&&sameBeat(cursorNow.current,repairSelection(state.score,mark.at));
+    captureUndo.current=null;captureEnd.current=null;
+    const job=controller.undo();
+    if(hit&&mark)void job.then(()=>setSelection(repairSelection(controller.getState().score,mark.from)),()=>{});
+    return job;
+  };
   const act=(job: Promise<unknown>)=>{void job.catch(()=>{});};
   const change=(job:Promise<unknown>)=>{const before=state.score;setClipboardError(null);clearEntryQueue();act(job.then(()=>{const score=controller.getState().score;setSelection(old=>repairSelection(score,followSelectedTrack(before,score,old)));editorSelection(null);}));};
   const edit=(command:EditCommand,after?:(score:model.Score)=>void)=>{
@@ -327,6 +351,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const landed=controller.edit(command);ownEdits.current++;
     const done=landed.then(()=>{
       recorded=true;
+      captureUndo.current=null;captureEnd.current=null;
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
       if(command.type==='pasteMusic')setNoteIndex(null);
@@ -402,7 +427,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const runPalette=(action:PaletteAction)=>{
     if(action.kind==='edit'){if(view==='sound')return;if(editLocked)setClipboardError(lockedMessage);else edit(action.command);}
     else if(action.kind==='select'){editorSelection(null);select(action.target);}
-    else if(action.name==='undo'){if(state.snapshot.canUndo&&!editLocked)change(controller.undo());}
+    else if(action.name==='undo'){if(state.snapshot.canUndo&&!editLocked)change(undoEdit());}
     else if(action.name==='redo'){if(state.snapshot.canRedo&&!editLocked)change(controller.redo());}
     else if(action.name==='play')shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();
     else if(action.name==='loop'||action.name==='slower'||action.name==='faster')shell.current?.querySelector<HTMLButtonElement>(`[data-action="${action.name}"]`)?.click();
@@ -534,10 +559,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const sameBeat=(a:BeatTarget,b:BeatTarget)=>a.track===b.track&&a.staff===b.staff&&a.bar===b.bar&&a.voice===b.voice&&a.beat===b.beat;
   const moveTo=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
-    entryFret.current=null;setPendingAccidental(null);const fixed=repairSelection(state.score,next);setSelection(fixed);
+    entryFret.current=null;setPendingAccidental(null);const live=controller.getState().score,fixed=repairSelection(live,next);setSelection(fixed);
     setNoteIndex(index!==undefined&&Number.isInteger(index)&&index>=0?index:null);
-    const beat=describeSelection(state.score,fixed).beat;
-    const count=state.score.tracks[fixed.track].staves[fixed.staff].tuning.length;
+    const beat=describeSelection(live,fixed).beat;
+    const count=live.tracks[fixed.track].staves[fixed.staff].tuning.length;
     const chosen=Math.max(1,Math.min(s,count));setString(chosen);
     setFret(beat?.notes.find(n=>n.string===chosen)?.fret ?? 0);endPending();
   };
@@ -554,13 +579,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   /** Shows why a key did nothing; for a queued key it also records that the rest of the queue was typed for a result that did not happen. */
   const refuse=(text:string,at:string)=>{setInputNotice({text,at});if(draining.current)entryFailure.current={text};};
   /** Records a planned entry as one edit, then moves the cursor where the plan says; a refusal keeps the cursor on the beat and says why. */
-  const runEntryPlan=(point:BeatTarget,plan:EntryPlan|EntryRefusal,pitch?:number)=>{
-    const placed=repairSelection(state.score,point),moves=userMoves.current;
+  const runEntryPlan=(point:BeatTarget,plan:EntryPlan|EntryRefusal,pitch?:number,captured=false)=>{
+    const placed=repairSelection(controller.getState().score,point),moves=userMoves.current;
     moveTo(point);
-    if('refused' in plan){refuse(t(`score_entry.${plan.refused}` as MessageKey,{name:plan.name}),JSON.stringify(point));return;}
+    if('refused' in plan){if(captured)midiCaptureSession().countNotWritten();refuse(t(`score_entry.${plan.refused}` as MessageKey,{name:plan.name}),JSON.stringify(point));return;}
     setInputNotice(plan.notice?{text:plan.notice,at:JSON.stringify(plan.next)}:null);
-    void edit(plan.command,score=>{if(sameBeat(cursorNow.current,placed)&&userMoves.current===moves){setSelection(repairSelection(score,plan.next));setNoteIndex(null);}if(plan.entry)entryDuration.current=plan.entry;if(pitch!==undefined&&!plan.removes)entryNear.current=pitch;})
-      .then(landed=>{if(!landed){const text=t('score_entry.refused',{name:plan.name});setInputNotice({text,at:JSON.stringify(point)});if(entryFailure.current)entryFailure.current.text=text;}});
+    void edit(plan.command,score=>{if(sameBeat(cursorNow.current,placed)&&userMoves.current===moves){setSelection(repairSelection(score,plan.next));setNoteIndex(null);}if(plan.entry)entryDuration.current=plan.entry;if(pitch!==undefined&&!plan.removes)entryNear.current=pitch;if(captured){if(plan.hand!==undefined)handFret.current=plan.hand;const revision=controller.getState().revision;captureUndo.current={documentId:state.documentId,revision,from:placed,at:plan.next};captureEnd.current=plan.end?{documentId:state.documentId,revision,at:plan.next}:null;}})
+      .then(landed=>{if(!landed){if(captured)midiCaptureSession().countNotWritten();const text=t('score_entry.refused',{name:plan.name});setInputNotice({text,at:JSON.stringify(point)});if(entryFailure.current)entryFailure.current.text=text;}});
   };
   const entryBlocked=(point:BeatTarget)=>{
     if(editLocked){refuse(lockedMessage,JSON.stringify(point));return true;}
@@ -638,6 +663,32 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(pair)void edit({type:'sequence',commands:[lead as SequenceStep,note as SequenceStep]});
     else void edit(note).then(accepted=>{if(accepted)entryDuration.current=entryAfterWrite(beat,entryDuration.current);});
   };
+  /**
+   * Whether a captured chord is written now: `off` (note entry is not on the score; the chord is only shown, and nothing is said),
+   * `blocked` (a header menu, a dialog or a text field has the interface; the chord is counted as not written) or `ok`.
+   * Typed keys cannot reach the score behind a menu or a dialog either.
+   */
+  const captureState=():'off'|'menu'|'blocked'|'ok'=>{
+    if(!noteEntryOn||view!=='score')return 'off';
+    if(exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null||document.querySelector('[role="dialog"]'))return 'blocked';
+    if(commandBar.current?.querySelector('details[open]'))return 'menu';
+    if(textEntry(document.activeElement??document.body))return 'blocked';
+    return 'ok';
+  };
+  /** Writes a captured chord at the cursor as one edit, as the note-entry keys write, then moves on. Every chord that does not reach the score is counted. */
+  const writeCapture=(chord:MidiChord)=>{
+    const lose=()=>midiCaptureSession().countNotWritten();
+    const mode=captureState();
+    if(mode!=='ok'||entryBlocked(target)){lose();return;}
+    // The cursor and the score are read now, not from the render that queued the chord.
+    const current=controller.getState(),point=repairSelection(current.score,cursorNow.current);
+    const end=captureEnd.current;
+    if(end&&end.documentId===state.documentId&&end.revision===current.revision&&sameBeat(end.at,point)){
+      moveTo(point);lose();refuse(t('score_entry.capture_end_blocked'),JSON.stringify(point));return;
+    }
+    setPendingAccidental(null);
+    runEntryPlan(point,planMidiCapture({project:current.snapshot.project,score:current.score,target:point,notes:chord.notes,preferences:inputPrefs,entry:entryDuration.current,hand:handFret.current}),undefined,true);
+  };
   /** One keyboard entry key, live or from the queue: both run this, so a queued key reads the preferences and the pending accidental when its turn comes. */
   const performItem=(item:EntryItem,at:number)=>{
     if(item.kind==='keypad'){
@@ -653,7 +704,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if(pendingTimer.current!==null)clearTimeout(pendingTimer.current);
       // Once the window closes the digits stand as the field's value, and Backspace deletes the note again, so the hint and the way back both end.
       pendingTimer.current=setTimeout(()=>{pendingTimer.current=null;fretBase.current=null;setPendingFret(null);},1000);
-    }else {endPending();enterFret();}
+    }else if(item.kind==='capture')writeCapture(item.chord);
+    else {endPending();enterFret();}
   };
   /** The key as an entry key, or null when it is anything else (navigation, the N toggle, other shortcuts). */
   const entryItem=(event:KeyboardEvent):EntryItem|null=>{
@@ -669,13 +721,45 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** A key waits only behind this app's own edit (or behind keys already waiting). A lock, a workspace transition or any other busy work still refuses it. */
   const entryQueueing=()=>!workspaceBusy&&!editLocked&&(ownEdits.current>0||entryQueue.current.length>0&&!controlsBusy);
-  const enqueueEntry=(item:EntryItem)=>{
+  const enqueueEntry=(item:EntryItem):boolean=>{
     const queue=entryQueue.current;
     if(!queue.length)entryFailure.current=null;
     // A refused key must not be followed by keys that assume it landed: once one is refused, the rest are too until the queue is empty and its last key has finished (the drain lifts it).
-    if(queue.length>=ENTRY_QUEUE_MAX){refusing.current=true;setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return;}
+    if(queue.length>=ENTRY_QUEUE_MAX){
+      // A typed key outranks a waiting chord: the oldest chord is turned away (and counted) to make room.
+      // A chord never sets the latch or says "busy": it is simply turned away (and counted by the caller).
+      if(item.kind==='capture')return false;
+      let evict=-1;queue.forEach((waiting,index)=>{if(waiting.item.kind==='capture')evict=index;});
+      if(evict<0){refusing.current=true;setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return false;}
+      queue.splice(evict,1);midiCaptureSession().countNotWritten();
+    }
     queue.push({item,at:Date.now(),documentId:state.documentId});
+    return true;
   };
+  /** Runs an entry item now or queues it behind the edit in flight; one that cannot join keys already waiting is refused, so the music has no hole. False when it was refused. */
+  const dispatchEntryItem=(item:EntryItem):boolean=>{
+    if(refusing.current||entryQueue.current.length&&!entryQueueing()){
+      refusing.current=true;if(!entryBlocked(target))setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return false;
+    }
+    if(entryQueueing())return enqueueEntry(item);
+    performItem(item,Date.now());return true;
+  };
+  /** A chord has its own small lane in the queue and never sets the refusal latch, so a flooding device cannot keep typed keys out. A chord that cannot wait is counted. */
+  const dispatchChord=(chord:MidiChord)=>{
+    const mode=captureState(),session=midiCaptureSession();
+    if(mode==='off')return;
+    const lose=()=>session.countNotWritten();
+    session.setBlocked(mode==='menu');
+    if(mode!=='ok'){lose();return;}
+    const waiting=entryQueue.current.filter(entry=>entry.item.kind==='capture').length;
+    if(refusing.current||entryQueue.current.length&&!entryQueueing()||waiting>=CHORD_QUEUE_MAX){lose();return;}
+    if(entryQueueing()){if(!enqueueEntry({kind:'capture',chord}))lose();return;}
+    try{performItem({kind:'capture',chord},Date.now());}
+    catch(error){console.error('A MIDI chord could not be written.',error);lose();}
+  };
+  useMidiCapture(midiCaptureSession(),dispatchChord);
+  // Chords still waiting when the editor goes away (another score became active) are counted, not lost.
+  useEffect(()=>()=>{const lost=entryQueue.current.filter(waiting=>waiting.item.kind==='capture').length;if(lost)midiCaptureSession().countNotWritten(lost);},[]);
   const discardEntryQueue=(reason:string|null,why:'discarded'|'stale'|'dropped',extra=0)=>{
     const count=entryQueue.current.length+extra;clearEntryQueue();
     const message=t(`editor.entry_queue_${why}_${count===1?'one':'other'}` as MessageKey,{count});
@@ -696,7 +780,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const next=queue.shift()!,before=ownEdits.current;
     draining.current=true;
     try{performItem(next.item,next.at);}
-    catch(error){console.error('A queued entry key failed.',error);discardEntryQueue(null,'discarded',1);return;}
+    catch(error){console.error('A queued entry key failed.',error);if(next.item.kind==='capture')midiCaptureSession().countNotWritten();discardEntryQueue(null,'discarded',1);return;}
     finally{draining.current=false;}
     if(ownEdits.current===before)setSettled(count=>count+1);
   };
@@ -745,11 +829,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       event.preventDefault();
       // Held letters and chords never repeat, and a key that has to wait is queued once, never from key repeat.
       if(event.repeat&&(item.kind==='entry'||entryQueueing()))return;
-      if(refusing.current||entryQueue.current.length&&!entryQueueing()){
-        // Keys are waiting and this one cannot join them: refuse it, and every later one until the queue is empty, so the music has no hole.
-        refusing.current=true;if(!entryBlocked(target))setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return;
-      }
-      if(entryQueueing())enqueueEntry(item);else performItem(item,Date.now());
+      // A key that cannot join the keys already waiting is refused, and every later one until the queue is empty.
+      dispatchEntryItem(item);
       return;
     }
     if(view==='score'&&(event.key==='n'||event.key==='N')&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();if(!event.repeat)setNoteEntryOn(on=>!on);return;}
@@ -857,7 +938,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       else if(key==='o')documentAction(onOpen());
       else if(key==='s')act(controller.save(event.shiftKey));
       else if(key==='y'||key==='z'&&event.shiftKey){if(state.snapshot.canRedo&&!editLocked)change(controller.redo());}
-      else if(state.snapshot.canUndo&&!editLocked)change(controller.undo());
+      else if(state.snapshot.canUndo&&!editLocked)change(undoEdit());
       return;
     }
     // The Sound view covers the score, which stays laid out underneath: keys that edit or select in it wait for the Score view.
@@ -913,7 +994,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys}>
-    <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><nav className="gp-menus" aria-label={t('menu.file_and_history')}><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
+    <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure&&!other.contains(disclosure)&&!disclosure.contains(other))other.open=false;});else if(event.target.closest('button')&&!event.target.closest('[data-menu-keep]'))closeCommands(true);}}><nav className="gp-menus" aria-label={t('menu.file_and_history')}><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>{t('action.new')}</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>{t('action.open')}</button>
@@ -929,7 +1010,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>{t('action.export_score')}</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>{t('action.export_gp')}</button>
       {libraryMenu}{sessionMenu}</section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.edit')}</summary><section aria-label={t('menu.edit')}>
-        <button type="button" {...busyGuard({busy:editBusy,disabled:!state.snapshot.canUndo,onClick:()=>{change(controller.undo());}})}>{t('menu.undo')}</button>
+        <button type="button" {...busyGuard({busy:editBusy,disabled:!state.snapshot.canUndo,onClick:()=>{change(undoEdit());}})}>{t('menu.undo')}</button>
         <button type="button" {...busyGuard({busy:editBusy,disabled:!state.snapshot.canRedo,onClick:()=>{change(controller.redo());}})}>{t('menu.redo')}</button>
         <button type="button" {...busyGuard({busy:controlsBusy,unavailable:editLocked||!musicSelection,onClick:()=>{copyMusic('singleTrack',true);}})}>{t('menu.cut')}</button>
         <button type="button" {...busyGuard({busy:controlsBusy,unavailable:!musicSelection,onClick:()=>{copyMusic('singleTrack');}})}>{t('menu.copy')}</button>
@@ -972,6 +1053,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>{t('view.bottom_dock')}</label>
         <label className="check"><input type="checkbox" checked={paletteVisible} onChange={event=>setPaletteVisible(event.target.checked)}/>{t('view.edition_palette')}</label>
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
+        <MidiCapturePanel/>
         <div className="language-setting-row"><label>{t('preferences.language')}: <select aria-label={t('preferences.language')} value={preference} onChange={e=>setPreference(e.target.value as LanguagePreference)}><option value="system">{t('preferences.lang_system')}</option><option value="en">{t('preferences.lang_en')}</option><option value="et">{t('preferences.lang_et')}</option><option value="de">{t('preferences.lang_de')}</option></select></label></div>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.window')}</summary><section aria-label={t('menu.window')}>
@@ -993,8 +1075,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     </header>
     <div className="gp-toolbar">
       <div className="gp-toolbar-left" role="group" aria-label={t('toolbar.main')}>
-        <button type="button" className="note-entry-toggle" aria-pressed={noteEntryOn} aria-keyshortcuts="N" title={t('score_entry.toggle_title')} onClick={()=>{const on=!noteEntryOn;setNoteEntryOn(on);setView('score');if(on)requestAnimationFrame(()=>scorePane.current?.focus());}}><NoteEntryGlyph/><span className="tp-sr">{t('score_entry.toggle')}</span></button><span className="gp-joined pane-toggles"><button type="button" data-pane-toggle="palette" aria-pressed={paletteVisible} title={t('toolbar.toggle_palette')} aria-label={t('toolbar.toggle_palette')} onClick={()=>setPaletteVisible(!paletteVisible)}><PaletteGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title={t('toolbar.toggle_dock')} aria-label={t('view.toggle_bottom_dock')} onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title={t('toolbar.toggle_inspector')} aria-label={t('view.toggle_inspector')} onClick={()=>inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button></span>
-        <span className="gp-joined"><button type="button" disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())} title={t('action.undo_title')}><UndoGlyph/><span className="tp-sr">{t('action.undo')}</span></button><button type="button" disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())} title={t('action.redo_title')}><RedoGlyph/><span className="tp-sr">{t('action.redo')}</span></button></span>
+        <button type="button" className="note-entry-toggle" aria-pressed={noteEntryOn} aria-keyshortcuts="N" title={t('score_entry.toggle_title')} onClick={()=>{const on=!noteEntryOn;setNoteEntryOn(on);setView('score');if(on)requestAnimationFrame(()=>scorePane.current?.focus());}}><NoteEntryGlyph/><span className="tp-sr">{t('score_entry.toggle')}</span></button><MidiCaptureIndicator/><span className="gp-joined pane-toggles"><button type="button" data-pane-toggle="palette" aria-pressed={paletteVisible} title={t('toolbar.toggle_palette')} aria-label={t('toolbar.toggle_palette')} onClick={()=>setPaletteVisible(!paletteVisible)}><PaletteGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title={t('toolbar.toggle_dock')} aria-label={t('view.toggle_bottom_dock')} onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title={t('toolbar.toggle_inspector')} aria-label={t('view.toggle_inspector')} onClick={()=>inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button></span>
+        <span className="gp-joined"><button type="button" disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(undoEdit())} title={t('action.undo_title')}><UndoGlyph/><span className="tp-sr">{t('action.undo')}</span></button><button type="button" disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())} title={t('action.redo_title')}><RedoGlyph/><span className="tp-sr">{t('action.redo')}</span></button></span>
         <button type="button" title={t('toolbar.print')} aria-label={t('toolbar.print')} {...busyGuard({busy:controlsBusy||exports.busy,onClick:()=>openModal('export')})}><ExportGlyph/></button>
         <span className="tp-sr score-tools">{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
       </div>

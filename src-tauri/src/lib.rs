@@ -15,6 +15,7 @@ pub mod harmony_library;
 pub mod intake;
 pub mod launch;
 pub mod line_in;
+pub mod midi_in;
 pub mod midi_out;
 pub mod password_crypto;
 pub mod password_lock;
@@ -1066,6 +1067,7 @@ pub fn run() {
         .manage(backing_waveform::BackingWaveformService::default())
         .manage(tuner::TunerState::default())
         .manage(line_in::LineInState::default())
+        .manage(midi_in::MidiInState::default())
         .setup(|app| {
             // Files named on the command line, as an associated file's double-click passes them.
             if let Ok(directory) = std::env::current_dir() {
@@ -1344,7 +1346,12 @@ pub fn run() {
         line_in::line_in_status,
         midi_out::midi_out_ports,
         midi_out::midi_out_set_delay,
-        midi_out::midi_out_status
+        midi_out::midi_out_status,
+        midi_in::midi_in_ports,
+        midi_in::midi_in_start,
+        midi_in::midi_in_configure,
+        midi_in::midi_in_stop,
+        midi_in::midi_in_status
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1462,6 +1469,12 @@ pub fn run() {
         midi_out::midi_out_set_delay,
         midi_out::midi_out_status,
         midi_out::midi_out_test_log,
+        midi_in::midi_in_ports,
+        midi_in::midi_in_start,
+        midi_in::midi_in_configure,
+        midi_in::midi_in_stop,
+        midi_in::midi_in_status,
+        midi_in::midi_in_test_inject,
         plugins::commands::plugin_test_set_parameter,
         desktop_test_io
     ]);
@@ -1483,6 +1496,9 @@ pub fn run() {
                 clear_print_cache(app);
                 if let Some(tuner) = app.try_state::<tuner::TunerState>() {
                     tuner.stop();
+                }
+                if let Some(midi_in) = app.try_state::<midi_in::MidiInState>() {
+                    midi_in.shutdown();
                 }
                 if let (Some(line_in), Some(audio)) = (
                     app.try_state::<line_in::LineInState>(),

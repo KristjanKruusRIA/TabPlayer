@@ -1,5 +1,6 @@
 import { CLICK_SOUNDS,type ClickSound,type PracticeSettings } from './practice-types';
 import type { PracticeNotice } from './types';
+import type { MessageKey } from '../i18n';
 
 /** The checks a person can fail by typing in the Practice settings. The message is the English source; the panel shows `practice.error_<code>`. */
 const PRACTICE_MESSAGES={
@@ -55,6 +56,11 @@ export function validatePractice(settings:PracticeSettings,hasBacking:boolean):v
   if(!Number.isInteger(number(count.bars,0,16,'count_in')))throw new PracticeError('count_in');
   if(Object.hasOwn(value,'tonality')&&!Number.isInteger(number(value.tonality,-12,12,'tonality')))throw new PracticeError('tonality');
   if(hasBacking&&tempo.kind==='fixed')throw new PracticeError('fixed_backing');
+}
+
+/** The message for a practice change that could not be made, in the interface's language: a validation code has its own text, anything else gets one plain sentence rather than the raw error. */
+export function practiceProblem(error:unknown,t:(key:MessageKey)=>string):string {
+  return error instanceof PracticeError?t(`practice.error_${error.code}` as MessageKey):t('palette.error_key_failed');
 }
 
 export function practiceForBacking(settings:PracticeSettings,hasBacking:boolean):{settings:PracticeSettings;notice:PracticeNotice|null} {

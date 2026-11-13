@@ -53,3 +53,18 @@ it('neutral Reset is disabled and instructions describe the fields',()=>{setup()
 it('No Filter commits once from a filtered backing and retains its raw pitch pair',async()=>{const initial={...backing,processing:{semitones:1,cents:-50,filter:'highAttenuation' as const}},p=setup(vi.fn(async()=>{}),initial);fireEvent.change(screen.getByRole('combobox',{name:'Filter'}),{target:{value:'none'}});await waitFor(()=>expect(p.release).toHaveBeenCalledOnce());expect(p.onEdit).toHaveBeenCalledExactlyOnceWith({type:'setBacking',backing:{...initial,processing:{...initial.processing,filter:'none'}}});});
 it.each(['filter','reset'])('%s holds one lease through pending rejection',async action=>{let reject!:(e:Error)=>void;const p=setup(vi.fn(()=>new Promise<void>((_,no)=>{reject=no;})),{...backing,processing:{semitones:2,cents:0,filter:'none'}});if(action==='filter')fireEvent.change(screen.getByRole('combobox'),{target:{value:'bassEnhance'}});else fireEvent.click(screen.getByRole('button',{name:'Reset'}));expect(p.begin).toHaveBeenCalledOnce();expect(p.release).not.toHaveBeenCalled();expect(semitones()).toBeDisabled();expect(cents()).toBeDisabled();expect(screen.getByRole('combobox')).toBeDisabled();await act(async()=>reject(new Error('Rejected')));expect(screen.getByRole('alert')).toHaveTextContent('Rejected');expect(p.release).toHaveBeenCalledOnce();});
 it('new settings immediately replace a pending stale draft without releasing its lease',async()=>{let finish!:()=>void;const p=setup(vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;})));fireEvent.change(cents(),{target:{value:'50'}});fireEvent.keyDown(cents(),{key:'Enter'});p.view.rerender(<p.Harness settings={{...backing,processing:{semitones:0,cents:25,filter:'none'}}}/>);expect(cents()).toHaveValue('25');expect(cents()).toBeDisabled();expect(p.release).not.toHaveBeenCalled();await act(async()=>finish());expect(p.release).toHaveBeenCalledOnce();});
+
+it('says the practice key shift is added to the backing pitch, only while one is set',()=>{
+ const props={settings:backing,busy:false,visible:true,beginOperation:()=>()=>{},onEdit:async()=>{}};
+ const {rerender}=render(<BackingProcessingControls {...props}/>);
+ expect(screen.queryByText(/practice key shift/)).not.toBeInTheDocument();
+ rerender(<BackingProcessingControls {...props} keyShift={4}/>);
+ expect(screen.getByText('The practice key shift of +4 is added to this.')).toBeInTheDocument();
+ rerender(<BackingProcessingControls {...props} keyShift={-2}/>);
+ expect(screen.getByText(/shift of [−-]2 is added/)).toBeInTheDocument();
+});
+
+it('keeps the key shift hint out of live regions, so it is not read again at every step',()=>{
+ render(<BackingProcessingControls settings={backing} busy={false} visible={true} beginOperation={()=>()=>{}} onEdit={async()=>{}} keyShift={4}/>);
+ expect(screen.getByText('The practice key shift of +4 is added to this.').closest('[role=status],[aria-live]')).toBeNull();
+});

@@ -88,3 +88,13 @@ describe('MidiOutPanel',()=>{
     fireEvent.change(output(),{target:{value:'USB MIDI'}});expect(onEdit).not.toHaveBeenCalled();
   });
 });
+
+describe('MidiOutPanel key shift hint',()=>{
+  it('says routed notes are sent in the practice key only while a shift is set',async()=>{
+    const bridge=fakeBridge(),{rerender}=render(<MidiOutPanel trackId="base/0" mix={mix} onEdit={()=>{}} bridge={bridge}/>);
+    await screen.findByRole('option',{name:'USB MIDI'});
+    expect(screen.queryByText(/key shift is set/)).not.toBeInTheDocument();
+    rerender(<MidiOutPanel trackId="base/0" mix={mix} onEdit={()=>{}} bridge={bridge} keyShift={-3}/>);
+    expect(screen.getByText(/While a key shift is set, notes sent to the device are in that key/)).toBeInTheDocument();
+  });
+});

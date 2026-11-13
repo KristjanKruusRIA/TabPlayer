@@ -75,7 +75,7 @@ const choices = { cursor: [{ generation: 1, occurrenceIndex: 0, startTick: 0 }, 
 
 const playbackState = { ready: true, playing: false, time: 1000, endTime: 6000, measure: 0, speed: 100, metronome: false, practice: { settings: structuredClone(DEFAULT_PRACTICE), phase: 'paused', countInRemaining: 0, completedPasses: 0, effectiveRatio: 1, currentBpm: 120, pulse: null },
   practicePending: false, practiceNotice: null, loopNotice: null, range: null, loop: null, error: null };
-const transportPlayer = { generation: 1, getState: () => playbackState as never, subscribe: () => noop, play: noop, pause: noop, stop: noop, setSpeed: noop, setLoop: noop, clearLoop: noop, seekToMeasure: noop, setPractice: noop,
+const transportPlayer = { generation: 1, getState: () => playbackState as never, subscribe: () => noop, play: noop, pause: noop, stop: noop, setSpeed: noop, setLoop: noop, clearLoop: noop, seekToMeasure: noop, setPractice: noop, stepKeyShift: noop, setKeyShift: noop,
   cursorPlaybackChoices: () => choices.cursor, selectionPlaybackChoices: () => choices.passage, playbackOccurrences: () => occurrences, playFromCursor: noop, playSelection: noop, loopSelection: noop };
 
 const surfaces: Array<{ title: string; mount: () => ReturnType<typeof render> }> = [

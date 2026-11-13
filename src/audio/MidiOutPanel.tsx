@@ -8,6 +8,8 @@ import { MIDI_OUT_DELAY_MAX,readMidiOutDelay,saveMidiOutDelay } from './midi-out
 
 export interface MidiOutPanelProps {
   trackId:string;
+  /** The practice key shift in semitones, so the panel can say routed notes are sent in that key. */
+  keyShift?:number;
   /** The open score, so Refresh also moves its tracks back onto a port that has come back. */
   owner?:MidiOutOwner;
   mix?:ChannelMix;
@@ -26,7 +28,7 @@ const portCache=new WeakMap<MidiOutBridge,MidiOutPort[]>();
  * track's mix, so choosing it is one undoable edit and travels with the score; a port that is not connected on this
  * computer leaves the track on the internal sound until it is.
  */
-export function MidiOutPanel({trackId,owner,mix,busy=false,onEdit,bridge=nativeMidiOut,interval=1000}:MidiOutPanelProps):React.JSX.Element {
+export function MidiOutPanel({keyShift=0,trackId,owner,mix,busy=false,onEdit,bridge=nativeMidiOut,interval=1000}:MidiOutPanelProps):React.JSX.Element {
   const {t}=useI18n();
   const [ports,setPorts]=useState<MidiOutPort[]|null>(()=>portCache.get(bridge)??null),[listError,setListError]=useState('');
   const [status,setStatus]=useState<MidiOutStatus|null>(null),[error,setError]=useState('');
@@ -68,6 +70,7 @@ export function MidiOutPanel({trackId,owner,mix,busy=false,onEdit,bridge=nativeM
     {current&&<p className="hint">{t('midi_out.delay_hint')}</p>}
     {notice&&<p className="hint" role="status">{notice}</p>}
     <p className="hint">{t('midi_out.hint')}</p>
+    {keyShift!==0&&<p className="hint">{t('midi_out.key_shift')}</p>}
     {problem&&<p role="alert">{problem}</p>}
   </div>;
 }

@@ -136,3 +136,12 @@ it('processing draft owns a usable field outside disabled mix ancestors and disa
  fireEvent.keyDown(input,{key:'Escape'});expect(p.release).toHaveBeenCalledOnce();expect(screen.getByLabelText('Backing gain')).toBeEnabled();expect(p.onEdit).not.toHaveBeenCalled();
 });
 it.each(['score only','embedded'])('does not show committed processing controls for %s',mode=>{setup(mode==='score only'?{settings:null}:{missing:true});expect(screen.queryByText('Pitch & filter')).not.toBeInTheDocument();});
+
+it('an embedded backing, which has no processing controls, still says the practice key shift applies to it',()=>{
+  const props={settings:undefined,embedded:new Uint8Array([1]),assets:{},onEdit:()=>{},stageBacking:async()=>null,stageEmbeddedBacking:async()=>null,beginOperation:()=>()=>{}};
+  const {rerender}=render(<BackingPanel {...props}/>);
+  expect(screen.queryByText(/practice key shift/)).not.toBeInTheDocument();
+  rerender(<BackingPanel {...props} keyShift={3}/>);
+  const hint=screen.getByText('The practice key shift of +3 applies to this backing track.');
+  expect(hint.closest('[role=status],[aria-live]')).toBeNull();
+});

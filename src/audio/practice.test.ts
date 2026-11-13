@@ -1,5 +1,5 @@
 import { expect,it } from 'vitest';
-import { practiceForBacking,validatePractice } from './practice';
+import { PracticeError,practiceForBacking,practiceProblem,validatePractice } from './practice';
 import { DEFAULT_PRACTICE,type PracticeSettings } from './practice-types';
 import protocol from '../../tests/practice-protocol.json';
 
@@ -57,4 +57,11 @@ it('practice_for_backing_keeps_the_key_shift_and_adds_none_when_absent',()=>{
   expect(Object.hasOwn(practiceForBacking(settings(),true).settings,'tonality')).toBe(false);
   const fixed:PracticeSettings={...settings(),tempo:{kind:'fixed',bpm:90},tonality:3};
   expect(practiceForBacking(fixed,true).settings).toEqual({...settings(),tonality:3});
+});
+
+it('describes_a_failed_key_change_in_the_language_of_the_interface_and_never_shows_a_raw_error',()=>{
+  const t=(key:string)=>`<${key}>`;
+  expect(practiceProblem(new PracticeError('tonality'),t as never)).toBe('<practice.error_tonality>');
+  expect(practiceProblem(new Error('Practice settings acknowledgement is pending.'),t as never)).toBe('<palette.error_key_failed>');
+  expect(practiceProblem('boom',t as never)).toBe('<palette.error_key_failed>');
 });

@@ -1,6 +1,7 @@
 /* Transport: one row of captioned groups, divided by rules rather than frames. Lime is playback and "on"; blue stays for focus. */
 .tp-sr { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
 .app-shell .transport { position:relative; display:flex; flex-direction:column; flex-shrink:0; min-height:56px; padding:0 10px; border:0; border-top:1px solid var(--tp-line-strong); background:var(--tp-panel); font-family:var(--tp-font-ui); }
+.app-shell .transport .transport-fields { display:flex; flex-direction:row; flex-wrap:nowrap; align-items:stretch; gap:0; min-width:0; margin:0; padding:0; border:0; }
 .app-shell .transport>.transport-primary { display:flex; flex-direction:row; flex-wrap:nowrap; align-items:stretch; gap:0; min-height:56px; min-width:0; }
 .transport-group { display:flex; flex-direction:column; justify-content:center; gap:3px; min-width:0; padding:0 14px; border-left:1px solid var(--tp-line-subtle); }
 .transport-group:first-child { padding-left:2px; border-left:0; }
@@ -32,7 +33,10 @@
 .transport-loopbutton { min-width:104px; }
 .transport-metronome input { position:absolute; width:1px; height:1px; margin:0; opacity:0; min-height:0; }
 .transport-metronome { position:relative; }
-.transport-speed .transport-row { gap:2px; }
+.transport-speed .transport-row,.transport-key .transport-row { gap:2px; }
+.transport-keyvalue { min-width:34px; text-align:center; font:500 15px/1 var(--tp-font-mono); font-variant-numeric:tabular-nums; color:var(--tp-text); }
+.transport-key[data-pending] .transport-keyvalue { opacity:.6; }
+.transport-keyreset[aria-disabled=true] { opacity:.45; }
 .app-shell .transport .transport-step { width:30px; padding:0; }
 .transport-speed-field { display:inline-flex; flex-direction:row; align-items:center; gap:2px; }
 .transport-speed-field input { width:46px; min-height:28px; padding:0 4px; text-align:center; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-input); color:var(--tp-text); font:500 13px/1 var(--tp-font-mono); font-variant-numeric:tabular-nums; -moz-appearance:textfield; appearance:textfield; }

@@ -83,3 +83,12 @@ it('applying_the_panel_never_resets_a_key_shift_and_adds_none_when_there_is_none
   view.rerender(<PracticePanel settings={settings()} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
   apply();expect(Object.hasOwn(changes[2],'tonality')).toBe(false);
 });
+
+it('a_key_step_from_the_transport_keeps_an_unapplied_draft',()=>{
+  const changes:PracticeSettings[]=[];
+  const view=render(<PracticePanel settings={settings()} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
+  change('Relative speed (%)','80');change('Count-in bars','2');
+  view.rerender(<PracticePanel settings={{...settings(),tonality:3}} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
+  expect(screen.getByLabelText('Relative speed (%)')).toHaveValue(80);expect(screen.getByLabelText('Count-in bars')).toHaveValue(2);
+  apply();expect(changes).toHaveLength(1);expect(changes[0].tonality).toBe(3);expect(changes[0].tempo).toEqual({kind:'relative',ratio:.8});
+});

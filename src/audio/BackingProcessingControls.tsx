@@ -19,8 +19,8 @@ const filterKeys: Record<BackingFilter, MessageKey> = {
 };
 const filterTypes: BackingFilter[] = ['none','bassEnhance','bassAttenuation','mediumEnhance','mediumAttenuation','highEnhance','highAttenuation'];
 
-export function BackingProcessingControls({settings,busy,visible,beginOperation,onEdit}:{settings:BackingSettings;busy:boolean;visible:boolean;beginOperation:()=>()=>void;onEdit:(edit:EditCommand)=>void|Promise<void>}) {
-  const {t}=useI18n();
+export function BackingProcessingControls({settings,busy,visible,beginOperation,onEdit,keyShift=0}:{settings:BackingSettings;busy:boolean;keyShift?:number;visible:boolean;beginOperation:()=>()=>void;onEdit:(edit:EditCommand)=>void|Promise<void>}) {
+  const {t,lang}=useI18n();
   const session=useRef<Session|null>(null),mounted=useRef(true),[,refresh]=useState(0),[error,setError]=useState<string|null>(null),guidance=useId(),helper=useId(),invalidGuidance=useId();
   const processing=settings.processing??defaultBackingProcessing(),own=session.current;
   const invalidField=own?.current&&own.field&&!Number.isFinite(integer(own.value,own.field))?own.field:null;
@@ -55,6 +55,6 @@ export function BackingProcessingControls({settings,busy,visible,beginOperation,
     <div className="pair">{field('semitones')}{field('cents')}</div>
     {invalidField&&<p className="muted processing-invalid" id={invalidGuidance}>{t('processing.invalid_range',{field:t(invalidField==='semitones'?'processing.semitones':'processing.cents'),min:-limits[invalidField],max:limits[invalidField]})}</p>}
     <label>{t('processing.filter_label')}<select disabled={disabled} value={processing.filter} onChange={e=>{const filter=e.target.value as BackingFilter;if(disabled||filter===processing.filter)return;const value=start();void commit(value,{...value.settings,processing:{...(value.settings.processing??defaultBackingProcessing()),filter}});}}>{filterTypes.map(f=><option key={f} value={f}>{t(filterKeys[f])}</option>)}</select></label>
-    <p className="muted" id={helper}>{t('processing.helper')}</p><p className="muted" id={guidance}>{t('processing.guidance')}</p>{error&&<p role="alert">{error}</p>}
+    <p className="muted" id={helper}>{t('processing.helper')}</p><p className="muted" id={guidance}>{t('processing.guidance')}</p>{keyShift!==0&&<p className="muted">{t('backing.key_shift_added',{value:new Intl.NumberFormat(lang,{signDisplay:'exceptZero'}).format(keyShift)})}</p>}{error&&<p role="alert">{error}</p>}
   </fieldset></details>;
 }

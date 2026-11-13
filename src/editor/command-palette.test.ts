@@ -1,4 +1,5 @@
 import { expect,it } from 'vitest';
+import { getMessage } from '../i18n';
 import { model,Settings } from '@coderline/alphatab';
 import { music,target } from './fixtures';
 import { searchCommands,type PaletteContext } from './command-palette';
@@ -73,4 +74,24 @@ it('offers the practice shortcuts with their keys as app commands',()=>{
   expect(first('clear')).toMatchObject({id:'loop'});
   expect(first('slower')).toMatchObject({keys:'[',action:{kind:'app',name:'slower'}});
   expect(first('faster')).toMatchObject({keys:']',action:{kind:'app',name:'faster'}});
+});
+
+it('offers the playback key as three app commands with no shortcut, found in English by key, semitone and practice',()=>{
+  for(const [query,id,title] of [['lower the key','keyLower','Lower the key'],['raise the key','keyRaise','Raise the key'],['original key','keyReset','Original key']] as const){
+    const match=first(query);expect(match).toMatchObject({id,title,action:{kind:'app',name:id}});expect(match).not.toHaveProperty('keys');
+  }
+  expect(searchCommands('key',context()).map(match=>match.id)).toEqual(['keyLower','keyRaise','keyReset']);
+  expect(searchCommands('semitone',context()).map(match=>match.id)).toEqual(['keyLower','keyRaise']);
+});
+
+it('refuses a key command it cannot run, in the palette, with a translated reason, and runs it otherwise',()=>{
+  const key=(shift:number,ready=true)=>({key:{shift,ready}});
+  expect(first('raise the key',key(12))).toMatchObject({id:'keyRaise',error:'The key is already at the limit of 12 semitones.'});
+  expect(first('lower the key',key(-12))).toMatchObject({id:'keyLower',error:'The key is already at the limit of 12 semitones.'});
+  expect(first('original key',key(0))).toMatchObject({id:'keyReset',error:'The key is already the original.'});
+  for(const query of ['raise the key','lower the key','original key'])expect(first(query,key(3,false))).toMatchObject({error:'Wait until playback is ready.'});
+  for(const [query,shift] of [['raise the key',11],['lower the key',-11],['original key',1]] as const)expect(first(query,key(shift))).toMatchObject({action:{kind:'app'}});
+  expect(first('raise the key',key(12))).not.toHaveProperty('action');
+  const german=searchCommands('tonart erhöhen',context(key(12)),(k,params)=>getMessage('de',k,params))[0];
+  expect(german).toMatchObject({id:'keyRaise',error:'Die Tonart ist bereits an der Grenze von 12 Halbtönen.'});
 });

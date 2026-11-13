@@ -117,12 +117,12 @@ export async function setPlaybackSpeed(page,percent) {
 }
 
 export function revealPlaybackControls(page) {
-  return openDisclosure(summary(page,/^More playback(?: · Error)?$/));
+  return openDisclosure(summary(page,/^More playback(?: · Error)?(?: ♮ [+−-]?\d+)?$/));
 }
 
 /** The More playback panel opens upward over the inspector, so close it before touching anything behind it. */
 export async function hidePlaybackControls(page) {
-  const more=summary(page,/^More playback(?: · Error)?$/);
+  const more=summary(page,/^More playback(?: · Error)?(?: ♮ [+−-]?\d+)?$/);
   if(await more.evaluate(node=>node.parentElement.open))await more.click();
 }
 

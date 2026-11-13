@@ -15,11 +15,11 @@ const context=(patch:Partial<PaletteContext>={}):PaletteContext=>({score:music()
 const search=(lang:SupportedLanguage,query:string,patch?:Partial<PaletteContext>):PaletteMatch[]=>searchCommands(query,context(patch),translator(lang));
 const ids=(lang:SupportedLanguage,query:string)=>search(lang,query).map(match=>match.id);
 
-const commandIds=['measure','track','fret','duration','tempo','insertBeat','deleteBeat','rest','appendMeasure','removeMeasure','undo','redo','play','loop','slower','faster','new','open','importAscii','save','saveAs','help','about','export'];
+const commandIds=['measure','track','fret','duration','tempo','insertBeat','deleteBeat','rest','appendMeasure','removeMeasure','undo','redo','play','loop','slower','faster','keyLower','keyRaise','keyReset','new','open','importAscii','save','saveAs','help','about','export'];
 const titles:Record<SupportedLanguage,string[]>={
-  en:['Go to measure','Go to track','Set fret','Set duration','Set initial tempo','Insert beat','Delete beat','Make rest','Append measure','Remove measure','Undo','Redo','Play or pause','Loop','Slower','Faster','New score','Open score','Import ASCII tab','Save','Save As','Help topics','About and updates','Export score'],
-  et:['Mine takti juurde','Mine raja juurde','Määra krihv','Määra kestus','Määra algne tempo','Lisa löök','Kustuta löök','Muuda pausiks','Lisa takt lõppu','Eemalda takt','Võta tagasi','Tee uuesti','Esita või pane pausile','Kordus','Aeglasemalt','Kiiremini','Uus pala','Ava pala','Impordi ASCII tabulatuur','Salvesta','Salvesta nimega','Abiteemad','Teave ja uuendused','Ekspordi partituur'],
-  de:['Gehe zu Takt','Gehe zu Spur','Bund setzen','Notenwert setzen','Anfangstempo setzen','Beat einfügen','Beat löschen','Zur Pause machen','Takt anhängen','Takt entfernen','Rückgängig','Wiederholen','Abspielen oder anhalten','Schleife','Langsamer','Schneller','Neue Partitur','Partitur öffnen','ASCII-Tabulatur importieren','Speichern','Speichern unter','Hilfethemen','Über & Updates','Partitur exportieren'],
+  en:['Go to measure','Go to track','Set fret','Set duration','Set initial tempo','Insert beat','Delete beat','Make rest','Append measure','Remove measure','Undo','Redo','Play or pause','Loop','Slower','Faster','Lower the key','Raise the key','Original key','New score','Open score','Import ASCII tab','Save','Save As','Help topics','About and updates','Export score'],
+  et:['Mine takti juurde','Mine raja juurde','Määra krihv','Määra kestus','Määra algne tempo','Lisa löök','Kustuta löök','Muuda pausiks','Lisa takt lõppu','Eemalda takt','Võta tagasi','Tee uuesti','Esita või pane pausile','Kordus','Aeglasemalt','Kiiremini','Madalda helistikku','Tõsta helistikku','Algne helistik','Uus pala','Ava pala','Impordi ASCII tabulatuur','Salvesta','Salvesta nimega','Abiteemad','Teave ja uuendused','Ekspordi partituur'],
+  de:['Gehe zu Takt','Gehe zu Spur','Bund setzen','Notenwert setzen','Anfangstempo setzen','Beat einfügen','Beat löschen','Zur Pause machen','Takt anhängen','Takt entfernen','Rückgängig','Wiederholen','Abspielen oder anhalten','Schleife','Langsamer','Schneller','Tonart senken','Tonart erhöhen','Originaltonart','Neue Partitur','Partitur öffnen','ASCII-Tabulatur importieren','Speichern','Speichern unter','Hilfethemen','Über & Updates','Partitur exportieren'],
 };
 const hints:Record<SupportedLanguage,string[]>={
   en:['measure 12','track 2','fret 5','duration 8 or 1/8','tempo 96'],
@@ -161,7 +161,7 @@ describe('an English alias never outranks an equally good current-language match
   });
   it('lists the German title matches before the alias-only matches for p',()=>{
     // Partitur and Pause start with p; loop, slower and faster match through the English word practice only, and play through the expression rule.
-    expect(ids('de','p')).toEqual(['play','expression','rest','new','open','export','loop','slower','faster']);
+    expect(ids('de','p')).toEqual(['play','expression','rest','new','open','export','loop','slower','faster','keyLower','keyRaise','keyReset']);
   });
 });
 

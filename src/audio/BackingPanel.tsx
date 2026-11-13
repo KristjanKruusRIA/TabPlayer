@@ -10,8 +10,8 @@ import type {ReferenceEndpoint,ReferenceSyncControls} from './reference-sync-typ
 const noSubscribe=()=>()=>{},noState=()=>null;
 const numberValue=(value:string)=>/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)&&Number.isFinite(Number(value))?Number(value):NaN;
 
-export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedBacking,beginOperation,busy=false,visible=true,durationMs,playback,embedded,originalSettings,onShowWaveform,reference}:{settings:BackingSettings|null|undefined;assets:Record<string,AssetInfo>;onEdit:(edit:EditCommand,candidate?:BackingCandidate)=>void|Promise<void>;stageBacking:()=>Promise<BackingCandidate|null>;stageEmbeddedBacking:(bytes:Uint8Array)=>Promise<BackingCandidate|null>;beginOperation:()=>()=>void;busy?:boolean;visible?:boolean;durationMs?:number;playback?:NativePlaybackController|null;embedded?:Uint8Array|null;originalSettings?:BackingSettings|null;onShowWaveform?:()=>void;reference?:ReferenceSyncControls}) {
-  const {t}=useI18n();
+export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedBacking,beginOperation,busy=false,visible=true,durationMs,playback,embedded,originalSettings,onShowWaveform,reference,keyShift=0}:{keyShift?:number;settings:BackingSettings|null|undefined;assets:Record<string,AssetInfo>;onEdit:(edit:EditCommand,candidate?:BackingCandidate)=>void|Promise<void>;stageBacking:()=>Promise<BackingCandidate|null>;stageEmbeddedBacking:(bytes:Uint8Array)=>Promise<BackingCandidate|null>;beginOperation:()=>()=>void;busy?:boolean;visible?:boolean;durationMs?:number;playback?:NativePlaybackController|null;embedded?:Uint8Array|null;originalSettings?:BackingSettings|null;onShowWaveform?:()=>void;reference?:ReferenceSyncControls}) {
+  const {t,lang}=useI18n();
   useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const [error,setError]=useState<string|null>(null),[staging,setStaging]=useState(false),[duration,setDuration]=useState<number|undefined>(durationMs);
   const [bar,setBar]=useState(1),[occurrence,setOccurrence]=useState(1),[ratio,setRatio]=useState(0),[audioMs,setAudioMs]=useState(0);
@@ -55,7 +55,8 @@ export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedB
       <label className="check"><input type="checkbox" aria-label={t('backing.solo_aria')} checked={settings.mix.solo} onChange={e=>edit({...settings,mix:{...settings.mix,solo:e.target.checked}})}/>{t('backing.solo')}</label>
     </>}
     </fieldset>
-    {settings&&<BackingProcessingControls settings={settings} busy={competing} visible={visible} beginOperation={beginOperation} onEdit={onEdit}/>}
+    {!settings&&embedded&&keyShift!==0&&<p className="muted">{t('backing.key_shift_applies',{value:new Intl.NumberFormat(lang,{signDisplay:'exceptZero'}).format(keyShift)})}</p>}
+    {settings&&<BackingProcessingControls settings={settings} busy={competing} visible={visible} beginOperation={beginOperation} onEdit={onEdit} keyShift={keyShift}/>}
     {reference&&<details open onToggle={e=>{if(!e.currentTarget.open&&referenceEdit.current?.active?.surface==='number')referenceEdit.current.cancel();}}><summary>{t('backing.sync_timing')}</summary><fieldset>
       <label>{t('backing.timing_label')}<select value={settings?.referenceSync?'reference':'score'} disabled={!referenceReady||competing} onKeyDown={e=>e.stopPropagation()} onKeyUp={e=>e.stopPropagation()} onChange={e=>runReference(()=>reference.onModeChange(e.target.value as 'score'|'reference'))}><option value="score">{t('backing.audio_follows_score')}</option><option value="reference">{t('backing.score_follows_audio')}</option></select></label>
       <div className="pair">{numberField('entry')}{numberField('exit')}</div>

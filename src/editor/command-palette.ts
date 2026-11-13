@@ -5,8 +5,8 @@ import { readExpression } from './expressions';
 import { getMessage,type MessageKey } from '../i18n';
 
 /** What a palette command does: an undoable edit, a selection move, or an application command. */
-export type PaletteAction={kind:'edit';command:EditCommand}|{kind:'select';target:BeatTarget}|{kind:'app';name:'undo'|'redo'|'play'|'loop'|'slower'|'faster'|'new'|'open'|'importAscii'|'save'|'saveAs'|'export'|'help'|'about'};
-export interface PaletteContext {score:model.Score;target:BeatTarget;string:number;canUndo:boolean;canRedo:boolean;/** The document is finalized: edit actions, undo and redo cannot run. */locked?:boolean;/** The score is hidden (e.g. in Sound view): score editing commands cannot run. */scoreHidden?:boolean}
+export type PaletteAction={kind:'edit';command:EditCommand}|{kind:'select';target:BeatTarget}|{kind:'app';name:'undo'|'redo'|'play'|'loop'|'slower'|'faster'|'keyLower'|'keyRaise'|'keyReset'|'new'|'open'|'importAscii'|'save'|'saveAs'|'export'|'help'|'about'};
+export interface PaletteContext {score:model.Score;target:BeatTarget;string:number;canUndo:boolean;canRedo:boolean;/** The document is finalized: edit actions, undo and redo cannot run. */locked?:boolean;/** The score is hidden (e.g. in Sound view): score editing commands cannot run. *//** The playback key the player has asked for, and whether playback is ready for it. */key?:{shift:number;ready:boolean};scoreHidden?:boolean}
 /** A command matching the typed text, with either a ready action or the reason it cannot run. */
 export interface PaletteMatch {id:string;title:string;hint:string;keys?:string;action?:PaletteAction;error?:string}
 
@@ -74,6 +74,9 @@ const commands:Command[]=[
   {id:'loop',keys:`Shift+L`,words:'loop selection passage clear repeat practice',run:()=>app('loop')},
   {id:'slower',keys:`[`,words:'slower slow down speed practice',run:()=>app('slower')},
   {id:'faster',keys:`]`,words:'faster speed up practice',run:()=>app('faster')},
+  {id:'keyLower',words:'lower key down semitone transpose pitch practice',run:(_,{key},t)=>key&&!key.ready?{error:t('palette.error_key_not_ready')}:key&&key.shift<=-12?{error:t('palette.error_key_limit')}:app('keyLower')},
+  {id:'keyRaise',words:'raise key up semitone transpose pitch practice',run:(_,{key},t)=>key&&!key.ready?{error:t('palette.error_key_not_ready')}:key&&key.shift>=12?{error:t('palette.error_key_limit')}:app('keyRaise')},
+  {id:'keyReset',words:'original key reset pitch practice',run:(_,{key},t)=>key&&!key.ready?{error:t('palette.error_key_not_ready')}:key&&key.shift===0?{error:t('palette.error_key_original')}:app('keyReset')},
   {id:'new',keys:`${mod}+N`,words:'new score file',run:()=>app('new')},
   {id:'open',keys:`${mod}+O`,words:'open score file',run:()=>app('open')},
   {id:'importAscii',words:'import ascii text tab tablature file',run:()=>app('importAscii')},

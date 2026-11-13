@@ -1,5 +1,5 @@
 import { useEffect,useId,useState } from 'react';
-import { CLICK_SOUNDS,clickSoundOf,tonalityOf,type ClickSound,type PracticeSettings } from './practice-types';
+import { CLICK_SOUNDS,clickSoundOf,type ClickSound,type PracticeSettings } from './practice-types';
 import { useI18n } from '../i18n';
 import { PracticeError,validatePractice } from './practice';
 
@@ -18,7 +18,7 @@ const numeric=(value:string)=>value.trim()?Number(value):NaN;
 const percentage=(value:string,accepted?:number)=>accepted!==undefined&&value===String(accepted*100)?accepted:numeric(value)/100;
 
 export function PracticePanel({settings,busy,hasBacking,onChange}:PracticePanelProps):React.JSX.Element {
-  const tempo=settings.tempo,accepted=draftFor(settings),acceptedKey=JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,clickSoundOf(settings.metronome),settings.countIn.bars,settings.countIn.betweenLoops,tonalityOf(settings)]),backingReason=useId(),{t}=useI18n();
+  const tempo=settings.tempo,accepted=draftFor(settings),acceptedKey=JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,clickSoundOf(settings.metronome),settings.countIn.bars,settings.countIn.betweenLoops]),backingReason=useId(),{t}=useI18n();
   const [draft,setDraft]=useState(accepted),[error,setError]=useState('');
   useEffect(()=>{setDraft(accepted);setError('');},[acceptedKey]);
   const changeTempo=(kind:TempoDraft['kind'])=>setDraft(value=>({...value,tempo:kind==='relative'?{kind,ratio:'100'}:kind==='fixed'?{kind,bpm:'120'}:{kind,start:'50',end:'100',step:'10',repetitions:'1'}}));

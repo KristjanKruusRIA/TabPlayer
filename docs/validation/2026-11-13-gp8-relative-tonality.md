@@ -1,4 +1,4 @@
-# GP8 parity P12: global relative tonality, native core (2026-11-13)
+# GP8 parity P12: global relative tonality (2026-11-13)
 
 Slice 1 of `docs/superpowers/specs/2026-11-13-relative-tonality-design.md` (THE-57). The native core applies a playback-only key shift of -12 to +12 semitones. There is no user interface yet (slice 2), so the tracker rows P12 and P20 stay partial and are not updated by this note.
 
@@ -29,3 +29,39 @@ Slice 1 of `docs/superpowers/specs/2026-11-13-relative-tonality-design.md` (THE-
 - External MIDI hardware, other operating systems, and the time a shift takes to apply on a large score were not tried.
 - The shift is not applied to the metronome, count-in, Line-In, note auditions or exports, by design.
 - Not compared with a running Guitar Pro 8.
+
+## Slice 2: the interface
+
+A Key group in the transport (lower, value, raise, original key), three command-palette commands, hints on the backing and MIDI-out panels, and a "Change the key" help section, all in English, Estonian and German. No Rust changed.
+
+### Verified (automated)
+
+- Vitest: one click sends one whole settings object with only the key changed and the rest of the practice settings intact; the ends and the original key send nothing and stay `aria-disabled` and in place; a pending shift shows as pending, never `disabled`, and keeps focus; a busy editor blocks the buttons the same way; the labels exist in all three languages.
+- Controller: a refused or superseded shift falls back to the acknowledged key and raises the notice; neither an edit nor a document change is recorded; a new document and a return to the first one both start at the original key.
+- Palette: three app commands without shortcuts, found in English by key, semitone and practice; titles and aliases in all three languages; the existing orderings changed only by the new commands.
+- CSS pins: the Key group is in both small-window caption rules.
+
+### Not verified
+
+- The width of the transport at 960 by 600 and whether the Key group fits there. The driver `tests/desktop/parity-key-shift.mjs` checks it (and the rest of the real-app flow: acknowledged in `audio_status`, kept tick, loop and generation while playing, reset, no edit and no dirty mark); it was syntax-checked and **not run**.
+- The look of the group and its pending state in the real window, and use with a screen reader.
+- The German and Estonian wording was written for this slice and has not been reviewed by a speaker; "Tonart" and "Helistik" were chosen as the nearest existing terms.
+- Everything listed under Limits above still stands: nobody has listened, and the P12 and P20 tracker rows are not updated until the driver has run and the sound has been heard.
+
+### After review (2026-11-13)
+
+Verified by Vitest: the requested key survives an edit (carried into the next prepare); a request not acknowledged in time falls back with a notice and new requests are accepted; fast steps coalesce into one request each time, never two in flight; a refusal drops queued steps and shows one translated message with no raw error; the palette refuses at the limits, at the original key and while not ready, in English and German; a key step keeps a Practice panel draft; an embedded backing shows the hint; the hints are not live regions; the new document shows the original key at once; a focused key button keeps focus while the score is prepared; translated labels, hint and announcements in German and Estonian.
+
+Not verified: the width of the row at 960 (the Key group is folded into More playback at 1100 px and below as a precaution, which was chosen without measuring); the driver `parity-key-shift.mjs` (now measuring every control's right edge with a selection, a double click, a palette command and a loop-bounded position check) is syntax-checked only; screen reader behaviour of the new live region; the coalescing and the 2.5 s bound against a real stalled callback.
+
+### Real app (2026-11-13, after the second review)
+
+`tests/desktop/parity-key-shift.mjs` was built (`scripts/build-desktop-test.ps1`) and **run against the real app, and passed**: with a selection present (the loop-selection button in the row) no transport control's right edge is outside the window at 1280, 1101 and 960 wide; the Key group is in the row at 1280 and 1101 and folded into More playback at 960, where it is reachable and its value shows on the More playback summary; in-row clicks at 1101 and folded clicks at 960 are acknowledged in `audio_status`; two activations in one task (a coalesced double step) both land; the palette's "Raise the key" and "Original key" work and "Original key" at the original key is refused with its message; a change while playing keeps the loop, the generation and a position inside the loop; reset returns to the original key; the project and the dirty flag are unchanged and the page reported no errors. The result is in `.analysis/parity/key-shift-result.json` (not committed).
+
+Found while running it: a Playwright pointer double click on the folded Raise button delivers only one click, because the layout moves when the first change appears (the "♮ +n" mark widens the summary and the popover shifts); the driver therefore uses a same-task double activation. The shift of the popover on the first change is a visual wart, not measured further.
+
+Still not verified: how it sounds; screen reader behaviour of the live region and of the summary mark; the 2.5 s bound and the coalescing against a genuinely stalled callback.
+
+### Real app, final run (2026-11-13)
+
+After the last fixes the app was rebuilt and `tests/desktop/parity-key-shift.mjs` passed again. It now performs a real pointer double click on the in-row Raise at 1101 px and on the folded Raise at 960 px (each gives +2), which the earlier run could not do because the popover moved under the pointer; it also measures the folded mark at 960 with a shift of +3 (label "Key +3", inside the summary and the window, no overflow) and the fit of every control with the mark shown. Result: `.analysis/parity/key-shift-result.json` (not committed). The earlier remarks on what is unverified (sound, screen reader, a genuinely stalled callback, translation review) stand.

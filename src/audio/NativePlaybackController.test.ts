@@ -648,3 +648,138 @@ it('a key shift is sent whole, acknowledged only by an echo that carries it, kep
   const other=blankProject();vi.mocked(bridge.prepare).mockClear();await player.loadDocument(other,buildDocument(other),0,1);
   expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual(DEFAULT_PRACTICE);player.destroy();
 });
+
+it('a refused or superseded key shift falls back to the acknowledged key and says so, without touching the document',async()=>{
+  const {player,bridge,emit,onEdit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  const shifted={...defaults(),tonality:3};
+  player.setPractice(shifted);emit({practice:practiceStatus(structuredClone(shifted))});expect(player.getState().practice.settings.tonality).toBe(3);
+  bridge.command=vi.fn(async()=>{throw new Error('A newer score preparation superseded the key change.');});
+  player.setPractice({...shifted,tonality:5});
+  await vi.waitFor(()=>expect(player.getState()).toMatchObject({practicePending:false,practiceNotice:'key_shift_refused',error:null,practice:{settings:{tonality:3}}}));
+  // The next request clears the notice; a refusal that changes no key does not raise it.
+  bridge.command=vi.fn(async()=>{throw new Error('Practice refused');});
+  player.setPractice({...shifted,tempo:{kind:'relative',ratio:.5}});
+  await vi.waitFor(()=>expect(player.getState()).toMatchObject({practicePending:false,practiceNotice:null,error:'Practice refused'}));
+  expect(onEdit).not.toHaveBeenCalled();player.destroy();
+});
+it('the key shift is the session of one document: another document starts at the original key, and so does returning to the first',async()=>{
+  const {player,bridge,emit,onEdit}=fixture();const a=blankProject(),b=blankProject();
+  await player.loadDocument(a,buildDocument(a),0,0);emit();player.setPractice({...defaults(),tonality:-4});emit({practice:practiceStatus({...defaults(),tonality:-4})});
+  expect(player.getState().practice.settings.tonality).toBe(-4);
+  vi.mocked(bridge.prepare).mockClear();await player.loadDocument(b,buildDocument(b),0,1);
+  expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual(DEFAULT_PRACTICE);
+  player.setPractice({...defaults(),tonality:7});emit({practice:practiceStatus({...defaults(),tonality:7})});
+  vi.mocked(bridge.prepare).mockClear();await player.loadDocument(a,buildDocument(a),0,0);
+  expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual(DEFAULT_PRACTICE);
+  expect(onEdit).not.toHaveBeenCalled();player.destroy();
+});
+
+it('a key shift asked for just before an edit is carried into the next prepare, whichever way native answers',async()=>{
+  const {player,bridge,emit,onEdit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  const shifted={...defaults(),tonality:3};player.setPractice(shifted);emit({practice:practiceStatus(structuredClone(shifted))});
+  let refuse!:(error:Error)=>void;bridge.command=vi.fn(()=>new Promise<void>((_resolve,reject)=>{refuse=reject;}));
+  player.stepKeyShift(1);expect(player.getState().practicePending).toBe(true);
+  // The real order: the edit bumps the generation first, and only then does native report the supersession.
+  player.beforeScoreChange();refuse(new Error('A newer score preparation superseded the key change.'));
+  await new Promise(resolve=>setTimeout(resolve,0));
+  expect(player.getState().practiceNotice).toBeNull();
+  vi.mocked(bridge.prepare).mockClear();await player.loadDocument(project,buildDocument(project));
+  expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...DEFAULT_PRACTICE,tonality:4});
+  expect(onEdit).not.toHaveBeenCalled();player.destroy();
+});
+it('a key shift that is not acknowledged in time falls back to the acknowledged key, says so and lets new requests through',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  vi.useFakeTimers();try{
+    player.stepKeyShift(1);expect(player.getState().practicePending).toBe(true);expect(()=>player.setSpeed(50)).toThrow('pending');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(player.getState()).toMatchObject({practicePending:false,practiceNotice:'key_shift_refused',error:null});expect(player.getState().practice.settings.tonality??0).toBe(0);
+    // The timed-out request lands late: the notice goes, and the key shows.
+    emit({practice:practiceStatus({...defaults(),tonality:1})});
+    expect(player.getState()).toMatchObject({practiceNotice:null,practicePending:false,practice:{settings:{tonality:1}}});
+    // Another request after a timeout is accepted, and an echo of some other key does not clear a notice it does not belong to.
+    player.stepKeyShift(1);await vi.advanceTimersByTimeAsync(10_000);expect(player.getState().practiceNotice).toBe('key_shift_refused');
+    vi.mocked(bridge.command).mockClear();player.stepKeyShift(-2);expect(bridge.command).toHaveBeenCalledOnce();expect(player.getState().practiceNotice).toBeNull();
+  }finally{vi.useRealTimers();player.destroy();}
+});
+it('the bound on a pending request starts when native has answered the command, not while it is still building the renderer',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  let answer!:()=>void;bridge.command=vi.fn(()=>new Promise<void>(resolve=>{answer=resolve;}));
+  vi.useFakeTimers();try{
+    player.stepKeyShift(1);player.stepKeyShift(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(player.getState()).toMatchObject({practicePending:true,practiceNotice:null,keyTarget:2});
+    answer();await vi.advanceTimersByTimeAsync(0);expect(player.getState().practicePending).toBe(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(player.getState()).toMatchObject({practicePending:false,practiceNotice:'key_shift_refused',keyTarget:0});
+  }finally{vi.useRealTimers();player.destroy();}
+});
+it('a carried key that the next prepare refuses is retried once at the acknowledged key, with the notice',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  player.setPractice({...defaults(),tonality:3});emit({practice:practiceStatus({...defaults(),tonality:3})});
+  bridge.command=vi.fn(()=>new Promise<void>(()=>{}));player.stepKeyShift(1);player.beforeScoreChange();
+  vi.mocked(bridge.prepare).mockReset();
+  vi.mocked(bridge.prepare).mockRejectedValueOnce(new Error('Key shift must be a whole number of semitones from -12 to 12.')).mockResolvedValue(undefined);
+  await player.loadDocument(project,buildDocument(project));
+  const calls=vi.mocked(bridge.prepare).mock.calls;expect(calls).toHaveLength(2);
+  expect(calls[0][4]).toEqual({...DEFAULT_PRACTICE,tonality:4});expect(calls[1][4]).toEqual({...DEFAULT_PRACTICE,tonality:3});
+  expect(player.getState()).toMatchObject({practiceNotice:'key_shift_refused',error:null});expect(player.getState().keyTarget).toBe(3);
+  // A prepare that fails with no carried key is not retried.
+  vi.mocked(bridge.prepare).mockReset();vi.mocked(bridge.prepare).mockRejectedValue(new Error('no'));
+  await player.loadDocument(project,buildDocument(project),0,0,0);player.destroy();
+});
+it('queued key steps dropped by a refusal of another setting, or by a native error, say so',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  bridge.command=vi.fn(async()=>{throw new Error('Practice refused');});
+  player.setSpeed(50);player.stepKeyShift(2);expect(player.getState().keyTarget).toBe(2);
+  await vi.waitFor(()=>expect(player.getState()).toMatchObject({practicePending:false,practiceNotice:'key_shift_refused',keyTarget:0,error:'Practice refused'}));
+  bridge.command=vi.fn(async()=>{});player.setSpeed(60);player.stepKeyShift(1);
+  emit({error:'The device stopped.'});
+  expect(player.getState()).toMatchObject({practicePending:false,practiceNotice:'key_shift_refused',keyTarget:0});player.destroy();
+});
+it('steps taken while a key shift is pending add up into one request sent when the pending one is acknowledged',async()=>{
+  const {player,bridge,emit,onEdit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();vi.mocked(bridge.command).mockClear();
+  player.stepKeyShift(1);player.stepKeyShift(1);player.stepKeyShift(1);
+  expect(bridge.command).toHaveBeenCalledOnce();expect(vi.mocked(bridge.command).mock.calls[0][0]).toMatchObject({type:'setPractice',settings:{tonality:1}});
+  expect(player.getState().keyTarget).toBe(3);expect(player.getState().practice.settings.tonality??0).toBe(0);
+  emit({practice:practiceStatus({...defaults(),tonality:1})});
+  expect(bridge.command).toHaveBeenCalledTimes(2);expect(vi.mocked(bridge.command).mock.calls[1][0]).toMatchObject({type:'setPractice',settings:{tonality:3}});
+  expect(player.getState()).toMatchObject({practicePending:true,keyTarget:3});
+  // Stepping back to the pending value drops the queued one; the limits hold; the original key is one target too.
+  player.stepKeyShift(-1);player.stepKeyShift(-1);player.setKeyShift(40);expect(player.getState().keyTarget).toBe(1);
+  emit({practice:practiceStatus({...defaults(),tonality:3})});
+  expect(bridge.command).toHaveBeenCalledTimes(3);expect(vi.mocked(bridge.command).mock.calls[2][0]).toMatchObject({settings:{tonality:1}});
+  emit({practice:practiceStatus({...defaults(),tonality:1})});player.setKeyShift(0);emit({practice:practiceStatus(defaults())});
+  expect(player.getState()).toMatchObject({practicePending:false,keyTarget:0});expect(onEdit).not.toHaveBeenCalled();player.destroy();
+});
+it('a refusal drops the steps queued behind it',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  bridge.command=vi.fn(async()=>{throw new Error('refused');});
+  player.stepKeyShift(1);player.stepKeyShift(1);
+  await vi.waitFor(()=>expect(player.getState()).toMatchObject({practicePending:false,practiceNotice:'key_shift_refused',keyTarget:0}));
+  expect(bridge.command).toHaveBeenCalledOnce();player.destroy();
+});
+it('changing to another document shows the original key at once, before the new score is prepared',async()=>{
+  const {player,bridge,emit}=fixture();const a=blankProject(),b=blankProject();
+  await player.loadDocument(a,buildDocument(a),0,0,0);emit();player.setPractice({...defaults(),tonality:5});emit({practice:practiceStatus({...defaults(),tonality:5})});
+  expect(player.getState().practice.settings.tonality).toBe(5);
+  bridge.status=vi.fn(()=>new Promise<never>(()=>{}));
+  void player.loadDocument(b,buildDocument(b),0,1,1);
+  await new Promise(resolve=>setTimeout(resolve,0));
+  expect(player.getState().practice.settings.tonality??0).toBe(0);expect(player.getState().keyTarget).toBe(0);player.destroy();
+});
+
+it('a pending speed change carries no key: a prepare that fails after the edit is not retried and raises no key notice',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  player.setPractice({...defaults(),tonality:3});emit({practice:practiceStatus({...defaults(),tonality:3})});
+  bridge.command=vi.fn(()=>new Promise<void>(()=>{}));player.setSpeed(60);player.beforeScoreChange();
+  vi.mocked(bridge.prepare).mockReset();vi.mocked(bridge.prepare).mockRejectedValue(new Error('prepare failed'));
+  await player.loadDocument(project,buildDocument(project));
+  expect(vi.mocked(bridge.prepare)).toHaveBeenCalledTimes(1);
+  expect(player.getState()).toMatchObject({practiceNotice:null,error:'prepare failed'});player.destroy();
+});
+it('a change of document is marked in the state, so the shown key can reset without being announced as a change',async()=>{
+  const {player,emit}=fixture();const a=blankProject(),b=blankProject();
+  await player.loadDocument(a,buildDocument(a),0,0);emit();const first=player.getState().documentSerial??0;
+  await player.loadDocument(a,buildDocument(a),0,0);expect(player.getState().documentSerial??0).toBe(first);
+  await player.loadDocument(b,buildDocument(b),0,1);expect(player.getState().documentSerial).toBeGreaterThan(first);player.destroy();
+});

@@ -16,7 +16,7 @@ describe('Loop, Click and Speed captions (THE-196, friction 4)',()=>{
   });
   it('stay visible for the three groups, in one rule that names each of them',()=>{
     const selector=css.match(/([^{}]*\.transport-loop[^{}]*)\{[^{}]*position:absolute[^{}]*text-overflow:ellipsis/)?.[1]??'';
-    expect(selector).toContain('.transport-loop');expect(selector).toContain('.transport-click');expect(selector).toContain('.transport-speed');expect(selector).toContain('>.transport-caption');
+    expect(selector).toContain('.transport-loop');expect(selector).toContain('.transport-click');expect(selector).toContain('.transport-speed');expect(selector).toContain('.transport-key');expect(selector).toContain('>.transport-caption');
     expect(captionRules.length).toBeGreaterThan(0);
   });
   it('take no width from the toolbar: out of the flow, one line, clipped with an ellipsis instead of widening the group',()=>{
@@ -25,7 +25,7 @@ describe('Loop, Click and Speed captions (THE-196, friction 4)',()=>{
     expect(body).toMatch(/clip-path:none/);expect(body).not.toMatch(/clip-path:inset/);expect(body).not.toMatch(/white-space:normal|white-space:wrap/);
   });
   it('sit inside their group, which is the positioning box, and cost no height: the group keeps its row',()=>{
-    expect(bodies(':is(.transport-loop,.transport-click,.transport-speed)').some(body=>/^\s*position:relative;?\s*$/.test(body))).toBe(true);
+    expect(bodies(':is(.transport-loop,.transport-click,.transport-speed,.transport-key)').some(body=>/^\s*position:relative;?\s*$/.test(body))).toBe(true);
   });
 });
 
@@ -58,7 +58,7 @@ describe('where the display messages and the captions sit (THE-196)',()=>{
   });
   // Numbers read from the stylesheet, not measured: the transport box is min-height 48px with its groups centred; the groups are 28px (the control min-height).
   const num=(text:string,pattern:RegExp)=>Number(text.match(pattern)?.[1]);
-  const caption=bodies(':is(.transport-loop,.transport-click,.transport-speed)>.transport-caption').join(';');
+  const caption=bodies(':is(.transport-loop,.transport-click,.transport-speed,.transport-key)>.transport-caption').join(';');
   const toolbarPaddingTop=num(exact('.gp-toolbar')[0],/padding:(\d+)px/);
   it('lies inside the transport box or, at most, in the toolbar padding above it: it paints over no other row and is not clipped',()=>{
     const transportHeight=num(exact('.app-shell .gp-toolbar .transport')[0],/min-height:(\d+)px/),groupHeight=28;

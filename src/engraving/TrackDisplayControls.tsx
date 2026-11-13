@@ -57,9 +57,14 @@ export function TrackDisplayControls({ids,names,selected,view,zoom,disabled,onVi
       if(disabled)return;
       const draft=e.target.value,value=Number(draft);setZoomDraft(draft);
       if(draft.trim()&&Number.isFinite(value)&&value>=25&&value<=300)onZoom(value);
+    }} onKeyDown={e=>{
+      // While a fit is shown, Enter chooses the shown value as a zoom of its own, even when it is the one already in the field: the only way to leave an automatic fit at 100%.
+      if(e.key!=='Enter'||disabled||current.zoomMode==='manual')return;
+      const draft=zoomDraft,value=Number(draft);
+      if(draft.trim()&&Number.isFinite(value)&&value>=25&&value<=300)onZoom(value);
     }}/></label>
     <div className="score-fit-controls">
-      <button type="button" aria-pressed={current.zoomMode==='fitWidth'} onClick={()=>{if(!disabled)onDisplay?.({...current,zoomMode:'fitWidth'});}}>{t('track_display.fit_width')}</button>
+      <button type="button" aria-pressed={current.zoomMode==='fitWidth'} onClick={()=>{if(disabled)return;if(current.zoomMode==='fitWidth')onZoom(100);else onDisplay?.({...current,zoomMode:'fitWidth'});}}>{t('track_display.fit_width')}</button>
       <button type="button" disabled={!pageFitAvailable} aria-pressed={pageFitAvailable&&current.zoomMode==='fitPage'} aria-describedby={!pageFitAvailable?fitHelp:undefined} onClick={()=>{if(!disabled&&pageFitAvailable)onDisplay?.({...current,zoomMode:'fitPage'});}}>{t('track_display.fit_page')}</button>
     </div>
     {current.zoomMode!=='manual'&&actualZoom!==undefined&&<output className="score-actual-zoom" aria-label={t('track_display.actual_zoom_aria')}>{t('track_display.actual_zoom_text',{zoom:formatZoomPercent(actualZoom)})}</output>}
@@ -69,8 +74,10 @@ export function TrackDisplayControls({ids,names,selected,view,zoom,disabled,onVi
       if(disabled||shown&&visible.length===1)return;
       onView({kind:'custom',trackIds:ids.filter((_,i)=>i===index?e.target.checked:visible.includes(i))});
     }}/>{name}</label>;
-  })}</div></details>{!physical&&<p className="muted score-fit-help" id={fitHelp}>{t('track_display.fit_page_help')}</p>}
+  })}</div></details></fieldset>
+  {/* Outside the fieldset, which is hidden while folded: an error or a limit must be seen and announced either way. */}
+  <div className="score-display-messages">{!physical&&<p className="muted score-fit-help" id={fitHelp}>{t('track_display.fit_page_help')}</p>}
   {pageError&&<p className="score-fit-help" id={physical?fitHelp:undefined} role="alert">{pageError}</p>}
   {current.zoomMode!=='manual'&&fitLimited&&!pageError&&actualZoom!==undefined&&<p className="muted score-fit-help" role="status">{t('track_display.fit_limited_status',{zoom:formatZoomPercent(actualZoom)})}</p>}
-  {ids.length>0&&!visible.includes(selected)&&<p className="muted" role="status">{t('track_display.track_hidden_status',{name:names[selected]||t('track_display.track_fallback',{index:selected+1})})}</p>}</fieldset></div>;
+  {ids.length>0&&!visible.includes(selected)&&<p className="muted" role="status">{t('track_display.track_hidden_status',{name:names[selected]||t('track_display.track_fallback',{index:selected+1})})}</p>}</div></div>;
 }

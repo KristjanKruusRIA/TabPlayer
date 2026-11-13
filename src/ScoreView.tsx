@@ -17,6 +17,7 @@ import {musicFonts,type MusicFontId} from './engraving/font-catalog';
 import {headerFieldsOf} from './engraving/header-footer';
 import {tabDigitFloorPercent,typographyOf} from './engraving/typography';
 import {loadExportFonts} from './export/pdf';
+import {wantsAutoFit} from './engraving/auto-fit';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
 import {passageBands,type PassageBar} from './engraving/passage-bands';
 import type {LoopBar,LoopPassage} from './audio/loop-passage';
@@ -150,11 +151,15 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const screenLayout=display.layout==='verticalScreen'||display.layout==='horizontalScreen';
   const baseWidth=natural?.score===renderedScore&&natural.tracks===trackKey&&natural.layout===display.layout&&natural.width===available.width&&natural.engraving===engraving&&natural.profile===profile?natural.value:null;
   // Auto fit is the same fit width as the button, at the same legible floor (THE-201), but only for a page layout that is wider than its area; the screen layouts already reflow or scroll by design.
-  const autoFitting=autoFit&&display.zoomMode==='manual'&&!screenLayout&&!pageError&&available.width>0&&geometry.width*zoom/100>available.width;
+  const autoFitWas=useRef(false);
+  const autoFitting=autoFit&&display.zoomMode==='manual'&&!screenLayout&&!pageError&&available.width>0&&wantsAutoFit({pageWidth:geometry.width,zoom,available:available.width,fitted:autoFitWas.current});
+  autoFitWas.current=autoFitting;
   const fitMode=pageError?'manual':autoFitting?'fitWidth':display.zoomMode;
-  const fit=fitMode==='manual'||!available.width||(fitMode==='fitPage'&&!available.height)?{percent:zoom,limited:false}:screenLayout?
+  const fitRaw=fitMode==='manual'||!available.width||(fitMode==='fitPage'&&!available.height)?{percent:zoom,limited:false}:screenLayout?
     baseWidth===null?{percent:100,limited:false}:resolveScreenZoom({zoomMode:'fitWidth',manualPercent:zoom,available:{...available,width:display.layout==='verticalScreen'?Math.min(available.width,baseWidth):available.width},natural:{width:baseWidth},minPercent:display.layout==='horizontalScreen'?tabDigitFloorPercent(engraving?typographyOf(engraving).tabScale:null):25}):
     resolveScreenZoom({zoomMode:fitMode,manualPercent:zoom,available,natural:{width:geometry.width,height:geometry.height},...autoFitting?{minPercent:tabDigitFloorPercent(engraving?typographyOf(engraving).tabScale:null)}:{}});
+  // Inside the release margin the page already fits, so a held fit stays at the zoom it replaced rather than growing past it.
+  const fit=autoFitting&&fitRaw.percent>zoom?{...fitRaw,percent:zoom}:fitRaw;
   const measureBase=screenLayout&&fitMode!=='manual'&&baseWidth===null;
   const factor=fit.percent/100,sourcePhysical=physicalRequested&&!pageError;
   const sourceWidth=sourcePhysical?geometry.usableWidth:display.layout==='horizontalScreen'?(baseWidth!==null?Math.max(available.width,baseWidth*factor):available.width):screenLayout?available.width:geometry.width*factor;

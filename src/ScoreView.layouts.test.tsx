@@ -821,4 +821,14 @@ describe('fitting to the window by default (THE-196)',()=>{
   rerender(tree({...props,zoom:150,display:{layout:'parchment',zoomMode:'manual'},autoFit:false} as never));
   expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:150,fitLimited:false,pageError:null});expect(onAutoFit).toHaveBeenLastCalledWith(false);
  });
+ it('does not flip back and forth when fitting changes the area by a scrollbar: it lets go only a clear margin past the page',()=>{
+  const resizeTo=(width:number)=>{state.width=width;act(()=>state.resize());};
+  state.width=790;const onAutoFit=vi.fn(),{props}=setup('parchment',100,{autoFit:true,onAutoFit}),last=()=>props.onDisplayStatus.mock.lastCall![0].zoomPercent;
+  expect(onAutoFit).toHaveBeenLastCalledWith(true);
+  resizeTo(830);expect(onAutoFit).toHaveBeenLastCalledWith(true);expect(last()).toBe(100);
+  resizeTo(790);expect(onAutoFit).toHaveBeenLastCalledWith(true);
+  resizeTo(840);expect(onAutoFit).toHaveBeenLastCalledWith(false);expect(last()).toBe(100);
+  resizeTo(830);expect(onAutoFit).toHaveBeenLastCalledWith(false);expect(last()).toBe(100);
+  resizeTo(800);expect(onAutoFit).toHaveBeenLastCalledWith(true);
+ });
 });

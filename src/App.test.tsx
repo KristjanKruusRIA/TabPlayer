@@ -2524,4 +2524,50 @@ describe('small windows (THE-196)',()=>{
       setHeight(600);resize();expect(screen.getByRole('button',{name:'Score display'})).toHaveFocus();expect(c.getState()).toBe(before);
     });
   });
+  describe('saving a default and choosing 100% while fitted',()=>{
+    const saved=()=>JSON.parse(window.localStorage.getItem(defaultsKey)!);
+    it('Use current view while the page is fitted saves fit width, as shown, and the open score keeps its fit',async()=>{
+      const c=await setup(),before=c.getState();act(()=>lastScoreProps().onAutoFit(true));
+      click('Use current view');click('Save default view');
+      expect(saved()).toEqual({layout:'parchment',zoomMode:'fitWidth',zoom:100,tracks:'selected'});
+      expect(lastScoreProps()).toMatchObject({autoFit:false,display:{layout:'parchment',zoomMode:'fitWidth'}});
+      expect(testWorkspace.getState().documents[0].view.scoreDisplay).toEqual({layout:'parchment',zoomMode:'fitWidth'});
+      expect(c.getState()).toBe(before);expect(c.getState().snapshot.dirty).toBe(false);
+    });
+    it('a new score then opens fitted by the saved default, not by automatic fit',async()=>{
+      await setup();act(()=>lastScoreProps().onAutoFit(true));click('Use current view');click('Save default view');
+      const first=testWorkspace.getState().active.documentId;
+      fireEvent.click(within(openCommand('File')).getByRole('button',{name:'New'}));await waitFor(()=>expect(testWorkspace.getState().active.documentId).not.toBe(first));
+      const view=testWorkspace.getState().documents.find(entry=>entry.id===testWorkspace.getState().active.documentId)!.view;
+      expect(view.scoreDisplay).toEqual({layout:'parchment',zoomMode:'fitWidth'});expect(lastScoreProps()).toMatchObject({autoFit:false,display:{layout:'parchment',zoomMode:'fitWidth'}});
+    });
+    it('saving any default ends automatic fit in the open score at once, without changing what it shows',async()=>{
+      await setup();expect(lastScoreProps()).toMatchObject({autoFit:true});
+      click('Save default view');
+      expect(lastScoreProps()).toMatchObject({autoFit:false,display:{layout:'parchment',zoomMode:'manual'}});
+    });
+    it('pressing the pressed Fit width while automatically fitted chooses an explicit 100% and saves it',async()=>{
+      const c=await setup(),before=c.getState();act(()=>lastScoreProps().onAutoFit(true));
+      const fit=screen.getByRole('button',{name:'Fit width'});expect(fit).toHaveAttribute('aria-pressed','true');fireEvent.click(fit);
+      expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','false');
+      expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:100,display:{layout:'parchment',zoomMode:'manual'}});
+      expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:100,scoreDisplay:{layout:'parchment',zoomMode:'manual'}});
+      expect(c.getState()).toBe(before);expect(c.getState().snapshot).toMatchObject({dirty:false,canUndo:false});
+    });
+    it('pressing the pressed Fit width after choosing it also returns to 100%',async()=>{
+      await setup();change('Zoom (%)','90');click('Fit width');
+      expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','true');click('Fit width');
+      expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:100,scoreDisplay:{zoomMode:'manual'}});
+    });
+    it('Enter in the zoom field while fitted chooses the shown 100% as an explicit zoom',async()=>{
+      await setup();act(()=>lastScoreProps().onAutoFit(true));
+      const field=screen.getByLabelText('Zoom (%)');fireEvent.keyDown(field,{key:'Enter'});
+      expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:100});expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:100,scoreDisplay:{layout:'parchment',zoomMode:'manual'}});
+    });
+    it('an explicit 100% survives reopening the score and is not fitted again',async()=>{
+      await setup();act(()=>lastScoreProps().onAutoFit(true));fireEvent.click(screen.getByRole('button',{name:'Fit width'}));
+      const view=testWorkspace.getState().documents[0].view;cleanup();
+      await setup(blankProject(),undefined,{view});expect(lastScoreProps()).toMatchObject({autoFit:false,zoom:100,display:{zoomMode:'manual'}});
+    });
+  });
 });

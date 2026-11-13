@@ -195,4 +195,40 @@ describe('folded into one menu at small heights (THE-196)',()=>{
     view.rerender(<TrackDisplayControls {...p} compact disabled/>);expect(menu()).not.toBeDisabled();expect(menu()).toHaveFocus();
     fireEvent.click(menu());expect(controls()).toBeVisible();expect(screen.getByLabelText('Display mode')).toBeDisabled();
   });
+  describe('messages stay visible and announced while the row is folded',()=>{
+    it('shows a page error',()=>{
+      render(<TrackDisplayControls {...props()} compact display={{layout:'grid',zoomMode:'fitPage'}} pageError="A system exceeds this paper. Choose a larger page."/>);
+      expect(controls()).not.toBeVisible();expect(screen.getByRole('alert')).toBeVisible();expect(screen.getByRole('alert')).toHaveTextContent('A system exceeds this paper.');
+    });
+    it('shows the fit limit',()=>{
+      render(<TrackDisplayControls {...props()} compact display={{layout:'parchment',zoomMode:'fitWidth'}} actualZoom={63} fitLimited/>);
+      expect(controls()).not.toBeVisible();expect(screen.getByRole('status')).toBeVisible();expect(screen.getByRole('status')).toHaveTextContent('Fit is limited to 63%.');
+    });
+    it('shows that the selected track is hidden',()=>{
+      render(<TrackDisplayControls {...props()} compact view={{kind:'custom',trackIds:['base/0']}}/>);
+      expect(controls()).not.toBeVisible();expect(screen.getByRole('status')).toBeVisible();expect(screen.getByRole('status')).toHaveTextContent('Bass is hidden in score.');
+    });
+  });
+});
+
+describe('getting back to an unfitted 100% (THE-196)',()=>{
+  it('pressing Fit width while it is pressed turns the fit off and chooses 100%',()=>{
+    const p=props(),onDisplay=vi.fn();render(<TrackDisplayControls {...p} display={{layout:'parchment',zoomMode:'fitWidth'}} onDisplay={onDisplay}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Fit width'}));expect(p.onZoom).toHaveBeenCalledExactlyOnceWith(100);expect(onDisplay).not.toHaveBeenCalled();
+  });
+  it('pressing Fit width while it is not pressed still fits',()=>{
+    const p=props(),onDisplay=vi.fn();render(<TrackDisplayControls {...p} display={{layout:'parchment',zoomMode:'manual'}} onDisplay={onDisplay}/>);
+    fireEvent.click(screen.getByRole('button',{name:'Fit width'}));expect(onDisplay).toHaveBeenCalledWith({layout:'parchment',zoomMode:'fitWidth'});expect(p.onZoom).not.toHaveBeenCalled();
+  });
+  it('Enter in the zoom field commits the shown value while a fit is shown, even when it equals the zoom',()=>{
+    const p=props(),view=render(<TrackDisplayControls {...p} display={{layout:'parchment',zoomMode:'fitWidth'}} onDisplay={vi.fn()}/>),field=screen.getByLabelText('Zoom (%)');
+    fireEvent.keyDown(field,{key:'Enter'});expect(p.onZoom).toHaveBeenCalledExactlyOnceWith(100);
+    p.onZoom.mockClear();view.rerender(<TrackDisplayControls {...p} display={{layout:'parchment',zoomMode:'manual'}} onDisplay={vi.fn()}/>);
+    fireEvent.keyDown(field,{key:'Enter'});expect(p.onZoom).not.toHaveBeenCalled();
+  });
+  it('Enter does not commit an invalid draft or act while busy',()=>{
+    const p=props(),view=render(<TrackDisplayControls {...p} display={{layout:'parchment',zoomMode:'fitWidth'}} onDisplay={vi.fn()}/>),field=screen.getByLabelText('Zoom (%)');
+    fireEvent.change(field,{target:{value:'4'}});fireEvent.keyDown(field,{key:'Enter'});expect(p.onZoom).not.toHaveBeenCalled();
+    view.rerender(<TrackDisplayControls {...p} disabled display={{layout:'parchment',zoomMode:'fitWidth'}} onDisplay={vi.fn()}/>);fireEvent.keyDown(field,{key:'Enter'});expect(p.onZoom).not.toHaveBeenCalled();
+  });
 });

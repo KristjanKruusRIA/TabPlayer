@@ -4,7 +4,8 @@ import { compactWindowHeight } from './small-window';
 
 // jsdom applies no stylesheet, so these pin the CSS text that the layout rests on. They say what the rules are, not how they render:
 // nothing here measures a pixel. The widths and heights in the comments are arithmetic from the stylesheet, not measurements.
-const css=readFileSync('src/workstation/gp-shell.css','utf8');
+const css=readFileSync('src/workstation/gp-shell.css','utf8').replace(/\/\*[\s\S]*?\*\//g,'');
+const exact=(selector:string)=>[...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(match=>match[1].trim()===selector).map(match=>match[2]);
 /** The declaration blocks of every rule whose selector text contains `fragment`, . */
 const bodies=(fragment:string,source=css)=>[...source.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(match=>match[1].includes(fragment)).map(match=>match[2]);
 
@@ -40,11 +41,35 @@ describe('the display controls folded at small heights (THE-196, friction 8)',()
     expect(bodies('.score-display-toggle').join(';')).toMatch(/min-height:28px/);expect(css).toMatch(/\.score-display-toggle\[aria-expanded=true\]/);
   });
   it('lets the button share the edit and view row in narrow windows instead of taking a row of its own',()=>{
-    const narrow=css.slice(css.indexOf('/* A short window'));
+    const narrow=css.slice(css.indexOf('[data-compact-height=true]'));
     expect(narrow).toMatch(/\[data-compact-height=true\][^{]*\.gp-toolbar\s*\{[^}]*grid-template-areas:'transport transport transport' 'left display right'/);
   });
   it('is switched by the app\'s own height test, the same one that folds the controls, so the two cannot disagree',()=>{
     expect(css).not.toMatch(/@media[^{]*max-height/);expect(compactWindowHeight).toBe(610);
     expect(readFileSync('src/App.tsx','utf8')).toMatch(/data-compact-height=\{compactHeight\}/);
+  });
+});
+
+describe('where the display messages and the captions sit (THE-196)',()=>{
+  it('keeps the page error visible below the host whether or not the menu is folded',()=>{
+    expect(bodies('.score-display-messages>p:not(.muted)').join(';')).toMatch(/position:absolute/);
+    expect(bodies('.score-display-messages>p.muted').join(';')).toMatch(/clip-path:inset\(50%\)/);
+    expect(css).not.toMatch(/\[aria-label='Score display'\]>p/);
+  });
+  // Numbers read from the stylesheet, not measured: the transport box is min-height 48px with its groups centred; the groups are 28px (the control min-height).
+  const num=(text:string,pattern:RegExp)=>Number(text.match(pattern)?.[1]);
+  const caption=bodies(':is(.transport-loop,.transport-click,.transport-speed)>.transport-caption').join(';');
+  const toolbarPaddingTop=num(exact('.gp-toolbar')[0],/padding:(\d+)px/);
+  it('lies inside the transport box or, at most, in the toolbar padding above it: it paints over no other row and is not clipped',()=>{
+    const transportHeight=num(exact('.app-shell .gp-toolbar .transport')[0],/min-height:(\d+)px/),groupHeight=28;
+    const top=num(caption,/top:(-?\d+)px/),lineHeight=num(caption,/line-height:(\d+)px/);
+    const boxTopInTransport=(transportHeight-groupHeight)/2+top,boxBottomInTransport=boxTopInTransport+lineHeight;
+    expect(toolbarPaddingTop).toBe(2);expect(transportHeight).toBe(48);
+    expect(boxTopInTransport).toBeGreaterThanOrEqual(-toolbarPaddingTop);
+    expect(boxBottomInTransport).toBeLessThanOrEqual((transportHeight-groupHeight)/2);
+  });
+  it('is no smaller than the own caption size of the transport',()=>{
+    const own=num(readFileSync('src/shell/transport.css','utf8').match(/\.transport-caption \{[^}]*\}/)![0],/font-size:(\d+)px/);
+    expect(num(caption,/font-size:(\d+)px/)).toBeGreaterThanOrEqual(own);
   });
 });

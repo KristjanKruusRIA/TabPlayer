@@ -137,3 +137,22 @@ it('does not write a defaults record at first start, and a read-only (newer) nat
   expect(put).not.toHaveBeenCalled(); expect(currentInstrumentSettingsProblem()).toBe('newer'); expect(heard).toHaveBeenCalledTimes(1);
   expect(readInstrumentViewPreferences(storage)).toMatchObject({ leftHanded: true, expanded: true }); stop();
 });
+
+it('after a failed read on a fresh profile, a retry sends only the changed option over the native record', async () => {
+  const storage = memory(); let fail = true; const native = { ...persisted, leftHanded: true, noteNames: 'letter', neck: 'bass', expanded: true };
+  const put = vi.fn(async () => ({})), bridge = { read: async () => { if (fail) throw new Error('unreadable'); return { instrumentView: native }; }, put } as unknown as NativeSettingsBridge;
+  setNativeSettingsBridge(bridge); await syncInstrumentViewPreferencesFromNative(storage);
+  writeInstrumentViewPreferences({ focus: 'bar' }, storage); await flush(); expect(put).not.toHaveBeenCalled();
+  fail = false; writeInstrumentViewPreferences({ focus: 'next' }, storage); await flush(); await flush();
+  expect(put).toHaveBeenCalledTimes(1); expect(put).toHaveBeenCalledWith({ ...native, focus: 'next' });
+  expect(readInstrumentViewPreferences(storage)).toMatchObject({ leftHanded: true, noteNames: 'letter', neck: 'bass', expanded: true, focus: 'next' });
+});
+
+it('the same holds when the failed read was in an earlier run: only the marked options come from the browser copy', async () => {
+  const storage = memory(); const native = { ...persisted, leftHanded: true, noteNames: 'letter' };
+  const first = { read: async () => { throw new Error('unreadable'); }, put: vi.fn(async () => ({})) } as unknown as NativeSettingsBridge;
+  setNativeSettingsBridge(first); await syncInstrumentViewPreferencesFromNative(storage); writeInstrumentViewPreferences({ focus: 'bar' }, storage);
+  resetInstrumentViewPreferencesSync(); const next = bridgeWith(native); setNativeSettingsBridge(next.bridge);
+  await syncInstrumentViewPreferencesFromNative(storage); await flush();
+  expect(next.put).toHaveBeenCalledWith({ ...native, focus: 'bar' });
+});

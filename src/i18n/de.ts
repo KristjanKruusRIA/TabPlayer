@@ -2439,6 +2439,7 @@ export const de: MessageCatalog = {
   'batch.no_matching_files': 'Keine passenden Dateien gefunden.',
   'palette.score_editing_unavailable': 'Partiturbearbeitung ist nicht verfügbar, solange die Partitur ausgeblendet ist.',
   'palette.command_input_aria': 'Befehl',
+  // Translators: the toolbar's widths were measured with the track_display.* layout, tracks, fit and zoom texts and transport.bar_n / transport.of_n. If one gets longer, say so: the widths in src/shell/toolbar-fit.ts must be measured again (see toolbar-fit.catalog.test.ts).
   'track_display.toolbar_aria': 'Partituranzeige',
   'track_display.display_mode': 'Anzeigemodus',
   'track_display.layout_vertical_page': 'Vertikale Seite',

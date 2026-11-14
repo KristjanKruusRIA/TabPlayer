@@ -2439,6 +2439,7 @@ export const et: MessageCatalog = {
   'batch.no_matching_files': 'Sobivaid faile ei leitud.',
   'palette.score_editing_unavailable': 'Partituuri muutmine pole saadaval, kui partituur on peidetud.',
   'palette.command_input_aria': 'Käsk',
+  // Translators: the toolbar's widths were measured with the track_display.* layout, tracks, fit and zoom texts and transport.bar_n / transport.of_n. If one gets longer, say so: the widths in src/shell/toolbar-fit.ts must be measured again (see toolbar-fit.catalog.test.ts).
   'track_display.toolbar_aria': 'Partituuri kuva',
   'track_display.display_mode': 'Kuvamisrežiim',
   'track_display.layout_vertical_page': 'Vertikaalne leht',

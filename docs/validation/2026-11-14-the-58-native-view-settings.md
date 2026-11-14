@@ -42,7 +42,7 @@ Built with `scripts/build-desktop-test.ps1` and run from the worktree.
 ## Limits
 
 - Native settings are read once at start and written on every change, but are not pushed to other open views of the app; the app has one window, so "the same across windows" was not exercised.
-- A failed native write is silent: the choice still applies and the browser copy keeps it, and the next start sends nothing over a native record it cannot read.
+- A failed native write is not silent since the second round: the choice still applies and the browser copy keeps it, a marker makes the next start send it, and one status line says so. A save that never succeeds is still lost when the browser copy is lost too.
 - The keyboard panel is remembered only where view state is (the session's recovery checkpoint), not in the `.tabplayer` file; a document opened from disk starts on its own view.
 - A recovery checkpoint written with the keyboard panel shown cannot be read by a build older than this one (see above).
 - Not verified: the concurrent-launch case of two app instances writing the settings file; the corrupt-settings path in the running app (covered by Rust tests only); et and de text did not change.
@@ -65,7 +65,7 @@ Commit 21becae (THE-57) put the Key group in the transport row, which grew from 
 
 ### Front end (`src/instruments/view-preferences.ts`)
 
-- **Unsent marker.** While a choice has not reached the native settings (a failed write, or a failed read), the browser copy carries `tabplayer.instrumentView.unsent`. The next start sends the browser copy over the older native record instead of the other way round, and clears the marker once the write succeeded. Without the marker the native record wins as before.
+- **Unsent marker.** While a choice has not reached the native settings (a failed write, or a failed read), the browser copy carries `tabplayer.instrumentView.unsent`. The next start sends the browser copy over the older native record instead of the other way round, and clears the marker once the write succeeded. Without the marker the native record wins as before. The marker says what to send: after a failed write it covers the whole record; after a failed read it names only the options chosen meanwhile, so a retry (or the next start) lays only those over the native record and keeps the rest.
 - **One quiet status**, in en, et and de (`instruments.settings_not_saved`, `instruments.settings_newer`), shown in the instrument view when the options could not be saved, until a save succeeds. A failed native read also tells the person, keeps the choices, and the next choice tries the read again.
 - **Saving no longer depends on the browser store.** After the native read the whole record is kept in memory and every change is sent from it; a choice made before the read is remembered in memory and merged over the native record, not read back from storage. With storage refusing, the native settings are still written.
 
@@ -84,3 +84,8 @@ The earlier fix moved the breakpoints up to widths that were tuned by hand and g
 ### Results of the second round
 
 Desktop drivers on the rebuilt app: `parity-key-shift.mjs` (with the new all-group, three-language sweep), `instruments.mjs`, `parity-instrument-handedness.mjs` and `parity-instrument-settings.mjs` passed. `cargo fmt --all -- --check` clean; Rust lib 991 passed, 7 ignored; `recovery`, `recovery_protocol`, `workspace_recovery`, `password_locks` 26, 30, 4 and 8 passed; typecheck clean; `npm test` 403 files passed, 4 skipped, 7060 tests passed, 8 skipped; secret scan 0 findings. The Rust `app_settings` tests and the new status component test were written together with the code, not seen failing first. The Unix non-blocking open is not compiled here. The toolbar breakpoints were first tied to a viewport width of exactly the breakpoint minus one pixel, which exposed a one-pixel gap between a `max-width` rule and the Key fold's `min-width` query at a fractional width; both now use the range syntax (`width < N`, `width >= N`), so they cannot leave a gap.
+
+### Follow-ups
+
+- A failed read followed by a retry no longer sends defaults over the native record: only the options chosen in the meantime are laid over what the retry reads (test with a native record of left-handed and letter note names, a failed first read, a change of Show only).
+- `src/shell/toolbar-fit.catalog.test.ts` pins, per language, the display-group and bar-readout texts the toolbar widths were measured with; it fails with "a toolbar caption changed - re-measure with tests/desktop/parity-key-shift.mjs and update toolbar-fit.ts". A note for translators is at the top of `toolbar-fit.ts` and beside the `track_display` texts in each catalog. The transport row measured 1003px in all three languages, so no transport caption is pinned.

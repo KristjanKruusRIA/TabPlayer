@@ -8,7 +8,7 @@ The existing score toolbar now offers Vertical page, Horizontal page, Grid, Parc
 
 App retains the existing view bridge. Derived zoom/resize metrics stay local. ScoreView keeps one API, updates settings/rendering for layout changes, maps physical note/range interactions through accepted immutable geometry and canonical score identity, and preserves the existing native playback controller. A narrow public presentation adapter maps the clock-derived cursors, scrolling and supplied opaque glyph-highlight IDs; it adds no output clock, native command, dependency patch or private ID derivation. Oversized paper content falls back explicitly to continuous notation at the last manual magnification.
 
-All six actual GenAI reference/provenance pairs were inspected and committed before UI implementation. The selected composition authority is `docs/design/reference-workstation/score-layout-reference-selection.md`, SHA-256 `A7496A5CE490AC2D093E97F9E0013F7678FE106FFFAFC6EE4ABF52FB0C6E5539`. Raster notation errors, unequal paper, incidental labels and overlap were excluded explicitly. These references are generated concepts, not screenshots of the application.
+All six actual GenAI reference/provenance pairs were inspected and committed before UI implementation. The selected composition authority is `docs/design/reference-workstation//score-layout-reference-selection.md`, SHA-256 `A7496A5CE490AC2D093E97F9E0013F7678FE106FFFAFC6EE4ABF52FB0C6E5539`. Raster notation errors, unequal paper, incidental labels and overlap were excluded explicitly. These references are generated concepts, not screenshots of the application.
 
 ## Independent review and corrections
 

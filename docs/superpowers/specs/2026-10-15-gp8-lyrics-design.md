@@ -17,7 +17,7 @@ The approved slate/cream/lime editor layout and inspector forms remain the visua
 - DTO indices are zero-based; measure labels are one-based. Validate complete payloads and destinations before mutation. Undo/redo uses deterministic history replay.
 - Standard GPIF fields must be demonstrated by public readers/writers or authored GP8 fixtures; no invented extension elements, IDs, or private properties.
 - Model retention, native replay, rendered notation, musical output, and target-runtime GP8 compatibility require separate evidence.
-- Lyrics are per selected track, with at most five source lines. Native reader/writer/render evidence establishes dispatched=false as hidden source. Mixed/embedded-comment syntax and actual GP8 runtime acceptance remain open.
+- Lyrics are per selected track, with at most five source lines. Analysis of Guitar Pro 8 that is not published here establishes dispatched=false as hidden source. Mixed/embedded-comment syntax and actual GP8 runtime acceptance remain open.
 
 ## Observed capabilities and losses
 
@@ -94,7 +94,7 @@ Follow existing details/summary and fieldset patterns. Show selected track name,
 
 writeGpifLyrics replaces managed Track/Lyrics nodes and imported nonempty/hidden raw sources with exact raw Text and zero-based Offset. Visible unmanaged syllable assignments remain unchanged. Use DOM text nodes for XML escaping of `&`, `<`, `]]>`, Unicode, and newlines. Preserve carriage returns using standard character references. Root integrates this with its single XML/ZIP rewrite, retaining unrelated source siblings and the first delivery's DSP/percussion patches. Literal CDATA terminators require a detached export model and bounded Beat lyric serialization because the public writer emits malformed CDATA and its reader loses adjacent CDATA chunks.
 
-The supplied GPIO.dll reader at 0x1800f0d60 reads dispatched, the writer at 0x180115580 writes it while retaining raw verses, and renderer helper 0x1802129f0 returns that flag for its lyrics branch. This resolves the initial unknown: write dispatched=false for hidden source. Since alphaTab ignores the flag, the owned importer clears first-staff assignments while retaining exact raw source, and rebuilds keep hidden assignments clear. This execution-free evidence does not prove original GP8 runtime acceptance. Hashes, addresses and limits are recorded in the validation report and ignored native-gpif-semantics evidence.
+Based on analysis of Guitar Pro 8 that is not published here (details in the validation report): the track's `dispatched` flag is read and written while the raw verses are kept, and it controls whether lyrics are shown. This resolves the initial unknown: write dispatched=false for hidden source. Since alphaTab ignores the flag, the owned importer clears first-staff assignments while retaining exact raw source, and rebuilds keep hidden assignments clear. The analysis did not run the program, so it does not prove acceptance by the original application at runtime.
 
 ## Acceptance and self-review
 

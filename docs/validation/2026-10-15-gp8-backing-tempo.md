@@ -135,7 +135,7 @@ These are real publication/GPIF/current-byte checks, with supported public quant
 
 Both actual GenAI references and provenance were inspected before their respective UI implementation. Generated geometry, timing values, blended stereo depiction and italic error styling are illustrative; real mono/stereo lanes and existing workstation/dialog identity remain authoritative.
 
-| Pre-code reference/provenance under `docs/design/reference-workstation/` | SHA-256 |
+| Pre-code reference/provenance under `docs/design/reference-workstation/` (removed before publication: images and provenance records) | SHA-256 |
 | --- | --- |
 | `backing-tempo-concept.png` | `8F3F6B33FA1C6099168DE4D84E428AA0203A49C2B3B00883E0F4084725F25666` |
 | `backing-tempo-generated-concept.json` | `DEB694E67ACC5C91527028BDF4C4ED28CBE1F71F0D2F0C87E6EC114298532FF3` |

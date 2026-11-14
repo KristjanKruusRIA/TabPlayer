@@ -7,7 +7,7 @@ import { exporter,model,Settings } from '@coderline/alphatab';
 import { directory,launch,connect,stop } from './harness.mjs';
 
 // Help: F1 opens help on the topic for the focused area (the score → Editing the score), the Help menu opens
-// About and updates, and Check for updates discloses that this build has no update service and the installed
+// About and updates, and Check for updates discloses that this release has no update service and the installed
 // version. Opening and closing help keeps the unsaved edit, its history and the open tabs, and returns focus.
 const version=JSON.parse(readFileSync('src-tauri/tauri.conf.json','utf8')).version;
 const fixture=resolve(directory,'help-fixture.gp');
@@ -43,7 +43,7 @@ try{
   assert.match(await help.getByRole('article',{name:'Editing the score'}).textContent(),/command palette/);
   await help.getByRole('button',{name:'About and updates',exact:true}).click();
   await help.getByRole('button',{name:'Check for updates',exact:true}).click();
-  assert.equal(await help.getByRole('status').textContent(),`You have TabPlayer ${version}. This build has no update service, so it cannot check for newer versions. Install a newer build to update; your scores are not affected.`);
+  assert.equal(await help.getByRole('status').textContent(),`You have TabPlayer ${version}. This release has no update service. To update, install a newer version; your scores are not affected.`);
   await page.keyboard.press('Escape');await help.waitFor({state:'detached'});
   assert.equal(await workspace.evaluate(node=>node===document.activeElement),true,'Closing help returns focus to the score.');
   assert.deepEqual(await state(),before,'Help leaves the edit, its history and the tabs as they were.');

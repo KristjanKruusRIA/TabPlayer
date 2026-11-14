@@ -113,10 +113,15 @@ mod event {
 
     impl Inner {
         pub fn new() -> std::io::Result<Inner> {
-            Ok(Inner {
+            let inner = Inner {
                 signalled: Mutex::new(false),
                 changed: Condvar::new(),
-            })
+            };
+            // Where std's locks are pthread ones (macOS), a mutex and a condition variable allocate on first use. `signal`
+            // is called from the audio thread, so use them once here, off it. Nobody waits yet, so this wakes no one.
+            drop(inner.signalled.lock());
+            inner.changed.notify_one();
+            Ok(inner)
         }
 
         pub fn signal(&self) {
@@ -169,13 +174,17 @@ impl MappedRing {
     }
 
     fn wrap(host: HostRing, owner: Owner) -> MappedRing {
-        MappedRing {
+        let ring = MappedRing {
             control: host.control(),
             sample_rate: host.sample_rate(),
             host: Mutex::new(host),
             published: AtomicU64::new(0),
             owner,
-        }
+        };
+        // `with_host` runs on the audio thread. Where std's mutex is a pthread one (macOS) it allocates the first time it
+        // is locked, so lock it once here, off the audio thread, to make that the only time.
+        drop(ring.host.try_lock());
+        ring
     }
 
     /// Creates a zeroed mapping and initializes the ring in it. The helper maps the same memory once it has a duplicate of

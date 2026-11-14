@@ -122,3 +122,9 @@ The palette hint is `krihv 5`, and the palette accepts typed words through its a
 - Placeholders are `{name}` tokens only. Other markup (none was found in the catalogs) would not be checked.
 - `--apply` does not edit the catalogs and has not been run against a real reviewer's file; it was tried on a small synthetic CSV only.
 - Review fatigue: 2433 rows per language is a long job. Flagged rows (408 and 445) are a sensible first pass.
+
+## Update 2026-11-14: fret and tie terms settled
+
+- Estonian fret: the owner chose "krihv". Every "astmetraat" in `src/i18n/et.ts` (18 lines) now reads as the form of "krihv" the sentence needs, and `scripts/i18n-review-table.mjs` flags "astmetra" as forbidden instead of a check. The "Decisions" text above describes the state before this change.
+- German tie: the catalog uses "Haltebogen" for a tie and "Bindebogen" for a slur. Two help strings had them the wrong way round and were corrected: `help.topic.shortcuts.clipboard.title` (ties) and `help.topic.export.guitar-pro.p2` (slurs). The one "Bindung" the note above records had already been reworded.
+- Still unreviewed by a native speaker.

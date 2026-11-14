@@ -217,5 +217,5 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
   'help.topic.about.title': 'Teave ja uuendused',
   'help.topic.about.version.title': 'Versioon ja uuendused',
   'help.topic.about.version.p1': 'TabPlayer {version} töölauale.',
-  'help.topic.about.version.p2': 'Sellel versioonil puudub uuendusteenus. TabPlayer ei laadi ega paigalda uuendusi iseseisvalt ning uuenduste kontrollimine ei muuda avatud partituure.',
+  'help.topic.about.version.p2': 'Selles väljalaskes puudub uuendusteenus. TabPlayer ei laadi ega paigalda uuendusi iseseisvalt ning uuenduste kontrollimine ei muuda avatud partituure. Eesti- ja saksakeelset teksti ei ole emakeelekõneleja üle vaadanud.',
 };

@@ -38,8 +38,7 @@ The notation design ([2026-10-15-gp8-notation-design.md](../superpowers/specs/20
 
 ### Why the probe was not run
 
-- The installed Guitar Pro 8 under Program Files has no program file, only an uninstaller.
-- The copy extracted in `.analysis/guitar-pro-8.1.5-31` carries a valid Arobas Music signature. Started with the probe file, it opened to a Software Activation window. It was closed again; no licence was entered and activation was not worked around.
+- The probe was not run in Guitar Pro 8 from here: no installed copy was available to run, and the analysis of Guitar Pro 8 that exists is not published here and did not run the program.
 - Another executable on the machine was not run, because its origin could not be vouched for.
 
 So the probe could not be run from here; the owner ran it, as recorded below. Whether Guitar Pro reads the written `Offset` as the intended beat is also unconfirmed; the README asks the user to check that the symbols sit over the labelled notes.

@@ -17,7 +17,7 @@
 - The audio callback renders preallocated blocks; it performs no file I/O, decoding, blocking locks or Tauri calls.
 - Live and offline rendering use the same Rust musical voices and effects.
 - Shipping builds omit the existing desktop test commands.
-- Private test music and extracted Guitar Pro application resources remain outside product/source releases.
+- Private test music and Guitar Pro program files and resources remain outside product/source releases.
 - Sound sources and presets retain stable manifest identifiers across project replay.
 
 ## Review Focus

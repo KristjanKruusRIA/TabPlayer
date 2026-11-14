@@ -10,17 +10,17 @@ const knob=(extra:Partial<React.ComponentProps<typeof Knob>>={})=><Knob label="G
 const begin=(slider:HTMLElement,y=300)=>{fireEvent.pointerDown(slider,{clientY:y,pointerId:1,pointerType:'mouse',buttons:1});fireEvent.pointerMove(slider,{clientY:y-48,pointerId:1,pointerType:'mouse',buttons:1});};
 
 /** The rule: a pointer gesture records only when the release is seen with the pointer still held. Losing the pointer any other way ends it with nothing recorded. */
-it('ends a drag without an edit when pointer capture is lost before the release', ()=>{
+it('carries on when pointer capture is dropped before the release: the window follows the pointer and the release records once', ()=>{
   const onCommit=vi.fn(),onInput=vi.fn(),onInputEnd=vi.fn();render(knob({onCommit,onInput,onInputEnd}));
   const slider=screen.getByRole('slider');begin(slider);
   expect(slider).toHaveAttribute('aria-valuenow','3');
+  // Capture can be dropped while the button is still down (it is, for mouse events the webview is given from outside); that ends nothing.
   fireEvent.lostPointerCapture(slider,{pointerId:1});
-  expect(slider).toHaveAttribute('aria-valuenow','0');expect(onInputEnd).toHaveBeenCalledExactlyOnceWith(false);
-  // Ending it does not send the old value as one more update: the end is the signal to go back.
-  expect(onInput).toHaveBeenCalledTimes(1);
-  // The button coming up afterwards, or the pointer moving over it, does nothing.
-  fireEvent.pointerUp(slider,{clientY:252,pointerId:1,pointerType:'mouse'});fireEvent.pointerMove(slider,{clientY:100,pointerId:1,pointerType:'mouse',buttons:0});
-  expect(onCommit).not.toHaveBeenCalled();expect(slider).toHaveAttribute('aria-valuenow','0');
+  expect(onInputEnd).not.toHaveBeenCalled();
+  // The pointer leaves the control and the button comes up elsewhere: the gesture still ends where the pointer was.
+  fireEvent.pointerMove(document.body,{clientY:100,pointerId:1,pointerType:'mouse',buttons:1});
+  fireEvent.pointerUp(document.body,{clientY:100,pointerId:1,pointerType:'mouse'});
+  expect(onCommit).toHaveBeenCalledTimes(1);expect(onInputEnd).toHaveBeenCalledExactlyOnceWith(true);
 });
 
 it('does not end a drag that has already been released when capture is released after it', ()=>{
@@ -67,12 +67,12 @@ it('ends a drag, and a wheel run, without an edit when the control goes away', (
   expect(onCommit).not.toHaveBeenCalled();expect(onInputEnd).toHaveBeenCalledTimes(2);
 });
 
-it('ends a fader drag the same way', ()=>{
+it('ends a fader drag without an edit when it loses its pointer (the button comes up with none held)', ()=>{
   const onCommit=vi.fn(),onInputEnd=vi.fn();render(<Fader label="1k" value={0} min={-12} max={12} step={.5} onCommit={onCommit} onInputEnd={onInputEnd}/>);
   const slider=screen.getByRole('slider');slider.getBoundingClientRect=()=>({top:0,left:0,right:36,bottom:134,height:134,width:36,x:0,y:0,toJSON:()=>({})});
   const thumb=slider.querySelector('.tp-fader-thumb')!;
   fireEvent.pointerDown(thumb,{clientY:67,pointerId:1,pointerType:'mouse',buttons:1});fireEvent.pointerMove(thumb,{clientY:37,pointerId:1,pointerType:'mouse',buttons:1});
-  fireEvent.lostPointerCapture(slider,{pointerId:1});
+  fireEvent.pointerMove(thumb,{clientY:20,pointerId:1,pointerType:'mouse',buttons:0});
   expect(onCommit).not.toHaveBeenCalled();expect(onInputEnd).toHaveBeenCalledExactlyOnceWith(false);expect(slider).toHaveAttribute('aria-valuenow','0');
 });
 

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from './project';
+import type { ChannelMix } from './edit-types';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
 import { projectScoreOverview } from './workstation/overview';
 import { ScoreOverview } from './workstation/ScoreOverview';
@@ -9,8 +10,11 @@ import { trackColorHex } from './track-color';
 import { trackIdentity } from './engine';
 import { DockMasterControls, MasterPanel } from './audio/MasterPanel';
 import { Knob } from './ui/Knob';
+import { MixSlider } from './ui/MixSlider';
+import { useLivePreview } from './mixer/useLivePreview';
 import { BassGlyph, DrumGlyph, GuitarGlyph, KeysGlyph, MuteGlyph, NoteGlyph, PlusGlyph, SoloGlyph } from './shell/glyphs';
 
+const percent=(value:number)=>`${Math.round(value*100)}%`;
 const panText=(pan:number)=>Math.abs(pan)<.005?'C':pan<0?`L${Math.round(-pan*100)}`:`R${Math.round(pan*100)}`;
 /** The mark beside a track's name: drums for percussion, else by General MIDI program family. */
 function instrumentMark(track:model.Track) {
@@ -45,12 +49,26 @@ function TrackInstrument({track:index}:{track:number}){
   const Mark=instrumentMark(track);
   return <span className="dock-track-instrument" aria-hidden="true"><Mark width={15} height={15}/></span>;
 }
+/** Volume or pan of one track as a gesture: heard while dragged (a preview of the mix, nothing recorded), then saved once, as the Mixer view does. */
+function useMixGesture(player:DockPlayer,score:model.Score,id:string){
+  const live=useLivePreview(),latest=useRef(score);latest.current=score;
+  // The track is found by identity each time: a track list that changes under a drag never sends it to another track.
+  const indexOf=()=>latest.current.tracks.findIndex(track=>trackIdentity(track)===id);
+  return (patch:(value:number)=>Partial<ChannelMix>,save:(index:number,value:number)=>Promise<void>|undefined)=>({
+    onInput:(value:number)=>live.hear(()=>{const index=indexOf();return index<0?undefined:player?.previewMix?.(index,patch(value));},()=>{const index=indexOf();return index<0?undefined:player?.previewMix?.(index,null);}),
+    onCommit:(value:number)=>{const index=indexOf();return index<0?undefined:save(index,value);},
+    // A saved drag stays heard until the player holds the edit, so it never steps back to the old level.
+    onInputEnd:(committed:boolean)=>{void live.end({keep:committed});},
+  });
+}
 function TrackMixRow({track:index}:{track:number}){
   const {score,player,busy}=useContext(DockRows);const { t } = useI18n();
   useSyncExternalStore(player?.subscribe ?? noSubscribe,player?.getState ?? noState);
+  const rowId=score.tracks[index]?trackIdentity(score.tracks[index]):'';
+  const gesture=useMixGesture(player,score,rowId);
   const view=useContext(DockShown);
   const track=score.tracks[index];if(!track)return null;
-  const name=track.name||`Track ${index+1}`,mix=player?.mix(track),mute=mix?.mute??track.playbackInfo.isMute,solo=mix?.solo??track.playbackInfo.isSolo,volume=mix?.volume??1,pan=mix?.pan??0,off=busy||!player;
+  const name=track.name||`Track ${index+1}`,mix=player?.mix(track),mute=mix?.mute??track.playbackInfo.isMute,solo=mix?.solo??track.playbackInfo.isSolo,volume=mix?.volume??1,pan=mix?.pan??0,off=busy||!player,missing=!player;
   // The score always shows at least one track, so the last shown track's eye cannot close.
   const isShown=view.shown.includes(index),lastShown=isShown&&view.shown.length<=1;
   const eyeLabel=t(isShown?'overview.hide_track':'overview.show_track',{track:name});
@@ -58,21 +76,30 @@ function TrackMixRow({track:index}:{track:number}){
     {view.toggle?<button type="button" data-kind="shown" aria-pressed={isShown} aria-label={t('overview.track_shown',{track:name})} title={lastShown?t('overview.last_shown_track'):eyeLabel} aria-disabled={busy||lastShown||undefined} onClick={()=>{if(!busy&&!lastShown)view.toggle!(index);}}><EyeGlyph open={isShown}/></button>:<span/>}
     <button type="button" data-kind="mute" aria-pressed={mute} aria-label={t('overview.mute_track',{track:name})} title={t('overview.mute_track',{track:name})} disabled={off} onClick={()=>player?.setMute(index,!mute)}><MuteGlyph width={14} height={14}/></button>
     <button type="button" data-kind="solo" aria-pressed={solo} aria-label={t('overview.solo_track',{track:name})} title={t('overview.solo_track',{track:name})} disabled={off} onClick={()=>player?.setSolo(index,!solo)}><SoloGlyph width={14} height={14}/></button>
-    <input type="range" className="dock-fader" min={0} max={1} step={.05} value={volume} disabled={off} aria-label={t('overview.track_volume',{track:name})} aria-valuetext={`${Math.round(volume*100)}%`} title={`${Math.round(volume*100)}%`} onChange={e=>player?.setTrackVolume(index,Number(e.target.value))}/>
-    <Knob className="dock-pan" label={t('overview.col_pan')} ariaLabel={t('overview.track_pan',{track:name})} bipolar value={pan} min={-1} max={1} step={.05} defaultValue={0} format={panText} disabled={off} onInput={value=>player?.setPan(index,value)} onCommit={value=>player?.setPan(index,value)}/>
+    <MixSlider key={rowId} className="dock-fader" label={t('overview.track_volume',{track:name})} min={0} max={1} step={.05} value={volume} format={percent} disabled={missing} busy={busy} {...gesture(gain=>({gain}),(at,value)=>player?.setTrackVolume(at,value))}/>
+    <Knob key={rowId} className="dock-pan" label={t('overview.col_pan')} ariaLabel={t('overview.track_pan',{track:name})} bipolar value={pan} min={-1} max={1} step={.05} defaultValue={0} format={panText} disabled={missing} busy={busy} {...gesture(value=>({pan:value}),(at,value)=>player?.setPan(at,value))}/>
   </span>;
+}
+
+/** The volume and pan ranges of one channel of the dock's mixer: each drag is heard as it goes and recorded once at its release. */
+function ChannelRanges({player,score,track,busy,volume,pan}:{player:DockPlayer;score:model.Score;track:model.Track;busy:boolean;volume:number;pan:number}){
+  const gesture=useMixGesture(player,score,trackIdentity(track));
+  return <>
+    <MixSlider visible="Volume" label={`Volume ${track.name}`} min={0} max={1} step={.05} value={volume} format={value=>String(Number(value.toFixed(2)))} disabled={!player} busy={busy} {...gesture(gain=>({gain}),(at,value)=>player?.setTrackVolume(at,value))}/>
+    <MixSlider visible="Pan" label={`Pan ${track.name}`} min={-1} max={1} step={.05} value={pan} format={value=>String(Number(value.toFixed(2)))} disabled={!player} busy={busy} {...gesture(value=>({pan:value}),(at,value)=>player?.setPan(at,value))}/>
+  </>;
 }
 
 export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,onSelect,onSelectPosition,player,shown=[],onToggleShown,onAddTrack}: {
   score:model.Score;selected:number;busy:boolean;view:'overview'|'mixer';target:BeatTarget;onExitOverview:()=>void;
   /** The bars a running loop plays, marked on the overview. */
   loop?:LoopPassage|null;
-  onSelect:(track:number)=>void;onSelectPosition:(track:number,bar:number)=>void;
+  onSelect:(track:number,by?:'pointer')=>void;onSelectPosition:(track:number,bar:number)=>void;
   /** Tracks shown in the score; with `onToggleShown`, each dock row gets an eye that shows or hides its track. */
   shown?:readonly number[];onToggleShown?:(track:number)=>void;
   /** Shows a + button in the track list's header that starts adding a track. */
   onAddTrack?:()=>void;
-  player:Pick<NativePlaybackController,'subscribe'|'getState'|'mix'|'setMute'|'setSolo'|'setTrackVolume'|'setPan'|'focus'|'setFocus'>&Partial<Pick<NativePlaybackController,'master'|'setMaster'>>|null;
+  player:Pick<NativePlaybackController,'subscribe'|'getState'|'mix'|'setMute'|'setSolo'|'setTrackVolume'|'setPan'|'focus'|'setFocus'>&Partial<Pick<NativePlaybackController,'master'|'setMaster'|'previewMix'>>|null;
 }):React.JSX.Element {
   const state=useSyncExternalStore(player?.subscribe ?? noSubscribe,player?.getState ?? noState);
   const { t } = useI18n();
@@ -101,7 +128,7 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
   const phase=state?.practice?.phase;
   const playbackBar=state?.ready&&!state.error&&(phase==='playing'||phase==='paused')&&!state.practice.countInRemaining&&Number.isInteger(state.measure)&&state.measure>=0&&state.measure<score.masterBars.length?state.measure:null;
   return <section className="track-panel" aria-label="Tracks">
-    <div className="track-panel-view" hidden={view!=='overview'}><PlaybackTick.Provider value={state}><DockRows.Provider value={dockRows}><DockShown.Provider value={dockShown}><ScoreOverview model={overview} colors={colors} controls={controls} target={target} loop={loop} playbackBar={playbackBar} onSelect={onSelectPosition} onExit={onExitOverview}/></DockShown.Provider></DockRows.Provider></PlaybackTick.Provider>
+    <div className="track-panel-view" hidden={view!=='overview'}><PlaybackTick.Provider value={state}><DockRows.Provider value={dockRows}><DockShown.Provider value={dockShown}><ScoreOverview model={overview} colors={colors} controls={controls} target={target} loop={loop} playbackBar={playbackBar} onSelect={onSelectPosition} onSelectTrack={onSelect} onExit={onExitOverview}/></DockShown.Provider></DockRows.Provider></PlaybackTick.Provider>
       <div className="score-overview-master" role="group" aria-label={t('audio.master')}><span className="score-overview-master-name">{t('audio.master')}</span><span className="score-overview-mix score-overview-master-mix"><DockMasterControls master={player?.master?.()} disabled={busy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/></span></div></div>
     <div className="track-panel-view track-mixer" role="region" aria-label="Mixer" hidden={view!=='mixer'}>
       <section className="track-channel track-focus" aria-label="Focus">
@@ -113,10 +140,9 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
       {score.tracks.map(track=>{
         const mix=player?.mix(track),mute=mix?.mute??track.playbackInfo.isMute,solo=mix?.solo??track.playbackInfo.isSolo,volume=mix?.volume??1,pan=mix?.pan??0;
         return <section className={`track-channel${track.index===selected?' selected':''}`} key={track.index} aria-label={`Channel ${track.index+1}: ${track.name}`}>
-          <div className="track-channel-heading"><button className="track-channel-select" title={track.name} aria-label={`Track ${track.index+1}: ${track.name}`} aria-pressed={track.index===selected} disabled={busy} onClick={()=>onSelect(track.index)}><span className="track-color-swatch" aria-hidden="true" style={{backgroundColor:trackColorHex(track.color)}}/>{track.index+1}. {track.name || `Track ${track.index+1}`}</button><span className="track-channel-status">{track.index===selected?'Selected':track.isPercussion?'Percussion':`${track.staves[0].tuning.length?`${track.staves[0].tuning.length} strings`:'Notation'}`}</span></div>
+          <div className="track-channel-heading"><button className="track-channel-select" title={track.name} aria-label={`Track ${track.index+1}: ${track.name}`} aria-pressed={track.index===selected} onClick={event=>{if(event.detail>0)onSelect(track.index,'pointer');else onSelect(track.index);}}><span className="track-color-swatch" aria-hidden="true" style={{backgroundColor:trackColorHex(track.color)}}/>{track.index+1}. {track.name || `Track ${track.index+1}`}</button><span className="track-channel-status">{track.index===selected?'Selected':track.isPercussion?'Percussion':`${track.staves[0].tuning.length?`${track.staves[0].tuning.length} strings`:'Notation'}`}</span></div>
           <div className="track-channel-switches"><label><input type="checkbox" checked={mute} disabled={busy||!player} onChange={e=>player?.setMute(track.index,e.target.checked)}/>Mute</label><label><input type="checkbox" checked={solo} disabled={busy||!player} onChange={e=>player?.setSolo(track.index,e.target.checked)}/>Solo</label></div>
-          <label className="track-channel-range">Volume <output>{volume.toFixed(2)}</output><input type="range" min={0} max={1} step={.05} value={volume} disabled={busy||!player} aria-label={`Volume ${track.name}`} aria-valuetext={String(volume)} onChange={e=>player?.setTrackVolume(track.index,Number(e.target.value))}/></label>
-          <label className="track-channel-range">Pan <output>{pan.toFixed(2)}</output><input type="range" min={-1} max={1} step={.05} value={pan} disabled={busy||!player} aria-label={`Pan ${track.name}`} aria-valuetext={String(pan)} onChange={e=>player?.setPan(track.index,Number(e.target.value))}/></label>
+          <ChannelRanges key={trackIdentity(track)} player={player} score={score} track={track} busy={busy} volume={volume} pan={pan}/>
         </section>;
       })}
       <MasterPanel master={player?.master?.()} disabled={busy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/>

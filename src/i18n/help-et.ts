@@ -92,7 +92,7 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
 
   'help.topic.editing.title': 'Pala muutmine',
   'help.topic.editing.move.title': 'Liikumine ja nootide seadmine',
-  'help.topic.editing.move.p1': 'Klõpsa löögil või kasuta nooleklahve, et liigutada sinist muutmissihtmärki. Üles ja alla vahetavad keelt; kirjuta number väljale „{@editor.fret}“ ja vajuta Enter, et noot seada.',
+  'help.topic.editing.move.p1': 'Klõpsa löögil või kasuta nooleklahve, et liigutada sinist muutmissihtmärki. Üles ja alla vahetavad keelt; kirjuta number ja „{@editor.fret}“ kirjutatakse noodile kohe; teine number ühe sekundi jooksul teeb sellest kahekohalise (1, siis 2, annab 12). Üks käsk „Võta tagasi“ võtab mõlemad numbrid tagasi. Escape lõpetab teise numbri ootamise; Enter kirjutab välja „{@editor.fret}“ väärtuse, kui väärtus on määratud väljalt või pillivaatest.',
   'help.topic.editing.entry.title': 'Noodisisestus',
   'help.topic.editing.entry.p1': '„{@score_entry.toggle}“, mille lülitad sisse tööriistariba vasakpoolse nupuga või klahviga N, kirjutab noote noodijoonestikul klõpsates või klahvidega A kuni G.',
   'help.topic.editing.entry.p2': '{@help.shortcut_note_entry}',

@@ -700,7 +700,8 @@ it('ends a drag without an edit when a block change replaces the knob it was on'
   const gain=screen.getByRole('slider',{name:'amp Gain (dB)'});
   await press(user,gain);
   expect(player.soundPreview()).not.toBeNull();
-  await user.click(screen.getByRole('tab',{name:/^Drive, /}));await wait(20);
+  // The block changes with the pointer still held (a bare click event: a real press and release elsewhere would end the drag where it was released, and record it).
+  fireEvent.click(screen.getByRole('tab',{name:/^Drive, /}));await wait(20);
   expect(player.soundPreview()).toBeNull();
   await user.pointer([{keys:'[/MouseLeft]',target:screen.getByRole('slider',{name:'drive Drive'})}]);await wait(20);
   expect(edits).toEqual([]);

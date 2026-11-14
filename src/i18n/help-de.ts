@@ -92,7 +92,7 @@ export const helpDe: Record<keyof typeof helpEn, string> = {
 
   'help.topic.editing.title': 'Die Partitur bearbeiten',
   'help.topic.editing.move.title': 'Bewegen und Noten setzen',
-  'help.topic.editing.move.p1': 'Klicken Sie auf einen Schlag oder verwenden Sie die Pfeiltasten, um das blaue Bearbeitungsziel zu bewegen. Auf und Ab wechseln die Saite; geben Sie die Nummer für „{@editor.fret}“ ein und drücken Sie die Eingabetaste, um die Note zu setzen.',
+  'help.topic.editing.move.p1': 'Klicken Sie auf einen Schlag oder verwenden Sie die Pfeiltasten, um das blaue Bearbeitungsziel zu bewegen. Auf und Ab wechseln die Saite; tippen Sie eine Zahl, und der „{@editor.fret}“ wird sofort auf die Note geschrieben; eine zweite Ziffer innerhalb einer Sekunde macht daraus zwei Ziffern (1, dann 2, ergibt 12). Ein Rückgängig nimmt beide Ziffern zurück. Escape beendet das Warten auf eine zweite Ziffer; die Eingabetaste schreibt den Wert des Feldes „{@editor.fret}“, etwa wenn der Wert im Feld oder in der Instrumentenansicht gesetzt wurde.',
   'help.topic.editing.entry.title': 'Noteneingabe',
   'help.topic.editing.entry.p1': '{@score_entry.toggle}, eingeschaltet mit der Schaltfläche links in der Werkzeugleiste oder mit N, schreibt Noten durch Klicken ins Notensystem oder Tippen von A bis G.',
   'help.topic.editing.entry.p2': '{@help.shortcut_note_entry}',

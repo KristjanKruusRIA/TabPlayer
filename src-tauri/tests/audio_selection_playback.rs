@@ -132,7 +132,9 @@ fn play_range_is_atomic_and_nullable_end_is_meaningful() {
         TransportCommand::SetPractice {
             generation: 1,
             settings: PracticeSettings {
-                tempo: PracticeTempo::Fixed { bpm: 90.0 },
+                // With a backing, a fixed tempo is refused only when it would stretch the backing outside 10% to 300%:
+                // 11 BPM over the score's 120 is under 10%.
+                tempo: PracticeTempo::Fixed { bpm: 11.0 },
                 ..Default::default()
             },
         },

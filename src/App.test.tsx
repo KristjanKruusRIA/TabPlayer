@@ -557,6 +557,17 @@ it('selects editable music with keyboard shortcuts without changing history or t
   const selectedHistory=c.getState().snapshot.project.edits.length;click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);
   expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();expect(selectedHistory).toBe(history+1);
 });
+it('Alt+Shift+period and comma move the range end by the entry duration and never past its start',async()=>{
+  const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));
+  const history=c.getState().snapshot.project.edits.length,workspace=screen.getByRole('region',{name:'Score workspace'}),move=(code:'Comma'|'Period')=>fireEvent.keyDown(workspace,{key:code==='Comma'?'<':'>',code,altKey:true,shiftKey:true});
+  fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});expect(screen.getByText('1 note · 2 beats')).toBeInTheDocument();
+  move('Period');expect(screen.getByText('1 note · 3 beats')).toBeInTheDocument();
+  move('Comma');move('Comma');expect(screen.getByText('1 note · 1 beat')).toBeInTheDocument();
+  move('Comma');expect(screen.getByText('1 note · 1 beat')).toBeInTheDocument();
+  expect(c.getState().snapshot.project.edits).toHaveLength(history);
+  // Alt+Shift+Arrow is still the measure extension, not this.
+  fireEvent.keyDown(workspace,{key:'ArrowRight',altKey:true,shiftKey:true});expect(screen.queryByText('1 note · 1 beat')).not.toBeInTheDocument();
+});
 it('keeps the beat cursor on its original music across insert and remove measure ranges',async()=>{
   const c=await setup();change('Measure','3');change('Measures to insert','2');click('Insert before');
   await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(6));await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(5));

@@ -390,7 +390,7 @@ export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocume
       mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);documentSettings.engraving=mapEngravingBars(documentSettings.engraving,prepared.barMap.oldToNew);
     }else if(edit.type==='transposeHarmony')score=prepareHarmonyTranspose(rebuild(score),edit,index);
     else {
-      if(!previous&&['setOttava','setCrescendo','setFermata','setSustainPedal','setSimile','eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','tieSelectionToEarlierPitch','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
+      if(!previous&&['setOttava','setCrescendo','setFermata','setSustainPedal','setSimile','eraseSelection','cutSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','tieSelectionToEarlierPitch','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
       const measureMap=edit.type==='insertMeasures'||edit.type==='removeMeasures'?planMeasureMap(score.masterBars.length,edit):null;
       if(measureMap)mapLyricsMeasures(score,measureMap);
       apply(score, edit,index);
@@ -401,7 +401,7 @@ export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocume
       if (edit.type==='duplicateTrack') {identities.splice(edit.track+1,0,`added/${index}/${JSON.stringify(edit)}`);copyTrackSettings(documentSettings,identities[edit.track],identities[edit.track+1]);}
       if (['addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack'].includes(edit.type)) forgetTrackOrderedEntries(score);
       if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);documentSettings.engraving=mapEngravingBars(documentSettings.engraving,Array.from({length:score.masterBars.length+1},(_,bar)=>bar<edit.bar?bar:bar===edit.bar?null:bar-1));}
-      if (!previous&&['insertBeat','deleteBeat','fitVoice','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
+      if (!previous&&['insertBeat','deleteBeat','fitVoice','cutSelection','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
         score = rebuild(score);
       }
     }

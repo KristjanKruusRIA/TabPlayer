@@ -123,11 +123,13 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
   'help.topic.selection.select.title': 'Muusika valimine',
   'help.topic.selection.select.p1': '{@keys.chord_selection}: {@help.shortcut_selection} {@keys.chord_select_track}: {@help.shortcut_select_track} {@keys.escape}: {@help.shortcut_clear}',
   'help.topic.selection.select.p2': 'Kaardi „{@inspector.selection}“ jaotises „{@editor.music_selection}“ on „{@editor.select_bar}“, „{@editor.select_track}“ ja „{@editor.select_all}“. Valik kuulub seansile ja seda ei salvestata.',
+  'help.topic.selection.select.p3': '{@keys.chord_range_edge}: {@help.shortcut_range_edge}',
   'help.topic.selection.clipboard.title': 'Kopeerimine, lõikamine ja kleepimine',
   'help.topic.selection.clipboard.p1': '{@keys.chord_clipboard}: {@help.shortcut_clipboard}',
   'help.topic.selection.clipboard.p2': '{@editor.paste_context_hint}',
   'help.topic.selection.clipboard.p3': 'Kaardi „{@inspector.selection}“ jaotises „{@editor.musical_clipboard}“ on samad toimingud valikutega: „{@editor.copy_cut_mode}“, „{@editor.paste_repetitions}“ ja „{@editor.paste_special}“. {@editor.clipboard_multi_hint} Mitme raja kopeerimine vähemate radadega palasse lisab puuduvad rajad.',
   'help.topic.selection.clipboard.p4': 'Kleepimine on keelatud kordusmärgi lõpetava takti ja selle järgmise alternatiivlõpu vahel ning mitmetaktilise alternatiivlõpu sees. Kleebi enne kordust või terve lõpu ees või järel.',
+  'help.topic.selection.clipboard.p5': 'Venitatud noodist lõigatud aja tagasi kleepimisel kõlab noot lõikeserval uuesti: osi ühendanud sidekaar ei taastu.',
 
   'help.topic.tracks.title': 'Rajad ja helid',
   'help.topic.tracks.settings.title': 'Raja seaded',

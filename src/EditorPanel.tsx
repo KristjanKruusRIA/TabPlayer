@@ -26,6 +26,8 @@ import { EditingToolbar } from './editor/EditingToolbar';
 import { durationLabel } from './editor/common';
 import { displayedBpm, shownBpm, quarterUnit, tempoUnitKeys, tempoUnitOf } from './editor/tempo-unit';
 import type { MusicSelection } from './editor/range-types';
+import { rangeExtent } from './editor/range-edge';
+import { rangeCutsBeat } from './editor/clipboard-subdivide';
 import './editor-panel.css';
 
 export type InspectorContextScope = 'all' | 'note' | 'beat' | 'measure' | 'staff' | 'selection';
@@ -260,7 +262,9 @@ export function EditorPanel({
 
   const selectionSummary = musicSelection
     ? musicSelection.kind === 'range'
-      ? `Range selection · M${musicSelection.range.start.bar + 1}–M${musicSelection.range.end.bar + 1}`
+      ? rangeCutsBeat(score, musicSelection.range)
+        ? t('editor.range_extent', rangeExtent(score, musicSelection.range))
+        : `Range selection · M${musicSelection.range.start.bar + 1}–M${musicSelection.range.end.bar + 1}`
       : musicSelection.kind === 'bars'
         ? `Range selection · Measures ${musicSelection.firstBar + 1}–${musicSelection.lastBar + 1}`
         : `Range selection · ${musicSelection.notes.length} note${musicSelection.notes.length === 1 ? '' : 's'}`

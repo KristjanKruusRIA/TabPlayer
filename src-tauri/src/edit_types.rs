@@ -1006,6 +1006,10 @@ pub enum EditCommand {
     EraseSelection {
         selection: MusicSelection,
     },
+    /// Cuts a range whose edge falls inside a held beat: the beat is split at the edge, the selected time becomes rests.
+    CutSelection {
+        selection: MusicSelection,
+    },
     TransposeSelection {
         selection: MusicSelection,
         semitones: i32,
@@ -1581,6 +1585,7 @@ impl EditCommand {
                 options.validate()?;
             }
             Self::EraseSelection { selection }
+            | Self::CutSelection { selection }
             | Self::TransposeSelection { selection, .. }
             | Self::MoveSelectionStrings { selection, .. }
             | Self::RefingerSelection { selection, .. }
@@ -1590,6 +1595,11 @@ impl EditCommand {
             | Self::TieSelectionToEarlierPitch { selection } => {
                 selection.validate()?;
                 match self {
+                    Self::CutSelection { selection }
+                        if !matches!(selection, MusicSelection::Range { .. }) =>
+                    {
+                        return Err("A cut inside a note needs a range of time.".into());
+                    }
                     Self::TransposeSelection { semitones, .. }
                         if *semitones == 0 || !(-127..=127).contains(semitones) =>
                     {
@@ -2269,6 +2279,12 @@ mod tests {
         commands.extend(music_selections().into_iter().map(
             |selection| json!({"type": "tieSelectionToEarlierPitch", "selection": selection}),
         ));
+        commands.extend(
+            music_selections()
+                .into_iter()
+                .filter(|selection| selection["kind"] == "range")
+                .map(|selection| json!({"type": "cutSelection", "selection": selection})),
+        );
         commands
     }
 
@@ -2333,7 +2349,26 @@ mod tests {
             json!({"kind": "beats"}),
         ] {
             rejected(&json!({"type": "eraseSelection", "selection": invalid}));
+            rejected(&json!({"type": "cutSelection", "selection": invalid}));
         }
+        // A cut carries the selection and nothing else; an empty or backwards range is as invalid as for an erase.
+        rejected(&json!({"type": "cutSelection"}));
+        // Only a range of time can be cut through a note: the notes and bars kinds are the plain erase.
+        for selection in music_selections() {
+            if selection["kind"] != "range" {
+                rejected(&json!({"type": "cutSelection", "selection": selection}));
+            }
+        }
+        rejected(
+            &json!({"type": "cutSelection", "selection": {"kind": "range", "range": {
+            "start": {"bar": 0, "tick": 480}, "end": {"bar": 0, "tick": 480},
+            "lanes": [{"track": 0, "staff": 0, "voice": 0}]}}}),
+        );
+        rejected(
+            &json!({"type": "cutSelection", "selection": {"kind": "range", "range": {
+            "start": {"bar": 0, "tick": 480}, "end": {"bar": 0, "tick": 960},
+            "lanes": [{"track": 0, "staff": 0, "voice": 0}]}}, "split": true}),
+        );
         rejected(&json!({"type": "eraseSelection", "selection": {
             "kind": "bars", "tracks": [0], "firstBar": 0, "lastBar": 0, "notes": []
         }}));

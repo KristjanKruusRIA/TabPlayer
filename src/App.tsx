@@ -93,6 +93,8 @@ import { PracticePanel } from './audio/PracticePanel';
 import { TunerPanel } from './audio/TunerPanel';
 import { LineInPanel,useLineInRunning } from './audio/LineInPanel';
 import { MidiCaptureIndicator,MidiCapturePanel } from './editor/MidiCapturePanel';
+import { FretlightFeed } from './fretlight/FretlightFeed';
+import { FretlightPanel } from './fretlight/FretlightPanel';
 import { planMidiCapture } from './editor/midi-capture';
 import { activeStringMapping } from './editor/midi-capture-preferences';
 import { midiCaptureSession } from './editor/midi-capture-session';
@@ -1129,6 +1131,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <label className="check"><input type="checkbox" checked={paletteVisible} onChange={event=>setPaletteVisible(event.target.checked)}/>{t('view.edition_palette')}</label>
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
         <MidiCapturePanel writeWhilePlaying={inputPrefs.writeWhilePlaying}/>
+        <FretlightPanel trackStrings={trackStrings}/>
         <div className="language-setting-row"><label>{t('preferences.language')}: <select aria-label={t('preferences.language')} value={preference} onChange={e=>setPreference(e.target.value as LanguagePreference)}><option value="system">{t('preferences.lang_system')}</option><option value="en">{t('preferences.lang_en')}</option><option value="et">{t('preferences.lang_et')}</option><option value="de">{t('preferences.lang_de')}</option></select></label></div>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.window')}</summary><section aria-label={t('menu.window')}>
@@ -1156,6 +1159,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <span className="tp-sr score-tools">{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
       </div>
       <div className="gp-toolbar-display"><TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={shownDisplay} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError} compact={compactHeight}/></div>
+      <FretlightFeed score={state.score} target={target} player={player}/>
       {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection} display={transportDisplay}/>}
       <div className="gp-toolbar-right">
         <details ref={practiceMenu} className="gp-practice" onToggle={event=>{if(event.currentTarget.open)event.currentTarget.querySelectorAll<HTMLDetailsElement>('.gp-practice-body details:not([open])').forEach(inner=>{inner.open=true;});}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} aria-label={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} data-line-in={lineInOn||undefined}><PracticeGlyph/>{lineInOn&&<span className="line-in-badge" aria-hidden="true"/>}</summary><div ref={setPracticeHost} className="gp-practice-body"/></details>

@@ -45,9 +45,13 @@ await copyFile(new URL('../legal/Apache-2.0.txt',import.meta.url),new URL('Apach
 await copyFile(new URL('../legal/integrated-notices.txt',import.meta.url),new URL('integrated-notices.txt',output));
 // The vorbis-rs crates publish no licence file, so their upstream BSD-3-Clause text is kept in the repository.
 await copyFile(new URL('../legal/vorbis-rs-BSD-3-Clause.txt',import.meta.url),new URL('vorbis-rs-BSD-3-Clause.txt',output));
+// The basic-udev crate (the Linux backend of hidapi) ships no licence file, so its MIT text is kept in the repository.
+await copyFile(new URL('../legal/basic-udev-MIT.txt',import.meta.url),new URL('basic-udev-MIT.txt',output));
 // VST3 hosting: the `vst3` crate's licences are packaged with the crate; `com-scrape-types` publishes no licence file, the
 // Steinberg interfaces the bindings are generated from are MIT, and the plug-in helper vendors a part of SoundCraft's FFI
 // (its bundle resolution is in the protocol crate, so the app binary links that part too).
 for(const name of ['steinberg-pluginterfaces-MIT.txt','com-scrape-types-MIT.txt','soundcraft-vst3-host-MIT.txt'])await copyFile(new URL(`../legal/${name}`,import.meta.url),new URL(name,output));
+// The hidapi crate builds the bundled C HIDAPI on macOS only; its BSD-style licence is kept in the repository (Fretlight, THE-77).
+await copyFile(new URL('../legal/hidapi-bsd-license.txt',import.meta.url),new URL('hidapi-bsd-license.txt',output));
 // The LGPL-3.0 of mp3lame-sys asks for the GNU GPL 3.0 text to travel with it.
 await copyFile(new URL('../legal/GPL-3.0.txt',import.meta.url),new URL('GPL-3.0.txt',output));

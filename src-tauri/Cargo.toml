@@ -35,6 +35,9 @@ mp3lame-sys = { version = "=0.1.11", default-features = false }
 ringbuf = "=0.5.3"
 # External MIDI output (A26): MIT, thin wrappers over WinMM, CoreMIDI and ALSA.
 midir = "=0.11.1"
+# Fretlight guitar LEDs over wired USB HID (THE-77): MIT. `windows-native` and `linux-native-basic-udev` are pure Rust, so Windows and Linux need no
+# system package and no bundled C hidapi (Linux reads the udev database without libudev); macOS builds the bundled C backend over IOKit.
+hidapi = { version = "=2.6.7", default-features = false, features = ["windows-native", "linux-native-basic-udev"] }
 svg2pdf = "=0.13.0"
 resvg = { version = "=0.45.1", default-features = false }
 png = "=0.17.16"

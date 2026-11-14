@@ -1,0 +1,4 @@
+.fretlight-panel{display:grid;gap:6px;min-width:0}
+.fretlight-panel label{display:grid;gap:4px;min-width:0}
+.fretlight-panel .hint{margin:0}
+.fretlight-experimental strong{font-weight:600}

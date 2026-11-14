@@ -10,6 +10,7 @@ pub mod export;
 pub mod export_backing;
 pub mod file_library;
 pub mod files;
+pub mod fretlight;
 pub mod fs_identity;
 pub mod harmony;
 pub mod harmony_library;
@@ -1090,6 +1091,7 @@ pub fn run() {
         .manage(tuner::TunerState::default())
         .manage(line_in::LineInState::default())
         .manage(midi_in::MidiInState::default())
+        .manage(fretlight::FretlightState::default())
         .setup(|app| {
             // Files named on the command line, as an associated file's double-click passes them.
             if let Ok(directory) = std::env::current_dir() {
@@ -1375,7 +1377,11 @@ pub fn run() {
         midi_in::midi_in_start,
         midi_in::midi_in_configure,
         midi_in::midi_in_stop,
-        midi_in::midi_in_status
+        midi_in::midi_in_status,
+        fretlight::fretlight_connect,
+        fretlight::fretlight_frame,
+        fretlight::fretlight_disconnect,
+        fretlight::fretlight_status
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1501,6 +1507,11 @@ pub fn run() {
         midi_in::midi_in_stop,
         midi_in::midi_in_status,
         midi_in::midi_in_test_inject,
+        fretlight::fretlight_connect,
+        fretlight::fretlight_frame,
+        fretlight::fretlight_disconnect,
+        fretlight::fretlight_status,
+        fretlight::fretlight_test_log,
         plugins::commands::plugin_test_set_parameter,
         desktop_test_io
     ]);
@@ -1525,6 +1536,10 @@ pub fn run() {
                 }
                 if let Some(midi_in) = app.try_state::<midi_in::MidiInState>() {
                     midi_in.shutdown();
+                }
+                // The all-off frame is written first, for at most a second and a half.
+                if let Some(fretlight) = app.try_state::<fretlight::FretlightState>() {
+                    fretlight.shutdown();
                 }
                 if let (Some(line_in), Some(audio)) = (
                     app.try_state::<line_in::LineInState>(),

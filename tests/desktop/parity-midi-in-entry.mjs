@@ -86,6 +86,46 @@ try{
   await page.getByText(/is outside what this instrument can play/).waitFor();
   assert.equal((await edits()).length,count);
 
+  // Write notes while the score plays: with the setting off, playback pauses typed keys and chords, nothing waits for later, and stopping restores entry at once.
+  // The checkbox is in the View menu next to this section and does not close the menu.
+  const openPanel=async()=>{await viewSummary.click();if(!await panel.evaluate(node=>node.open))await panel.locator('summary').click();};
+  const closeMenu=async()=>{await viewSummary.focus();await page.keyboard.press('Escape');await page.waitForTimeout(200);};
+  await openPanel();
+  const setting=page.getByLabel('Write notes while the score plays');
+  assert.equal(await setting.isChecked(),true,'writing while the score plays is on by default');
+  await setting.click();assert.equal(await setting.isChecked(),false);
+  assert.equal(await page.evaluate(()=>document.querySelector('details.midi-capture-panel').parentElement.closest('details').open),true,'the View menu stays open when the setting is changed');
+  await panel.getByText(/Chords are not written while the score plays/).waitFor();
+  await closeMenu();
+  const status=()=>invoke('audio_status');
+  const lost=async()=>{await openPanel();const text=await panel.getByText(/chords? did not reach the score\./).first().textContent();await closeMenu();return Number(/^(\d+)/.exec(text)[1]);};
+  const lostBefore=await lost(),editsBefore=(await edits()).length;
+  await workspace.focus();await page.keyboard.press('Space');
+  await until(status,value=>value.playing,'the score plays');
+  await play([...noteOn(40),...noteOn(47)]);
+  await page.keyboard.press('e');await page.keyboard.press('g');
+  await page.getByText(/Note entry is paused while the score plays/).waitFor();
+  assert.equal(await page.getByText(/Note entry is paused while the score plays/).count(),1,'the notice appears once');
+  await page.waitForTimeout(300);
+  assert.equal((await status()).playing,true,'still playing while the keys and the chord were refused');
+  assert.equal((await edits()).length,editsBefore,'nothing is written while the score plays');
+  assert.equal(await lost(),lostBefore+1,'the chord is counted as not reaching the score');
+  await openPanel();await panel.getByText(/writing during playback is off/).waitFor();await closeMenu();
+  // Stop: entry works again at once, and the keys and chord played during playback were not kept.
+  await workspace.focus();await page.keyboard.press('Space');
+  await until(status,value=>!value.playing,'the score stops');
+  await page.waitForTimeout(300);
+  assert.equal((await edits()).length,editsBefore,'nothing waited for later');
+  await page.keyboard.press('e');
+  await until(edits,list=>list.length===editsBefore+1,'a typed key is written once playback stops');
+  await page.waitForTimeout(200);await play([...noteOn(40),...noteOn(47)]);
+  await until(edits,list=>list.length===editsBefore+2,'a chord is written once playback stops');
+  // Back on: the same key is written while the score plays.
+  await openPanel();await setting.click();assert.equal(await setting.isChecked(),true);await closeMenu();
+  await workspace.focus();await page.keyboard.press('Space');await until(status,value=>value.playing,'the score plays again');
+  await page.keyboard.press('e');await until(edits,list=>list.length===editsBefore+3,'with the setting on a typed key is written while the score plays');
+  await page.keyboard.press('Space');await until(status,value=>!value.playing,'the score stops again');
+
   assert.deepEqual(errors,[]);
   await mkdir(resolve('.analysis/parity'),{recursive:true});await page.screenshot({path:resolve('.analysis/parity/native-midi-in-entry.png')});
   console.log('MIDI input entry passed:',JSON.stringify({first:written.commands.map(placement),next}));

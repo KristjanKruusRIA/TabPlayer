@@ -113,7 +113,7 @@ import { effectivePageLayout } from './engraving/page';
 import { resolveVisibleTracks,type TrackView } from './engraving/view';
 import { isPhysicalPageLayout,resolveScoreDisplay,type ScoreDisplayPreferences } from './engraving/screen-view';
 import { gridTicks,moveRangeEnd } from './editor/range-edge';
-import { acceptsOnlyWholeBeats,eraseCommandFor } from './editor/range-cut';
+import { acceptsOnlyWholeBeats,cutLyricWordsLost,eraseCommandFor } from './editor/range-cut';
 import { defaultPrintLayout } from './document-settings';
 import { HarmonyChordDialog } from './harmony/HarmonyChordDialog';
 import { ScaleToolPanel } from './harmony/ScaleToolPanel';
@@ -133,7 +133,7 @@ type EntryItem=
   |{kind:'enter'}
   |{kind:'capture';chord:MidiChord};
 interface QueuedEntryKey{item:EntryItem;at:number;documentId:string}
-const ENTRY_QUEUE_MAX=8,ENTRY_QUEUE_STALE_MS=2000;
+const ENTRY_QUEUE_MAX=8,ENTRY_QUEUE_STALE_MS=2000,DROPPED_NOTICE_PAUSE_MS=1500;
 /** Chords that may wait in the entry queue at once; more are counted as not written. */
 const CHORD_QUEUE_MAX=4;
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)&&!(target instanceof HTMLInputElement&&target.type==='range')||target.isContentEditable);
@@ -201,6 +201,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const entryQueue=useRef<QueuedEntryKey[]>([]),ownEdits=useRef(0),draining=useRef(false),entryFailure=useRef<{text:string|null}|null>(null),[settled,setSettled]=useState(0);
   // `unseenSettles` are edits whose follow-up has run but whose render has not committed yet; they stay in `ownEdits` until the drain effect (which runs after that commit) takes them off.
   const unseenSettles=useRef(0),refusing=useRef(false);
+  // Typed keys the drain dropped as too old. Its own line, apart from the input notice: writing a note, moving the cursor or a refusal reason must not hide it. It goes at the next edit
+  // that lands more than a short pause after the last key was dropped (a fast typist sees it, one who stopped typing does not keep it), and with the document.
+  // After a cut that took lyric words out of the lyrics: shown while that cut is the last edit, so Undo (or any later edit) takes it away.
+  const [lyricsCutNotice,setLyricsCutNotice]=useState<{count:number;edits:number}|null>(null);
+  const [droppedNotice,setDroppedNotice]=useState<{count:number;at:number}|null>(null);
   // MIDI capture: where the fretting hand last was, and the cursor an undo of the last captured chord puts back.
   const handFret=useRef<number|null>(null),captureUndo=useRef<{documentId:string;revision:number;from:BeatTarget;at:BeatTarget}|null>(null),captureEnd=useRef<{documentId:string;revision:number;at:BeatTarget}|null>(null);
   // Clearing the queue also lifts the refusal latch (see `refusing` in `keys`).
@@ -355,12 +360,14 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setClipboardError(null);
     // A range that ends inside a note of the lane it was shaped on is drawn part-way through that note, but these edits take every note that starts in it: say so, as a gesture, rather than act on more than is shown.
     if('selection'in command&&acceptsOnlyWholeBeats(state.score,command as {type:string;selection?:MusicSelection},{track:target.track,staff:target.staff,voice:target.voice})){setClipboardError(t('editor.range_edge_whole_beats_only'));return Promise.resolve(false);}
-    const oldCount=state.score.masterBars.length;
+    const oldCount=state.score.masterBars.length,lostWords=command.type==='cutSelection'?cutLyricWordsLost(state.score,command.selection):0;
     const wasPlaying=player?.getState().playing??false;
     let recorded=false;
     const landed=controller.edit(command);ownEdits.current++;
     const done=landed.then(()=>{
       recorded=true;
+      if(lostWords>0)setLyricsCutNotice({count:lostWords,edits:controller.getState().snapshot.project.edits.length});
+      setDroppedNotice(old=>old&&Date.now()-old.at>DROPPED_NOTICE_PAUSE_MS?null:old);
       captureUndo.current=null;captureEnd.current=null;
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
@@ -387,8 +394,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     try{
       const scope=musicClipSelection(state.score,musicSelection,mode),bars=scope as Extract<MusicSelection,{kind:'bars'}>;
       const map=cut&&mode==='multiTrack'?planMeasureMap(state.score.masterBars.length,{type:'removeMeasures',firstBar:bars.firstBar,lastBar:bars.lastBar}):null;
+      const splitting=cut&&mode==='singleTrack'?eraseCommandFor(state.score,scope,{track:target.track,staff:target.staff,voice:target.voice}):null,lostWords=splitting?.type==='cutSelection'?cutLyricWordsLost(state.score,splitting.selection):0;
       act((cut?controller.cutMusic(scope,mode,{track:target.track,staff:target.staff,voice:target.voice}):controller.copyMusic(scope,mode)).then(value=>{
         clipboard.set(value);setClipboardVersion(version=>version+1);
+        if(lostWords>0)setLyricsCutNotice({count:lostWords,edits:controller.getState().snapshot.project.edits.length});
         if(cut){setSelection(old=>map?repairMeasureSelection(controller.getState().score,old,map):repairSelection(controller.getState().score,old));editorSelection(null);}
       }).catch(reason=>setClipboardError(reason instanceof Error?reason.message:String(reason))));
     }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
@@ -673,6 +682,22 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(pair)void edit({type:'sequence',commands:[lead as SequenceStep,note as SequenceStep]});
     else void edit(note).then(accepted=>{if(accepted)entryDuration.current=entryAfterWrite(beat,entryDuration.current);});
   };
+  /** Whether the transport is running, a count-in included. */
+  const transportRunning=()=>{const playback=player?.getState();return !!playback&&(playback.playing||playback.practice.phase==='countIn');};
+  /** The setting to write notes while the score plays is off and the transport is running: typed entry and MIDI capture are paused, and nothing waits for later. */
+  const entryPaused=()=>!inputPrefs.writeWhilePlaying&&transportRunning();
+  /** Whether an item writes a note: a typed letter, Enter (it commits the typed fret as a note, in note entry or not), or a captured chord. Typing the fret digits only builds the fret, and durations, accidentals, respelling and every other edit write no note. */
+  const writesNote=(item:EntryItem)=>item.kind==='capture'||item.kind==='entry'&&item.key.kind==='letter'||item.kind==='enter';
+  /** Says that typed entry is paused whenever a key is ignored and the notice is not already on screen (it is tied to the cursor, so a move hides it). */
+  const announcePaused=()=>{
+    const text=t('editor.entry_paused_playing'),at=JSON.stringify(target);
+    setPendingAccidental(null);
+    if(inputNotice?.text===text&&inputNotice.at===at)return;
+    setInputNotice({text,at});
+  };
+  useEffect(()=>{if(!playbackState?.playing&&playbackState?.practice.phase!=='countIn')midiCaptureSession().setPaused(false);},[playbackState?.playing,playbackState?.practice.phase]);
+  useEffect(()=>{if(inputPrefs.writeWhilePlaying)midiCaptureSession().setPaused(false);},[inputPrefs.writeWhilePlaying]);
+  useEffect(()=>{setDroppedNotice(null);},[state.documentId,state.documentEpoch]);
   /**
    * Whether a captured chord is written now: `off` (note entry is not on the score; the chord is only shown, and nothing is said),
    * `blocked` (a header menu, a dialog or a text field has the interface; the chord is counted as not written) or `ok`.
@@ -690,6 +715,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const lose=()=>midiCaptureSession().countNotWritten();
     const mode=captureState();
     if(mode!=='ok'||entryBlocked(target)){lose();return;}
+    // A chord that waited in the queue while playback began is turned away like a live one.
+    if(entryPaused()){midiCaptureSession().setPaused(true);lose();return;}
     // The cursor and the score are read now, not from the render that queued the chord.
     const current=controller.getState(),point=repairSelection(current.score,cursorNow.current);
     const end=captureEnd.current;
@@ -701,6 +728,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** One keyboard entry key, live or from the queue: both run this, so a queued key reads the preferences and the pending accidental when its turn comes. */
   const performItem=(item:EntryItem,at:number)=>{
+    if(item.kind!=='capture'&&writesNote(item)&&entryPaused()){if(item.kind==='enter')endPending();announcePaused();return;}
     if(item.kind==='keypad'){
       if(!location.beat||entryBlocked(target))return;
       const change=numpadDurationEdit(item.keypad,target,location.beat);
@@ -748,6 +776,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** Runs an entry item now or queues it behind the edit in flight; one that cannot join keys already waiting is refused, so the music has no hole. False when it was refused. */
   const dispatchEntryItem=(item:EntryItem):boolean=>{
+    // Nothing is queued for later: while entry is paused the key is told so and dropped.
+    if(item.kind!=='capture'&&writesNote(item)&&entryPaused()){if(item.kind==='enter')endPending();announcePaused();return false;}
     if(refusing.current||entryQueue.current.length&&!entryQueueing()){
       refusing.current=true;if(!entryBlocked(target))setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return false;
     }
@@ -761,6 +791,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const lose=()=>session.countNotWritten();
     session.setBlocked(mode==='menu');
     if(mode!=='ok'){lose();return;}
+    if(entryPaused()){session.setPaused(true);lose();return;}
+    session.setPaused(false);
     const waiting=entryQueue.current.filter(entry=>entry.item.kind==='capture').length;
     if(refusing.current||entryQueue.current.length&&!entryQueueing()||waiting>=CHORD_QUEUE_MAX){lose();return;}
     if(entryQueueing()){if(!enqueueEntry({kind:'capture',chord}))lose();return;}
@@ -778,8 +810,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   /**
    * Runs the first waiting key once the previous one is finished: none of our edits in flight (`ownEdits` drops only after its follow-up moved the
    * selection, so the cursor is where the key before left it), nothing else busy, and this render shows that cursor. A key that makes no edit bumps
-   * `settled`, so the next one runs on the following render. A refused or unlanded key, a stale one, or one for another document discards the rest.
+   * `settled`, so the next one runs on the following render. A refused or unlanded key, or one for another document, discards the rest; one that waited too long is dropped alone.
    */
+  /** What an item is to the note it belongs to: digits make a fret and Enter ends it; an accidental or a keypad duration is set before a letter; a letter writes the note. */
+  const entryRole=(item:EntryItem):'digit'|'enter'|'prefix'|'letter'|'capture'|'other'=>
+    item.kind==='digit'?'digit':item.kind==='enter'?'enter':item.kind==='keypad'||item.kind==='entry'&&item.key.kind==='accidental'?'prefix':item.kind==='entry'&&item.key.kind==='letter'?'letter':item.kind==='capture'?'capture':'other';
   const drainEntry=()=>{
     if(ownEdits.current>0||controlsBusy)return;
     const queue=entryQueue.current,failure=entryFailure.current;entryFailure.current=null;
@@ -787,19 +822,24 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(editLocked||workspaceBusy||queue[0].documentId!==state.documentId){discardEntryQueue(null,'dropped');return;}
     if(failure){discardEntryQueue(failure.text,'discarded');return;}
     if(Date.now()-queue[0].at>ENTRY_QUEUE_STALE_MS){
-      // Each waiting item is judged by its own age, so a key typed just now is not thrown out with chords that have waited too long. A chord that
-      // is too old is counted. A typed key that is too old is dropped, and so are the typed keys after it, which assumed it landed.
-      const now=Date.now();let keysDropped=0,chordsDropped=0,brokenRun=false;
+      // Each waiting item is judged by its own age: a chord or key that waited too long is dropped (chords are counted, keys named in a notice that stays), and a key typed just now is kept
+      // and written, even behind a dropped one. Keys run at the cursor as it stands when they run, so a kept key lands where the cursor is, one place earlier than the player aimed.
+      // The exception is a key that only means something with the key before it: the second digit of a fret, Enter after digits, and a letter after an accidental or a keypad duration
+      // would write a different note (12 becomes 2, a sharp becomes a natural), so it is dropped with the stale key it belongs to. Kept items keep their order.
+      const now=Date.now();let keysDropped=0,chordsDropped=0,orphan:'digit'|'note'|null=null;
       const kept=queue.filter(waiting=>{
-        const old=now-waiting.at>ENTRY_QUEUE_STALE_MS;
-        if(waiting.item.kind==='capture'){if(old)chordsDropped++;return !old;}
-        if(old)brokenRun=true;
-        if(brokenRun){keysDropped++;return false;}
-        return true;
+        const role=entryRole(waiting.item),old=now-waiting.at>ENTRY_QUEUE_STALE_MS;
+        const belongs=!old&&(orphan==='digit'&&(role==='digit'||role==='enter')||orphan==='note'&&(role==='prefix'||role==='letter'));
+        const drop=old||belongs;
+        if(drop){if(role==='capture')chordsDropped++;else keysDropped++;}
+        if(role==='capture')return !drop;
+        if(drop){if(role==='digit')orphan='digit';else if(role==='prefix')orphan='note';else if(role==='letter'||role==='enter')orphan=null;}
+        else orphan=null;
+        return !drop;
       });
       queue.splice(0,queue.length,...kept);
       if(chordsDropped)midiCaptureSession().countNotWritten(chordsDropped);
-      if(keysDropped)setInputNotice({text:t(`editor.entry_queue_stale_${keysDropped===1?'one':'other'}` as MessageKey,{count:keysDropped}),at:JSON.stringify(target)});
+      if(keysDropped)setDroppedNotice(old=>({count:(old&&Date.now()-old.at<=DROPPED_NOTICE_PAUSE_MS*4?old.count:0)+keysDropped,at:Date.now()}));
       if(!kept.length){refusing.current=false;return;}
     }
     const next=queue.shift()!,before=ownEdits.current;
@@ -1088,7 +1128,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>{t('view.bottom_dock')}</label>
         <label className="check"><input type="checkbox" checked={paletteVisible} onChange={event=>setPaletteVisible(event.target.checked)}/>{t('view.edition_palette')}</label>
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
-        <MidiCapturePanel/>
+        <MidiCapturePanel writeWhilePlaying={inputPrefs.writeWhilePlaying}/>
         <div className="language-setting-row"><label>{t('preferences.language')}: <select aria-label={t('preferences.language')} value={preference} onChange={e=>setPreference(e.target.value as LanguagePreference)}><option value="system">{t('preferences.lang_system')}</option><option value="en">{t('preferences.lang_en')}</option><option value="et">{t('preferences.lang_et')}</option><option value="de">{t('preferences.lang_de')}</option></select></label></div>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.window')}</summary><section aria-label={t('menu.window')}>
@@ -1142,6 +1182,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label={t('workspace.score_workspace')} tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
         <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
+        {lyricsCutNotice&&lyricsCutNotice.edits===state.snapshot.project.edits.length&&<div className="score-hint score-hint-lyrics-cut" role="status">{t(`editor.cut_lyrics_removed_${lyricsCutNotice.count===1?'one':'other'}` as MessageKey,{count:lyricsCutNotice.count})}</div>}
+        {droppedNotice&&<div className="score-hint score-hint-dropped" role="status">{t(`editor.entry_queue_stale_${droppedNotice.count===1?'one':'other'}` as MessageKey,{count:droppedNotice.count})}</div>}
         {pendingFret!==null?<div className="score-hint score-hint-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</div>:inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}
       </section>
       {inspectorShown&&<InspectorResizeHandle width={inspectorWidth} min={inspectorMin} max={inspectorMax} onWidth={setInspectorSize} onReset={()=>setInspectorSize(null)}/>}

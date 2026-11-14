@@ -20,6 +20,8 @@ export function MidiCaptureIndicator({bridge=nativeMidiIn}:MidiCapturePanelProps
 }
 export interface MidiCapturePanelProps {
   bridge?:MidiInBridge;
+  /** The note-entry preference "Write notes while the score plays", shown here read-only; the control lives with the other score-input choices. Absent counts as on. */
+  writeWhilePlaying?:boolean;
 }
 /** The pitches, velocities and channels (counted from 1) of a chord, each in the order they were played. */
 export function describeChord(chord:MidiChord):{notes:string;velocity:string;channel:string} {
@@ -44,7 +46,7 @@ function startError(message:string,port:string,t:(key:MessageKey,params?:Record<
  * the port is opened only when Start is pressed, never at launch and never because an input is remembered. The session
  * lives outside the panel, so listening carries on while the View menu is closed.
  */
-export function MidiCapturePanel({bridge=nativeMidiIn}:MidiCapturePanelProps):React.JSX.Element {
+export function MidiCapturePanel({bridge=nativeMidiIn,writeWhilePlaying=true}:MidiCapturePanelProps):React.JSX.Element {
   const {t}=useI18n();
   const session=midiCaptureSession(bridge);
   const state=useMidiCaptureState(session);
@@ -112,6 +114,7 @@ export function MidiCapturePanel({bridge=nativeMidiIn}:MidiCapturePanelProps):Re
     {state.phase==='error'&&<p role="alert">{startError(state.message,port,t)}</p>}
     {running&&<p className="midi-capture-last">{chord?t('midi_in.last_chord',chord):t('midi_in.no_chord')}</p>}
     {state.blocked&&<p className="hint">{t('midi_in.blocked_menu')}</p>}
+    {state.paused?<p className="hint">{t('midi_in.paused_playing')}</p>:!writeWhilePlaying&&<p className="hint">{t('midi_in.write_while_playing_off')}</p>}
     {/* The number changes with every lost chord, so it is not live; the fixed line is announced once, when the first chord is lost. */}
     {state.notWritten>0&&<p className="hint">{t(`midi_in.not_written_${state.notWritten===1?'one':'other'}` as MessageKey,{count:state.notWritten})}</p>}
     <span className="tp-sr" aria-live="polite">{state.notWritten>0?t('midi_in.not_written_alert'):''}</span>

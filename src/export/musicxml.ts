@@ -722,7 +722,7 @@ function exportMusicXmlPlain(score:model.Score,selection:ExportSelection):Uint8A
     const source=getLyricsSource(score.tracks[index])?.value;if(!source)continue;
     // Hidden lyrics have no syllables to write, and comments are not distributed.
     if(!source.visible&&source.lines.some(line=>line.text.trim()))unsupported('hidden lyrics');
-    if(source.lines.some(line=>line.text.includes('[')))unsupported('lyric comments');
+    if(source.lines.some(line=>line.text.replaceAll('[]','').includes('[')))unsupported('lyric comments');
     // Words past the last note are kept in the source but never distributed to a beat.
     const bars=score.tracks[index].staves[0].bars;
     for(const line of source.lines){

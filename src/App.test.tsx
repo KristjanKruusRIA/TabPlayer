@@ -568,6 +568,32 @@ it('Alt+Shift+period and comma move the range end by the entry duration and neve
   // Alt+Shift+Arrow is still the measure extension, not this.
   fireEvent.keyDown(workspace,{key:'ArrowRight',altKey:true,shiftKey:true});expect(screen.queryByText('1 note · 1 beat')).not.toBeInTheDocument();
 });
+/** Bar 1 is a quarter, a quarter and a half note, each with a word. */
+const wordsProject=(words:boolean):Project=>({...blankProject(),edits:[
+  {type:'deleteBeat',target:{track:0,staff:0,bar:0,voice:0,beat:3}},{type:'setDuration',target:{track:0,staff:0,bar:0,voice:0,beat:2},duration:2,dots:0},
+  ...[0,1,2].map(beat=>({type:'setNote' as const,target:{track:0,staff:0,bar:0,voice:0,beat},string:3,fret:beat+1})),
+  ...(words?[{type:'setTrackLyrics' as const,track:0,visible:true,lines:[{startBar:0,text:'one two three'}]}]:[])]});
+/** The range from the first beat to the middle of the half note (two whole notes and the first half of the third), then Ctrl+Shift+Delete. */
+async function cutIntoHalf(c:DocumentController){
+  const workspace=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});fireEvent.keyDown(workspace,{key:'>',code:'Period',altKey:true,shiftKey:true});
+  const before=c.getState().snapshot.project.edits.length;
+  fireEvent.keyDown(workspace,{key:'Delete',ctrlKey:true,shiftKey:true});
+  await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(before+1));
+  return workspace;
+}
+it('a cut that takes lyric words away says how many and that Undo brings them back, and Undo takes the notice away',async()=>{
+  const c=await setup(wordsProject(true));const workspace=await cutIntoHalf(c);
+  expect(c.getState().snapshot.project.edits.at(-1)?.type).toBe('cutSelection');
+  expect(await screen.findByText(/2 lyric words were removed with the cut notes/)).toBeInTheDocument();
+  fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+  await waitFor(()=>expect(screen.queryByText(/lyric words? (was|were) removed/)).toBeNull());
+});
+it('a cut that takes no lyric word away shows no lyrics notice',async()=>{
+  const c=await setup(wordsProject(false));await cutIntoHalf(c);
+  expect(c.getState().snapshot.project.edits.at(-1)?.type).toBe('cutSelection');
+  await new Promise(resolve=>setTimeout(resolve,30));expect(screen.queryByText(/lyric words? (was|were) removed/)).toBeNull();
+});
 it('keeps the beat cursor on its original music across insert and remove measure ranges',async()=>{
   const c=await setup();change('Measure','3');change('Measures to insert','2');click('Insert before');
   await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(6));await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(5));
@@ -1925,6 +1951,89 @@ describe('entry key queue',()=>{
       await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
     }finally{clock.mockRestore();}
   });
+  it('judges each key by its own age: a fresh key behind a dropped one is kept, written where the cursor is, in order',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);let now=1_700_000_000_000;const clock=vi.spyOn(Date,'now').mockImplementation(()=>now);
+    try{
+      press({key:'e'});press({key:'g'});
+      now+=2500;
+      press({key:'a'});press({key:'b'});
+      await hold.next();
+      await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();
+      await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();expect(hold.held).toHaveLength(0);
+      // The notice names the dropped key once the kept ones have landed (writing a note clears it, so it is not shown earlier).
+      expect(await screen.findByText(/1 queued key was dropped: it waited too long/)).toBeInTheDocument();
+      // g was dropped, so a lands on the cursor (beat 1, where g would have gone) and b follows it: E4, A4, B4.
+      const pitch=(beat:number)=>currentBeat(c,beat).notes[0].realValue;
+      expect(currentBeat(c,2).notes).toHaveLength(1);expect(currentBeat(c,3).notes).toHaveLength(0);
+      expect([pitch(1)-pitch(0),pitch(2)-pitch(1)]).toEqual([5,2]);
+    }finally{clock.mockRestore();}
+  });
+  it('says how many keys were dropped when several are stale, and keeps only the fresh one',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);let now=1_700_000_000_000;const clock=vi.spyOn(Date,'now').mockImplementation(()=>now);
+    try{
+      press({key:'e'});press({key:'g'});press({key:'a'});
+      now+=2500;
+      press({key:'b'});
+      await hold.next();
+      await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();
+      await waitFor(()=>expect(edits(c)).toHaveLength(2));await quiet();expect(hold.held).toHaveLength(0);
+      expect(await screen.findByText(/2 queued keys were dropped: they waited too long/)).toBeInTheDocument();
+      expect(currentBeat(c,1).notes[0].realValue-currentBeat(c,0).notes[0].realValue).toBe(-5);expect(currentBeat(c,2).notes).toHaveLength(0);
+    }finally{clock.mockRestore();}
+  });
+  /** Starts an edit that stays in flight, then queues `stale` (typed before the wait), moves the clock past the stale age and queues `fresh`. */
+  const withStale=async(prefs:string|undefined,stale:()=>void,fresh:()=>void)=>{
+    const c=await entryOn(prefs),hold=holdEdits(c);let now=1_700_000_000_000;const clock=vi.spyOn(Date,'now').mockImplementation(()=>now);
+    press({key:'e'});stale();now+=2500;fresh();
+    return {c,hold,advance:(ms:number)=>{now+=ms;},done:()=>clock.mockRestore()};
+  };
+  it('drops the second digit of a fret with its stale first digit, so 12 never becomes 2',async()=>{
+    const run=await withStale(undefined,()=>press({key:'1'}),()=>press({key:'2'}));
+    try{
+      await run.hold.next();
+      expect(await screen.findByText(/2 queued keys were dropped: they waited too long/)).toBeInTheDocument();
+      await quiet();expect(run.hold.held).toHaveLength(0);expect(edits(run.c)).toHaveLength(1);expect(screen.queryByText(/Enter commits/)).toBeNull();
+    }finally{run.done();}
+  });
+  it('drops a letter with the stale accidental typed before it, and a letter with the stale keypad duration',async()=>{
+    const accidental=await withStale(undefined,()=>press({key:'7',code:'Digit7',ctrlKey:true}),()=>press({key:'g'}));
+    try{
+      await accidental.hold.next();
+      expect(await screen.findByText(/2 queued keys were dropped: they waited too long/)).toBeInTheDocument();
+      await quiet();expect(accidental.hold.held).toHaveLength(0);expect(edits(accidental.c)).toHaveLength(1);
+    }finally{accidental.done();}
+    cleanup();
+    const duration=await withStale(keypadOn,()=>keypad('Numpad3'),()=>press({key:'g'}));
+    try{
+      await duration.hold.next();
+      expect(await screen.findByText(/2 queued keys were dropped: they waited too long/)).toBeInTheDocument();
+      await quiet();expect(duration.hold.held).toHaveLength(0);expect(edits(duration.c)).toHaveLength(1);
+    }finally{duration.done();}
+  });
+  it('keeps a fresh letter behind a stale letter, and keeps the notice on screen through the kept keys and a cursor move until typing pauses',async()=>{
+    const run=await withStale(undefined,()=>press({key:'g'}),()=>{press({key:'a'});press({key:'b'});});
+    try{
+      await run.hold.next();
+      expect(await screen.findByText(/1 queued key was dropped: it waited too long/)).toBeInTheDocument();
+      await waitFor(()=>expect(run.hold.held).toHaveLength(1));await run.hold.next();await waitFor(()=>expect(run.hold.held).toHaveLength(1));await run.hold.next();
+      await waitFor(()=>expect(edits(run.c)).toHaveLength(3));await quiet();
+      // Written notes and the cursor moves they made did not hide it.
+      expect(screen.getByText(/1 queued key was dropped: it waited too long/)).toBeInTheDocument();
+      // A key typed right away leaves it; one typed after a pause takes it away.
+      press({key:'c'});await waitFor(()=>expect(run.hold.held).toHaveLength(1));await run.hold.next();await waitFor(()=>expect(edits(run.c)).toHaveLength(4));
+      expect(screen.getByText(/1 queued key was dropped: it waited too long/)).toBeInTheDocument();
+      run.advance(2000);press({key:'d'});await waitFor(()=>expect(run.hold.held).toHaveLength(1));await run.hold.next();await waitFor(()=>expect(edits(run.c)).toHaveLength(5));
+      await waitFor(()=>expect(screen.queryByText(/queued keys? (was|were) dropped/)).toBeNull());
+    }finally{run.done();}
+  });
+  it('shows the dropped-keys notice together with the reason a kept key was refused',async()=>{
+    const run=await withStale(undefined,()=>press({key:'g'}),()=>{press({key:'a'});press({key:'b'});});
+    try{
+      await run.hold.next();await waitFor(()=>expect(run.hold.held).toHaveLength(1));await run.hold.next('refuse');
+      expect(await screen.findByText(/was not entered: the edit was refused\. 1 queued key was discarded/)).toBeInTheDocument();
+      expect(screen.getByText(/1 queued key was dropped: it waited too long/)).toBeInTheDocument();
+    }finally{run.done();}
+  });
   it('keeps the oldest eight waiting keys and shows the busy notice for the ninth',async()=>{
     const c=await entryOn(),hold=holdEdits(c);
     // + and - alternate the beat between two durations, so every key is a real edit that lands on the same beat.
@@ -2792,6 +2901,118 @@ describe('MIDI capture in the score',()=>{
     sendChord(keyboardChord([40]));
     await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   });
+  // The setting "Write notes while the score plays": off pauses typed entry and MIDI capture while the transport runs, and nothing waits for later.
+  const playingNow=()=>integration.players[0];
+  const stopTransport=()=>act(()=>playingNow().publish({playing:false,practice:{...playingNow().getState().practice,phase:'idle'}}));
+  const setting=(value:boolean)=>window.localStorage.setItem(inputKey,JSON.stringify({writeWhilePlaying:value}));
+  it('with writing while the score plays off, a chord is not written, is counted with the reason, and the next one is written once it stops',async()=>{
+    setting(false);integration.running=true;
+    try{
+      const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+      fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+      expect(screen.getByText(/Chords are not written while the score plays/)).toBeInTheDocument();
+      const before=c.getState().snapshot.project.edits.length;
+      sendChord(keyboardChord([40]),keyboardChord([41]));
+      await waitFor(()=>expect(session.get().notWritten).toBe(2));
+      expect(c.getState().snapshot.project.edits).toHaveLength(before);expect(currentBeat(c).notes).toHaveLength(0);
+      expect(screen.getByText(/The score is playing and writing during playback is off/)).toBeInTheDocument();
+      stopTransport();sendChord(keyboardChord([40]));
+      await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+      expect(session.get().notWritten).toBe(2);expect(screen.queryByText(/The score is playing and writing during playback is off/)).toBeNull();
+      // Nothing was kept for later: the two chords played during playback never arrive.
+      expect(c.getState().snapshot.project.edits).toHaveLength(before+1);
+    }finally{window.localStorage.removeItem(inputKey);}
+  });
+  it('with writing while the score plays off, a typed key is not written, the notice appears once, and keys write again once it stops',async()=>{
+    setting(false);integration.running=true;
+    try{
+      const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+      fireEvent.keyDown(workspace,{key:'n'});const before=c.getState().snapshot.project.edits.length;
+      fireEvent.keyDown(workspace,{key:'e'});fireEvent.keyDown(workspace,{key:'g'});fireEvent.keyDown(workspace,{key:'3'});fireEvent.keyDown(workspace,{key:'Enter'});
+      await new Promise(resolve=>setTimeout(resolve,30));
+      expect(c.getState().snapshot.project.edits).toHaveLength(before);expect(currentBeat(c).notes).toHaveLength(0);
+      expect(screen.getByText(/Note entry is paused while the score plays/)).toBeInTheDocument();
+      // The notice is tied to the cursor: after a move it is gone, and the next ignored key says it again.
+      fireEvent.keyDown(workspace,{key:'ArrowRight'});await waitFor(()=>expect(screen.queryByText(/Note entry is paused while the score plays/)).toBeNull());
+      fireEvent.keyDown(workspace,{key:'g'});expect(await screen.findByText(/Note entry is paused while the score plays/)).toBeInTheDocument();
+      fireEvent.keyDown(workspace,{key:'ArrowLeft'});await waitFor(()=>expect(screen.queryByText(/Note entry is paused while the score plays/)).toBeNull());
+      // Shortcuts that are not note entry still work: the cursor moves.
+      fireEvent.keyDown(workspace,{key:'ArrowRight'});expect(entryProps().editTarget).toMatchObject({beat:1});fireEvent.keyDown(workspace,{key:'ArrowLeft'});
+      expect(c.getState().snapshot.project.edits).toHaveLength(before);
+      stopTransport();fireEvent.keyDown(workspace,{key:'e'});
+      await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));expect(c.getState().snapshot.project.edits).toHaveLength(before+1);
+    }finally{window.localStorage.removeItem(inputKey);}
+  });
+  it('with writing while the score plays off, a key or chord that waited behind an edit is not written when playback began meanwhile',async()=>{
+    setting(false);
+    try{
+      const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+      fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+      const hold=holdCaptureEdits(c),before=c.getState().snapshot.project.edits.length;
+      fireEvent.keyDown(workspace,{key:'e'});await waitFor(()=>expect(hold.held).toHaveLength(1));
+      fireEvent.keyDown(workspace,{key:'g'});sendChord(keyboardChord([40]));
+      integration.running=true;act(()=>integration.players[0].publish({playing:true}));
+      await hold.next();
+      await waitFor(()=>expect(session.get().notWritten).toBe(1));
+      expect(await screen.findByText(/Note entry is paused while the score plays/)).toBeInTheDocument();
+      await new Promise(resolve=>setTimeout(resolve,30));
+      expect(hold.held).toHaveLength(0);expect(c.getState().snapshot.project.edits.length-before).toBe(1);
+    }finally{window.localStorage.removeItem(inputKey);}
+  });
+  it('with writing while the score plays off, durations, accidentals and digits outside note entry are not paused, and the chord line follows the setting',async()=>{
+    window.localStorage.setItem(inputKey,JSON.stringify({writeWhilePlaying:false,numpadDurations:true}));integration.running=true;
+    try{
+      const c=await setup({...blankProject(),edits:[{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:3,fret:5}]}),workspace=screen.getByRole('region',{name:'Score workspace'});
+      fireEvent.keyDown(workspace,{key:'4',code:'Numpad4'});
+      await waitFor(()=>expect(c.getState().snapshot.project.edits.some(edit=>edit.type==='setDuration')).toBe(true));
+      expect(screen.queryByText(/Note entry is paused/)).toBeNull();
+      // The chord line says why while a chord is turned away, and goes when the setting is switched on during playback.
+      fireEvent.keyDown(workspace,{key:'ArrowRight'});fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+      sendChord(keyboardChord([40]));await waitFor(()=>expect(session.get().notWritten).toBe(1));
+      expect(screen.getByText(/The score is playing and writing during playback is off/)).toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText('Write notes while the score plays'));
+      await waitFor(()=>expect(screen.queryByText(/The score is playing and writing during playback is off/)).toBeNull());
+      sendChord(keyboardChord([40]));await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+    }finally{window.localStorage.removeItem(inputKey);}
+  });
+  it('with writing while the score plays off, fret digits and Enter outside note entry write nothing, and say why; typing the fret alone is not a write',async()=>{
+    setting(false);integration.running=true;
+    try{
+      const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'}),before=c.getState().snapshot.project.edits.length;
+      fireEvent.keyDown(workspace,{key:'5'});fireEvent.keyDown(workspace,{key:'Enter'});
+      expect(await screen.findByText(/Note entry is paused while the score plays/)).toBeInTheDocument();
+      await new Promise(resolve=>setTimeout(resolve,30));
+      expect(c.getState().snapshot.project.edits).toHaveLength(before);expect(currentBeat(c).notes).toHaveLength(0);
+      stopTransport();fireEvent.keyDown(workspace,{key:'5'});fireEvent.keyDown(workspace,{key:'Enter'});
+      await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    }finally{window.localStorage.removeItem(inputKey);}
+  });
+  it('with writing while the score plays off and the score stopped, both typed keys and chords are written',async()=>{
+    setting(false);
+    try{
+      const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+      fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+      fireEvent.keyDown(workspace,{key:'e'});await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));
+      sendChord(keyboardChord([40]));await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+      expect(session.get().notWritten).toBe(0);expect(screen.queryByText(/Note entry is paused/)).toBeNull();
+    }finally{window.localStorage.removeItem(inputKey);}
+  });
+  it('with writing while the score plays on, a typed key is written during playback',async()=>{
+    integration.running=true;
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});fireEvent.keyDown(workspace,{key:'e'});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));expect(screen.queryByText(/Note entry is paused/)).toBeNull();
+  });
+  it('a count-in counts as playing for the setting',async()=>{
+    setting(false);integration.running=true;
+    try{
+      const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+      fireEvent.keyDown(workspace,{key:'n'});
+      act(()=>playingNow().publish({playing:false,practice:{...playingNow().getState().practice,phase:'countIn'}}));
+      fireEvent.keyDown(workspace,{key:'e'});await new Promise(resolve=>setTimeout(resolve,30));
+      expect(currentBeat(c).notes).toHaveLength(0);expect(screen.getByText(/Note entry is paused while the score plays/)).toBeInTheDocument();
+    }finally{window.localStorage.removeItem(inputKey);}
+  });
   it('writes nothing while a text field has the focus, and does not take the focus',async()=>{
     const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
     fireEvent.keyDown(workspace,{key:'n'});await startCapture();
@@ -2871,6 +3092,23 @@ describe('MIDI capture in the score',()=>{
     await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before).toBe(2));
     expect(currentBeat(c,0).notes).toHaveLength(1);expect(currentBeat(c,1).notes).toHaveLength(1);expect(currentBeat(c,2).notes).toHaveLength(0);
     expect(screen.queryByText(/queued keys? (was|were) dropped/)).toBeNull();
+  });
+  it('judges a typed key by its own age too: a stale key is named, a key typed after the wait is written, stale chords are counted',async()=>{
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
+    const hold=holdCaptureEdits(c),before=c.getState().snapshot.project.edits.length;
+    sendChord(keyboardChord([40]));
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    sendChord(keyboardChord([41]));
+    fireEvent.keyDown(workspace,{key:'e'});
+    clockNow+=2500;
+    fireEvent.keyDown(workspace,{key:'g'});
+    await hold.next();
+    await waitFor(()=>expect(session.get().notWritten).toBe(1));
+    await hold.next();
+    await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before).toBe(2));
+    expect(currentBeat(c,1).notes).toHaveLength(1);expect(currentBeat(c,2).notes).toHaveLength(0);
+    expect(await screen.findByText(/1 queued key was dropped: it waited too long/)).toBeInTheDocument();
   });
   it('drops everything that waited too long: chords are counted, the typed key is named in the notice, and no key is counted twice',async()=>{
     const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});

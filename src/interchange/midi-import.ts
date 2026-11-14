@@ -279,7 +279,9 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     if(source.percussion){
       // A drum hit has no useful length: it lasts until the next hit, up to the end of its quarter note.
       const onsets=[...new Set(hits.map(hit=>hit.start))].sort((a,b)=>a-b),after=new Map(onsets.map((onset,index)=>[onset,onsets[index+1]]));
-      hits=hits.map(hit=>({key:hit.key,start:hit.start,end:Math.min(spanStart(bars,hit.start)+SPAN,after.get(hit.start)??total,total)}));
+      // The hit also stops at its own bar line: where the bar is not a whole number of quarters (or is shorter than one) the quarter it
+      // started in runs on into the next bars, and the end that gave could be off a tuplet grid there (THE-210).
+      hits=hits.map(hit=>{const bar=bars[barIndex(bars,hit.start)];return {key:hit.key,start:hit.start,end:Math.min(spanStart(bars,hit.start)+SPAN,bar.start+bar.length,after.get(hit.start)??total,total)};});
     }
     const merged=new Map<string,Hit>();for(const hit of hits){const id=`${hit.key}/${hit.start}`,other=merged.get(id);if(!other||hit.end>other.end)merged.set(id,hit);}
     hits=[...merged.values()];

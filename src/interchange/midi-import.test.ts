@@ -1,6 +1,6 @@
 import { describe,expect,it } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
-import { defaultMidiImportOptions,formatMidiImportNote,importMidi,midiImportFileName,type MidiImportNote,type MidiImportOptions } from './midi-import';
+import { defaultMidiImportOptions,formatMidiImportNote,importMidi,midiImportFileName,type MidiImport,type MidiImportNote,type MidiImportOptions } from './midi-import';
 import { getMessage } from '../i18n';
 import { readMidiFile } from './midi-smf';
 import { exportGpInterchange,loadInterchangeScore } from './gp';
@@ -216,7 +216,7 @@ describe('importMidi as a Guitar Pro score',()=>{
     const {score}=run(file(1,480,[track(line([[0,1440,40],[480,480,47]],1)),track(line([[0,10,36],[480,10,38],[960,10,36]],9))]));
     const back=loadInterchangeScore(exportGpInterchange(score,settings),settings),drums=back.tracks[1];
     expect(back.tracks[0].staves[0].bars[0].voices).toHaveLength(2);expect(drums.isPercussion).toBe(true);
-    const keys=drums.staves[0].bars[0].voices[0].beats.filter(beat=>beat.notes.length).map(beat=>drums.percussionArticulations[beat.notes[0].percussionArticulation].outputMidiNumber);
+    const keys=drums.staves[0].bars[0].voices[0].beats.filter(beat=>beat.notes.some(entry=>!entry.isTieDestination)).map(beat=>drums.percussionArticulations[beat.notes[0].percussionArticulation].outputMidiNumber);
     expect(keys).toEqual([36,38,36]);
     // A Guitar Pro round trip takes about 1.3 s alone for the first one in a worker, several times that on a loaded machine.
     // The limit is a hang guard, not a speed requirement.
@@ -243,20 +243,59 @@ describe('importMidi robustness',()=>{
   // 0.2 ms a round); writing the score to a .gp file and reading it back costs about 16 ms, so that round trip is done in every seventh
   // round only (18 of 120: the stride is coprime to 3, 4 and 5, so it meets every option combination). The explicit timeout is a hang guard.
   const SEED=7,ROUNDS=120,ROUND_TRIP_EVERY=7;
-  it('fills every bar exactly for random unquantized playing under every option',()=>{
-    const next=random(SEED);
+  /** Imports the rounds of one seed (all of them, or only those listed: the generator still runs through the others). */
+  const play=(seed:number,only?:readonly number[],each?:(result:{score:model.Score;summary:MidiImport['summary']},round:number)=>void,roundTrips=true)=>{
+    const next=random(seed);
     for(let round=0;round<ROUNDS;round++){
       const notes:[number,number,number][]=Array.from({length:40},()=>[Math.floor(next()*3000),1+Math.floor(next()*(next()<0.5?60:900)),30+Math.floor(next()*50)]);
       const bytes=file(1,480,[track([[0,meter(1+Math.floor(next()*13),([4,8,16,32] as const)[Math.floor(next()*4)])]]),track(line(notes,round%4===3?9:0))]);
       const choices:Partial<MidiImportOptions>={quantization:([4,8,16,32,64] as const)[round%5],tuplets:(['none','triplets','triplets-quintuplets'] as const)[round%3],voices:([1,2,3,4] as const)[round%4]};
+      if(only&&!only.includes(round))continue;
       try{
-        const {score}=run(bytes,choices);
-        expect(clockOf(score).every(difference=>difference===0)).toBe(true);
-        if(round%ROUND_TRIP_EVERY===0)loadInterchangeScore(exportGpInterchange(score,settings),settings);
+        const result=run(bytes,choices);
+        expect(clockOf(result.score).every(difference=>difference===0)).toBe(true);
+        if(roundTrips&&round%ROUND_TRIP_EVERY===0||only)loadInterchangeScore(exportGpInterchange(result.score,settings),settings);
+        each?.(result,round);
       }catch(error){
-        throw new Error(`random MIDI import failed with SEED=${SEED}, ROUND=${round}, options ${JSON.stringify(choices)}: ${error instanceof Error?error.message:String(error)}`,{cause:error});
+        throw new Error(`random MIDI import failed with SEED=${seed}, ROUND=${round}, options ${JSON.stringify(choices)}: ${error instanceof Error?error.message:String(error)}`,{cause:error});
       }
     }
+  };
+  /** A note tied into the first beat of a bar: a note that crosses a bar line. */
+  const crossesBarLine=(score:model.Score)=>score.tracks.some(item=>item.staves[0].bars.some(bar=>bar.voices.some(voice=>voice.beats[0]?.notes.some(entry=>entry.isTieDestination))));
+  const hitCount=(score:model.Score)=>score.tracks.reduce((sum,item)=>sum+item.staves[0].bars.reduce((inBars,bar)=>inBars+bar.voices.reduce((inVoices,voice)=>inVoices+voice.beats.reduce((inBeats,beat)=>inBeats+beat.notes.filter(entry=>!entry.isTieDestination).length,0),0),0),0);
+  it('fills every bar exactly for random unquantized playing under every option',()=>{play(SEED);},60_000);
+  // Rounds that the importer refused before THE-210 (a drum hit ending off the tuplet grid of the next bar), as [seed, round, meter].
+  // The meter is checked, so a wrong seed or round in this list fails instead of quietly importing something else.
+  it.each([[1,71,'10/32'],[4,71,'11/16'],[5,91,'13/32'],[12,107,'7/16'],[15,31,'13/16'],[16,31,'5/16'],[23,91,'7/16'],[30,11,'13/16']] as const)('also imports seed %i round %i, once refused, through a Guitar Pro file',(seed,round,time)=>{
+    let seen=0;
+    play(seed,[round],({score,summary})=>{
+      seen++;
+      expect(`${score.masterBars[0].timeSignatureNumerator}/${score.masterBars[0].timeSignatureDenominator}`).toBe(time);
+      expect(score.tracks[0].staves[0].isPercussion).toBe(true);
+      expect(hitCount(score)).toBe(summary.tracks[0].notes);expect(hitCount(score)).toBeGreaterThan(0);
+      expect(crossesBarLine(score)).toBe(false);
+    });
+    expect(seen).toBe(1);
+  },60_000);
+  // Pitched rounds of seeds 2, 3 and 5 are fingerprinted beat for beat, with the import report. The fingerprints were produced by running
+  // this same loop against the importer as it is in HEAD before THE-210 (a scratch copy of that file, never a stash), so they pin what
+  // the change must not touch. Drum rounds in bars that are not a whole number of quarters change on purpose (the hit stops at its
+  // bar line), so for those only the invariants are checked.
+  it('imports pitched rounds exactly as before and keeps the invariants of drum rounds',()=>{
+    const fingerprints=[2,3,5].map(seed=>{
+      let hash=2166136261;
+      play(seed,undefined,({score,summary},round)=>{
+        if(round%4===3){
+          expect(crossesBarLine(score)).toBe(false);expect(hitCount(score)).toBe(summary.tracks.reduce((sum,item)=>sum+item.notes,0));
+          return;
+        }
+        const text=JSON.stringify(summary.notes)+score.tracks.map(item=>item.staves[0].bars.map(bar=>bar.voices.map(voice=>voice.beats.map(beat=>`${beat.duration}.${beat.dots}t${beat.tupletNumerator}/${beat.tupletDenominator}${beat.notes.map(entry=>`${entry.string}:${entry.fret}:${entry.octave}:${entry.tone}${entry.isTieDestination?'~':''}`).join(',')}`).join(' ')).join('|')).join('/')).join('#');
+        for(let index=0;index<text.length;index++)hash=Math.imul(hash^text.charCodeAt(index),16777619)>>>0;
+      },false);
+      return hash;
+    });
+    expect(fingerprints).toEqual([1582485421,2589796054,2009308009]);
   },60_000);
   it('either reads or refuses every truncation and corruption of a valid file, with a plain Error',()=>{
     const valid=file(1,480,[track([[0,tempo(100)],[0,meter(4,4)]]),track([[0,program(25)],...line([[0,480,60],[480,240,64],[720,240,67]])])]);
@@ -367,5 +406,52 @@ describe('formatMidiImportNote',()=>{
     expect(formatMidiImportNote({code:'merged_notes',count:1},tr('de'))).toBe('1 Note erhielt die Dauer des Akkords, mit dem sie beginnt.');
     expect(formatMidiImportNote({code:'merged_notes',count:3},tr('de'))).toBe('3 Noten erhielten die Dauer des Akkords, mit dem sie beginnen.');
   });
+  });
+});
+
+describe('importMidi drum hits that start in the short last quarter of a bar',()=>{
+  const clockOf=(score:model.Score)=>score.tracks.flatMap(item=>item.staves.flatMap(staff=>staff.bars.flatMap((bar,index)=>bar.voices.filter(voice=>!voice.isEmpty).map(voice=>voice.beats.reduce((sum,beat)=>sum+beat.playbackDuration,0)-score.masterBars[index].calculateDuration()))));
+  const drumFile=(meters:Ev[],hits:[number,number][])=>file(1,480,[track(meters),track(line(hits.map(([start,length])=>[start,length,35] as [number,number,number]),9))]);
+  const drums=(numerator:number,denominator:number,hits:[number,number][])=>drumFile([[0,meter(numerator,denominator)]],hits);
+  /** Indexes of the bars that open with a note tied from the bar before: a note crossing a bar line (a tie inside a bar is fine). */
+  const tied=(score:model.Score)=>score.tracks[0].staves[0].bars.flatMap((bar,index)=>bar.voices.filter(voice=>voice.beats[0]?.notes.some(entry=>entry.isTieDestination)).map(()=>index));
+  const sounding=(score:model.Score)=>score.tracks[0].staves[0].bars.flatMap((bar,index)=>bar.voices[0].beats.filter(beat=>beat.notes.some(entry=>!entry.isTieDestination)).map(()=>index));
+  // A drum hit used to last to the end of its quarter note counted from its own bar line. In a bar that is not a whole number of
+  // quarters the last quarter is short, so that end lay in the next bar: the hit tied across the bar line, and when the next bar's first
+  // quarter was a tuplet grid the end was off it and the whole file was refused (THE-210). A drum hit now never passes its own bar line.
+  it.each([
+    ['13/32 at 1/8 into a triplet quarter',13,32,8,'triplets',[[2789,480]]],
+    ['5/16 at 1/8 into a triplet quarter',5,16,8,'triplets',[[1706,248]]],
+    ['13/32 at 1/32 into a triplet quarter',13,32,32,'triplets',[[1016,38],[1176,27],[696,35]]],
+  ] as const)('imports %s, the hits staying inside their bars',(_name,numerator,denominator,quantization,tuplets,hits)=>{
+    const {score,summary}=run(drums(numerator,denominator,hits as unknown as [number,number][]),{quantization,tuplets,voices:4});
+    expect(clockOf(score).every(difference=>difference===0)).toBe(true);
+    expect(tied(score)).toEqual([]);expect(summary.notes).toEqual([]);
+    expect(sounding(score)).toHaveLength(hits.length);
+    expect(loadInterchangeScore(exportGpInterchange(score,settings),settings).masterBars).toHaveLength(score.masterBars.length);
+  });
+  it('leaves no tied stub in the next bar when there is no tuplet (13/32 at 1/8)',()=>{
+    const {score}=run(drums(13,32,[[2789,480]]),{quantization:8,tuplets:'none',voices:4});
+    expect(clockOf(score).every(difference=>difference===0)).toBe(true);
+    expect(tied(score)).toEqual([]);
+    // The hit starts in bar 4 (index 3), in its short last quarter, and ends at that bar's line: the next bar holds only rests.
+    expect(sounding(score)).toEqual([3]);
+  });
+  it('stops a hit at its bar line when bars of 1/16 are shorter than the quarter it started in',()=>{
+    // 4/4 bar, then four bars of 1/16 (120 ticks each), then 4/4 again. One long hit starts in the first short bar.
+    const bytes=drumFile([[0,meter(4,4)],[1920,meter(1,16)],[480,meter(4,4)]],[[1920,900],[2640,60]]);
+    for(const tuplets of ['none','triplets','triplets-quintuplets'] as const)for(const quantization of [8,16,32] as const){
+      const {score}=run(bytes,{quantization,tuplets,voices:4});
+      expect(clockOf(score).every(difference=>difference===0)).toBe(true);
+      expect(score.masterBars.map(bar=>`${bar.timeSignatureNumerator}/${bar.timeSignatureDenominator}`).slice(0,6)).toEqual(['4/4','1/16','1/16','1/16','1/16','4/4']);
+      expect(tied(score)).toEqual([]);
+      expect(sounding(score)).toEqual([1,5]);
+    }
+  });
+  it('writes a hit that ends on the grid inside a triplet quarter as it did before',()=>{
+    // Three triplet eighths in the first quarter, then a hit that ends on the next onset, all inside the bar.
+    const {score}=run(drums(4,4,[[0,60],[160,60],[320,60],[480,60]]),{quantization:8,tuplets:'triplets',voices:4});
+    expect(shape(beatsOf(score,0,0,0)).slice(0,4)).toEqual(['8t3*','8t3*','8t3*','4*']);
+    expect(clockOf(score).every(difference=>difference===0)).toBe(true);expect(tied(score)).toEqual([]);
   });
 });

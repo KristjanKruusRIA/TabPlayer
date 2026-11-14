@@ -13,8 +13,8 @@ use super::{
     plan::PlaybackPlan,
     playback::PlaybackSpan,
     practice::{
-        ClickVoice, CountInClock, CountInSnapshot, MetronomeSettings, PracticeTempo, PulsePosition,
-        RenderTempo, progressive_ratio,
+        AuthoredTempos, ClickVoice, CountInClock, CountInSnapshot, MetronomeSettings,
+        PracticeRefusal, PracticeTempo, PulsePosition, RenderTempo, progressive_ratio,
     },
     reference_sync::ReferenceSyncMap,
     renderer::{PreparedMix, Renderer},
@@ -224,7 +224,7 @@ impl TransportCommand {
             Self::SeekTick { tick, .. } if !tick.is_finite() || *tick < 0.0 || *tick > duration => {
                 Err("Seek position is outside the score.")
             }
-            Self::SetPractice { settings, .. } => settings.validate(false),
+            // Practice settings are checked in full, with the score's tempos, where the command is applied.
             Self::SetLoop {
                 start_tick,
                 end_tick,
@@ -933,7 +933,7 @@ impl CallbackTransport {
     fn resolve_renderer(&mut self) {
         let tempo = self.resolved_tempo();
         if let Some(renderer) = &mut self.renderer {
-            let _ = renderer.set_practice_tempo(tempo);
+            let _ = renderer.apply_practice_tempo(tempo);
             renderer.set_metronome_settings(self.practice.metronome);
         }
     }
@@ -1068,7 +1068,7 @@ impl CallbackTransport {
         if self.shared.epoch.load(Ordering::Acquire) != self.epoch
             || generation < self.generation
             || generation < self.shared.desired.load(Ordering::Acquire)
-            || accepted.validate(renderer.has_backing()).is_err()
+            || accepted.check(renderer.authored_tempos()).is_err()
             || !(-12..=12).contains(&practice.tonality)
         {
             return Some(renderer);
@@ -1079,7 +1079,7 @@ impl CallbackTransport {
                 ratio: progressive_ratio(&accepted.tempo, if preserving { self.passes } else { 0 }),
             },
         };
-        if renderer.set_practice_tempo(tempo).is_err() {
+        if renderer.apply_practice_tempo(tempo).is_err() {
             return Some(renderer);
         }
         renderer.set_metronome_settings(accepted.metronome);
@@ -1343,7 +1343,10 @@ impl CallbackTransport {
                 };
             }
             TransportCommand::SetPractice { settings, .. } => {
-                settings.validate(self.renderer.as_ref().is_some_and(|r| r.has_backing()))?;
+                // No allocation here: this runs on the audio thread, so the refusal is the short fixed form.
+                settings
+                    .check(self.renderer.as_ref().and_then(|r| r.authored_tempos()))
+                    .map_err(PracticeRefusal::brief)?;
                 let tempo_changed = self.practice.tempo != settings.tempo;
                 // The key shift changes only with the renderer that sounds it, through `Install`, so a practice
                 // command alone can never make the echo claim a shift the sound does not have.
@@ -2540,9 +2543,10 @@ impl AudioService {
             Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
         )>,
     ) -> Result<(), String> {
-        practice
-            .validate(backing_bytes.is_some() || settings.backing.is_some())
-            .map_err(str::to_string)?;
+        practice.validate(
+            (backing_bytes.is_some() || settings.backing.is_some())
+                .then(|| AuthoredTempos::of_plan(&plan)),
+        )?;
         plan.validate()?;
         validate_count(&plan, practice, 8_000)?;
         validate_count(&plan, practice, 192_000)?;
@@ -2814,14 +2818,13 @@ impl AudioService {
             .document
             .as_ref()
             .ok_or("Prepare a score before setting sound.")?;
-        old.practice
-            .validate(
-                settings.backing.is_some()
-                    || backing_bytes
-                        .as_ref()
-                        .map_or(old.backing.is_some(), |bytes| bytes.is_some()),
-            )
-            .map_err(str::to_string)?;
+        old.practice.validate(
+            (settings.backing.is_some()
+                || backing_bytes
+                    .as_ref()
+                    .map_or(old.backing.is_some(), |bytes| bytes.is_some()))
+            .then(|| AuthoredTempos::of_plan(&old.plan)),
+        )?;
         if old.plan.generation != generation
             || self.shared.desired.load(Ordering::Acquire) != generation
         {
@@ -2957,9 +2960,10 @@ impl AudioService {
             validate_count(&document.plan, document.practice, state.rate)?;
         }
         if let TransportCommand::SetPractice { settings, .. } = &command {
-            settings
-                .validate(document.backing.is_some() || document.settings.backing.is_some())
-                .map_err(str::to_string)?;
+            settings.validate(
+                (document.backing.is_some() || document.settings.backing.is_some())
+                    .then(|| AuthoredTempos::of_plan(&document.plan)),
+            )?;
             validate_count(&document.plan, *settings, state.rate)?;
         }
         if let TransportCommand::SelectDevice { device_id, .. } = command {

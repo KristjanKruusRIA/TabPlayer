@@ -15,7 +15,7 @@
 - Engine version remains exactly 1.8.4.
 - Version 1 projects migrate in memory without changing their musical result and save as version 2.
 - A rejected edit or failed native commit keeps the displayed score and history unchanged.
-- Private test music and extracted Guitar Pro application resources remain outside product/source releases.
+- Private test music and Guitar Pro program files and resources remain outside product/source releases.
 - Keep the approved toolbar, track panel, score and inspector arrangement.
 - Implementation and plan reviews are auto-approved; use inline execution and independent final review.
 

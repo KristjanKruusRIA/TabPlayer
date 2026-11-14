@@ -144,7 +144,7 @@ The observer now forwards original fetch arguments exactly once and returns the 
 <!-- backing_processing_visual:start -->
 ## Generated design and bounded visual correction
 
-The actual generated reference `docs/design/reference-workstation/backing-pitch-filter-concept.png` hashes to `6B683115A53B4185CC11528D60712E73754A10B7A0F3FAB6BA81740345CB67C4`; provenance JSON `backing-pitch-filter-generated-concept.json` hashes to `108589E1D25B77399B5D722F2F6720B520D652972459B3F0F1CCD19965DEB4E3`. Root inspected the generated concept before implementation, including its corrected left-sidebar placement. Incidental example values and generated blue focus did not override real defaults or the required white keyboard focus.
+The actual generated reference `backing-pitch-filter-concept.png` (removed before publication) hashes to `6B683115A53B4185CC11528D60712E73754A10B7A0F3FAB6BA81740345CB67C4`; provenance JSON `backing-pitch-filter-generated-concept.json` hashes to `108589E1D25B77399B5D722F2F6720B520D652972459B3F0F1CCD19965DEB4E3`. Root inspected the generated concept before implementation, including its corrected left-sidebar placement. Incidental example values and generated blue focus did not override real defaults or the required white keyboard focus.
 
 Root's first and only visual batch inspected all nine AC96 screenshot entries together at 960/1280/1600 widths, short height, numeric/select focus, invalid/pending and original-embedded states. `.analysis/parity/backing-processing-visual-review-root.md` hashes to `0044EEF13BBA4259012C93336C5D277E893BA490ED3AB88F479620F06387B3CF`; its image-hash/geometry manifest hashes to `85AACE39C4610462D61085C416E684F85230EB0A7F8AD0FA202DBC452C4D0472`.
 

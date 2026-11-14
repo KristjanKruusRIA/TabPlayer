@@ -3,8 +3,8 @@ use std::{
     cell::Cell,
 };
 use tabplayer_lib::audio::practice::{
-    ClickSound, ClickVoice, CountInClock, CountInSnapshot, PracticeSettings, PracticeTempo,
-    progressive_ratio,
+    AuthoredTempos, ClickSound, ClickVoice, CountInClock, CountInSnapshot, PracticeSettings,
+    PracticeTempo, progressive_ratio,
 };
 
 thread_local! {
@@ -42,9 +42,14 @@ fn shared_settings_fixture_matches_native_serde_and_semantics() {
             let accepted = serde_json::from_value::<PracticeSettings>(case["settings"].clone())
                 .ok()
                 .is_some_and(|settings| {
-                    settings
-                        .validate(case["hasBacking"].as_bool().unwrap())
-                        .is_ok()
+                    let authored = case["hasBacking"]
+                        .as_bool()
+                        .unwrap()
+                        .then(|| AuthoredTempos {
+                            min: case["authoredBpm"]["min"].as_f64().unwrap(),
+                            max: case["authoredBpm"]["max"].as_f64().unwrap(),
+                        });
+                    settings.validate(authored).is_ok()
                 });
             assert_eq!(accepted, group == "valid", "{}", case["name"]);
         }
@@ -52,9 +57,74 @@ fn shared_settings_fixture_matches_native_serde_and_semantics() {
 }
 
 #[test]
+fn the_range_a_refusal_names_is_exactly_the_range_that_is_accepted() {
+    let tenths = |n: f64| (n * 10.0).round() / 10.0;
+    let mut checked = 0;
+    let maxima = (100..=3000)
+        .map(f64::from)
+        .chain([33.3, 121.5, 99.9, 10.5, 300.1]);
+    for max in maxima {
+        for ratio in [1.0, 0.75, 0.5, 0.1, 0.034] {
+            for min in [max * ratio, (max * ratio).round()] {
+                let authored = AuthoredTempos {
+                    min: min.min(max),
+                    max,
+                };
+                if authored.min <= 0.0 {
+                    continue;
+                }
+                let accepts = |bpm: f64| {
+                    PracticeSettings {
+                        tempo: PracticeTempo::Fixed { bpm },
+                        ..PracticeSettings::default()
+                    }
+                    .check(Some(authored))
+                    .is_ok()
+                };
+                let Some((low, high)) = authored.fixed_limits() else {
+                    assert!(!accepts(100.0), "{authored:?}");
+                    continue;
+                };
+                checked += 1;
+                for bpm in [low, tenths((low + high) / 2.0), high] {
+                    assert!(accepts(bpm), "{bpm} in {low}..{high} of {authored:?}");
+                }
+                // Inside the stated range the stretch really is within 10% to 300% at the slowest and fastest tempo.
+                for bpm in [low, high] {
+                    assert!(
+                        bpm / authored.min <= 3.0 + 1e-6 && bpm / authored.max >= 0.1 - 1e-7,
+                        "{authored:?}"
+                    );
+                }
+                if low - 0.1 >= 10.0 {
+                    assert!(!accepts(tenths(low - 0.1)), "under {low} of {authored:?}");
+                }
+                if high + 0.1 <= 300.0 {
+                    assert!(!accepts(tenths(high + 0.1)), "over {high} of {authored:?}");
+                }
+            }
+        }
+    }
+    assert!(checked > 10_000);
+    // The case that used to be refused at its own suggestion: a 121 BPM score.
+    let steady = AuthoredTempos {
+        min: 121.0,
+        max: 121.0,
+    };
+    assert_eq!(steady.fixed_limits(), Some((12.1, 300.0)));
+    assert!(steady.check_fixed(12.1).is_ok());
+    assert!(
+        steady
+            .check_fixed(12.0)
+            .unwrap_err()
+            .contains("choose 12.1 to 300 BPM")
+    );
+}
+
+#[test]
 fn validates_semantic_bounds_and_backing_atomically() {
     let original = PracticeSettings::default();
-    assert!(original.validate(false).is_ok());
+    assert!(original.validate(None).is_ok());
     for tempo in [
         PracticeTempo::Relative { ratio: 0.1 },
         PracticeTempo::Relative { ratio: 3.0 },
@@ -74,7 +144,7 @@ fn validates_semantic_bounds_and_backing_atomically() {
         },
     ] {
         let settings = PracticeSettings { tempo, ..original };
-        assert!(settings.validate(false).is_ok(), "{tempo:?}");
+        assert!(settings.validate(None).is_ok(), "{tempo:?}");
     }
     for tempo in [
         PracticeTempo::Relative { ratio: 0.099 },
@@ -125,25 +195,72 @@ fn validates_semantic_bounds_and_backing_atomically() {
         },
     ] {
         let settings = PracticeSettings { tempo, ..original };
-        assert!(settings.validate(false).is_err(), "{tempo:?}");
+        assert!(settings.validate(None).is_err(), "{tempo:?}");
     }
     for volume in [-0.001, 1.001] {
         let mut settings = original;
         settings.metronome.volume = volume;
-        assert!(settings.validate(false).is_err());
+        assert!(settings.validate(None).is_err());
     }
     let mut settings = original;
     settings.count_in.bars = 17;
-    assert!(settings.validate(false).is_err());
+    assert!(settings.validate(None).is_err());
     settings = original;
     settings.count_in.bars = 16;
     settings.metronome.volume = 0.0;
-    assert!(settings.validate(true).is_ok());
+    let steady = Some(AuthoredTempos {
+        min: 120.0,
+        max: 120.0,
+    });
+    assert!(settings.validate(steady).is_ok());
     settings.tempo = PracticeTempo::Fixed { bpm: 100.5 };
+    assert!(settings.validate(steady).is_ok());
+    // Exactly 10% and 300% of a steady 120 and 100 BPM are allowed; a hair outside is refused with the range named.
+    settings.tempo = PracticeTempo::Fixed { bpm: 12.0 };
+    assert!(settings.validate(steady).is_ok());
+    settings.tempo = PracticeTempo::Fixed { bpm: 11.9 };
     assert_eq!(
-        settings.validate(true),
-        Err("Fixed tempo is unavailable while a backing track is present.")
+        settings.validate(steady),
+        Err("Fixed tempo 11.9 BPM would stretch the backing track outside 10% to 300% of its speed. For this score choose 12 to 300 BPM. A muted backing counts too.".to_string())
     );
+    let slow = Some(AuthoredTempos {
+        min: 100.0,
+        max: 100.0,
+    });
+    settings.tempo = PracticeTempo::Fixed { bpm: 300.0 };
+    assert!(settings.validate(slow).is_ok());
+    settings.tempo = PracticeTempo::Fixed { bpm: 300.0 };
+    assert!(
+        settings
+            .validate(Some(AuthoredTempos {
+                min: 99.9,
+                max: 99.9
+            }))
+            .is_err()
+    );
+    // A tempo change means every position must stay inside: 60 and 120 BPM allow 12 to 180.
+    let changing = Some(AuthoredTempos {
+        min: 60.0,
+        max: 120.0,
+    });
+    for (bpm, ok) in [(12.0, true), (180.0, true), (11.9, false), (180.1, false)] {
+        settings.tempo = PracticeTempo::Fixed { bpm };
+        assert_eq!(settings.validate(changing).is_ok(), ok, "{bpm}");
+    }
+    // Tempos that are too far apart leave no fixed tempo at all.
+    settings.tempo = PracticeTempo::Fixed { bpm: 100.0 };
+    assert!(
+        settings
+            .validate(Some(AuthoredTempos {
+                min: 10.0,
+                max: 400.0
+            }))
+            .unwrap_err()
+            .starts_with("No fixed tempo suits this score")
+    );
+    // Without a backing the range does not matter.
+    settings.tempo = PracticeTempo::Fixed { bpm: 10.0 };
+    assert!(settings.validate(None).is_ok());
     assert_eq!(original, PracticeSettings::default());
 }
 
@@ -177,13 +294,13 @@ fn rejects_nonfinite_settings() {
                     tempo,
                     ..PracticeSettings::default()
                 }
-                .validate(false)
+                .validate(None)
                 .is_err()
             );
         }
         let mut settings = PracticeSettings::default();
         settings.metronome.volume = value;
-        assert!(settings.validate(false).is_err());
+        assert!(settings.validate(None).is_err());
     }
 }
 

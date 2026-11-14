@@ -45,11 +45,12 @@ it('unchanged_accepted_status_preserves_drafts_changed_settings_and_document_key
   view.rerender(<PracticePanel key="document-a" {...props} settings={{...accepted,tempo:{kind:'relative',ratio:.75}}}/>);expect(screen.getByLabelText('Relative speed (%)')).toHaveValue(75);expect(screen.getByLabelText('Count-in bars')).toHaveValue(0);
   change('Relative speed (%)','123');view.rerender(<PracticePanel key="document-b" {...props}/>);expect(screen.getByLabelText('Relative speed (%)')).toHaveValue(100);
 });
-it('busy_and_backing_guard_fixed_mode_and_prevent_dispatch',()=>{
-  const changes:PracticeSettings[]=[],props={settings:settings(),busy:false,hasBacking:true,onChange:(value:PracticeSettings)=>changes.push(value)};
-  const view=render(<PracticePanel {...props}/>);expect(screen.getByRole('option',{name:'Fixed'})).toBeDisabled();expect(screen.getByText('Fixed tempo is unavailable while a backing track is present.')).toBeInTheDocument();
-  change('Tempo mode','fixed');apply();expect(changes).toEqual([]);
-  view.rerender(<PracticePanel {...props} busy/>);expect(screen.getByRole('button',{name:'Apply practice settings'})).toBeDisabled();apply();expect(changes).toEqual([]);
+it('busy_guards_prevent_dispatch_and_a_backing_keeps_fixed_mode_inside_its_range',()=>{
+  const changes:PracticeSettings[]=[],props={settings:settings(),busy:false,hasBacking:true,authored:{min:120,max:120},onChange:(value:PracticeSettings)=>changes.push(value)};
+  const view=render(<PracticePanel {...props}/>);expect(screen.getByRole('option',{name:'Fixed'})).not.toBeDisabled();expect(screen.getByText(/the backing follows the fixed tempo/)).toBeInTheDocument();
+  change('Tempo mode','fixed');change('Fixed tempo (BPM)','11.9');apply();expect(changes).toEqual([]);expect(screen.getByRole('alert')).toHaveTextContent('Fixed tempo 11.9 BPM would stretch the backing track outside 10% to 300% of its speed. For this score choose 12 to 300 BPM. A muted backing counts too.');
+  change('Fixed tempo (BPM)','90');apply();expect(changes).toHaveLength(1);expect(changes[0].tempo).toEqual({kind:'fixed',bpm:90});
+  view.rerender(<PracticePanel {...props} busy/>);expect(screen.getByRole('button',{name:'Apply practice settings'})).toBeDisabled();apply();expect(changes).toHaveLength(1);
 });
 it('unchanged_percentage_fields_retain_the_exact_accepted_numbers',()=>{
   const changes:PracticeSettings[]=[],accepted:PracticeSettings={tempo:{kind:'progressive',start:.10501504513540623,end:1.995987963891675,step:.03501504513540623,repetitions:2},metronome:{enabled:true,volume:.10501504513540623,visual:true,sound:'beep'},countIn:{bars:1,betweenLoops:true}};

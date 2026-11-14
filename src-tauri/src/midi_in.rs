@@ -351,6 +351,22 @@ fn list_inputs(
     create: &dyn Fn() -> Result<midir::MidiInput, String>,
     wait: Duration,
 ) -> Result<Vec<MidiPortInfo>, String> {
+    list_inputs_typed(slot, create, wait).map_err(|failure| match failure {
+        ListFailure::Busy(message) | ListFailure::NoClient(message) => message,
+    })
+}
+/// Why a listing failed, so a caller can treat a system without MIDI differently from a listing that is merely busy.
+enum ListFailure {
+    /// Another listing is still in progress.
+    Busy(String),
+    /// The system's MIDI client could not be made.
+    NoClient(String),
+}
+fn list_inputs_typed(
+    slot: &Mutex<Option<midir::MidiInput>>,
+    create: &dyn Fn() -> Result<midir::MidiInput, String>,
+    wait: Duration,
+) -> Result<Vec<MidiPortInfo>, ListFailure> {
     let deadline = Instant::now() + wait;
     let mut client = loop {
         match slot.try_lock() {
@@ -358,16 +374,16 @@ fn list_inputs(
             Err(std::sync::TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => {
                 if Instant::now() >= deadline {
-                    return Err(
+                    return Err(ListFailure::Busy(
                         "A MIDI listing is still in progress. Try again in a moment.".into(),
-                    );
+                    ));
                 }
                 thread::sleep(Duration::from_millis(10));
             }
         }
     };
     if client.is_none() {
-        *client = Some(create()?);
+        *client = Some(create().map_err(ListFailure::NoClient)?);
     }
     let input = client.as_ref().expect("the client was just made");
     let mut found = Vec::new();
@@ -384,16 +400,36 @@ fn list_inputs(
 impl SystemMidiIn {
     /// Lists the inputs, waiting up to `wait` for a listing in progress.
     fn list(&self, wait: Duration) -> Result<Vec<MidiPortInfo>, String> {
+        self.list_with(wait, &Self::input)
+    }
+
+    /// `list` with the way of making the listing client given, so a system without MIDI can be stood in for.
+    fn list_with(
+        &self,
+        wait: Duration,
+        create: &dyn Fn() -> Result<midir::MidiInput, String>,
+    ) -> Result<Vec<MidiPortInfo>, String> {
         // Listing opens no port. A system whose MIDI client cannot be made is an error the page can show.
-        let mut found = list_inputs(&self.lister, &Self::input, wait)?;
+        let system = list_inputs_typed(&self.lister, create, wait);
+        // The injection port needs no system client (a CI machine has no sequencer), so a test build that asks for it
+        // still lists it when that client cannot be made. A busy listing stays an error (the watchdog must not count a
+        // miss for it), and without the test port a failed client stays an error too.
         #[cfg(any(test, feature = "desktop-test"))]
         if self.test_port {
+            let mut found = match system {
+                Ok(found) => found,
+                Err(ListFailure::NoClient(_)) => Vec::new(),
+                Err(ListFailure::Busy(message)) => return Err(message),
+            };
             found.push(MidiPortInfo {
                 id: format!("test:{TEST_PORT_NAME}"),
                 name: TEST_PORT_NAME.into(),
             });
+            return Ok(found);
         }
-        Ok(found)
+        system.map_err(|failure| match failure {
+            ListFailure::Busy(message) | ListFailure::NoClient(message) => message,
+        })
     }
 
     fn input() -> Result<midir::MidiInput, String> {
@@ -2287,15 +2323,56 @@ mod tests {
         );
         state.stop(Some(session));
         assert!(state.test_inject(&[0x90, 60, 90]).is_err(), "closed again");
-        // The ordinary build offers no such port.
-        let plain = MidiInState::new(Arc::new(SystemMidiIn::default()));
-        assert!(
-            plain
-                .ports()
-                .unwrap()
-                .iter()
-                .all(|p| p.name != TEST_PORT_NAME)
+        // The ordinary build offers no such port, whatever the system says: a listing either leaves it out or fails.
+        let plain = SystemMidiIn::default();
+        match plain.ports_quick() {
+            Ok(ports) => assert!(ports.iter().all(|p| p.name != TEST_PORT_NAME), "{ports:?}"),
+            Err(error) => assert!(!error.is_empty(), "a failed listing says why"),
+        }
+    }
+
+    #[test]
+    fn the_test_port_needs_no_system_midi_client_but_a_plain_listing_still_does() {
+        let no_midi =
+            || Err::<midir::MidiInput, String>("MIDI support could not be initialized".into());
+        // As on a CI machine without a sequencer: the injection port is listed and can be opened.
+        let testing = SystemMidiIn {
+            test_port: true,
+            ..SystemMidiIn::default()
+        };
+        let found = testing.list_with(Duration::ZERO, &no_midi).unwrap();
+        assert_eq!(
+            found.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            [TEST_PORT_NAME]
         );
+        assert!(testing.open(TEST_PORT_NAME, Box::new(|_| {})).is_ok());
+        // Real use is unchanged: without the test port, a client that cannot be made is an error, not an empty list.
+        let plain = SystemMidiIn::default();
+        assert_eq!(
+            plain.list_with(Duration::ZERO, &no_midi).unwrap_err(),
+            "MIDI support could not be initialized"
+        );
+    }
+
+    #[test]
+    fn a_busy_listing_stays_an_error_in_test_mode_and_the_watchdog_counts_nothing() {
+        let backend = Arc::new(SystemMidiIn {
+            test_port: true,
+            ..SystemMidiIn::default()
+        });
+        let no_midi = || Err::<midir::MidiInput, String>("not reached".into());
+        let busy = lock(&backend.lister);
+        let error = backend.list_with(Duration::ZERO, &no_midi).unwrap_err();
+        assert!(error.contains("still in progress"), "{error}");
+        // A session on the test port whose listings are all busy is never reported lost.
+        let state = MidiInState::new(backend.clone())
+            .with_timings(Duration::from_millis(150), Duration::from_millis(20));
+        let (emit, rx) = collector();
+        state.start(TEST_PORT_NAME, fast(), emit).unwrap();
+        next_status(&rx);
+        assert!(quiet(&rx, Duration::from_millis(400)));
+        assert_eq!(state.status().state, InputState::Running);
+        drop(busy);
     }
 
     #[test]

@@ -18,7 +18,7 @@
 - Native project schema version 2 retains the immutable base and ordered edits and adds an immutable, content-addressed asset table.
 - Version 1 projects migrate in memory without changing their musical result and save as version 2.
 - Shipping builds omit the existing desktop test commands.
-- Private test music and extracted Guitar Pro application resources remain outside product/source releases.
+- Private test music and Guitar Pro program files and resources remain outside product/source releases.
 - Every acceptance check receives a result and evidence path in the validation report; a passing narrow test does not establish an entire feature.
 
 ## Review Focus

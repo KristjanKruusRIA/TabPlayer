@@ -75,7 +75,7 @@ export const helpDe: Record<keyof typeof helpEn, string> = {
   'help.topic.playback.key.p3': 'Wie das Tempo gehört die Tonart zur Sitzung: Sie wird nicht mit der Partitur gespeichert, nicht rückgängig gemacht und kehrt beim Öffnen einer anderen Partitur oder beim Wechsel zu einer anderen geöffneten Partitur zur Originaltonart zurück. {@palette.command_keyLower}, {@palette.command_keyRaise} und {@palette.command_keyReset} stehen in der Befehlspalette; eine eigene Tastenkombination haben sie nicht.',
   'help.topic.playback.practice.title': 'Übungseinstellungen',
   'help.topic.playback.practice.p1': '{@toolbar.practice} am rechten Rand der Werkzeugleiste öffnet die Übungswerkzeuge. {@practice.tempo_mode} ist {@practice.tempo_relative} (ein Prozentwert des notierten Tempos), {@practice.tempo_fixed} (ein Tempo in BPM) oder {@practice.tempo_progressive}, das von {@practice.starting_speed} bis {@practice.finishing_speed} in Schritten von {@practice.increment_points} geht, mit {@practice.repetitions_per_speed} je Tempo.',
-  'help.topic.playback.practice.p2': 'Änderungen in diesen Feldern gelten, wenn Sie {@practice.apply_settings} drücken. {@practice.fixed_unavailable_backing}',
+  'help.topic.playback.practice.p2': 'Änderungen in diesen Feldern gelten, wenn Sie {@practice.apply_settings} drücken. {@practice.fixed_backing_note}',
   'help.topic.playback.practice.p3': 'Das Metronom hat {@practice.metronome}, {@practice.metronome_volume}, {@practice.metronome_sound} ({@practice.metronome_sound.beep}, {@practice.metronome_sound.woodblock}, {@practice.metronome_sound.cowbell} oder {@practice.metronome_sound.stick}) und {@practice.visual_metronome}. Die Werkzeugleiste hat außerdem einen Metronomschalter unter {@transport.click}.',
   'help.topic.playback.practice.p4': '{@practice.count_in_bars} legt 0 bis 16 Einzähltakte vor der Wiedergabe fest, und {@practice.count_in_between_loops} zählt zwischen den Schleifendurchläufen erneut ein. Der Audio-Export enthält kein Einzählen.',
   'help.topic.playback.backing.title': 'Begleit-Audio',
@@ -193,7 +193,7 @@ export const helpDe: Record<keyof typeof helpEn, string> = {
   'help.topic.export.audio.p3': 'Der Audio-Export verwendet dieselbe Klang-Engine wie die Wiedergabe. Er enthält weder das Einzählen noch schrittweise Tempoänderungen.',
   'help.topic.export.guitar-pro.title': 'Guitar-Pro-Export und seine Abweichungen',
   'help.topic.export.guitar-pro.p1': 'Das Format Guitar Pro baut die Partitur als .gp-Datei neu auf (Guitar Pro 7 und 8). Guitar Pro 5 schreibt das ältere .gp5-Format. Ein Export nach Guitar Pro 6 (.gpx) ist nicht verfügbar.',
-  'help.topic.export.guitar-pro.p2': 'Bevor eine Guitar-Pro-Datei gespeichert wird, bittet TabPlayer um Bestätigung in einer Frage mit dem Titel „Export Guitar Pro file“. Wird etwas anders geschrieben oder weggelassen, listet die Frage es unter „Differences in this file“ auf, zum Beispiel Verbindungen zwischen Noten, die der Leser nicht wiederherstellen kann, Haltebögen, lange Bendings und Takte mit abweichender Common- oder Cut-Time-Angabe. Eine Partitur kann nur eine Common- oder Cut-Time-Wahl enthalten, daher schreibt der Export die Wahl, die die meisten Takte haben, und listet die Takte auf, die anders aussehen werden. Diese Frage ist in jeder Sprache englisch. Ihr TabPlayer-Projekt und die Originaldatei bleiben unverändert.',
+  'help.topic.export.guitar-pro.p2': 'Bevor eine Guitar-Pro-Datei gespeichert wird, bittet TabPlayer um Bestätigung in einer Frage mit dem Titel „Export Guitar Pro file“. Wird etwas anders geschrieben oder weggelassen, listet die Frage es unter „Differences in this file“ auf, zum Beispiel Verbindungen zwischen Noten, die der Leser nicht wiederherstellen kann, Bindebögen, lange Bendings und Takte mit abweichender Common- oder Cut-Time-Angabe. Eine Partitur kann nur eine Common- oder Cut-Time-Wahl enthalten, daher schreibt der Export die Wahl, die die meisten Takte haben, und listet die Takte auf, die anders aussehen werden. Diese Frage ist in jeder Sprache englisch. Ihr TabPlayer-Projekt und die Originaldatei bleiben unverändert.',
   'help.topic.export.guitar-pro.p3': 'Der Export nach Guitar Pro 5 listet im Exportfenster auf, was das ältere Format weglässt, und Sie bestätigen das, bevor der Speichern-Dialog sich öffnet. Behalten Sie das .tabplayer-Projekt, das alles enthält, was TabPlayer unterstützt. Diese Dateien wurden nicht in Guitar Pro selbst geprüft.',
 
   'help.topic.palette.title': 'Befehlspalette',
@@ -208,7 +208,7 @@ export const helpDe: Record<keyof typeof helpEn, string> = {
   'help.topic.shortcuts.files.p2': '{@keys.chord_undo}: {@help.shortcut_undo_redo} {@keys.space}: {@help.shortcut_play}.',
   'help.topic.shortcuts.practice.title': 'Übungstasten',
   'help.topic.shortcuts.practice': 'Shift + L wiederholt die markierte Passage oder, ohne Auswahl, die Takte von {@transport.loop_start} und {@transport.loop_end} und beendet eine laufende Schleife. [ spielt langsamer und ] schneller. Auf der deutschen Tastatur liegt [ auf der Taste Ü und wirkt dort; die Taste, die + tippt, ist die Notenschreibtaste und ändert die Tempostufe nicht.',
-  'help.topic.shortcuts.clipboard.title': 'Zwischenablage und Bindebögen',
+  'help.topic.shortcuts.clipboard.title': 'Zwischenablage und Haltebögen',
   'help.topic.shortcuts.clipboard.p3': '{@keys.chord_clipboard}: {@help.shortcut_clipboard}',
   'help.topic.shortcuts.tie': '{@keys.chord_tie}: {@help.shortcut_tie}',
   'help.topic.shortcuts.palette.title': 'Befehlspalette und Hilfe',
@@ -217,5 +217,5 @@ export const helpDe: Record<keyof typeof helpEn, string> = {
   'help.topic.about.title': 'Über & Updates',
   'help.topic.about.version.title': 'Version und Updates',
   'help.topic.about.version.p1': 'TabPlayer {version} für den Desktop.',
-  'help.topic.about.version.p2': 'Dieser Build besitzt keinen Update-Dienst. TabPlayer lädt oder installiert niemals selbstständig Updates, und die Überprüfung verändert keine geöffneten Partituren.',
+  'help.topic.about.version.p2': 'Diese Version besitzt keinen Update-Dienst. TabPlayer lädt oder installiert niemals selbstständig Updates, und die Überprüfung verändert keine geöffneten Partituren. Der estnische und der deutsche Text wurden nicht von Muttersprachlern geprüft.',
 };

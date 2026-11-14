@@ -1,3 +1,4 @@
+use super::plan::PlaybackPlan;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -108,19 +109,114 @@ impl Default for PracticeSettings {
     }
 }
 
+/// The slowest and fastest authored tempo (BPM) of the played range of a score. With a backing track the score clock
+/// drives the backing, so a fixed tempo F stretches it by F over the authored tempo at each point: the ratio ranges
+/// from F / max to F / min over the tempo map, and every one of them must stay within 10% to 300%.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AuthoredTempos {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl AuthoredTempos {
+    /// The tempos that govern some tick before the played range ends (the first always does). A score that follows
+    /// its audio carries tempos derived from that audio, so for it these are the audio's own tempos.
+    pub fn of_plan(plan: &PlaybackPlan) -> Self {
+        let end = plan.playback_end_tick.unwrap_or(plan.duration_tick);
+        let (mut min, mut max) = (f64::INFINITY, 0.0_f64);
+        for (index, tempo) in plan.tempos.iter().enumerate() {
+            if index == 0 || tempo.tick < end {
+                min = min.min(tempo.bpm);
+                max = max.max(tempo.bpm);
+            }
+        }
+        Self { min, max }
+    }
+    /// The fixed tempos (to a tenth, rounded inwards from the exact limits F >= max / 10 and F <= 3 * min) that keep
+    /// the backing within 10% to 300% everywhere, or `None` when no tempo does. Mirrors `fixedLimits` in `practice.ts`.
+    pub fn fixed_limits(self) -> Option<(f64, f64)> {
+        let tenth = |value: f64, up: bool| {
+            if up {
+                (value * 10.0 - 1e-6).ceil() / 10.0
+            } else {
+                (value * 10.0 + 1e-6).floor() / 10.0
+            }
+        };
+        let low = tenth((self.max * 0.1).max(10.0), true);
+        let high = tenth((self.min * 3.0).min(300.0), false);
+        (low <= high).then_some((low, high))
+    }
+    /// Refuses a fixed tempo that would stretch the backing outside 10% to 300% anywhere in the score.
+    pub fn check_fixed(self, bpm: f64) -> Result<(), String> {
+        self.refuse_fixed(bpm).map_err(PracticeRefusal::message)
+    }
+    /// Compares `bpm` with the very numbers the message states (`fixed_limits`), so a tempo inside the stated range is
+    /// always accepted and the first one outside it refused. Allocates nothing.
+    pub fn refuse_fixed(self, bpm: f64) -> Result<(), PracticeRefusal> {
+        let Some((low, high)) = self.fixed_limits() else {
+            return Err(PracticeRefusal::FixedSpan);
+        };
+        if !(low..=high).contains(&bpm) {
+            return Err(PracticeRefusal::FixedRange { bpm, low, high });
+        }
+        Ok(())
+    }
+}
+
+/// Why practice settings were refused. Copyable, so deciding it allocates nothing (the audio thread decides it);
+/// the sentence is built only where a message is wanted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PracticeRefusal {
+    Fixed(&'static str),
+    FixedRange { bpm: f64, low: f64, high: f64 },
+    FixedSpan,
+}
+
+impl PracticeRefusal {
+    /// A short fixed sentence, for the audio thread.
+    pub fn brief(self) -> &'static str {
+        match self {
+            Self::Fixed(text) => text,
+            Self::FixedRange { .. } => {
+                "Fixed tempo would stretch the backing track outside 10% to 300% of its speed."
+            }
+            Self::FixedSpan => "No fixed tempo suits this score while a backing track is present.",
+        }
+    }
+    pub fn message(self) -> String {
+        match self {
+            Self::Fixed(text) => text.into(),
+            Self::FixedRange { bpm, low, high } => format!(
+                "Fixed tempo {bpm} BPM would stretch the backing track outside 10% to 300% of its speed. For this score choose {low} to {high} BPM. A muted backing counts too."
+            ),
+            Self::FixedSpan => "No fixed tempo suits this score while a backing track is present: its tempos are too far apart to keep the backing within 10% to 300% of its speed. A muted backing counts too.".into(),
+        }
+    }
+}
+
 impl PracticeSettings {
-    pub fn validate(&self, has_backing: bool) -> Result<(), &'static str> {
+    /// `backing` is the score's authored tempo range when a backing track is present (muted or not: un-muting is a
+    /// mix change that is not checked again), else `None`.
+    pub fn validate(&self, backing: Option<AuthoredTempos>) -> Result<(), String> {
+        self.check(backing).map_err(PracticeRefusal::message)
+    }
+    /// As `validate`, without building a message.
+    pub fn check(&self, backing: Option<AuthoredTempos>) -> Result<(), PracticeRefusal> {
         let valid_ratio = |ratio: f64| ratio.is_finite() && (0.1..=3.0).contains(&ratio);
         match self.tempo {
             PracticeTempo::Relative { ratio } if !valid_ratio(ratio) => {
-                return Err("Practice speed must be between 10% and 300%.");
+                return Err(PracticeRefusal::Fixed(
+                    "Practice speed must be between 10% and 300%.",
+                ));
             }
             PracticeTempo::Fixed { bpm } => {
                 if !bpm.is_finite() || !(10.0..=300.0).contains(&bpm) {
-                    return Err("Fixed tempo must be between 10 and 300 BPM.");
+                    return Err(PracticeRefusal::Fixed(
+                        "Fixed tempo must be between 10 and 300 BPM.",
+                    ));
                 }
-                if has_backing {
-                    return Err("Fixed tempo is unavailable while a backing track is present.");
+                if let Some(authored) = backing {
+                    authored.refuse_fixed(bpm)?;
                 }
             }
             PracticeTempo::Progressive {
@@ -130,27 +226,37 @@ impl PracticeSettings {
                 repetitions,
             } => {
                 if !valid_ratio(start) || !valid_ratio(end) || end < start {
-                    return Err("Progressive speed must increase between 10% and 300%.");
+                    return Err(PracticeRefusal::Fixed(
+                        "Progressive speed must increase between 10% and 300%.",
+                    ));
                 }
                 if !step.is_finite() || step <= 0.0 || step > 2.9 {
-                    return Err(
+                    return Err(PracticeRefusal::Fixed(
                         "Progressive increment must be greater than 0 and at most 290 percentage points.",
-                    );
+                    ));
                 }
                 if !(1..=100).contains(&repetitions) {
-                    return Err("Repetitions per speed must be between 1 and 100.");
+                    return Err(PracticeRefusal::Fixed(
+                        "Repetitions per speed must be between 1 and 100.",
+                    ));
                 }
             }
             _ => {}
         }
         if !self.metronome.volume.is_finite() || !(0.0..=1.0).contains(&self.metronome.volume) {
-            return Err("Metronome volume must be between 0% and 100%.");
+            return Err(PracticeRefusal::Fixed(
+                "Metronome volume must be between 0% and 100%.",
+            ));
         }
         if self.count_in.bars > 16 {
-            return Err("Count-in must be between 0 and 16 bars.");
+            return Err(PracticeRefusal::Fixed(
+                "Count-in must be between 0 and 16 bars.",
+            ));
         }
         if !(-12..=12).contains(&self.tonality) {
-            return Err("Key shift must be between -12 and 12 semitones.");
+            return Err(PracticeRefusal::Fixed(
+                "Key shift must be between -12 and 12 semitones.",
+            ));
         }
         Ok(())
     }

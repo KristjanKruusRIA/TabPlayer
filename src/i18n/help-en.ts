@@ -76,7 +76,7 @@ export const helpEn = {
   'help.topic.playback.key.p3': 'Like speed, the key belongs to the session: it is not saved with the score, is not undone, and returns to the original key when you open another score or switch to another open one. {@palette.command_keyLower}, {@palette.command_keyRaise} and {@palette.command_keyReset} are in the command palette; they have no keyboard shortcut of their own.',
   'help.topic.playback.practice.title': 'Practice settings',
   'help.topic.playback.practice.p1': '{@toolbar.practice}, at the right of the toolbar, opens the practice tools. {@practice.tempo_mode} is {@practice.tempo_relative} (a percentage of the written tempo), {@practice.tempo_fixed} (a tempo in BPM) or {@practice.tempo_progressive}, which goes from {@practice.starting_speed} to {@practice.finishing_speed} in steps of {@practice.increment_points}, with {@practice.repetitions_per_speed} at each speed.',
-  'help.topic.playback.practice.p2': 'Changes in these fields take effect when you press {@practice.apply_settings}. {@practice.fixed_unavailable_backing}',
+  'help.topic.playback.practice.p2': 'Changes in these fields take effect when you press {@practice.apply_settings}. {@practice.fixed_backing_note}',
   'help.topic.playback.practice.p3': 'The metronome has {@practice.metronome}, {@practice.metronome_volume}, {@practice.metronome_sound} ({@practice.metronome_sound.beep}, {@practice.metronome_sound.woodblock}, {@practice.metronome_sound.cowbell} or {@practice.metronome_sound.stick}) and {@practice.visual_metronome}. The toolbar also has a metronome switch under {@transport.click}.',
   'help.topic.playback.practice.p4': '{@practice.count_in_bars} sets 0 to 16 bars of count-in before playback, and {@practice.count_in_between_loops} counts in again between loop passes. Audio export does not include the count-in.',
   'help.topic.playback.backing.title': 'Backing audio',
@@ -218,5 +218,5 @@ export const helpEn = {
   'help.topic.about.title': 'About and updates',
   'help.topic.about.version.title': 'Version and updates',
   'help.topic.about.version.p1': 'TabPlayer {version} for desktop.',
-  'help.topic.about.version.p2': 'This build has no update service. TabPlayer never downloads or installs updates by itself, and checking for updates never changes your open scores.',
+  'help.topic.about.version.p2': 'This release has no update service. TabPlayer never downloads or installs updates by itself, and checking for updates never changes your open scores. The Estonian and German text has not been reviewed by a native speaker.',
 } as const;

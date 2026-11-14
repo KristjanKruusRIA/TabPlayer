@@ -12,13 +12,13 @@ The first Rust/Tauri player/editor is implemented on Windows. This report separa
 - Actual Windows rendering and note hit testing were checked with a two-track composition. Interaction tests cover empty-string entry, chords, rests/rhythm, overflow errors, keyboard navigation, structural selection repair and undo/redo.
 - A standalone release app loads bundled assets and sends nonzero PCM to a running Web Audio worklet with external requests blocked. Measured sample peak was 0.1693759. Pause, last-measure seeking, 50% speed, multiple loop cycles, stop on edit and regenerated-note playback passed. The user separately confirmed audible playback.
 - The final 100-measure/four-track engine check loaded in 115 ms, with median edits of 52 ms and maximum edits of 80 ms. Native synchronous rendering opened it in 343 ms and redrew an edit in 95 ms. These are observed Windows-host timings, not cross-machine guarantees.
-- A Windows x64 NSIS installer is built. Extracted Guitar Pro resources and private scores are outside `dist`; package assets come from alphaTab, generated original icons and licence files.
+- A Windows x64 NSIS installer is built. Guitar Pro resources and private scores are outside `dist`; package assets come from alphaTab, generated original icons and licence files.
 
 ## Limits
 
 macOS/Linux builds, packaged audio and installer lifecycle tests have not run on corresponding hosts. The Windows installer is unsigned and was built without installing it into the operating system. Native file-picker write routing needs a manual smoke check; the automated write/restart test uses explicit test hooks sharing production file functions.
 
-Guitar Pro runtime acceptance of exports is not checked. No installed Guitar Pro entry was found in the Windows uninstall registry; the supplied installer was examined statically and was not installed. AlphaTab model reimport is a separate check.
+Guitar Pro runtime acceptance of exports is not checked. No installed Guitar Pro entry was found in the Windows uninstall registry; no Guitar Pro program was run. AlphaTab model reimport is a separate check.
 
 GP export can lose unsupported data. Native projects preserve original bytes and commands, including data the editor cannot expose. The milestone does not create advanced techniques, detailed voice layouts, backing audio or RSE-equivalent sound. Track rename/instrument changes after creation need a later command.
 

@@ -301,6 +301,12 @@ fn centroids(pcm: &[[f32; 2]], around: &[usize], half: usize) -> Vec<f64> {
         .collect()
 }
 
+/// The requirement for sustained audio against the score clock: 2 ms, 96 source frames at 48 kHz.
+const WITHIN_2_MS: f64 = 96.0;
+/// The 40 ms bursts used here are short against the stretcher's grains, so their first grains are still converging:
+/// they are held to 3 ms (144 frames). Measured worst 100 (2.1 ms, at 2.5x). Bursts of 200 ms, in `audio_backing_stretch`,
+/// are held to 2 ms.
+const SHORT_BURST_3_MS: f64 = 144.0;
 const LOOP_A: (f64, f64) = (1440.0, 3360.0);
 const LOOP_B: (f64, f64) = (3120.0, 4560.0);
 
@@ -374,23 +380,21 @@ fn the_backing_event_on_the_loop_start_plays_and_the_one_on_the_loop_end_does_no
 }
 
 #[test]
-fn backing_tone_bursts_sit_a_fixed_musical_time_off_the_score_in_a_partial_beat_loop() {
-    // Sustained backing audio goes through the grain stretcher, not the exact-impulse path. It is not sample aligned
-    // away from 1.0x: it is early below 1.0x and late above it, by an amount that in score time (source frames)
-    // is bounded by the search window, 256 + 256 * |1 - ratio|, and that measured within about 6% of it. Each row is
-    // (ratio, sign, lowest accepted, highest accepted) in source frames; the highest is that structural maximum plus
-    // a few frames, the lowest is about 10% under the smallest value measured. Measured worst, 8 bursts apiece:
-    // 463.0 (0.1), 366.3 (0.5), 403.8 (1.7), 765.0 (3.0).
+fn backing_tone_bursts_sit_on_the_score_in_a_partial_beat_loop_at_every_speed() {
+    // Sustained backing audio goes through the grain stretcher, not the exact-impulse path. THE-57 re-centred it: the
+    // stretcher aims each grain so the middle of its output is on the score clock, and the correlation search is
+    // pulled toward that position. The error of each burst in score time (source frames) is therefore small at every
+    // speed, and exactly 0 at 1.0x. The requirement is 2 ms (96 source frames at 48 kHz) for sustained audio and 3 ms for these short bursts.
     const BURSTS: [u32; 4] = [1920, 2880, 4320, 4800];
-    const ROWS: [(f64, f64, f64, f64); 5] = [
-        (0.1, -1.0, 415.0, 490.0),
-        (0.5, -1.0, 325.0, 390.0),
-        (1.0, 0.0, 0.0, 0.001),
-        (1.7, 1.0, 350.0, 440.0),
-        (3.0, 1.0, 560.0, 775.0),
+    const ROWS: [(f64, f64); 5] = [
+        (0.1, SHORT_BURST_3_MS),
+        (0.5, SHORT_BURST_3_MS),
+        (1.0, 0.001),
+        (1.7, SHORT_BURST_3_MS),
+        (3.0, SHORT_BURST_3_MS),
     ];
     let mut report = Vec::new();
-    for (ratio, sign, low, high) in ROWS {
+    for (ratio, bound) in ROWS {
         // Three passes of the loop 1500..5000 (116,500 score frames, divided by the speed), so at least two whole
         // passes of four bursts are measured at every speed.
         let frames = (116_500.0 / ratio * 3.0) as usize;
@@ -409,14 +413,10 @@ fn backing_tone_bursts_sit_a_fixed_musical_time_off_the_score_in_a_partial_beat_
         assert!(errors.len() >= 8, "ratio {ratio}: {} bursts", errors.len());
         for e in &errors {
             assert!(e.is_finite(), "ratio {ratio}: {errors:?}");
-            if sign == 0.0 {
-                assert!(e.abs() <= high, "ratio {ratio}: {errors:?}");
-            } else {
-                assert!(
-                    e.signum() == sign && (low..=high).contains(&e.abs()),
-                    "ratio {ratio}: expected sign {sign} and {low}..{high}, got {errors:?}"
-                );
-            }
+            assert!(
+                e.abs() <= bound,
+                "ratio {ratio}: bound {bound}, got {errors:?}"
+            );
         }
         // No drift: each pass reproduces the previous pass burst for burst, to a hundredth of a frame.
         for i in 4..errors.len() {
@@ -505,5 +505,184 @@ fn an_offset_backing_follows_a_partial_beat_loop_by_its_offset() {
             gaps.iter().all(|g| *g == 0),
             "ratio {ratio}: {score:?} {gaps:?}"
         );
+    }
+}
+
+// Fixed tempo with a backing (THE-57 decision 2). The backing follows the score clock exactly as in relative mode, so a
+// fixed tempo F stretches it by F over the authored tempo at each point: here 120 BPM in bar 0 and 60 BPM in bar 1, so
+// F = 90 plays the backing at 0.75x then 1.5x, F = 60 at 0.5x then 1.0x, F = 150 at 1.25x then 2.5x.
+const FIXED: [f64; 3] = [60.0, 90.0, 150.0];
+
+fn fixed(bpm: f64, frames: usize) -> Scenario {
+    Scenario::new(PracticeTempo::Fixed { bpm }, frames)
+}
+
+#[test]
+fn a_fixed_tempo_backing_lands_on_the_score_frame_across_a_tempo_change() {
+    for bpm in FIXED {
+        let (score, gaps) = impulse_gaps(&fixed(bpm, 420_000));
+        assert!(score.len() >= 12, "fixed {bpm}: {score:?}");
+        // The fixed tempo is really in force: ticks 0 and 960 are a beat of F BPM apart, not of the authored 120.
+        assert_eq!(
+            score[1] - score[0],
+            (960.0 / (bpm * 16.0) * 48_000.0).round() as usize,
+            "fixed {bpm}"
+        );
+        assert!(
+            gaps.iter().all(|g| *g == 0),
+            "fixed {bpm}: {score:?} {gaps:?}"
+        );
+    }
+}
+
+#[test]
+fn a_fixed_tempo_backing_lands_on_the_score_frame_through_loop_wraps_seeks_count_ins_and_offsets() {
+    for bpm in [90.0, 150.0] {
+        let mut looped = fixed(bpm, 300_000);
+        looped.loop_ticks = Some(LOOP_A);
+        let mut seek = fixed(bpm, 300_000);
+        seek.seek = Some(3200.0);
+        let mut counted = fixed(bpm, 700_000);
+        counted.loop_ticks = Some(LOOP_A);
+        counted.count_bars = 1;
+        counted.between = true;
+        let mut offset = fixed(bpm, 300_000);
+        offset.loop_ticks = Some(LOOP_A);
+        offset.offset_ms = 100.0;
+        for (name, scenario, events) in [
+            ("loop", looped, 8),
+            ("seek", seek, 4),
+            ("count-in between loops", counted, 12),
+            ("offset loop", offset, 8),
+        ] {
+            let (score, gaps) = impulse_gaps(&scenario);
+            assert!(score.len() >= events, "fixed {bpm} {name}: {score:?}");
+            assert!(
+                gaps.iter().all(|g| *g == 0),
+                "fixed {bpm} {name}: {score:?} {gaps:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_fixed_tempo_backing_loop_edges_play_as_in_relative_mode() {
+    let reference = Scenario::new(PracticeTempo::Relative { ratio: 1.0 }, 90_000)
+        .render(false, Content::Marked);
+    let (start_level, end_level) = (
+        reference[score_frames(1440)][0],
+        reference[score_frames(3360)][0],
+    );
+    for bpm in [90.0, 150.0] {
+        let mut scenario = fixed(bpm, 260_000);
+        scenario.loop_ticks = Some(LOOP_A);
+        let pcm = scenario.render(false, Content::Marked);
+        let heard = |level: f32| pcm.iter().filter(|x| (x[0] - level).abs() < 0.02).count();
+        assert_eq!(
+            heard(end_level),
+            0,
+            "fixed {bpm}: the end-tick event is heard"
+        );
+        assert!(
+            heard(start_level) >= 2,
+            "fixed {bpm}: the start-tick event repeats each pass"
+        );
+    }
+}
+
+#[test]
+fn fixed_tempo_tone_bursts_sit_on_the_score_across_a_tempo_change_and_loop_passes() {
+    // As the relative-speed test, with the speed changing at tick 3840. The error is in source frames, at the speed
+    // of the bar the burst is in (F / 120 in bar 0, F / 60 in bar 1).
+    const BURSTS: [u32; 4] = [1920, 2880, 4320, 4800];
+    for bpm in FIXED {
+        let frames = (3.0 * 3500.0 / (bpm * 16.0) * 48_000.0) as usize + 20_000;
+        let mut scenario = fixed(bpm, frames);
+        scenario.loop_ticks = Some((1500.0, 5000.0));
+        scenario.ticks = &BURSTS;
+        let score = onsets(&scenario.render(true, Content::None));
+        let backing = scenario.render(false, Content::Burst);
+        assert!(score.len() >= 8, "fixed {bpm}: {score:?}");
+        let ratios = BURSTS
+            .iter()
+            .cycle()
+            .map(|&tick| if tick < 3840 { bpm / 120.0 } else { bpm / 60.0 });
+        let errors: Vec<f64> = score
+            .iter()
+            .zip(ratios)
+            .map(|(&s, ratio)| {
+                (centroids(&backing, &[s], (3000.0 / ratio) as usize)[0] - s as f64) * ratio
+            })
+            .collect();
+        for e in &errors {
+            assert!(e.abs() <= SHORT_BURST_3_MS, "fixed {bpm}: {errors:?}");
+        }
+        for i in 4..errors.len() {
+            assert!(
+                (errors[i] - errors[i - 4]).abs() < 0.01,
+                "fixed {bpm}: pass drift {errors:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_export_with_a_backing_lands_sustained_audio_where_playback_does() {
+    use tabplayer_lib::export::{
+        audio::{AudioExportRender, AudioExportRequest},
+        stems::{StemKind, StemTrack},
+        wav::AudioFormat,
+    };
+    // The export drives the same renderer and stretcher as playback (`set_speed`, then the same render), so it is
+    // centred the same way: at 50% and at 170% the bursts sit within the playback requirement, and where playback puts
+    // them to within a frame.
+    const BURSTS: [u32; 4] = [1920, 2880, 4320, 4800];
+    for speed in [0.5, 1.7] {
+        let renderer = *renderer(&[], &BURSTS, false, Content::Burst, 0.0);
+        let request = AudioExportRequest {
+            tracks: vec![StemTrack {
+                id: "guitar".into(),
+                name: "Guitar".into(),
+                preset: "gm".into(),
+                kind: StemKind::Score,
+            }],
+            range: None,
+            format: AudioFormat::wav(RATE, 24),
+            speed,
+            metronome: false,
+            metronome_sound: Default::default(),
+            tail_seconds: 0.0,
+            include_backing: true,
+            include_mix: true,
+            normalize_rms_db: None,
+        };
+        let mut export = AudioExportRender::new(renderer, &plan(), request).unwrap();
+        let mut exported = Vec::new();
+        loop {
+            let mut block = [[0.0f32; 2]; 512];
+            let n = export.render_mix(&mut block).unwrap();
+            if n == 0 {
+                break;
+            }
+            exported.extend_from_slice(&block[..n]);
+        }
+        let played = Scenario::new(PracticeTempo::Relative { ratio: speed }, exported.len())
+            .render(false, Content::Burst);
+        // The score is silent here (no notes), so the expected frame of a burst is its tick's frame over the speed.
+        let expected: Vec<usize> = BURSTS
+            .iter()
+            .map(|&tick| (score_frames(tick) as f64 / speed).round() as usize)
+            .collect();
+        let half = (3000.0 / speed) as usize;
+        let from_export = centroids(&exported, &expected, half);
+        let from_playback = centroids(&played, &expected, half);
+        for ((e, p), want) in from_export.iter().zip(&from_playback).zip(&expected) {
+            let (e, p) = ((e - *want as f64) * speed, (p - *want as f64) * speed);
+            assert!(e.abs() <= WITHIN_2_MS, "speed {speed}: export error {e}");
+            assert!(
+                (e - p).abs() < 1.0,
+                "speed {speed}: export {e}, playback {p}"
+            );
+        }
     }
 }

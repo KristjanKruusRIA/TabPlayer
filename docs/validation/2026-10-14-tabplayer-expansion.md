@@ -2,7 +2,7 @@
 
 Verified product implementation: **fbc63f096b7ab33eb8b32a47f5c4e728ded0f2b9**. All eight findings from the one independent whole-change review are fixed in its ancestor ac0ece7. The follow-up adds 25 tuning presets and realistic instrument views. Fresh joined tests, actual minimum-Rust Windows builds, serial desktop workflows, private plans, extracted shipping resources, installed production/uninstall checks and all three platform CI jobs pass. The [approved expansion](../superpowers/specs/2026-10-14-tabplayer-deferred-features-design.md) is implemented and the verified code is integrated and pushed to main. Later commits update release documentation only.
 
-Local evidence links target ignored `.analysis` files in the implementation worktree; they are not distributed in source or packages. Tracked test/harness links identify reproducible checks. Private scores and extracted Guitar Pro application assets remain outside source and release resources. Older owner reports retain historical failures/checkpoints; the fresh logs and results linked here supersede them.
+Local evidence links target ignored `.analysis` files in the implementation worktree; they are not distributed in source or packages. Tracked test/harness links identify reproducible checks. Private scores and Guitar Pro program assets remain outside source and release resources. Older owner reports retain historical failures/checkpoints; the fresh logs and results linked here supersede them.
 
 ## Final integrated evidence
 

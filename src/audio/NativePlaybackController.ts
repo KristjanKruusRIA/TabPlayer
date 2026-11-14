@@ -12,7 +12,7 @@ import { preparePlan,preparePlanFromScore } from './plan';
 import { interpretationsOf } from './interpretation';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
 import { DEFAULT_PRACTICE,tonalityOf,type PracticeLoop,type PracticeSettings,type PracticeStatus } from './practice-types';
-import { practiceForBacking,validatePractice } from './practice';
+import { authoredTemposOf,practiceForBacking,validatePractice,type AuthoredTempos } from './practice';
 import { cursorPlaybackChoices,selectionPlaybackChoices,requireCursorChoice,requirePassageChoice } from './selection-playback';
 import type { ScheduledNotes } from '../instruments/focus';
 import type { CursorPlaybackChoice,PassagePlaybackChoice } from './selection-playback-types';
@@ -146,8 +146,10 @@ export class NativePlaybackController {
   private occurrence(bar:number){const found=this.plan?.occurrences.find(o=>o.bar===bar);if(!Number.isInteger(bar)||!found)throw new Error('Select a measure after playback is ready.');return found;}
   private seekToTick(tick:number){this.noteMode='seeking';this.pendingNoteTick=tick;this.operationError=null;this.update({error:this.lastStatus?.error??null});this.send({type:'seekTick',tick,generation:this.generation});}
   seekToMeasure(index:number){this.seekToTick(this.occurrence(index).startTick);}
+  /** The score's authored tempo range while it has a backing track and its plan is known; a fixed tempo is checked against it. */
+  authoredTempos():AuthoredTempos|null{return this.hasBacking&&this.plan?authoredTemposOf(this.plan):null;}
   setPractice(settings:PracticeSettings){
-    validatePractice(settings,this.hasBacking);
+    validatePractice(settings,this.authoredTempos());
     if(this.pendingPractice)throw new Error('Practice settings acknowledgement is pending.');
     if(practiceKey(settings)===practiceKey(this.practice))return;
     const next=structuredClone(settings);this.pendingPractice=next;this.lateKey=null;
@@ -339,7 +341,7 @@ export class NativePlaybackController {
     // The saved interpretations shape the plan itself, so a change re-plans like a change of reference timing.
     const interpretations=interpretationsOf(saved.mixes),interpreted=Object.keys(interpretations).length>0;
     const timingKey=referenceTimingKey(audioSettings.backing),interpretationKey=interpreted?JSON.stringify(interpretations):'';
-    const normalized=practiceForBacking(this.practice,this.hasBacking);
+    const normalized=practiceForBacking(this.practice,this.authoredTempos());
     if(normalized.notice){this.practice=normalized.settings;this.update({practiceNotice:normalized.notice});}
     if(!documentChanged && !normalized.notice && this.built?.score===built.score && timingKey===this.planTimingKey && interpretationKey===this.planInterpretationKey && (this.preparing || this.plan&&this.prepared)){
       this.built=built;if(audioSettingsKey===this.desiredAudioSettingsKey)return;
@@ -355,12 +357,15 @@ export class NativePlaybackController {
         this.mixQueue=pending;await pending;return;
       }
     }
-    const practice=structuredClone(this.practice);
+    let practice=structuredClone(this.practice);
     this.awaitingRestore=this.keptLoop!==null||this.loopLost;
     this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.planTimingKey=timingKey;this.planInterpretationKey=interpretationKey;this.desiredAudioSettingsKey=audioSettingsKey;
     try {
       const authored=await (this.options.preparePlan?(interpreted?this.options.preparePlan(project,generation,interpretations):this.options.preparePlan(project,generation)):(interpreted?preparePlanFromScore(built.score,generation,interpretations):preparePlanFromScore(built.score,generation)));if(generation!==this.generation||this.destroyed)return;
       const plan=applyReferenceSyncPlan(authored,audioSettings.backing);
+      // The plan now in hand decides whether a fixed tempo still keeps the backing within 10% to 300%; a tempo edit can change that.
+      const fitted=practiceForBacking(practice,this.hasBacking?authoredTemposOf(plan):null);
+      if(fitted.notice){practice=fitted.settings;this.practice=fitted.settings;this.update({practiceNotice:fitted.notice});}
       const sourceKey=project.base.kind==='file'?project.base.sha256:'blank';
       this.authoredPlan=authored;this.plan=plan;this.update({endTime:plan.playbackEndTick===undefined?plan.durationMs:this.millisecondsAtTick(plan.playbackEndTick,plan)});for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
       const embedded=this.embeddedSource===sourceKey?null:built.embeddedBacking;

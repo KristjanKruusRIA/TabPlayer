@@ -75,7 +75,7 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
   'help.topic.playback.key.p3': 'Nagu kiirus, kuulub helistik seansile: seda ei salvestata palaga, seda ei võeta tagasi ja teise pala avamisel või teisele avatud palale lülitumisel naaseb algne helistik. „{@palette.command_keyLower}“, „{@palette.command_keyRaise}“ ja „{@palette.command_keyReset}“ on käsupaletis; neil pole oma kiirklahvi.',
   'help.topic.playback.practice.title': 'Harjutamise seaded',
   'help.topic.playback.practice.p1': '„{@toolbar.practice}“ tööriistariba paremas servas avab harjutamise tööriistad. „{@practice.tempo_mode}“ on „{@practice.tempo_relative}“ (protsent kirjutatud tempost), „{@practice.tempo_fixed}“ (tempo BPM-ides) või „{@practice.tempo_progressive}“, mis läheb väärtusest „{@practice.starting_speed}“ väärtuseni „{@practice.finishing_speed}“ sammuga „{@practice.increment_points}“, igal kiirusel „{@practice.repetitions_per_speed}“.',
-  'help.topic.playback.practice.p2': 'Nende väljade muudatused jõustuvad, kui vajutad „{@practice.apply_settings}“. {@practice.fixed_unavailable_backing}',
+  'help.topic.playback.practice.p2': 'Nende väljade muudatused jõustuvad, kui vajutad „{@practice.apply_settings}“. {@practice.fixed_backing_note}',
   'help.topic.playback.practice.p3': 'Metronoomil on „{@practice.metronome}“, „{@practice.metronome_volume}“, „{@practice.metronome_sound}“ ({@practice.metronome_sound.beep}, {@practice.metronome_sound.woodblock}, {@practice.metronome_sound.cowbell} või {@practice.metronome_sound.stick}) ja „{@practice.visual_metronome}“. Tööriistaribal on ka metronoomilüliti rühmas „{@transport.click}“.',
   'help.topic.playback.practice.p4': '„{@practice.count_in_bars}“ seab enne taasesitust 0 kuni 16 sissehelistamistakti ja „{@practice.count_in_between_loops}“ helistab sisse uuesti korduskordade vahel. Heliekspordis sissehelistamist ei ole.',
   'help.topic.playback.backing.title': 'Taustheli',
@@ -217,5 +217,5 @@ export const helpEt: Record<keyof typeof helpEn, string> = {
   'help.topic.about.title': 'Teave ja uuendused',
   'help.topic.about.version.title': 'Versioon ja uuendused',
   'help.topic.about.version.p1': 'TabPlayer {version} töölauale.',
-  'help.topic.about.version.p2': 'Sellel versioonil puudub uuendusteenus. TabPlayer ei laadi ega paigalda uuendusi iseseisvalt ning uuenduste kontrollimine ei muuda avatud partituure.',
+  'help.topic.about.version.p2': 'Selles väljalaskes puudub uuendusteenus. TabPlayer ei laadi ega paigalda uuendusi iseseisvalt ning uuenduste kontrollimine ei muuda avatud partituure. Eesti- ja saksakeelset teksti ei ole emakeelekõneleja üle vaadanud.',
 };

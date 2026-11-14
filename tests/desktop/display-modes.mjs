@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { existsSync,mkdirSync,readFileSync,writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { launch,connect,stop,directory } from './harness.mjs';
 import { closeWelcomeLibrary,waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls } from './workstation-commands.mjs';
@@ -7,9 +8,9 @@ import { writeDenseScore,denseFret } from './display-modes-fixture.mjs';
 
 // THE-56: the six screen display modes and the fit/zoom policies, driven in the real desktop app with real mouse and keyboard
 // input over CDP (port 9223). Only the bundled CC0 Library example and a dense score this driver builds are used.
-// Results go to DISPLAY_MODES_OUT (default E:/claude-tmp/the-56): result.json, and screenshots in shots/. Nothing is written into the repository.
+// Results go to DISPLAY_MODES_OUT (default: tabplayer-the-56 under the operating system's temp folder): result.json, and screenshots in shots/. Nothing is written into the repository.
 // Run from the checkout root after the desktop test build:  node tests/desktop/display-modes.mjs [--quick]
-const out=process.env.DISPLAY_MODES_OUT??'E:/claude-tmp/the-56',shots=resolve(out,'shots'),quick=process.argv.includes('--quick'),only=(process.argv.find(a=>a.startsWith('--only='))??'').slice(7).split(',').filter(Boolean);
+const out=process.env.DISPLAY_MODES_OUT??resolve(tmpdir(),'tabplayer-the-56'),shots=resolve(out,'shots'),quick=process.argv.includes('--quick'),only=(process.argv.find(a=>a.startsWith('--only='))??'').slice(7).split(',').filter(Boolean);
 mkdirSync(shots,{recursive:true});
 const modes=['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'];
 const physical=new Set(['verticalPage','horizontalPage','grid']);

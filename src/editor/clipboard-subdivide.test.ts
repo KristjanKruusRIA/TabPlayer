@@ -75,9 +75,9 @@ it('a slide leaves from the final piece, so a head-only copy drops it and a tail
   const clip=makeMusicClip(score,range([0,480],[1,0]),'singleTrack');expect(clip.links.map(link=>link.kind)).toEqual(['slide']);
   const tail=decode(clip).tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];expect(tail.slideOutType).toBe(model.SlideOutType.Shift);
 });
-it('cut refuses a range that cuts a sustained beat but cut of whole beats is unchanged',()=>{
+it('cut of a range that cuts a sustained beat makes the clip Copy makes, and cut of whole beats is unchanged',()=>{
   const score=sustained(2,0,2);
-  expect(()=>makeMusicClip(score,range([0,480],[1,0]),'singleTrack',{cut:true})).toThrow(/beat boundaries/);
+  expect(makeMusicClip(score,range([0,480],[1,0]),'singleTrack',{cut:true})).toEqual(makeMusicClip(score,range([0,480],[1,0]),'singleTrack'));
   expect(makeMusicClip(score,range([0,1920],[1,0]),'singleTrack',{cut:true}).kind).toBe('phrase');
 });
 

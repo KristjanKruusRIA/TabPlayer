@@ -71,6 +71,12 @@ describe('passageBands',()=>{
     const full=passageBands(world.lookup,whole(bar,next))[0];
     expect(band.x).toBeGreaterThan(full.x);expect(band.x+band.w).toBeLessThan(full.x+full.w);
   });
+  it('ends part of the way through its last beat when a range edge falls inside that beat, even for the last beat of the bar',()=>{
+    const bar=world.lookup.staffSystems[0].bars[0].index,end=beatOf(bar,3),box=world.lookup.findBeat(end)!.realBounds;
+    const [half]=passageBands(world.lookup,[{bar,to:end,toFraction:.5}]),[whole]=passageBands(world.lookup,[{bar,to:end}]);
+    expect(half.x+half.w).toBeCloseTo(box.x+box.w*.5);expect(half.x+half.w).toBeLessThan(whole.x+whole.w);
+    expect(passageBands(world.lookup,[{bar,to:end,toFraction:1}])[0].w).toBeCloseTo(whole.w);
+  });
   it('lets a beat that opens or closes its bar take the bar edge, as the renderer shades a selection',()=>{
     const bar=world.lookup.staffSystems[0].bars[0],first=beatOf(bar.index,0),last=beatOf(bar.index,3);
     const [band]=passageBands(world.lookup,[{bar:bar.index,from:first,to:last}]);

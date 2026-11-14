@@ -37,7 +37,7 @@ const shapes:Record<string,readonly string[]>={
   setCrescendo:['from','to','crescendo','targetDynamics'],setFermata:['target','fermata'],setSustainPedal:['target','pedal'],
   setBarGestures:['track','staff','bar','clefOttava'],setMasterBarGestures:['bar','commonTime','doubleBar','tripletFeel','beaming'],
   setSimile:['track','staff','bar','kind'],
-  eraseSelection:['selection'],transposeSelection:['selection','semitones'],moveSelectionStrings:['selection','direction'],
+  eraseSelection:['selection'],cutSelection:['selection'],transposeSelection:['selection','semitones'],moveSelectionStrings:['selection','direction'],
   refingerSelection:['selection','maxFret'],setSelectionSustain:['selection','strings','kind','enabled'],
   setSelectionStrokes:['selection','technique','pattern'],setSelectionTies:['selection','tied'],tieSelectionToEarlierPitch:['selection'],
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
@@ -222,6 +222,7 @@ export function validateParityCommand(value:unknown):void {
     const strings=nonempty(edit.strings);for(const string of strings){integer(string);if(string===0)throw new Error('Invalid string.');}unique(strings);
   }
   if(type==='setSelectionStrokes')validateStrokePattern(edit.technique,edit.pattern);
+  if(type==='cutSelection'&&(object(edit.selection).kind!=='range'))throw new Error('A cut inside a note needs a range of time.');
   if(type==='setSelectionTies')flag(edit.tied);
   if(type==='setStringCount')validateStringCount(edit.tuning,edit.keep);
   if(type==='insertMeasures'){integer(edit.beforeBar);integer(edit.count,1000);if(edit.count===0)throw new Error('Insert at least one measure.');}

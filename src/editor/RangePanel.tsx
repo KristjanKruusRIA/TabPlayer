@@ -2,6 +2,7 @@ import { useI18n } from '../i18n';
 import { useEffect,useState } from 'react';
 import type { RangeCommand,RangePanelProps,StrokeDirection,StrokeTechnique,VoiceAddress } from './range-types';
 import { resolveSelectionBeats,resolveSelectionNotes,selectionForBars,selectionForTrack,validateMusicSelection } from './range-selection';
+import { eraseCommandFor } from './range-cut';
 
 function scopeLanes({score,target}:Pick<RangePanelProps,'score'|'target'>,bar:number,scope:string):VoiceAddress[] {
   return score.tracks.filter(track=>scope==='all'||track.index===target.track).flatMap(track=>track.staves.filter(staff=>(scope!=='lane'&&scope!=='staff')||staff.index===target.staff).flatMap(staff=>(staff.bars[bar]?.voices??[]).filter(voice=>scope!=='lane'||voice.index===target.voice).map(voice=>({track:track.index,staff:staff.index,voice:voice.index}))));
@@ -76,7 +77,7 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
     </select></label>
     <button disabled={!selection||selection.kind==='notes'||!!selectionError||scope==='custom'} onClick={broaden}>{t('editor.apply_selection_scope')}</button>
     <fieldset disabled={!available||locked}><legend>{t('editor.selected_notes')}</legend>
-      <button onClick={()=>selection&&edit({type:'eraseSelection',selection})}>{t('editor.erase_selected_notes')}</button>
+      <button onClick={()=>selection&&edit(eraseCommandFor(score,selection,{track:target.track,staff:target.staff,voice:target.voice}))}>{t('editor.erase_selected_notes')}</button>
       <div className="editor-actions"><button disabled={!melodic} onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:true})}>{t('editor.tie_selected_notes')}</button><button onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:false})}>{t('editor.untie_selected_notes')}</button><button disabled={!melodic} title="Ties each note to the earlier note on its string and gives it that fret" onClick={()=>selection&&edit({type:'tieSelectionToEarlierPitch',selection})}>Tie to earlier pitch</button></div>
       <fieldset disabled={!melodic}><legend>{t('editor.transpose')}</legend>
         <div className="editor-actions"><button onClick={()=>shift(-1)}>{t('editor.down_semitone')}</button><button onClick={()=>shift(1)}>{t('editor.up_semitone')}</button><button onClick={()=>shift(-12)}>{t('editor.down_octave')}</button><button onClick={()=>shift(12)}>{t('editor.up_octave')}</button></div>

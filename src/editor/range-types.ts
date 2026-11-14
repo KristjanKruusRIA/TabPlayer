@@ -11,6 +11,8 @@ export type MusicSelection =
   | {kind:'bars';tracks:number[];firstBar:number;lastBar:number};
 export type RangeCommand =
   | {type:'eraseSelection';selection:MusicSelection}
+  /** Cut a range whose edge may fall inside a held beat: the beat is split there and the selected time becomes rests. */
+  | {type:'cutSelection';selection:MusicSelection}
   | {type:'transposeSelection';selection:MusicSelection;semitones:number}
   | {type:'moveSelectionStrings';selection:MusicSelection;direction:'higher'|'lower'}
   | {type:'refingerSelection';selection:MusicSelection;maxFret:number}

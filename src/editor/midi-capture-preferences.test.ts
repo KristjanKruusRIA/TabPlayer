@@ -1,9 +1,10 @@
-import { describe,expect,it } from 'vitest';
-import { DEFAULT_MIDI_CAPTURE,MIDI_CAPTURE_KEY,readMidiCapturePreferences,saveMidiCapturePreferences } from './midi-capture-preferences';
+import { afterEach,describe,expect,it,vi } from 'vitest';
+import { DEFAULT_MIDI_CAPTURE,MIDI_CAPTURE_KEY,activeStringMapping,readMidiCapturePreferences,saveMidiCapturePreferences } from './midi-capture-preferences';
 
 const memory=(initial?:string)=>{let value=initial;const writes:string[]=[];return {getItem:()=>value??null,setItem:(_key:string,next:string)=>{value=next;writes.push(next);},value:()=>value,writes};};
 
 describe('MIDI capture preferences',()=>{
+  afterEach(()=>{vi.restoreAllMocks();});
   it('default to a 60 ms window, a floor of 1, no mapping and no port',()=>{
     expect(DEFAULT_MIDI_CAPTURE).toEqual({port:'',chordWindowMs:60,minVelocity:1,stringMapping:'off'});
     const storage=memory();
@@ -36,6 +37,15 @@ describe('MIDI capture preferences',()=>{
     const throwing={getItem:()=>{throw new Error('blocked');},setItem:()=>{throw new Error('full');}};
     expect(readMidiCapturePreferences(throwing)).toEqual(DEFAULT_MIDI_CAPTURE);
     expect(()=>saveMidiCapturePreferences(DEFAULT_MIDI_CAPTURE,throwing)).not.toThrow();
+  });
+  it('keep the session choice of the string mapping when the browser refuses to give out its storage at all',()=>{
+    const original=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+    Object.defineProperty(globalThis,'localStorage',{configurable:true,get:()=>{throw new Error('blocked');}});
+    saveMidiCapturePreferences({...DEFAULT_MIDI_CAPTURE,stringMapping:'lowestFirst'});
+    expect(activeStringMapping()).toBe('lowestFirst');
+    if(original)Object.defineProperty(globalThis,'localStorage',original);else delete (globalThis as {localStorage?:unknown}).localStorage;
+    saveMidiCapturePreferences({...DEFAULT_MIDI_CAPTURE},memory());
+    expect(activeStringMapping()).toBe('off');
   });
   it('keep nothing but the port name and the three settings',()=>{
     const storage=memory();saveMidiCapturePreferences({...DEFAULT_MIDI_CAPTURE,port:'Keys'},storage);

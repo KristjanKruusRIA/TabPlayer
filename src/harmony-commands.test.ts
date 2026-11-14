@@ -8,7 +8,7 @@ const chord:HarmonyChord={name:'Legacy',nameMode:'manual',recipe:null,firstFret:
 const commands:HarmonyCommand[]=[{type:'setBeatText',target,text:'Exact\r\ntext'},{type:'setHarmonyChord',target,chord,fillEmptyBeat:false},{type:'setHarmonyChord',target,chord:null,fillEmptyBeat:false},
   ...[{kind:'semitones' as const,semitones:-127},{kind:'chromatic' as const,number:3,quality:'minor' as const,direction:'up' as const,octaves:1},{kind:'diatonic' as const,steps:2}].map(interval=>({type:'transposeHarmony' as const,selection,interval,includeKeySignatures:false,includeChords:false}))];
 it('accepts every shared engraving, harmony and v2 wire fixture unchanged',()=>{
-  expect(wireExamples).toHaveLength(84);for(const example of wireExamples.slice(59))expect(()=>validateParityCommand(example)).not.toThrow();
+  expect(wireExamples).toHaveLength(85);for(const example of wireExamples.slice(59))expect(()=>validateParityCommand(example)).not.toThrow();
 });
 it('accepts exact v2 clipboard metadata while keeping v1 envelopes unchanged',()=>{
   const clip={format:'TabPlayerClip',version:2,engineVersion:'1.8.4',mode:'singleTrack',kind:'phrase',scoreJson:'{}',links:[],harmony:[{track:0,staff:0,chordId:' exact/id ',chord}]};

@@ -76,6 +76,7 @@ fn view(zoom: f64) -> DocumentViewState {
         },
         instrument_visible: false,
         score_display: None,
+        keyboard_visible: false,
     }
 }
 

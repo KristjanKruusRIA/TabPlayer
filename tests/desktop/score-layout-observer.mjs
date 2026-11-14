@@ -10,7 +10,7 @@ export async function installScoreLayoutIpcObserver(){
   const copy=value=>JSON.parse(JSON.stringify(value));
   const pick=(value,keys)=>Object.fromEntries(keys.filter(key=>value&&Object.hasOwn(value,key)).map(key=>[key,copy(value[key])]));
   const payload=(command,args)=>{
-    if(command==='workspace_set_view')return {...pick(args,['documentId']),...(args.view?{view:pick(args.view,['target','selectedString','selectedNoteIndex','zoom','trackView','instrumentVisible','scoreDisplay'])}:{})};
+    if(command==='workspace_set_view')return {...pick(args,['documentId']),...(args.view?{view:pick(args.view,['target','selectedString','selectedNoteIndex','zoom','trackView','instrumentVisible','scoreDisplay','keyboardVisible'])}:{})};
     if(command==='apply_edit')return {...pick(args,['document']),...(args.command?{command:pick(args.command,['type','selection','semitones','direction','layout'])}:{})};
     if(command==='audio_command')return {...pick(args,['owner']),...(args.command?{command:pick(args.command,['type','tick','generation','range','loop'])}:{})};
     return pick(args,['owner','generation']);

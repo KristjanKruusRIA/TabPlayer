@@ -2591,7 +2591,22 @@ it('selects the beat of a clicked instrument note in the score, as a click on th
   expect(c.getState().snapshot).toBe(before);expect(integration.commits).not.toHaveBeenCalled();
   integration.activeNotes.mockImplementation(()=>[]);
 });
-it('gives the keyboard its own dock panel, apart from the neck, for this open document only',async()=>{
+it('remembers the keyboard panel with the document view: restored when the view is, never an edit',async()=>{
+  const c=await setup(),before=c.getState().snapshot;
+  expect(testWorkspace.getState().documents[0].view).not.toHaveProperty('keyboardVisible');
+  fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));
+  expect(testWorkspace.getState().documents[0].view).toMatchObject({keyboardVisible:true,instrumentVisible:false});
+  fireEvent.click(screen.getByRole('button',{name:'Instrument'}));
+  expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(true);expect(testWorkspace.getState().documents[0].view).not.toHaveProperty('keyboardVisible');
+  fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));fireEvent.click(screen.getByRole('button',{name:'Overview'}));
+  expect(testWorkspace.getState().documents[0].view).not.toHaveProperty('keyboardVisible');
+  expect(c.getState().snapshot).toBe(before);expect(integration.commits).not.toHaveBeenCalled();
+  cleanup();
+  await setup(blankProject(),undefined,{view:{keyboardVisible:true}});
+  expect(screen.getByRole('region',{name:'Keyboard panel'})).toBeVisible();expect(screen.getByRole('button',{name:'Keyboard'})).toHaveAttribute('aria-pressed','true');
+  expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();
+});
+it('gives the keyboard its own dock panel, apart from the neck',async()=>{
   window.localStorage.removeItem(instrumentViewKey);
   const c=await setup(),before=c.getState().snapshot;
   fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));
@@ -2604,7 +2619,8 @@ it('gives the keyboard its own dock panel, apart from the neck, for this open do
   expect(screen.getByRole('button',{name:'Hide instrument'})).toHaveAttribute('aria-pressed','true');expect(screen.queryByRole('button',{name:'Show instrument'})).not.toBeInTheDocument();
   expect(window.localStorage.getItem(instrumentViewKey)??'{}').not.toContain('keyboardPanel');
   expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(false);
-  // A document opened afterwards, or the same one reopened, starts on its own view, not on the keyboard.
+  expect(testWorkspace.getState().documents[0].view.keyboardVisible).toBe(true);
+  // A new document starts on its own view, not on the keyboard.
   cleanup();await setup();
   expect(screen.queryByRole('region',{name:'Keyboard panel'})).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'Overview'})).toHaveAttribute('aria-pressed','true');expect(screen.getByRole('button',{name:'Show instrument'})).toHaveAttribute('aria-pressed','false');
   fireEvent.click(screen.getByRole('button',{name:'Keyboard'}));fireEvent.click(screen.getByRole('button',{name:'Instrument'}));

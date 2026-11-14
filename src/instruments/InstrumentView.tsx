@@ -1,5 +1,5 @@
 import { useI18n, type MessageKey } from '../i18n';
-import { useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { PlanNote } from '../audio/types';
 import type { EditCommand } from '../edit-types';
@@ -13,7 +13,7 @@ import { DrumsArt, FretboardArt, KeyboardArt, cymbalIds, neckGeometry, shellHeig
 import { drumPieces, instrumentHits, kitOrder, ownerOf, percussionInstruments, type Instrument } from './drum-kit';
 import type { HeldNote } from './focus';
 import { PercussionArt } from './percussion-art';
-import { readInstrumentViewPreferences, writeInstrumentViewPreferences, type InstrumentMode, type NoteNames } from './view-preferences';
+import { readInstrumentViewPreferences, subscribeInstrumentViewPreferences, writeInstrumentViewPreferences, type InstrumentMode, type NoteNames } from './view-preferences';
 import './instruments.css';
 
 export interface InstrumentViewProps {
@@ -269,6 +269,8 @@ export function InstrumentView({score,track:trackIndex,staff:staffIndex,notes,ca
   const caption = captionProp ?? t('instruments.caption_playing'), empty = emptyProp ?? t('instruments.empty_playing');
   const [saved] = useState(readInstrumentViewPreferences), [requestedMode,setRequestedMode] = useState<InstrumentMode>('auto'), [neckChoice,setNeckChoice] = useState<'guitar'|'bass'|null>(saved.neck), track = score.tracks[trackIndex], staff = track.staves[staffIndex];
   const [expanded,setExpandedNow] = useState(saved.expanded), [leftHanded,setLeftHanded] = useState(saved.leftHanded), [noteNames,setNoteNamesNow] = useState<NoteNames>(saved.noteNames);
+  // The native settings are read after the first paint; an open view then follows them.
+  useEffect(() => subscribeInstrumentViewPreferences(() => { const now = readInstrumentViewPreferences(); setLeftHanded(now.leftHanded); setNoteNamesNow(now.noteNames); setExpandedNow(now.expanded); setNeckChoice(now.neck); }), []);
   // These are the user's own view options: each choice is kept for the next view and still applies here when storage refuses it.
   const handedness = (left: boolean) => { setLeftHanded(left); writeInstrumentViewPreferences({ leftHanded: left }); };
   // The mode itself is per track (Auto follows the track), so only the neck it chose is kept.

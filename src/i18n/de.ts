@@ -731,6 +731,8 @@ export const de: MessageCatalog = {
   'instruments.held_note': '{pitch} · Saite {string} · Bund {fret} · gebunden, hält eine frühere Note',
   'instruments.select_note': '{note} in der Partitur auswählen, Takt {bar}, Beat {beat}',
   'instruments.keyboard_panel': 'Klaviaturbereich',
+  'instruments.settings_not_saved': 'Die Optionen der Instrumentenansicht konnten nicht gespeichert werden. Sie gelten jetzt, das Speichern wird erneut versucht.',
+  'instruments.settings_newer': 'Diese Einstellungen stammen von einer neueren TabPlayer-Version und bleiben unverändert. Änderungen hier werden nicht gespeichert.',
   'instruments.keyboard_percussion': 'Die Klaviatur zeigt Notensysteme mit Tonhöhen. Nutzen Sie für dieses Perkussionssystem die Ansicht Schlagzeug.',
   'instruments.expand_view': 'Instrumentenansicht erweitern',
   'instruments.compact_view': 'Instrumentenansicht verkleinern',

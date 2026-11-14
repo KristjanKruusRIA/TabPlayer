@@ -1,3 +1,4 @@
+import { keyFoldQuery } from './shell/toolbar-fit';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
 import type { BeatTarget } from './project';
@@ -113,16 +114,15 @@ export interface TransportDisplay {
   /** Whether the selected track's voices fill a bar. */
   completionAt?:(bar:number)=>BarCompletion;
 }
-/** Whether the window is narrow enough that the transport row cannot hold every group: the Key group then lives in More playback. The breakpoint is the toolbar's own (1100px); the row's width was not measured. */
-function useNarrowWindow(beforeChange:()=>void):boolean {
-  const query='(max-width: 1100px)';
+/** Whether the window is too narrow for the transport row to hold every group beside the toolbar's other groups: the Key group then lives in More playback. The widths are measured per language (src/shell/toolbar-fit.ts). */
+function useNarrowWindow(query:string,beforeChange:()=>void):boolean {
   const [narrow,setNarrow]=useState(()=>typeof window!=='undefined'&&typeof window.matchMedia==='function'&&window.matchMedia(query).matches);
   const before=useRef(beforeChange);before.current=beforeChange;
   useEffect(()=>{
     if(typeof window.matchMedia!=='function')return;
     const list=window.matchMedia(query),update=()=>{if(list.matches!==narrow)before.current();setNarrow(list.matches);};update();
     list.addEventListener?.('change',update);return()=>list.removeEventListener?.('change',update);
-  },[narrow]);
+  },[narrow,query]);
   return narrow;
 }
 export function Transport({player,measures,busy,cursor,selection,display:lcd}: {player:Pick<NativePlaybackController,'subscribe'|'getState'|'play'|'pause'|'stop'|'setSpeed'|'setLoop'|'clearLoop'|'seekToMeasure'|'setPractice'|'stepKeyShift'|'setKeyShift'|'generation'|'cursorPlaybackChoices'|'selectionPlaybackChoices'|'playbackOccurrences'|'playFromCursor'|'playSelection'|'loopSelection'>;measures:number;busy:boolean;cursor:BeatTarget;selection:MusicSelection|null;display?:TransportDisplay}) {
@@ -192,7 +192,7 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
   useEffect(()=>{if(state.practiceNotice==='key_shift_refused')say(t('transport.key_refused',{value:keyFormat.format(keyShift)}));},[state.practiceNotice]);
   // Crossing the breakpoint moves the Key group (it remounts); a key button that held focus gets it back, in More playback if that is where the group now is.
   const refocus=useRef<string|null>(null);
-  const compactRow=useNarrowWindow(()=>{const held=root.current?.querySelector('.transport-key')?.contains(document.activeElement)?(document.activeElement as HTMLElement).dataset.action:undefined;refocus.current=held??null;});
+  const compactRow=useNarrowWindow(keyFoldQuery(lang),()=>{const held=root.current?.querySelector('.transport-key')?.contains(document.activeElement)?(document.activeElement as HTMLElement).dataset.action:undefined;refocus.current=held??null;});
   useLayoutEffect(()=>{
     const action=refocus.current;if(!action)return;refocus.current=null;
     const details=root.current?.querySelector<HTMLDetailsElement>('.transport-more');if(compactRow&&details)details.open=true;

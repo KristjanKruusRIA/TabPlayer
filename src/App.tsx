@@ -1,3 +1,4 @@
+import { syncInstrumentViewPreferencesFromNative } from './instruments/view-preferences';
 import { useCallback,useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
 import {model,Settings} from '@coderline/alphatab';
 import { DocumentController } from './controller';
@@ -146,7 +147,7 @@ export interface AppProps {
 }
 
 export function App({controller,audioBridge,waveformBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onImportConverted,onClose,onCloseAll,documentTabs,sessionMenu,libraryMenu,onFileCommandCapture,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
-  const { t, preference, setPreference } = useI18n();
+  const { t, lang, preference, setPreference } = useI18n();
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
   const controlsBusy=state.busy||workspaceBusy;
   // A finalized document refuses every change to its music and layout. This is kept apart from controlsBusy so
@@ -158,6 +159,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
   const loopPassage=useLoopPassage(player,playbackState);
   useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
+  // The person's instrument view options live in the app's native settings; the browser copy only serves the first paint. Read them once, whichever document is open.
+  useEffect(()=>{void syncInstrumentViewPreferencesFromNative();},[]);
   useEffect(()=>{controller.setBeforeChange(bars=>player?.beforeScoreChange(true,bars));return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
@@ -230,8 +233,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const saveViewDefaults=(defaults:ViewDefaults)=>{const saved=writeViewDefaults(defaults);setSavedViewDefaults(true);if(autoFit&&autoFitted)setScoreDisplay({...display,zoomMode:'fitWidth'});return saved;};
   const manualZoom=(value:number)=>{setZoom(value);setScoreDisplay(old=>old?old.zoomMode!=='manual'?{...old,zoomMode:'manual'}:old:value===standardViewDefaults.zoom?{layout:standardViewDefaults.layout,zoomMode:'manual'}:old);};
   const [instrumentVisible,setInstrumentVisible]=useState(documentView.instrumentVisible);
-  /** The keyboard's own dock panel. Neither the document nor the user's settings keep it: it is a choice for this open document only. */
-  const [keyboardVisible,setKeyboardVisible]=useState(false);
+  /** The keyboard's own dock panel. It is part of this document's view state (like the instrument panel), not of the score or the user's settings, so it records no edit. */
+  const [keyboardVisible,setKeyboardVisible]=useState(documentView.keyboardVisible===true);
   const dockPanelVisible=instrumentVisible||keyboardVisible;
   const [paletteVisible,setPaletteVisible]=useState(true),[paletteHost,setPaletteHost]=useState<HTMLElement|null>(null);
   const [songHost,setSongHost]=useState<HTMLElement|null>(null),[practiceHost,setPracticeHost]=useState<HTMLElement|null>(null);
@@ -303,7 +306,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const target=repairSelection(state.score,selection);
   const gapBar=selectedGapBar(musicSelection,target.bar);
   const tunerStaff=state.score.tracks[target.track]?.staves[target.staff],tunerTuning=useMemo(()=>tunerStaff&&!tunerStaff.isPercussion?[...tunerStaff.tuning]:[],[tunerStaff]);
-  useEffect(()=>{onViewChange({target,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,...(scoreDisplay?{scoreDisplay}:{})});},[target.track,target.staff,target.bar,target.voice,target.beat,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,scoreDisplay,onViewChange]);
+  useEffect(()=>{onViewChange({target,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,...(scoreDisplay?{scoreDisplay}:{}),...(keyboardVisible?{keyboardVisible:true as const}:{})});},[target.track,target.staff,target.bar,target.voice,target.beat,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,keyboardVisible,scoreDisplay,onViewChange]);
   const trackIds=useMemo(()=>state.score.tracks.map(trackIdentity),[state.score]);
   const trackNames=useMemo(()=>Object.fromEntries(state.score.tracks.map(track=>[trackIdentity(track),track.name||t('track_display.track_fallback',{index:track.index+1})])),[state.score,t]);
   const visibleTracks=useMemo(()=>resolveVisibleTracks(trackIds,target.track,trackView),[trackIds,target.track,trackView]);
@@ -1011,7 +1014,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       editorSelection(null);setPendingAccidental(null);clearEntryQueue();event.preventDefault();
     }
   }
-  return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys}>
+  return <div ref={shell} className="app-shell" lang={lang} aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys}>
     <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure&&!other.contains(disclosure)&&!disclosure.contains(other))other.open=false;});else if(event.target.closest('button')&&!event.target.closest('[data-menu-keep]'))closeCommands(true);}}><nav className="gp-menus" aria-label={t('menu.file_and_history')}><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>{t('action.new')}</button>

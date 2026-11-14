@@ -45,3 +45,10 @@ it.each(['parchment','verticalScreen','horizontalScreen'] as const)('repairs end
 it.each([25,137.5,300].flatMap(zoom=>(['manual','fitWidth','fitPage'] as const).map(zoomMode=>({zoom,zoomMode}))))('retains manual $zoom with $zoomMode preference',({zoom,zoomMode})=>{
   expect(repairDocumentView(buildScore(blankProject()),{...initialDocumentView(),zoom,scoreDisplay:{layout:'grid',zoomMode}})).toEqual({...initialDocumentView(),zoom,scoreDisplay:{layout:'grid',zoomMode}});
 });
+
+it('keeps a shown keyboard panel, drops it when hidden or malformed, and never shows both panels',()=>{
+  const score=buildScore(blankProject()),base=initialDocumentView();
+  expect(repairDocumentView(score,{...base,keyboardVisible:true})).toEqual({...base,keyboardVisible:true});
+  for(const keyboardVisible of [false,undefined,null,1,'true'] as unknown[]){const repaired=repairDocumentView(score,{...base,keyboardVisible} as DocumentViewState);expect(Object.hasOwn(repaired,'keyboardVisible')).toBe(false);}
+  const both=repairDocumentView(score,{...base,instrumentVisible:true,keyboardVisible:true});expect(both.instrumentVisible).toBe(true);expect(Object.hasOwn(both,'keyboardVisible')).toBe(false);
+});

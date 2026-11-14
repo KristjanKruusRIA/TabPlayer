@@ -27,6 +27,7 @@ fn view() -> DocumentViewState {
         track_view: TrackView::Selected {},
         instrument_visible: false,
         score_display: None,
+        keyboard_visible: false,
     }
 }
 fn document(id: &str) -> RecoveryDocument {
@@ -187,6 +188,41 @@ fn malformed_view_resets_only_view_and_reports_repair() {
     let result = raw_decode(&raw).unwrap();
     assert_eq!(result.envelope.documents[0].view.zoom, 100.0);
     assert_eq!(result.issues.len(), 1);
+}
+
+#[test]
+fn a_recovery_written_before_the_keyboard_panel_field_still_opens_and_hides_it() {
+    // The view as every earlier build wrote it: no `keyboardVisible`, an instrument panel and a display choice.
+    let mut raw = serde_json::to_value(envelope(vec![document("first")])).unwrap();
+    raw["documents"][0]["view"] = json!({
+        "target":{"track":0,"staff":0,"bar":2,"voice":0,"beat":1},
+        "selectedString":4,"selectedNoteIndex":null,"zoom":125.0,
+        "trackView":{"kind":"selected"},"instrumentVisible":true,
+        "scoreDisplay":{"layout":"grid","zoomMode":"manual"}
+    });
+    let result = raw_decode(&raw).unwrap();
+    assert!(
+        result.issues.is_empty(),
+        "an old view is not a repair: {:?}",
+        result.issues
+    );
+    let kept = &result.envelope.documents[0].view;
+    assert!(!kept.keyboard_visible && kept.instrument_visible);
+    assert_eq!(kept.target.bar, 2);
+    // Everything else the old file held is read back, and the document's music and history are untouched.
+    assert_eq!(kept.zoom, 125.0);
+    assert_eq!(result.envelope.documents[0].revision, 7);
+    // A build that predates the field can read what this one writes while the panel is hidden.
+    let (bytes, _) = encode(&envelope(vec![document("first")]));
+    assert!(!String::from_utf8_lossy(&bytes).contains("keyboardVisible"));
+    // Shown, it round-trips with the document.
+    let mut shown = document("first");
+    shown.view.keyboard_visible = true;
+    let (bytes, reference) = encode(&envelope(vec![shown]));
+    let decoded =
+        decode_checkpoint(bytes.as_slice(), &manifest(reference.clone()), &reference).unwrap();
+    assert!(decoded.envelope.documents[0].view.keyboard_visible);
+    assert!(decoded.issues.is_empty());
 }
 
 #[test]

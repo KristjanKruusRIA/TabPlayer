@@ -79,30 +79,30 @@
     },
     "current_dispositions": {
       "implemented": 102,
-      "partial": 145,
-      "missing": 2,
+      "partial": 146,
+      "missing": 1,
       "unverified": 6,
       "out_of_scope": 3
     },
-    "evidence_reviewed_total": 202,
+    "evidence_reviewed_total": 203,
     "evidence_reviewed": {
       "implemented": 60,
-      "partial": 137,
+      "partial": 138,
       "missing": 0,
       "unverified": 5
     },
-    "baseline_not_reaudited_total": 56,
+    "baseline_not_reaudited_total": 55,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 8,
-      "missing": 2,
+      "missing": 1,
       "unverified": 1,
       "out_of_scope": 3
     },
-    "status_changed_total": 153,
+    "status_changed_total": 154,
     "transition_counts": {
       "missing -> implemented": 41,
-      "missing -> partial": 100,
+      "missing -> partial": 101,
       "partial -> implemented": 10,
       "unverified -> partial": 2
     },
@@ -116,7 +116,7 @@
       "transition_counts": {
         "missing -> out_of_scope": 3
       },
-      "note": "Decided by the owner on 2026-11-14. These carried rows were not re-audited, so they are not part of status_changed_total (153), evidence_reviewed_total or transition_counts, which describe the 202 evidence-reviewed rows only."
+      "note": "Decided by the owner on 2026-11-14. These carried rows were not re-audited, so they are not part of status_changed_total (154), evidence_reviewed_total or transition_counts, which describe the 203 evidence-reviewed rows only."
     }
   },
   "evidence": {
@@ -2542,6 +2542,48 @@
       "path": "docs/validation/2026-11-14-the-58-native-view-settings.md",
       "start_line": 72,
       "end_line": 82,
+      "kind": "validation_report"
+    },
+    "fretlight_scope": {
+      "path": "docs/validation/2026-11-14-gp8-fretlight.md",
+      "start_line": 5,
+      "end_line": 7,
+      "kind": "validation_report"
+    },
+    "fretlight_built": {
+      "path": "docs/validation/2026-11-14-gp8-fretlight.md",
+      "start_line": 9,
+      "end_line": 14,
+      "kind": "validation_report"
+    },
+    "fretlight_protocol": {
+      "path": "docs/validation/2026-11-14-gp8-fretlight.md",
+      "start_line": 16,
+      "end_line": 20,
+      "kind": "validation_report"
+    },
+    "fretlight_decisions": {
+      "path": "docs/validation/2026-11-14-gp8-fretlight.md",
+      "start_line": 22,
+      "end_line": 37,
+      "kind": "validation_report"
+    },
+    "fretlight_dependency": {
+      "path": "docs/validation/2026-11-14-gp8-fretlight.md",
+      "start_line": 39,
+      "end_line": 41,
+      "kind": "validation_report"
+    },
+    "fretlight_evidence": {
+      "path": "docs/validation/2026-11-14-gp8-fretlight.md",
+      "start_line": 43,
+      "end_line": 60,
+      "kind": "validation_report"
+    },
+    "fretlight_limits": {
+      "path": "docs/validation/2026-11-14-gp8-fretlight.md",
+      "start_line": 62,
+      "end_line": 74,
       "kind": "validation_report"
     }
   },
@@ -10756,12 +10798,18 @@
       "acceptance_required": "Drive supported device in score/scale modes and handle disconnect/repeats.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No Fretlight discovery/connection/light commands.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "A View-menu section, Fretlight guitar, labelled experimental and untested on real hardware, connects to a wired Fretlight over USB HID and lights the notes of the selected six-string track on its neck. Nothing is listed or opened at launch, on opening the section or on opening a score: only Connect does, and the guitar is off again at every launch. The lights follow the instrument view's Show choice (Playing notes, Selected beat, Selected bar, Next beat), which the section also sets, even while the view is closed. Each change writes three 8-byte reports built from the documented layout, at most 25 frames a second with the newest frame winning. A capo lights the physical fret (written number plus capo, partial capo included), tuning and the left-handed view do not change the lights, positions above fret 21 are counted and not lit, and any other track (percussion, keyboard, four, five, seven or more strings) lights nothing and the section says so. A failed write marks the guitar lost and leaves its lights as they were; Disconnect and quitting write an all-off frame first, for at most 1.5 s. Run in the real app against a fake guitar (parity-fretlight.mjs passed): the bytes written for a beat, a chord, a high position, the last beat and a whole bar equal the ones worked out by hand, the lights followed playback with the instrument view closed, every beat of the first bar was lit in order during playback, a 3000-frame flood reached the device at about 23 frames a second, hostile frames were refused, the bass track lit nothing, and Disconnect wrote all-off. 28 Rust unit tests (the encoder is also checked against all 132 cells of the source post's tables) and about 40 page tests pass.",
+      "remaining_gap": "No real Fretlight was ever connected and the hidapi backend (listing, opening, writing) never touched a real USB stack, so whether a guitar lights the right LED, whether lights persist or need refreshing, the product name a real guitar reports (matched as containing \"fretlight\", a guess) and which fret a capo should light are all unverified; the byte layout comes from one community write-up. Scale mode is not built (scale overlays exist only in the Scale browser dialog): the row asks for score and scale modes and only the four score modes are met. Wireless models are not supported (no public protocol). Repeats and loops follow the playback plan's notes but were not driven on a device or against the fake one. hidapi 2.6.7 walks the system's HID device list once on Connect and the app keeps only the Fretlight ids. macOS and Linux were not built or run, and on Linux the hidraw permission is not handled. An unplug is noticed only at the next write. The Estonian and German text is unreviewed. 2026-11-14: nobody on the project owns a Fretlight, so this ships untested on real hardware.",
+      "current_evidence": [
+        "fretlight_scope",
+        "fretlight_protocol",
+        "fretlight_decisions",
+        "fretlight_evidence",
+        "fretlight_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

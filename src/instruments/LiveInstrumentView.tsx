@@ -1,17 +1,15 @@
 import { useI18n } from '../i18n';
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
-import { trackIdentity } from '../engine';
 import type { BeatTarget } from '../project';
-import { focusNotes, heldNotes, type InstrumentFocus } from './focus';
+import type { InstrumentFocus } from './focus';
+import { useFocusedNotes } from './use-focused-notes';
 import type { EditCommand } from '../edit-types';
 import type { EntryFollow } from './entry';
 import { InstrumentView, type PickBy } from './InstrumentView';
-import { currentInstrumentSettingsProblem, readInstrumentViewPreferences, subscribeInstrumentSettingsProblem, subscribeInstrumentViewPreferences, writeInstrumentViewPreferences } from './view-preferences';
+import { announceInstrumentFocus, currentInstrumentFocus, currentInstrumentSettingsProblem, readInstrumentViewPreferences, subscribeInstrumentFocus, subscribeInstrumentSettingsProblem, writeInstrumentViewPreferences } from './view-preferences';
 
-const noSubscribe=()=>()=>{};
-const noState=()=>null;
 export function LiveInstrumentView({score,track,staff,target=null,noteIndex=null,player,onEdit,onSelect,busy=false,locked=false,string,panel}: {
   score:model.Score;track:number;staff:number;target?:BeatTarget|null;
   /** Sends an edit made from the view through the app's edit path; without it the view cannot edit. */
@@ -26,21 +24,13 @@ export function LiveInstrumentView({score,track,staff,target=null,noteIndex=null
     next:{label:t('instruments.focus_next'),caption:t('instruments.caption_next'),empty:t('instruments.empty_next')},
   };
   const [saved]=useState(readInstrumentViewPreferences),[focus,setFocusNow]=useState<InstrumentFocus>(saved.focus),[editing,setEditing]=useState(saved.clickToEdit);
-  useEffect(()=>subscribeInstrumentViewPreferences(()=>setFocusNow(readInstrumentViewPreferences().focus)),[]);
-  const setFocus=(value:InstrumentFocus)=>{setFocusNow(value);writeInstrumentViewPreferences({focus:value});};
+  useEffect(()=>subscribeInstrumentFocus(()=>setFocusNow(currentInstrumentFocus())),[]);
+  const setFocus=(value:InstrumentFocus)=>{setFocusNow(value);writeInstrumentViewPreferences({focus:value});announceInstrumentFocus(value);};
   const editMode=editing&&!!onEdit&&!locked;
   const chooseEditing=(on:boolean)=>{setEditing(on);writeInstrumentViewPreferences({clickToEdit:on});};
   const settingsProblem=useSyncExternalStore(subscribeInstrumentSettingsProblem,currentInstrumentSettingsProblem);
-  const state=useSyncExternalStore(player?.subscribe??noSubscribe,player?.getState??noState);
-  const id=trackIdentity(score.tracks[track]),active=player?.activeNotes(id)??[];
-  const scheduled=focus==='playing'?null:player?.scheduledNotes?.(id)??null;
-  // Only the next beat moves with playback; the selected beat and bar depend on the plan and the selection alone.
-  const tick=focus==='next'?scheduled?.tick??null:null,{notes:planned,beats,counting,loop,range}=scheduled??{};
-  const picked=useMemo(()=>planned&&beats?focusNotes(focus,{notes:planned,beats,tick,counting:!!counting,loop:loop??null,range:range??null,active:[],target}):[],
-    [focus,planned,beats,tick,counting,loop?.startTick,loop?.endTick,range?.endTick,target?.track,target?.staff,target?.bar,target?.voice,target?.beat]);
-  // A tie that only continues an earlier note has no planned note, so it is read from the score for the selected beat or bar.
-  const held=useMemo(()=>heldNotes(score,focus,target),[score,focus,target?.track,target?.staff,target?.bar,target?.voice,target?.beat]);
-  const shownFocus:InstrumentFocus=editMode?'beat':focus,notes=focus==='playing'?active:picked,shown=focuses[shownFocus];
+  const {state,notes,held,scheduled}=useFocusedNotes({score,track,target,player,focus});
+  const shownFocus:InstrumentFocus=editMode?'beat':focus,shown=focuses[shownFocus];
   const empty=editMode||focus==='playing'?shown.empty:state?.error?t('instruments.playback_unavailable'):!state?.ready||!scheduled?t('instruments.playback_not_ready'):shown.empty;
   return <section className="live-instrument-view" aria-label={panel==='keyboard'?t('instruments.keyboard_panel'):t('instruments.instrument_view')}>
     <InstrumentView lockedMode={panel==='keyboard'?'keys':undefined} score={score} track={track} staff={staff} notes={notes} held={held} caption={shown.caption} empty={empty}

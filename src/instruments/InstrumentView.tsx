@@ -7,12 +7,13 @@ import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
 import { busyGuard } from '../ui';
 import { describePartialCapo, getPartialCapo, openStringKey } from '../editor/partial-capo';
-import { describeBanjoDrone, fretExists, getBanjoDrone, neckFret, plainFret } from '../editor/banjo-drone';
+import { describeBanjoDrone, getBanjoDrone } from '../editor/banjo-drone';
 import { busyHint, entryBeat, entryNotes, fretTarget, hitTarget, instrumentTarget, keyTarget, noBeatHint, padTarget, type EntryAction, type EntryContext, type EntryFollow, type EntryTarget } from './entry';
 import { DrumsArt, FretboardArt, KeyboardArt, cymbalIds, neckGeometry, shellHeightOf, surfaceDepthOf, targetDepthOf } from './instrument-art';
 import { drumPieces, instrumentHits, kitOrder, ownerOf, percussionInstruments, type Instrument } from './drum-kit';
 import type { HeldNote } from './focus';
 import { PercussionArt } from './percussion-art';
+import { fretPositions } from './fret-positions';
 import { readInstrumentViewPreferences, subscribeInstrumentViewPreferences, writeInstrumentViewPreferences, type InstrumentMode, type NoteNames } from './view-preferences';
 import './instruments.css';
 
@@ -133,16 +134,7 @@ function Fretboard({staff, notes, mode, leftHanded, pick, entry}: {staff: model.
   const start = `${entry?.string && entry.string >= 1 && entry.string <= staff.tuning.length ? entry.string : staff.tuning.length}/0`;
   const positions: FretPosition[] = [], held = new Set(notes.filter(note => note.held).map(note => note.id));
   if (entry) for (const note of entry.ctx.notes) { if (note.string) positions.push({id: note.id, key: note.key, string: note.string, fret: note.fret, held: held.has(note.id)}); }
-  else for (const note of notes) {
-    if (note.source.target.staff !== staff.index) continue;
-    const {target,string} = note.source, beat = staff.bars[target.bar]?.voices[target.voice]?.beats[target.beat];
-    const source = beat?.notes.find(n => n.string === string);
-    if (string < 1 || string > staff.tuning.length || (!source && !beat?.deadSlapped)) continue;
-    // Trills and ornaments retain their source string; harmonics retain their
-    // authored touch position rather than moving to a guessed sounding fret.
-    const fret = beat?.deadSlapped ? 0 : source!.harmonicType === 0 && (!source!.isDead || fretExists(staff, string, source!.fret)) ? neckFret(staff, string, plainFret(staff, string, source!.fret) + note.key - source!.realValue) : source!.fret;
-    if (fret >= 0) positions.push({id: note.id, key: note.key, string, fret, note, held: note.held});
-  }
+  else positions.push(...fretPositions(staff, notes));
   // One button per position; a position that repeats in the bar is one button that walks its occurrences.
   const picks = !entry && pick ? groupPicks(positions, p => `${p.string}/${p.fret}`, p => p.string * 1000 + p.fret) : [], pickOrder = picks.map(group => group.id);
   const roving = entry ? rove(order, start) : rove(pickOrder, pickOrder[0] ?? '');

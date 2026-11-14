@@ -60,6 +60,19 @@ const nativeBridge = () => bridge === undefined ? (bridge = defaultBridge()) : b
 export function setNativeSettingsBridge(value: NativeSettingsBridge | null) { bridge = value; }
 
 const listeners = new Set<() => void>();
+/** Which shown notes the instrument view follows, as the person chose it in this run. Kept here too because storage may refuse it. */
+let announcedFocus: InstrumentFocus | null = null;
+const focusListeners = new Set<() => void>();
+/** Tells whoever follows the focus (the Fretlight lights) that it was chosen. The choice itself is written with `writeInstrumentViewPreferences`. */
+export function announceInstrumentFocus(value: InstrumentFocus) { announcedFocus = value; for (const listener of [...focusListeners]) try { listener(); } catch { /* a failing follower must not stop the others */ } }
+/** The focus now: the choice made in this run, else the stored one. */
+export const currentInstrumentFocus = (): InstrumentFocus => announcedFocus ?? readInstrumentViewPreferences().focus;
+/** Hears of a focus chosen in this run and of the native settings arriving. */
+export function subscribeInstrumentFocus(listener: () => void): () => void {
+  focusListeners.add(listener);
+  const off = subscribeInstrumentViewPreferences(() => { announcedFocus = null; listener(); });
+  return () => { focusListeners.delete(listener); off(); };
+}
 /** Called when the native settings changed what the browser copy held, so views that are already open follow them. */
 export function subscribeInstrumentViewPreferences(listener: () => void): () => void { listeners.add(listener); return () => { listeners.delete(listener); }; }
 

@@ -2504,6 +2504,7 @@ export const et: MessageCatalog = {
   'menu.password_protection': 'Paroolikaitse…',
   'status.working': 'Töötlen…',
   'status.unsaved': 'Salvestamata muudatused',
+  'status.document_rebuilt': 'Partituur uuendati ajaloo järgi',
   'status.saved': 'Salvestatud',
   'status.not_saved': 'Salvestamata',
   'status.new_score': 'Uus partituur',

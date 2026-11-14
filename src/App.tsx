@@ -110,6 +110,7 @@ import type { SystemSpan } from './engraving/system-gaps';
 import { barScaleOf,sourceWeight,withBarScale } from './engraving/bar-widths';
 import { TrackDisplayControls } from './engraving/TrackDisplayControls';
 import { projectEngraving } from './engraving/projection';
+import { followProjection,type ProjectionBasis } from './engraving/follow';
 import { engravingRenderKey } from './engraving/system-gaps';
 import { effectivePageLayout } from './engraving/page';
 import { resolveVisibleTracks,type TrackView } from './engraving/view';
@@ -127,6 +128,8 @@ import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
 import './workstation/workstation-shell.css';
 import './workstation/gp-shell.css';
 const noPlaybackSubscribe=()=>()=>{};
+/** How long after the last edit the playback plan is built: playback is invalid at once, and a run of edits is prepared once. */
+const PLAN_QUIET_MS=300;
 /** A keyboard entry key that waits for the edit before it. Which key it is (the Plus/Minus swap, the keypad durations) is settled when it is pressed; the cursor, the pending accidental and the fret are read when its turn comes. */
 type EntryItem=
   |{kind:'keypad';keypad:NonNullable<ReturnType<typeof numpadKey>>}
@@ -162,7 +165,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
   const loopPassage=useLoopPassage(player,playbackState);
-  useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
+  useEffect(()=>{const playback=new NativePlaybackController({quietMs:PLAN_QUIET_MS,bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
   // The person's instrument view options live in the app's native settings; the browser copy only serves the first paint. Read them once, whichever document is open.
   useEffect(()=>{void syncInstrumentViewPreferencesFromNative();},[]);
   useEffect(()=>{controller.setBeforeChange(bars=>player?.beforeScoreChange(true,bars));return()=>controller.setBeforeChange(()=>{});},[controller,player]);
@@ -330,7 +333,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   // projectEngraving ignores system gaps, so a gap-only edit keeps the projected score (and so the notation render and the audio load).
   const engravingKey=engravingRenderKey(state.settings.engraving);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const projection=useMemo(()=>projectEngraving(state.score,trackIds,state.settings.engraving),[state.score,trackIds,engravingKey]);
+  // A score edited in place carries its edit, so its projection is the last one with that edit applied rather than a whole new copy of the score.
+  const projectionBasis=useRef<ProjectionBasis|null>(null);
+  const projection=useMemo(()=>{
+    const basis=projectionBasis.current,next=(basis&&followProjection(basis,state.score,trackIds,state.settings.engraving))||projectEngraving(state.score,trackIds,state.settings.engraving);
+    projectionBasis.current={source:state.score,ids:trackIds,value:state.settings.engraving,projection:next};return next;
+  },[state.score,trackIds,engravingKey]);
   const pageState=useMemo(()=>{
     try{return {page:effectivePageLayout(state.settings),error:null};}
     catch(error){return {page:effectivePageLayout({page:null,print:defaultPrintLayout()}),error:t('app.print_layout_error',{error:error instanceof Error?error.message:String(error)})};}
@@ -482,6 +490,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       else if(JSON.stringify(options.layout)!==JSON.stringify(state.settings.print))await controller.edit({type:'setPrintLayout',layout:options.layout});
     }
     if(exportCancelled.current)return;
+    // An edit applied in place is compared with a rebuild before anything is exported from it.
+    await controller.verified();
     const latest=controller.getState();
     if(await exports.run(options,{score:latest.score,settings:effectiveAudioSettings(latest.snapshot.project,latest),embeddedBacking:latest.embeddedBacking,revision:latest.revision})&&!exportCancelled.current)closeModal();
   })().catch(error=>{setExportError(error instanceof Error?error.message:String(error));}).finally(()=>{setExportLaunching(false);exportRunning.current=null;});exportRunning.current=running;act(running);};
@@ -1246,6 +1256,6 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound',key:{shift:playbackState?.keyTarget??playbackState?.practice.settings.tonality??0,ready:playbackState?.ready??false}}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onNote={editLocked?undefined:instrumentEdit} onClose={closeModal}/>}
-    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? t('status.save_hint')}</span>}{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?t('status.hint_note'):t('status.hint_score')}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
+    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? t('status.save_hint')}</span>}{state.repaired&&<span className="statusbar-note" role="status">{t('status.document_rebuilt')}</span>}{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?t('status.hint_note'):t('status.hint_score')}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
   </div>;
 }

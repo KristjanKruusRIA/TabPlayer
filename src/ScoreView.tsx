@@ -39,6 +39,8 @@ import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score
 import { useI18n } from './i18n';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
+/** How often, and for how long each time, a draw gives way to keys and clicks that are waiting. */
+const DRAW_DEFERRALS_MAX=6,DRAW_DEFERRAL_MS=16;
 const diagramScale=.45,chipHeight=16,chipGap=2;
 const chipWidth=(diagram:ScaleDiagram)=>18+6*Math.min(14,(diagram.name||'Scale').length);
 const chipLabel=(diagram:ScaleDiagram)=>(diagram.name||'Scale').slice(0,14);
@@ -513,8 +515,16 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
   const [drawFailure,setDrawFailure]=useState<{error:unknown}|null>(null);
   const renderGeneration=useRef(0);
+  // A draw of a long score takes a fifth of a second and cannot be interrupted. When keys or clicks are already waiting (a pointer merely moving over the page does not count) (a run of edits typed
+  // quickly), the draw lets them go first, a few frames at most; each of them changes the score again, and only the newest is drawn.
+  const [drawRetry,setDrawRetry]=useState(0),drawDeferred=useRef(0);
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0)return;
+    const scheduling=(navigator as Navigator&{scheduling?:{isInputPending?:(options?:{includeContinuous?:boolean})=>boolean}}).scheduling;
+    if(drawDeferred.current<DRAW_DEFERRALS_MAX&&scheduling?.isInputPending?.({includeContinuous:false})){
+      drawDeferred.current++;const timer=setTimeout(()=>setDrawRetry(count=>count+1),DRAW_DEFERRAL_MS);return()=>clearTimeout(timer);
+    }
+    drawDeferred.current=0;
     // `music` is the font the layout is drawn with: the chosen font's loaded data, or Bravura's (also when the chosen font failed to load).
     const draw=(music:MusicFontData,drawn=engraving)=>{
       view.settings.display.scale=sourceScale;applyEffectBandSpacing(view.settings);
@@ -561,7 +571,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       reportFonts();
     });
     return()=>{renderGeneration.current++;};
-  },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page,idsKey]);
+  },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page,idsKey,drawRetry]);
   useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refreshOverlays();},[pagination,arrangement,pageError]);
   /** Places every mark drawn over the score again from where the renderer now has it. The last pass's cost is kept as a user-timing measure. */
   const refreshOverlays=()=>{

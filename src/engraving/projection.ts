@@ -62,9 +62,8 @@ function liveTracks(score:model.Score,ids:readonly string[],value:EngravingOverr
   }
 }
 export function validateEngravingTracks(score:model.Score,ids:readonly string[],value:EngravingOverrides):void {validateEngraving(value);liveTracks(score,ids,value,true);}
-export function projectEngraving(source:model.Score,ids:readonly string[],value:EngravingOverrides):EngravingProjection {
-  validateEngraving(value);liveTracks(source,ids,value,false);
-  const score=scoreFromJson(model.JsonConverter.scoreToJson(source),new Settings());restoreNoteLinks(score,captureNoteLinks(source));copyGpInterchangeSource(source,score);
+/** Gives the rendered copy `score` of `source` the display flags its track profiles ask for, and maps each source beat and note to its copy. */
+export function mapProjection(source:model.Score,score:model.Score,ids:readonly string[],value:EngravingOverrides):Pick<EngravingProjection,'beats'|'notes'> {
   const beats:EngravingProjection['beats']=new Map(),notes:EngravingProjection['notes']=new Map(),profiles=new Map(value.profiles.map(entry=>[entry.trackId,entry.profile]));
   source.tracks.forEach((track,ti)=>track.staves.forEach((staff,si)=>{
     const rendered=score.tracks[ti].staves[si],profile=profiles.get(ids[ti])??'source',stringed=staff.tuning.length>0&&!staff.isPercussion;
@@ -77,6 +76,12 @@ export function projectEngraving(source:model.Score,ids:readonly string[],value:
   }));
   // The public tie-ID JSON replay path omits the continued bend's origin link.
   for(const pair of notes.values())pair.rendered.bendOrigin=pair.source.bendOrigin?notes.get(pair.source.bendOrigin.id)?.rendered??null:null;
+  return {beats,notes};
+}
+export function projectEngraving(source:model.Score,ids:readonly string[],value:EngravingOverrides):EngravingProjection {
+  validateEngraving(value);liveTracks(source,ids,value,false);
+  const score=scoreFromJson(model.JsonConverter.scoreToJson(source),new Settings());restoreNoteLinks(score,captureNoteLinks(source));copyGpInterchangeSource(source,score);
+  const {beats,notes}=mapProjection(source,score,ids,value);
   const style=score.stylesheet,overrides=value.stylesheet;
   for(const [key,field]of Object.entries(styleBooleans)){const override=overrides[key as keyof typeof styleBooleans];if(override!==null)Object.assign(style,{[field]:override});}
   for(const [key,mapping]of Object.entries(styleEnums)){const override=overrides[key as keyof typeof styleEnums];if(override!=='inherit')Object.assign(style,{[mapping.field]:(mapping.values as Record<string,number>)[override]});}

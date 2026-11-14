@@ -8,7 +8,8 @@ import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
 import type { AudioDiagnostics, AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
 import type { AuditionSource } from './audition';
-import { preparePlan,preparePlanFromScore } from './plan';
+import { freezePlan,preparePlan,preparePlanFromScore } from './plan';
+import { sameData } from '../same-data';
 import { interpretationsOf } from './interpretation';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
 import { DEFAULT_PRACTICE,tonalityOf,type PracticeLoop,type PracticeSettings,type PracticeStatus } from './practice-types';
@@ -32,7 +33,8 @@ const mixKey=(mix:ChannelMix|undefined)=>{const m=mix??defaultMix();return JSON.
 const mixLanded=(heard:{track:string;mix:ChannelMix;landing:{key:string;project:ProjectView|null}|null},built:BuiltDocument|null,project:ProjectView|null)=>{if(heard.landing===null||!built)return false;if(project!==heard.landing.project)return true;const key=mixKey(built.settings.mixes[heard.track]);return key!==heard.landing.key||key===mixKey(heard.mix);};
 /** How long a practice change waits for the native acknowledgement before it falls back to the acknowledged settings. Native's own wait for the callback is 250 ms. */
 const PENDING_MS=2500;
-type Options={pendingMs?:number;bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined;latestMaster?:()=>MasterSettings|undefined};
+/** `quietMs`: how long a score that changed (an edit) waits, with playback already invalid, before its plan is built, so that a run of edits is prepared once, for the last of them. */
+type Options={pendingMs?:number;quietMs?:number;bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined;latestMaster?:()=>MasterSettings|undefined};
 export class NativePlaybackController {
   private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,practice:idlePractice(DEFAULT_PRACTICE),practicePending:false,practiceNotice:null,range:null,loop:null,loopNotice:null,error:null};
   private listeners=new Set<()=>void>();private view:AlphaTabApi|null=null;private cleanupView:()=>void=()=>{};
@@ -44,7 +46,7 @@ export class NativePlaybackController {
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private pendingTimer:ReturnType<typeof setTimeout>|null=null;/** Steps taken while a change was pending, added up into one key sent once it is acknowledged. */private queuedKey:number|null=null;/** The key a pending request asked for when the score changed under it, passed on to the next prepare. */private carriedKey:number|null=null;/** What a request that timed out asked for, so a late echo of it clears the notice. */private lateKey:string|null=null;/** Counts changes of document, so a view can tell a key that reset with the document from one that was changed. */private documentSerial=0;private hasBacking=false;
   /** The running loop by bars, so it can follow an edit that rebuilds the plan. `awaitingRestore` holds off reading the loop back from native while the rebuilt plan has none yet; `loopLost` is an edit that took the loop's bars with it. */
   private keptLoop:KeptLoop|null=null;private loopLost=false;private awaitingRestore=false;private loopsSending=0;
-  private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
+  private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;private lastChangeAt:number|null=null;
   private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
   private bridge:NativeAudioBridge;private options:Options;generation=++nextGeneration;
   constructor(options:Options) {
@@ -71,7 +73,15 @@ export class NativePlaybackController {
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener);};};
   private keyTarget(){return this.queuedKey??(this.pendingPractice?tonalityOf(this.pendingPractice):tonalityOf(this.practice));}
-  private update(change:Partial<PlaybackState>){if(this.destroyed)return;this.state={...this.state,...change,keyTarget:this.keyTarget(),documentSerial:this.documentSerial};for(const listener of this.listeners)listener();}
+  /** Publishes a change. Native status arrives about 30 times a second whatever it says, so a change that leaves every field as it was keeps the same state object and tells nobody; the fields that did not change keep their old objects too. An empty change is the explicit wish to notify (a private field the getters read has changed). */
+  private update(change:Partial<PlaybackState>){
+    if(this.destroyed)return;
+    const next={...this.state,...change,keyTarget:this.keyTarget(),documentSerial:this.documentSerial} as PlaybackState,forced=Object.keys(change).length===0;
+    let changed=forced;
+    for(const key of Object.keys(next) as (keyof PlaybackState)[]){if(sameData(this.state[key],next[key]))(next as unknown as Record<string,unknown>)[key]=this.state[key];else changed=true;}
+    if(!changed)return;
+    this.state=forced?{...next}:next;for(const listener of this.listeners)listener();
+  }
   private fail(error:unknown){this.noteMode='stopped';this.pendingNoteTick=undefined;this.operationError=error instanceof Error?error.message:String(error);this.update({error:this.operationError});}
   private receive(status:NativeAudioStatus){
     if(status.generation!==this.generation || this.destroyed)return;
@@ -358,11 +368,17 @@ export class NativePlaybackController {
       }
     }
     let practice=structuredClone(this.practice);
+    // Edits that follow one another are prepared once, for the last. The first change after a quiet spell is built at once; a change while a build is in flight or within the window of the one before it waits for the edits to stop.
+    const quietMs=this.options.quietMs??0,now=Date.now(),recent=this.lastChangeAt!==null&&now-this.lastChangeAt<quietMs;
+    const settling=!documentChanged&&this.built!==null&&quietMs>0&&(this.preparing||recent);
+    this.lastChangeAt=now;
     this.awaitingRestore=this.keptLoop!==null||this.loopLost;
     this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.planTimingKey=timingKey;this.planInterpretationKey=interpretationKey;this.desiredAudioSettingsKey=audioSettingsKey;
     try {
+      // Playback is already invalid. Building the plan is the long step; it waits until the edits stop, and a newer score supersedes it here.
+      if(settling){await new Promise<void>(resolve=>setTimeout(resolve,this.options.quietMs));if(generation!==this.generation||this.destroyed)return;}
       const authored=await (this.options.preparePlan?(interpreted?this.options.preparePlan(project,generation,interpretations):this.options.preparePlan(project,generation)):(interpreted?preparePlanFromScore(built.score,generation,interpretations):preparePlanFromScore(built.score,generation)));if(generation!==this.generation||this.destroyed)return;
-      const plan=applyReferenceSyncPlan(authored,audioSettings.backing);
+      freezePlan(authored);const plan=freezePlan(applyReferenceSyncPlan(authored,audioSettings.backing));
       // The plan now in hand decides whether a fixed tempo still keeps the backing within 10% to 300%; a tempo edit can change that.
       const fitted=practiceForBacking(practice,this.hasBacking?authoredTemposOf(plan):null);
       if(fitted.notice){practice=fitted.settings;this.practice=fitted.settings;this.update({practiceNotice:fitted.notice});}

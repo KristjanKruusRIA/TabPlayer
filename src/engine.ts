@@ -3,7 +3,8 @@ import { model, Settings } from '@coderline/alphatab';
 import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
 import { appliesFilePartialCapo,projectCommands } from './project';
 import { isSettingsEdit } from './edit-types';
-import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types';
+import type { BackingSettings, ChannelMix, DocumentSettings, SingleCommand } from './edit-types';
+import { describeScore, describeScoreSteps, duplicateIds, firstDifference } from './engine-verify';
 import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings, completeSound, completeMaster } from './document-settings';
 import { getLyricsSource, setLyricsSource } from './editor/lyrics-source';
 import { copyHarmonyChord } from './harmony/chord-source';
@@ -364,7 +365,12 @@ function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undef
 
 /** `canRedo`: the document has undone edits, so it is not edit-free even when its list is empty. */
 export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocument {
-  const project = validateProject(value); const initial = initialScore(project, canRedo); let score = initial.score;
+  const steps = buildDocumentSteps(value, canRedo);
+  for (;;) { const step = steps.next(); if (step.done) return step.value; }
+}
+/** `buildDocument` in steps: each `yield` is a point where the caller may let other work go first (the check that compares an edited document with a rebuild uses this so typing is not stalled by a rebuild). */
+export function* buildDocumentSteps(value: ProjectInput, canRedo = false): Generator<void, BuiltDocument> {
+  const project = validateProject(value); yield; const initial = initialScore(project, canRedo); let score = initial.score; yield;
   const sourceBarCount=score.masterBars.length;
   const identities=score.tracks.map((_,index)=>`base/${index}`);
   const documentSettings=defaultDocumentSettings();
@@ -379,6 +385,7 @@ export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocume
   score.tracks.forEach((track,index)=>{documentSettings.mixes[identities[index]]={...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo};});
   const sourceMixes=structuredClone(documentSettings.mixes);
   for (const [index,edit] of projectCommands(project).entries()) {
+    yield;
     if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
     if(documentSettings.backing?.referenceSync)score=rebuild(score);
     const previous=documentSettings.backing?.referenceSync?referenceSyncTiming(documentSettings.backing,backingLocationsForScore(score)):null;
@@ -409,7 +416,7 @@ export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocume
     if(previous){score=rebuild(score);documentSettings.backing=adjustReferenceSyncBounds(documentSettings.backing!,previous,backingLocationsForScore(score));}
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
-  score=rebuild(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
+  yield;score=rebuild(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
   validateEngravingTracks(score,identities,{...documentSettings.engraving,profiles:documentSettings.engraving.profiles.filter(entry=>identities.includes(entry.trackId))});
   const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes,sourceBarCount,importNotice:initial.notice};
   validateBackingAnchors(score,effectiveAudioSettings(project,built).backing);return built;
@@ -488,6 +495,310 @@ export function previewEdit(project: ProjectInput, edit: EditCommand, current?:B
   const built=buildDocument(next);assertDiagramFrets(built.score,edit);
   lastBuilt={project,edit:key,built};
   return {...built,project:next};
+}
+
+/**
+ * Editing a built document in place.
+ *
+ * `buildDocument` rebuilds a document from its file and every edit, which costs seconds on a long score. The edits a person makes
+ * most (a note, a rest, a duration, a beat) touch one voice and nothing outside its track, so they are applied to the document
+ * that is already built, and only that track's derived state (beat chain, timings, links) is worked out again. The result must be
+ * the document a full rebuild gives, so it is only done for edits known to be safe this way, `verifyEditInPlace` checks it, and
+ * everything else, or anything this refuses, takes the full rebuild.
+ */
+const inPlaceTypes=new Set<string>(['setNote','removeNote','setRest','setDuration','insertBeat','deleteBeat']);
+const inPlaceSteps=(edit:EditCommand):SingleCommand[]|null=>{
+  const steps:SingleCommand[]=edit.type==='sequence'?edit.commands as SingleCommand[]:[edit];
+  if(!steps.length||steps.some(step=>!inPlaceTypes.has(step.type)||!('target' in step)||!step.target||typeof step.target!=='object'||step.target.track!==(steps[0] as {target:BeatTarget}).target.track))return null;
+  return steps;
+};
+/** How a score came from another by an edit in place: its predecessor and the one track whose content changed. Lets a view of the score (the engraving projection) follow the edit without being rebuilt. */
+export interface ScoreLineage {previous:model.Score;track:number;edit:EditCommand}
+const lineages=new WeakMap<model.Score,ScoreLineage>();
+export const scoreLineage=(score:model.Score):ScoreLineage|undefined=>lineages.get(score);
+/** Why `edit` may not be applied to `current` in place (anything not known to be safe is refused and takes the full rebuild), or null when it may. */
+export function inPlaceRefusal(current:BuiltDocument,edit:EditCommand):string|null {
+  const steps=inPlaceSteps(edit);if(!steps)return 'edit type';
+  const track=current.score.tracks[(steps[0] as {target:BeatTarget}).target.track];if(!track)return 'no such track';
+  if(current.settings.backing?.referenceSync)return 'reference timing';
+  // Lyrics that are laid out from their text are laid out again after an edit; the pedal markers are repaired by the rebuild.
+  const lyrics=getLyricsSource(track);if(lyrics&&(lyrics.managed||!lyrics.value.visible))return 'managed lyrics';
+  for(const staff of track.staves)for(const bar of staff.bars)if(bar.sustainPedals.length)return 'sustain pedals';
+  // A pickup bar's length is what it holds, which moves every bar after it; a bar's fermatas are kept for all the tracks at once; a
+  // free-time bar has no length to keep. Edits to such bars, and to a voice that holds a fermata, are rebuilt.
+  for(const step of steps) {
+    const place=(step as {target:BeatTarget}).target,master=current.score.masterBars[place.bar],voice=track.staves[place.staff]?.bars[place.bar]?.voices[place.voice];
+    if(!master||!voice)return 'no such bar';
+    if(master.isAnacrusis)return 'pickup bar';
+    if(master.isFreeTime)return 'free-time bar';
+    if(master.fermata!==null||voice.beats.some(beat=>beat.fermata))return 'fermata';
+    if(changesRests(step)&&flagNearby(track.staves[place.staff],place))return 'let ring or palm mute beside a rest';
+  }
+  // A beat that shows its running time has it worked out from the whole score's playback, which an edit would change for every beat after it.
+  return showsTimers(current.score)?'timers':null;
+}
+/** Whether `edit` may be applied to `current` in place. */
+export const canEditInPlace=(current:BuiltDocument,edit:EditCommand):boolean=>inPlaceRefusal(current,edit)===null;
+/**
+ * Whether a step can make a beat a rest or a note (or add or remove a beat), which is what moves the let ring and palm mute marks of the beats around it:
+ * finishing hands them on to a rest from the beat before and takes them off the rests before a note that lacks them, from whatever the marks were already,
+ * so their result depends on how many times the track was finished (a rebuild from the file does it twice, an edit in place once more each time).
+ */
+const changesRests=(step:SingleCommand):boolean=>step.type!=='setDuration';
+/** Whether a beat in the run of rests around `place`, with the note before and the note after the run, carries a let ring or palm mute mark. */
+function flagNearby(staff:model.Staff,place:BeatTarget):boolean {
+  const lane=(bar:number)=>staff.bars[bar]?.voices[place.voice]?.beats??[];
+  const marked=(beat:model.Beat)=>beat.isLetRing||beat.isPalmMute||beat.notes.some(note=>note.isLetRing||note.isPalmMute);
+  const resting=(beat:model.Beat)=>beat.isRest||beat.isEmpty||beat.notes.length===0;
+  let steps=0;
+  // Backwards from the beat, through the rests, to the note before them.
+  for(let bar=place.bar,index=place.beat;bar>=0&&steps<4000;){
+    const beats=lane(bar);if(index<0){bar--;index=lane(bar).length-1;continue;}
+    const beat=beats[index];steps++;if(!beat){bar--;index=lane(bar).length-1;continue;}
+    if(marked(beat))return true;
+    if(!(bar===place.bar&&index===place.beat)&&!resting(beat))break;
+    index--;
+  }
+  // Forwards from the beat, likewise.
+  for(let bar=place.bar,index=place.beat;bar<staff.bars.length&&steps<8000;){
+    const beats=lane(bar);if(index>=beats.length){bar++;index=0;continue;}
+    const beat=beats[index];steps++;
+    if(marked(beat))return true;
+    if(!(bar===place.bar&&index===place.beat)&&!resting(beat))break;
+    index++;
+  }
+  return false;
+}
+const timerScores=new WeakMap<model.Score,boolean>();
+function showsTimers(score:model.Score):boolean {
+  let known=timerScores.get(score);
+  if(known===undefined){known=score.tracks.some(track=>track.staves.some(staff=>staff.bars.some(bar=>bar.voices.some(voice=>voice.beats.some(beat=>beat.showTimer)))));timerScores.set(score,known);}
+  return known;
+}
+/** Everything `rebuild` does to a score before and after its serialization, for one track whose beats changed. */
+function settleTrack(track:model.Track) {
+  const dynamics=new Map<model.Note,number>();
+  // `rebuild` captures the links between notes before the serialization and puts them back after it, so what finishing works out for them
+  // (a hammer-on re-pointed at a new note between its two) is undone; the same is done here, for the notes of this track.
+  const alone={tracks:[track]} as unknown as model.Score,links=captureNoteLinks(alone);
+  // The voices a staff has music in only ever grow while finishing, and in the order the bars first used them.
+  for(const staff of track.staves)(staff as unknown as {_filledVoices:Set<number>})._filledVoices.clear();
+  for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices) {
+    if(!voice.beats.length){const empty=new Beat();empty.isEmpty=true;voice.addBeat(empty);}
+    for(const beat of voice.beats){
+      tripleDotTiming(beat);
+      // What finishing only ever sets, never clears: a beat that lost its successor, or a lookup entry of a note that is gone.
+      beat.previousBeat=null;beat.nextBeat=null;
+      beat.isEffectSlurOrigin=false;beat.effectSlurOrigin=null;beat.effectSlurDestination=null;beat.noteValueLookup.clear();
+      for(const [position,note] of beat.notes.entries()){note.index=position;dynamics.set(note,note.dynamics);note.hasEffectSlur=false;note.isEffectSlurOrigin=false;note.effectSlurOrigin=null;note.effectSlurDestination=null;(note as unknown as {effectSlur:unknown}).effectSlur=null;}
+    }
+  }
+  // Finishing a track again works out what the serialization pass works out: the beat chain, timings, tie and slide derivations.
+  track.finish(settings,null);
+  restoreNoteLinks(alone,links);
+  // Public Beat.finish assigns the beat's dynamics to every note; a note keeps its own, as it does through the serialization.
+  for(const [note,value] of dynamics)note.dynamics=value;
+}
+/**
+ * New notes, beats, bars and voices take the next value of a counter that every importer start sets back to zero, so after another score
+ * was opened an edit in place would give a new object the id of one the document already holds. The counters are raised above the
+ * highest id the score holds before an edit creates anything. A score's highest ids are found once and carried to its successors.
+ */
+type IdCeilings={note:number;beat:number;bar:number;voice:number};
+const idCeilings=new WeakMap<model.Score,IdCeilings>();
+const idCounters=model as unknown as {Note:{globalNoteId:number};Beat:{_globalBeatId:number};Bar:{_globalBarId:number};Voice:{_globalVoiceId:number}};
+function raiseIdCounters(score:model.Score):void {
+  let ceilings=idCeilings.get(score);
+  if(!ceilings){
+    ceilings={note:-1,beat:-1,bar:-1,voice:-1};
+    for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars){
+      ceilings.bar=Math.max(ceilings.bar,bar.id);
+      for(const voice of bar.voices){ceilings.voice=Math.max(ceilings.voice,voice.id);for(const beat of voice.beats){ceilings.beat=Math.max(ceilings.beat,beat.id);for(const note of beat.notes)ceilings.note=Math.max(ceilings.note,note.id);}}
+    }
+    idCeilings.set(score,ceilings);
+  }
+  idCounters.Note.globalNoteId=Math.max(idCounters.Note.globalNoteId,ceilings.note+1);idCounters.Beat._globalBeatId=Math.max(idCounters.Beat._globalBeatId,ceilings.beat+1);
+  idCounters.Bar._globalBarId=Math.max(idCounters.Bar._globalBarId,ceilings.bar+1);idCounters.Voice._globalVoiceId=Math.max(idCounters.Voice._globalVoiceId,ceilings.voice+1);
+}
+/** What an edit made, as the new highest ids of its score. */
+function noteIdCeilings(score:model.Score):void {
+  const ceilings=idCeilings.get(score);if(!ceilings)return;
+  ceilings.note=Math.max(ceilings.note,idCounters.Note.globalNoteId-1);ceilings.beat=Math.max(ceilings.beat,idCounters.Beat._globalBeatId-1);
+  ceilings.bar=Math.max(ceilings.bar,idCounters.Bar._globalBarId-1);ceilings.voice=Math.max(ceilings.voice,idCounters.Voice._globalVoiceId-1);
+}
+/**
+ * The same document under a new identity: a score made of the same tracks and measures, so that everything that follows a score by its
+ * identity (the engraving projection, the render, the playback plan) sees a change. The old shell stays what it was, but its tracks now
+ * belong to the new one, so it is no longer shown.
+ */
+export function newScoreIdentity(old:model.Score):model.Score {
+  const next=Object.assign(Object.create(Object.getPrototypeOf(old)),old) as model.Score;
+  next.tracks=[...old.tracks];next.masterBars=[...old.masterBars];
+  for(const item of next.tracks)item.score=next;
+  for(const master of next.masterBars)master.score=next;
+  copyGpInterchangeSource(old,next);
+  const ceilings=idCeilings.get(old);if(ceilings)idCeilings.set(next,ceilings);
+  return next;
+}
+function reviseScore(old:model.Score,track:number,edit:EditCommand):model.Score {
+  const next=newScoreIdentity(old);lineages.set(next,{previous:old,track,edit});timerScores.set(next,false);return next;
+}
+/**
+ * What it takes to put a track back as it was before an edit applied in place: the beats of the voices the edit touched (their own fields and
+ * their note lists), the fret of every note of the track (an edit to a tied note changes the whole chain), and the links between the notes.
+ * What finishing works out (the beat chain, timings) is worked out again by `settleTrack` afterwards, as it is after an edit.
+ */
+function captureJournal(score:model.Score,trackIndex:number,steps:SingleCommand[]):()=>void {
+  const track=score.tracks[trackIndex],alone={tracks:[track]} as unknown as model.Score,links=captureNoteLinks(alone);
+  const voices=new Set<model.Voice>();
+  for(const step of steps){const place=(step as {target:BeatTarget}).target;const voice=track.staves[place.staff]?.bars[place.bar]?.voices[place.voice];if(voice)voices.add(voice);}
+  const frets=new Map<model.Note,number>();
+  for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)frets.set(note,note.fret);
+  const saved=[...voices].map(voice=>({
+    voice,beats:voice.beats.slice(),
+    beatFields:voice.beats.map(beat=>({beat,fields:{...beat,notes:beat.notes.slice(),noteStringLookup:new Map(beat.noteStringLookup),noteValueLookup:new Map(beat.noteValueLookup)} as Record<string,unknown>,notes:beat.notes.map(note=>({note,fields:{...note} as Record<string,unknown>}))})),
+  }));
+  return ()=>{
+    for(const item of saved){
+      item.voice.beats=item.beats.slice();
+      for(const beatState of item.beatFields){Object.assign(beatState.beat,beatState.fields);beatState.beat.notes=(beatState.fields.notes as model.Note[]).slice();for(const noteState of beatState.notes)Object.assign(noteState.note,noteState.fields);}
+    }
+    for(const [note,fret] of frets)note.fret=fret;
+    restoreNoteLinks(alone,links);
+    settleTrack(track);
+  };
+}
+/** How many edits applied in place can be taken back one after the other without a rebuild (each keeps the track's frets and links as they were). */
+const JOURNAL_DEPTH=24;
+interface Journal {restore:()=>void;older:Journal|null}
+const journals=new WeakMap<model.Score,Journal>();
+/** Whether the last edit that made this document's score can be taken back without a rebuild. */
+export const canUndoInPlace=(score:model.Score):boolean=>journals.has(score);
+/**
+ * Takes back the edit that made `current`'s score (applied in place), on the same tracks, under a new identity. Throws when there is nothing to take back.
+ * The edit before it, if it was also applied in place, can be taken back in turn.
+ */
+export function undoInPlace(current:BuiltDocument):BuiltDocument {
+  const journal=journals.get(current.score);if(!journal)throw new Error('There is no edit to take back in place.');
+  raiseIdCounters(current.score);
+  journal.restore();
+  noteIdCeilings(current.score);journals.delete(current.score);
+  const next=newScoreIdentity(current.score);
+  if(journal.older)journals.set(next,journal.older);
+  return {...current,score:next};
+}
+/** Applies `edit` to `score` in place without any check, and works out the derived state of the track it changed. For a copy of a document that `edit` has already been applied to and checked on. */
+export function editScoreInPlace(score:model.Score,edit:EditCommand,index=0):void {
+  const steps=inPlaceSteps(edit);if(!steps)throw new Error('This edit cannot be applied in place.');
+  const track=(steps[0] as {target:BeatTarget}).target.track;
+  raiseIdCounters(score);
+  for(const step of steps){apply(score,step,index);settleTrack(score.tracks[track]);}
+  noteIdCeilings(score);
+}
+/**
+ * Applies `edit` to the score of `current` in place and returns the document with a new score identity (the old one is no longer
+ * valid, and must not be shown). Throws what the edit refuses with, after which the score is in an unknown state: the caller
+ * rebuilds the document from its project.
+ */
+export function editInPlace(current:BuiltDocument,edit:EditCommand,index:number):BuiltDocument {
+  validateParityCommand(edit);
+  const steps=inPlaceSteps(edit);if(!steps||!canEditInPlace(current,edit))throw new Error('This edit cannot be applied in place.');
+  const score=current.score,track=(steps[0] as {target:BeatTarget}).target.track;
+  raiseIdCounters(score);
+  const restore=captureJournal(score,track,steps);
+  for(const step of steps) {
+    apply(score,step,index);assertDroneFrets(score);
+    settleTrack(score.tracks[track]);
+  }
+  noteIdCeilings(score);
+  const next=reviseScore(score,track,edit),journal:Journal={restore,older:journals.get(score)??null};journals.set(next,journal);
+  // Only the newest edits keep what it takes to take them back.
+  let oldest:Journal=journal;for(let depth=1;depth<JOURNAL_DEPTH&&oldest.older;depth++)oldest=oldest.older;oldest.older=null;
+  return {...current,score:next};
+}
+/** A detached copy of the beats of `voice` with what applying a note, rest, duration or beat edit reads: durations, tuplets, grace type, and each note's string and fret. It carries no links to other notes, so applying an edit to it reaches nothing outside it. */
+function scratchVoice(voice:model.Voice):model.Voice {
+  const copy=new Voice();copy.bar=voice.bar;copy.index=voice.index;
+  for(const beat of voice.beats) {
+    const next=new Beat();
+    next.duration=beat.duration;next.dots=beat.dots;next.isEmpty=beat.isEmpty;next.graceType=beat.graceType;
+    next.tupletNumerator=beat.tupletNumerator;next.tupletDenominator=beat.tupletDenominator;next.overrideDisplayDuration=beat.overrideDisplayDuration;
+    copy.addBeat(next);
+    for(const note of beat.notes){const made=new Note();made.string=note.string;made.fret=note.fret;made.isDead=note.isDead;next.addNote(made);}
+  }
+  return copy;
+}
+/**
+ * Whether `edit` applies to the document: the same checks, and the same refusals, as applying it, made on detached copies of the
+ * voices it touches so that the document itself is not changed. Throws what the edit is refused with.
+ */
+export function checkEditInPlace(current:BuiltDocument,edit:EditCommand,index:number):void {
+  validateParityCommand(edit);
+  const steps=inPlaceSteps(edit);if(!steps||!canEditInPlace(current,edit))throw new Error('This edit cannot be applied in place.');
+  const score=current.score,swapped:{bar:model.Bar;position:number;original:model.Voice}[]=[],scratches=new Set<model.Voice>();
+  try {
+    for(const step of steps) {
+      const {bar,voice}=voiceAt(score,(step as {target:BeatTarget}).target);
+      if(!scratches.has(voice)){const position=bar.voices.indexOf(voice),copy=scratchVoice(voice);swapped.push({bar,position,original:voice});bar.voices[position]=copy;scratches.add(copy);}
+      apply(score,step,index);assertDroneFrets(score);
+    }
+  } finally {for(const item of swapped)item.bar.voices[item.position]=item.original;}
+}
+/**
+ * The document built for a project that is the current state of an open document, found by the project object (a project is never changed in place).
+ * Lets a question that only asks whether edits would apply (`editsFitLive`) be answered on the open document instead of building a new one.
+ */
+const liveDocuments=new WeakMap<object,BuiltDocument>();
+export function registerLiveDocument(project:object,document:BuiltDocument):void {liveDocuments.set(project,document);}
+/**
+ * Whether the commands, applied one after another to the project's document, would all be accepted: true or false when that can be told from the
+ * open document (checked on copies of the voices they touch, with the refusals of applying them), null when it cannot (the caller builds the document).
+ */
+export function editsFitLive(project:ProjectInput,commands:EditCommand[]):boolean|null {
+  const live=liveDocuments.get(project);if(!live||!commands.length)return null;
+  const edit:EditCommand=commands.length===1?commands[0]:{type:'sequence',commands:commands as never};
+  if(!canEditInPlace(live,edit))return null;
+  try{checkEditInPlace(live,edit,projectCommands(project).length);return true;}catch{return false;}
+}
+/** What the edits did so far: in place, by a full rebuild, rebuilt after an in-place edit was refused or failed, and compared with a full rebuild. */
+export const editStats={inPlace:0,full:0,healed:0,verified:0,mismatches:0};
+(globalThis as {__tabplayerEditStats?:typeof editStats}).__tabplayerEditStats=editStats;
+/**
+ * How often an edit made in place is compared with a full rebuild (every n-th; 0 never). The comparison costs as much as the
+ * rebuild it replaces, so it is on for tests and development builds, and a person or a test can turn it on in a running app with
+ * `globalThis.__tabplayerCheckEdits=n`. A difference is reported to the console and the rebuilt document replaces the edited one.
+ */
+export const editCheck={every:(import.meta as {env?:{DEV?:boolean}}).env?.DEV?25:0,count:0};
+/** How long after the last edit the document edited in place is compared with a rebuild, in every build (0 turns it off: the unit tests start it themselves). */
+export const idleVerification={afterMs:(import.meta as {env?:{MODE?:string}}).env?.MODE==='test'?0:2000};
+export function shouldCheckEdit():boolean {
+  const override=(globalThis as {__tabplayerCheckEdits?:number}).__tabplayerCheckEdits,every=typeof override==='number'?override:editCheck.every;
+  return every>0&&++editCheck.count%every===0;
+}
+/** The document a full rebuild gives for `project`, compared with `built`: null when they are the same, otherwise where they first differ. */
+export function verifyEditInPlace(project:ProjectInput,built:BuiltDocument,canRedo=false):string|null {
+  const repeated=duplicateIds(built.score);if(repeated)return `duplicate ids: ${repeated}`;
+  const full=buildDocument(project,canRedo);
+  const difference=firstDifference(describeScore(built.score),describeScore(full.score));
+  if(difference)return `score ${difference}`;
+  const settingsDifference=firstDifference(JSON.parse(JSON.stringify(built.settings)),JSON.parse(JSON.stringify(full.settings)));
+  return settingsDifference?`settings ${settingsDifference}`:null;
+}
+
+/**
+ * `verifyEditInPlace` that lets other work go first between its steps (`pause`) and gives up when `cancelled()` says the document moved on.
+ * Resolves null when cancelled, otherwise the difference found (null when the documents are the same) and the document rebuilt from the project.
+ */
+export async function verifyEditStepwise(project:ProjectInput,built:BuiltDocument,canRedo:boolean,pause:()=>Promise<void>,cancelled:()=>boolean):Promise<{problem:string|null;rebuilt:BuiltDocument}|null> {
+  const build=buildDocumentSteps(project,canRedo);let step=build.next();
+  while(!step.done){await pause();if(cancelled())return null;step=build.next();}
+  const rebuilt=step.value,repeated=duplicateIds(built.score);
+  const described=describeScoreSteps(built.score),expected=describeScoreSteps(rebuilt.score);
+  let one=described.next(),other=expected.next();
+  while(!one.done||!other.done){await pause();if(cancelled())return null;if(!one.done)one=described.next();if(!other.done)other=expected.next();}
+  const difference=firstDifference(one.value,other.value);
+  const settingsDifference=difference?null:firstDifference(JSON.parse(JSON.stringify(built.settings)),JSON.parse(JSON.stringify(rebuilt.settings)));
+  return {rebuilt,problem:repeated?`duplicate ids: ${repeated}`:difference?`score ${difference}`:settingsDifference?`settings ${settingsDifference}`:null};
 }
 
 export function exportGp(score: model.Score): Uint8Array { return exportGpInterchange(score, settings); }

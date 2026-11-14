@@ -42,7 +42,10 @@ export class WorkspaceController {
   getState=()=>this.state;
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return ()=>{this.listeners.delete(listener);};};
   private update(change:Partial<WorkspaceState>) {
-    this.state={...this.state,...change};for(const listener of this.listeners)listener();
+    // A change that leaves every field as it was keeps the state object (still telling the subscribers), so nothing redraws for it.
+    const entries=Object.entries(change) as [keyof WorkspaceState,unknown][];
+    if(!this.state||entries.some(([key,value])=>!Object.is(this.state[key],value)))this.state={...this.state,...change};
+    for(const listener of this.listeners)listener();
   }
   private async synchronize(snapshot:WorkspaceSnapshot,views:Record<DocumentId,DocumentViewState>={}) {
     const cached=new Map(this.state?.documents.map(entry=>[entry.id,entry]));
@@ -217,7 +220,9 @@ export class WorkspaceController {
     const entry=this.state.documents.find(entry=>entry.id===documentId);if(!entry)throw new Error('Select an open document.');
     if(this.transitioning||this.windowClosing)return;
     const repaired=repairDocumentView(entry.controller.getState().score,view);
-    this.update({documents:this.state.documents.map(entry=>entry.id===documentId?{...entry,view:repaired}:entry)});
+    // The view comes from the editor that is showing it, so nothing needs to redraw for it: the state keeps the newest view for the next
+    // reader without telling the subscribers, which would otherwise render the whole workspace for every cursor move.
+    this.state={...this.state,documents:this.state.documents.map(entry=>entry.id===documentId?{...entry,view:repaired}:entry)};
     this.queueView(documentId,repaired);
   }
   setSessionBridge(bridge:NativeSessionBridge):void {

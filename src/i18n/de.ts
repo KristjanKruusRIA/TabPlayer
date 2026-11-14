@@ -2504,6 +2504,7 @@ export const de: MessageCatalog = {
   'menu.password_protection': 'Passwortschutz…',
   'status.working': 'Wird bearbeitet…',
   'status.unsaved': 'Ungespeicherte Änderungen',
+  'status.document_rebuilt': 'Partitur nach ihrem Verlauf erneuert',
   'status.saved': 'Gespeichert',
   'status.not_saved': 'Nicht gespeichert',
   'status.new_score': 'Neue Partitur',

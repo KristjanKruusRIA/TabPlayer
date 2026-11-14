@@ -2503,6 +2503,7 @@ export const en = {
   'menu.password_protection': 'Password protection…',
   'status.working': 'Working…',
   'status.unsaved': 'Unsaved changes',
+  'status.document_rebuilt': 'Score refreshed to match its history',
   'status.saved': 'Saved',
   'status.not_saved': 'Not saved',
   'status.new_score': 'New score',

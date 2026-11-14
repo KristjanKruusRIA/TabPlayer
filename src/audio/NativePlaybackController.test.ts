@@ -792,3 +792,27 @@ it('a change of document is marked in the state, so the shown key can reset with
   await player.loadDocument(a,buildDocument(a),0,0);expect(player.getState().documentSerial??0).toBe(first);
   await player.loadDocument(b,buildDocument(b),0,1);expect(player.getState().documentSerial).toBeGreaterThan(first);player.destroy();
 });
+
+it('prepares the first change after a quiet spell at once, and edits that follow it once, for the last',async()=>{
+  vi.useFakeTimers();
+  try {
+    const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
+    const planned:number[]=[];
+    const preparePlan:ConstructorParameters<typeof NativePlaybackController>[0]['preparePlan']=async(project,generation)=>{planned.push(project.edits.length);return buildPlaybackPlan(buildDocument(project).score,generation);};
+    const player=new NativePlaybackController({bridge,onEdit:vi.fn(),preparePlan,quietMs:300});
+    const note=(fret:number)=>({type:'setNote' as const,target:{track:0,staff:0,bar:0,voice:0,beat:0},string:1,fret});
+    let current=blankProject(),built=buildDocument(current);
+    const load=()=>player.loadDocument(current,built);
+    const change=(fret:number)=>{const next=previewEdit(current,note(fret));current=next.project;built=next;};
+    // The document opens, then one edit after a quiet spell: no wait.
+    await load();vi.advanceTimersByTime(1000);planned.length=0;
+    change(3);const first=load();await vi.advanceTimersByTimeAsync(0);await first;
+    expect(planned,'the first edit after a quiet spell is built without waiting').toEqual([1]);
+    // Three edits inside the window: only the last is built, after the quiet period.
+    change(4);const second=load();vi.advanceTimersByTime(100);change(5);const third=load();vi.advanceTimersByTime(100);change(6);const fourth=load();
+    await vi.advanceTimersByTimeAsync(0);expect(planned,'edits in a burst wait for the edits to stop').toEqual([1]);
+    await vi.advanceTimersByTimeAsync(300);await Promise.all([second,third,fourth]);
+    expect(planned).toEqual([1,4]);
+    expect(player.getState().ready,'playback is for the newest score').toBe(false);
+  } finally {vi.useRealTimers();}
+});

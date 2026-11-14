@@ -24,7 +24,9 @@ describe('vector notation pagination',()=>{
       expect(annotation).toBeDefined();expect(annotation!.getAttribute('style')).toContain('Noto Sans CJK JP');expect(annotation!.getAttribute('style')).toContain('Noto Emoji');
     }
     expect(model.JsonConverter.scoreToJson(score)).toBe(before);
-  });
+    // The first full render in a worker loads and lays out the bundled fonts and takes about 1 s alone, several times that on a loaded
+    // machine. The limit is a hang guard, not a speed requirement.
+  }, 30_000);
   it('fills custom header and footer fields from the exported score metadata',()=>{
     const score=music();Object.assign(score,{title:'Song',artist:'Band',copyright:'© 2026',tab:'Tabber'});
     const bands=(header:string,footer:string)=>({header:{left:header,center:'',right:''},footer:{left:'',center:'',right:footer}});

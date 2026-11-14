@@ -732,23 +732,76 @@ mod tests {
         assert_eq!(schedule.total_frames, 99000);
     }
 
-    #[test]
-    fn missing_plugin_exports_built_in_with_warning() {
+    /// A launcher that hosts plug-ins on every system and launches nothing, so the service's own rules run everywhere.
+    struct HostsNothingLaunched;
+
+    impl crate::plugins::service::Launcher for HostsNothingLaunched {
+        fn launch_session(
+            &self,
+            _exe: &std::path::Path,
+            _bundle: &std::path::Path,
+            _class_id: &str,
+            _rate: u32,
+            _state: crate::plugins::helper::StateParts,
+            _supervisor: &crate::plugins::supervisor::Supervisor,
+            _key: crate::plugins::supervisor::HelperKey,
+        ) -> Result<
+            std::sync::Arc<dyn crate::plugins::service::HelperSession>,
+            crate::plugins::helper::HelperError,
+        > {
+            unreachable!("no helper is launched for a class the library does not hold")
+        }
+
+        fn launch_offline(
+            &self,
+            _exe: &std::path::Path,
+            _bundle: &std::path::Path,
+            _class_id: &str,
+            _rate: u32,
+            _state: crate::plugins::helper::StateParts,
+        ) -> Result<
+            std::sync::Arc<dyn crate::plugins::service::HelperSession>,
+            crate::plugins::helper::HelperError,
+        > {
+            unreachable!("no helper is launched for a class the library does not hold")
+        }
+
+        fn probe(
+            &self,
+            _exe: &std::path::Path,
+            _bundle: &std::path::Path,
+            _timeout: std::time::Duration,
+        ) -> Result<
+            Vec<tabplayer_plugin_protocol::control::ClassInfo>,
+            crate::plugins::helper::HelperError,
+        > {
+            unreachable!()
+        }
+
+        fn hosts_plugins(&self) -> bool {
+            true
+        }
+    }
+
+    /// Exports a score whose one track holds a plug-in the library does not know, through `launcher`, and returns the
+    /// status the export warns with. The export must fall back to the built-in sound (no inserts) with that one warning.
+    fn export_with_unknown_plugin(
+        launcher: Option<std::sync::Arc<dyn crate::plugins::service::Launcher>>,
+    ) -> crate::plugins::status::PluginStatus {
         use crate::plugins::service::{PluginPaths, PluginService, SlotRequest};
-        use crate::plugins::status::PluginStatus;
         use crate::settings::{PluginFormat, PluginSlot};
         use std::sync::Arc;
 
         let dir = tempfile::tempdir().unwrap();
-        let service = PluginService::new(
-            PluginPaths {
-                helper: dir.path().join("helper.exe"),
-                library_dir: dir.path().join("library"),
-                consent_file: dir.path().join("consent.json"),
-            },
-            Box::new(|_| {}),
-        )
-        .unwrap();
+        let paths = PluginPaths {
+            helper: dir.path().join("helper.exe"),
+            library_dir: dir.path().join("library"),
+            consent_file: dir.path().join("consent.json"),
+        };
+        let service = match launcher {
+            Some(launcher) => PluginService::new_with_launcher(paths, Box::new(|_| {}), launcher),
+            None => PluginService::new(paths, Box::new(|_| {})).unwrap(),
+        };
 
         let req = SlotRequest {
             track_id: "t1".into(),
@@ -768,7 +821,28 @@ mod tests {
         let result = service.offline_inserts("doc1", &[req], 48000).unwrap();
         assert!(result.inserts.is_empty());
         assert_eq!(result.warnings.len(), 1);
-        assert_eq!(result.warnings[0].status, PluginStatus::Missing);
+        result.warnings[0].status
+    }
+
+    #[test]
+    fn missing_plugin_exports_built_in_with_warning() {
+        // A launcher that hosts here (the service's own rule, on every system): the class is not in the library.
+        assert_eq!(
+            export_with_unknown_plugin(Some(std::sync::Arc::new(HostsNothingLaunched))),
+            crate::plugins::status::PluginStatus::Missing
+        );
+    }
+
+    #[test]
+    fn real_launcher_exports_built_in_with_warning_for_a_plugin_it_cannot_host() {
+        // The real helper hosts plug-ins on Windows only. Elsewhere the export still falls back to the built-in sound
+        // with a warning, but the reason is the platform; on Windows the class is simply not in the library.
+        let expected = if cfg!(windows) {
+            crate::plugins::status::PluginStatus::Missing
+        } else {
+            crate::plugins::status::PluginStatus::UnsupportedPlatform
+        };
+        assert_eq!(export_with_unknown_plugin(None), expected);
     }
 
     #[test]
@@ -840,6 +914,11 @@ mod tests {
                 _timeout: Duration,
             ) -> Result<Vec<ClassInfo>, HelperError> {
                 unreachable!()
+            }
+
+            // The consent rule is the service's own, so it is tested where the real launcher would say no too.
+            fn hosts_plugins(&self) -> bool {
+                true
             }
         }
 

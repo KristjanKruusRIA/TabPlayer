@@ -384,16 +384,29 @@ fn list_inputs(
 impl SystemMidiIn {
     /// Lists the inputs, waiting up to `wait` for a listing in progress.
     fn list(&self, wait: Duration) -> Result<Vec<MidiPortInfo>, String> {
+        self.list_with(wait, &Self::input)
+    }
+
+    /// `list` with the way of making the listing client given, so a system without MIDI can be stood in for.
+    fn list_with(
+        &self,
+        wait: Duration,
+        create: &dyn Fn() -> Result<midir::MidiInput, String>,
+    ) -> Result<Vec<MidiPortInfo>, String> {
         // Listing opens no port. A system whose MIDI client cannot be made is an error the page can show.
-        let mut found = list_inputs(&self.lister, &Self::input, wait)?;
+        let system = list_inputs(&self.lister, create, wait);
+        // The injection port needs no system client (a CI machine has no sequencer), so a test build that asks for it
+        // still lists it when the system cannot be listed. Without it, a failed client stays an error.
         #[cfg(any(test, feature = "desktop-test"))]
         if self.test_port {
+            let mut found = system.unwrap_or_default();
             found.push(MidiPortInfo {
                 id: format!("test:{TEST_PORT_NAME}"),
                 name: TEST_PORT_NAME.into(),
             });
+            return Ok(found);
         }
-        Ok(found)
+        system
     }
 
     fn input() -> Result<midir::MidiInput, String> {
@@ -2287,14 +2300,35 @@ mod tests {
         );
         state.stop(Some(session));
         assert!(state.test_inject(&[0x90, 60, 90]).is_err(), "closed again");
-        // The ordinary build offers no such port.
-        let plain = MidiInState::new(Arc::new(SystemMidiIn::default()));
+        // The ordinary build offers no such port, and a real system's listing is not needed to know it.
+        let plain = SystemMidiIn::default();
+        let listed = plain.ports_quick();
         assert!(
-            plain
-                .ports()
-                .unwrap()
-                .iter()
-                .all(|p| p.name != TEST_PORT_NAME)
+            listed.iter().flatten().all(|p| p.name != TEST_PORT_NAME),
+            "{listed:?}"
+        );
+    }
+
+    #[test]
+    fn the_test_port_needs_no_system_midi_client_but_a_plain_listing_still_does() {
+        let no_midi =
+            || Err::<midir::MidiInput, String>("MIDI support could not be initialized".into());
+        // As on a CI machine without a sequencer: the injection port is listed and can be opened.
+        let testing = SystemMidiIn {
+            test_port: true,
+            ..SystemMidiIn::default()
+        };
+        let found = testing.list_with(Duration::ZERO, &no_midi).unwrap();
+        assert_eq!(
+            found.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            [TEST_PORT_NAME]
+        );
+        assert!(testing.open(TEST_PORT_NAME, Box::new(|_| {})).is_ok());
+        // Real use is unchanged: without the test port, a client that cannot be made is an error, not an empty list.
+        let plain = SystemMidiIn::default();
+        assert_eq!(
+            plain.list_with(Duration::ZERO, &no_midi).unwrap_err(),
+            "MIDI support could not be initialized"
         );
     }
 

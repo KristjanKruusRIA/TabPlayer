@@ -4595,7 +4595,7 @@
       "historical_status": "missing",
       "current_status": "partial",
       "current_behavior": "Single-track phrases (supporting up to 4 simultaneous voices) and whole-bar all-voice copy/cut/paste are self-contained across New/Open, with destination context, sounding overwrite, undo and restart replay. Copying from inside a sustained note keeps its dynamics and sustained techniques. Cut through a held note splits it at the range edge (the part inside becomes rests, the rest stays as a shorter note, the clipboard equals Copy's), recorded as one `cutSelection` that older builds cannot open; a cut on beat boundaries still records the plain erase.",
-      "remaining_gap": "Cut then paste restrikes the note at a cut edge: the tie that joined the parts is not restored. Cut refuses bent, trilled, dead, whammy, overridden-length and free-time beats, cuts with no plain written length, a cut that would move placed lyrics, and an edge inside a note of another voice or track.",
+      "remaining_gap": "Cut then paste restrikes the note at a cut edge: the tie that joined the parts is not restored. Cut refuses bent, trilled, dead, whammy, overridden-length and free-time beats, cuts with no plain written length, and an edge inside a note of another voice or track.",
       "current_evidence": [
         "clipboard",
         "clipboard_validation",

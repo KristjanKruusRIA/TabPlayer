@@ -13,8 +13,11 @@ import { makeMusicClip } from './clipboard-source';
 import { preparePasteMusic } from './clipboard-paste';
 import { rhythmTicks } from './common';
 import { captureNoteLinks,restoreNoteLinks } from './links';
+import { getLyricsSource } from './lyrics-source';
+import { insertLyricGap,tokenizeLyrics } from './lyrics';
+import { exportGpInterchange,loadInterchangeScore } from '../interchange/gp';
 import type { ClipboardCommand } from './clipboard-types';
-import { acceptsOnlyWholeBeats,eraseCommandFor } from './range-cut';
+import { acceptsOnlyWholeBeats,cutLyricWordsLost,eraseCommandFor } from './range-cut';
 import type { MusicSelection } from './range-types';
 
 /** The score as JSON without the runtime counters that number every object (they differ between two builds of one document). */
@@ -193,7 +196,7 @@ it('a refused cut names its reason in the interface language and records nothing
   expect(bridge.applyEdit).not.toHaveBeenCalled();
 });
 it('the refusal texts exist in English, Estonian and German',()=>{
-  for(const key of ['editor.cut_refusal_range','editor.cut_refusal_length','editor.cut_refusal_pieces','editor.cut_refusal_bend','editor.cut_refusal_trill','editor.cut_refusal_dead','editor.cut_refusal_whammy','editor.cut_refusal_override','editor.cut_refusal_free_time'] as const)
+  for(const key of ['editor.cut_refusal_range','editor.cut_refusal_length','editor.cut_refusal_pieces','editor.cut_refusal_bend','editor.cut_refusal_trill','editor.cut_refusal_dead','editor.cut_refusal_whammy','editor.cut_refusal_override','editor.cut_refusal_free_time','editor.cut_refusal_lyrics'] as const)
     for(const catalog of [en,et,de])expect(typeof (catalog as Record<string,string>)[key]).toBe('string');
 });
 
@@ -260,18 +263,18 @@ it('a cut that takes the attack hands its syllable to the surviving tail and mov
   const cutAttack:Project={...withLyrics(),edits:[...withLyrics().edits,cutLog(range([0,0],[0,1920]))]};
   expect(syllables(buildDocument(cutAttack).score)).toEqual(['one','two']);
 });
-it('a cut that would add a second note-bearing beat after a surviving attack is refused while lyrics are placed note by note',()=>{
-  const middle:Project={...withLyrics(),edits:[...withLyrics().edits,cutLog(range([0,960],[0,2880]))]};
-  expect(()=>buildDocument(middle)).toThrow(/syllables/);
-  const none:Project={...wholeNote(),edits:[...wholeNote().edits,cutLog(range([0,960],[0,2880]))]};expect(()=>buildDocument(none)).not.toThrow();
+it('a middle cut with lyrics proceeds and every later syllable stays on the same note',()=>{
+  const before=placed(buildDocument(withLyrics()).score);expect(before.map(item=>item[0])).toEqual(['one','two']);
+  const after=buildDocument({...withLyrics(),edits:[...withLyrics().edits,cutLog(range([0,960],[0,2880]))]}).score;
+  expect(placed(after)).toEqual(before);expect(lyricText(after)).toBe('one  two three');
+  expect(beatsOf(after).map(beat=>[beat.notes.length,beat.lyrics?.[0]??null])).toEqual([[1,'one'],[0,null],[1,'']]);
 });
-it('a cut that leaves a multi-piece tail is refused while lyrics are placed note by note, and the score is unchanged',()=>{
-  // The first three eighths go; the 5-eighth remainder is written as a half and an eighth: one syllable-bearing beat would become two.
-  const score=buildDocument(withLyrics()).score,before=json(score);
-  expect(()=>cut(score,range([0,0],[0,1440]))).toThrow(/syllables/);expect(json(score)).toBe(before);
-  const log:Project={...withLyrics(),edits:[...withLyrics().edits,cutLog(range([0,0],[0,1440]))]};
-  expect(()=>buildDocument(log)).toThrow(/syllables/);
-  expect(()=>buildDocument({...wholeNote(),edits:[...wholeNote().edits,cutLog(range([0,0],[0,1440]))]})).not.toThrow();
+it('a tail written as two tied beats takes a gap: the first three eighths of a whole note, later syllables unmoved',()=>{
+  const before=placed(buildDocument(withLyrics()).score),score=buildDocument({...withLyrics(),edits:[...withLyrics().edits,cutLog(range([0,0],[0,1440]))]}).score;
+  const after=placed(score);
+  // The attack was taken, so its syllable goes to the surviving tail; nothing after it moves.
+  expect(after).toEqual([['one',0,1440,3,5],before[1]]);expect(lyricText(score)).toBe('one  two three');
+  expect(beatsOf(score).map(beat=>beat.lyrics?.[0]??null)).toEqual([null,'one','']);
 });
 it('a tail that stays one beat is allowed with lyrics, and no later syllable moves', ()=>{
   for(const end of [960,1920]){
@@ -286,17 +289,140 @@ const lineProject=(lines:Array<{startBar:number;text:string}>):Project=>({...bla
 /** From the quarter note in bar 1 to three eighths into the whole note that opens bar 2. */
 const acrossBarline=(project:Project):Project=>({...project,edits:[...project.edits,cutLog(range([0,0],[1,1440]))]});
 const bySyllable=(score:model.Score)=>score.tracks[0].staves[0].bars.slice(0,3).flatMap(bar=>bar.voices[0].beats.filter(beat=>beat.notes.length).map(beat=>beat.lyrics?.[0]??''));
-it('a line that starts in the second bar is refused when that bar gains a syllable beat although the track total is unchanged',()=>{
-  const project=lineProject([{startBar:1,text:'one two three'}]);expect(bySyllable(buildDocument(project).score)).toEqual(['','one','two']);
-  const score=buildDocument(project).score,before=json(score);
-  expect(()=>cut(score,range([0,0],[1,1440]))).toThrow(/syllables/);expect(json(score)).toBe(before);
-  expect(()=>buildDocument(acrossBarline(project))).toThrow(/syllables/);
-});
 it('the same cut is allowed when the line starts in the first bar, and later syllables stay where they are',()=>{
   const project=lineProject([{startBar:0,text:'one two three'}]);expect(bySyllable(buildDocument(project).score)).toEqual(['one','two','three']);
   expect(bySyllable(buildDocument(acrossBarline(project)).score).slice(-1)).toEqual(['three']);
 });
-it('with two lines only one of which would shift, the cut is refused; a line without text is ignored',()=>{
-  expect(()=>buildDocument(acrossBarline(lineProject([{startBar:0,text:'one two three'},{startBar:1,text:'a b c'}])))).toThrow(/syllables/);
-  expect(()=>buildDocument(acrossBarline(lineProject([{startBar:1,text:''},{startBar:0,text:'one two three'}])))).not.toThrow();
+
+// A cut that adds note-bearing beats keeps every later syllable on its note by writing blank beats ("Extra spaces leave blank beats") into the line.
+/** Each syllable of a lyric line with its bar, tick and note: [text, bar, tick, string, fret]. */
+function placed(score:model.Score,line=0) {
+  const out:Array<[string,number,number,number,number]>=[];
+  score.tracks[0].staves[0].bars.forEach((bar,index)=>{let tick=0;for(const beat of bar.voices[0].beats){if(beat.notes.length&&beat.lyrics?.[line])out.push([beat.lyrics[line],index,tick,beat.notes[0].string,beat.notes[0].fret]);tick+=rhythmTicks(beat);}});
+  return out;
+}
+const lyricText=(score:model.Score,line=0)=>getLyricsSource(score.tracks[0])!.value.lines[line].text;
+const withEdits=(project:Project,...edits:EditCommand[]):Project=>({...project,edits:[...project.edits,...edits]});
+const middleOfBar1=cutLog(range([1,960],[1,2880]));
+it('a startBar 1 line and a range crossing the barline: the cut proceeds, later syllables stay',()=>{
+  const project=lineProject([{startBar:1,text:'one two three'}]),before=placed(buildDocument(project).score);
+  const after=buildDocument(acrossBarline(project)).score;
+  expect(placed(after).filter(item=>item[0]!=='one')).toEqual(before.filter(item=>item[0]!=='one'));
+  expect(placed(after).find(item=>item[0]==='one')![2]).toBe(1440);expect(lyricText(after)).toBe('one  two three');
+});
+it('with two lines of different startBar each gets a gap only where its own range holds the new beat',()=>{
+  const project=lineProject([{startBar:0,text:'one two three'},{startBar:1,text:'a b c'}]),score=buildDocument(project).score;
+  const before=[placed(score,0),placed(score,1)],after=buildDocument(acrossBarline(project)).score;
+  expect([lyricText(after,0),lyricText(after,1)]).toEqual(['two  three','a  b c']);
+  expect(placed(after,0).find(item=>item[0]==='three')).toEqual(before[0].find(item=>item[0]==='three'));
+  expect(placed(after,1).find(item=>item[0]==='b')).toEqual(before[1].find(item=>item[0]==='b'));
+});
+it('a line that starts after the cut region, and a line with no text, are left alone',()=>{
+  const project=lineProject([{startBar:2,text:'x y'},{startBar:0,text:''}]),after=buildDocument(withEdits(project,cutLog(range([0,0],[1,1440])))).score;
+  expect(lyricText(after,0)).toBe('x y');expect(lyricText(after,1)).toBe('');expect(placed(after,0)).toEqual(placed(buildDocument(project).score,0));
+});
+it('hyphenated words, extension tokens and extra blanks around the gap keep their syllables',()=>{
+  for(const [text,expected] of [['ky-ri-e','ky-ri-[] e'],['one _ three','one _  three'],['one  two three','one   two three'],['a-b-c','a-b-[] c']]) {
+    const project=lineProject([{startBar:0,text}]),before=placed(buildDocument(project).score),after=buildDocument(withEdits(project,middleOfBar1)).score;
+    expect(lyricText(after)).toBe(expected);expect(placed(after)).toEqual(before);
+  }
+});
+it('the cut and its lyric gap are one edit: undo restores notes and text exactly, redo and a replay match',async()=>{
+  const bridge=makeBridge(withLyrics()),controller=await DocumentController.create(bridge),original=json(controller.getState().score),text=lyricText(controller.getState().score);
+  await controller.cutMusic(range([0,960],[0,2880]),'singleTrack');
+  expect(vi.mocked(bridge.applyEdit).mock.calls.map(call=>call[0].type)).toEqual(['cutSelection']);
+  const done=controller.getState(),gesture=json(done.score);expect(lyricText(done.score)).toBe('one  two three');
+  const replay=buildDocument(done.snapshot.project).score;expect(json(replay)).toBe(gesture);expect(lyricText(replay)).toBe(lyricText(done.score));
+  await controller.undo();expect(json(controller.getState().score)).toBe(original);expect(lyricText(controller.getState().score)).toBe(text);
+  await controller.redo();expect(json(controller.getState().score)).toBe(gesture);expect(lyricText(controller.getState().score)).toBe('one  two three');
+});
+it('a hidden lyric track gets the gap too, so its syllables land on the same notes when shown again',()=>{
+  const lines=[{startBar:0,text:'one two three'}],project=withEdits(lineProject(lines),{type:'setTrackLyrics',track:0,visible:false,lines});
+  const shown=buildDocument(lineProject(lines)).score,before=placed(shown),hidden=buildDocument(withEdits(project,middleOfBar1)).score;
+  expect(getLyricsSource(hidden.tracks[0])!.value.visible).toBe(false);expect(placed(hidden)).toEqual([]);expect(lyricText(hidden)).toBe('one two  three');
+  const back=buildDocument(withEdits(project,middleOfBar1,{type:'setTrackLyrics',track:0,visible:true,lines:getLyricsSource(hidden.tracks[0])!.value.lines})).score;
+  expect(placed(back)).toEqual(before);
+});
+it('a cut that adds no note-bearing beat leaves the lyric text as it was, and a note cut away whole leaves the line without its syllable',()=>{
+  const project=withLyrics();
+  for(const end of [960,1920]){const after=buildDocument(withEdits(project,cutLog(range([0,0],[0,end])))).score;expect(lyricText(after)).toBe('one two three');}
+  // A note cut away whole takes its syllable out of the line, so the notes after it keep theirs (the first test of the property file shows it token by token).
+  const whole=buildDocument(withEdits(project,cutLog(range([0,0],[1,0])))).score;
+  expect(lyricText(whole)).toBe('two three');expect(placed(whole)).toEqual([['two',1,0,2,3]]);
+});
+it('cut applied twice from the same document gives the same lyric text (a pure function of document and selection)',()=>{
+  const make=()=>buildDocument(withEdits(withLyrics(),cutLog(range([0,960],[0,2880])))).score;
+  expect(lyricText(make())).toBe(lyricText(make()));expect(json(make())).toBe(json(make()));
+});
+it('an old log holding eraseSelection with lyrics replays as it always did: the text is never touched',()=>{
+  const erase=(start:number,end:number):EditCommand=>({type:'eraseSelection',selection:range([0,start],[0,end])});
+  expect(lyricText(buildDocument(withEdits(withLyrics(),erase(960,2880))).score)).toBe('one two three');
+  const whole=buildDocument(withEdits(withLyrics(),erase(0,1920))).score;
+  expect(lyricText(whole)).toBe('one two three');expect(placed(whole)).toEqual([['one',1,0,2,3]]);
+});
+it('the cut result exports to Guitar Pro and reads back with every syllable on the same note',()=>{
+  const settings=new Settings();
+  for(const [lines,edit] of [[[{startBar:0,text:'one two three'}],middleOfBar1],[[{startBar:1,text:'one two three'}],cutLog(range([0,0],[1,1440]))],[[{startBar:0,text:'ky-ri-e'}],middleOfBar1]] as const) {
+    const score=buildDocument(withEdits(lineProject([...lines]),edit)).score,loaded=loadInterchangeScore(exportGpInterchange(score,settings),settings);
+    expect(placed(score).length).toBeGreaterThan(0);expect(placed(loaded)).toEqual(placed(score));
+  }
+});
+it('insertLyricGap writes one blank token at the index and keeps comments and line breaks as written',()=>{
+  for(const [text,at] of [['one two three',1],['one two three',0],['ky-ri-e',2],['[intro] one\ntwo three',1],['one [x] two three',2],['a b\r\nc d',2],['one  two',2]] as const) {
+    const gapped=insertLyricGap(text,at)!,tokens=tokenizeLyrics(text);
+    expect(tokenizeLyrics(gapped)).toEqual([...tokens.slice(0,at),'',...tokens.slice(at)]);
+    expect(gapped.length).toBeGreaterThan(text.length);expect(gapped.length).toBeLessThanOrEqual(text.length+3);
+  }
+  expect(insertLyricGap('one two',2)).toBe('one two');expect(insertLyricGap('',0)).toBe('');
+});
+
+// Every syllable stays on the piece that keeps its note's attack (or the first surviving piece when the attack was cut); every other tied piece of any note gets a blank.
+/** Bar 1: half note, half note; bar 2: a quarter note. Three syllables, one per note. */
+const twoHalves=(text='one two three'):Project=>({...blankProject(),edits:[
+  {type:'setNote',target:voiceTarget(0,0),string:3,fret:5},{type:'setNote',target:voiceTarget(0,1),string:2,fret:3},
+  {type:'deleteBeat',target:voiceTarget(0,3)},{type:'deleteBeat',target:voiceTarget(0,2)},
+  {type:'setDuration',target:voiceTarget(0,0),duration:2,dots:0},{type:'setDuration',target:voiceTarget(0,1),duration:2,dots:0},
+  {type:'setNote',target:voiceTarget(0,0,1),string:2,fret:4},
+  {type:'setTrackLyrics',track:0,visible:true,lines:[{startBar:0,text}]}]});
+/** The first note-bearing piece after the cut that carries each syllable, with the blank pieces named '': [text, bar, tick] for every note-bearing beat. */
+const pieces=(score:model.Score)=>score.tracks[0].staves[0].bars.slice(0,3).flatMap((bar,index)=>{let tick=0;return bar.voices[0].beats.flatMap(beat=>{const at=tick;tick+=rhythmTicks(beat);return beat.notes.length?[[beat.lyrics?.[0]??'',index,at] as [string,number,number]]:[];});});
+it('a head that needs two tied pieces gives its second piece the blank, and the syllable of the next note stays on that note',()=>{
+  const before=pieces(buildDocument(twoHalves()).score);expect(before.map(item=>item[0])).toEqual(['one','two','three']);
+  const after=buildDocument(withEdits(twoHalves(),cutLog(range([0,1200],[0,2400])))).score;
+  // 1200 into the first half note is a quarter and a sixteenth: B, its tied sixteenth, then the tail of the second half note.
+  expect(pieces(after)).toEqual([['one',0,0],['',0,960],['two',0,2400],['three',1,0]]);
+  expect(lyricText(after)).toBe('one  two three');
+});
+it('a head of three pieces, and a head and a tail that both need several pieces, each give every extra piece a blank',()=>{
+  const whole=(text:string):Project=>({...lineProject([{startBar:0,text}])});
+  // lineProject: bar 1 quarter, bar 2 whole, bar 3 quarter. A head of 2760 ticks in the whole note is a half, a dotted eighth and a 32nd.
+  const heads=buildDocument(withEdits(whole('one two three'),cutLog(range([1,2760],[2,0])))).score;
+  expect(pieces(heads).map(item=>item[0])).toEqual(['one','two','','','three']);
+  expect(lyricText(heads)).toBe('one two   three');
+  const both=buildDocument(withEdits(whole('one two three'),cutLog(range([1,840],[1,1200])))).score;
+  // Head 840 is two pieces and tail 2640 is four (a half, an eighth and two 32nds): six pieces of the note that sings "two"; the five after the first are blank.
+  expect(pieces(both).map(item=>item[0])).toEqual(['one','two','','','','','','three']);
+});
+it('the syllable of a note whose attack was cut goes to its first surviving piece, over several bars',()=>{
+  const project=lineProject([{startBar:0,text:'one two three'}]),after=buildDocument(withEdits(project,cutLog(range([1,840],[2,480])))).score;
+  // "two" keeps its attack with a head of 720 + 120; the quarter note of bar 3 lost its attack, so "three" goes to what is left of it.
+  expect(pieces(after)).toEqual([['one',0,0],['two',1,0],['',1,720],['three',2,480]]);
+});
+it('refuses, with the score unchanged and a reason that says what to do, when the removed word cannot leave its line cleanly',()=>{
+  // A word followed by a comment (the comment would swallow the space after it) and a word alone on a line that ends in a space.
+  for(const [text,from,to] of [['one [c] two three',[0,0],[1,0]],['a\nb \nc',[1,0],[2,0]]] as const) {
+    const base=lineProject([{startBar:0,text}]),score=buildDocument(base).score,before=json(score),line=lyricText(score);
+    expect(()=>cut(score,range([...from],[...to]))).toThrow(/Remove the comment or tidy that lyric line/);
+    expect(json(score)).toBe(before);expect(lyricText(score)).toBe(line);
+    expect(()=>buildDocument(withEdits(base,cutLog(range([...from],[...to]))))).toThrow(/tidy that lyric line/);
+  }
+});
+it('a cut that removes lyric words says how many, and says nothing when it removed none',()=>{
+  const base=lineProject([{startBar:0,text:'one two three'}]),score=buildDocument(base).score;
+  expect(cutLyricWordsLost(score,range([0,0],[1,0]))).toBe(1);
+  expect(cutLyricWordsLost(score,range([0,0],[2,0]))).toBe(2);
+  expect(cutLyricWordsLost(score,range([1,960],[1,2880]))).toBe(0);
+  expect(cutLyricWordsLost(buildDocument(wholeNote()).score,range([0,0],[1,0]))).toBe(0);
+  // The count is read from a copy: the score and its lyrics are untouched.
+  expect(lyricText(score)).toBe('one two three');
 });

@@ -6,19 +6,24 @@ import { AUTO_DURATION_UNFIT,DEFAULT_INPUT_PREFERENCES,InputPreferencesPanel,app
 
 const target={track:0,staff:0,bar:1,voice:0,beat:2};
 const key=(code:string,extra={},value=code.replace(/^Numpad(\d)$/,'$1').replace('NumpadDecimal','.'))=>({key:value,code,ctrlKey:false,metaKey:false,altKey:false,shiftKey:false,...extra});
-const on:InputPreferences={autoDuration:true,numpadDurations:true,pasteDiagrams:true,advance:true,swapPlusMinus:true};
+const on:InputPreferences={autoDuration:true,numpadDurations:true,pasteDiagrams:true,advance:true,swapPlusMinus:true,writeWhilePlaying:false};
 const beat=(extra:Partial<EntryBeat>={}):EntryBeat=>({duration:4,dots:0,isEmpty:false,notes:[],...extra});
 const store=(initial?:string)=>{const values=new Map<string,string>();if(initial!==undefined)values.set('tabplayer.input.preferences',initial);return {values,getItem:(name:string)=>values.get(name)??null,setItem:(name:string,value:string)=>{values.set(name,value);}};};
 
 describe('stored preferences',()=>{
   it('defaults, round-trips and repairs one field at a time',()=>{
     expect(readInputPreferences(store())).toEqual(DEFAULT_INPUT_PREFERENCES);
-    expect(DEFAULT_INPUT_PREFERENCES).toEqual({autoDuration:false,numpadDurations:false,pasteDiagrams:true,advance:true,swapPlusMinus:false});
+    expect(DEFAULT_INPUT_PREFERENCES).toEqual({autoDuration:false,numpadDurations:false,pasteDiagrams:true,advance:true,swapPlusMinus:false,writeWhilePlaying:true});
     const kept=store();writeInputPreferences(on,kept);expect(readInputPreferences(kept)).toEqual(on);
-    expect(readInputPreferences(store('{"autoDuration":true,"numpadDurations":"yes","pasteDiagrams":false}'))).toEqual({autoDuration:true,numpadDurations:false,pasteDiagrams:false,advance:true,swapPlusMinus:false});
+    expect(readInputPreferences(store('{"autoDuration":true,"numpadDurations":"yes","pasteDiagrams":false}'))).toEqual({autoDuration:true,numpadDurations:false,pasteDiagrams:false,advance:true,swapPlusMinus:false,writeWhilePlaying:true});
     expect(readInputPreferences(store('{"autoDuration":true,"numpadDurations":true,"pasteDiagrams":true,"advance":false}')).swapPlusMinus).toBe(false);
     expect(readInputPreferences(store('{"swapPlusMinus":true}')).swapPlusMinus).toBe(true);
     expect(readInputPreferences(store('{"swapPlusMinus":"yes"}')).swapPlusMinus).toBe(false);
+    // Writing while the score plays is on unless a stored value says false; anything that is not a boolean is repaired to on.
+    expect(readInputPreferences(store('{"writeWhilePlaying":false}')).writeWhilePlaying).toBe(false);
+    expect(readInputPreferences(store('{"writeWhilePlaying":"no"}')).writeWhilePlaying).toBe(true);
+    expect(readInputPreferences(store('{"writeWhilePlaying":0}')).writeWhilePlaying).toBe(true);
+    expect(readInputPreferences(store('{"autoDuration":true}')).writeWhilePlaying).toBe(true);
     expect(readInputPreferences(store('not json'))).toEqual(DEFAULT_INPUT_PREFERENCES);
     expect(readInputPreferences(store('[1]'))).toEqual(DEFAULT_INPUT_PREFERENCES);
     const broken={getItem:()=>{throw new Error('blocked');},setItem:()=>{throw new Error('blocked');}};
@@ -112,5 +117,12 @@ describe('InputPreferencesPanel',()=>{
     const view=render(<InputPreferencesPanel preferences={DEFAULT_INPUT_PREFERENCES} onChange={change=>changes.push(change)} preview onPreview={()=>{}}/>);
     const box=within(view.container).getByLabelText(/^Plus\/Minus keys/) as HTMLInputElement;expect(box.checked).toBe(false);
     fireEvent.click(box);expect(changes).toEqual([{swapPlusMinus:true}]);
+  });
+  it('offers writing while the score plays, on by default, in the same panel',()=>{
+    const changes:Partial<InputPreferences>[]=[];
+    const view=render(<InputPreferencesPanel preferences={DEFAULT_INPUT_PREFERENCES} onChange={change=>changes.push(change)} preview onPreview={()=>{}}/>);
+    const box=within(view.container).getByLabelText('Write notes while the score plays') as HTMLInputElement;expect(box.checked).toBe(true);expect(box.disabled).toBe(false);
+    fireEvent.click(box);expect(changes).toEqual([{writeWhilePlaying:false}]);
+    expect(within(view.container).getByText(/Off pauses typed notes and captured chords while the score plays/)).toBeTruthy();
   });
 });

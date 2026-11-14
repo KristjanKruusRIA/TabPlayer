@@ -14,6 +14,8 @@ export interface DocumentViewState {
   target:BeatTarget;selectedString:number;selectedNoteIndex:number|null;
   zoom:number;trackView:TrackView;instrumentVisible:boolean;
   scoreDisplay?:ScoreDisplayPreferences;
+  /** The keyboard's own dock panel. Absent when hidden, so views written before it existed read as today; never set together with `instrumentVisible`. */
+  keyboardVisible?:true;
 }
 export interface DocumentTab {id:DocumentId;title:string;path:string|null;dirty:boolean;locked?:boolean}
 export interface NativeWorkspaceBridge {

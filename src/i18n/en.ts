@@ -730,6 +730,8 @@ export const en = {
   'instruments.held_note': '{pitch} · string {string} · fret {fret} · tied, held from an earlier note',
   'instruments.select_note': 'Select {note} in the score, bar {bar}, beat {beat}',
   'instruments.keyboard_panel': 'Keyboard panel',
+  'instruments.settings_not_saved': 'Instrument view options could not be saved. They apply now and saving is tried again.',
+  'instruments.settings_newer': 'These settings were saved by a newer TabPlayer and are left as they are. Changes here are not saved.',
   'instruments.keyboard_percussion': 'The keyboard shows pitched staves. Use the Drums view for this percussion staff.',
   'instruments.expand_view': 'Expand instrument view',
   'instruments.compact_view': 'Compact instrument view',

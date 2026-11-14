@@ -1,5 +1,5 @@
 import { useI18n } from '../i18n';
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
 import { trackIdentity } from '../engine';
@@ -8,7 +8,7 @@ import { focusNotes, heldNotes, type InstrumentFocus } from './focus';
 import type { EditCommand } from '../edit-types';
 import type { EntryFollow } from './entry';
 import { InstrumentView, type PickBy } from './InstrumentView';
-import { readInstrumentViewPreferences, writeInstrumentViewPreferences } from './view-preferences';
+import { currentInstrumentSettingsProblem, readInstrumentViewPreferences, subscribeInstrumentSettingsProblem, subscribeInstrumentViewPreferences, writeInstrumentViewPreferences } from './view-preferences';
 
 const noSubscribe=()=>()=>{};
 const noState=()=>null;
@@ -26,9 +26,11 @@ export function LiveInstrumentView({score,track,staff,target=null,noteIndex=null
     next:{label:t('instruments.focus_next'),caption:t('instruments.caption_next'),empty:t('instruments.empty_next')},
   };
   const [saved]=useState(readInstrumentViewPreferences),[focus,setFocusNow]=useState<InstrumentFocus>(saved.focus),[editing,setEditing]=useState(saved.clickToEdit);
+  useEffect(()=>subscribeInstrumentViewPreferences(()=>setFocusNow(readInstrumentViewPreferences().focus)),[]);
   const setFocus=(value:InstrumentFocus)=>{setFocusNow(value);writeInstrumentViewPreferences({focus:value});};
   const editMode=editing&&!!onEdit&&!locked;
   const chooseEditing=(on:boolean)=>{setEditing(on);writeInstrumentViewPreferences({clickToEdit:on});};
+  const settingsProblem=useSyncExternalStore(subscribeInstrumentSettingsProblem,currentInstrumentSettingsProblem);
   const state=useSyncExternalStore(player?.subscribe??noSubscribe,player?.getState??noState);
   const id=trackIdentity(score.tracks[track]),active=player?.activeNotes(id)??[];
   const scheduled=focus==='playing'?null:player?.scheduledNotes?.(id)??null;
@@ -43,6 +45,6 @@ export function LiveInstrumentView({score,track,staff,target=null,noteIndex=null
   return <section className="live-instrument-view" aria-label={panel==='keyboard'?t('instruments.keyboard_panel'):t('instruments.instrument_view')}>
     <InstrumentView lockedMode={panel==='keyboard'?'keys':undefined} score={score} track={track} staff={staff} notes={notes} held={held} caption={shown.caption} empty={empty}
       onSelect={onSelect} selected={target?{target,noteIndex}:null} entry={editing&&onEdit&&!locked?{target,busy,string,onEdit}:undefined}
-      controls={<>{onEdit?<label className="instrument-check"><input type="checkbox" checked={editing&&!locked} disabled={locked} title={locked?t('project.finalized'):undefined} onChange={event=>chooseEditing(event.target.checked)}/>{t('instruments.click_to_edit')}</label>:null}<label>{t('instruments.show_focus')}<select value={focus} disabled={editMode} onChange={event=>setFocus(event.target.value as InstrumentFocus)}>{Object.entries(focuses).map(([value,{label}])=><option key={value} value={value}>{label}</option>)}</select></label></>}/>
+      controls={<>{settingsProblem?<span className="instrument-settings-note" role="status">{t(settingsProblem==='newer'?'instruments.settings_newer':'instruments.settings_not_saved')}</span>:null}{onEdit?<label className="instrument-check"><input type="checkbox" checked={editing&&!locked} disabled={locked} title={locked?t('project.finalized'):undefined} onChange={event=>chooseEditing(event.target.checked)}/>{t('instruments.click_to_edit')}</label>:null}<label>{t('instruments.show_focus')}<select value={focus} disabled={editMode} onChange={event=>setFocus(event.target.value as InstrumentFocus)}>{Object.entries(focuses).map(([value,{label}])=><option key={value} value={value}>{label}</option>)}</select></label></>}/>
   </section>;
 }

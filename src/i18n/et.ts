@@ -731,6 +731,8 @@ export const et: MessageCatalog = {
   'instruments.held_note': '{pitch} · keel {string} · astmetraat {fret} · seotud, jätkab eelmist nooti',
   'instruments.select_note': 'Vali noot {note} partituuris, takt {bar}, löök {beat}',
   'instruments.keyboard_panel': 'Klahvistiku paneel',
+  'instruments.settings_not_saved': 'Pilli vaate valikuid ei saanud salvestada. Need kehtivad praegu ja salvestamist proovitakse uuesti.',
+  'instruments.settings_newer': 'Need seaded salvestas uuem TabPlayeri versioon ja neid ei muudeta. Siin tehtud muudatusi ei salvestata.',
   'instruments.keyboard_percussion': 'Klahvistik näitab helikõrgusega noodiridu. Selle löökpillirea jaoks kasuta vaadet Trummid.',
   'instruments.expand_view': 'Laienda pillivaadet',
   'instruments.compact_view': 'Ahenda pillivaadet',

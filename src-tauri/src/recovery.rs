@@ -189,6 +189,9 @@ pub struct DocumentViewState {
     pub instrument_visible: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub score_display: Option<ScoreDisplayPreferences>,
+    /// The keyboard's own dock panel. Absent when hidden, so a view that never showed it is unchanged on disk.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keyboard_visible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -356,6 +359,7 @@ impl Default for DocumentViewState {
             track_view: TrackView::Selected {},
             instrument_visible: false,
             score_display: None,
+            keyboard_visible: false,
         }
     }
 }
@@ -803,6 +807,7 @@ pub fn redact_sealed(documents: Vec<RecoveryDocument>) -> Vec<RecoveryDocument> 
                     zoom: document.view.zoom,
                     instrument_visible: document.view.instrument_visible,
                     score_display: document.view.score_display.clone(),
+                    keyboard_visible: document.view.keyboard_visible,
                     ..DocumentViewState::default()
                 },
                 ..document
@@ -1485,6 +1490,53 @@ mod store_tests {
         let mut envelope = serde_json::to_value(empty(1, 1)).unwrap();
         envelope["extra"] = serde_json::json!(true);
         assert!(serde_json::from_value::<RecoveryEnvelope>(envelope).is_err());
+    }
+    #[test]
+    fn keyboard_panel_absent_in_old_views_defaults_to_hidden_and_stays_absent() {
+        // A view written before the keyboard panel existed has no `keyboardVisible`.
+        let old = serde_json::json!({
+            "target":{"track":1,"staff":0,"bar":2,"voice":0,"beat":3},
+            "selectedString":5,"selectedNoteIndex":null,"zoom":125.0,
+            "trackView":{"kind":"selected"},"instrumentVisible":true,
+            "scoreDisplay":{"layout":"grid","zoomMode":"manual"}
+        });
+        let view: DocumentViewState = serde_json::from_value(old.clone()).unwrap();
+        assert!(!view.keyboard_visible);
+        assert!(view.instrument_visible);
+        // Writing it back adds nothing, so a build that predates the field still reads what this one writes.
+        assert_eq!(serde_json::to_value(&view).unwrap(), old);
+        assert!(
+            serde_json::to_value(DocumentViewState::default())
+                .unwrap()
+                .get("keyboardVisible")
+                .is_none()
+        );
+    }
+    #[test]
+    fn keyboard_panel_visible_roundtrips_and_rejects_non_booleans() {
+        let mut value = serde_json::to_value(DocumentViewState::default()).unwrap();
+        value["keyboardVisible"] = serde_json::json!(true);
+        let view: DocumentViewState = serde_json::from_value(value.clone()).unwrap();
+        assert!(view.keyboard_visible);
+        assert_eq!(serde_json::to_value(view).unwrap(), value);
+        value["keyboardVisible"] = serde_json::json!(false);
+        let hidden: DocumentViewState = serde_json::from_value(value).unwrap();
+        assert!(!hidden.keyboard_visible);
+        assert!(
+            serde_json::to_value(hidden)
+                .unwrap()
+                .get("keyboardVisible")
+                .is_none()
+        );
+        for bad in [
+            serde_json::json!(null),
+            serde_json::json!(1),
+            serde_json::json!("true"),
+        ] {
+            let mut value = serde_json::to_value(DocumentViewState::default()).unwrap();
+            value["keyboardVisible"] = bad;
+            assert!(serde_json::from_value::<DocumentViewState>(value).is_err());
+        }
     }
     fn empty(epoch: u64, generation: u64) -> RecoveryEnvelope {
         RecoveryEnvelope {

@@ -28,3 +28,5 @@ rect.entry-target[aria-disabled="true"]:hover{fill:transparent}
 /* A neck pick is an invisible 14-unit target over its position; it only shows on hover and focus. */
 .fret-pick{cursor:pointer;outline:none}.fret-pick .fret-hit{stroke:transparent;stroke-width:2}.fret-pick:hover .fret-hit{fill:#b8e45f33}.fret-pick:focus-visible .fret-hit{fill:#7fb2ff33;stroke:#7fb2ff}
 .piano-key.selectable{cursor:pointer;outline:none}.piano-key.selectable:hover>.key-area{fill:#b8e45f33}.piano-key.selectable:focus-visible>.key-area{stroke:#7fb2ff;stroke-width:2}
+
+.instrument-settings-note{font-size:11px;color:var(--tp-muted,#9aa);max-width:36ch}

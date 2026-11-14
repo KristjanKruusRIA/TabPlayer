@@ -17,5 +17,5 @@ export function repairDocumentView(score:model.Score,view:DocumentViewState):Doc
   return {target,selectedString:staff.isPercussion||!staff.tuning.length?1:Number.isInteger(view.selectedString)?Math.max(1,Math.min(view.selectedString,staff.tuning.length)):1,
     selectedNoteIndex:view.selectedNoteIndex!==null&&Number.isInteger(view.selectedNoteIndex)&&view.selectedNoteIndex>=0&&view.selectedNoteIndex<notes.length?view.selectedNoteIndex:null,
     zoom:Number.isFinite(view.zoom)&&view.zoom>=25&&view.zoom<=300?view.zoom:100,
-    trackView:view.trackView.kind==='custom'?custom.length?{kind:'custom',trackIds:custom}:{kind:'selected'}:{kind:view.trackView.kind},instrumentVisible:view.instrumentVisible,...(scoreDisplay?{scoreDisplay}:{})};
+    trackView:view.trackView.kind==='custom'?custom.length?{kind:'custom',trackIds:custom}:{kind:'selected'}:{kind:view.trackView.kind},instrumentVisible:view.instrumentVisible,...(scoreDisplay?{scoreDisplay}:{}),...(view.keyboardVisible===true&&!view.instrumentVisible?{keyboardVisible:true as const}:{})};
 }

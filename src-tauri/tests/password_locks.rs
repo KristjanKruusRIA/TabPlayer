@@ -943,6 +943,7 @@ fn a_sealed_score_cannot_become_a_plain_copy_or_a_plain_recovery_backup() {
                 },
                 instrument_visible: true,
                 score_display: None,
+                keyboard_visible: true,
             },
         )
         .unwrap();
@@ -970,6 +971,7 @@ fn a_sealed_score_cannot_become_a_plain_copy_or_a_plain_recovery_backup() {
         // Only display preferences survive; positions and track ids point into the score.
         assert_eq!(kept.view.zoom, original.view.zoom);
         assert_eq!(kept.view.score_display, original.view.score_display);
+        assert_eq!(kept.view.keyboard_visible, original.view.keyboard_visible);
         assert_eq!(kept.view.target, DocumentViewState::default().target);
         assert_eq!(
             kept.view.selected_string,

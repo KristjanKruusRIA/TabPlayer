@@ -90,3 +90,34 @@ it('can be locked to the keyboard for its own panel, with no mode or handedness 
   render(<InstrumentView score={score} track={0} staff={0} notes={notes} lockedMode="keys" />);
   expect(screen.getByRole('heading')).toHaveTextContent('Guitar · Keys'); expect(screen.queryByLabelText('Instrument view mode')).toBeNull();
 });
+
+it('an open view follows the native settings once they arrive, with no choice of its own recorded', async () => {
+  const { score, notes } = music(), { act } = await import('@testing-library/react');
+  const { setNativeSettingsBridge, resetInstrumentViewPreferencesSync, syncInstrumentViewPreferencesFromNative } = await import('./view-preferences');
+  resetInstrumentViewPreferencesSync();
+  setNativeSettingsBridge({ read: async () => ({ instrumentView: { leftHanded: true, noteNames: 'letter', neck: null, expanded: true, focus: 'bar' } }), put: async () => ({}) });
+  try {
+    render(<LiveInstrumentView score={score} track={0} staff={0} player={null} />);
+    expect(screen.getByRole('checkbox', { name: 'Left-handed' })).not.toBeChecked();
+    await act(async () => { await syncInstrumentViewPreferencesFromNative(); });
+    expect(screen.getByRole('checkbox', { name: 'Left-handed' })).toBeChecked();
+    expect((screen.getByLabelText('Show') as HTMLSelectElement).value).toBe('bar');
+    expect(notes.length).toBeGreaterThan(0);
+  } finally { setNativeSettingsBridge(null); resetInstrumentViewPreferencesSync(); }
+});
+
+it('says once, quietly, when the options could not be saved, and when the settings belong to a newer build', async () => {
+  const { score } = music(), { act } = await import('@testing-library/react');
+  const { setNativeSettingsBridge, resetInstrumentViewPreferencesSync, syncInstrumentViewPreferencesFromNative } = await import('./view-preferences');
+  resetInstrumentViewPreferencesSync();
+  setNativeSettingsBridge({ read: async () => ({ instrumentView: null }), put: async () => { throw new Error('disk full'); } });
+  try {
+    render(<LiveInstrumentView score={score} track={0} staff={0} player={null} />);
+    await act(async () => { await syncInstrumentViewPreferencesFromNative(); });
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await act(async () => { fireEvent.click(screen.getByRole('checkbox', { name: 'Left-handed' })); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+    expect(screen.getByRole('status')).toHaveTextContent('could not be saved');
+    expect(screen.getByRole('checkbox', { name: 'Left-handed' })).toBeChecked();
+  } finally { setNativeSettingsBridge(null); resetInstrumentViewPreferencesSync(); }
+});

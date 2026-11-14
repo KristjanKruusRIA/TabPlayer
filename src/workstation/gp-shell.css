@@ -112,12 +112,20 @@
 .gp-practice-section h3 { margin:0 0 8px; font:600 12px/1.2 var(--tp-font-ui); letter-spacing:.04em; text-transform:uppercase; color:var(--ws-text); }
 .gp-practice-section>fieldset { margin:0; padding:0; border:0; min-width:0; }
 
-/* Below full HD the score display controls take a second row; in narrow windows the transport gets a row of its own. */
-@media (max-width:1879px) {
+/* Below 1920px (written as a range, so that the Key fold in Transport, which uses the opposite range, leaves no gap at a fractional width) the score display controls take a second row; below 1515px the transport gets a row of its own. Estonian and German have wider captions in the display group, so their single row starts later (2025px, 2115px). The widths are measured, with a margin, and kept in src/shell/toolbar-fit.ts, which the stylesheet test ties these numbers to; the Key group folds into More playback where the single row does not hold it (see Transport). */
+@media (width < 1920px) {
   .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'left transport right' 'display display display'; }
   .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
 }
-@media (max-width:1339px) {
+@media (width >= 1920px) and (width < 2025px) {
+  .app-shell:lang(et) .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'left transport right' 'display display display'; }
+  .app-shell:lang(et) .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
+}
+@media (width >= 1920px) and (width < 2115px) {
+  .app-shell:lang(de) .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'left transport right' 'display display display'; }
+  .app-shell:lang(de) .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
+}
+@media (width < 1515px) {
   .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'transport transport transport' 'left display right'; }
   .gp-toolbar>.gp-toolbar-display { padding-bottom:0; }
 }

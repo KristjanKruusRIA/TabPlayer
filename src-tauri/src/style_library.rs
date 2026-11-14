@@ -215,7 +215,7 @@ pub fn remove_entry(directory: &Path, id: &str) -> Result<StyleLibrary, String> 
 
 #[tauri::command]
 pub async fn style_library_read(app: AppHandle) -> Result<StyleLibrary, String> {
-    let directory = crate::tuning_library_directory(&app)?;
+    let directory = crate::personal_data_directory(&app)?;
     tauri::async_runtime::spawn_blocking(move || read_library(&directory))
         .await
         .map_err(|err| err.to_string())?
@@ -223,7 +223,7 @@ pub async fn style_library_read(app: AppHandle) -> Result<StyleLibrary, String> 
 
 #[tauri::command]
 pub async fn style_library_put(app: AppHandle, entry: SavedStyle) -> Result<StyleLibrary, String> {
-    let directory = crate::tuning_library_directory(&app)?;
+    let directory = crate::personal_data_directory(&app)?;
     tauri::async_runtime::spawn_blocking(move || put_entry(&directory, entry))
         .await
         .map_err(|err| err.to_string())?
@@ -231,7 +231,7 @@ pub async fn style_library_put(app: AppHandle, entry: SavedStyle) -> Result<Styl
 
 #[tauri::command]
 pub async fn style_library_remove(app: AppHandle, id: String) -> Result<StyleLibrary, String> {
-    let directory = crate::tuning_library_directory(&app)?;
+    let directory = crate::personal_data_directory(&app)?;
     tauri::async_runtime::spawn_blocking(move || remove_entry(&directory, &id))
         .await
         .map_err(|err| err.to_string())?

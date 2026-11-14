@@ -1,3 +1,4 @@
+pub mod app_settings;
 pub mod assets;
 pub mod audio;
 pub mod audio_input;
@@ -252,9 +253,9 @@ async fn harmony_library_remove(
         .map_err(|err| err.to_string())?
 }
 
-/// Where the personal tuning library lives. A diagnostic desktop-test run must name its own absolute folder,
-/// so acceptance runs never read or write the user's real library.
-fn tuning_library_directory(app: &AppHandle) -> Result<PathBuf, String> {
+/// Where the person's own stores live (saved tunings, application settings). A diagnostic desktop-test run must name its own absolute folder,
+/// so acceptance runs never read or write the user's real files.
+fn personal_data_directory(app: &AppHandle) -> Result<PathBuf, String> {
     #[cfg(feature = "desktop-test")]
     if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() == Ok("1") {
         let selected = std::env::var_os("TABPLAYER_TEST_APP_DATA_DIR")
@@ -269,8 +270,29 @@ fn tuning_library_directory(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
+async fn app_settings_read(app: AppHandle) -> Result<app_settings::AppSettings, String> {
+    let directory = personal_data_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || app_settings::read_settings(&directory))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn app_settings_put_instrument_view(
+    app: AppHandle,
+    value: app_settings::InstrumentViewSettings,
+) -> Result<app_settings::AppSettings, String> {
+    let directory = personal_data_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        app_settings::put_instrument_view(&directory, value)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 async fn tuning_library_read(app: AppHandle) -> Result<tuning_library::TuningLibrary, String> {
-    let directory = tuning_library_directory(&app)?;
+    let directory = personal_data_directory(&app)?;
     tauri::async_runtime::spawn_blocking(move || tuning_library::read_library(&directory))
         .await
         .map_err(|err| err.to_string())?
@@ -281,7 +303,7 @@ async fn tuning_library_put(
     app: AppHandle,
     entry: tuning_library::SavedTuning,
 ) -> Result<tuning_library::TuningLibrary, String> {
-    let directory = tuning_library_directory(&app)?;
+    let directory = personal_data_directory(&app)?;
     tauri::async_runtime::spawn_blocking(move || tuning_library::put_entry(&directory, entry))
         .await
         .map_err(|err| err.to_string())?
@@ -292,7 +314,7 @@ async fn tuning_library_remove(
     app: AppHandle,
     id: String,
 ) -> Result<tuning_library::TuningLibrary, String> {
-    let directory = tuning_library_directory(&app)?;
+    let directory = personal_data_directory(&app)?;
     tauri::async_runtime::spawn_blocking(move || tuning_library::remove_entry(&directory, &id))
         .await
         .map_err(|err| err.to_string())?
@@ -1288,6 +1310,8 @@ pub fn run() {
         harmony_library_read,
         harmony_library_put,
         harmony_library_remove,
+        app_settings_read,
+        app_settings_put_instrument_view,
         tuning_library_read,
         tuning_library_put,
         tuning_library_remove,
@@ -1409,6 +1433,8 @@ pub fn run() {
         harmony_library_read,
         harmony_library_put,
         harmony_library_remove,
+        app_settings_read,
+        app_settings_put_instrument_view,
         tuning_library_read,
         tuning_library_put,
         tuning_library_remove,

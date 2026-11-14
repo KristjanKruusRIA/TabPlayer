@@ -24,6 +24,15 @@ const writtenKeys=(base:Project,command:EditCommand,target:BeatTarget)=>{
 
 describe('planChordFingering',()=>{
   const staff=()=>describeSelection(buildDocument(project()).score,guitar(0)).staff;
+  it('reports no search work when a call returns before it searches',()=>{
+    planChordFingering(staff(),[{key:69,string:null}],new Set(),null);
+    expect(lastFingeringSearchNodes()).toBeGreaterThan(0);
+    expect(planChordFingering(staff(),[],new Set(),null)).toBeNull();
+    expect(lastFingeringSearchNodes()).toBe(0);
+    planChordFingering(staff(),[{key:69,string:null}],new Set(),null);
+    expect(planChordFingering(staff(),[{key:30,string:null}],new Set(),null)).toBeNull();
+    expect(lastFingeringSearchNodes()).toBe(0);
+  });
   it('puts an open E major chord on the strings and frets a guitarist plays it on',()=>{
     const result=planChordFingering(staff(),[40,47,52,56,59,64].map(key=>({key,string:null})),new Set(),null);
     expect(result).toEqual([{string:1,fret:0},{string:2,fret:2},{string:3,fret:2},{string:4,fret:1},{string:5,fret:0},{string:6,fret:0}]);

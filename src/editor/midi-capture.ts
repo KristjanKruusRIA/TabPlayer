@@ -81,6 +81,7 @@ function anyAssignment(options:readonly (readonly Placement[])[]):Placement[]|nu
  * operations) improves on a first valid assignment and never replaces it with nothing.
  */
 export function planChordFingering(staff:model.Staff,notes:readonly {key:number;string:number|null}[],occupied:ReadonlySet<number>,hand:number|null):Placement[]|null {
+  lastNodes=0;
   const strings=staff.tuning.length;
   if(staff.isPercussion||!strings||!notes.length||notes.length>strings)return null;
   // Lowest pitch first, so that the string order check below reads naturally.
@@ -134,7 +135,7 @@ export function planChordFingering(staff:model.Staff,notes:readonly {key:number;
 }
 
 const text=(key:MessageKey,params?:Record<string,string|number>)=>getMessage(getResolvedLanguage(),key,params);
-const names=(keys:readonly number[])=>keys.map(formatPitch).join(' ');
+const names=(keys:readonly number[])=>[...new Set(keys)].map(formatPitch).join(' ');
 
 interface MappedNote {key:number;string:number|null}
 /**

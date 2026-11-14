@@ -213,7 +213,7 @@ fn audio_root() -> PathBuf {
 fn output_folder() -> PathBuf {
     let folder = std::env::var_os("TONE_AB_OUT")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(r"E:\git\TabPlayer\.worktrees\gp8-parity\output\tone-ab"));
+        .unwrap_or_else(|| std::env::temp_dir().join("tabplayer-tone-ab"));
     std::fs::create_dir_all(&folder).unwrap();
     folder
 }

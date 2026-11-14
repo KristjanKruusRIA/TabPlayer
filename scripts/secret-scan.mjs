@@ -92,9 +92,6 @@ export const allowlist = [
   { rule: 'local-folder', path: 'docs/design/reference-workstation/', reason: 'same records as above (THE-72 note, item ii)' },
   // Declared exceptions: functional defaults and project guidance that name the author's folders.
   { rule: 'local-folder', path: 'CLAUDE.md', reason: 'project guidance naming the shared cargo-target slots' },
-  { rule: 'local-folder', path: 'src-tauri/examples/tone_ab/main.rs', reason: 'default output folder of an example; needs a code change' },
-  { rule: 'local-folder', path: 'tests/desktop/display-modes.mjs', reason: 'default output folder of a driver; needs a code change' },
-  { rule: 'local-folder', path: 'tests/desktop/selection-loop-drawing.mjs', reason: 'default screenshot folder of a driver; needs a code change' },
   // The scanner's own rules and tests spell out the shapes they look for, so they match themselves.
   { rule: 'minisign-secret-key', path: 'scripts/secret-scan.mjs', reason: 'the rule text itself' },
   { rule: 'home-path', path: 'scripts/secret-scan.mjs', reason: 'the rule text itself' },

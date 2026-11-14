@@ -51,8 +51,9 @@ it('dispatches exact live mix values, retains slider ranges and selects the cano
   expect(pan).toHaveValue('-0.2');expect(pan).toHaveAttribute('min','-1');expect(pan).toHaveAttribute('max','1');expect(pan).toHaveAttribute('step','0.05');
   fireEvent.click(screen.getByLabelText('Mute'));expect(player.setMute).toHaveBeenLastCalledWith(0,true);
   fireEvent.click(screen.getByLabelText('Solo'));expect(player.setSolo).toHaveBeenLastCalledWith(0,false);
-  fireEvent.change(volume,{target:{value:'.55'}});expect(player.setTrackVolume).toHaveBeenLastCalledWith(0,.55);
-  fireEvent.change(pan,{target:{value:'.25'}});expect(player.setPan).toHaveBeenLastCalledWith(0,.25);
+  // A drag is heard and recorded once, at its release; a keyboard step is one change on its key release.
+  fireEvent.pointerDown(volume,{pointerId:1});fireEvent.change(volume,{target:{value:'.6'}});fireEvent.change(volume,{target:{value:'.55'}});expect(player.setTrackVolume).not.toHaveBeenCalled();fireEvent.pointerUp(volume,{pointerId:1});expect(player.setTrackVolume).toHaveBeenCalledExactlyOnceWith(0,.55);
+  fireEvent.keyDown(pan,{key:'ArrowRight'});fireEvent.change(pan,{target:{value:'.25'}});fireEvent.keyUp(pan,{key:'ArrowRight'});expect(player.setPan).toHaveBeenLastCalledWith(0,.25);
   const channel=screen.getByRole('button',{name:'Track 1: Guitar'});expect(channel).toHaveAttribute('aria-pressed','true');
   fireEvent.click(channel);expect(onSelect).toHaveBeenLastCalledWith(0);
   emit({}, {mute:true,solo:false,volume:.55,pan:.25});expect(screen.getByLabelText('Mute')).toBeChecked();expect(volume).toHaveValue('0.55');expect(pan).toHaveValue('0.25');
@@ -85,10 +86,15 @@ it('keeps overview and mixer mounted across view switches with drafts, channels 
   expect(screen.getByRole('button',{name:`Track 1: ${name}`})).toHaveAttribute('title',name);expect(screen.getByText('Selected')).toBeVisible();
   view.rerender(<TrackPanel {...initial} view="overview"/>);expect(screen.getByLabelText('Overview local draft')).toBe(draft);expect(draft).toHaveValue('Keep my location');
 });
-it('disables all mix changes when busy or without a player while retaining channel selection',()=>{
+it('disables all mix changes when busy or without a player while retaining channel selection, and keeps the ranges enabled while busy',()=>{
   const initial=props(),{player}=livePlayer(initial.score),view=render(<TrackPanel {...initial} player={player} busy/>);
-  for(const label of ['Mute','Solo','Volume Guitar','Pan Guitar'])expect(screen.getByLabelText(label)).toBeDisabled();
-  expect(screen.getByRole('button',{name:'Track 1: Guitar'})).toBeDisabled();
+  for(const label of ['Mute','Solo'])expect(screen.getByLabelText(label)).toBeDisabled();
+  // A range holding focus is never disabled for busy: it refuses the change instead.
+  for(const label of ['Volume Guitar','Pan Guitar']){expect(screen.getByLabelText(label)).toBeEnabled();expect(screen.getByLabelText(label)).toHaveAttribute('aria-disabled','true');}
+  fireEvent.change(screen.getByLabelText('Volume Guitar'),{target:{value:'.1'}});fireEvent.pointerUp(screen.getByLabelText('Volume Guitar'));
+  expect(player.setTrackVolume).not.toHaveBeenCalled();
+  // Choosing a track is navigation, so it works while busy.
+  expect(screen.getByRole('button',{name:'Track 1: Guitar'})).toBeEnabled();
   view.rerender(<TrackPanel {...initial}/>);
   for(const label of ['Mute','Solo','Volume Guitar','Pan Guitar'])expect(screen.getByLabelText(label)).toBeDisabled();
   expect(screen.getByRole('button',{name:'Track 1: Guitar'})).toBeEnabled();

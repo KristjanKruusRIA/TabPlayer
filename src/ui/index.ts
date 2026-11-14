@@ -2,6 +2,8 @@ export { Knob, formatValue } from './Knob';
 export type { KnobProps, ControlProps } from './Knob';
 export { Fader } from './Fader';
 export type { FaderProps } from './Fader';
+export { MixSlider } from './MixSlider';
+export type { MixSliderProps } from './MixSlider';
 export { Segmented } from './Segmented';
 export type { SegmentedOption, SegmentedProps } from './Segmented';
 export { Dialog } from './Dialog';

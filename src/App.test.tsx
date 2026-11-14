@@ -1369,7 +1369,8 @@ it('does not remember a refused note as the entry duration, and never leaves a r
   const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
   keypad('Numpad4');await waitFor(()=>expect(currentBeat(c).duration).toBe(8));
   fireEvent.keyDown(workspace,{key:'ArrowRight'});
-  fireEvent.keyDown(workspace,{key:'9'});fireEvent.keyDown(workspace,{key:'9'});expect(screen.getByLabelText('Fret')).toHaveValue(99);
+  // 99 cannot be typed as digits any more (the second 9 would be a fret of its own), so the refused fret comes from the field.
+  change('Fret','99');expect(screen.getByLabelText('Fret')).toHaveValue(99);
   fireEvent.keyDown(workspace,{key:'Enter'});await new Promise(resolve=>setTimeout(resolve,50));
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration']);expect(currentBeat(c,1).duration).toBe(4);
   change('Fret','5');fireEvent.keyDown(workspace,{key:'Enter'});
@@ -2150,9 +2151,9 @@ describe('GP8 edit and cursor keys',()=>{
   const beatsIn=(c:DocumentController,bar=0)=>c.getState().score.tracks[0].staves[0].bars[bar].voices[0].beats.length;
   function holdEdits(c:DocumentController){
     const bridge=documentBridges.get(c.getState().documentId)!,original=bridge.applyEdit.bind(bridge);
-    const held:{pass:()=>void}[]=[];
-    vi.spyOn(bridge,'applyEdit').mockImplementation((command,expected,token)=>new Promise((resolve,reject)=>{held.push({pass:()=>void original(command,expected,token).then(resolve,reject)});}));
-    return {held,next:async()=>{await waitFor(()=>expect(held.length).toBeGreaterThan(0));held.shift()!.pass();}};
+    const held:{pass:()=>void;refuse:()=>void}[]=[];
+    vi.spyOn(bridge,'applyEdit').mockImplementation((command,expected,token)=>new Promise((resolve,reject)=>{held.push({pass:()=>void original(command,expected,token).then(resolve,reject),refuse:()=>reject(new Error('The edit was refused.'))});}));
+    return {held,next:async(how:'pass'|'refuse'='pass')=>{await waitFor(()=>expect(held.length).toBeGreaterThan(0));held.shift()![how]();}};
   }
   const entryOn=async(prefs?:string)=>{
     if(prefs)window.localStorage.setItem(inputKey,prefs);else window.localStorage.removeItem(inputKey);
@@ -2317,72 +2318,150 @@ describe('GP8 edit and cursor keys',()=>{
     // Once the queue is empty, entry works again.
     press({key:'a'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
   });
-  it('Backspace clears typed fret digits instead of deleting the note on the string',async()=>{
-    const c=await setup(withNotes());
-    press({key:'1'});press({key:'2'});
-    press({key:'Backspace'});await quiet();expect(edits(c)).toHaveLength(2);
-    press({key:'Backspace'});
-    await waitFor(()=>expect(edits(c)).toHaveLength(3));
-    expect(edits(c)[2]).toMatchObject({type:'removeNote'});
-  });
-  it('shows pending fret digits while typed and clears on Enter or Escape',async()=>{
-    const c=await setup(withNotes());
-    expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0);
-    press({key:'7'});
-    await waitFor(()=>expect(screen.getAllByText('Fret 7: Enter commits, Escape cancels')).toHaveLength(2));
-    expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBe('7');
-    press({key:'Escape'});
-    await waitFor(()=>expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0));
-    expect(edits(c)).toHaveLength(2);
-
-    press({key:'5'});
-    await waitFor(()=>expect(screen.getAllByText('Fret 5: Enter commits, Escape cancels')).toHaveLength(2));
-    press({key:'Enter'});
-    await waitFor(()=>expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0));
-    await waitFor(()=>expect(edits(c)).toHaveLength(3));
-  });
   const fretField=()=>(screen.getByLabelText('Fret') as HTMLInputElement).value;
-  it('Escape puts back the fret that stood before the first pending digit and records no edit',async()=>{
+  const hint='Fret 7 written: another digit within a second makes it two digits';
+  it('writes a typed digit at once on the cursor string, with no Enter, and leaves the cursor where it is',async()=>{
+    const c=await setup(withNotes());
+    const at=cursor();
+    press({key:'7'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'setNote',string:6,fret:7});
+    await quiet();expect(cursor()).toEqual(at);
+  });
+  it('turns 1 then 2 into fret 12 as one undo step that restores what stood before the first digit',async()=>{
     const c=await setup(withNotes());
     expect(fretField()).toBe('3');
     press({key:'1'});press({key:'2'});
-    await waitFor(()=>expect(fretField()).toBe('12'));
-    press({key:'Escape'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
+    expect(edits(c)).toHaveLength(3);expect(edits(c)[2]).toMatchObject({type:'setNote',string:6,fret:12});
+    expect(screen.queryByText(/queued keys? (was|were)/)).toBeNull();
+    // One undo takes back both digits.
+    fireEvent.click(screen.getByRole('button',{name:'Undo'}));
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));
     await waitFor(()=>expect(fretField()).toBe('3'));
-    await quiet();expect(edits(c)).toHaveLength(2);
-    // A fret set before the digits (as the instrument view does) comes back too, not the note's.
-    change('Fret','9');expect(fretField()).toBe('9');
-    press({key:'1'});press({key:'2'});
-    await waitFor(()=>expect(fretField()).toBe('12'));
+  });
+  it('takes the second digit as a new fret when the two digits are not a fret',async()=>{
+    const c=await setup(withNotes());
+    press({key:'9'});press({key:'9'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
+    // 99 is refused as a fret, so the second 9 is a fret 9 of its own: the note already has it, which records nothing.
+    expect(edits(c)).toHaveLength(3);expect(edits(c)[2]).toMatchObject({type:'setNote',fret:9});
+  });
+  it('takes a digit typed after the window as a separate fret, not a join',async()=>{
+    let now=1_700_000_000_000;const spy=vi.spyOn(Date,'now').mockImplementation(()=>now);
+    try{
+      const c=await setup(withNotes());
+      press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
+      now+=1500;press({key:'2'});
+      await waitFor(()=>expect(edits(c)).toHaveLength(4));
+      expect(edits(c)[2]).toMatchObject({fret:1});expect(edits(c)[3]).toMatchObject({fret:2});
+    }finally{spy.mockRestore();}
+  });
+  it('Escape ends the wait for a second digit, so the next digit is a new fret; nothing is taken back',async()=>{
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
     press({key:'Escape'});
-    await waitFor(()=>expect(fretField()).toBe('9'));
-    press({key:'Enter'});
-    await waitFor(()=>expect(edits(c)).toHaveLength(3));
-    expect(edits(c)[2]).toMatchObject({type:'setNote',string:6,fret:9});
+    press({key:'2'});await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(edits(c)[3]).toMatchObject({fret:2});
   });
-  it('Enter commits exactly the typed two-digit fret',async()=>{
+  it('Enter writes the Fret field value, and records nothing when the note already has that fret',async()=>{
     const c=await setup(withNotes());
-    press({key:'1'});press({key:'2'});
-    await waitFor(()=>expect(screen.getAllByText('Fret 12: Enter commits, Escape cancels')).toHaveLength(2));
+    press({key:'5'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    press({key:'Enter'});await quiet();expect(edits(c)).toHaveLength(3);
+    change('Fret','9');expect(fretField()).toBe('9');
     press({key:'Enter'});
-    await waitFor(()=>expect(edits(c)).toHaveLength(3));
-    expect(edits(c)[2]).toMatchObject({type:'setNote',string:6,fret:12});
+    await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(edits(c)[3]).toMatchObject({type:'setNote',string:6,fret:9});
   });
-  it('announces the pending fret in one status region only',async()=>{
+  it('shows the written fret and the chance of a second digit in one status region, then drops it when the window closes',async()=>{
     await setup(withNotes());
+    expect(screen.queryAllByText(hint)).toHaveLength(0);
     press({key:'7'});
-    await waitFor(()=>expect(screen.getAllByText('Fret 7: Enter commits, Escape cancels')).toHaveLength(2));
-    expect(screen.getAllByRole('status').filter(node=>node.textContent==='Fret 7: Enter commits, Escape cancels')).toHaveLength(1);
-  });
-  it('drops the pending hint when the digit window closes, and Backspace then deletes the note',async()=>{
-    const c=await setup(withNotes());
-    press({key:'7'});
-    await waitFor(()=>expect(screen.getAllByText('Fret 7: Enter commits, Escape cancels')).toHaveLength(2));
-    await waitFor(()=>expect(screen.queryAllByText(/Enter commits, Escape cancels/)).toHaveLength(0),{timeout:2500});
+    await waitFor(()=>expect(screen.getAllByText(hint)).toHaveLength(2));
+    expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBe('7');
+    expect(screen.getAllByRole('status').filter(node=>node.textContent===hint)).toHaveLength(1);
+    await waitFor(()=>expect(screen.queryAllByText(hint)).toHaveLength(0),{timeout:2500});
     expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBeNull();
+  });
+  it('Backspace after a typed digit removes the note on the string, as it does for any note',async()=>{
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
     press({key:'Backspace'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(edits(c)[3]).toMatchObject({type:'removeNote'});
+  });
+  it('keeps digits typed while the first digit is still being recorded: 1 then 2 lands as 12 on the same beat',async()=>{
+    const c=await setup(withNotes()),hold=holdEdits(c);
+    press({key:'1'});press({key:'2'});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    await hold.next();
     await waitFor(()=>expect(edits(c)).toHaveLength(3));
-    expect(edits(c)[2]).toMatchObject({type:'removeNote'});
+    // The second digit waited for the first to land, then wrote 12 in its place.
+    await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();
+    await waitFor(()=>expect(edits(c)[2]).toMatchObject({fret:12}));
+    expect(edits(c)).toHaveLength(3);
+  });
+  const lastFret=(c:DocumentController)=>{const last=edits(c).at(-1) as {fret?:number}|undefined;return last?.fret;};
+  it('puts the first digit back and says so when the two-digit fret is refused after the undo',async()=>{
+    const c=await setup(withNotes()),hold=holdEdits(c);
+    press({key:'1'});await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    press({key:'2'});await waitFor(()=>expect(hold.held).toHaveLength(1));
+    await hold.next('refuse');
+    // The undo was done and the write refused: the first digit is back, and the player is told.
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));expect(lastFret(c)).toBe(1);
+    expect(await screen.findByText(/first digit was put back/)).toBeInTheDocument();
+  });
+  it('does not undo or join when another edit came between the two digits',async()=>{
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
+    await c.edit({type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:1},string:6,fret:4});
+    press({key:'2'});await waitFor(()=>expect(edits(c)).toHaveLength(5));
+    // The outside edit is still there, and the 2 is a fret of its own.
+    expect(edits(c)[3]).toMatchObject({target:{beat:1},fret:4});expect(edits(c)[2]).toMatchObject({fret:1});expect(lastFret(c)).toBe(2);
+  });
+  it('leaves the document as it was when the two digits are the fret the note had, and says what stays in Redo',async()=>{
+    const c=await setup(withNotes());
+    change('Fret','12');press({key:'Enter'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    press({key:'2'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
+    expect(lastFret(c)).toBe(12);
+    // The undone "1" cannot be dropped from the redo stack without a history format change, so Redo would write fret 1.
+    expect(c.getState().snapshot.canRedo).toBe(true);expect((c.getState().snapshot.redoEdit as {fret?:number}).fret).toBe(1);
+  });
+  it('never joins a leading zero: 0 then 5 is fret 5, and 0,1 is fret 1',async()=>{
+    const c=await setup(withNotes());
+    press({key:'0'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();expect(lastFret(c)).toBe(0);
+    press({key:'5'});await waitFor(()=>expect(edits(c)).toHaveLength(4));await quiet();
+    expect(lastFret(c)).toBe(5);expect(edits(c)).toHaveLength(4);
+    press({key:'Escape'});
+    press({key:'0'});await waitFor(()=>expect(edits(c)).toHaveLength(5));await quiet();
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(6));await quiet();
+    expect(lastFret(c)).toBe(1);
+  });
+  it('does not write a digit typed with Ctrl, Alt or Meta',async()=>{
+    const c=await setup(withNotes());
+    press({key:'5',ctrlKey:true});press({key:'5',altKey:true});press({key:'5',metaKey:true});await quiet();
+    expect(edits(c)).toHaveLength(2);
+  });
+  it('says why a digit cannot write: no strings on the staff, and a refused write',async()=>{
+    const drums=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Kit',program:0}] as EditCommand[]});
+    fireEvent.click(screen.getByRole('button',{name:'Select track Kit'}));
+    await waitFor(()=>expect(cursor()).toBeTruthy());await quiet();
+    press({key:'5'});
+    expect(await screen.findByText('Fret numbers can only be typed on a staff with strings.')).toBeInTheDocument();expect(edits(drums)).toHaveLength(1);
+    cleanup();
+    const c=await setup(withNotes()),hold=holdEdits(c);
+    press({key:'7'});await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next('refuse');
+    expect(await screen.findByText(/Fret 7 was not entered: the edit was refused/)).toBeInTheDocument();
+  });
+  it('makes a track active from its name: same bar and beat, nothing recorded, not dirty',async()=>{
+    const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}] as EditCommand[]});
+    const before=edits(c).length,dirty=c.getState().snapshot.dirty,at=cursor();
+    fireEvent.click(screen.getByRole('button',{name:'Select track Bass'}));
+    await waitFor(()=>expect((engravingView.mock.lastCall![0] as {editTarget:{track:number}}).editTarget.track).toBe(1));
+    expect(cursor()).toMatchObject({bar:at.bar,beat:at.beat});
+    expect(edits(c)).toHaveLength(before);expect(c.getState().snapshot.dirty).toBe(dirty);
+    expect(screen.getByRole('button',{name:'Select track Bass'})).toHaveAttribute('aria-pressed','true');
   });
   it('shows the hint for the swapped Plus/Minus preference',async()=>{
     await entryOn(JSON.stringify({swapPlusMinus:true}));

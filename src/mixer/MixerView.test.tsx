@@ -177,7 +177,9 @@ it('refuses mix changes while busy without dropping focus, and keeps channel sel
   const view=render(<MixerView {...initial} player={player} busy onSelect={onSelect}/>);
   // A control that may hold focus is refused with aria-disabled, never the disabled attribute.
   const mute=screen.getByLabelText('Mute'),solo=screen.getByLabelText('Solo'),select=screen.getByRole('button',{name:'Track 1: Guitar'});
-  for(const control of [mute,solo,select,screen.getByRole('button',{name:'Reset focus'})]){
+  // Choosing a track is navigation, not an edit: it is never refused for busy.
+  expect(select).not.toHaveAttribute('aria-disabled');expect(select).not.toHaveAttribute('disabled');
+  for(const control of [mute,solo,screen.getByRole('button',{name:'Reset focus'})]){
     expect(control).toHaveAttribute('aria-disabled','true');expect(control).not.toHaveAttribute('disabled');
   }
   for(const label of ['Volume Guitar','Pan Guitar','Focus selected track'])expect(screen.getByRole('slider',{name:label})).toHaveAttribute('aria-disabled','true');
@@ -186,7 +188,7 @@ it('refuses mix changes while busy without dropping focus, and keeps channel sel
   const volume=screen.getByRole('slider',{name:'Volume Guitar'});volume.focus();fireEvent.keyDown(volume,{key:'ArrowDown'});
   fireEvent.keyDown(screen.getByRole('slider',{name:'Pan Guitar'}),{key:'ArrowUp'});
   expect(volume).toHaveFocus();
-  expect([player.setMute,player.setSolo,player.setTrackVolume,player.setPan,player.previewMix,player.setFocus,onSelect].map(fn=>fn.mock.calls.length)).toEqual([0,0,0,0,0,0,0]);
+  expect([player.setMute,player.setSolo,player.setTrackVolume,player.setPan,player.previewMix,player.setFocus].map(fn=>fn.mock.calls.length)).toEqual([0,0,0,0,0,0]);expect(onSelect).toHaveBeenCalledTimes(1);
 
   // Without a player the controls are unavailable, but a track can still be chosen.
   view.rerender(<MixerView {...initial} onSelect={onSelect}/>);
@@ -430,30 +432,52 @@ it('keeps a drag with its track when the track list is reordered by an undo that
   expect(player.setTrackVolume).toHaveBeenCalledTimes(1);expect(player.setTrackVolume).toHaveBeenCalledWith(1,.55);
 });
 
-it('ends a drag when the mixer turns busy: the level goes back, the sound goes back and release saves nothing', async()=>{
+it('keeps a drag going when the mixer turns busy, and saves it once at the release', async()=>{
   const added=twoTracks(),{player}=livePlayer(added.score);
   const {view,volume,thumb}=dragGuitar(player,added.score);
   view.rerender(<MixerView {...props(added.score)} busy player={player}/>);
-  expect(volume).toHaveAttribute('aria-valuenow','0.7');
-  await vi.waitFor(()=>expect(player.previewMix).toHaveBeenLastCalledWith(0,null));
-  player.previewMix.mockClear();
+  // Busy refuses a new gesture only: the fader is not disabled, holds its place and its drag.
+  expect(volume).not.toHaveAttribute('disabled');expect(volume).toHaveAttribute('aria-valuenow','0.55');
   fireEvent.pointerMove(thumb,{clientY:190,pointerId:1});
+  expect(volume).toHaveAttribute('aria-valuenow','0.35');
   fireEvent.pointerUp(thumb,{clientY:190,pointerId:1});
-  expect(volume).toHaveAttribute('aria-valuenow','0.7');
-  expect(player.setTrackVolume).not.toHaveBeenCalled();expect(player.previewMix).not.toHaveBeenCalledWith(0,{gain:expect.any(Number)});
+  expect(player.setTrackVolume).toHaveBeenCalledTimes(1);expect(player.setTrackVolume).toHaveBeenCalledWith(0,.35);
+});
+it('chooses a track from its name while busy, and says which one is active',()=>{
+  const added=twoTracks(),{player}=livePlayer(added.score),onSelect=vi.fn();
+  render(<MixerView {...props(added.score)} onSelect={onSelect} busy player={player}/>);
+  const bass=screen.getByRole('button',{name:'Track 2: Bass'}),guitar=screen.getByRole('button',{name:'Track 1: Guitar'});
+  expect(guitar).toHaveAttribute('aria-pressed','true');expect(bass).toHaveAttribute('aria-pressed','false');expect(bass).not.toHaveAttribute('aria-disabled');
+  fireEvent.click(bass);expect(onSelect).toHaveBeenCalledExactlyOnceWith(1);
+});
+it('refuses a new fader or pan gesture while busy, without disabling the controls', ()=>{
+  const added=twoTracks(),{player}=livePlayer(added.score);
+  render(<MixerView {...props(added.score)} busy player={player}/>);
+  const volume=screen.getByRole('slider',{name:'Volume Guitar'});sized(volume);
+  expect(volume).toHaveAttribute('aria-disabled','true');expect(volume).toHaveAttribute('tabindex','0');
+  const thumb=volume.querySelector('.tp-fader-thumb')!;
+  fireEvent.pointerDown(thumb,{clientY:150,pointerId:1});fireEvent.pointerMove(thumb,{clientY:168,pointerId:1});fireEvent.pointerUp(thumb,{clientY:168,pointerId:1});
+  fireEvent.keyDown(screen.getByRole('slider',{name:'Pan Guitar'}),{key:'ArrowLeft'});
+  expect(player.previewMix).not.toHaveBeenCalled();expect(player.setTrackVolume).not.toHaveBeenCalled();expect(player.setPan).not.toHaveBeenCalled();
 });
 
-it('ends a drag without saving when the fader loses focus or its pointer capture', async()=>{
-  for(const lose of ['blur','capture'] as const){
+it('ends a drag without saving when the fader loses focus, but not when only its pointer capture is dropped', async()=>{
+  {
     const added=twoTracks(),{player}=livePlayer(added.score);
     const {volume,thumb}=dragGuitar(player,added.score);
-    if(lose==='blur')fireEvent.blur(volume);else fireEvent.lostPointerCapture(volume,{pointerId:1});
+    fireEvent.blur(volume);
     expect(volume).toHaveAttribute('aria-valuenow','0.7');
     await vi.waitFor(()=>expect(player.previewMix).toHaveBeenLastCalledWith(0,null));
     fireEvent.pointerUp(thumb,{clientY:168,pointerId:1});
     expect(player.setTrackVolume).not.toHaveBeenCalled();
     cleanup();
   }
+  const added=twoTracks(),{player}=livePlayer(added.score);
+  const {volume,thumb}=dragGuitar(player,added.score);
+  fireEvent.lostPointerCapture(volume,{pointerId:1});
+  expect(volume).toHaveAttribute('aria-valuenow','0.55');
+  fireEvent.pointerUp(thumb,{clientY:168,pointerId:1});
+  expect(player.setTrackVolume).toHaveBeenCalledExactlyOnceWith(0,.55);
 });
 
 it('mixes the kit of a selected percussion track only: six elements, each heard while dragged and saved once', async()=>{

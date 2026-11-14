@@ -110,7 +110,9 @@ import { projectEngraving } from './engraving/projection';
 import { engravingRenderKey } from './engraving/system-gaps';
 import { effectivePageLayout } from './engraving/page';
 import { resolveVisibleTracks,type TrackView } from './engraving/view';
-import { resolveScoreDisplay,type ScoreDisplayPreferences } from './engraving/screen-view';
+import { isPhysicalPageLayout,resolveScoreDisplay,type ScoreDisplayPreferences } from './engraving/screen-view';
+import { gridTicks,moveRangeEnd } from './editor/range-edge';
+import { acceptsOnlyWholeBeats,eraseCommandFor } from './editor/range-cut';
 import { defaultPrintLayout } from './document-settings';
 import { HarmonyChordDialog } from './harmony/HarmonyChordDialog';
 import { ScaleToolPanel } from './harmony/ScaleToolPanel';
@@ -348,6 +350,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const change=(job:Promise<unknown>)=>{const before=state.score;setClipboardError(null);clearEntryQueue();act(job.then(()=>{const score=controller.getState().score;setSelection(old=>repairSelection(score,followSelectedTrack(before,score,old)));editorSelection(null);}));};
   const edit=(command:EditCommand,after?:(score:model.Score)=>void)=>{
     setClipboardError(null);
+    // A range that ends inside a note of the lane it was shaped on is drawn part-way through that note, but these edits take every note that starts in it: say so, as a gesture, rather than act on more than is shown.
+    if('selection'in command&&acceptsOnlyWholeBeats(state.score,command as {type:string;selection?:MusicSelection},{track:target.track,staff:target.staff,voice:target.voice})){setClipboardError(t('editor.range_edge_whole_beats_only'));return Promise.resolve(false);}
     const oldCount=state.score.masterBars.length;
     const wasPlaying=player?.getState().playing??false;
     let recorded=false;
@@ -359,7 +363,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
       if(command.type==='pasteMusic')setNoteIndex(null);
       after?.(score);
-      if(!('selection'in command)||command.type==='eraseSelection')editorSelection(null);
+      if(!('selection'in command)||command.type==='eraseSelection'||command.type==='cutSelection')editorSelection(null);
       // Hearing an entered note is a courtesy: only note-setting edits, and only while nothing is playing.
       if(auditionEditsNow.current&&player&&!wasPlaying&&!player.getState().playing){const heard=editAudition(score,command);if(heard){const current=controller.getState();player.audition({trackId:trackIdentity(score.tracks[heard.track])},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});}}
     });
@@ -380,7 +384,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     try{
       const scope=musicClipSelection(state.score,musicSelection,mode),bars=scope as Extract<MusicSelection,{kind:'bars'}>;
       const map=cut&&mode==='multiTrack'?planMeasureMap(state.score.masterBars.length,{type:'removeMeasures',firstBar:bars.firstBar,lastBar:bars.lastBar}):null;
-      act((cut?controller.cutMusic(scope,mode):controller.copyMusic(scope,mode)).then(value=>{
+      act((cut?controller.cutMusic(scope,mode,{track:target.track,staff:target.staff,voice:target.voice}):controller.copyMusic(scope,mode)).then(value=>{
         clipboard.set(value);setClipboardVersion(version=>version+1);
         if(cut){setSelection(old=>map?repairMeasureSelection(controller.getState().score,old,map):repairSelection(controller.getState().score,old));editorSelection(null);}
       }).catch(reason=>setClipboardError(reason instanceof Error?reason.message:String(reason))));
@@ -836,12 +840,22 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     let notes:model.Note[];
     try{notes=musicSelection?resolveSelectionNotes(state.score,musicSelection):[];}catch{notes=[];}
     if(!musicSelection||!notes.length){setInputNotice({text:t(musicSelection?'editor.gp8_no_notes':'editor.gp8_no_selection'),at});return;}
-    void edit({type:'eraseSelection',selection:musicSelection});
+    void edit(eraseCommandFor(state.score,musicSelection,{track:target.track,staff:target.staff,voice:target.voice}));
   };
   function keys(event:KeyboardEvent) {
     if (textEntry(event.target)||(event.target as HTMLElement).tagName==='BUTTON') return;
     // The Menu key and Shift+F10 open the score-symbol menu at the edit target, as a right-click does on the score.
     if ((event.key==='ContextMenu'||(event.key==='F10'&&event.shiftKey))&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&view==='score') {event.preventDefault();setSymbolRequest(count=>count+1);return;}
+    // Alt+Shift+, and Alt+Shift+. move the end of the selected range back and forth by the entry duration, so a range can end inside a held note. The physical comma and period keys: Alt+Shift+Arrow already extends by measures.
+    if(view==='score'&&event.altKey&&event.shiftKey&&!event.ctrlKey&&!event.metaKey&&(event.code==='Comma'||event.code==='Period')){
+      event.preventDefault();
+      const at=JSON.stringify(target);
+      if(isPhysicalPageLayout(display.layout)){setInputNotice({text:t('editor.range_edge_page_layout'),at});return;}
+      if(musicSelection?.kind!=='range'){setInputNotice({text:t('editor.range_edge_no_range'),at});return;}
+      const step=entryDuration.current??(location.beat?{duration:location.beat.duration,dots:location.beat.dots}:{duration:4,dots:0}),result=moveRangeEnd(state.score,musicSelection.range,gridTicks(step.duration,step.dots),event.code==='Period'?1:-1);
+      if('refusal'in result){setInputNotice({text:t(result.refusal),at});return;}
+      setInputNotice(null);setMusicSelection({kind:'range',range:result.range});return;
+    }
     const item=entryItem(event);
     if(item){
       event.preventDefault();
@@ -1086,7 +1100,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <h2>{t('help.keyboard_editing_heading')}</h2><p>{t('help.keyboard_editing_intro')}</p>
       <dl><dt>{t('keys.chord_new_open')}</dt><dd>{t('help.shortcut_new_open')}</dd><dt>{t('keys.chord_save')}</dt><dd>{t('help.shortcut_save')}</dd><dt>{t('keys.chord_close')}</dt><dd>{t('help.shortcut_close')}</dd><dt>{t('keys.chord_next_score')}</dt><dd>{t('help.shortcut_next_score')}</dd><dt>{t('keys.chord_undo')}</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>{t('keys.space')}</dt><dd>{t('help.shortcut_play')}</dd><dt>{t('keys.chord_palette')}</dt><dd>{t('help.shortcut_palette')}</dd></dl>
       <button type="button" onClick={openPalette}>{t('help.open_command_palette')}</button>
-      <h3>{t('help.score_focused_heading')}</h3><dl><dt>{t('keys.left_right')}</dt><dd>{t('help.shortcut_beat')}</dd><dt>{t('keys.up_down')}</dt><dd>{t('help.shortcut_string')}</dd><dt>{t('keys.digits_enter')}</dt><dd>{t('help.shortcut_fret')}</dd><dt>{t('keys.chord_selection')}</dt><dd>{t('help.shortcut_selection')}</dd><dt>{t('keys.chord_select_track')}</dt><dd>{t('help.shortcut_select_track')}</dd><dt>{t('keys.chord_tie')}</dt><dd>{t('help.shortcut_tie')}</dd><dt>{t('keys.chord_clipboard')}</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>{t('keys.escape')}</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>{t('keys.note_move')}</dt><dd>{t('help.shortcut_note_move')}</dd><dt>{t('keys.accidental')}</dt><dd>{t('help.shortcut_accidental')}</dd><dt>{t('keys.chord_gp8_edit')}</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>{t('keys.chord_gp8_cursor')}</dt><dd>{t('help.shortcut_gp8_cursor')}</dd><dt>{t('keys.chord_gp8_voice')}</dt><dd>{t('help.shortcut_gp8_voice')}</dd><dt>{t('keys.chord_gp8_track')}</dt><dd>{t('help.shortcut_gp8_track')}</dd><dt>{t('keys.chord_gp8_bar')}</dt><dd>{t('help.shortcut_gp8_bar')}</dd><dt>{t('keys.chord_gp8_play_bar')}</dt><dd>{t('help.shortcut_gp8_play_bar')}</dd><dt>{t('keys.chord_gp8_go_to')}</dt><dd>{t('help.shortcut_gp8_go_to')}</dd><dt>{t('keys.chord_gp8_techniques')}</dt><dd>{t('help.shortcut_gp8_techniques')}</dd></dl>
+      <h3>{t('help.score_focused_heading')}</h3><dl><dt>{t('keys.left_right')}</dt><dd>{t('help.shortcut_beat')}</dd><dt>{t('keys.up_down')}</dt><dd>{t('help.shortcut_string')}</dd><dt>{t('keys.digits_enter')}</dt><dd>{t('help.shortcut_fret')}</dd><dt>{t('keys.chord_selection')}</dt><dd>{t('help.shortcut_selection')}</dd><dt>{t('keys.chord_select_track')}</dt><dd>{t('help.shortcut_select_track')}</dd><dt>{t('keys.chord_range_edge')}</dt><dd>{t('help.shortcut_range_edge')}</dd><dt>{t('keys.chord_tie')}</dt><dd>{t('help.shortcut_tie')}</dd><dt>{t('keys.chord_clipboard')}</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>{t('keys.escape')}</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>{t('keys.note_move')}</dt><dd>{t('help.shortcut_note_move')}</dd><dt>{t('keys.accidental')}</dt><dd>{t('help.shortcut_accidental')}</dd><dt>{t('keys.chord_gp8_edit')}</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>{t('keys.chord_gp8_cursor')}</dt><dd>{t('help.shortcut_gp8_cursor')}</dd><dt>{t('keys.chord_gp8_voice')}</dt><dd>{t('help.shortcut_gp8_voice')}</dd><dt>{t('keys.chord_gp8_track')}</dt><dd>{t('help.shortcut_gp8_track')}</dd><dt>{t('keys.chord_gp8_bar')}</dt><dd>{t('help.shortcut_gp8_bar')}</dd><dt>{t('keys.chord_gp8_play_bar')}</dt><dd>{t('help.shortcut_gp8_play_bar')}</dd><dt>{t('keys.chord_gp8_go_to')}</dt><dd>{t('help.shortcut_gp8_go_to')}</dd><dt>{t('keys.chord_gp8_techniques')}</dt><dd>{t('help.shortcut_gp8_techniques')}</dd></dl>
       <p>{t('help.workflow_description')}</p>
     </section></details>
     </nav><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span>

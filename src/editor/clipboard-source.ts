@@ -11,7 +11,7 @@ import { getHarmonyChord,setHarmonyChordSource,validateHarmonyChord } from '../h
 import type { MusicSelection } from './range-types';
 import { setNoteAudio } from './note-audio';
 import { directionProblem } from './clipboard-structure';
-import { rangeCutsBeat,subdivideRange } from './clipboard-subdivide';
+import { subdivideRange } from './clipboard-subdivide';
 import type { ClipboardHarmony,ClipboardLink,ClipboardMode,MusicClip } from './clipboard-types';
 
 type RecordValue=Record<string,unknown>;
@@ -174,12 +174,11 @@ export function musicClipSelection(score:model.Score,selection:MusicSelection,mo
 }
 
 /** Build a new selected-music score, never a document plus a selection mask. */
-export function makeMusicClip(source:model.Score,selection:MusicSelection,mode:ClipboardMode,options:{cut?:boolean}={}):MusicClip {
+export function makeMusicClip(source:model.Score,selection:MusicSelection,mode:ClipboardMode,/** `options.cut` is accepted for callers' sake: Cut and Copy of one range make the same clip. */ _options:{cut?:boolean}={}):MusicClip {
   selection=musicClipSelection(source,selection,mode);
   // A range edge inside a sustained beat copies exactly the selected time from a detached, subdivided copy; the source is never touched.
   let score=source,pieces=new Set<number>();
   if(selection.kind==='range'&&mode==='singleTrack'){
-    if(options.cut&&rangeCutsBeat(source,selection.range))throw new Error('Cut needs a range that starts and ends on beat boundaries. Copy it instead, or select whole beats.');
     ({score,pieces}=subdivideRange(source,selection.range));
   }
   const selectedBeats=resolveSelectionBeats(score,selection),selectedNotes=new Set(resolveSelectionNotes(score,selection));

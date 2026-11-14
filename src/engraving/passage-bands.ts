@@ -2,7 +2,9 @@ import type {model} from '@coderline/alphatab';
 import {beatSpanOf,type ScreenBounds,type ScreenSystem} from './screen-pages';
 
 /** One bar of a passage. `from` is the first beat of the bar the passage includes and `to` the last; left out, the passage takes the bar's own edge. */
-export interface PassageBar {bar:number;from?:model.Beat|null;to?:model.Beat|null}
+export interface PassageBar {bar:number;from?:model.Beat|null;to?:model.Beat|null;
+  /** The passage ends this fraction (above 0, below 1) of the way through the `to` beat's drawn span, as a range edge inside a held beat does. Left out, it ends at the beat's right edge. */
+  toFraction?:number}
 /** A band of one system, in the renderer's own coordinates: map it with the same function as every other overlay (live offset, or the page layout's mapScreenRect with `system`). */
 export interface PassageBand {
   system:ScreenSystem;x:number;y:number;w:number;h:number;firstBar:number;lastBar:number;
@@ -27,7 +29,8 @@ export function passageBands(lookup:ScreenBounds,bars:readonly PassageBar[]):Pas
     const startBox=beatBox(bar.from),endBox=beatBox(bar.to);
     let left=master.realBounds.x,right=master.realBounds.x+master.realBounds.w,innerStart=false,innerEnd=false;
     if(bar.from&&startBox&&bar.from.index>0){left=startBox.x;innerStart=true;}
-    if(bar.to&&endBox&&bar.to.index<bar.to.voice.beats.length-1){right=endBox.x+endBox.w;innerEnd=true;}
+    const part=bar.toFraction!==undefined&&bar.toFraction>0&&bar.toFraction<1?bar.toFraction:1;
+    if(bar.to&&endBox&&(part<1||bar.to.index<bar.to.voice.beats.length-1)){right=endBox.x+endBox.w*part;innerEnd=true;}
     if(!(right>left)||![left,right,master.visualBounds.y,master.visualBounds.h].every(Number.isFinite)){open=null;continue;}
     const top=master.visualBounds.y,bottom=top+master.visualBounds.h;
     if(open&&!open.innerEnd&&!innerStart&&open.band.system===system&&open.band.lastBar+1===bar.bar){
@@ -40,7 +43,7 @@ export function passageBands(lookup:ScreenBounds,bars:readonly PassageBar[]):Pas
   // A band continues across a line break where the neighbouring bar is part of the passage, sits on another system, and the passage does not stop short inside this bar.
   const systemOf=(bar:number)=>lookup.findMasterBarByIndex(bar)?.staffSystemBounds??null;
   const insideStart=(bar:number)=>{const entry=wanted.get(bar);return !!entry?.from&&entry.from.index>0;};
-  const insideEnd=(bar:number)=>{const entry=wanted.get(bar);return !!entry?.to&&entry.to.index<entry.to.voice.beats.length-1;};
+  const insideEnd=(bar:number)=>{const entry=wanted.get(bar);return !!entry?.to&&(entry.to.index<entry.to.voice.beats.length-1||(entry.toFraction??1)<1);};
   for(const band of bands){
     const before=band.firstBar-1,after=band.lastBar+1;
     band.continuesBefore=wanted.has(before)&&!insideStart(band.firstBar)&&!insideEnd(before)&&systemOf(before)!==null&&systemOf(before)!==band.system;

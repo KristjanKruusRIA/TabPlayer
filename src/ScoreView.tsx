@@ -5,7 +5,7 @@ import './tremolo-guard';
 import type { BeatTarget } from './project';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
 import type { MusicSelection, VoiceAddress } from './editor/range-types';
-import { rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selectionForBars, selectionForTrack } from './editor/range-selection';
+import { rangeEndFraction, rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selectionForBars, selectionForTrack } from './editor/range-selection';
 import { configureEngraving, type EngravingProjection } from './engraving/projection';
 import type { EngravingOverrides,PageLayout } from './engraving/types';
 import {engravingRenderKey,withoutStackingOffsets,type SystemSpan} from './engraving/system-gaps';
@@ -379,10 +379,12 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     return passageBands(lookup,bars).flatMap(band=>{const rect=mapped({x:band.x,y:band.y,w:band.w,h:band.h},band.system);return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)&&rect.w>0&&rect.h>0?[{...rect,before:band.continuesBefore||undefined,after:band.continuesAfter||undefined}]:[];});
   };
   /** The selected passage, rendered beats `first` to `last`: whole bars between, the edge beats at its ends. */
-  const selectionBands=(first:model.Beat,last:model.Beat):Band[]=>{
+  const selectionBands=(first:model.Beat,last:model.Beat,toFraction?:number):Band[]=>{
     const a=first.voice.bar.index,b=last.voice.bar.index;
-    return bandsOf(Array.from({length:Math.max(0,b-a+1)},(_,i)=>({bar:a+i,...(i===0?{from:first}:{}),...(i===b-a?{to:last}:{})})));
+    return bandsOf(Array.from({length:Math.max(0,b-a+1)},(_,i)=>({bar:a+i,...(i===0?{from:first}:{}),...(i===b-a?{to:last,...toFraction===undefined?{}:{toFraction}}:{})})));
   };
+  /** Where a range of the current selection ends inside its last beat, so the band stops there and not at the beat's edge. */
+  const partialEnd=():number|undefined=>{const selected=current.current.editorSelection;return selected?.kind==='range'?rangeEndFraction(current.current.score,selected.range):undefined;};
   const placeHandles=(event:PlaybackHighlightChangeEventArgs)=>{
     setRangeBlocks([]);
     if(rendering.current||!event.startBeat||!event.endBeat||!event.startBeatBounds||!event.endBeatBounds){setHandles(null);return;}
@@ -390,8 +392,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(!first||!last||event.startBeatBounds.beat!==event.startBeat||event.endBeatBounds.beat!==event.endBeat){setHandles(null);return;}
     if(presentation.current.physical&&(!(api.current?.boundsLookup?.findBeats(event.startBeat)??[]).includes(event.startBeatBounds)||!(api.current?.boundsLookup?.findBeats(event.endBeat)??[]).includes(event.endBeatBounds))){setHandles(null);return;}
     const start=mapped(event.startBeatBounds.realBounds,beatSystem(event.startBeat)),end=mapped(event.endBeatBounds.realBounds,beatSystem(event.endBeat));
-    setHandles(start&&end?{start:{...start,target:address(first)},end:{...end,x:end.x+end.w,target:address(last)}}:null);
-    setRangeBlocks(selectionBands(event.startBeat,event.endBeat));
+    const part=partialEnd();
+    setHandles(start&&end?{start:{...start,target:address(first)},end:{...end,x:end.x+end.w*(part??1),target:address(last)}}:null);
+    setRangeBlocks(selectionBands(event.startBeat,event.endBeat,part));
   };
   /** The bracket over the bars a running loop plays. Where the loop begins or ends inside a bar its edge falls on the beat the plan reaches there; without a plan row to say, it takes the whole bar. */
   refreshLoop.current=()=>{
@@ -427,7 +430,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const startBeatBounds=view.boundsLookup?.findBeat(first),endBeatBounds=view.boundsLookup?.findBeat(last);
       if(startBeatBounds?.beat!==first||endBeatBounds?.beat!==last){clearHighlight(view);return;}
       view.highlightPlaybackRange(first,last);
-      if(first===last){const rect=mapped(beatSpanOf(startBeatBounds),beatSystem(first));setMarkers(rect?[rect]:[]);if(selected.kind==='bars')setRangeBlocks(selectionBands(first,last));}else if(!presentation.current.physical)placeHandles({startBeat:first,endBeat:last,startBeatBounds,endBeatBounds});
+      // In a page layout a range ending inside one beat is shown as that whole beat; the selection summary says where it really ends.
+      if(first===last&&(partialEnd()===undefined||presentation.current.physical)){const rect=mapped(beatSpanOf(startBeatBounds),beatSystem(first));setMarkers(rect?[rect]:[]);if(selected.kind==='bars')setRangeBlocks(selectionBands(first,last));}else if(!presentation.current.physical)placeHandles({startBeat:first,endBeat:last,startBeatBounds,endBeatBounds});
     } catch {clearHighlight(view);}
   };
   useEffect(()=>{

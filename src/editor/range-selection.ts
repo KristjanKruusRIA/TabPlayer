@@ -62,7 +62,7 @@ export function validateMusicSelection(score:model.Score,selection:MusicSelectio
 function ordered(beats:Iterable<model.Beat>) {
   return [...new Set(beats)].sort((a,b)=>a.voice.bar.staff.track.index-b.voice.bar.staff.track.index||a.voice.bar.staff.index-b.voice.bar.staff.index||a.voice.bar.index-b.voice.bar.index||a.voice.index-b.voice.index||a.index-b.index);
 }
-function writtenPositions(score:model.Score,lane:VoiceAddress) {
+export function writtenPositions(score:model.Score,lane:VoiceAddress) {
   const staff=trackAt(score,lane.track).staves[lane.staff],points=new Map<model.Beat,MusicPoint>();
   for(const bar of staff.bars){let tick=0;for(const beat of bar.voices[lane.voice]?.beats??[]){if(!beat.isEmpty&&beat.graceType===model.GraceType.None)points.set(beat,{bar:bar.index,tick});tick+=rhythmTicks(beat,bar.masterBar.calculateDuration(false));}}
   for(const [beat,point] of points)for(const grace of beat.graceGroup?.beats??[])if(!grace.isEmpty)points.set(grace,point);
@@ -79,6 +79,18 @@ export function resolveSelectionBeats(score:model.Score,selection:MusicSelection
   const {start,end,lanes}=selection.range,beats:model.Beat[]=[];
   for(const lane of lanes)for(const [beat,point] of writtenPositions(score,lane))if(compare(point,start)>=0&&compare(point,end)<0)beats.push(beat);
   return ordered(beats);
+}
+/**
+ * How far through its last attacked beat a range ends, as a fraction above 0 and below 1, when the end edge falls inside that beat; undefined when the range ends where its last beat ends.
+ * The first lane stands for the range, as the selection band does.
+ */
+export function rangeEndFraction(score:model.Score,range:BeatRange):number|undefined {
+  const lane=range.lanes[0];if(!lane)return undefined;
+  let found:{beat:model.Beat;point:MusicPoint}|null=null;
+  for(const [beat,point] of writtenPositions(score,lane))if(beat.graceType===model.GraceType.None&&compare(point,range.start)>=0&&compare(point,range.end)<0&&(!found||compare(point,found.point)>0))found={beat,point};
+  if(!found||found.point.bar!==range.end.bar)return undefined;
+  const length=rhythmTicks(found.beat,found.beat.voice.bar.masterBar.calculateDuration(false)),inside=range.end.tick-found.point.tick;
+  return length>0&&inside>0&&inside<length?inside/length:undefined;
 }
 export function resolveSelectionNotes(score:model.Score,selection:MusicSelection):model.Note[] {
   if(selection.kind!=='notes')return resolveSelectionBeats(score,selection).flatMap(beat=>beat.notes);

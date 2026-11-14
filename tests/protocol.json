@@ -82,5 +82,6 @@
   {"type":"fitVoice","track":0,"staff":0,"bar":0,"voice":0},
   {"type":"setTuning","track":0,"tuning":[64,59,55,50,45,38],"tuningName":"Drop D","keepPitch":true},
   {"type":"setStaffSettings","track":0,"staff":0,"settings":{"tuning":[64,59,55,50,45,40],"capo":2,"transposition":0,"displayTransposition":0,"clef":4,"showTab":true,"showNotation":true,"keepPitch":true}},
-  {"type":"sequence","commands":[{"type":"addPitchedNote","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"pitch":63},{"type":"setNoteSpelling","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0,"accidentalMode":4}]}
+  {"type":"sequence","commands":[{"type":"addPitchedNote","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"pitch":63},{"type":"setNoteSpelling","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0,"accidentalMode":4}]},
+  {"type":"cutSelection","selection":{"kind":"range","range":{"start":{"bar":0,"tick":480},"end":{"bar":0,"tick":1440},"lanes":[{"track":0,"staff":0,"voice":0}]}}}
 ]

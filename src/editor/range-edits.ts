@@ -8,6 +8,7 @@ import { nextLinkedNote } from './techniques';
 import { openStringKey } from './partial-capo';
 import { fretExists, neckFret, plainFret } from './banjo-drone';
 import { resolveSelectionBeats,resolveSelectionNotes } from './range-selection';
+import { applyCutSelection } from './range-cut';
 
 function fields(value:object,keys:string[]) {
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==keys.length||keys.some(key=>!Object.hasOwn(value,key)))throw new Error('Invalid range command fields.');
@@ -208,8 +209,9 @@ function applySelectionTies(notes:model.Note[],tied:boolean,retune=false) {
   for(const [origin,note] of changes){untie(note);origin.tieDestination=note;note.tieOrigin=origin;note.isTieDestination=true;}
 }
 export function applyRangeEdit(score:model.Score,command:RangeCommand):boolean {
-  if(!['eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','tieSelectionToEarlierPitch'].includes(command.type))return false;
-  const keys={eraseSelection:[],transposeSelection:['semitones'],moveSelectionStrings:['direction'],refingerSelection:['maxFret'],setSelectionSustain:['strings','kind','enabled'],setSelectionStrokes:['technique','pattern'],setSelectionTies:['tied'],tieSelectionToEarlierPitch:[]}[command.type];fields(command,['type','selection',...keys]);
+  if(!['eraseSelection','cutSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','tieSelectionToEarlierPitch'].includes(command.type))return false;
+  const keys={eraseSelection:[],cutSelection:[],transposeSelection:['semitones'],moveSelectionStrings:['direction'],refingerSelection:['maxFret'],setSelectionSustain:['strings','kind','enabled'],setSelectionStrokes:['technique','pattern'],setSelectionTies:['tied'],tieSelectionToEarlierPitch:[]}[command.type];fields(command,['type','selection',...keys]);
+  if(command.type==='cutSelection'){applyCutSelection(score,command.selection);return true;}
   const beats=resolveSelectionBeats(score,command.selection),notes=resolveSelectionNotes(score,command.selection),selected=new Set(notes);
   if(command.type==='eraseSelection'){
     for(const note of notes){const beat=note.beat;detachNote(note);beat.removeNote(note);beat.notes.forEach((member,index)=>member.index=index);beat.isEmpty=false;}return true;

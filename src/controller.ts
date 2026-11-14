@@ -11,7 +11,7 @@ import { isSettingsEdit,type BackingSettings } from './edit-types';
 import type { NativeBridge } from './bridge';
 import type { ProtectionRequest } from './protection/protection';
 import type { ClipboardMode,MusicClip } from './editor/clipboard-types';
-import type { MusicSelection } from './editor/range-types';
+import type { MusicSelection,VoiceAddress } from './editor/range-types';
 import { makeMusicClip,musicClipSelection } from './editor/clipboard-source';
 import { pasteGestureProblem } from './editor/clipboard-paste';
 import type {NativeBackingWaveformBridge} from './audio/backing-waveform-types';
@@ -22,6 +22,8 @@ import {scoreUsesTempoUnits,tempoUnitOf} from './editor/tempo-unit';
 import {projectGpDocument} from './interchange/backing-projection';
 import {barMapOfEdit,barMapOfUndo} from './editor/edit-bar-map';
 import type {BarIndexMap} from './editor/measures-types';
+import {rangeCutsSoundingBeat} from './editor/clipboard-subdivide';
+import {anchorLane,cutRefusal,eraseCommandFor} from './editor/range-cut';
 
 /** Called before a score change the player must rebuild for; `bars` says where the bars went when the change moved some and that is known. */
 export type BeforeChange=(bars?:BarIndexMap)=>void;
@@ -146,12 +148,16 @@ export class DocumentController {
     const requested=structuredClone(selection);
     return this.run(async()=>makeMusicClip(this.state.score,requested,mode));
   }
-  cutMusic(selection:MusicSelection,mode:ClipboardMode):Promise<MusicClip> {
+  /** `anchor` is the lane the range was shaped on (the cursor's); a range edge inside a note there is cut, inside a note of another lane it is refused, as it always was. */
+  cutMusic(selection:MusicSelection,mode:ClipboardMode,anchor?:VoiceAddress):Promise<MusicClip> {
     const requested=structuredClone(selection);
     return this.run(async()=>{
-      const scope=musicClipSelection(this.state.score,requested,mode),clip=makeMusicClip(this.state.score,scope,mode,{cut:true});
+      const scope=musicClipSelection(this.state.score,requested,mode);
+      if(mode==='singleTrack'&&scope.kind==='range'){const lane=anchorLane(scope.range,anchor);if(rangeCutsSoundingBeat(this.state.score,scope.range,scope.range.lanes.filter(other=>other!==lane)))throw cutRefusal('editor.cut_refusal_other_lane');}
+      const clip=makeMusicClip(this.state.score,scope,mode,{cut:true});
       const bars=scope as Extract<MusicSelection,{kind:'bars'}>;
-      await this.editNow(mode==='multiTrack'?{type:'removeMeasures',firstBar:bars.firstBar,lastBar:bars.lastBar}:{type:'eraseSelection',selection:scope});
+      // Only a range edge inside a held note needs the splitting cut; every other cut keeps the edit older builds read.
+      await this.editNow(mode==='multiTrack'?{type:'removeMeasures',firstBar:bars.firstBar,lastBar:bars.lastBar}:eraseCommandFor(this.state.score,scope,anchor));
       return clip;
     });
   }

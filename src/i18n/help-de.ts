@@ -123,11 +123,13 @@ export const helpDe: Record<keyof typeof helpEn, string> = {
   'help.topic.selection.select.title': 'Musik auswählen',
   'help.topic.selection.select.p1': '{@keys.chord_selection}: {@help.shortcut_selection} {@keys.chord_select_track}: {@help.shortcut_select_track} {@keys.escape}: {@help.shortcut_clear}',
   'help.topic.selection.select.p2': '{@editor.music_selection} im Reiter {@inspector.selection} hat {@editor.select_bar}, {@editor.select_track} und {@editor.select_all}. Eine Auswahl gehört zur Sitzung und wird nicht gespeichert.',
+  'help.topic.selection.select.p3': '{@keys.chord_range_edge}: {@help.shortcut_range_edge}',
   'help.topic.selection.clipboard.title': 'Kopieren, Ausschneiden und Einfügen',
   'help.topic.selection.clipboard.p1': '{@keys.chord_clipboard}: {@help.shortcut_clipboard}',
   'help.topic.selection.clipboard.p2': '{@editor.paste_context_hint}',
   'help.topic.selection.clipboard.p3': 'Der Abschnitt {@editor.musical_clipboard} im Reiter {@inspector.selection} bietet dieselben Aktionen mit Auswahlmöglichkeiten: {@editor.copy_cut_mode}, {@editor.paste_repetitions} und {@editor.paste_special}. {@editor.clipboard_multi_hint} Eine Mehrspur-Kopie, die in eine Partitur mit weniger Spuren eingefügt wird, ergänzt die fehlenden Spuren.',
   'help.topic.selection.clipboard.p4': 'Ein Einfügen wird abgelehnt zwischen dem Schlusstakt einer Wiederholung und ihrer nächsten Alternativ-Endung sowie innerhalb einer mehrtaktigen Alternativ-Endung. Fügen Sie vor der Wiederholung oder vor oder nach der ganzen Endung ein.',
+  'help.topic.selection.clipboard.p5': 'Wer ein gehaltenes Stück aus einer Note ausschneidet und wieder einfügt, hört die Note am Schnittrand neu angeschlagen: der Haltebogen zwischen den Teilen wird nicht wiederhergestellt.',
 
   'help.topic.tracks.title': 'Spuren und Klänge',
   'help.topic.tracks.settings.title': 'Spureinstellungen',

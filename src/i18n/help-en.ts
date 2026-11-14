@@ -124,11 +124,13 @@ export const helpEn = {
   'help.topic.selection.select.title': 'Selecting music',
   'help.topic.selection.select.p1': '{@keys.chord_selection}: {@help.shortcut_selection} {@keys.chord_select_track}: {@help.shortcut_select_track} {@keys.escape}: {@help.shortcut_clear}',
   'help.topic.selection.select.p2': '{@editor.music_selection} in the {@inspector.selection} tab has {@editor.select_bar}, {@editor.select_track} and {@editor.select_all}. A selection belongs to the session and is not saved.',
+  'help.topic.selection.select.p3': '{@keys.chord_range_edge}: {@help.shortcut_range_edge}',
   'help.topic.selection.clipboard.title': 'Copy, cut and paste',
   'help.topic.selection.clipboard.p1': '{@keys.chord_clipboard}: {@help.shortcut_clipboard}',
   'help.topic.selection.clipboard.p2': '{@editor.paste_context_hint}',
   'help.topic.selection.clipboard.p3': 'The {@editor.musical_clipboard} section of the {@inspector.selection} tab has the same actions with choices: {@editor.copy_cut_mode}, {@editor.paste_repetitions} and {@editor.paste_special}. {@editor.clipboard_multi_hint} A multitrack copy pasted into a score with fewer tracks adds the missing tracks.',
   'help.topic.selection.clipboard.p4': 'A paste is refused between the closing bar of a repeat and its next alternate ending, and inside a multi-bar alternate ending. Paste before the repeat, or before or after the whole ending.',
+  'help.topic.selection.clipboard.p5': 'Cutting through a held note and pasting the cut time back plays the note again at the cut edge: the tie that joined the two parts is not restored.',
 
   'help.topic.tracks.title': 'Tracks and sounds',
   'help.topic.tracks.settings.title': 'Track settings',

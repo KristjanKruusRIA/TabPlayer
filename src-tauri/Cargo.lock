@@ -4368,7 +4368,7 @@ dependencies = [
 
 [[package]]
 name = "tabplayer"
-version = "0.2.0"
+version = "1.0.0"
 dependencies = [
  "argon2",
  "atomic-write-file",
@@ -4408,7 +4408,7 @@ dependencies = [
 
 [[package]]
 name = "tabplayer-plugin-host"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "libloading 0.9.0",
  "log",
@@ -4421,7 +4421,7 @@ dependencies = [
 
 [[package]]
 name = "tabplayer-plugin-protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -4430,7 +4430,7 @@ dependencies = [
 
 [[package]]
 name = "tabplayer-test-plugin"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "vst3",
  "windows-sys 0.61.2",

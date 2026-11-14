@@ -84,7 +84,7 @@ pub const TEST_CLASS_ID: &str = "7ABB1A7E57E5701C8E5700000000A001";
 pub const TEST_PLUGIN_NAME: &str = "TabPlayer Test Gain";
 
 /// The version the factory reports.
-pub const TEST_PLUGIN_VERSION: &str = "0.1.0";
+pub const TEST_PLUGIN_VERSION: &str = "1.0.0";
 
 /// The largest latency, in frames: one second at 48 kHz. A bigger value in a state or a parameter is refused or clamped.
 pub const MAX_LATENCY: u32 = 48_000;

@@ -76,17 +76,31 @@ function setProblem(value: InstrumentSettingsProblem) {
 
 /** Set in the browser copy while a choice has not reached the native settings, so the next start sends it instead of reading an older native record over it. */
 const unsentKey = 'tabplayer.instrumentView.unsent';
-let unsentInMemory = false;
-const hasUnsent = (storage: PreferenceStorage | undefined) => { try { return unsentInMemory || !!storage?.getItem(unsentKey); } catch { return unsentInMemory; } };
-function markUnsent(storage: PreferenceStorage | undefined) { unsentInMemory = true; try { storage?.setItem(unsentKey, '1'); } catch { /* the in-memory mark still holds for this run */ } }
-function clearUnsent(storage: PreferenceStorage | undefined) { unsentInMemory = false; try { if (storage?.removeItem) storage.removeItem(unsentKey); else storage?.setItem(unsentKey, ''); } catch { /* an old mark only makes the next start send the browser copy again */ } }
+/** 'all': a whole record failed to reach the native settings, so the browser copy wins. A set of option names: only those choices were made while the native settings could not be read, so only they are laid over the native record. */
+type Unsent = 'all' | Set<keyof NativeInstrumentView>;
+let unsentInMemory: Unsent | null = null;
+const readUnsent = (storage: PreferenceStorage | undefined): Unsent | null => {
+  let stored: Unsent | null = null;
+  try { const raw = storage?.getItem(unsentKey); if (raw) stored = raw === 'all' || raw === '1' ? 'all' : new Set(raw.split(',').filter((name): name is keyof NativeInstrumentView => (optionNames as readonly string[]).includes(name))); } catch { /* only the in-memory mark counts then */ }
+  return mergeUnsent(stored, unsentInMemory);
+};
+function mergeUnsent(a: Unsent | null, b: Unsent | null): Unsent | null {
+  if (a === 'all' || b === 'all') return 'all';
+  if (!a || !b) return a ?? b;
+  return new Set([...a, ...b]);
+}
+function markUnsent(storage: PreferenceStorage | undefined, what: Unsent) {
+  const all = mergeUnsent(readUnsent(storage), what); unsentInMemory = all;
+  try { storage?.setItem(unsentKey, all === 'all' ? 'all' : [...(all ?? [])].join(',')); } catch { /* the in-memory mark still holds for this run */ }
+}
+function clearUnsent(storage: PreferenceStorage | undefined) { unsentInMemory = null; try { if (storage?.removeItem) storage.removeItem(unsentKey); else storage?.setItem(unsentKey, ''); } catch { /* an old mark only makes the next start send the browser copy again */ } }
 
 // Until the native settings have been read, a choice goes to the browser copy and is remembered in `touched`; reading
 // then merges it over what the native side holds, so a stale browser copy never overwrites a native choice.
 // Afterwards `current` is the whole record in memory, so saving never depends on the browser store.
 let loaded = false, readFailed = false, nativeReadOnly = false, loading: Promise<void> | null = null, pending = 0;
 let touched: Partial<NativeInstrumentView> = {}, current: NativeInstrumentView | null = null, nativeWrites: Promise<unknown> = Promise.resolve();
-export function resetInstrumentViewPreferencesSync() { loaded = false; readFailed = false; nativeReadOnly = false; loading = null; pending = 0; touched = {}; current = null; nativeWrites = Promise.resolve(); unsentInMemory = false; problem = null; }
+export function resetInstrumentViewPreferencesSync() { loaded = false; readFailed = false; nativeReadOnly = false; loading = null; pending = 0; touched = {}; current = null; nativeWrites = Promise.resolve(); unsentInMemory = null; problem = null; }
 function sendNative(value: NativeInstrumentView, storage: PreferenceStorage | undefined) {
   const target = nativeBridge(); if (!target) return;
   pending++;
@@ -94,7 +108,7 @@ function sendNative(value: NativeInstrumentView, storage: PreferenceStorage | un
   nativeWrites = nativeWrites.then(() => target.put(value)).then(() => { if (--pending === 0) { clearUnsent(storage); if (problem === 'save') setProblem(null); } }, error => {
     pending--;
     if (String((error as { message?: string })?.message ?? error).includes('settings-newer-version')) { nativeReadOnly = true; setProblem('newer'); return; }
-    markUnsent(storage); setProblem('save');
+    markUnsent(storage, 'all'); setProblem('save');
   });
 }
 
@@ -115,7 +129,7 @@ export function writeInstrumentViewPreferences(change: Partial<InstrumentViewPre
     if (changedNames.length && nativeBridge()) {
       if (nativeReadOnly) setProblem('newer');
       else if (loaded && current) sendNative(current, storage);
-      else if (readFailed) { markUnsent(storage); void syncInstrumentViewPreferencesFromNative(storage); }
+      else if (readFailed) { markUnsent(storage, new Set(changedNames)); void syncInstrumentViewPreferencesFromNative(storage); }
     }
     return kept;
   } catch { return false; }
@@ -134,16 +148,18 @@ export function syncInstrumentViewPreferencesFromNative(storage: PreferenceStora
     const target = nativeBridge(); if (!target) return;
     let stored: { instrumentView: unknown; readOnly?: boolean };
     try { stored = await target.read(); } catch {
-      readFailed = true; loading = null; if (Object.keys(touched).length) markUnsent(storage); setProblem('save'); return;
+      readFailed = true; loading = null; if (Object.keys(touched).length) markUnsent(storage, new Set(Object.keys(touched) as (keyof NativeInstrumentView)[])); setProblem('save'); return;
     }
     readFailed = false;
     const local = readInstrumentViewPreferences(storage), native = stored?.instrumentView, hadTouched = Object.keys(touched).length > 0;
     if (stored?.readOnly === true) { nativeReadOnly = true; current = { ...nativeOf(local), ...touched }; if (hadTouched) setProblem('newer'); return; }
     const fromNative = native && typeof native === 'object' && !Array.isArray(native) ? repairedOptions(native as Record<string, unknown>) : null;
-    const unsent = hasUnsent(storage);
-    const merged: NativeInstrumentView = { ...(unsent || !fromNative ? nativeOf(local) : fromNative), ...touched };
+    const unsent = readUnsent(storage);
+    const merged: NativeInstrumentView = { ...(unsent === 'all' || !fromNative ? nativeOf(local) : fromNative), ...touched };
+    if (unsent instanceof Set && fromNative) for (const name of unsent) (merged as Record<string, unknown>)[name] = local[name];
+    if (unsent instanceof Set && fromNative) Object.assign(merged, touched);
     current = merged; touched = {}; loaded = true;
-    const send = unsent || (fromNative ? !sameOptions(merged, fromNative) : hadTouched || !sameDefaults(merged));
+    const send = unsent !== null || (fromNative ? !sameOptions(merged, fromNative) : hadTouched || !sameDefaults(merged));
     if (send) sendNative(merged, storage); else if (problem === 'save') setProblem(null);
     const differs = !sameOptions(merged, nativeOf(local));
     if (differs || (!fromNative && !sameDefaults(merged))) { try { storage?.setItem(key, JSON.stringify(merged)); } catch { /* the native settings still hold it */ } }

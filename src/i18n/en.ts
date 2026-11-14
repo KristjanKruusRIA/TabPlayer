@@ -2438,6 +2438,7 @@ export const en = {
   'batch.no_matching_files': 'No matching files were found.',
   'palette.score_editing_unavailable': 'Score editing is unavailable while the score is hidden.',
   'palette.command_input_aria': 'Command',
+  // Translators: the toolbar's widths were measured with the track_display.* layout, tracks, fit and zoom texts and transport.bar_n / transport.of_n. If one gets longer, say so: the widths in src/shell/toolbar-fit.ts must be measured again (see toolbar-fit.catalog.test.ts).
   'track_display.toolbar_aria': 'Score display',
   'track_display.display_mode': 'Display mode',
   'track_display.layout_vertical_page': 'Vertical page',

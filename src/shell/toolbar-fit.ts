@@ -1,5 +1,7 @@
 import type { SupportedLanguage } from '../i18n/types';
 
+// If a toolbar caption's translation changes length, these widths are stale: re-measure with tests/desktop/parity-key-shift.mjs and update this file.
+// The captions that matter are listed in toolbar-fit.catalog.test.ts, which fails when one of them changes.
 /**
  * Where the toolbar's groups fit in one row. The numbers are measured in a desktop run (see the validation note of
  * 2026-11-14 on the native view settings), not guessed: a sweep in steps of 5px, for each language, looked for a control

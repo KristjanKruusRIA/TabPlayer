@@ -49,9 +49,9 @@ export const REVIEW_TERMS = [
   { id: 'palette-words', lang: '*', side: 'key', kind: 'check', match: /^palette\.(command|hint|aliases|error)_/,
     note: 'Command palette titles, hints, errors and native search alias words. The notes say the alias words are a first choice and may miss forms a speaker expects.', source: '2026-11-13-the-203-command-palette-i18n.md, Limits' },
   { id: 'et-krihv', lang: 'et', side: 'translation', kind: 'chosen', match: 'krihv',
-    note: 'Estonian fret is "krihv", not "astmetraat".', source: '2026-11-13-the-203-command-palette-i18n.md, Terms' },
-  { id: 'et-astmetraat', lang: 'et', side: 'translation', kind: 'check', match: 'astmetra',
-    note: 'The palette note chose "krihv" for fret over "astmetraat", but other catalog text still uses "astmetraat"; the reviewer should pick one term.', source: '2026-11-13-the-203-command-palette-i18n.md, Terms' },
+    note: 'Estonian fret is "krihv" (owner decision 2026-11-14).', source: '2026-11-13-the-203-command-palette-i18n.md, Terms' },
+  { id: 'et-astmetraat', lang: 'et', side: 'translation', kind: 'forbidden', match: 'astmetra',
+    note: 'The owner chose "krihv" for fret on 2026-11-14; "astmetraat" must not return.', source: '2026-11-13-the-203-command-palette-i18n.md, Terms' },
   { id: 'de-beat', lang: 'de', side: 'translation', kind: 'check', match: /\bBeat\b/,
     note: '"Beat einfügen" and "Beat löschen" match the editor buttons and were kept.', source: '2026-11-13-the-203-command-palette-i18n.md, Terms' },
 ];

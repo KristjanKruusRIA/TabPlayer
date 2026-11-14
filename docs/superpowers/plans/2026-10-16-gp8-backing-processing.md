@@ -12,7 +12,7 @@
 - Authoritative checkout <checkout>; feat/gp8-parity. All scoped work approved; no approval question. Root owns Git/full checks/build/apps/actual acceptance.
 - Preserve P16 clocks, source-frame gates, current-source byte identity, strict unknown-field rejection, owner/revision/generation protections and legacy payloads. No score/global tonality changes or invented GP metadata.
 - Numeric local policy: integer semitones[-12,12], integer cents[-100,100], additive with no carry; filter wire values and exact curve/response contract come from spec.
-- Actual GenAI backing-pitch-filter-concept.png and provenance were generated and root-inspected before UI. Keep left sidebar placement; no P16 visual freshness recheck.
+- Actual GenAI backing-pitch-filter-concept.png and provenance (removed before publication) were generated and root-inspected before UI. Keep left sidebar placement; no P16 visual freshness recheck.
 - Serialize Cargo ownership; native contract producer owns all Rust until release. Disjoint frontend work may proceed. No worker whole suite/build/app/Git. Preserve private/untracked/user files.
 - New view verification: one batch, one identified correction set, at most one confirmation. Quiet physical audio window ended; no Play/device capture assumed. Full GP8/platform/shipping acceptance is separate.
 

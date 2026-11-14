@@ -20,7 +20,7 @@
 - Rejected edits, failed saves, and failed imports preserve the current document.
 - Originals remain unchanged; raw alphaTab JSON is not the durable format.
 - Offline operation bundles fonts, worker assets, and an explicitly licensed SoundFont.
-- Extracted Guitar Pro assets and binaries remain outside the product and versioned source.
+- Guitar Pro program files, assets and binaries remain outside the product and versioned source.
 - Verify packaged behavior on each target OS before claiming release support there.
 
 ## Review Focus

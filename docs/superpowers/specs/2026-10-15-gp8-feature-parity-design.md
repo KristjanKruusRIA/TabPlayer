@@ -67,7 +67,7 @@ Fix loss of per-note dynamics during score rebuild. A command asking for dynamic
 
 The root integrator owns shared TypeScript command/schema validation, Rust serde DTOs, engine/router, App, EditorPanel, ScoreView, dependencies, Git operations and desktop testing. Feature workers own isolated new modules/panels/tests. The non-tab worker additionally owns `common.ts`, `techniques.ts`, and `TechniquePanel.tsx`. The interchange worker owns new `src/interchange` modules. Each worker supplies evidence and a narrow handoff; no worker starts an app, changes shared schemas, commits, pushes or touches another worker's files.
 
-Source bytes and history remain immutable. Rebuild/replay must reproduce edits deterministically, including undo/redo and export. Private song files and extracted vendor resources remain ignored local evidence. No keys, licensed banks or private songs enter the repository.
+Source bytes and history remain immutable. Rebuild/replay must reproduce edits deterministically, including undo/redo and export. Private song files and vendor files remain ignored local evidence. No keys, licensed banks or private songs enter the repository.
 
 ## Acceptance
 

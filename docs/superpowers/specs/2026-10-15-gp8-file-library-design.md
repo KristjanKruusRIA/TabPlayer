@@ -28,7 +28,7 @@ Inspected `WorkspaceController`, `WorkspaceApp`, `main.tsx`, `bridge.ts`, `proje
 - Root exclusively owns shared project/schema/engine/recovery/workspace/lib/runtime/main/App integration, builds, apps, Git and final validation. Isolated producers receive exact contracts before work.
 - Start implementation only after the current recovery join is accepted and frozen. Changes to project and recovery compatibility below belong to this next batch, never concurrent edits to today's frozen recovery files.
 - Preserve one bootstrap, keyed App/player, document IDs, activation fences, staged-candidate cleanup, source/destination protection, modal/export leases, Close All and native freeze admission. Index/store I/O never runs under workspace/audio locks or on the audio callback.
-- Private user songs, absolute personal paths and extracted vendor files do not enter source control, example content or generated UI mockup prompts.
+- Private user songs, absolute personal paths and vendor files do not enter source control, example content or generated UI mockup prompts.
 
 ## Selected architecture and alternatives
 
@@ -110,7 +110,7 @@ Protect internal factory/example/template/catalog/index paths from document Save
 
 ## UI and generated image prerequisite
 
-Before implementing any new Library/Welcome/Templates view, root must generate and inspect GenAI reference images matching the user's collage, then model the implementation after those images. Cover Welcome/Recent, Templates, Folders and Examples with four named concepts so each new section has an actual image reference. Recovery/export concepts already exist but do not cover these views. Save prompts and resulting paths under `docs/design/reference-workstation/`; generated incidental content does not define behavior. Design review precedes generation; this document does not invoke the image tool.
+Before implementing any new Library/Welcome/Templates view, root must generate and inspect GenAI reference images matching the user's collage, then model the implementation after those images. Cover Welcome/Recent, Templates, Folders and Examples with four named concepts so each new section has an actual image reference. Recovery/export concepts already exist but do not cover these views. Save prompts and resulting paths under `docs/design/reference-workstation/` (removed before publication: images and provenance records); generated incidental content does not define behavior. Design review precedes generation; this document does not invoke the image tool.
 
 Use one Library dialog/Welcome variant, reachable from File → Library, Recent scores, New from template and Examples, plus File → Save as template and Open containing folder. Keep plain New as the existing blank-score shortcut. Welcome opens after successful startup resolution only for first use/no restored working documents; it never replaces the recovery decision or automatically creates/plays a score. Closing it reveals the already resolved workspace. A small remembered `welcomeSeen` catalog preference suppresses subsequent automatic display; persist only after the welcome was actually shown/dismissed, without changing session restore preference.
 

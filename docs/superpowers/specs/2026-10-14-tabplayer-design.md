@@ -44,7 +44,7 @@ Opening another document or closing a window with unsaved edits offers save, dis
 
 ## Guitar Pro compatibility
 
-The supplied Guitar Pro 8.1.5.31 installer contains a native Qt application and separate file I/O, score, drawing, and audio libraries. Static analysis of its I/O library identifies distinct legacy, GP6, GP7, and GPIF readers. That supports testing each format generation independently; it does not establish complete behavior equivalence. See the [investigation report](../../research/2026-10-14-guitar-pro-investigation.md).
+Guitar Pro 8 reads distinct legacy, GP6, GP7 and GPIF file generations (analysis that is not published here, with the format facts in the investigation report). That supports testing each format generation independently; it does not establish complete behavior equivalence. See the [investigation report](../../research/2026-10-14-guitar-pro-investigation.md).
 
 alphaTab documents those import generations and a `.gp` exporter. Its exporter rebuilds the container and GPIF content. Its own round-trip tests compare alphaTab models, and the GP8 test excludes bend comparisons. TabPlayer therefore promises the explicitly tested note, rhythm, tuning, and track behavior, with advanced-feature coverage recorded per fixture. Full Guitar Pro acceptance requires opening exported files in Guitar Pro itself.
 

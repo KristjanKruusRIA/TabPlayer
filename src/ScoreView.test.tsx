@@ -310,7 +310,7 @@ it('renders pending fret digits on the score edit target caret overlay when prov
   expect(document.querySelector('.score-edit-entry')).toBeNull();
 });
 
-it.each([['et','Astmetraat 7'],['de','Bund 7']] as const)('translates the on-score pending fret label in %s',(language,fret)=>{
+it.each([['et','Krihv 7'],['de','Bund 7']] as const)('translates the on-score pending fret label in %s',(language,fret)=>{
   setLanguagePreference(language);
   try{
     const props={score:music(),track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};

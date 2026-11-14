@@ -1,5 +1,7 @@
 # Score layout references selected by root
 
+Note, 2026-11-14: the generated mockup images named below and their provenance records were removed before publication. This note stays as the record of which composition was chosen and its limits; the hashes can no longer be checked.
+
 2026-10-16. These are actual builtin image_gen raster outputs, not application screenshots. Root visually inspected the original five additional views together and the two corrected page arrangements together, before any score-layout UI implementation. Horizontal screen v2 was inspected earlier in `.analysis/parity/horizontal-screen-generated-reference-review-root.md`. Each adjacent generated-concept JSON retains the exact prompt, inputs, output provenance, dimensions, hashes and limitations.
 
 | View | Selected image | PNG SHA-256 |

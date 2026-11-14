@@ -14,7 +14,7 @@ afterEach(cleanup);
 it('reports the same version as the native app and its crate',()=>{
   const tauri=JSON.parse(readFileSync('src-tauri/tauri.conf.json','utf8')),cargo=/^version\s*=\s*"([^"]+)"/m.exec(readFileSync('src-tauri/Cargo.toml','utf8'))?.[1];
   expect([tauri.version,cargo]).toEqual([appVersion,appVersion]);
-  expect(updateStatus()).toBe(`You have TabPlayer ${appVersion}. This build has no update service, so it cannot check for newer versions. Install a newer build to update; your scores are not affected.`);
+  expect(updateStatus()).toBe(`You have TabPlayer ${appVersion}. This release has no update service. To update, install a newer version; your scores are not affected.`);
 });
 
 it('chooses the topic for the focused part of the window',()=>{
@@ -40,7 +40,7 @@ it('opens on the given topic, switches topics, discloses update status and keeps
   expect(screen.getByRole('article',{name:'About and updates'})).toHaveTextContent(`TabPlayer ${appVersion} for desktop.`);
   expect(screen.getByRole('status')).toHaveTextContent('');
   fireEvent.click(topic('Check for updates'));
-  expect(screen.getByRole('status')).toHaveTextContent(`You have TabPlayer ${appVersion}. This build has no update service`);
+  expect(screen.getByRole('status')).toHaveTextContent(`You have TabPlayer ${appVersion}. This release has no update service`);
   const close=topic('Close'),check=topic('Check for updates');check.focus();
   fireEvent.keyDown(check,{key:'Tab'});expect(close).toHaveFocus();
   fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(check).toHaveFocus();

@@ -379,7 +379,7 @@ export const en = {
   'help.dialog_title': 'TabPlayer help',
   'help.topics_heading': 'Topics',
   'help.check_for_updates': 'Check for updates',
-  'help.update_status': 'You have TabPlayer {version}. This build has no update service, so it cannot check for newer versions. Install a newer build to update; your scores are not affected.',
+  'help.update_status': 'You have TabPlayer {version}. This release has no update service. To update, install a newer version; your scores are not affected.',
   'help.keyboard_editing_help': 'Keyboard and editing help',
   'help.keyboard_editing_heading': 'Keyboard & editing',
   'help.keyboard_editing_intro': 'Use these shortcuts outside input fields and dialogs. F1 opens help about the part of the window you are using.',

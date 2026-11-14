@@ -1,6 +1,6 @@
 # THE-72 pre-publication preparation
 
-Date: 2026-11-13. Branch `agy/the-72-prepublication` (equal to `develop` at the start). The repository is private today and is meant to go public under MIT once the project is finished. Parts A and B are done in the working tree; Part C lists proposals only and changes nothing.
+Date: 2026-11-13. Branch `agy/the-72-prepublication` (equal to `develop` at the start). The repository is private today and is meant to go public under MIT once the project is finished. Parts A and B are done in the working tree; Part C lists the proposals, and the decisions taken on 2026-11-14 and what was done are recorded in the last section.
 
 ## Part A: machine-specific paths in documentation (done)
 
@@ -31,7 +31,7 @@ Date: 2026-11-13. Branch `agy/the-72-prepublication` (equal to `develop` at the 
 
 ### (i) `docs/research/2026-10-14-guitar-pro-investigation.md`
 
-It records static analysis of the Guitar Pro 8.1.5.31 installer: the installer's path and hash, extraction steps, DLL names, procedure addresses (three `0x18...` addresses), recovered symbol names, and Evidence identifiers pointing at a local analysis folder. None of it is needed by a reader of TabPlayer, and it reads as reverse engineering of a commercial product. It says nothing about activation, but the whole record is of that kind.
+It records an analysis of the Guitar Pro 8 installer: its local path and hash, the extraction steps, library names, addresses, recovered names and evidence identifiers pointing at a local analysis folder. None of it is needed by a reader of TabPlayer, and it reads as reverse engineering of a commercial product. It says nothing about activation, but the whole record is of that kind.
 
 Proposed replacement, about 40 lines, titled "File-format generations and foundation choice":
 
@@ -41,12 +41,12 @@ Proposed replacement, about 40 lines, titled "File-format generations and founda
 4. Coverage table: keep, with the installer-specific wording removed.
 5. Limits: static reading does not establish equivalence; round trips are not lossless; the proprietary sound engine is not replicated.
 
-Drop: the installer path, size and hash, the extraction tool and its checksum, DLL inventory and versions, the address and symbol table, the Evidence identifier list, and the "Source and retention" section.
+Drop: the installer path, size and hash, the extraction tool details, the library inventory, the address and name tables, the evidence identifier list, and the "Source and retention" section.
 
 Other tracked files that link to or repeat it:
 - `docs/superpowers/specs/2026-10-14-tabplayer-design.md` line 47 links to it (the link survives if the file keeps its name).
-- `docs/superpowers/specs/2026-10-15-gp8-lyrics-design.md` line 97 and `docs/validation/2026-10-15-gp8-lyrics-notation.md` lines 36 and 38 name `GPIO.dll` with procedure addresses and a hash.
-- `docs/validation/2026-10-31-gp8-buzz-roll.md` lines 12 to 31 and `docs/validation/2026-11-12-gp8-golpe-sound-fermata-probe.md` line 42 describe inspecting the extracted application under `.analysis/`.
+- `docs/superpowers/specs/2026-10-15-gp8-lyrics-design.md` line 97 and `docs/validation/2026-10-15-gp8-lyrics-notation.md` lines 36 and 38 name a vendor library with procedure addresses and a hash.
+- `docs/validation/2026-10-31-gp8-buzz-roll.md` lines 12 to 31 and `docs/validation/2026-11-12-gp8-golpe-sound-fermata-probe.md` line 42 describe inspecting the vendor application files in a local analysis folder.
 
 Proposal: replace the file as outlined and strip the addresses and DLL references from those four documents, keeping the format facts they support. History still holds the originals (see iii).
 
@@ -80,3 +80,22 @@ Commit metadata: every commit records the author e-mail address, history contain
 Push named branches only, for example `git push origin main` and `git push origin develop`; never `git push --all`, `--mirror` or `--tags` without checking. `origin` currently pushes to `https://github.com/KristjanKruusRIA/TabPlayer.git`, which is the private repository; a public release should use a new or converted remote after the decisions above.
 
 Local refs that must never be pushed: two refs outside `refs/heads` and `refs/remotes`, both under `refs/codex/turn-diffs/checkpoints/` (Codex turn checkpoints, 2 refs; the full names are in `git for-each-ref refs/codex`). They exist locally only; the configured fetch refspec is `+refs/heads/*:refs/remotes/origin/*` and there is no push refspec, so a plain `git push origin <branch>` does not send them. Do not run `git push --mirror` or `git push origin 'refs/*:refs/*'`. Also review which of the `agy/*` and `fix/*` branches should be public before pushing anything but `main` and `develop`. Nothing was changed or pushed here.
+
+## Decisions of 2026-11-14 and what was done
+
+Owner decisions:
+
+- Condense the Guitar Pro investigation note and the passages in other documents that carried vendor library names, addresses or evidence identifiers (item i).
+- Remove the 20 generated mockups (item ii).
+- Publish the history as it is (item iii): no rewrite and no fresh repository. The earlier commits still hold the originals of everything removed below.
+- The commit e-mail address stays as it is. No address is quoted here.
+
+Done in the working tree (nothing staged or committed here):
+
+- `docs/research/2026-10-14-guitar-pro-investigation.md` was rewritten (71 lines to 46). It keeps the file-format generations with their magic bytes and member path, the foundation comparison with its public links, a coverage table and the limits. It drops the installer path, size and hash, the extraction tool, the library inventory and versions, the address and name tables, the evidence identifiers, the source and retention section and every local path. The file name is unchanged, so the link in `docs/superpowers/specs/2026-10-14-tabplayer-design.md` still resolves.
+- The same kind of detail was condensed, keeping each document's conclusions, in `docs/superpowers/specs/2026-10-15-gp8-lyrics-design.md`, `docs/validation/2026-10-15-gp8-lyrics-notation.md`, `docs/validation/2026-10-31-gp8-buzz-roll.md` and `docs/validation/2026-11-12-gp8-golpe-sound-fermata-probe.md` (the four named above), and also in `docs/superpowers/specs/2026-10-15-gp8-stylesheet-interchange-design.md`, `docs/validation/2026-10-15-gp8-stylesheet-interchange.md` and `docs/superpowers/plans/2026-10-15-gp8-stylesheet-interchange.md` (evidence identifiers and hashes of vendor files). The golpe note's remark about trying an installed copy was reworded.
+- The 20 PNG mockups and all 16 JSON provenance records in `docs/design/reference-workstation/` were deleted from the working tree; they had no purpose without their images. `score-layout-reference-selection.md` stays (other documents link to it) with a note that the images are gone. Fifteen documents that named the images (acceptance, plans, specs and validation notes) now say they were removed before publication; their hash tables are kept as a record and can no longer be checked. A search of `src`, `src-tauri`, `tests`, `scripts`, `package.json` and `.github` found no dependency on any of these files.
+- `scripts/secret-scan.mjs`: the allowlist entries for the investigation note and the reference-workstation folder were removed. `node scripts/secret-scan.mjs` prints 0 findings (1825 tracked files) and `node --test scripts/secret-scan.test.mjs` passes (15 tests). Part B's allowlist paragraph above describes the state before this change.
+- Still for the owner's commit: `git rm --cached .vitest/json/output.json`, and staging the deletions.
+
+Publishing rule (unchanged): push named branches only, never `--all`, `--mirror` or `--tags` unchecked. The two refs under `refs/codex/turn-diffs/checkpoints/` must never be pushed (see item iv above).

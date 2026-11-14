@@ -380,7 +380,7 @@ export const de: MessageCatalog = {
   'help.dialog_title': 'TabPlayer Hilfe',
   'help.topics_heading': 'Themen',
   'help.check_for_updates': 'Nach Updates suchen',
-  'help.update_status': 'Sie verwenden TabPlayer {version}. Dieser Build hat keinen Update-Dienst und kann nicht nach neuen Versionen suchen. Installieren Sie eine neuere Version; Ihre Partituren bleiben unberührt.',
+  'help.update_status': 'Sie verwenden TabPlayer {version}. Diese Version hat keinen Update-Dienst. Zum Aktualisieren installieren Sie eine neuere Version; Ihre Partituren bleiben unberührt.',
   'help.keyboard_editing_help': 'Tastatur- und Bearbeitungshilfe',
   'help.keyboard_editing_heading': 'Tastatur & Bearbeitung',
   'help.keyboard_editing_intro': 'Verwenden Sie diese Tastenkürzel außerhalb von Eingabefeldern und Dialogen. F1 öffnet Hilfe zum aktuell aktiven Bereich.',

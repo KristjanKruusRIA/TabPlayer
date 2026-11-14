@@ -218,5 +218,5 @@ export const helpEn = {
   'help.topic.about.title': 'About and updates',
   'help.topic.about.version.title': 'Version and updates',
   'help.topic.about.version.p1': 'TabPlayer {version} for desktop.',
-  'help.topic.about.version.p2': 'This build has no update service. TabPlayer never downloads or installs updates by itself, and checking for updates never changes your open scores.',
+  'help.topic.about.version.p2': 'This release has no update service. TabPlayer never downloads or installs updates by itself, and checking for updates never changes your open scores. The Estonian and German text has not been reviewed by a native speaker.',
 } as const;

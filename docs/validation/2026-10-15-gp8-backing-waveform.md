@@ -15,8 +15,8 @@ Root generated, versioned and inspected the actual GenAI reference before UI imp
 | Artifact | SHA-256 |
 |---|---|
 | `docs/superpowers/specs/2026-10-15-gp8-backing-waveform-design.md` | `6E2FB1FC5FF062E8BED0F870199A8CC5D062289B8ECE875F633008F2F0E6FE31` |
-| `docs/design/reference-workstation/backing-waveform-concept.png` | `D19D16955B14E9DCB6A1958D35F70E4CFF6C8FFCB11900CDA189954674E6D576` |
-| `docs/design/reference-workstation/backing-waveform-generated-concept.json` | `67E9B9E86BBA9F1D875353398B9DDE79AF554ACD0C6E0B109529E7198E2F24EC` |
+| `backing-waveform-concept.png` (removed before publication) | `D19D16955B14E9DCB6A1958D35F70E4CFF6C8FFCB11900CDA189954674E6D576` |
+| `backing-waveform-generated-concept.json` (removed before publication) | `67E9B9E86BBA9F1D875353398B9DDE79AF554ACD0C6E0B109529E7198E2F24EC` |
 
 ## Accepted source and independent review
 

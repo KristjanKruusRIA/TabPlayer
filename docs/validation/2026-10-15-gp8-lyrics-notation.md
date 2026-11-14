@@ -33,13 +33,13 @@ Three fresh reviews covered schemas, notation/timers, and lyrics/shared integrat
 
 ## Original-target file evidence
 
-The supplied GPIO.dll was analyzed without execution or modification, SHA256 `3a225b022a507d20ab2b9fa2530b5ac5deed9d11445588e37e9227cce398d816`.
+The findings below are based on analysis of Guitar Pro 8 that is not published here. The analysis did not run the program, and no vendor code is included in TabPlayer.
 
-- GPIF reader `0x1800f0d60`, writer `0x180115580` and notation gate `0x1802129f0` establish that `Track/Lyrics dispatched="false"` gates lyrics while raw Text/Offset slots remain stored. Our importer handles alphaTab's failure to honor that standard flag. This supersedes the initial design's unresolved visibility boundary.
-- Native common/cut display uses stylesheet `Staff/drawTimeSignatureC` / `BarStyle::setShowTimeSignatureAsSymbol`; numeric GPIF Time remains unchanged. The native loader prefers `Content/Stylesheets/score.gpss` over BinaryStylesheet. A global stylesheet switch cannot faithfully encode arbitrary per-bar choices, so no guessed GPIF field was introduced.
+- GPIF files establish that `Track/Lyrics dispatched="false"` gates lyrics while raw Text/Offset slots remain stored. Our importer handles alphaTab's failure to honor that standard flag. This supersedes the initial design's unresolved visibility boundary.
+- Common/cut display is carried by the stylesheet's `Staff/drawTimeSignatureC` setting; numeric GPIF Time remains unchanged. A present `Content/Stylesheets/score.gpss` takes precedence over BinaryStylesheet. A global stylesheet switch cannot faithfully encode arbitrary per-bar choices, so no guessed GPIF field was introduced.
 - Fermata Type/rational Offset/numeric Length read/write are established. Audio units and timing behavior remain unresolved.
 
-Detailed addresses, 49 retained evidence records, hashes and the independently patched candidate fixture remain in ignored `native-gpif-semantics.*`. The candidate is not represented as a file authored or accepted by the original GP8 runtime. No vendor code, binary or asset is included in this implementation.
+The supporting analysis is not published here. The independently patched candidate fixture is not represented as a file authored or accepted by the original GP8 runtime. No vendor code, binary or asset is included in this implementation.
 
 ## Remaining boundaries
 

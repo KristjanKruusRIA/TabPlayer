@@ -24,7 +24,7 @@ The Rust 1.88 diagnostic build completed. Root executed `tests/desktop/parity-st
 
 Both direct and dialog paths exported/reopened current true/false choices. Native save, full process restart, Undo/Redo and explicit equal-false replay passed. Mixed, inherited and conflicting/malformed view changes produced actionable errors; absent outputs stayed absent and existing sentinel destinations stayed byte exact. Subsequent valid exports succeeded. Untouched conflicting view data remained preserved. Root subsequently inspected all 16 images, confirming common C, cut C, numeric 4/4, 2/2 and 3/4, reopened results and errors; the receipt's scripted visual-pending field predates that inspection. No layout correction was needed.
 
-Read-only retained-probe verification passed for both original common-time probes, preserving 14 members and MIDI identity. Original `GPCore.dll`/`GPIO.dll` hashes matched the retained record in `.analysis/parity/stylesheet-retained-probes.json`. No original GP8 program was executed.
+Read-only retained-probe verification passed for both original common-time probes, preserving 14 members and MIDI identity. No original GP8 program was executed.
 
 Final diagnostic SHA-256: `f508e3215074639be81a7fa52bf68af052525d3853dfa6e1b76e735b0d5c07c7`.
 

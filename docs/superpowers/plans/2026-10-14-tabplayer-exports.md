@@ -18,7 +18,7 @@
 - PDF conversion must not fetch remote resources or read paths supplied by score text.
 - Stereo integer PCM WAV uses 44.1 or 48 kHz and 16 or 24 bits with deterministic dither.
 - A multi-minute song must not allocate one complete PCM buffer.
-- Private test music and extracted Guitar Pro application resources remain outside product/source releases.
+- Private test music and Guitar Pro program files and resources remain outside product/source releases.
 - Root alone stages/commits and owns App/controller/bridge/lib registration/source guard; audio-assets owns dependency/resource/notice configuration.
 
 ## Review Focus

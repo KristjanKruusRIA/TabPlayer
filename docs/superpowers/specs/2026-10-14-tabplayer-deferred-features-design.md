@@ -39,7 +39,7 @@ Score edits, backing selection/synchronization, sound configuration and print la
 
 Native Rust owns audio rendering and its sample clock. The webview sends prepared score events and configuration, and receives transport state; it does not stream PCM over Tauri. alphaTab remains the notation/MIDI generator and its public external-media interface drives the cursor from the Rust clock. Live and offline rendering use the same Rust musical voices and effects. Export operates on an immutable document snapshot and cannot mark an unsaved project clean.
 
-All score, asset and export I/O retains source-overwrite protection and atomic replacement. Export cancellation/failure preserves previous output files. Large asset reads, decoding and exports run away from the UI and audio callback. Shipping builds omit the existing desktop test commands. Dependency versions and notices are recorded, and bundled sample sources are pinned and hashed. Private test music and extracted Guitar Pro application resources remain outside product/source releases.
+All score, asset and export I/O retains source-overwrite protection and atomic replacement. Export cancellation/failure preserves previous output files. Large asset reads, decoding and exports run away from the UI and audio callback. Shipping builds omit the existing desktop test commands. Dependency versions and notices are recorded, and bundled sample sources are pinned and hashed. Private test music and Guitar Pro program files and resources remain outside product/source releases.
 
 ## Completion and release records
 

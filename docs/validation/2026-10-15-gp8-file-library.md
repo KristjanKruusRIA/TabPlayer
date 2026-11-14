@@ -4,7 +4,7 @@
 
 ## Interface and document behavior
 
-The four Library sections follow the actual generated references and prompts versioned under `docs/design/reference-workstation`. One application-lifetime Library sits beside the existing editor/player. Opening a template/example creates a separate clean score with an immutable baseline and fresh user history. Normal file intake preserves original bytes and existing-tab aliases. Successful native open/save receipts authorize recents and later metadata enrichment; history-write failure remains separate from completed music I/O.
+The four Library sections follow the actual generated references and prompts versioned under `docs/design/reference-workstation/` (removed before publication: images and provenance records). One application-lifetime Library sits beside the existing editor/player. Opening a template/example creates a separate clean score with an immutable baseline and fresh user history. Normal file intake preserves original bytes and existing-tab aliases. Successful native open/save receipts authorize recents and later metadata enrichment; history-write failure remains separate from completed music I/O.
 
 Schema3 adds the immutable baseline. Strict schema1/2 migration occurs after original-byte digest verification; the recovery envelope stays version1. Protected destinations include bundled Library content, its catalog/payload/index namespace, recovery files and existing original-score/backing sources. All sixteen Library IPCs are registered in production and diagnostic builds. No installer was executed.
 

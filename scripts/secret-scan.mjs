@@ -85,11 +85,6 @@ export const neverTracked = new Set([
 // Explicit exceptions. Each entry names one rule and one path (a directory when it ends in "/") and says why.
 // Add to this list only for a documented, deliberate reason; a real secret is removed, never listed.
 export const allowlist = [
-  // Pending the owner's decisions recorded in docs/validation/2026-11-13-the-72-prepublication.md (items i and ii):
-  // both are proposed for replacement or removal, so their local paths are left untouched until then.
-  { rule: 'home-path', path: 'docs/research/2026-10-14-guitar-pro-investigation.md', reason: 'pending replacement (THE-72 note, item i)' },
-  { rule: 'home-path', path: 'docs/design/reference-workstation/', reason: 'generated provenance records, pending keep/replace/remove (THE-72 note, item ii)' },
-  { rule: 'local-folder', path: 'docs/design/reference-workstation/', reason: 'same records as above (THE-72 note, item ii)' },
   // Declared exceptions: functional defaults and project guidance that name the author's folders.
   { rule: 'local-folder', path: 'CLAUDE.md', reason: 'project guidance naming the shared cargo-target slots' },
   // The scanner's own rules and tests spell out the shapes they look for, so they match themselves.

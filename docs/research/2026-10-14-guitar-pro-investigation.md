@@ -1,41 +1,19 @@
-# Guitar Pro installer findings and TabPlayer foundation
+# File-format generations and foundation choice
 
-Date: 2026-10-14. The supplied installer is Guitar Pro 8.1.5.31. Its payload contains a 64-bit native Qt application, separate proprietary libraries, and a large nested soundbank installer. The approved TabPlayer foundation is Rust and Tauri plus alphaTab, with independently implemented editing and persistence.
+Date: 2026-10-14 (condensed 2026-11-14 before publication). This note records which Guitar Pro file generations TabPlayer must test independently and why the foundation is Rust and Tauri plus alphaTab. TabPlayer's importers and exporters are written from public documentation, alphaTab's open source and the observed behaviour of files; no vendor code is included. The format facts below also rest on analysis of Guitar Pro 8 that is not published here. An earlier version of this note held details of that analysis; they are not needed to build or understand TabPlayer and were removed.
 
-## Artifact identity and extraction
+## Format generations
 
-The investigated input is `C:\Users\krist\Downloads\Guitar Pro 8.1.5.31\guitar-pro-8-setup.exe`, 1,035,739,304 bytes. Its SHA-256 is `642eb400725ee7493de1695dafdd2cc12836c72ed6c4ea37799fbd767ea35d6e`. REA classified the installer wrapper as x86 PE. Windows version metadata reports Guitar Pro 8, Arobas Music, version 8.1.5.31.
+Each generation is tested on its own, because a reader that handles one says nothing about the others.
 
-Inno Setup headers identify setup data version 6.1.0. The official portable innoextract 1.9 package was downloaded to an analysis tools directory; its MD5 matched the publisher's displayed `72d0d0dd874b6236eaa44411f4470ee1`. Innoextract inventoried the installer and extracted only its `app` subtree, with exit code 0. The target installer and extracted application were not executed. These are shell-tool observations, separate from REA Evidence.
-
-The extracted `GuitarPro.exe` is 52,829,848 bytes; its version is 8.1.5.31, and Windows Authenticode inspection reports a valid Arobas Music signature. `Qt5Core.dll` reports version 5.15.3.0. The inventory contains Qt Widgets, GUI, SVG, XML, network, printing, and platform plugins. A nested `tmp\soundbank-full.exe` is approximately 924 MiB; it was inventoried without being extracted or run.
-
-The inventory also contains `GPCore.dll`, `GPIO.dll`, `AMPainting.dll`, `AMAudio.dll`, `GPRSE.dll`, `AMSoundFont.dll`, and audio-related codecs/libraries. Their names and imports indicate a modular score/I/O/render/audio organization; exact runtime responsibilities require further tracing.
-
-## Static file I/O evidence
-
-REA opened the extracted `GPIO.dll` as an x86-64 PE shared library, SHA-256 `3a225b022a507d20ab2b9fa2530b5ac5deed9d11445588e37e9227cce398d816`. Ghidra 12.1.4 default analysis reported 22,419 procedures and 11,573 defined strings. These are analysis inventory counts, not original-source function counts.
-
-| Finding | Evidence and interpretation |
+| Generation | Container and detection |
 | --- | --- |
-| Separate file generations | Procedure searches identify `GP5ScoreLoader`, `GP5ScoreExporter`, `GP6ScoreLoader`, `GP7ScoreLoader`, and `GPIFReader`/`GPIFWriter`. This observes native symbol inventory; names alone do not prove full format fidelity. |
-| GP6 header detection | At `0x18009a880`, `GP6ScoreLoader::canImportData` checks length greater than three, reads four bytes, resets the file position, and accepts constants `0x53464342` or `0x5a464342`. In little-endian order these are `BCFS` and `BCFZ`. This is decompiler-derived static behavior. |
-| GPIF XML detection | At `0x1800d7060`, `GPIFReader::canImportData` checks length of at least 64 bytes, requires the six-byte prefix `<?xml `, parses XML, and compares the root name with five bytes at `0x1804b0f3c`. REA read those bytes as `4750494600`, or `GPIF` followed by NUL. Runtime parser edge cases are unobserved. |
-| GP7 container path | `GP7ScoreLoader::canImportData` at `0x1800a4730` checks an extension list and calls `FUN_1800a4800`. That helper constructs `am::filesystem::PKZipReader` and runs two further checks. ZIP-reader involvement is established; the exact accepted ZIP member/version rules are not yet decoded. |
-| GPIF archive paths | Defined-string search observes `Content/score.gpif`, `/score.gpif`, and `score.gpif`, along with reader/writer symbols. These are candidates for container/schema tracing, not a complete archive specification. |
+| GP3, GP4, GP5 | Legacy binary format. |
+| GP6 (`.gpx`) | Container whose first four bytes read `BCFS` (uncompressed) or `BCFZ` (compressed). |
+| GP7 and GP8 (`.gp`) | ZIP archive whose score is `Content/score.gpif`. |
+| Bare GPIF | Plain XML file whose root element is `GPIF`. |
 
-The complete local REA bundle is `.analysis/guitar-pro-8.1.5-31/rea-evidence.json`. Its Evidence identifiers include:
-
-- Overview: `ev_d6c0b658fc16267dbad8cd0f5bef7dfad85648e7a05dcaf9d45fd379d98aa656`.
-- Format symbol search: `ev_dbdc5f3e4edb2c40624a3bcd635b62495cbbe15530743b55303f6266508b5d6b`.
-- GP6 detector: `ev_5ae910643188994dc0d640a5d4a5f9c71ab96c0223350a26a70fd9ae74200ebf`.
-- GPIF detector: `ev_ce81c6c1cb62f4980d87803e61368b39f210d42afe9a3d29197300a33b404bed`.
-- GPIF root bytes: `ev_a45401f982737f238781ffef92daa8ed0477ef22479aee4882b9c87f583a9047`.
-- GP7 detector: `ev_e4c10881a419171a39c33d441f667cac78656ac0a6ecffcbfcb2fb83ec3d9823`.
-- GP7 ZIP helper: `ev_2c7f6f785054e9014f166f33db9955dcfb136d1c9d62bc07ed6a0941ebf082f2`.
-- GPIF strings: `ev_5ddb98fa5bb9e35be80e946dc1df32ca15d56ffdcd07e192c47ce914535ff91e`.
-
-REA's pseudocode is a recovered representation, not original source. Defined-string coverage can omit undefined or packed bytes; unresolved indirect calls and untraced helpers remain limitations.
+They are not a full specification: the schemas of each generation are recovered by testing against representative files, not from this note.
 
 ## Foundation comparison
 
@@ -49,23 +27,20 @@ TuxGuitar is a credible alternative foundation because it already supplies a des
 
 Building a native engraving, parsing, editing, and audio engine from scratch would provide more control but expands the initial implementation considerably. Reserve that option for specific engine limits demonstrated by tests.
 
-## Investigation coverage
+## Coverage
 
 | Question | Status |
 | --- | --- |
-| Exact supplied target and packaged version | Answered by REA identity, installer inventory, and Windows metadata. |
-| Package and desktop technology | Answered for inventory and Qt dependency/version facts; detailed runtime architecture remains partial. |
-| Format generation boundaries | Partially answered by symbol searches and focused native detectors. Full parser schemas are not recovered. |
-| Import/render/playback foundation | Answered sufficiently for selecting the initial engine from public documentation and source. Actual app integration remains to be built and tested. |
-| Original UI editing semantics | Unresolved; no runtime UI scenario was observed. The proposed editor behaviors are TabPlayer design choices. |
-| RSE timbre, effects, and soundbank equivalence | Unresolved; first milestone uses a separately licensed SoundFont. |
-| Real Guitar Pro acceptance and advanced export fidelity | Unresolved pending representative file tests and original-app validation. |
-| Cross-platform packaged behavior | Unresolved pending implementation and execution on each OS. |
+| Format generation boundaries | Answered at the level of the table above; full schemas are established by file tests, not here. |
+| Import, render and playback foundation | Answered sufficiently from public documentation and source for choosing the initial engine; integration is tested in the app. |
+| Original UI editing semantics | Not established. The editor behaviours are TabPlayer design choices. |
+| Timbre, effects and sound-engine equivalence | Not established; TabPlayer uses a separately licensed SoundFont and its own audio engine. |
+| Acceptance by Guitar Pro and advanced export fidelity | Not established without representative file tests in the original application. |
+| Cross-platform packaged behaviour | Established only by running on each operating system. |
 
-This is an initial investigation supporting the first player/editor milestone, not a complete reverse engineering of Guitar Pro or a completed replacement.
+## Limits
 
-## Source and retention
-
-The analysis directory retains the extracted application, installer inventory, extraction log, and complete Evidence bundle for focused follow-up. It is excluded from Git and product packaging. No files from adjacent download folders were used. The supplied installer remains unchanged.
-
-[innoextract's official download and extraction documentation](https://constexpr.org/innoextract/) explains the execution-free extraction used here.
+- Reading public material and files does not establish equivalence with any commercial product.
+- Round trips are not lossless; originals are retained and supported musical fields are tested.
+- The proprietary sound engine is not replicated.
+- This is an initial investigation supporting the first player and editor milestone, not a complete study of the format or a finished replacement.

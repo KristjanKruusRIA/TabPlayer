@@ -2819,13 +2819,15 @@ let midiSeq=0;
 const keyboardChord=(keys:number[],session=1)=>({session,seq:++midiSeq,atMs:midiSeq*100,dropped:0,notes:keys.map(key=>({key,velocity:90,channel:0}))});
 const startCapture=async()=>{const session=midiCaptureSession(nativeMidiIn);await act(async()=>{await session.stop();await session.start('Keys',{chordWindowMs:60,minVelocity:1});});return session;};
 const sendChord=(...chords:ReturnType<typeof keyboardChord>[])=>act(()=>{for(const chord of chords)midiIn.chord(chord);});
-describe('MIDI capture in the score',()=>{
+// Hang guard, not a budget: every wait in this describe is for an event (an edit arriving, the cursor moving, a counter changing) and the clock below is frozen, so nothing here goes stale.
+// Each written chord or key is a render of the whole workspace, which takes seconds on a runner under load; the limits only stop a test that would never finish.
+describe('MIDI capture in the score',{timeout:90000},()=>{
   // Queued entry keys older than two seconds are dropped by design (ENTRY_QUEUE_STALE_MS). Each queued chord is a render of the whole
   // workspace, so on a loaded machine a queue of six outlasts two seconds and a typed key is dropped without being counted. The clock
   // stands still here, so no test races that rule; the entry key queue tests above move the clock themselves to test it.
   let frozenClock:ReturnType<typeof vi.spyOn>|undefined,clockNow=1_700_000_000_000;
-  beforeEach(()=>{clockNow=1_700_000_000_000;frozenClock=vi.spyOn(Date,'now').mockImplementation(()=>clockNow);});
-  afterEach(()=>{frozenClock?.mockRestore();});
+  beforeEach(()=>{clockNow=1_700_000_000_000;frozenClock=vi.spyOn(Date,'now').mockImplementation(()=>clockNow);configure({asyncUtilTimeout:60000});});
+  afterEach(()=>{frozenClock?.mockRestore();configure({asyncUtilTimeout:10000});});
   /** Holds every edit the document is asked to record until the test lets it through, one at a time. */
   function holdCaptureEdits(c:DocumentController){
     const bridge=documentBridges.get(c.getState().documentId)!,original=bridge.applyEdit.bind(bridge);
@@ -2850,22 +2852,25 @@ describe('MIDI capture in the score',()=>{
     const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
     fireEvent.keyDown(workspace,{key:'n'});await startCapture();
     const strings=()=>currentBeat(c,0).notes.map(note=>[note.string,note.fret]);
-    const undo=async()=>{fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(0));};
+    // A chord is written when its edit has landed AND its follow-up has moved the cursor on (that follow-up also arms the undo's cursor return); the undo takes the note out
+    // first and puts the cursor back on the beat a moment later, and the next chord is written at the cursor. So each step waits for the cursor, not for the note alone.
+    const written=async()=>{await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));};
+    const undo=async()=>{fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(0));await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:0}));};
     const sent=(channel:number)=>({...keyboardChord([52]),notes:[{key:52,velocity:90,channel}]});
     try{
       expect(midiCaptureSession().get().trackStrings).toBe(6);
       sendChord(sent(5));
-      await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));
+      await written();
       expect(strings()).toEqual([[3,2]]);
       await undo();
       localStorage.setItem('tabplayer.midiCapture',JSON.stringify({port:'',chordWindowMs:60,minVelocity:1,stringMapping:'highestFirst'}));
       sendChord(sent(5));
-      await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));
+      await written();
       expect(strings()).toEqual([[1,12]]);
       await undo();
       localStorage.setItem('tabplayer.midiCapture',JSON.stringify({port:'',chordWindowMs:60,minVelocity:1,stringMapping:'lowestFirst'}));
       sendChord(sent(0));
-      await waitFor(()=>expect(currentBeat(c,0).notes).toHaveLength(1));
+      await written();
       expect(strings()).toEqual([[1,12]]);
     }finally{localStorage.removeItem('tabplayer.midiCapture');}
   });
@@ -3185,8 +3190,8 @@ describe('MIDI capture in the score',()=>{
     // Neither the chord that found the queue full nor the typed key that evicted one says the editor is busy or refuses later keys.
     expect(screen.queryByText(/Still entering the previous note/)).toBeNull();
     // Let the queue run (or go stale); then the chords that were written are the first ones, in order, and the evicted ones are not among them.
-    let seen=-1;
-    await waitFor(()=>{const now=c.getState().snapshot.project.edits.length;const settled=now===seen;seen=now;expect(settled).toBe(true);},{timeout:8000,interval:600});
+    // Nine items were accepted (the first chord, four keys, three chords, and the last typed key): wait for the event, the ninth edit arriving, not for a quiet spell.
+    await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before).toBe(9));
     const low=c.getState().snapshot.project.edits.slice(before).flatMap(edit=>edit.type==='sequence'?edit.commands:[edit]).filter(step=>step.type==='setNote'&&(step as {string:number}).string===1).map(step=>(step as {fret:number}).fret);
     expect(low).toEqual([...low].sort((x,y)=>x-y));
     expect(low).not.toContain(4);expect(low).not.toContain(5);

@@ -194,6 +194,10 @@
           "bars": 0,
           "betweenLoops": false
         }
+      },
+      "authoredBpm": {
+        "min": 120,
+        "max": 120
       }
     },
     {
@@ -254,6 +258,167 @@
           "betweenLoops": false
         },
         "tonality": 12
+      }
+    },
+    {
+      "name": "fixed backing at the authored tempo",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 120
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 120,
+        "max": 120
+      }
+    },
+    {
+      "name": "fixed backing at exactly 10% of the tempo",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 12
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 120,
+        "max": 120
+      }
+    },
+    {
+      "name": "fixed backing at exactly 300% of the tempo",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 300
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 100,
+        "max": 100
+      }
+    },
+    {
+      "name": "fixed backing across a tempo change at both limits 12",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 12
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 60,
+        "max": 120
+      }
+    },
+    {
+      "name": "fixed backing across a tempo change at both limits 180",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 180
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 60,
+        "max": 120
+      }
+    },
+    {
+      "name": "fixed backing at the stated low of a 121 BPM score",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 12.1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 121,
+        "max": 121
+      }
+    },
+    {
+      "name": "fixed backing at the stated high of a 33.3 BPM score",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 99.9
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 33.3,
+        "max": 33.3
       }
     }
   ],
@@ -584,25 +749,6 @@
       }
     },
     {
-      "name": "fixed backing",
-      "hasBacking": true,
-      "settings": {
-        "tempo": {
-          "kind": "fixed",
-          "bpm": 120
-        },
-        "metronome": {
-          "enabled": false,
-          "volume": 0.4,
-          "visual": false
-        },
-        "countIn": {
-          "bars": 0,
-          "betweenLoops": false
-        }
-      }
-    },
-    {
       "name": "unknown root",
       "hasBacking": false,
       "settings": {
@@ -873,6 +1019,167 @@
           "betweenLoops": false
         },
         "tonality": "2"
+      }
+    },
+    {
+      "name": "fixed backing just under 10% of the tempo",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 11.9
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 120,
+        "max": 120
+      }
+    },
+    {
+      "name": "fixed backing just over 300% of the tempo",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 300
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 99.9,
+        "max": 99.9
+      }
+    },
+    {
+      "name": "fixed backing under 10% of the fastest tempo",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 11.9
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 60,
+        "max": 120
+      }
+    },
+    {
+      "name": "fixed backing over 300% of the slowest tempo",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 181
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 60,
+        "max": 120
+      }
+    },
+    {
+      "name": "fixed backing where no tempo fits a score from 10 to 400 BPM",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 100
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 10,
+        "max": 400
+      }
+    },
+    {
+      "name": "fixed backing just under the stated low of a 121 BPM score",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 12
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 121,
+        "max": 121
+      }
+    },
+    {
+      "name": "fixed backing just over the stated high of a 33.3 BPM score",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 100
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      },
+      "authoredBpm": {
+        "min": 33.3,
+        "max": 33.3
       }
     }
   ]

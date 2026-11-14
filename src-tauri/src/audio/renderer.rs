@@ -8,7 +8,9 @@ use super::{
     midi_out::MidiTap,
     plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
     plugin_insert::{InsertError, PluginInsert},
-    practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
+    practice::{
+        AuthoredTempos, ClickVoice, MetronomeSettings, PracticeRefusal, PulsePosition, RenderTempo,
+    },
     resources::{AudioResources, Region},
     voices::{
         RECORDED_KIT, SampleVoice, VoiceParameters, articulation_name, automatic_voice_id,
@@ -1890,20 +1892,28 @@ impl Renderer {
         self.set_practice_tempo(RenderTempo::Relative { ratio: speed })
     }
     pub fn set_practice_tempo(&mut self, tempo: RenderTempo) -> Result<(), String> {
+        self.apply_practice_tempo(tempo)
+            .map_err(PracticeRefusal::message)
+    }
+    /// As `set_practice_tempo`, deciding a refusal without building a message: the audio thread uses this one, and
+    /// nothing on it may allocate.
+    pub fn apply_practice_tempo(&mut self, tempo: RenderTempo) -> Result<(), PracticeRefusal> {
         match tempo {
             RenderTempo::Relative { ratio }
                 if !ratio.is_finite() || !(0.1..=3.0).contains(&ratio) =>
             {
-                return Err("Practice speed must be between 10% and 300%.".into());
+                return Err(PracticeRefusal::Fixed(
+                    "Practice speed must be between 10% and 300%.",
+                ));
             }
             RenderTempo::Fixed { bpm } => {
                 if !bpm.is_finite() || !(10.0..=300.0).contains(&bpm) {
-                    return Err("Fixed tempo must be between 10 and 300 BPM.".into());
+                    return Err(PracticeRefusal::Fixed(
+                        "Fixed tempo must be between 10 and 300 BPM.",
+                    ));
                 }
-                if self.has_backing() {
-                    return Err(
-                        "Fixed tempo is unavailable while a backing track is present.".into(),
-                    );
+                if let Some(authored) = self.authored_tempos() {
+                    authored.refuse_fixed(bpm)?;
                 }
             }
             _ => {}
@@ -2082,6 +2092,11 @@ impl Renderer {
         }
         self.count_in_frame(0.0)
     }
+    /// The authored tempo range a fixed tempo is checked against, while a backing track is present.
+    pub fn authored_tempos(&self) -> Option<AuthoredTempos> {
+        self.has_backing()
+            .then(|| AuthoredTempos::of_plan(&self.plan))
+    }
     pub fn has_backing(&self) -> bool {
         self.configured_backing || self.backing.is_some()
     }
@@ -2212,8 +2227,10 @@ impl Renderer {
         processing: BackingProcessing,
         extra_semitones: i8,
     ) -> Result<(), String> {
-        if matches!(self.tempo, RenderTempo::Fixed { .. }) {
-            return Err("Fixed tempo is unavailable while a backing track is present.".into());
+        // The backing follows the score clock in fixed mode as in relative mode, so a fixed tempo that stretches it
+        // outside 10% to 300% anywhere in the score is refused here, before anything is installed.
+        if let RenderTempo::Fixed { bpm } = self.tempo {
+            AuthoredTempos::of_plan(&self.plan).check_fixed(bpm)?;
         }
         validate_mix(&mix)?;
         let mut voice = BackingVoice::new_with_processing_shifted(

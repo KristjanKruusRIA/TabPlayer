@@ -160,7 +160,7 @@ const fixed: Array<[string, RegExp]> = [
   ['src/audio/BackingPanel.tsx', /<h3>Backing audio<\/h3>|'Replace backing'|'Import backing'|>Remove backing<|>Show waveform</],
   ['src/audio/BackingWaveform.tsx', /aria-label="Backing audio waveform"|aria-label="Backing waveform"|>Score follows audio<|>Fit<\/button>/],
   ['src/audio/BackingProcessingControls.tsx', /<summary>Pitch &amp; filter|>Reset<\/button>|label>Filter<select|Changes backing audio only\./],
-  ['src/audio/PracticePanel.tsx', /<summary>Practice settings<\/summary>|Fixed tempo is unavailable while a backing track is present|>Apply practice settings<\/button>/],
+  ['src/audio/PracticePanel.tsx', /<summary>Practice settings<\/summary>|>Apply practice settings<\/button>/],
   ['src/editor/SectionsPanel.tsx', />Previous section<\/button>|>Next section<\/button>|aria-label="Sections"|No sections yet\./],
   ['src/engraving/EngravingPanel.tsx', />Apply engraving<\/button>|>Reset to source\/default<\/button>|<summary>Staff profiles<\/summary>|<summary>Notation style presets<\/summary>/],
   ['src/engraving/StylePresetsPanel.tsx', />Apply saved style<\/button>|>Force default style<\/button>|<summary>Saved styles<\/summary>/],

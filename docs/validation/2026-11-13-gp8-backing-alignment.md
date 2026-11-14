@@ -1,6 +1,6 @@
 # GP8 parity P20: backing alignment under loops, seeks, speed and feel (2026-11-13)
 
-THE-57. Measurement only: **no product code changed**. The new test program is `src-tauri/tests/audio_backing_alignment.rs`. Nobody has listened to any of this; every claim below is a number from a headless render at 48 kHz through `CallbackTransport` (the real loop, seek, count and practice-tempo path), not a judgement of sound.
+THE-57. This note is the 2026-11-13 measurement, written when **no product code had changed**. Both open questions below were decided by the owner on 2026-11-14 and are implemented: see `2026-11-14-gp8-backing-fixed-mode.md`. The numbers in this note describe the stretcher and the refusal as they were on 2026-11-13. The new test program is `src-tauri/tests/audio_backing_alignment.rs`. Nobody has listened to any of this; every claim below is a number from a headless render at 48 kHz through `CallbackTransport` (the real loop, seek, count and practice-tempo path), not a judgement of sound.
 
 **Headline.** Backing transients (isolated clicks and impulses) land on the score's frame, exactly. Sustained backing audio, which is what real recordings are made of, is **not** sample aligned at any speed other than 1.0x: it sits a bounded amount early (below 1.0x) or late (above 1.0x), about 7.6 to 15.9 ms at the speeds measured, and it is the same on every loop pass. It was not changed, because changing it changes the sound and nobody has listened. A partial-beat loop with real backing audio is therefore aligned to within that offset, not to the frame.
 
@@ -53,13 +53,13 @@ What I found: mechanically it would work, because the backing already follows th
 
 ## Open questions for the owner
 
-0. Is a backing that is 8 to 16 ms early at slow practice speeds and late at fast ones acceptable, or should the stretcher be re-centred? Re-centring changes the sound and needs listening before it is chosen.
+Decided on 2026-11-14 and removed from this list (see `2026-11-14-gp8-backing-fixed-mode.md`): whether the stretcher should be re-centred (yes, done), and fixed mode with a backing (allowed; the backing follows by stretching; refused outside 10% to 300%).
 
-Fixed mode with backing:
+Still open:
 
-1. Should fixed mode with a backing exist at all? Options: keep the refusal (today); or allow it.
-2. If allowed, what does the backing do? (i) Follow the score position, so it is stretched by fixed BPM divided by the authored tempo at each point (simplest; assumes the audio matches the authored tempo map, as relative speed does today). (ii) For a score that follows its audio (reference sync), the tempos come from the audio, so fixed BPM would be compared with the derived tempos. (iii) Mute the backing in fixed mode.
-3. What happens when the implied ratio leaves 10% to 300% (fixed 300 BPM over an authored 10 BPM is 30 times)? Refuse the setting, clamp, or mute the backing there.
+1. Fermata holds are not implemented; a Guitar Pro 8 probe found no hold in its MIDI export (see the section above).
+2. Is a residual of up to about 2.5 ms for aperiodic backing audio (noise-like, with no period to splice by) acceptable, or should the search window or splice method change? Measured in the 2026-11-14 note; nobody has listened.
+3. A backing with sync anchors has its own source-over-score slope on top of the practice speed. The 10% to 300% rule counts only the score clock (fixed tempo over authored tempo), as relative speed does; should the anchors' slope count too?
 
 ## Limits
 

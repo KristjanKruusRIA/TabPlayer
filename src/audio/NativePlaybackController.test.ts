@@ -378,14 +378,23 @@ it('fixed native cursor updates cannot feed a relative setting back through alph
   emit({playing:true,seconds:4,tick:4800,practice:practiceStatus(settings,{phase:'playing',effectiveRatio:1.5,currentBpm:90})});
   expect(player.getState()).toMatchObject({speed:150,practice:{currentBpm:90,settings}});expect(bridge.command).not.toHaveBeenCalled();expect(player.exportPracticeRatio()).toBeNull();player.destroy();
 });
-it.each(['imported','embedded'])('normalizes fixed before preparing %s backing, including muted backing',async kind=>{
+it.each(['imported','embedded'])('resets a fixed tempo the backing cannot follow before preparing %s backing, including muted backing',async kind=>{
+  const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);
+  const settings:PracticeSettings={tempo:{kind:'fixed',bpm:10},metronome:{enabled:true,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}};emit({practice:practiceStatus(settings)});
+  const backing={assetId:'recording',offsetMs:0,anchors:[],mix:{gain:1,pan:0,mute:true,solo:false}};
+  const next=kind==='imported'?{...built,settings:{...built.settings,backing}}:{...built,embeddedBacking:new Uint8Array([1,2]),embeddedBackingSettings:{offsetMs:0,anchors:[],mix:backing.mix}};
+  await player.loadDocument(project,next);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...settings,tempo:{kind:'relative',ratio:1}});
+  expect(player.getState().practiceNotice).toBe('fixed_tempo_backing_range');
+  expect(()=>player.setPractice(settings)).toThrow('would stretch the backing track');expect(player.getState().practice.settings.tempo).not.toEqual({kind:'fixed',bpm:10});player.destroy();
+});
+it.each(['imported','embedded'])('keeps a fixed tempo the backing can follow when preparing %s backing',async kind=>{
   const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);
   const settings:PracticeSettings={tempo:{kind:'fixed',bpm:90},metronome:{enabled:true,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}};emit({practice:practiceStatus(settings)});
   const backing={assetId:'recording',offsetMs:0,anchors:[],mix:{gain:1,pan:0,mute:true,solo:false}};
   const next=kind==='imported'?{...built,settings:{...built.settings,backing}}:{...built,embeddedBacking:new Uint8Array([1,2]),embeddedBackingSettings:{offsetMs:0,anchors:[],mix:backing.mix}};
-  await player.loadDocument(project,next);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...settings,tempo:{kind:'relative',ratio:1}});
-  expect(player.getState().practiceNotice).toBe('fixed_tempo_disabled_backing');
-  expect(()=>player.setPractice(settings)).toThrow('backing track');expect(player.getState().practice.settings.tempo).not.toEqual({kind:'fixed',bpm:90});player.destroy();
+  await player.loadDocument(project,next);expect(bridge.setMix).toHaveBeenCalled();
+  expect(player.getState().practiceNotice).toBeNull();expect(player.getState().practice.settings.tempo).toEqual({kind:'fixed',bpm:90});
+  expect(()=>player.setPractice({...settings,tempo:{kind:'fixed',bpm:10}})).toThrow('would stretch the backing track');player.destroy();
 });
 it('publishes loop only after native acknowledgement and clears it on generation replacement',async()=>{
   const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
@@ -415,13 +424,13 @@ it('retains only acknowledged settings when a musical edit replaces a pending Ap
   expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...DEFAULT_PRACTICE,tempo:{kind:'relative',ratio:1.23}});
   emit({generation,practice:practiceStatus({...defaults(),tempo:{kind:'fixed',bpm:90}})});expect(player.getState()).toMatchObject({practicePending:false,practice:{settings:{tempo:{kind:'relative',ratio:1.23}}}});player.destroy();
 });
-it('removing backing permits a later fixed Apply without restoring the former fixed tempo',async()=>{
+it('a backing keeps later fixed Apply inside its range and removing it lifts the range',async()=>{
   const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);
   const backing={assetId:'recording',offsetMs:0,anchors:[],mix:{gain:1,pan:0,mute:true,solo:false}};
   await player.loadDocument(project,{...built,settings:{...built.settings,backing}});emit();
-  expect(()=>player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:90}})).toThrow('backing track');
-  await player.loadDocument(project,built);expect(player.getState().practice.settings.tempo).toEqual({kind:'relative',ratio:1});
-  player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:90}});expect(bridge.command).toHaveBeenLastCalledWith({type:'setPractice',generation:player.generation,settings:{...DEFAULT_PRACTICE,tempo:{kind:'fixed',bpm:90}}});player.destroy();
+  expect(()=>player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:10}})).toThrow('would stretch the backing track');
+  player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:90}});expect(bridge.command).toHaveBeenLastCalledWith({type:'setPractice',generation:player.generation,settings:{...DEFAULT_PRACTICE,tempo:{kind:'fixed',bpm:90}}});
+  player.destroy();
 });
 
 it('an older Apply promise cannot fail a newer pending Apply after native acknowledgement',async()=>{

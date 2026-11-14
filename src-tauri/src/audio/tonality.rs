@@ -628,11 +628,11 @@ mod tests {
         let mut settings = super::super::practice::PracticeSettings::default();
         for value in [-13, 13, i8::MIN, i8::MAX] {
             settings.tonality = value;
-            assert!(settings.validate(false).is_err(), "{value}");
+            assert!(settings.validate(None).is_err(), "{value}");
         }
         for value in [-12, 0, 12] {
             settings.tonality = value;
-            assert!(settings.validate(false).is_ok(), "{value}");
+            assert!(settings.validate(None).is_ok(), "{value}");
         }
     }
 }

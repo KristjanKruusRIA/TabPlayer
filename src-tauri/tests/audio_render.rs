@@ -537,14 +537,19 @@ fn fixed_output_budget_crosses_tempo_step_and_rejects_backing_atomically() {
     assert!(backed.has_backing());
     let before = backed.position();
     let budget = backed.output_frames_until(4800.0);
-    assert_eq!(
+    // The plan runs 120 then 60 BPM, so with a backing a fixed tempo must stay within 12 to 180 BPM.
+    assert!(
         backed
-            .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
-            .unwrap_err(),
-        "Fixed tempo is unavailable while a backing track is present."
+            .set_practice_tempo(RenderTempo::Fixed { bpm: 11.9 })
+            .unwrap_err()
+            .contains("choose 12 to 180 BPM")
     );
     assert_eq!(backed.position().tick, before.tick);
     assert_eq!(backed.output_frames_until(4800.0), budget);
+    // A fixed tempo no backing could follow keeps one out, atomically; a tempo it can follow lets it in.
+    renderer
+        .set_practice_tempo(RenderTempo::Fixed { bpm: 300.0 })
+        .unwrap();
     assert!(
         renderer
             .install_backing(
@@ -555,6 +560,76 @@ fn fixed_output_budget_crosses_tempo_step_and_rejects_backing_atomically() {
             .is_err()
     );
     assert!(!renderer.has_backing());
+    renderer
+        .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    renderer
+        .install_backing(
+            tone(),
+            BackingMap::new(&[], 0.0, &plan).unwrap(),
+            ChannelMix::default(),
+        )
+        .unwrap();
+    assert!(renderer.has_backing());
+}
+
+#[test]
+fn refusing_a_fixed_tempo_on_the_audio_thread_touches_no_heap() {
+    use tabplayer_lib::{
+        audio::{
+            backing::BackingMap,
+            practice::{AuthoredTempos, PracticeSettings, PracticeTempo, RenderTempo},
+            renderer::Renderer,
+        },
+        settings::ChannelMix,
+    };
+    // Every refusal the callback can reach (a practice command, the renderer re-applying its tempo) must be decided
+    // without building a message. The plan runs 120 then 60 BPM, so 12 to 180 BPM are allowed with a backing.
+    let (_, resources, settings) = renderer_fixture(false);
+    let plan = changing_tempo_practice_plan();
+    let mut renderer = Renderer::new(plan.clone(), resources, settings, 48_000).unwrap();
+    renderer
+        .install_backing(
+            tone(),
+            BackingMap::new(&[], 0.0, &plan).unwrap(),
+            ChannelMix::default(),
+        )
+        .unwrap();
+    let authored = renderer.authored_tempos();
+    assert_eq!(authored, Some(AuthoredTempos::of_plan(&plan)));
+    let fixed = |bpm| PracticeSettings {
+        tempo: PracticeTempo::Fixed { bpm },
+        ..PracticeSettings::default()
+    };
+    HEAP_OPERATIONS.with(|n| n.set(0));
+    COUNT_HEAP.with(|f| f.set(true));
+    let refused = [
+        fixed(11.9).check(authored).is_err(),
+        fixed(180.1).check(authored).is_err(),
+        fixed(300.0).check(authored).is_err(),
+        renderer
+            .apply_practice_tempo(RenderTempo::Fixed { bpm: 11.9 })
+            .is_err(),
+        renderer
+            .apply_practice_tempo(RenderTempo::Fixed { bpm: 5.0 })
+            .is_err(),
+        renderer
+            .apply_practice_tempo(RenderTempo::Relative { ratio: 4.0 })
+            .is_err(),
+        fixed(12.0).check(authored).is_err(),
+        renderer
+            .apply_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+            .is_err(),
+        renderer
+            .apply_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+            .is_err(),
+    ];
+    COUNT_HEAP.with(|f| f.set(false));
+    assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
+    assert_eq!(
+        refused,
+        [true, true, true, true, true, true, false, false, false]
+    );
 }
 
 #[test]

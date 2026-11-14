@@ -1,9 +1,9 @@
 import { useEffect,useId,useState } from 'react';
 import { CLICK_SOUNDS,clickSoundOf,type ClickSound,type PracticeSettings } from './practice-types';
 import { useI18n } from '../i18n';
-import { PracticeError,validatePractice } from './practice';
+import { PracticeError,validatePractice,type AuthoredTempos } from './practice';
 
-export interface PracticePanelProps {settings:PracticeSettings;busy:boolean;hasBacking:boolean;onChange:(settings:PracticeSettings)=>void}
+export interface PracticePanelProps {settings:PracticeSettings;busy:boolean;hasBacking:boolean;/** The score's tempo range once its plan is known, so a fixed tempo can be checked here as native will check it. */authored?:AuthoredTempos|null;onChange:(settings:PracticeSettings)=>void}
 type TempoDraft=
   |{kind:'relative';ratio:string}
   |{kind:'fixed';bpm:string}
@@ -17,7 +17,7 @@ function draftFor(settings:PracticeSettings):Draft {
 const numeric=(value:string)=>value.trim()?Number(value):NaN;
 const percentage=(value:string,accepted?:number)=>accepted!==undefined&&value===String(accepted*100)?accepted:numeric(value)/100;
 
-export function PracticePanel({settings,busy,hasBacking,onChange}:PracticePanelProps):React.JSX.Element {
+export function PracticePanel({settings,busy,hasBacking,authored=null,onChange}:PracticePanelProps):React.JSX.Element {
   const tempo=settings.tempo,accepted=draftFor(settings),acceptedKey=JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,clickSoundOf(settings.metronome),settings.countIn.bars,settings.countIn.betweenLoops]),backingReason=useId(),{t}=useI18n();
   const [draft,setDraft]=useState(accepted),[error,setError]=useState('');
   useEffect(()=>{setDraft(accepted);setError('');},[acceptedKey]);
@@ -27,11 +27,11 @@ export function PracticePanel({settings,busy,hasBacking,onChange}:PracticePanelP
     const tempo=draft.tempo;
     const source=settings.tempo;
     const value:PracticeSettings={tempo:tempo.kind==='relative'?{kind:tempo.kind,ratio:percentage(tempo.ratio,source.kind==='relative'?source.ratio:undefined)}:tempo.kind==='fixed'?{kind:tempo.kind,bpm:numeric(tempo.bpm)}:{kind:tempo.kind,start:percentage(tempo.start,source.kind==='progressive'?source.start:undefined),end:percentage(tempo.end,source.kind==='progressive'?source.end:undefined),step:percentage(tempo.step,source.kind==='progressive'?source.step:undefined),repetitions:numeric(tempo.repetitions)},metronome:{enabled:draft.enabled,volume:percentage(draft.volume,settings.metronome.volume),visual:draft.visual,sound:draft.sound},countIn:{bars:numeric(draft.bars),betweenLoops:draft.betweenLoops},...(settings.tonality===undefined?{}:{tonality:settings.tonality})};
-    try {validatePractice(value,hasBacking);setError('');onChange(value);}catch(reason){setError(reason instanceof PracticeError?t(`practice.error_${reason.code}`):reason instanceof Error?reason.message:String(reason));}
+    try {validatePractice(value,hasBacking?authored:null);setError('');onChange(value);}catch(reason){setError(reason instanceof PracticeError?t(`practice.error_${reason.code}`,reason.detail&&{...reason.detail}):reason instanceof Error?reason.message:String(reason));}
   };
   return <details><summary>{t('practice.settings_summary')}</summary><fieldset disabled={busy}>
-    <label>{t('practice.tempo_mode')}<select value={draft.tempo.kind} aria-describedby={hasBacking?backingReason:undefined} onChange={event=>changeTempo(event.target.value as TempoDraft['kind'])}><option value="relative">{t('practice.tempo_relative')}</option><option value="fixed" disabled={hasBacking}>{t('practice.tempo_fixed')}</option><option value="progressive">{t('practice.tempo_progressive')}</option></select></label>
-    {hasBacking&&<p id={backingReason}>{t('practice.fixed_unavailable_backing')}</p>}
+    <label>{t('practice.tempo_mode')}<select value={draft.tempo.kind} aria-describedby={hasBacking?backingReason:undefined} onChange={event=>changeTempo(event.target.value as TempoDraft['kind'])}><option value="relative">{t('practice.tempo_relative')}</option><option value="fixed">{t('practice.tempo_fixed')}</option><option value="progressive">{t('practice.tempo_progressive')}</option></select></label>
+    {hasBacking&&<p id={backingReason}>{t('practice.fixed_backing_note')}</p>}
     {draft.tempo.kind==='relative'&&<label>{t('practice.relative_speed')}<input type="number" min={10} max={300} step="any" value={draft.tempo.ratio} onChange={event=>{const ratio=event.target.value;setDraft(value=>({...value,tempo:{kind:'relative',ratio}}));}}/></label>}
     {draft.tempo.kind==='fixed'&&<label>{t('practice.fixed_tempo_bpm')}<input type="number" min={10} max={300} step="any" value={draft.tempo.bpm} onChange={event=>{const bpm=event.target.value;setDraft(value=>({...value,tempo:{kind:'fixed',bpm}}));}}/></label>}
     {draft.tempo.kind==='progressive'&&<>

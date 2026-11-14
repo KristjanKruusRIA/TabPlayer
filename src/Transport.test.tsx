@@ -225,18 +225,18 @@ it('says so in the transport message line when an edit ended the loop',()=>{
   expect(screen.getByText('The loop was removed because your edit changed the bars it covered.')).toBeInTheDocument();
 });
 it('practice_notices_are_visible_and_control_errors_stay_inline',()=>{
-  const {player}=playerFor(snapshot({practiceNotice:'fixed_tempo_disabled_backing'}));player.setSpeed.mockImplementation(()=>{throw new Error('Practice change rejected.');});renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
-  expect(screen.getByText('Fixed tempo disabled because this score has backing audio.')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Slower'}));expect(screen.getByRole('alert')).toHaveTextContent('Practice change rejected.');
+  const {player}=playerFor(snapshot({practiceNotice:'fixed_tempo_backing_range'}));player.setSpeed.mockImplementation(()=>{throw new Error('Practice change rejected.');});renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
+  expect(screen.getByText('Fixed tempo reset to 100% speed because it would stretch the backing audio outside 10% to 300%.')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Slower'}));expect(screen.getByRole('alert')).toHaveTextContent('Practice change rejected.');
 });
 it('translates practice notice when language preference changes',()=>{
-  const {player}=playerFor(snapshot({practiceNotice:'fixed_tempo_disabled_backing'}));
+  const {player}=playerFor(snapshot({practiceNotice:'fixed_tempo_backing_range'}));
   setLanguagePreference('et');
   const {unmount}=renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
-  expect(screen.getByText('Fikseeritud tempo on välja lülitatud, sest sellel palal on taustheli.')).toBeInTheDocument();
+  expect(screen.getByText('Fikseeritud tempo lähtestati 100% kiirusele, sest see venitaks taustaheli väljapoole vahemikku 10% kuni 300%.')).toBeInTheDocument();
   unmount();
   setLanguagePreference('de');
   renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
-  expect(screen.getByText('Festes Tempo deaktiviert, da diese Partitur über Begleitaudio verfügt.')).toBeInTheDocument();
+  expect(screen.getByText('Festes Tempo auf 100 % Geschwindigkeit zurückgesetzt, weil es das Begleitaudio außerhalb von 10 % bis 300 % dehnen würde.')).toBeInTheDocument();
 });
 it('steps bars from the toolbar and shows the selected track, bar, signature and tempo in the position display',()=>{
   const {player,update}=playerFor(snapshot({measure:1}));

@@ -640,3 +640,85 @@ fn reference_ranges_and_loops_keep_pcm_source_clock_across_tempo_change() {
         }
     }
 }
+
+#[test]
+fn a_fixed_tempo_follows_a_backing_whose_tempos_come_from_its_audio() {
+    use tabplayer_lib::audio::{
+        device::PracticeSettings,
+        practice::{AuthoredTempos, PracticeTempo},
+    };
+
+    // For a score that follows its audio the plan's tempos are the audio's own (they are checked against the pins),
+    // so the authored tempo is what the audio plays at and fixed F stretches the backing by F over that tempo: here
+    // 120 BPM to tick 3840 and 60 BPM after, so F = 60, 90 and 150 give 0.5x/1.0x, 0.75x/1.5x and 1.25x/2.5x.
+    let case = first_case();
+    let plan = Arc::new(fixture_plan(&case));
+    let authored = AuthoredTempos::of_plan(&plan);
+    assert_eq!((authored.min, authored.max), (60.0, 120.0));
+    assert_eq!(authored.fixed_limits(), Some((12.0, 180.0)));
+    for rate in [44_100, 48_000] {
+        let mut pcm = vec![[0.0; 2]; rate as usize * 8];
+        for second in [2, 3, 4] {
+            pcm[rate as usize * second] = [0.7, 0.35];
+        }
+        for bpm in [60.0, 90.0, 150.0] {
+            let mut renderer =
+                Renderer::new(plan.clone(), resources(), DocumentSettings::default(), rate)
+                    .unwrap();
+            let backing = settings(&case["backing"]);
+            renderer
+                .install_backing(
+                    audio(rate, pcm.clone()),
+                    BackingMap::from_settings(&backing, &plan).unwrap(),
+                    backing.mix,
+                )
+                .unwrap();
+            let mut transport = CallbackTransport::headless(rate);
+            transport.install_with_practice(
+                Box::new(renderer),
+                1,
+                false,
+                PracticeSettings {
+                    tempo: PracticeTempo::Fixed { bpm },
+                    ..Default::default()
+                },
+            );
+            transport
+                .command(TransportCommand::PlayRange {
+                    generation: 1,
+                    start_tick: 1920.0,
+                    end_tick: Some(5760.0),
+                })
+                .unwrap();
+            let ticks_per_frame = bpm * 16.0 / f64::from(rate);
+            let mut output = vec![[0.0; 2]; (3840.0 / ticks_per_frame) as usize + 512];
+            let mut offset = 0;
+            for size in [127, 511, 1024].into_iter().cycle() {
+                let end = (offset + size).min(output.len());
+                transport.render_into(&mut output[offset..end]);
+                offset = end;
+                if offset == output.len() {
+                    break;
+                }
+            }
+            let attacks: Vec<usize> = output
+                .iter()
+                .enumerate()
+                .filter(|(_, sample)| sample[0] > 0.2)
+                .map(|(frame, _)| frame)
+                .collect();
+            // The impulses sit at ticks 1920, 3840 and 4800 of the score clock.
+            let expected: Vec<f64> = [1920.0, 3840.0, 4800.0]
+                .iter()
+                .map(|tick| (tick - 1920.0) / ticks_per_frame)
+                .collect();
+            assert_eq!(attacks.len(), 3, "fixed {bpm} rate {rate}: {attacks:?}");
+            for (frame, want) in attacks.iter().zip(&expected) {
+                assert!(
+                    (*frame as f64 - want).abs() <= 1.0,
+                    "fixed {bpm} rate {rate}: {attacks:?} vs {expected:?}"
+                );
+            }
+        }
+    }
+}

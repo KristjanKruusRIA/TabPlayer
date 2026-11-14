@@ -22,7 +22,9 @@ for (const name of ['guitarpro3-notes.gp3','guitarpro4-notes.gp4','guitarpro5-no
       expect(beats.slice(group*5,group*5+5).map(b => b.duration)).toEqual([duration,duration,duration,duration,duration]);
       expect(beats[group*5+4].isRest).toBe(true);
     }
-  });
+    // The first Guitar Pro 7 file in a worker loads the whole importer and takes about 1 s alone, several times that on a loaded machine.
+    // The limit is a hang guard, not a speed requirement.
+  }, 30_000);
 }
 
 it('keeps GP8 tempo changes within beats and measures', () => {

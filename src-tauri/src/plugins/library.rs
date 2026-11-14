@@ -745,6 +745,14 @@ mod tests {
         simplify(std::fs::canonicalize(path).unwrap())
     }
 
+    /// The root of an absolute path on this system, as the library writes it: a drive on Windows, `/` elsewhere.
+    const ABS_ROOT: &str = if cfg!(windows) { "C:\\" } else { "/" };
+
+    /// An absolute `.vst3` path in the plain form this system uses: `<root>Plugins<separator><name>`.
+    fn plain_bundle(name: &str) -> PathBuf {
+        Path::new(ABS_ROOT).join("Plugins").join(name)
+    }
+
     fn ok(classes: Vec<ClassInfo>) -> impl FnOnce(&Path) -> Result<Vec<ClassInfo>, HelperError> {
         move |_| Ok(classes)
     }
@@ -894,7 +902,7 @@ mod tests {
         // backslash costs 2 bytes in the file and a character outside the basic plane costs 4.
         for filler in ['\\', '\u{1F600}'] {
             let unit = json_len(&filler.to_string());
-            let mut path = String::from("C:\\");
+            let mut path = String::from(ABS_ROOT);
             while json_len(&path) + unit <= MAX_BUNDLE_JSON_BYTES - 6 {
                 path.push(filler);
             }
@@ -920,10 +928,10 @@ mod tests {
             assert!(bytes.len() < MAX_FILE_BYTES, "{filler:?}: {}", bytes.len());
         }
         // One byte more than the cap is not a valid bundle path.
-        let mut too_long = String::from("C:\\");
+        let mut too_long = String::from(ABS_ROOT);
         too_long.push_str(&"\u{1F600}".repeat(MAX_BUNDLE_JSON_BYTES / 4));
         assert!(!bundle_fits(Path::new(&too_long)));
-        assert!(bundle_fits(Path::new("C:\\Plugins\\Amp.vst3")));
+        assert!(bundle_fits(&plain_bundle("Amp.vst3")));
     }
 
     #[test]
@@ -1309,7 +1317,7 @@ mod tests {
     }
 
     fn longest_entry(class: char) -> LibraryEntry {
-        let mut path = String::from("C:\\");
+        let mut path = String::from(ABS_ROOT);
         while json_len(&path) + 4 <= MAX_BUNDLE_JSON_BYTES - 6 {
             path.push('\u{1F600}');
         }
@@ -1333,22 +1341,30 @@ mod tests {
             name: "Amp".into(),
             vendor: "Vendor".into(),
             version: "1.0".into(),
-            bundle: PathBuf::from("C:\\Plugins\\Two.vst3"),
+            bundle: plain_bundle("Two.vst3"),
             module_len: 1,
             module_modified: 1,
-            previous_bundle: Some(PathBuf::from("C:\\Plugins\\One.vst3")),
+            previous_bundle: Some(plain_bundle("One.vst3")),
         };
         assert!(entry.is_valid());
-        let mut too_long = String::from("C:\\");
+        let mut too_long = String::from(ABS_ROOT);
         too_long.push_str(&"\u{1F600}".repeat(MAX_BUNDLE_JSON_BYTES / 4));
         too_long.push_str(".vst3");
-        for bad in [
-            "Plugins\\One.vst3",
-            "C:\\Plugins\\..\\One.vst3",
-            "C:\\Plugins\\One.dll",
-            "\\\\.\\C:\\One.vst3",
-            too_long.as_str(),
-        ] {
+        let sep = std::path::MAIN_SEPARATOR;
+        let mut bad_paths = vec![
+            // Not absolute.
+            format!("Plugins{sep}One.vst3"),
+            // A `..` part.
+            format!("{ABS_ROOT}Plugins{sep}..{sep}One.vst3"),
+            // Not a `.vst3`.
+            format!("{ABS_ROOT}Plugins{sep}One.dll"),
+            too_long,
+        ];
+        if cfg!(windows) {
+            // A device path: only Windows has one.
+            bad_paths.push(String::from("\\\\.\\C:\\One.vst3"));
+        }
+        for bad in &bad_paths {
             entry.previous_bundle = Some(PathBuf::from(bad));
             assert!(!entry.is_valid(), "{bad}");
         }
@@ -1392,8 +1408,66 @@ mod tests {
         library.add(&one, ok(vec![class('A', "Amp")])).unwrap();
         let entries = library.add(&two, ok(vec![class('A', "Amp")])).unwrap();
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].bundle, two);
-        assert_eq!(entries[0].previous_bundle, Some(one));
+        // The library stores canonical paths. The temp folder may be named by a short or linked form (`RUNNER~1`, or
+        // `/var` for `/private/var`), so the expectation is canonical too.
+        assert_eq!(entries[0].bundle, canon(&two));
+        assert_eq!(entries[0].previous_bundle, Some(canon(&one)));
+    }
+
+    #[test]
+    fn a_bundle_added_again_by_another_spelling_of_its_path_is_not_a_move() {
+        let dir = tempfile::tempdir().unwrap();
+        let one = bundle(dir.path(), "One", b"x");
+        let other = dir.path().join("Other");
+        std::fs::create_dir_all(&other).unwrap();
+        // The same folder through a `..` part, and through a link or short name where this system has one.
+        let mut spellings = vec![other.join("..").join("One.vst3")];
+        spellings.extend(alias_of(&one));
+        for spelling in spellings {
+            assert_ne!(spelling, canon(&one), "{spelling:?} is another spelling");
+            let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
+            library.add(&one, ok(vec![class('A', "Amp")])).unwrap();
+            let entries = library.add(&spelling, ok(vec![class('A', "Amp")])).unwrap();
+            assert_eq!(entries.len(), 1, "{spelling:?}");
+            assert_eq!(entries[0].bundle, canon(&one), "{spelling:?}");
+            assert_eq!(entries[0].previous_bundle, None, "{spelling:?}");
+            std::fs::remove_dir_all(dir.path().join("data")).unwrap();
+        }
+    }
+
+    /// Another path to `bundle` that is not its canonical form: through a symbolic link on Unix, or the 8.3 short name
+    /// on Windows when the volume has one. `None` when this system gives no such path.
+    fn alias_of(bundle: &Path) -> Option<PathBuf> {
+        #[cfg(unix)]
+        {
+            let parent = bundle.parent()?;
+            let link = parent.join("link-to-folder");
+            std::os::unix::fs::symlink(parent, &link).ok()?;
+            Some(link.join(bundle.file_name()?))
+        }
+        #[cfg(windows)]
+        {
+            let short = short_path(bundle)?;
+            (short != canon(bundle)).then_some(short)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = bundle;
+            None
+        }
+    }
+
+    #[cfg(windows)]
+    fn short_path(path: &Path) -> Option<PathBuf> {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        unsafe extern "system" {
+            fn GetShortPathNameW(long: *const u16, short: *mut u16, len: u32) -> u32;
+        }
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain([0]).collect();
+        let mut out = vec![0u16; 1024];
+        // SAFETY: `wide` is NUL-terminated and `out` holds the length passed.
+        let n = unsafe { GetShortPathNameW(wide.as_ptr(), out.as_mut_ptr(), 1024) } as usize;
+        (n > 0 && n < out.len()).then(|| PathBuf::from(std::ffi::OsString::from_wide(&out[..n])))
     }
 
     #[test]

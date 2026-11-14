@@ -1,5 +1,10 @@
 {
   "bundle": {
-    "targets": ["msi"]
+    "targets": ["msi"],
+    "windows": {
+      "wix": {
+        "upgradeCode": "37BE520D-BF22-5B09-ABE2-996F23EE08DC"
+      }
+    }
   }
 }

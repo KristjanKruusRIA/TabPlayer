@@ -66,7 +66,8 @@
     "implemented": "User-facing path + source implementation + inspected meaningful assertions support the stated narrow capability. Does not certify full vendor parity or new runtime test.",
     "partial": "A related foundation exists, but an explicit documented subcapability, field, workflow or fidelity requirement remains open.",
     "missing": "No exposed authoring/workflow/command/settings path in baseline finite interfaces; imported/rendered fields do not substitute.",
-    "unverified": "Available evidence cannot establish the feature/interoperability/platform claim; acceptance remains open."
+    "unverified": "Available evidence cannot establish the feature/interoperability/platform claim; acceptance remains open.",
+    "out_of_scope": "Excluded from this product by an owner decision recorded with the reason. The row stays in the catalog, is not counted as missing and needs no further work."
   },
   "counts": {
     "total": 258,
@@ -79,8 +80,9 @@
     "current_dispositions": {
       "implemented": 102,
       "partial": 145,
-      "missing": 5,
-      "unverified": 6
+      "missing": 2,
+      "unverified": 6,
+      "out_of_scope": 3
     },
     "evidence_reviewed_total": 202,
     "evidence_reviewed": {
@@ -93,8 +95,9 @@
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 8,
-      "missing": 5,
-      "unverified": 1
+      "missing": 2,
+      "unverified": 1,
+      "out_of_scope": 3
     },
     "status_changed_total": 153,
     "transition_counts": {
@@ -102,6 +105,18 @@
       "missing -> partial": 100,
       "partial -> implemented": 10,
       "unverified -> partial": 2
+    },
+    "out_of_scope_changes": {
+      "total": 3,
+      "rows": [
+        "L02",
+        "L03",
+        "L04"
+      ],
+      "transition_counts": {
+        "missing -> out_of_scope": 3
+      },
+      "note": "Decided by the owner on 2026-11-14. These carried rows were not re-audited, so they are not part of status_changed_total (153), evidence_reviewed_total or transition_counts, which describe the 202 evidence-reviewed rows only."
     }
   },
   "evidence": {
@@ -2713,7 +2728,7 @@
     {
       "priority": 5,
       "family": "Sound, hardware and external acceptance",
-      "work": "Effect families/routing/catalogue breadth, MIDI output, audio input/output/tuner, backing pitch/filter tools, P16 tempo-generation/bracket work and services remain open. MIDI input is built and awaits real hardware (U16, U17). P15 waveform/timeline and visual sync editing meet only the recorded Windows diagnostic acceptance. Original-GP8, physical printers and physical macOS/Linux input/audio require actual receipts; build/test CI is a separate check. 2026-10-16 P17/P18 addendum: P17 meets the declared local integer semitone/cents and duration-preserving scope; P18 is partial for six local frequency filters, without vocal/center/channel separation. P16 is already evidence-reviewed partial for its recorded native tempo/reference work; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain open.",
+      "work": "Effect families/routing/catalogue breadth, MIDI output, audio input/output/tuner, backing pitch/filter tools, P16 tempo-generation/bracket work remain open; mySongBook (L02 to L04) is out of scope. MIDI input is built and awaits real hardware (U16, U17). P15 waveform/timeline and visual sync editing meet only the recorded Windows diagnostic acceptance. Original-GP8, physical printers and physical macOS/Linux input/audio require actual receipts; build/test CI is a separate check. 2026-10-16 P17/P18 addendum: P17 meets the declared local integer semitone/cents and duration-preserving scope; P18 is partial for six local frequency filters, without vocal/center/channel separation. P16 is already evidence-reviewed partial for its recorded native tempo/reference work; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain open.",
       "evidence": [
         "practice_limits",
         "engraving_limits",
@@ -3286,7 +3301,7 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Windows installer associates .tabplayer and .gp/.gpx/.gp5/.gp4/.gp3 with TabPlayer. A file on the command line opens once the workspace is ready, and a second launch hands its file to the running app through tauri-plugin-single-instance and exits. Files wait natively through startup, dialogs, exports and busy Library work, then go through the dropped-file intake's checks. A Windows desktop-test launch with a file and a second launch both opened their scores, and the built NSIS installer registers each extension.",
+      "current_behavior": "Windows installer associates .tabplayer and .gp/.gpx/.gp5/.gp4/.gp3 with TabPlayer. A file on the command line opens once the workspace is ready, and a second launch hands its file to the running app through tauri-plugin-single-instance and exits. Files wait natively through startup, dialogs, exports and busy Library work, then go through the dropped-file intake's checks. A Windows desktop-test launch with a file and a second launch both opened their scores, and the built NSIS installer registers each extension. 2026-11-14: by the owner's decision the Windows package is an MSI, not an NSIS installer (CI builds only the MSI); the NSIS observation above was made on an earlier test build and is not an observation of the MSI.",
       "remaining_gap": "The installer was not installed, so no Explorer double-click was observed; it takes over .gp* defaults where the user made no choice; macOS open events and Linux associations are untested (THE-73); a launched file opens beside the startup blank. 2026-11-14: the owner has no Mac or Linux machine, so macOS and Linux packages are built and tested by CI only and are not accepted on a real machine.",
       "current_evidence": [
         "2026-11-06-gp8-file-association.md"
@@ -10800,11 +10815,11 @@
       "acceptance_required": "Use supported authorized service access; do not substitute copied vendor catalog/assets.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
+      "current_status": "out_of_scope",
       "assessment": "baseline_not_reaudited",
       "current_proven_status": null,
       "current_behavior": "No service connector or entitled content/open workflow.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
+      "remaining_gap": "2026-11-14: out of scope by the owner's decision. mySongBook offers no public access for third-party applications. As read on 2026-11-14 through summaries of its terms (not checked against the raw pages), purchased scores cannot be stored on the device and are not available offline, and export is described ambiguously, so an integration is out of scope. Design note: docs/superpowers/specs/2026-11-14-mysongbook-fretlight-design.md. Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
       "current_evidence": [],
       "runtime_rechecked_by_this_audit": false
     },
@@ -10827,11 +10842,11 @@
       "acceptance_required": "Verify genuine authorized receipts/entitlements and free-score access if integration is available.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
+      "current_status": "out_of_scope",
       "assessment": "baseline_not_reaudited",
       "current_proven_status": null,
       "current_behavior": "No purchase/entitlement/free-score UI.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
+      "remaining_gap": "2026-11-14: out of scope by the owner's decision. mySongBook offers no public access for third-party applications. As read on 2026-11-14 through summaries of its terms (not checked against the raw pages), purchased scores cannot be stored on the device and are not available offline, and export is described ambiguously, so an integration is out of scope. Design note: docs/superpowers/specs/2026-11-14-mysongbook-fretlight-design.md. Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
       "current_evidence": [],
       "runtime_rechecked_by_this_audit": false
     },
@@ -10854,11 +10869,11 @@
       "acceptance_required": "Open previously authorized cached score with correct access status and filters.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
+      "current_status": "out_of_scope",
       "assessment": "baseline_not_reaudited",
       "current_proven_status": null,
       "current_behavior": "No entitled local cache/arrangement/version management.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
+      "remaining_gap": "2026-11-14: out of scope by the owner's decision. mySongBook offers no public access for third-party applications. As read on 2026-11-14 through summaries of its terms (not checked against the raw pages), purchased scores cannot be stored on the device and are not available offline, and export is described ambiguously, so an integration is out of scope. Design note: docs/superpowers/specs/2026-11-14-mysongbook-fretlight-design.md. Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
       "current_evidence": [],
       "runtime_rechecked_by_this_audit": false
     },

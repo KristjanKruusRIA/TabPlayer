@@ -40,7 +40,7 @@ To make the plug-in produce a large state on its own, for a host that cannot sen
 
 ## Factory
 
-The factory implements `IPluginFactory2`: the class reports the subcategory `Fx`, version `0.1.0` and vendor `TabPlayer`. It does not set `kUnicode`, because that promises `IPluginFactory3`.
+The factory implements `IPluginFactory2`: the class reports the subcategory `Fx`, version `1.0.0` and vendor `TabPlayer`. It does not set `kUnicode`, because that promises `IPluginFactory3`.
 
 ## Editor (Windows)
 

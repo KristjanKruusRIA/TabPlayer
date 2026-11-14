@@ -150,6 +150,7 @@ mod build_id_tests {
         assert!(!version.is_empty(), "{BUILD_ID}");
         assert_eq!(hash.len(), 16, "{BUILD_ID}");
         assert!(hash.bytes().all(|b| b.is_ascii_hexdigit()), "{BUILD_ID}");
-        assert_ne!(BUILD_ID, "0.2.0");
+        assert_eq!(version, env!("CARGO_PKG_VERSION"), "{BUILD_ID}");
+        assert!(!hash.is_empty(), "{BUILD_ID}");
     }
 }

@@ -440,7 +440,7 @@ mod windows_helper {
                             class_id: TEST_CLASS_ID.into(),
                             name: "TabPlayer Test Gain".into(),
                             vendor: "TabPlayer".into(),
-                            version: "0.1.0".into(),
+                            version: "1.0.0".into(),
                             subcategories: "Fx".into(),
                         }]
                     );

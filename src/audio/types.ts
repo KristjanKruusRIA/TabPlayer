@@ -3,7 +3,7 @@ import type { PracticeLoop,PracticeStatus } from './practice-types';
 import type { PerformedBeat,PlaybackSpan } from './selection-playback-types';
 export type { PracticeSettings } from './practice-types';
 
-export type PracticeNotice = 'fixed_tempo_disabled_backing'|'key_shift_refused'|'practice_unconfirmed';
+export type PracticeNotice = 'fixed_tempo_backing_range'|'key_shift_refused'|'practice_unconfirmed';
 export interface PlaybackState {ready:boolean;playing:boolean;time:number;endTime:number;measure:number;speed:number;metronome:boolean;practice:PracticeStatus;practicePending:boolean;/** The key the player has asked for: the last step taken while a change was pending, else the pending key, else the acknowledged one. */keyTarget?:number;/** Counts changes of document. */documentSerial?:number;practiceNotice:PracticeNotice|null;loop:PracticeLoop|null;/** Why an edit ended the loop that was running, until the next edit or loop. */loopNotice:'cleared'|null;range:PlaybackSpan|null;error:string|null}
 export type Articulation = 'picked' | 'fingered' | 'muted' | 'dead' | 'ghost' | 'staccato' | 'legato' | 'tapped' | 'harmonic' | 'feedback' | 'slap' | 'pop';
 export interface PlanTrack { id: string; program: number; percussion: boolean }

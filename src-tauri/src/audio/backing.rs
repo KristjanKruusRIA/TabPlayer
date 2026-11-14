@@ -183,6 +183,33 @@ impl BackingMap {
     }
 }
 const HOP: usize = 256;
+/// The grain search looks at positions within +-RADIUS of the position the grain is aimed at, RADIUS = HOP * step
+/// source frames, capped at MAX_RADIUS (about 43 ms at 48 kHz, reached only by a large upward key shift or a very high
+/// file rate). It samples them COARSE_POINTS at most, 4 frames apart when that fits (always at step 1), wider
+/// otherwise, then refines by single frames within one coarse step either side of the chosen peak. The work per grain,
+/// in correlations of 64 samples each, is therefore at most
+///   COARSE_POINTS + 2 * (stride - 1), stride = max(4, ceil(2 * RADIUS / (COARSE_POINTS - 1))),
+/// which is 129 + 6 = 135 at step 1 (as before the re-centring), and never more than 144 + 56 = 200, at the cap. The
+/// score of each coarse position is kept in a fixed array, so the search allocates nothing.
+const MAX_RADIUS: f64 = 2048.0;
+const COARSE_POINTS: usize = 144;
+/// Which correlation peak a grain lands on is decided by its height less PULL_COST times the square of its distance
+/// from the aim in grains (HOP frames): nothing close in, 0.35 a grain away. A peak is where the waveform lines up, so
+/// whichever is chosen is phase-true, and the position is then refined on the correlation alone: the pull moves the
+/// choice between peaks, never the position inside one.
+const PULL_COST: f64 = 0.35;
+/// A peak that scores more than this below the best is never chosen, however near the aim: a much weaker peak is not
+/// preferred over a much stronger one.
+const PEAK_FLOOR: f64 = 0.1;
+/// Closer than this to the stretcher's own rate, the read position is not shifted at all (so 1.0x stays exact).
+const NEUTRAL_RATE: f64 = 1e-6;
+/// The furthest a grain is aimed from the score's source position, in source frames.
+const MAX_AIM: f64 = 8192.0;
+/// The spacing and number of the coarse search positions for a search radius (see MAX_RADIUS).
+fn search_shape(radius: i32) -> (i32, usize) {
+    let stride = ((2 * radius) as usize).div_ceil(COARSE_POINTS - 1).max(4) as i32;
+    (stride, ((2 * radius) / stride) as usize + 1)
+}
 struct Transient {
     frame: usize,
     score_seconds: f64,
@@ -201,6 +228,10 @@ pub struct BackingVoice {
     transients: Vec<Transient>,
     transient_index: usize,
     previous_seconds: f64,
+    /// Correlation of each coarse search position, kept so the search finds its peaks without allocating.
+    scores: [f64; COARSE_POINTS],
+    /// Where the last grain was read from, in source frames (for tests of the search).
+    landed: f64,
 }
 impl BackingVoice {
     pub fn new(
@@ -303,6 +334,8 @@ impl BackingVoice {
             transients,
             transient_index: 0,
             previous_seconds: f64::NEG_INFINITY,
+            scores: [0.0; COARSE_POINTS],
+            landed: 0.0,
         })
     }
     fn source_frame(&self, index: i64) -> [f32; 2] {
@@ -330,9 +363,49 @@ impl BackingVoice {
         let b = self.source_frame(i + 1);
         std::array::from_fn(|c| a[c] * (1.0 - f) + b[c] * f)
     }
+    /// How far from the score's own source position a grain should start so that what is heard sits on the score
+    /// clock. A grain reads `step` source frames per output frame (the key shift and the file's rate change it) while
+    /// the clock advances `rate` of them (practice speed and a sync map's slope), so the read position drifts from the
+    /// clock by (step - rate) per output frame whenever the two differ, and the stretcher is then stretching in time:
+    /// at any speed, with or without a key shift or a map slope, in playback and in export alike. The first half of a
+    /// grain's output is the previous grain's continuation crossfaded into this one, so what is heard averages that
+    /// drift over about HOP frames: starting (HOP - 0.5) * (rate - step) away puts the average on the clock. The aim
+    /// is not limited to what the search window reaches, because the window is centred on it; only an absurd rate
+    /// (more than MAX_AIM source frames away) is cut short. Zero for the first grain after a seek (it starts exactly
+    /// on the clock) and where rate and step are equal, which is an unshifted voice at 100% speed on a slope-1 map:
+    /// there nothing is stretched and the output is bit-identical to what it was before the re-centring.
+    fn grain_bias(&self, seconds: f64) -> f64 {
+        let dt = seconds - self.previous_seconds;
+        if !self.primed || !(dt > 0.0 && dt < 0.05) {
+            return 0.0;
+        }
+        let per_call = (self.map.source_seconds(seconds)
+            - self.map.source_seconds(self.previous_seconds))
+            * self.audio.sample_rate as f64;
+        // The previous call was the previous output frame, so this is source frames per output frame.
+        let rate = per_call;
+        if !rate.is_finite() || (rate - self.step).abs() < NEUTRAL_RATE {
+            return 0.0;
+        }
+        ((HOP as f64 - 0.5) * (rate - self.step)).clamp(-MAX_AIM, MAX_AIM)
+    }
+    /// The normalised correlation between the previous grain's continuation and what a grain read from `position` would
+    /// hold, from every fourth frame.
+    fn correlation(&self, position: f64, tail_energy: f64) -> f64 {
+        let (mut cross, mut energy) = (0.0, 0.0);
+        for i in (0..HOP).step_by(4) {
+            let x = self.sample(position + i as f64 * self.step);
+            let y = self.tail[i];
+            cross += (x[0] * y[0] + x[1] * y[1]) as f64;
+            energy += (x[0] * x[0] + x[1] * x[1]) as f64;
+        }
+        cross / (energy * tail_energy).sqrt().max(1e-12)
+    }
     fn prepare_grain(&mut self, seconds: f64) {
-        let expected = self.map.source_seconds(seconds) * self.audio.sample_rate as f64;
-        let mut best = expected;
+        let natural = self.map.source_seconds(seconds) * self.audio.sample_rate as f64;
+        let radius = (HOP as f64 * self.step).ceil().min(MAX_RADIUS) as i32;
+        let aim = natural + self.grain_bias(seconds);
+        let mut best = aim;
         let tail_energy = self
             .tail
             .iter()
@@ -341,48 +414,64 @@ impl BackingVoice {
             .sum::<f64>();
         if self.primed
             && tail_energy > 1e-10
-            && expected >= 0.0
-            && expected < self.audio.frames.len() as f64
+            && natural >= 0.0
+            && natural < self.audio.frames.len() as f64
         {
-            let radius = (HOP as f64 * self.step).ceil() as i32;
-            let mut best_score = f64::NEG_INFINITY;
-            for delta in (-radius..=radius).step_by(4) {
-                let candidate = expected + delta as f64;
-                let mut cross = 0.0;
-                let mut energy = 0.0;
-                for i in (0..HOP).step_by(4) {
-                    let x = self.sample(candidate + i as f64 * self.step);
-                    let y = self.tail[i];
-                    cross += (x[0] * y[0] + x[1] * y[1]) as f64;
-                    energy += (x[0] * x[0] + x[1] * x[1]) as f64;
-                }
-                let score =
-                    cross / (energy * tail_energy).sqrt().max(1e-12) - 1e-7 * (delta as f64).abs();
-                if score > best_score {
-                    best_score = score;
-                    best = candidate;
-                }
+            // Coarse: score the window and take the best correlation PEAK by height less the pull toward the aim.
+            let (stride, points) = search_shape(radius);
+            for k in 0..points {
+                let delta = -radius + k as i32 * stride;
+                self.scores[k] = self.correlation(aim + delta as f64, tail_energy);
             }
-            // Refine at source-frame precision after the coarse correlation search.
-            let coarse = best;
-            for delta in -3..=3 {
-                let candidate = coarse + delta as f64;
-                let mut cross = 0.0;
-                let mut energy = 0.0;
-                for i in (0..HOP).step_by(4) {
-                    let x = self.sample(candidate + i as f64 * self.step);
-                    let y = self.tail[i];
-                    cross += (x[0] * y[0] + x[1] * y[1]) as f64;
-                    energy += (x[0] * x[0] + x[1] * x[1]) as f64;
+            let top = self.scores[..points]
+                .iter()
+                .copied()
+                .fold(f64::NEG_INFINITY, f64::max);
+            // A run of exactly equal scores (digital silence, or a signal whose period divides the coarse step) is one
+            // peak, and the point of it nearest the aim stands for it.
+            let nearest = (radius as usize).div_ceil(stride as usize) as i32;
+            let nearest = if (nearest * stride - radius) > (radius - (nearest - 1) * stride) {
+                nearest - 1
+            } else {
+                nearest
+            } as usize;
+            let mut chosen = (f64::NEG_INFINITY, 0usize);
+            let mut start = 0;
+            while start < points {
+                let score = self.scores[start];
+                let mut end = start;
+                while end + 1 < points && self.scores[end + 1] == score {
+                    end += 1;
                 }
-                let score = cross / (energy * tail_energy).sqrt().max(1e-12)
-                    - 1e-7 * (candidate - expected).abs();
+                let peak = (start == 0 || self.scores[start - 1] < score)
+                    && (end + 1 == points || self.scores[end + 1] < score);
+                if peak && score >= top - PEAK_FLOOR {
+                    let at = nearest.clamp(start, end);
+                    let grains = (-radius + at as i32 * stride) as f64 / HOP as f64;
+                    let value = score - PULL_COST * grains * grains;
+                    if value > chosen.0 {
+                        chosen = (value, at);
+                    }
+                }
+                start = end + 1;
+            }
+            let coarse = aim + (-radius + chosen.1 as i32 * stride) as f64;
+            // Fine: single frames within one coarse step of the peak, whichever matches best.
+            let mut best_score = self.scores[chosen.1];
+            best = coarse;
+            for delta in -(stride - 1)..stride {
+                if delta == 0 {
+                    continue;
+                }
+                let candidate = coarse + delta as f64;
+                let score = self.correlation(candidate, tail_energy);
                 if score > best_score {
                     best_score = score;
                     best = candidate;
                 }
             }
         }
+        self.landed = best;
         for i in 0..HOP {
             let head = self.sample(best + i as f64 * self.step);
             let t = i as f32 / HOP as f32;
@@ -460,5 +549,75 @@ impl BackingVoice {
         }
         self.map
             .score_seconds(self.audio.frames.len() as f64 / self.audio.sample_rate as f64)
+    }
+}
+
+#[cfg(test)]
+mod search_bound_tests {
+    use super::*;
+    #[test]
+    fn the_search_does_at_most_two_hundred_correlations_whatever_the_step() {
+        // From a file at 8 kHz played at 192 kHz (step 1/24) to one at 192 kHz played at 8 kHz, +25 semitones.
+        let mut step = 1.0 / 24.0;
+        let mut worst = 0;
+        while step < 24.0 * 4.5 {
+            let radius = (HOP as f64 * step).ceil().min(MAX_RADIUS) as i32;
+            let (stride, points) = search_shape(radius);
+            assert!(points <= COARSE_POINTS && stride >= 4, "step {step}");
+            // The coarse positions reach the whole window, and the fine search covers the gap between them.
+            assert!(
+                -radius + (points as i32 - 1) * stride > radius - stride,
+                "step {step}"
+            );
+            let work = points + 2 * (stride as usize - 1);
+            worst = worst.max(work);
+            if step == 1.0 {
+                assert_eq!(work, 135);
+            }
+            step *= 1.01;
+        }
+        assert!(worst <= 200, "{worst}");
+        assert_eq!(search_shape(256), (4, 129));
+    }
+}
+
+#[cfg(test)]
+mod plateau_tests {
+    use super::*;
+    fn voice(frames: Vec<[f32; 2]>) -> BackingVoice {
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"a","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let mut voice = BackingVoice::new(
+            Arc::new(DecodedAudio {
+                sample_rate: 48_000,
+                channels: 2,
+                frames: Arc::new(frames),
+            }),
+            BackingMap::new(&[], 0.0, &plan).unwrap(),
+            48_000,
+        )
+        .unwrap();
+        // A grain after an earlier one, with the clock not moving between calls (so nothing is aimed away).
+        voice.primed = true;
+        voice.previous_seconds = f64::NEG_INFINITY;
+        voice
+    }
+    #[test]
+    fn a_grain_whose_candidates_are_all_silent_lands_on_the_aim_not_the_edge() {
+        // The tail still sounds, every candidate reads digital silence: every score is equal, one flat run.
+        let mut voice = voice(vec![[0.0; 2]; 20_000]);
+        voice.tail = [[0.5; 2]; HOP];
+        voice.prepare_grain(0.1);
+        assert_eq!(voice.landed, 4800.0);
+    }
+    #[test]
+    fn a_signal_whose_period_divides_the_coarse_step_lands_on_the_peak_nearest_the_aim() {
+        // A period of 4 frames makes every coarse position score exactly the same: one flat run, whole window.
+        let pattern = [0.5f32, 0.25, -0.5, -0.25];
+        let mut voice = voice((0..20_000).map(|n| [pattern[n % 4]; 2]).collect());
+        for i in 0..HOP {
+            voice.tail[i] = [pattern[i % 4]; 2];
+        }
+        voice.prepare_grain(0.1);
+        assert_eq!(voice.landed, 4800.0);
     }
 }

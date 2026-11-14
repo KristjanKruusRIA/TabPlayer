@@ -136,6 +136,8 @@ type EntryItem=
   |{kind:'capture';chord:MidiChord};
 interface QueuedEntryKey{item:EntryItem;at:number;documentId:string}
 const ENTRY_QUEUE_MAX=8,ENTRY_QUEUE_STALE_MS=2000,DROPPED_NOTICE_PAUSE_MS=1500;
+/** A digit typed within this long of the one before it joins it into a two-digit fret, as in Guitar Pro. */
+const FRET_DIGIT_WINDOW_MS=1000;
 /** Chords that may wait in the entry queue at once; more are counted as not written. */
 const CHORD_QUEUE_MAX=4;
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)&&!(target instanceof HTMLInputElement&&target.type==='range')||target.isContentEditable);
@@ -305,12 +307,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     void readHarmonyLibrary().then(value=>{if(active&&revision===libraryRevision.current)setLibrary(value);}).catch(error=>{if(active&&revision===libraryRevision.current)setLibraryError(t('app.chord_library_error',{error:error instanceof Error?error.message:String(error)}));}).finally(()=>{if(active&&revision===libraryRevision.current)setLibraryLoading(false);});
     return()=>{active=false;};
   },[harmonyOpen]);
-  const digits=useRef({text:'',time:0});
+  /** The fret digits just typed, which wrote the note at once: `pendingFret` is the hint while a second digit may still join them (a second, FRET_DIGIT_WINDOW_MS). `fretRun` is what that join needs: whether the first digit recorded an edit (an undo takes it back before the two digits are written as one), the document revision after it, and the entry duration from before it. */
   const [pendingFret,setPendingFret]=useState<string|null>(null);
-  /** The fret in place before the first pending digit (the note's, or one seeded from the instrument view): Escape and Backspace put it back. */
-  const fretBase=useRef<number|null>(null),pendingTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
-  /** Ends the pending state. The digit window lasts a second, so the hint goes with it. */
-  const endPending=()=>{if(pendingTimer.current!==null){clearTimeout(pendingTimer.current);pendingTimer.current=null;}fretBase.current=null;digits.current.text='';setPendingFret(null);};
+  const fretRun=useRef<{text:string;at:number;wrote:boolean;documentId:string;revision:number;edits:number;command:string;target:BeatTarget;string:number;entryBefore:EntryDuration|null}|null>(null);
+  const pendingTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  /** Ends the digit window: the hint goes, and the next digit starts a new fret. */
+  const endPending=()=>{if(pendingTimer.current!==null){clearTimeout(pendingTimer.current);pendingTimer.current=null;}fretRun.current=null;setPendingFret(null);};
   useEffect(()=>()=>{if(pendingTimer.current!==null)clearTimeout(pendingTimer.current);},[]);
   const target=repairSelection(state.score,selection);
   const gapBar=selectedGapBar(musicSelection,target.bar);
@@ -344,9 +346,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const string=Math.max(1,Math.min(selectedString,location.staff.tuning.length));
   // A click in the instrument view leaves its clicked fret as the entry fret, even when that note was just removed.
   const entryFret=useRef<{string:number;fret:number;score:model.Score}|null>(null);
+  // A typed fret writes its note, which changes the score: that must not close the digit window, only a different place does.
+  const placeKey=useRef('');
   useEffect(()=>{
     const kept=entryFret.current;entryFret.current=null;
-    setFret(kept&&kept.score===state.score&&kept.string===string?kept.fret:location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);endPending();
+    setFret(kept&&kept.score===state.score&&kept.string===string?kept.fret:location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);
+    const place=`${state.documentId}|${target.track}|${target.staff}|${target.bar}|${target.voice}|${target.beat}|${string}`;
+    if(place!==placeKey.current){placeKey.current=place;endPending();}
   },[state.score,target.track,target.staff,target.bar,target.voice,target.beat,string]);
   /** Undo; when it takes back the chord MIDI capture just wrote and the cursor has not been moved since, the cursor goes back to where the chord was written. */
   const undoEdit=()=>{
@@ -589,6 +595,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** A selection the user made: it also drops any keys still waiting, which were typed for the old cursor. Entry itself moves the cursor with `moveTo`. */
   const select=(next:BeatTarget,s=string,index?:number)=>{userMoves.current++;clearEntryQueue();moveTo(next,s,index);};
+  /** A click or Enter on a track's name in the dock or the Mixer view makes it the active track: the cursor goes to the same bar and beat there (the nearest the track has), on the same string where it has one. Navigation only: nothing is recorded, and it works while the app is busy. */
+  const selectTrack=(track:number,by?:'pointer')=>{
+    const next=state.score.tracks[track];if(!next)return;
+    select({track,staff:0,bar:target.bar,voice:0,beat:target.beat},Math.max(1,Math.min(string,next.staves[0].tuning.length||string)));
+    // A click hands the keys to the score, so a digit or letter typed next is written on this track; Enter or Space on the name keeps the focus where it is.
+    if(by==='pointer')scorePane.current?.focus({preventScroll:true});
+  };
   /** A mark clicked in the instrument view selects its beat, string and note like a click on the score does. */
   const selectFromInstrument=(next:BeatTarget,s:number|undefined,index:number|undefined,by:'pointer'|'keyboard')=>{
     select(next,s,index);
@@ -672,24 +685,90 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const change=durationKeyEdit(key,target,beat);
     if(change)void edit(change.command).then(accepted=>{if(accepted)entryDuration.current=change.entry;});
   };
-  /** Digits then Enter: writes the typed fret on the cursor string, with the automatic duration when that is on. */
+  /** What writing `fretValue` on the cursor string takes at `point` in `score`: the automatic rhythm and the note as one edit when both fit, else the note alone. */
+  const fretPlan=(project:typeof state.snapshot.project,score:model.Score,point:BeatTarget,fretValue:number)=>{
+    const beat=describeSelection(score,point).beat;if(!beat)return null;
+    const lead=autoDurationEdit(inputPrefs,point,beat,entryDuration.current),note:EditCommand={type:'setNote',target:point,string,fret:fretValue};
+    // The pair is checked before either edit, so a refused note never leaves a changed rhythm behind; an unfit duration falls back to a plain write.
+    const pair=lead!==null&&applyInOrder(project,[lead,note]),why=pair?null:lead&&applyInOrder(project,[note])?AUTO_DURATION_UNFIT:autoDurationSkip(inputPrefs,beat,entryDuration.current);
+    // The rhythm and the note are one edit, so one undo takes back the whole entry.
+    const command:EditCommand=pair?{type:'sequence',commands:[lead as SequenceStep,note as SequenceStep]}:note;
+    return {beat,command,pair:Boolean(pair),why,records:pair||noteAtCursor(beat)?.fret!==fretValue};
+  };
+  const writeFret=(plan:NonNullable<ReturnType<typeof fretPlan>>)=>{
+    setInputNotice(plan.why?{text:plan.why,at:JSON.stringify(target)}:null);
+    return edit(plan.command).then(accepted=>{if(accepted&&!plan.pair)entryDuration.current=entryAfterWrite(plan.beat,entryDuration.current);return accepted;});
+  };
+  /** Enter: writes the Fret field's value on the cursor string, with the automatic duration when that is on (for a fret set from the field or the instrument view; typed digits have already been written). Nothing is recorded when the note already has that fret. */
   const enterFret=()=>{
     if(!location.beat||indexed)return;
     if(editBusy){entryBlocked(target);return;}
-    const beat=location.beat,lead=autoDurationEdit(inputPrefs,target,beat,entryDuration.current),note:EditCommand={type:'setNote',target,string,fret},project=state.snapshot.project;
-    // The pair is checked before either edit, so a refused note never leaves a changed rhythm behind; an unfit duration falls back to a plain write.
-    const pair=lead!==null&&applyInOrder(project,[lead,note]),why=pair?null:lead&&applyInOrder(project,[note])?AUTO_DURATION_UNFIT:autoDurationSkip(inputPrefs,beat,entryDuration.current);
-    setInputNotice(why?{text:why,at:JSON.stringify(target)}:null);
-    // The rhythm and the note are one edit, so one undo takes back the whole entry.
-    if(pair)void edit({type:'sequence',commands:[lead as SequenceStep,note as SequenceStep]});
-    else void edit(note).then(accepted=>{if(accepted)entryDuration.current=entryAfterWrite(beat,entryDuration.current);});
+    const plan=fretPlan(state.snapshot.project,state.score,target,fret);
+    if(!plan||!plan.records){setInputNotice(null);return;}
+    void writeFret(plan);
+  };
+  /** A typed digit writes that fret on the cursor string at once. A second digit within FRET_DIGIT_WINDOW_MS of the first makes a two-digit fret when that is a valid one: the first write is undone and the two digits written in its place, so one undo
+   * takes back both and restores what stood before the first digit. When the two digits are not a valid fret the second digit is a new single-digit fret. */
+  const typeFretDigit=(digit:string,at:number)=>{
+    const beat=location.beat,here_=JSON.stringify(target);
+    // A digit that cannot write says why, instead of doing nothing.
+    if(indexed){setInputNotice({text:t('editor.digit_needs_strings'),at:here_});return;}
+    if(!beat){refuse(t('score_entry.no_beat'),here_);return;}
+    if(entryBlocked(target))return;
+    const current=controller.getState(),run=fretRun.current,value=Number(digit);
+    const lastEdit=current.snapshot.project.edits.at(-1);
+    // The join takes back the first digit's own edit, so it needs that edit to be the last one, nothing waiting on the controller, and the same place.
+    const here=run!==null&&run.wrote&&run.documentId===current.documentId&&run.revision===current.revision&&run.edits===current.snapshot.project.edits.length&&JSON.stringify(lastEdit)===run.command&&!controller.hasPendingActions()&&sameBeat(run.target,target)&&run.string===string&&at>=run.at&&at-run.at<=FRET_DIGIT_WINDOW_MS;
+    // A leading zero never joins (0 then 5 is fret 5, as in Guitar Pro).
+    const two=here&&run.text.length===1&&run.text!=='0'?Number(run.text+digit):null;
+    const joined=two!==null&&applyInOrder(current.snapshot.project,[{type:'setNote',target,string,fret:two}]);
+    const text=joined?String(two):digit,fretValue=joined?two as number:value;
+    setFret(fretValue);setPendingFret(text);
+    if(pendingTimer.current!==null)clearTimeout(pendingTimer.current);
+    // Once the window closes the hint ends and the next digit starts a new fret.
+    pendingTimer.current=setTimeout(()=>{pendingTimer.current=null;fretRun.current=null;setPendingFret(null);},FRET_DIGIT_WINDOW_MS);
+    const fretName=`${t('editor.fret')} ${text}`;
+    const remember=(wrote:boolean,entryBefore:EntryDuration|null)=>{const now=controller.getState(),edits=now.snapshot.project.edits;fretRun.current={text,at,wrote,documentId:now.documentId,revision:now.revision,edits:edits.length,command:JSON.stringify(edits.at(-1)),target,string,entryBefore};};
+    if(joined&&run){
+      const entryBefore=run.entryBefore,point=target,entryNow=entryDuration.current;
+      // One of our own edits is under way until the undo and the write are both done, so keys typed meanwhile wait behind it.
+      ownEdits.current++;
+      const finish=()=>{unseenSettles.current++;setSettled(count=>count+1);};
+      const failed=(why:string)=>{entryFailure.current={text:why};setInputNotice({text:why,at:JSON.stringify(point)});};
+      /** Puts the first digit back after the join failed, and says so; a Redo that fails is told, never swallowed. */
+      const restore=async(reason:string)=>{
+        entryDuration.current=entryNow;fretRun.current=null;
+        try{await controller.redo();failed(`${reason} ${t('editor.fret_join_restored')}`);}
+        catch(error){console.error(error);failed(`${reason} ${t('editor.fret_join_lost')}`);}
+      };
+      const rewrite=async()=>{
+        await controller.undo();
+        // The undo takes the last edit of the queue as it stands now: it must still be the first digit's.
+        const undone=controller.getState();
+        if(undone.snapshot.project.edits.length!==run.edits-1||JSON.stringify(undone.snapshot.redoEdit)!==run.command){await restore(t('score_entry.refused',{name:fretName}));return;}
+        entryDuration.current=entryBefore;
+        const now=controller.getState(),plan=fretPlan(now.snapshot.project,now.score,point,fretValue);
+        if(!plan){await restore(t('score_entry.no_beat'));return;}
+        // The note already had these digits as its fret: it is as it was, and the undone digit stays in Redo (a redo entry cannot be dropped without a history format change).
+        if(!plan.records){remember(false,entryBefore);return;}
+        if(!(await writeFret(plan))){await restore(t('score_entry.refused',{name:fretName}));return;}
+        remember(true,entryBefore);
+      };
+      void rewrite().catch(()=>restore(t('score_entry.refused',{name:fretName}))).finally(finish);
+      return;
+    }
+    const plan=fretPlan(current.snapshot.project,current.score,target,fretValue);
+    if(!plan)return;
+    const entryBefore=entryDuration.current;
+    if(!plan.records){setInputNotice(null);remember(false,entryBefore);return;}
+    void writeFret(plan).then(accepted=>{if(accepted)remember(true,entryBefore);else refuse(t('score_entry.refused',{name:fretName}),here_);});
   };
   /** Whether the transport is running, a count-in included. */
   const transportRunning=()=>{const playback=player?.getState();return !!playback&&(playback.playing||playback.practice.phase==='countIn');};
   /** The setting to write notes while the score plays is off and the transport is running: typed entry and MIDI capture are paused, and nothing waits for later. */
   const entryPaused=()=>!inputPrefs.writeWhilePlaying&&transportRunning();
   /** Whether an item writes a note: a typed letter, Enter (it commits the typed fret as a note, in note entry or not), or a captured chord. Typing the fret digits only builds the fret, and durations, accidentals, respelling and every other edit write no note. */
-  const writesNote=(item:EntryItem)=>item.kind==='capture'||item.kind==='entry'&&item.key.kind==='letter'||item.kind==='enter';
+  const writesNote=(item:EntryItem)=>item.kind==='capture'||item.kind==='entry'&&item.key.kind==='letter'||item.kind==='digit'||item.kind==='enter';
   /** Says that typed entry is paused whenever a key is ignored and the notice is not already on screen (it is tied to the cursor, so a move hides it). */
   const announcePaused=()=>{
     const text=t('editor.entry_paused_playing'),at=JSON.stringify(target);
@@ -730,21 +809,15 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** One keyboard entry key, live or from the queue: both run this, so a queued key reads the preferences and the pending accidental when its turn comes. */
   const performItem=(item:EntryItem,at:number)=>{
-    if(item.kind!=='capture'&&writesNote(item)&&entryPaused()){if(item.kind==='enter')endPending();announcePaused();return;}
+    if(item.kind!=='capture'&&writesNote(item)&&entryPaused()){if(item.kind==='enter'||item.kind==='digit')endPending();announcePaused();return;}
     if(item.kind==='keypad'){
       if(!location.beat||entryBlocked(target))return;
       const change=numpadDurationEdit(item.keypad,target,location.beat);
       if(change)void edit(change.command).then(accepted=>{if(accepted)entryDuration.current=change.entry;});
     }else if(item.kind==='entry'){
       if(item.key.kind==='accidental'||item.key.kind==='respell')accidentalKeys(item.key);else entryKey(item.key,item.shift);
-    }else if(item.kind==='digit'){
-      const fresh=at-digits.current.time>=1000||!digits.current.text,text=((fresh?'':digits.current.text)+item.digit).slice(-2);
-      if(fresh||fretBase.current===null)fretBase.current=fret;
-      digits.current.text=text;digits.current.time=at;setPendingFret(text);setFret(Number(text));
-      if(pendingTimer.current!==null)clearTimeout(pendingTimer.current);
-      // Once the window closes the digits stand as the field's value, and Backspace deletes the note again, so the hint and the way back both end.
-      pendingTimer.current=setTimeout(()=>{pendingTimer.current=null;fretBase.current=null;setPendingFret(null);},1000);
-    }else if(item.kind==='capture')writeCapture(item.chord);
+    }else if(item.kind==='digit')typeFretDigit(item.digit,at);
+    else if(item.kind==='capture')writeCapture(item.chord);
     else {endPending();enterFret();}
   };
   /** The key as an entry key, or null when it is anything else (navigation, the N toggle, other shortcuts). */
@@ -755,7 +828,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if((event.key==='n'||event.key==='N')&&!event.ctrlKey&&!event.metaKey&&!event.altKey)return null;
       if(noteEntryOn){const key=scoreEntryKey(event,inputPrefs.swapPlusMinus);if(key)return {kind:'entry',key,shift:event.shiftKey};}
     }
-    if(/^\d$/.test(event.key)&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!indexed)return {kind:'digit',digit:event.key};
+    if(/^\d$/.test(event.key)&&!event.ctrlKey&&!event.metaKey&&!event.altKey)return {kind:'digit',digit:event.key};
     if(event.key==='Enter'&&!indexed)return {kind:'enter'};
     return null;
   };
@@ -779,7 +852,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   /** Runs an entry item now or queues it behind the edit in flight; one that cannot join keys already waiting is refused, so the music has no hole. False when it was refused. */
   const dispatchEntryItem=(item:EntryItem):boolean=>{
     // Nothing is queued for later: while entry is paused the key is told so and dropped.
-    if(item.kind!=='capture'&&writesNote(item)&&entryPaused()){if(item.kind==='enter')endPending();announcePaused();return false;}
+    if(item.kind!=='capture'&&writesNote(item)&&entryPaused()){if(item.kind==='enter'||item.kind==='digit')endPending();announcePaused();return false;}
     if(refusing.current||entryQueue.current.length&&!entryQueueing()){
       refusing.current=true;if(!entryBlocked(target))setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return false;
     }
@@ -867,8 +940,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(kind==='insertBeat'){const beat=location.beat;void edit({type:'insertBeat',target,duration:beat?.duration??4,dots:beat?.dots??0});return;}
     if(kind==='removeNote'){
       const beat=location.beat,note=beat?noteAtCursor(beat):null;
-      // Fret digits typed but not yet entered: Backspace takes them back, as it would in a text field, and leaves the note alone.
-      if(!indexed&&digits.current.text&&Date.now()-digits.current.time<1000){setFret(fretBase.current??note?.fret??0);endPending();return;}
+      endPending();
       if(!note){setInputNotice({text:t('editor.gp8_no_note'),at});return;}
       void edit(indexed?{type:'removeNoteByIndex',target,noteIndex:note.index}:{type:'removeNote',target,string:note.string});return;
     }
@@ -905,7 +977,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(item){
       event.preventDefault();
       // Held letters and chords never repeat, and a key that has to wait is queued once, never from key repeat.
-      if(event.repeat&&(item.kind==='entry'||entryQueueing()))return;
+      if(event.repeat&&(item.kind==='entry'||item.kind==='digit'||entryQueueing()))return;
       // A key that cannot join the keys already waiting is refused, and every later one until the queue is empty.
       dispatchEntryItem(item);
       return;
@@ -1064,8 +1136,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       const menu=practiceMenu.current;
       if(menu?.open&&event.target instanceof Node&&menu.querySelector('.gp-practice-body')?.contains(event.target)){menu.open=false;menu.querySelector('summary')?.focus();event.preventDefault();return;}
       if(pendingFret!==null){
-        const beat=location.beat,note=beat?noteAtCursor(beat):null;
-        setFret(fretBase.current??note?.fret??0);endPending();event.preventDefault();return;
+        // The digits are already written; Escape only closes the window for a second digit (Undo takes the note back).
+        endPending();event.preventDefault();return;
       }
       editorSelection(null);setPendingAccidental(null);clearEntryQueue();event.preventDefault();
     }
@@ -1146,7 +1218,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <h2>{t('help.keyboard_editing_heading')}</h2><p>{t('help.keyboard_editing_intro')}</p>
       <dl><dt>{t('keys.chord_new_open')}</dt><dd>{t('help.shortcut_new_open')}</dd><dt>{t('keys.chord_save')}</dt><dd>{t('help.shortcut_save')}</dd><dt>{t('keys.chord_close')}</dt><dd>{t('help.shortcut_close')}</dd><dt>{t('keys.chord_next_score')}</dt><dd>{t('help.shortcut_next_score')}</dd><dt>{t('keys.chord_undo')}</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>{t('keys.space')}</dt><dd>{t('help.shortcut_play')}</dd><dt>{t('keys.chord_palette')}</dt><dd>{t('help.shortcut_palette')}</dd></dl>
       <button type="button" onClick={openPalette}>{t('help.open_command_palette')}</button>
-      <h3>{t('help.score_focused_heading')}</h3><dl><dt>{t('keys.left_right')}</dt><dd>{t('help.shortcut_beat')}</dd><dt>{t('keys.up_down')}</dt><dd>{t('help.shortcut_string')}</dd><dt>{t('keys.digits_enter')}</dt><dd>{t('help.shortcut_fret')}</dd><dt>{t('keys.chord_selection')}</dt><dd>{t('help.shortcut_selection')}</dd><dt>{t('keys.chord_select_track')}</dt><dd>{t('help.shortcut_select_track')}</dd><dt>{t('keys.chord_range_edge')}</dt><dd>{t('help.shortcut_range_edge')}</dd><dt>{t('keys.chord_tie')}</dt><dd>{t('help.shortcut_tie')}</dd><dt>{t('keys.chord_clipboard')}</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>{t('keys.escape')}</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>{t('keys.note_move')}</dt><dd>{t('help.shortcut_note_move')}</dd><dt>{t('keys.accidental')}</dt><dd>{t('help.shortcut_accidental')}</dd><dt>{t('keys.chord_gp8_edit')}</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>{t('keys.chord_gp8_cursor')}</dt><dd>{t('help.shortcut_gp8_cursor')}</dd><dt>{t('keys.chord_gp8_voice')}</dt><dd>{t('help.shortcut_gp8_voice')}</dd><dt>{t('keys.chord_gp8_track')}</dt><dd>{t('help.shortcut_gp8_track')}</dd><dt>{t('keys.chord_gp8_bar')}</dt><dd>{t('help.shortcut_gp8_bar')}</dd><dt>{t('keys.chord_gp8_play_bar')}</dt><dd>{t('help.shortcut_gp8_play_bar')}</dd><dt>{t('keys.chord_gp8_go_to')}</dt><dd>{t('help.shortcut_gp8_go_to')}</dd><dt>{t('keys.chord_gp8_techniques')}</dt><dd>{t('help.shortcut_gp8_techniques')}</dd></dl>
+      <h3>{t('help.score_focused_heading')}</h3><dl><dt>{t('keys.left_right')}</dt><dd>{t('help.shortcut_beat')}</dd><dt>{t('keys.up_down')}</dt><dd>{t('help.shortcut_string')}</dd><dt>{t('keys.digits')}</dt><dd>{t('help.shortcut_fret')}</dd><dt>{t('keys.chord_selection')}</dt><dd>{t('help.shortcut_selection')}</dd><dt>{t('keys.chord_select_track')}</dt><dd>{t('help.shortcut_select_track')}</dd><dt>{t('keys.chord_range_edge')}</dt><dd>{t('help.shortcut_range_edge')}</dd><dt>{t('keys.chord_tie')}</dt><dd>{t('help.shortcut_tie')}</dd><dt>{t('keys.chord_clipboard')}</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>{t('keys.escape')}</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>{t('keys.note_move')}</dt><dd>{t('help.shortcut_note_move')}</dd><dt>{t('keys.accidental')}</dt><dd>{t('help.shortcut_accidental')}</dd><dt>{t('keys.chord_gp8_edit')}</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>{t('keys.chord_gp8_cursor')}</dt><dd>{t('help.shortcut_gp8_cursor')}</dd><dt>{t('keys.chord_gp8_voice')}</dt><dd>{t('help.shortcut_gp8_voice')}</dd><dt>{t('keys.chord_gp8_track')}</dt><dd>{t('help.shortcut_gp8_track')}</dd><dt>{t('keys.chord_gp8_bar')}</dt><dd>{t('help.shortcut_gp8_bar')}</dd><dt>{t('keys.chord_gp8_play_bar')}</dt><dd>{t('help.shortcut_gp8_play_bar')}</dd><dt>{t('keys.chord_gp8_go_to')}</dt><dd>{t('help.shortcut_gp8_go_to')}</dd><dt>{t('keys.chord_gp8_techniques')}</dt><dd>{t('help.shortcut_gp8_techniques')}</dd></dl>
       <p>{t('help.workflow_description')}</p>
     </section></details>
     </nav><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span>
@@ -1220,12 +1292,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}
         ampCapture={board=><AmpCapture value={board.effects.amp.capture} busy={editBusy} label={board.name} scope={`${trackId}:${board.name('Amp')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={capture=>{if(!editBusy)board.write(effects=>{if(capture)effects.amp.capture=capture;else delete effects.amp.capture;});}}/>}
         cabinetResponse={board=><CabinetResponse ir={board.effects.cabinet.ir} model={board.effects.cabinet.model} label={board.name} scope={`${trackId}:${board.name('Cabinet')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={ir=>{if(!editBusy)board.write(effects=>{if(ir)effects.cabinet.ir=ir;else delete effects.cabinet.ir;});}}/>}/>}
-      {view==='mixer'&&<MixerView score={state.score} sounds={state.settings.sounds} selected={target.track} busy={controlsBusy} player={player} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}
+      {view==='mixer'&&<MixerView score={state.score} sounds={state.settings.sounds} selected={target.track} busy={controlsBusy} player={player} onSelect={selectTrack}/>}
       <section className="workstation-dock" aria-label={t('workspace.bottom_dock')} hidden={!dockVisible}>
         {!dockCollapsed&&<DockResizeHandle height={dockHeight} min={dockMin} max={dockMax} onHeight={setDockSize} onReset={()=>setDockSize(null)}/>}
         <nav aria-label={t('dock.views_group')}><button aria-pressed={!dockPanelVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>{t('dock.overview')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>{t('dock.mixer')}</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>{t('dock.instrument')}</button><button aria-pressed={keyboardVisible} onClick={()=>chooseDock('keyboard')}>{t('dock.keyboard')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>{t('dock.backing')}</button><button className="dock-collapse" aria-label={t(dockCollapsed?'dock.expand_aria':'dock.hide_aria')} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{t(dockCollapsed?'dock.expand':'dock.hide')}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
-          <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}</div>
+          <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={selectTrack}/>}</div>
           {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           {keyboardVisible&&<LiveInstrumentView panel="keyboard" score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           <div className="workstation-dock-backing" hidden={dockPanelVisible||dockMode!=='backing'}>

@@ -55,7 +55,8 @@ export interface MixerViewProps {
   sounds?:Record<string,TrackSound>;
   selected:number;
   busy:boolean;
-  onSelect:(track:number)=>void;
+  /** `by` says a pointer chose it, so the host can hand the keys back to the score. */
+  onSelect:(track:number,by?:'pointer')=>void;
   player:MixerPlayer|null;
 }
 
@@ -117,7 +118,8 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         defaultValue={0}
         value={Math.round(amount*100)}
         format={v=>v>0?t('mixer.focus_pct',{pct:Math.round(v)}):v<0?t('mixer.unfocus_pct',{pct:Math.round(-v)}):t('mixer.focus_off')}
-        disabled={busy||focusOff}
+        disabled={focusOff}
+        busy={busy}
         onInput={v=>{
           if(!selectedId)return;
           focusFrom.current??=amount;
@@ -139,7 +141,7 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         const panControl=mixControl(track.index,value=>({pan:value}),value=>player?.setPan(track.index,value));
         return <section className={`mixer-strip${isSelected?' selected':''}`} data-selected={isSelected||undefined} key={ids[position]} aria-label={t('mixer.channel_track',{number:track.index+1,name:track.name})}>
           <div className="mixer-strip-head">
-            <button type="button" title={track.name} aria-label={t('mixer.track_number_name',{number:track.index+1,name:track.name})} aria-pressed={isSelected} {...busyGuard({busy,className:'mixer-strip-select',onClick:()=>onSelect(track.index)})}>
+            <button type="button" title={track.name} aria-label={t('mixer.track_number_name',{number:track.index+1,name:track.name})} aria-pressed={isSelected} className="mixer-strip-select" onClick={event=>{if(event.detail>0)onSelect(track.index,'pointer');else onSelect(track.index);}}>
               <span className="track-color-swatch" aria-hidden="true" style={{backgroundColor:trackColorHex(track.color)}}/>
               <span className="mixer-strip-name">{track.index+1}. {track.name||t('mixer.track_number',{number:track.index+1})}</span>
             </button>
@@ -171,7 +173,8 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
             defaultValue={0}
             value={pan}
             format={v=>v.toFixed(2)}
-            disabled={off}
+            disabled={!player}
+            busy={busy}
             {...panControl}
           />
           <div className="mixer-strip-fader-well">
@@ -185,7 +188,8 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
               defaultValue={1}
               value={volume}
               format={v=>v.toFixed(2)}
-              disabled={off}
+              disabled={!player}
+              busy={busy}
               {...volumeControl}
             />
           </div>
@@ -212,8 +216,8 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
                 <span>Solo</span>
               </label>
             </div>
-            <Knob className="mixer-strip-pan" label="Pan" ariaLabel={`Pan ${label}`} bipolar min={-1} max={1} step={0.05} defaultValue={0} value={current.pan} format={v=>v.toFixed(2)} disabled={off} {...kitControl(kitTrack.index,element,pan=>({pan}))}/>
-            <Fader className="mixer-kit-fader" label="Volume" ariaLabel={`Volume ${label}`} min={0} max={1} step={0.05} defaultValue={1} value={current.gain} format={v=>v.toFixed(2)} disabled={off} {...kitControl(kitTrack.index,element,gain=>({gain}))}/>
+            <Knob className="mixer-strip-pan" label="Pan" ariaLabel={`Pan ${label}`} bipolar min={-1} max={1} step={0.05} defaultValue={0} value={current.pan} format={v=>v.toFixed(2)} disabled={!player} busy={busy} {...kitControl(kitTrack.index,element,pan=>({pan}))}/>
+            <Fader className="mixer-kit-fader" label="Volume" ariaLabel={`Volume ${label}`} min={0} max={1} step={0.05} defaultValue={1} value={current.gain} format={v=>v.toFixed(2)} disabled={!player} busy={busy} {...kitControl(kitTrack.index,element,gain=>({gain}))}/>
           </div>;
         })}
       </div>

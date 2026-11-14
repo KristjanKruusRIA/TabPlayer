@@ -93,7 +93,7 @@ export const helpEn = {
 
   'help.topic.editing.title': 'Editing the score',
   'help.topic.editing.move.title': 'Moving and setting notes',
-  'help.topic.editing.move.p1': 'Click a beat or use the arrow keys to move the blue edit target. Up and Down change the string; type a number for the “{@editor.fret}” and press Enter to set the note.',
+  'help.topic.editing.move.p1': 'Click a beat or use the arrow keys to move the blue edit target. Up and Down change the string; type a number and the “{@editor.fret}” is written on the note at once; type a second digit within a second to make it two digits (1, then 2, gives 12). One Undo takes both digits back. Escape ends the wait for a second digit; Enter writes the “{@editor.fret}” field’s value, for a value set from the field or the instrument view.',
   'help.topic.editing.entry.title': 'Note entry',
   'help.topic.editing.entry.p1': '{@score_entry.toggle}, switched on with the button at the left of the toolbar or with N, writes notes by clicking the staff or typing A to G.',
   'help.topic.editing.entry.p2': '{@help.shortcut_note_entry}',

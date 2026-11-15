@@ -125,7 +125,7 @@ function useNarrowWindow(query:string,beforeChange:()=>void):boolean {
   },[narrow,query]);
   return narrow;
 }
-export function Transport({player,measures,busy,cursor,selection,display:lcd}: {player:Pick<NativePlaybackController,'subscribe'|'getState'|'play'|'pause'|'stop'|'setSpeed'|'setLoop'|'clearLoop'|'seekToMeasure'|'setPractice'|'stepKeyShift'|'setKeyShift'|'generation'|'cursorPlaybackChoices'|'selectionPlaybackChoices'|'playbackOccurrences'|'playFromCursor'|'playSelection'|'loopSelection'>;measures:number;busy:boolean;cursor:BeatTarget;selection:MusicSelection|null;display?:TransportDisplay}) {
+export function Transport({player,measures,busy,cursor,selection,display:lcd}: {player:Pick<NativePlaybackController,'subscribe'|'getState'|'play'|'pause'|'stop'|'setSpeed'|'setLoop'|'clearLoop'|'seekToMeasure'|'setPractice'|'stepKeyShift'|'setKeyShift'|'generation'|'cursorPlaybackChoices'|'selectionPlaybackChoices'|'playbackOccurrences'|'playFromCursor'|'playSelection'|'loopSelection'>&Partial<Pick<NativePlaybackController,'cursorSeekChoice'>>;measures:number;busy:boolean;cursor:BeatTarget;selection:MusicSelection|null;display?:TransportDisplay}) {
   const { t,lang } = useI18n();
   const state=useSyncExternalStore(player.subscribe,player.getState);
   const occurrences=player.playbackOccurrences(),selectionAvailable=occurrences.length>0;
@@ -173,7 +173,12 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
   try{if(cursorChoice)currentCursor=requireCursorChoice(cursorChoices,cursorChoice);}catch{/* A changed cursor or plan retires its controlled choice. */}
   try{if(passageChoice)currentPassage=requirePassageChoice(passageChoices,passageChoice);}catch{/* Native playback is unchanged while a new passage is chosen. */}
   const fresh=practice.phase==='idle'||practice.phase==='ended',fromCursor=fresh&&!loop&&nextStart==='cursor',startDisabled=busy||state.practicePending;
-  useEffect(()=>{setCursorChoice(cursorChoices.length===1?{...cursorChoices[0]}:null);setPassageChoice(passageChoices.length===1?{...passageChoices[0]}:null);},[player.generation,cursor.track,cursor.staff,cursor.bar,cursor.voice,cursor.beat,selection]);
+  // The occurrence a click on this beat chose changes without the cursor changing when the same beat is clicked again (after Stop, or on the other pass).
+  const soughtOccurrence=player.cursorSeekChoice?.(cursor)?.startTick??-1;
+  useEffect(()=>{
+    // A bar played more than once needs a chosen occurrence: the one a click on the beat chose stands in until another is picked.
+    const clicked=cursorChoices.length>1?player.cursorSeekChoice?.(cursor):null,chosen=cursorChoices.find(item=>clicked&&item.occurrenceIndex===clicked.occurrenceIndex&&item.startTick===clicked.startTick);
+    setCursorChoice(cursorChoices.length===1?{...cursorChoices[0]}:chosen?{...chosen}:null);setPassageChoice(passageChoices.length===1?{...passageChoices[0]}:null);},[player.generation,cursor.track,cursor.staff,cursor.bar,cursor.voice,cursor.beat,selection,soughtOccurrence]);
   useEffect(()=>{setNextStart('cursor');},[player.generation,cursor.track,cursor.staff,cursor.bar,cursor.voice,cursor.beat]);
   useEffect(()=>{if(state.error)setNextStart('cursor');},[state.error]);
   useEffect(()=>{setSeek(value=>Math.min(value,measures));setStart(value=>Math.min(value,measures));setEnd(value=>Math.min(value,measures));},[measures]);

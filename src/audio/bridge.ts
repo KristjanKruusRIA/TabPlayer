@@ -14,6 +14,8 @@ export type TransportCommand =
   | {type:'play'|'pause'|'stop'|'clearLoop';generation:number}
   | {type:'invalidate';generation:number}
   | {type:'seekTick';tick:number;generation:number}
+  /** Moves the playhead and leaves the selection range, a count-in and the pass counts alone. */
+  | {type:'seekWithin';tick:number;generation:number}
   | {type:'playRange';generation:number;startTick:number;endTick:number|null}
   | {type:'setPractice';settings:PracticeSettings;generation:number}
   | {type:'setLoop';startTick:number;endTick:number;generation:number}

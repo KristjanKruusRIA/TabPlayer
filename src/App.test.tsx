@@ -49,7 +49,7 @@ vi.mock('./bridge',async original=>({...await original<typeof import('./bridge')
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),setSpeed:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),seekToCursor:vi.fn((_target:unknown)=>true),chooseCursorOccurrence:vi.fn((_target:unknown)=>null as unknown),cursorSeekChoice:vi.fn((_target:unknown)=>null as unknown),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),setSpeed:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
 // No MIDI service in jsdom: the inspector's MIDI output panel finds no ports instead of showing a listing error.
 vi.mock('./audio/midi-out',async original=>({...await original<typeof import('./audio/midi-out')>(),nativeMidiOut:{ports:async()=>[],setDelay:async()=>{},status:async()=>({ports:[],sent:0,dropped:0,late:0,maxLateMs:0}),testLog:async()=>[]}}));
@@ -73,7 +73,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   audition=integration.audition;
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
-  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=integration.setSpeed;setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
+  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;seekToCursor=integration.seekToCursor;chooseCursorOccurrence=integration.chooseCursorOccurrence;cursorSeekChoice=integration.cursorSeekChoice;setSpeed=integration.setSpeed;setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
   setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
   mix=(track:{index:number})=>{const value=this.built?.settings.mixes[this.identity(track.index)];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan,...(value.drumKit?{drumKit:value.drumKit}:{})}:undefined;};
@@ -1003,6 +1003,175 @@ it('Space still plays from the focused scrubber, a number field still counts as 
   const arrow=fireEvent.keyDown(scrub,{key:'ArrowRight'});expect(arrow).toBe(true);
   const field=screen.getByLabelText('Loop start');field.focus();fireEvent.keyDown(field,{key:' '});expect(integration.play.mock.calls.length).toBe(before+1);
   expect(screen.getByRole('button',{name:'Undo'})).toHaveAttribute('title',expect.stringContaining('Undo'));expect(screen.getByRole('button',{name:'Redo'})).toHaveAttribute('title',expect.stringContaining('Redo'));
+});
+describe('click to seek and Space to play',()=>{
+  const spacePlay=()=>integration.play.mock.calls.length+integration.pause.mock.calls.length;
+  const settleMs=(ms=200)=>new Promise(resolve=>setTimeout(resolve,ms));
+  const pressMouse=(element:Element,init:MouseEventInit={})=>fireEvent.mouseDown(element,init);
+  const clickNote=(init?:MouseEventInit)=>{const button=screen.getByRole('button',{name:'Select rendered note'});pressMouse(button,{button:0,detail:1,...init});fireEvent.click(button);};
+  it('a plain click on a beat moves playback there: navigation only, nothing recorded, not dirty',async()=>{
+    const c=await setup(),edits=c.getState().snapshot.project.edits.length;
+    clickNote();
+    await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({bar:0,beat:1})));
+    expect(integration.chooseCursorOccurrence).toHaveBeenCalledWith(expect.objectContaining({bar:0,beat:1}));
+    expect(c.getState().snapshot.project.edits).toHaveLength(edits);expect(c.getState().snapshot.dirty).toBe(false);
+  });
+  it.each([
+    ['shift-click',{shiftKey:true}],['ctrl-click',{ctrlKey:true}],['cmd-click',{metaKey:true}],['alt-click',{altKey:true}],
+    ['double click',{detail:2}],['triple click',{detail:3}],['right click',{button:2}],
+  ] as const)('a %s moves only the cursor, and cancels a seek that was waiting',async(_name,init)=>{
+    await setup();
+    clickNote();                       // a plain click first: its seek is waiting
+    clickNote(init as MouseEventInit); // then the second press of a double click, or a modified click
+    await settleMs(300);
+    expect(integration.seekToCursor).not.toHaveBeenCalled();
+  });
+  it('sends one seek for a burst of clicks, the last one',async()=>{
+    await setup();
+    clickNote();fireEvent.click(screen.getByRole('button',{name:'Select rendered chord note'}));
+    pressMouse(screen.getByRole('button',{name:'Select rendered note'}),{button:0,detail:1});fireEvent.click(screen.getByRole('button',{name:'Select rendered note'}));
+    await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledTimes(1));await settleMs(300);
+    expect(integration.seekToCursor).toHaveBeenCalledTimes(1);expect(integration.seekToCursor).toHaveBeenCalledWith(expect.objectContaining({bar:0,beat:1}));
+  });
+  it('does not seek while MIDI capture runs',async()=>{
+    await setup();const session=midiCaptureSession();const running=vi.spyOn(session,'get').mockReturnValue({...session.get(),phase:'running'});
+    try{clickNote();await settleMs(300);expect(integration.seekToCursor).not.toHaveBeenCalled();}finally{running.mockRestore();}
+  });
+  it('keeps a click it could not seek yet (the plan is not ready) and applies it once playback is ready, but only if the cursor is still there',async()=>{
+    await setup();const player=integration.players[0];
+    integration.seekToCursor.mockReturnValueOnce(false);
+    clickNote();
+    await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledTimes(1));
+    act(()=>player.publish({ready:false}));act(()=>player.publish({ready:true}));
+    await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledTimes(2));
+    expect(integration.seekToCursor).toHaveBeenLastCalledWith(expect.objectContaining({bar:0,beat:1}));
+    // A pending seek is dropped when the cursor moved on.
+    integration.seekToCursor.mockClear();integration.seekToCursor.mockReturnValueOnce(false);
+    clickNote();await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button',{name:'Select rendered chord note'}));
+    integration.seekToCursor.mockClear();
+    act(()=>player.publish({ready:false}));act(()=>player.publish({ready:true}));
+    await settleMs(100);expect(integration.seekToCursor).not.toHaveBeenCalledWith(expect.objectContaining({beat:1}));
+  });
+  it('a click on a beat inside a repeated section chooses its occurrence, so Play and Space start from it',async()=>{
+    await setup();const player=integration.players[0] as unknown as {cursorPlaybackChoices:(target:{bar:number;beat:number})=>unknown[]};
+    const first={generation:7,occurrenceIndex:0,startTick:960},second={generation:7,occurrenceIndex:1,startTick:5760};
+    player.cursorPlaybackChoices=()=>[first,second];
+    // Nothing chosen: Play is refused, and Space says why.
+    clickNote();await settleMs(50);
+    const workspace=screen.getByRole('region',{name:'Score workspace'}),before=integration.play.mock.calls.length;
+    fireEvent.keyDown(workspace,{key:' '});expect(integration.play.mock.calls.length).toBe(before);
+    expect(await screen.findByText(/played more than once/)).toBeInTheDocument();
+    // The click chose the first occurrence.
+    integration.cursorSeekChoice.mockReturnValue(first);
+    clickNote();await settleMs(50);fireEvent.click(screen.getByRole('button',{name:'Select rendered chord note'}));clickNote();await settleMs(50);
+    fireEvent.keyDown(workspace,{key:' '});
+    await waitFor(()=>expect(integration.play).toHaveBeenCalledWith(expect.objectContaining({beat:1}),expect.objectContaining({occurrenceIndex:0,startTick:960})));
+  });
+  it('Space plays or stops from the score, a button, a slider, a track name and the page, and never also activates the control',async()=>{
+    await setup();
+    const workspace=screen.getByRole('region',{name:'Score workspace'});
+    let before=spacePlay();
+    expect(fireEvent.keyDown(workspace,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    const button=screen.getByRole('button',{name:'Select rendered note'}),clicked=vi.fn();button.addEventListener('click',clicked);button.focus();
+    before=spacePlay();expect(fireEvent.keyDown(button,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    // The release of the key must not click the focused button either.
+    expect(fireEvent.keyUp(button,{key:' '})).toBe(false);expect(clicked).not.toHaveBeenCalled();
+    const scrub=await screen.findByRole('slider',{name:'Playback position'});scrub.focus();
+    before=spacePlay();fireEvent.keyDown(scrub,{key:' '});expect(spacePlay()).toBe(before+1);
+    const name=screen.getAllByRole('button',{name:/^Select track /})[0];name.focus();
+    before=spacePlay();expect(fireEvent.keyDown(name,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    const stop=document.querySelector<HTMLElement>('.transport-stopbutton')!;stop.focus();
+    before=spacePlay();expect(fireEvent.keyDown(stop,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    // Focus that fell to the page (a control that held it was disabled) still plays and stops.
+    (document.activeElement as HTMLElement|null)?.blur();before=spacePlay();expect(fireEvent.keyDown(document.body,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+  });
+  it('Space keeps its own meaning on a checkbox, a radio, a switch, a menu item and an option, and on a text field, textarea, select and contenteditable',async()=>{
+    await setup();const workspace=screen.getByRole('region',{name:'Score workspace'}),before=spacePlay();
+    const real=document.querySelector<HTMLInputElement>('input[type="checkbox"]');expect(real).not.toBeNull();
+    expect(fireEvent.keyDown(real!,{key:' '})).toBe(true);
+    const make=(tag:string,attributes:Record<string,string>={})=>{const element=document.createElement(tag);for(const [name,value] of Object.entries(attributes))element.setAttribute(name,value);element.tabIndex=0;workspace.appendChild(element);return element;};
+    const owners=[make('input',{type:'radio'}),make('input',{type:'color'}),make('input',{type:'file'}),make('input',{type:'text'}),make('input',{type:'number'}),make('textarea'),make('div',{contenteditable:'true'}),make('div',{role:'switch'}),make('div',{role:'radio'}),make('button',{role:'radio'}),make('summary'),make('div',{role:'checkbox'}),make('div',{role:'menuitemcheckbox'}),make('div',{role:'menuitemradio'}),make('div',{role:'option'}),make('div',{role:'textbox'})];
+    const inner=make('div',{role:'option'});const child=document.createElement('span');inner.appendChild(child);
+    const select=document.querySelector('select');expect(select).not.toBeNull();
+    try{for(const element of [...owners,child,select!])expect(fireEvent.keyDown(element,{key:' '}),element.outerHTML.slice(0,60)).toBe(true);expect(spacePlay()).toBe(before);}
+    finally{for(const element of [...owners,inner])element.remove();}
+  });
+  it('Space plays on a tab (Enter and the arrow keys operate it) and on a plain button, and a segmented control keeps it',async()=>{
+    await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});
+    const tab=screen.getAllByRole('tab',{hidden:true})[0];tab.focus();
+    let before=spacePlay();expect(fireEvent.keyDown(tab,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    // Enter still activates a tab: it is not held back.
+    expect(fireEvent.keyDown(tab,{key:'Enter'})).toBe(true);
+    const radio=document.querySelector<HTMLElement>('[role="radio"]');expect(radio).not.toBeNull();
+    before=spacePlay();expect(fireEvent.keyDown(radio!,{key:' '})).toBe(true);expect(spacePlay()).toBe(before);
+    void workspace;
+  });
+  it('Space is not play or stop on key repeat, with Alt, in a field, or with an open menu, a modal dialog, a list box; Shift+Space is Space; an open More playback panel does not turn it off',async()=>{
+    await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});
+    let before=spacePlay();
+    fireEvent.keyDown(workspace,{key:' ',repeat:true});fireEvent.keyDown(workspace,{key:' ',altKey:true});expect(spacePlay()).toBe(before);
+    fireEvent.keyDown(workspace,{key:' ',shiftKey:true});expect(spacePlay()).toBe(before+1);
+    const field=screen.getByLabelText('Loop start');field.focus();before=spacePlay();fireEvent.keyDown(field,{key:' '});expect(spacePlay()).toBe(before);
+    // The More playback panel is a disclosure, not a menu.
+    const more=document.querySelector<HTMLDetailsElement>('.transport-more');expect(more).not.toBeNull();more!.open=true;
+    fireEvent.keyDown(workspace,{key:' '});expect(spacePlay()).toBe(before+1);more!.open=false;
+    // An open menu of the menu bar keeps Space.
+    const menu=document.querySelector<HTMLDetailsElement>('header.gp-menubar details');expect(menu).not.toBeNull();menu!.open=true;
+    before=spacePlay();fireEvent.keyDown(workspace,{key:' '});expect(spacePlay()).toBe(before);menu!.open=false;
+    const listbox=document.createElement('div');listbox.setAttribute('role','listbox');document.body.querySelector('.app-shell')!.appendChild(listbox);
+    fireEvent.keyDown(workspace,{key:' '});listbox.remove();expect(spacePlay()).toBe(before);
+    const dialog=document.createElement('div');dialog.setAttribute('role','dialog');document.body.appendChild(dialog);
+    fireEvent.keyDown(workspace,{key:' '});dialog.remove();expect(spacePlay()).toBe(before);
+  });
+  it('Space on a control that refuses it (First bar at bar 1: unavailable, but holding focus) still plays and pauses, and activates nothing',async()=>{
+    await setup();const first=screen.getByRole('button',{name:'First bar'});first.focus();
+    expect(first).toHaveAttribute('aria-disabled','true');expect(first).toHaveFocus();
+    const before=spacePlay(),seeks=integration.seekToMeasure.mock.calls.length;
+    expect(fireEvent.keyDown(first,{key:' '})).toBe(false);
+    expect(spacePlay()).toBe(before+1);expect(integration.seekToMeasure.mock.calls.length).toBe(seeks);
+    // Held down it toggles once; a modifier is not Space.
+    fireEvent.keyDown(first,{key:' ',repeat:true});expect(spacePlay()).toBe(before+1);
+    fireEvent.keyDown(first,{key:' ',ctrlKey:true});expect(spacePlay()).toBe(before+1);
+  });
+  it('Ctrl+Space plays the cursor bar from its start, from a button as well as the score',async()=>{
+    await setup();const button=screen.getByRole('button',{name:'Select rendered note'});button.focus();
+    fireEvent.keyDown(button,{key:' ',ctrlKey:true});
+    expect(integration.seekToMeasure).toHaveBeenCalledWith(0);expect(integration.play).toHaveBeenCalled();
+  });
+  describe('a Space that waits for playback',()=>{
+    const notReady=async()=>{await setup();const player=integration.players[0],workspace=screen.getByRole('region',{name:'Score workspace'});act(()=>player.publish({ready:false}));return {player,workspace,before:integration.play.mock.calls.length};};
+    it('plays once it is ready, and says so while it waits',async()=>{
+      const {player,workspace,before}=await notReady();
+      fireEvent.keyDown(workspace,{key:' '});expect(integration.play.mock.calls.length).toBe(before);
+      expect(screen.getAllByText(/Playback starts when the score is ready/).length).toBeGreaterThan(0);
+      act(()=>player.publish({ready:true}));
+      await waitFor(()=>expect(integration.play.mock.calls.length).toBe(before+1));
+      await waitFor(()=>expect(screen.queryByText(/Playback starts when the score is ready/)).toBeNull());
+    });
+    it('is cancelled by a second Space',async()=>{
+      const {player,workspace,before}=await notReady();
+      fireEvent.keyDown(workspace,{key:' '});fireEvent.keyDown(workspace,{key:' '});
+      act(()=>player.publish({ready:true}));await settleMs(150);expect(integration.play.mock.calls.length).toBe(before);
+    });
+    it('is cancelled by Escape, by Stop, by a cursor change, by a dialog opening, by Ctrl+Space, by playback starting elsewhere and by Escape in a dock row',async()=>{
+      for(const cancel of ['escape','stop','cursor','dialog','ctrlspace','state','dockescape'] as const){
+        cleanup();integration.players=[];integration.play.mockClear();
+        const {player,workspace,before}=await notReady();
+        fireEvent.keyDown(workspace,{key:' '});
+        if(cancel==='escape')fireEvent.keyDown(workspace,{key:'Escape'});
+        else if(cancel==='stop')fireEvent.click(document.querySelector('.transport-stopbutton')!);
+        else if(cancel==='cursor')fireEvent.click(screen.getByRole('button',{name:'Select rendered note'}));
+        else if(cancel==='ctrlspace')fireEvent.keyDown(workspace,{key:' ',ctrlKey:true});
+        else if(cancel==='state'){act(()=>player.publish({playing:true}));act(()=>player.publish({playing:false}));}
+        else if(cancel==='dockescape'){const mute=document.querySelector<HTMLElement>('.score-overview-mix button')!;fireEvent.keyDown(mute,{key:'Escape'});}
+        else{const dialog=document.createElement('div');dialog.setAttribute('role','dialog');document.body.appendChild(dialog);}
+        act(()=>player.publish({ready:true}));await settleMs(150);
+        expect(integration.play.mock.calls.length-(cancel==='ctrlspace'?1:0),cancel).toBe(before);
+        document.querySelectorAll('[role="dialog"]').forEach(node=>node.remove());
+      }
+    });
+  });
 });
 it('top-bar panel toggles show and hide the palette, inspector and global view, and mirror the View menu',async()=>{
   const c=await setup(),before=c.getState(),shown=(selector:string)=>{const element=document.querySelector<HTMLElement>(selector);return !!element&&!element.closest('[hidden]');};

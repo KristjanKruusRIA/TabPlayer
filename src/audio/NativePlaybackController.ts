@@ -33,6 +33,7 @@ const mixLanded=(heard:{track:string;mix:ChannelMix;landing:{key:string;project:
 /** How long a practice change waits for the native acknowledgement before it falls back to the acknowledged settings. Native's own wait for the callback is 250 ms. */
 const PENDING_MS=2500;
 type Options={pendingMs?:number;bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined;latestMaster?:()=>MasterSettings|undefined};
+const sameTarget=(a:BeatTarget,b:BeatTarget)=>a.track===b.track&&a.staff===b.staff&&a.bar===b.bar&&a.voice===b.voice&&a.beat===b.beat;
 export class NativePlaybackController {
   private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,practice:idlePractice(DEFAULT_PRACTICE),practicePending:false,practiceNotice:null,range:null,loop:null,loopNotice:null,error:null};
   private listeners=new Set<()=>void>();private view:AlphaTabApi|null=null;private cleanupView:()=>void=()=>{};
@@ -127,6 +128,7 @@ export class NativePlaybackController {
     if(selection)try{result.spans=selectionPlaybackChoices(score,plan,selection).map(({startTick,endTick})=>({startTick,endTick}));}catch{}
     return result;
   }
+  private cursorSeek:{target:BeatTarget;choice:CursorPlaybackChoice}|null=null;
   private startRange(startTick:number,endTick:number|null){this.noteMode='waiting';this.pendingNoteTick=undefined;this.update({});this.send({type:'playRange',generation:this.generation,startTick,endTick});}
   play(cursor?:BeatTarget,choice?:CursorPlaybackChoice){
     if(cursor){
@@ -146,6 +148,42 @@ export class NativePlaybackController {
   private occurrence(bar:number){const found=this.plan?.occurrences.find(o=>o.bar===bar);if(!Number.isInteger(bar)||!found)throw new Error('Select a measure after playback is ready.');return found;}
   private seekToTick(tick:number){this.noteMode='seeking';this.pendingNoteTick=tick;this.operationError=null;this.update({error:this.lastStatus?.error??null});this.send({type:'seekTick',tick,generation:this.generation});}
   seekToMeasure(index:number){this.seekToTick(this.occurrence(index).startTick);}
+  /** Which performed occurrence a click on `target` means: the first when stopped or paused, the one nearest the playhead while playing. Remembered, so Play and Space start from it (see `cursorSeekChoice`). Null while no plan for the current document is ready. */
+  chooseCursorOccurrence(target:BeatTarget):CursorPlaybackChoice|null{
+    if(!this.selectionReady())return null;
+    const choices=cursorPlaybackChoices(this.built!.score,this.plan!,target);if(!choices.length)return null;
+    const here=this.lastStatus?.tick??0;
+    // A running loop or played selection decides first: the occurrences inside it are the ones a click can mean.
+    const passage=this.state.loop??this.state.range,inside=passage?choices.filter(item=>item.startTick>=passage.startTick&&item.startTick<passage.endTick):[];
+    const pool=inside.length?inside:choices;
+    const choice=this.state.playing?pool.reduce((best,next)=>Math.abs(next.startTick-here)<Math.abs(best.startTick-here)?next:best):pool[0];
+    this.cursorSeek={target:{...target},choice};this.update({});return choice;
+  }
+  /** The occurrence a click chose for `target`, while it is still one of the plan's; null otherwise. */
+  cursorSeekChoice(target:BeatTarget):CursorPlaybackChoice|null{
+    const kept=this.cursorSeek;
+    if(!kept||kept.choice.generation!==this.generation||!sameTarget(kept.target,target))return null;
+    return kept.choice;
+  }
+  /**
+   * Moves playback to a beat the player clicked. Navigation only (no edit), and it keeps the player's practice state: it sends `seekWithin`, which leaves the
+   * selection range, a count-in and the pass counts (loop, speed trainer) alone. While a loop or a played selection is active (playing or paused) a click outside
+   * it moves nothing, and a click inside seeks within it; during a count-in a click moves nothing. Returns false, and sends nothing, only while no plan for the
+   * current document is ready.
+   */
+  seekToCursor(target:BeatTarget):boolean{
+    const choice=this.cursorSeekChoice(target)??this.chooseCursorOccurrence(target);
+    if(!choice)return false;
+    const practice=this.state.practice,phase=practice.phase;
+    if(phase==='countIn'||practice.countInRemaining>0)return true;
+    const passage=this.state.loop??this.state.range;
+    if(passage&&(choice.startTick<passage.startTick||choice.startTick>=passage.endTick))return true;
+    const was={mode:this.noteMode,tick:this.pendingNoteTick};
+    this.noteMode='seeking';this.pendingNoteTick=choice.startTick;this.operationError=null;this.update({error:this.lastStatus?.error??null});
+    // Native refuses a seek that would leave the loop or the played selection, or land in a count-in, using its own newer state: that is not an error the player needs told.
+    const tick=choice.startTick;
+    void this.bridge.command({type:'seekWithin',tick,generation:this.generation}).catch(()=>{if(this.noteMode==='seeking'&&this.pendingNoteTick===tick){this.noteMode=was.mode;this.pendingNoteTick=was.tick;this.update({});}});return true;
+  }
   /** The score's authored tempo range while it has a backing track and its plan is known; a fixed tempo is checked against it. */
   authoredTempos():AuthoredTempos|null{return this.hasBacking&&this.plan?authoredTemposOf(this.plan):null;}
   setPractice(settings:PracticeSettings){

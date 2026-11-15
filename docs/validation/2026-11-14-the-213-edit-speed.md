@@ -368,13 +368,13 @@ with the final code:
 
 ## Verification run
 
-Final working tree after the fourth review: `develop` merged three times (1d00286, d6aad14 with the tuning dialog, 61ab5fb with click-to-seek and Space).
+Final working tree after the fifth review: `develop` merged three times (1d00286, d6aad14 with the tuning dialog, 61ab5fb with click-to-seek and Space).
 Every command ran in the task's own worktree by explicit path.
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | no errors |
-| `npm test -- --testTimeout=60000` | Node resource tests and the secret scan pass; Vitest 7355 passed, 8 skipped, 0 failed (fourth review) |
+| `npm test -- --testTimeout=60000` | Node resource tests and the secret scan pass; Vitest 7361 passed, 8 skipped, 0 failed (fifth review) |
 | `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` | clean |
 | `cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml` | 2028 passed, 0 failed, 96 ignored (Rust is merged from two branches now; run on the tree before the last TypeScript-only commits) |
 | owner-score fuzz (`TP_OWNER_SCORES`, 5 scores, 100 edits each, with the replay from a checkpoint compared with the rebuild every tenth edit) | passed on the final tree (5 of 5) |
@@ -382,18 +382,19 @@ Every command ran in the task's own worktree by explicit path.
 | `node tests/desktop/edit-speed.mjs` | exit 0 in every run. Digit edit median, key to drawn and free, on the 6 x 200 score, over five runs on a machine other work was using: 186, 228, 280, 237, 198 ms (the second round measured 197 and 230); an A/B of this build against the second round's on one score alternately showed no difference in the edit, undo (about 260 ms) or redo (about 270 ms) draw. Join 331 to 483 ms drawn once, undo 144 to 271 ms, cursor 11 ms, idle 0.1 to 0.3 % (it is measured after the idle check has ended), heap growth over 240 edits negative after a warm-up (budget 40 MB), real clicks on an inserted beat and on the typed note land on them, 3 edits compared with a rebuild, no mismatch |
 | `editor`, `parity-entry`, `loop-through-edit`, `exports`, `parity-document-tabs`, `parity-mix-drag`, `parity-fret-typing`, `parity-track-click`, `parity-clipboard`, `parity-tuning-dialog`, `parity-workstation`, `parity-click-seek-space`, `parity-click-seek-repeat`, `parity-click-seek-backing`, `native-audio` | exit 0 each, on the final build |
 
+Fifth review, on its final build (rebuilt once): `edit-speed`, `editor`, `parity-entry`, `exports`, `parity-document-tabs`, `parity-clipboard`,
+`parity-fret-typing`, `parity-click-seek-space`, `parity-finalize` and `cancellation` exit 0, and `parity-recovery` groups `crash` and `clean` exit 0 (these
+drivers cover finalizing, the unsaved-changes prompts and closing with unsaved work; `parity-file-library` needs a prepared state file and was not run).
+`edit-speed`: median 247 ms (worst 376), join 391 ms drawn once, undo 240 ms, idle 0.2 %, heap growth over 240 edits negative. The median is above 200 ms
+again on this shared machine (earlier runs 186 to 280 ms, and an A/B against the second round's build showed no difference): the edit's own path was not touched.
+`npm run typecheck` clean; the owner-score fuzz passes (5 of 5); Rust is unchanged since the third review (its workspace run passed: 2028 passed, 0 failed).
+
 `plan.performance.test.ts.snap` is rewritten by the run and was restored with `git checkout --`. macOS and Linux were not measured. The 200 ms median
 is the hard requirement and is met in some runs and missed by up to 80 ms in others on a shared machine; the edit's own work (native call 13 to 17 ms, the
 in-place edit and the draw) did not change in this round.
 
 New Vitest files in the third round: `engine.checkpoint.test.ts`, `engine.in-place.memory.test.ts`, additions to `controller.faults.test.ts` and
 `NativePlaybackController.test.ts`.
-
-Fourth review, on its final build (rebuilt once, drivers `edit-speed`, `editor`, `parity-entry`, `exports`, `parity-document-tabs`, `parity-clipboard`,
-`parity-fret-typing`, `parity-click-seek-space`: exit 0 each; the others of the third review's list were not rerun for this change, which touches the controller
-and the translations only): `edit-speed` median 234 ms (worst 432), join 439 ms drawn once, undo 277 ms, cursor 11 ms, idle 0.3 %, heap growth over
-240 edits negative; `npm run typecheck` clean, `cargo fmt --check` clean (Rust is unchanged since the third review, whose workspace run passed: 2028 passed, 0 failed).
-The median is again above 200 ms on this shared machine in this run (earlier runs 186 to 280 ms; see the A/B above): the edit's own path was not touched.
 
 ## What remains slow, and the next step
 

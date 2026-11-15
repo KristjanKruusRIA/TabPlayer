@@ -840,7 +840,7 @@ it('inserts a beat into an empty voice and changes score information and tuning'
   click('Insert beat');await waitFor(()=>expect(currentBeat(c)).toBeDefined());
   change('Title','My study');change('Artist','Band');change('Initial tempo','90');click('Apply score info');
   await waitFor(()=>expect(c.getState().score.title).toBe('My study'));
-  change('Tuning (notes, high to low)','E4 B3 G3 D3 A2 D2');click('Apply tuning');
+  click('Edit tuning (E4 B3 G3 D3 A2 E2)');const tuningDialog=within(screen.getByRole('dialog',{name:'Tuning'}));fireEvent.change(tuningDialog.getByLabelText('Notes, high to low'),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(tuningDialog.getByRole('button',{name:'Keep fingering'}));
   await waitFor(()=>expect(c.getState().score.tracks[0].staves[0].tuning.at(-1)).toBe(38));
 });
 
@@ -1016,17 +1016,17 @@ it('top-bar panel toggles show and hide the palette, inspector and global view, 
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('workstation hidden panes retain their mounted tuning rhythm and text drafts without score changes',async()=>{
-  const c=await setup(),before=c.getState();fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');fireEvent.change(tuning,{target:{value:'E4 B3 G3 D3 A2 D2'}});
+  const c=await setup(),before=c.getState();fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);fireEvent.change(tuning,{target:{value:'Draft lead'}});
   fireEvent.click(paneButton('Inspector'));expect(tuning).not.toBeVisible();const duration=screen.getByLabelText('Duration'),text=screen.getByLabelText('Beat text');revealDetails(text);fireEvent.change(duration,{target:{value:'8'}});fireEvent.change(text,{target:{value:'Unapplied passage note'}});
   viewToggle('Inspector');expect(duration).not.toBeVisible();viewToggle('Inspector');fireEvent.click(paneButton('Track'));
-  expect(screen.getByLabelText('Tuning (notes, high to low)')).toBe(tuning);expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(screen.getByLabelText('Duration')).toBe(duration);expect(duration).toHaveValue('8');expect(screen.getByLabelText('Beat text')).toBe(text);expect(text).toHaveValue('Unapplied passage note');expect(c.getState()).toBe(before);expectSilentNavigation();
+  expect(screen.getByLabelText('Track name')).toBe(tuning);expect(tuning).toHaveValue('Draft lead');expect(screen.getByLabelText('Duration')).toBe(duration);expect(duration).toHaveValue('8');expect(screen.getByLabelText('Beat text')).toBe(text);expect(text).toHaveValue('Unapplied passage note');expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it.each(['hidden-inspector','track-tab'] as const)('workstation paste-options shortcut reveals and focuses the existing Inspector from %s',async mode=>{
-  const c=await setup(blankProject(),undefined,{width:1280});fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');fireEvent.change(tuning,{target:{value:'E4 B3 G3 D3 A2 D2'}});
+  const c=await setup(blankProject(),undefined,{width:1280});fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);fireEvent.change(tuning,{target:{value:'Draft lead'}});
   fireEvent.click(paneButton('Inspector'));const duration=screen.getByLabelText('Duration'),text=screen.getByLabelText('Beat text');revealDetails(text);fireEvent.change(duration,{target:{value:'8'}});fireEvent.change(text,{target:{value:'Draft survives reveal'}});click('Select bar');const score=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(score,{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
   const editTask=document.querySelector<HTMLDetailsElement>('.inspector-task[id$="-edit"]')!;editTask.open=false;const summary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();summary.parentElement!.scrollIntoView=scroll;const selection=engravingView.mock.lastCall?.[0].editorSelection,before=c.getState();
   if(mode==='hidden-inspector')viewToggle('Inspector');else fireEvent.click(paneButton('Track'));expect(duration).not.toBeVisible();
-  fireEvent.keyDown(score,{key:'v',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(summary).toHaveFocus());expect(summary).toBeVisible();expect(editTask.open).toBe(true);expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(duration).toBeVisible();expect(duration).toHaveValue('8');expect(text).toHaveValue('Draft survives reveal');expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(c.getState()).toBe(before);expect(engravingView.mock.lastCall?.[0].editorSelection).toBe(selection);expectSilentNavigation();
+  fireEvent.keyDown(score,{key:'v',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(summary).toHaveFocus());expect(summary).toBeVisible();expect(editTask.open).toBe(true);expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(duration).toBeVisible();expect(duration).toHaveValue('8');expect(text).toHaveValue('Draft survives reveal');expect(tuning).toHaveValue('Draft lead');expect(c.getState()).toBe(before);expect(engravingView.mock.lastCall?.[0].editorSelection).toBe(selection);expectSilentNavigation();
 });
 it('workstation 960px task pane replaces Inspector and resize restores simultaneous wide panes',async()=>{
   await setup(blankProject(),undefined,{width:960});const shell=document.querySelector('.app-shell')!;expect(shell).toHaveAttribute('data-narrow','true');const location=screen.getByLabelText('Editing location');expect(location).toBeVisible();fireEvent.click(paneButton('Sound'));expect(location).not.toBeVisible();expect(screen.getByLabelText('Sound source')).toBeVisible();fireEvent.click(paneButton('Inspector'));expect(location).toBeVisible();expect(screen.getByLabelText('Sound source')).not.toBeVisible();
@@ -1050,13 +1050,13 @@ it.each([{width:1280,height:620},{width:960,height:720}])('short Backing dock at
 });
 it.each([960,1280,1600])('Backing waveform reveals the existing dock at %ipx and preserves drafts and history',async width=>{
   const c=await setup(blankProject(),undefined,{width}),before=c.getState();
-  fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');fireEvent.change(tuning,{target:{value:'E4 B3 G3 D3 A2 D2'}});
+  fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);fireEvent.change(tuning,{target:{value:'Draft lead'}});
   fireEvent.click(paneButton('Backing'));viewToggle('Bottom dock');click('Show waveform');
   expect(screen.getByRole('region',{name:'Backing waveform'})).toBeVisible();
   const dock=screen.getByRole('region',{name:'Bottom dock'});expect(within(dock).getByRole('button',{name:'Backing'})).toHaveAttribute('aria-pressed','true');
   expect(document.querySelector('.workstation-workspace')).toHaveStyle({'--dock-height':`${window.innerHeight<800?176:width>=1440?192:176}px`});
   fireEvent.click(within(dock).getByRole('button',{name:'Overview'}));expect(screen.getByRole('grid',{name:'Written measure overview'})).toBeVisible();
-  fireEvent.click(paneButton('Track'));expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(c.getState()).toBe(before);expectSilentNavigation();
+  fireEvent.click(paneButton('Track'));expect(tuning).toHaveValue('Draft lead');expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('drags the inspector and dock to sizes that are kept for the next run, clamped to the window, with no edit',async()=>{
   const key='tabplayer.panelSizes',workspace=()=>document.querySelector<HTMLElement>('.workstation-workspace')!;
@@ -1225,7 +1225,7 @@ it.each(['percussion','empty-voice'] as const)('workstation Overview selects and
   const edits:EditCommand[]=kind==='percussion'?[{type:'addPercussionTrack',name:'Drums',program:0}]:[0,1,2,3].map(()=>({type:'deleteBeat',target:{track:0,staff:0,bar:0,voice:0,beat:0}}));const c=await setup({...blankProject(),edits}),before=c.getState(),grid=screen.getByRole('grid',{name:'Written measure overview'});const cell=within(grid).getByRole('gridcell',{name:kind==='percussion'?'Drums, measure 1, rest':'Guitar, measure 1, empty'});fireEvent.click(cell);expect(engravingView.mock.lastCall?.[0].editTarget).toEqual({track:kind==='percussion'?1:0,staff:0,bar:0,voice:0,beat:0});if(kind==='percussion')expect(engravingView.mock.lastCall?.[0].editString).toBeUndefined();expect(cell).toHaveFocus();expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('workstation paste-options shortcut keeps input and dialog keyboard exclusions',async()=>{
-  const c=await setup(),before=c.getState(),summary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();summary.parentElement!.scrollIntoView=scroll;fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');tuning.focus();fireEvent.keyDown(tuning,{key:'v',ctrlKey:true,shiftKey:true});expect(tuning).toHaveFocus();expect(screen.getByLabelText('Editing location')).not.toBeVisible();expect(scroll).not.toHaveBeenCalled();
+  const c=await setup(),before=c.getState(),summary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();summary.parentElement!.scrollIntoView=scroll;fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);tuning.focus();fireEvent.keyDown(tuning,{key:'v',ctrlKey:true,shiftKey:true});expect(tuning).toHaveFocus();expect(screen.getByLabelText('Editing location')).not.toBeVisible();expect(scroll).not.toHaveBeenCalled();
   click('Browse scales');const dialog=screen.getByRole('dialog',{name:'Scale browser'}),focus=document.activeElement;fireEvent.keyDown(dialog,{key:'v',ctrlKey:true,shiftKey:true});expect(document.activeElement).toBe(focus);expect(summary.closest('details')).not.toHaveAttribute('open');expect(scroll).not.toHaveBeenCalled();expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 
@@ -1244,19 +1244,19 @@ it('inspector tabs show Song, Track and Selection, follow the arrow keys and kee
   const selection=within(list).getByRole('tab',{name:'Selection'});expect(selection).toHaveAttribute('aria-selected','true');expect(screen.getByLabelText('Editing location')).toBeVisible();
   selection.focus();await user.keyboard('{ArrowRight}');const song=within(list).getByRole('tab',{name:'Song'});expect(song).toHaveFocus();expect(song).toHaveAttribute('aria-selected','true');
   expect(screen.getByLabelText('Title')).toBeVisible();expect(screen.getByRole('button',{name:'Apply score info'})).toBeVisible();expect(screen.getByLabelText('Editing location')).not.toBeVisible();
-  await user.keyboard('{ArrowRight}');expect(within(list).getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByLabelText('Tuning (notes, high to low)')).toBeVisible();
+  await user.keyboard('{ArrowRight}');expect(within(list).getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeVisible();
   await user.keyboard('{ArrowLeft}{ArrowLeft}');expect(selection).toHaveFocus();expect(screen.getByLabelText('Duration')).toBeVisible();
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('menu commands open the inspector tab that holds their settings',async()=>{
   const c=await setup(),before=c.getState();viewToggle('Inspector');expect(document.querySelector('.workstation-inspector')).not.toBeVisible();
-  fireEvent.click(within(openCommand('Track')).getByRole('button',{name:'Track properties…'}));expect(screen.getByRole('tab',{name:'Track'})).toHaveAttribute('aria-selected','true');expect(screen.getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByLabelText('Tuning (notes, high to low)')).toBeVisible();
+  fireEvent.click(within(openCommand('Track')).getByRole('button',{name:'Track properties…'}));expect(screen.getByRole('tab',{name:'Track'})).toHaveAttribute('aria-selected','true');expect(screen.getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeVisible();
   fireEvent.click(within(openCommand('Sound')).getByRole('button',{name:'Sound mastering…'}));expect(screen.getByRole('tab',{name:'Song'})).toHaveAttribute('aria-selected','true');
   fireEvent.click(within(openCommand('Note')).getByRole('button',{name:'Note properties…'}));expect(screen.getByRole('tab',{name:'Selection'})).toHaveAttribute('aria-selected','true');
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('review responsive pane focus leaves an unrelated score focus in place',async()=>{
-  const c=await setup(),before=c.getState(),score=screen.getByRole('region',{name:'Score workspace'});score.focus();Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:960});fireEvent(window,new Event('resize'));expect(screen.getByLabelText('Tuning (notes, high to low)')).not.toBeVisible();expect(score).toHaveFocus();expect(c.getState()).toBe(before);expectSilentNavigation();
+  const c=await setup(),before=c.getState(),score=screen.getByRole('region',{name:'Score workspace'});score.focus();Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:960});fireEvent(window,new Event('resize'));expect(screen.getByRole('button',{name:/^Edit tuning/,hidden:true})).not.toBeVisible();expect(score).toHaveFocus();expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it.each(['View','dock button'] as const)('review instrument toggle shows the actual hidden dock in one click after hiding with %s',async source=>{
   const c=await setup(),before=c.getState();fireEvent.click(screen.getByRole('button',{name:'Instrument'}));expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(screen.getByRole('button',{name:'Hide instrument'})).toHaveAttribute('aria-pressed','true');if(source==='View')viewToggle('Bottom dock');else fireEvent.click(screen.getByRole('button',{name:'Hide bottom dock'}));expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(true);const show=screen.getByRole('button',{name:'Show instrument'});expect(show).toHaveAttribute('aria-pressed','false');fireEvent.click(show);expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(screen.getByRole('button',{name:'Hide instrument'})).toHaveAttribute('aria-pressed','true');expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(true);expect(c.getState()).toBe(before);expect(integration.playerOptions).toHaveBeenCalledOnce();expect(integration.destroy).not.toHaveBeenCalled();expectSilentNavigation();
@@ -1492,7 +1492,7 @@ it('keeps selection, scales, tuning audition and Copy music usable while finaliz
   fireEvent.click(functionalButton('Select bar'));
   await waitFor(()=>expect(functionalButton('Copy music')).toBeEnabled());
   expect(functionalButton('Clear selection')).toBeEnabled();expect(functionalButton('Erase selected notes')).toBeDisabled();
-  expect(functionalButton('Remove track')).toBeDisabled();expect(functionalButton('Apply tuning')).toBeDisabled();
+  expect(functionalButton('Remove track')).toBeDisabled();expect(functionalButton('Edit tuning (E4 B3 G3 D3 A2 E2)')).toBeDisabled();
   expect(functionalButton('Set note')).toBeDisabled();expect(functionalButton('Append measure')).toBeDisabled();
   expect(integration.commits).not.toHaveBeenCalled();
 });

@@ -77,7 +77,7 @@ it('remaps chord diagrams and their fingerings with the kept strings',()=>{
 
 it('refuses drums, an unchanged count, invalid tunings and keep values',()=>{
   const score=music(),clean=json(score);
-  expect(()=>applyStructureEdit(score,command([64,59,55,50,45,38]),0)).toThrow('Apply tuning');
+  expect(()=>applyStructureEdit(score,command([64,59,55,50,45,38]),0)).toThrow('Keep fingering');
   for(const tuning of [[],Array(13).fill(40),[64,59,55,50,45,40,128],[64,59,55,50,45,40,-1]])expect(()=>applyStructureEdit(score,command(tuning),0)).toThrow();
   expect(()=>applyStructureEdit(score,command(seven,'middle' as 'high'),0)).toThrow();
   expect(json(score)).toEqual(clean);

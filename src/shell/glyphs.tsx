@@ -46,4 +46,12 @@ export const KeysGlyph:Glyph=p=><svg {...base} {...p}><path d="M1.5 3.5h13v9h-13
 export const NoteGlyph:Glyph=p=><svg {...base} {...p}><path d="M7.5 12V2.5l5 2"/><ellipse cx="5.5" cy="12" rx="2.3" ry="1.7" fill="currentColor" stroke="none"/></svg>;
 /** Mute is a speaker struck through; solo is a pair of headphones. */
 export const MuteGlyph:Glyph=p=><svg {...base} {...p}><path d="M2 6h2.5L8 3v10l-3.5-3H2z" fill="currentColor" stroke="none"/><path d="M14 2.5L2.5 14"/></svg>;
-export const SoloGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 11V8a5.5 5.5 0 0111 0v3"/><path d="M2.5 9.5h2.5v4.5H2.5zM11 9.5h2.5v4.5H11z" fill="currentColor"/></svg>;
+export const SoloGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 11V8a5.5 5.5 0 0111 0v3"/><path d="M2.5 9.5h2.5v4.5H2.5zM11 9.5h2.5v4.5H11z" fill="currentColor"/></svg>;/** Move up and down: an arrow on a stem. */
+export const ArrowUpGlyph:Glyph=p=><svg {...base} {...p}><path d="M8 13.5v-10M4 7.5l4-4 4 4"/></svg>;
+export const ArrowDownGlyph:Glyph=p=><svg {...base} {...p}><path d="M8 2.5v10M4 8.5l4 4 4-4"/></svg>;
+/** Duplicate: a page behind a page. */
+export const DuplicateGlyph:Glyph=p=><svg {...base} {...p}><path d="M5.5 5.5h8v8h-8z"/><path d="M10.5 5.5v-3h-8v8h3"/></svg>;
+/** Remove: a bin with a lid. */
+export const TrashGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 4.5h11M6 4.5v-2h4v2M4 4.5l.8 9h6.4l.8-9M7 7v4M9 7v4"/></svg>;
+/** Settings for one thing: a cog. */
+export const CogGlyph:Glyph=p=><svg {...base} {...p}><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2.3M8 12.2v2.3M1.5 8h2.3M12.2 8h2.3M3.4 3.4L5 5M11 11l1.6 1.6M12.6 3.4L11 5M5 11l-1.6 1.6"/></svg>;

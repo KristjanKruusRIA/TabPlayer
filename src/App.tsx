@@ -323,6 +323,15 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [drawHold,setDrawHold]=useState(false);
   const fretRun=useRef<{text:string;at:number;wrote:boolean;documentId:string;revision:number;edits:number;command:string;target:BeatTarget;string:number;entryBefore:EntryDuration|null}|null>(null);
   const pendingTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  /** Ends the wait for a second digit once the clock (Date.now, the one the join and the entry queue are judged by) has reached `end`. The timer only wakes this up: a timer that fires early, or a clock that has not moved, waits for the rest instead of closing the window on its own count of real time. */
+  const closePendingWindowAt=(end:number)=>{
+    pendingTimer.current=setTimeout(()=>{
+      const left=end-Date.now();
+      // More than a whole window left means the clock stepped backwards: close now instead of waiting it out.
+      if(left>0&&left<=FRET_DIGIT_WINDOW_MS){closePendingWindowAt(end);return;}
+      pendingTimer.current=null;fretRun.current=null;setPendingFret(null);
+    },Math.max(1,end-Date.now()));
+  };
   /** Ends the digit window: the hint goes, and the next digit starts a new fret. */
   const endPending=()=>{if(pendingTimer.current!==null){clearTimeout(pendingTimer.current);pendingTimer.current=null;}fretRun.current=null;setPendingFret(null);};
   useEffect(()=>()=>{if(pendingTimer.current!==null)clearTimeout(pendingTimer.current);},[]);
@@ -774,7 +783,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setFret(fretValue);setPendingFret(text);
     if(pendingTimer.current!==null)clearTimeout(pendingTimer.current);
     // Once the window closes the hint ends and the next digit starts a new fret.
-    pendingTimer.current=setTimeout(()=>{pendingTimer.current=null;fretRun.current=null;setPendingFret(null);},FRET_DIGIT_WINDOW_MS);
+    closePendingWindowAt(Date.now()+FRET_DIGIT_WINDOW_MS);
     const fretName=`${t('editor.fret')} ${text}`;
     const remember=(wrote:boolean,entryBefore:EntryDuration|null)=>{const now=controller.getState(),edits=now.snapshot.project.edits;fretRun.current={text,at,wrote,documentId:now.documentId,revision:now.revision,edits:edits.length,command:JSON.stringify(edits.at(-1)),target,string,entryBefore};};
     if(joined&&run){

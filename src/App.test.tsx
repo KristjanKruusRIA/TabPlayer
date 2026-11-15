@@ -2308,6 +2308,12 @@ describe('entry key queue',()=>{
 });
 
 describe('GP8 edit and cursor keys',()=>{
+  // Every time rule in the editor (the 1000 ms join of two fret digits, the two-second age of a queued key) reads Date.now, so the clock stands still here
+  // and moves only when a test moves it: how fast the runner is decides nothing. A test that depends on a gap sets it with `later`.
+  let now=1_700_000_000_000,clock:ReturnType<typeof vi.spyOn>|undefined;
+  const later=(ms:number)=>{now+=ms;};
+  beforeEach(()=>{now=1_700_000_000_000;clock=vi.spyOn(Date,'now').mockImplementation(()=>now);});
+  afterEach(()=>{clock?.mockRestore();});
   const pane=()=>screen.getByRole('region',{name:'Score workspace'});
   const press=(init:Parameters<typeof fireEvent.keyDown>[1])=>fireEvent.keyDown(pane(),init);
   const edits=(c:DocumentController)=>c.getState().snapshot.project.edits;
@@ -2517,14 +2523,31 @@ describe('GP8 edit and cursor keys',()=>{
     expect(edits(c)).toHaveLength(3);expect(edits(c)[2]).toMatchObject({type:'setNote',fret:9});
   });
   it('takes a digit typed after the window as a separate fret, not a join',async()=>{
-    let now=1_700_000_000_000;const spy=vi.spyOn(Date,'now').mockImplementation(()=>now);
-    try{
-      const c=await setup(withNotes());
-      press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
-      now+=1500;press({key:'2'});
-      await waitFor(()=>expect(edits(c)).toHaveLength(4));
-      expect(edits(c)[2]).toMatchObject({fret:1});expect(edits(c)[3]).toMatchObject({fret:2});
-    }finally{spy.mockRestore();}
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    later(1500);press({key:'2'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(edits(c)[2]).toMatchObject({fret:1});expect(edits(c)[3]).toMatchObject({fret:2});
+  });
+  it('joins a second digit typed exactly one window after the first, and not one millisecond later',async()=>{
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
+    later(1000);press({key:'2'});
+    await waitFor(()=>expect(lastFret(c)).toBe(12));await quiet();expect(edits(c)).toHaveLength(3);
+    cleanup();
+    const late=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(late)).toHaveLength(3));await quiet();
+    later(1001);press({key:'2'});
+    await waitFor(()=>expect(edits(late)).toHaveLength(4));
+    expect(edits(late)[2]).toMatchObject({fret:1});expect(lastFret(late)).toBe(2);
+  });
+  it('joins when the real time between the two digits runs past the window but the clock has not moved',async()=>{
+    // A slow runner can take longer than a second between two key presses; the join is judged by the clock the keys carry, not by how long the test took.
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    await new Promise(resolve=>setTimeout(resolve,1300));
+    press({key:'2'});
+    await waitFor(()=>expect(lastFret(c)).toBe(12));await quiet();expect(edits(c)).toHaveLength(3);
   });
   it('Escape ends the wait for a second digit, so the next digit is a new fret; nothing is taken back',async()=>{
     const c=await setup(withNotes());
@@ -2549,7 +2572,9 @@ describe('GP8 edit and cursor keys',()=>{
     await waitFor(()=>expect(screen.getAllByText(hint)).toHaveLength(2));
     expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBe('7');
     expect(screen.getAllByRole('status').filter(node=>node.textContent===hint)).toHaveLength(1);
-    await waitFor(()=>expect(screen.queryAllByText(hint)).toHaveLength(0),{timeout:2500});
+    // The window closes when the clock says so; the timer only wakes the check, so it is the real second of the wait that this timeout covers.
+    later(1000);
+    await waitFor(()=>expect(screen.queryAllByText(hint)).toHaveLength(0),{timeout:5000});
     expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBeNull();
   });
   it('Backspace after a typed digit removes the note on the string, as it does for any note',async()=>{
@@ -2576,9 +2601,10 @@ describe('GP8 edit and cursor keys',()=>{
     press({key:'1'});await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
     press({key:'2'});await waitFor(()=>expect(hold.held).toHaveLength(1));
     await hold.next('refuse');
-    // The undo was done and the write refused: the first digit is back, and the player is told.
+    // The undo was done and the write refused: the first digit is back, and the player is told once the hint for a second digit is gone.
     await waitFor(()=>expect(edits(c)).toHaveLength(3));expect(lastFret(c)).toBe(1);
-    expect(await screen.findByText(/first digit was put back/)).toBeInTheDocument();
+    later(1000);
+    expect(await screen.findByText(/first digit was put back/,{},{timeout:5000})).toBeInTheDocument();
   });
   it('does not undo or join when another edit came between the two digits',async()=>{
     const c=await setup(withNotes());
@@ -2621,7 +2647,9 @@ describe('GP8 edit and cursor keys',()=>{
     cleanup();
     const c=await setup(withNotes()),hold=holdEdits(c);
     press({key:'7'});await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next('refuse');
-    expect(await screen.findByText(/Fret 7 was not entered: the edit was refused/)).toBeInTheDocument();
+    // The notice shows once the hint for a second digit is gone, and the clock says when that is; the 5 s only covers the real second the timer takes to look.
+    later(1000);
+    expect(await screen.findByText(/Fret 7 was not entered: the edit was refused/,{},{timeout:5000})).toBeInTheDocument();
   });
   it('makes a track active from its name: same bar and beat, nothing recorded, not dirty',async()=>{
     const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}] as EditCommand[]});

@@ -33,7 +33,7 @@
 }
 .tuning-dialog fieldset.tuning-capo { display: grid; gap: 6px; margin: 0; padding: 8px; border: 1px solid var(--tp-line-subtle); border-radius: var(--tp-radius-m); min-width: 0; }
 .tuning-dialog fieldset.tuning-capo legend { padding: 0 4px; color: var(--tp-muted); font-size: 12px; font-weight: 600; }
-.tuning-capo-row { display: grid; grid-template-columns: auto 80px minmax(0, 1fr); align-items: center; gap: 8px; }
+.tuning-capo-row { display: grid; grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 8px; }
 .tuning-capo-more > summary { min-height: 28px; line-height: 28px; cursor: pointer; color: var(--tp-muted); font-size: 12px; }
 .tuning-capo-more[open] { display: grid; gap: 6px; }
 .tuning-capo-more fieldset { min-width: 0; display: grid; gap: 4px; margin: 0; padding: 6px 0 0; border: 0; }

@@ -20,6 +20,7 @@ async function once(label,type,action) {
   const after=await session.edits();assert.equal(after.length,before+1,`${label}: exactly one edit (had ${before}, now ${after.length}: ${after.slice(before).map(e=>e.type)})`);
   assert.equal(after.at(-1).type,type,`${label}: edit type`);
   const edit=after.at(-1);
+  await closeProperties(page);
   await clickWorkstationButton(page,'Undo');await settle(page,400);
   assert.equal((await session.edits()).length,before,`${label}: Undo takes it back`);
   note(label,{type,edit});return edit;
@@ -100,8 +101,11 @@ try{
   await nothing('track name left unchanged records nothing',async()=>{await name.focus();await name.blur();});
   await once('Track name applies when left','setTrackInfo',async()=>{await name.fill('Lead');await name.blur();});
   await once('Track colour applies when the picker settles','setTrackColor',async()=>{await page.locator('.track-color-input').fill('#ff8800');});
-  await once('Tablature toggle records the staff settings','setStaffSettings',async()=>{await page.getByRole('button',{name:'Show tablature',exact:true}).click();});
   await once('Notation toggle records the staff settings','setStaffSettings',async()=>{await page.getByRole('button',{name:'Show notation',exact:true}).click();});
+  // The engine refuses a staff that shows neither, so tablature goes off only once notation is on.
+  await page.getByRole('button',{name:'Show notation',exact:true}).click();await settle(page,400);
+  await once('Tablature toggle records the staff settings','setStaffSettings',async()=>{await page.getByRole('button',{name:'Show tablature',exact:true}).click();});
+  await clickWorkstationButton(page,'Undo');await settle(page,400);
   await page.locator('.track-notation-more summary').click();
   await once('Sounding transposition (More) applies when left','setStaffSettings',async()=>{const field=page.getByLabel('Sounding transposition',{exact:true});await field.fill('12');await field.blur();});
   await once('Add staff (More) records addStaff','addStaff',async()=>{await page.getByRole('button',{name:'Add staff',exact:true}).click();});
@@ -112,19 +116,19 @@ try{
   assert.equal(await tdialog.getByLabel('Capo',{exact:true}).inputValue(),'0');
   await page.screenshot({path:resolve(shots,'after-tuning-dialog-capo.png')});
   await nothing('Keep fingering with the same tuning and capo records nothing',async()=>{await tdialog.getByRole('button',{name:'Keep fingering'}).click();await tdialog.waitFor({state:'hidden'});});
-  await once('Capo in the Tuning dialog is one setStaffSettings','setStaffSettings',async()=>{await tuning.click();await tdialog.getByLabel('Capo',{exact:true}).fill('2');await tdialog.getByRole('button',{name:'Keep fingering'}).click();await tdialog.waitFor({state:'hidden'});});
-  assert.equal(await focusedLabel().then(label=>label.includes('Edit tuning')),true,'focus returns to the tuning button');
+  await once('Capo in the Tuning dialog is one setStaffSettings','setStaffSettings',async()=>{await tuning.click();await tdialog.getByLabel('Capo',{exact:true}).fill('2');await tdialog.getByRole('button',{name:'Keep fingering'}).click();await tdialog.waitFor({state:'hidden'});
+    assert.equal(await focusedLabel().then(label=>label.includes('Edit tuning')),true,'focus returns to the tuning button');});
   // Sounds.
-  await once('Sound preset records one setTrackSound','setTrackSound',async()=>{await page.getByLabel('Sound preset',{exact:true}).selectOption('clean');});
+  await once('Sound preset records one setTrackSound','setTrackSound',async()=>{await page.getByLabel('Sound preset').selectOption('clean');});
   const editor=page.getByRole('button',{name:'Sound and pedalboard…',exact:true});await editor.focus();
   const sound=await dialogOpen(()=>editor.click(),'.sound-dialog');
   await page.screenshot({path:resolve(shots,'after-sound-dialog.png')});
-  await once('A pedal switched on in the sound dialog records one setTrackSound','setTrackSound',async()=>{await sound.getByText('Chorus',{exact:true}).first().click();await sound.getByRole('checkbox',{name:/^Enable chorus/i}).check();});
-  await closeTop('.sound-dialog');assert.equal(await focusedLabel(),'Sound and pedalboard…','focus returns to the sound editor button');
-  await once('Interpretation: Playing style records one setTrackMix','setTrackMix',async()=>{await page.getByLabel('Playing style',{exact:true}).selectOption('pick');});
+  await once('A pedal switched on in the sound dialog records one setTrackSound','setTrackSound',async()=>{await sound.getByText('Chorus',{exact:true}).first().click();await sound.getByRole('checkbox',{name:/^Enable chorus/i}).check();await closeTop('.sound-dialog');assert.equal(await focusedLabel(),'Sound and pedalboard…','focus returns to the sound editor button');});
+  await once('Interpretation: Playing style records one setTrackMix','setTrackMix',async()=>{await page.getByLabel('Playing style').selectOption('pick');});
   note('Sounds and Interpretation controls record the same edits from compact rows',{});
 
   // ---- Properties dialog (what the Selection tab held) ----
+  await openProperties(page,'bar');await page.screenshot({path:resolve(shots,'after-properties-dialog.png')});await closeProperties(page);
   await openProperties(page,'note');
   await once('Note: Palm mute records setNoteTechniques','setNoteTechniques',async()=>{
     const dialog=page.getByRole('dialog',{name:'Properties',exact:true});
@@ -138,13 +142,12 @@ try{
   await once('Bar: the time signature records setMeasureSettings','setMeasureSettings',async()=>{
     const dialog=page.getByRole('dialog',{name:'Properties',exact:true});
     const summary=dialog.locator('summary',{hasText:'Measure & notation'});if(!await summary.evaluate(n=>n.parentElement.open))await summary.click();
-    await dialog.getByLabel('Time numerator').fill('3');await dialog.getByRole('button',{name:'Apply measure settings'}).click();});
+    await dialog.getByLabel('Time numerator').fill('5');await dialog.getByRole('button',{name:'Apply measure settings'}).click();});
   await openProperties(page,'staff');
   await once('Staff and voices: Add voice records addVoice','addVoice',async()=>{
     const dialog=page.getByRole('dialog',{name:'Properties',exact:true});
     const summary=dialog.locator('summary',{hasText:'Staff, voices & layout'});if(!await summary.evaluate(n=>n.parentElement.open))await summary.click();
     await dialog.getByRole('button',{name:'Add voice',exact:true}).click();});
-  await page.screenshot({path:resolve(shots,'after-properties-dialog.png')});
   await closeProperties(page);
   // The palette's Lyrics button opens the dialog at the Lyrics section.
   await page.locator('[data-palette-id="lyrics"]').click();
@@ -173,7 +176,7 @@ try{
       }
       // The dialogs.
       await page.locator('[data-inspector-tab="song"]').click();
-      const dialogs=[['style','.stylesheet-row button','.score-style-dialog'],['mastering','.slot-more','.master-dialog']];
+      const dialogs=[['style','.stylesheet-row button','.score-style-dialog'],['mastering','.slot-all','.master-dialog']];
       await page.locator('[data-inspector-tab="track"]').click();
       dialogs.push(['sound','.sound-editor-open','.sound-dialog']);
       for(const [key,opener,selector] of dialogs){

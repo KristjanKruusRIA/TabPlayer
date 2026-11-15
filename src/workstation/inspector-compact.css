@@ -19,7 +19,10 @@
 .inspector-section .slot-row .slot-name { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ws-text); font-size:13px; }
 .slot-row .slot-state { color:var(--ws-muted); font-size:11px; }
 .inspector-section .slot-edit { width:28px; padding:0; display:inline-grid; place-items:center; border-radius:3px; }
-.slot-more { justify-self:start; background:transparent; border:0; color:var(--ws-muted); text-decoration:underline; font-size:12px; padding:0 4px; }
+.slots-head { display:flex; align-items:center; justify-content:space-between; gap:6px; }
+.slots-head>h3 { margin:4px 0 6px; font:700 13px/1.2 var(--tp-font-ui); letter-spacing:.05em; text-transform:uppercase; color:var(--ws-text); }
+.inspector-section .slot-all { width:28px; padding:0; display:inline-grid; place-items:center; border-radius:3px; background:transparent; border-color:transparent; color:var(--ws-muted); }
+.inspector-section .slot-all:hover { color:var(--ws-text); border-color:var(--ws-border); }
 .sound-summary { display:grid; gap:6px; min-width:0; }
 .sound-choices { display:grid; gap:6px; min-width:0; margin:0; padding:0; border:0; }
 .effect-strip { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:4px; }
@@ -49,3 +52,7 @@
 .inspector-section .inspector-more, .track-settings .inspector-more { margin:0; padding:0; border:0; }
 .inspector-section .inspector-more>summary { margin:0; }
 .song-information, .track-info, .track-notation-more { margin:0; padding:0; border:0; min-width:0; }
+
+.interpretation-rows fieldset, .sound-choices { gap:4px; }
+.inspector-section:has(.midi-out-more) { padding-bottom:0; }
+.inspector-section.inspector-add-section { border-top:0; padding-top:0; }

@@ -64,7 +64,6 @@ export function SongInspector({ score, busy, locked, onEdit, styleGroups, master
         <button type="button" aria-haspopup="dialog" {...busyGuard({ onClick: () => setStyleOpen(true) })}><PaletteGlyph />{t('song_inspector.open_score_style')}</button></div>
     </section>
     <section className="inspector-section" aria-labelledby="inspector-sound-mastering">
-      <h3 id="inspector-sound-mastering">{t('inspector.sound_mastering')}</h3>
       <MasterSlots master={master} disabled={masterDisabled} onChange={onMaster} />
     </section>
     {styleOpen && <ScoreStyleDialog {...styleGroups} onClose={() => setStyleOpen(false)} />}

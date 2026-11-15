@@ -23,6 +23,8 @@ export function MasterSlots({ master, disabled, onChange }: { master: MasterSett
     void change({ [effect]: { ...latest.current[effect], enabled: on } } as Partial<MasterSettings>);
   };
   return <div className="master-slots">
+    <div className="slots-head"><h3 id="inspector-sound-mastering">{t('inspector.sound_mastering')}</h3>
+      <button type="button" className="slot-all" aria-haspopup="dialog" title={t('master_slots.show_all')} aria-label={t('master_slots.show_all')} onClick={() => setEditing('all')}><SlidersGlyph /></button></div>
     <ul className="slot-rows" aria-label={t('inspector.sound_mastering')}>
       {effects.map(effect => <li key={effect} className="slot-row" data-on={current[effect].enabled}>
         <input id={`slot-${effect}`} type="checkbox" role="switch" checked={current[effect].enabled} aria-disabled={disabled || undefined} onChange={event => power(effect, event.target.checked)} />
@@ -31,7 +33,6 @@ export function MasterSlots({ master, disabled, onChange }: { master: MasterSett
         <button type="button" className="slot-edit" aria-haspopup="dialog" title={t('master_slots.edit', { name: name[effect] })} aria-label={t('master_slots.edit', { name: name[effect] })} onClick={() => setEditing(effect)}><SlidersGlyph /></button>
       </li>)}
     </ul>
-    <button type="button" className="slot-more" aria-haspopup="dialog" onClick={() => setEditing('all')}>{t('master_slots.show_all')}</button>
     {editing && <Dialog title={t('inspector.sound_mastering')} className="master-dialog" onClose={() => setEditing(null)} dismissOnBackdrop>
       <MasterPanel master={master} disabled={disabled} onChange={onChange} open={editing === 'all' ? undefined : editing} />
     </Dialog>}

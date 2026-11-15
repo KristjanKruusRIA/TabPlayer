@@ -256,7 +256,7 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, busy = fals
         {staff && mode === 'track' && <fieldset className="tuning-capo">
           <legend>{t('tuning_dialog.capo_section')}</legend>
           <div className="tuning-capo-row">
-            <label htmlFor="tuning-dialog-capo" className="tuning-dialog-label">{t('editor.capo')}</label>
+            <label htmlFor="tuning-dialog-capo" className="tp-sr">{t('editor.capo')}</label>
             <input id="tuning-dialog-capo" type="number" min={0} max={127} value={capoText} aria-invalid={!capoValid || undefined} onChange={event => { setCapoText(event.target.value); setError(null); setRefused(false); }} />
             <span className="tuning-hint">{t('tuning_dialog.capo_fret')}</span>
           </div>

@@ -19,7 +19,7 @@ import {planAccolades} from './engraving/accolades';
 import {withStaffGaps,withStaffGroups} from './engraving/staff-groups';
 import {threeTrackScore} from './engraving/staff-fixtures';
 import {engravingRenderKey,withSystemGaps} from './engraving/system-gaps';
-const state=vi.hoisted(()=>({music:((_id:string)=>new Promise<unknown>(()=>{})) as (id:string)=>Promise<unknown>,loadedMusic:new Map<string,unknown>(),roles:((_fonts?:unknown)=>new Promise<{failed:string[]}>(()=>{})) as (fonts?:unknown)=>Promise<{failed:string[]}>,fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,offset:0,resize:()=>{},loads:vi.fn(),renders:vi.fn(),chunkTops:[] as number[]}));
+const state=vi.hoisted(()=>({painted:vi.fn((_id:string)=>{}),music:((_id:string)=>new Promise<unknown>(()=>{})) as (id:string)=>Promise<unknown>,loadedMusic:new Map<string,unknown>(),roles:((_fonts?:unknown)=>new Promise<{failed:string[]}>(()=>{})) as (fonts?:unknown)=>Promise<{failed:string[]}>,fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,offset:0,resize:()=>{},loads:vi.fn(),renders:vi.fn(),chunkTops:[] as number[]}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
 vi.mock('./engraving/font-loading',async original=>({...await original<typeof import('./engraving/font-loading')>(),loadRoleFaces:(fonts?:unknown)=>state.roles(fonts),
  loadMusicFont:(id:string)=>state.music(id).then(data=>{state.loadedMusic.set(id,data);return data;}),
@@ -30,7 +30,7 @@ vi.mock('./export/pdf',async original=>({...await original<typeof import('./expo
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
  settings=new Settings();score:model.Score|null=null;tracks:number[]=[0];constructor(){state.api=this;}
  beatMouseDown=event<model.Beat>();noteMouseDown=event<model.Note>();beatMouseMove=event<model.Beat>();beatMouseUp=event<void>();renderStarted=event<void>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
- renderer={width:0,partialRenderFinished:event<unknown>()};boundsLookup={staffSystems:[] as rendering.StaffSystemBounds[],findBeats:(beat:model.Beat)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars.flatMap(m=>m.bars.flatMap(b=>b.beats))).filter(b=>b.beat===beat),findBeat:(beat:model.Beat)=>this.boundsLookup.findBeats(beat)[0],findMasterBarByIndex:(index:number)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars).find(m=>m.index===index)??null,getBeatAtPos:()=>null};
+ renderer={width:0,partialRenderFinished:event<unknown>(),partialLayoutFinished:event<unknown>(),renderResult(id:string){state.painted(id);}};boundsLookup={staffSystems:[] as rendering.StaffSystemBounds[],findBeats:(beat:model.Beat)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars.flatMap(m=>m.bars.flatMap(b=>b.beats))).filter(b=>b.beat===beat),findBeat:(beat:model.Beat)=>this.boundsLookup.findBeats(beat)[0],findMasterBarByIndex:(index:number)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars).find(m=>m.index===index)??null,getBeatAtPos:()=>null};
  uiFacade={getOffset:()=>({x:state.offset,y:0}),highlightElements(){},removeHighlights(){}};canvasElement={};customCursorHandler=undefined;customScrollHandler=undefined;
  updateSettings(){} destroy(){}
  highlightPlaybackRange(start:model.Beat,end:model.Beat){const first=this.boundsLookup.findBeat(start),last=this.boundsLookup.findBeat(end);if(first&&last)this.playbackRangeHighlightChanged.emit({startBeat:start,endBeat:end,startBeatBounds:first,endBeatBounds:last,highlightBlocks:this.boundsLookup.staffSystems.filter(s=>s.bars[0].index>=start.voice.bar.index&&s.bars[0].index<=end.voice.bar.index).map(s=>s.realBounds)});}
@@ -45,6 +45,7 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
  const bars=score.tracks.length<2?[b]:rows.filter(([t])=>this.tracks.includes(t)).map(([t,st,y,h],k)=>{const x=k?new rendering.BarBounds():b;x.realBounds=x.visualBounds=new rendering.Bounds(0,i*450+y,500,h);x.bar=score.tracks[t].staves[st].bars[i];x.masterBarBounds=m;x.beats=k?[]:[beat];return x;});
  if(score.tracks.length<2){b.realBounds=b.visualBounds=s.realBounds;b.bar=score.tracks[0].staves[0].bars[i];b.masterBarBounds=m;b.beats=[beat];}
  m.bars=bars;beat.barBounds=b;beat.beat=score.tracks[0].staves[0].bars[i].voices[0].beats[0];beat.realBounds=beat.visualBounds=new rendering.Bounds(50,i*450+40,60,60);note.note=beat.beat.notes[0];note.noteHeadBounds=new rendering.Bounds(60,i*450+50,12,12);beat.notes=[note];this.boundsLookup.staffSystems.push(s);state.chunkTops.push(i*450);
+ this.renderer.partialLayoutFinished.emit({id:`chunk-${i}`,x:0,y:i*450,width:500,height:400,firstMasterBarIndex:i,lastMasterBarIndex:i});
  this.renderer.partialRenderFinished.emit({id:`chunk-${i}`,x:0,y:i*450,width:500,height:400,firstMasterBarIndex:i,lastMasterBarIndex:i,renderResult:'<svg><text>Notes</text></svg>'});
  }this.postRenderFinished.emit();}
 }}));
@@ -58,7 +59,7 @@ function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageL
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
  const result=render(wrap(tree()) as ReactElement);return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
-afterEach(()=>{state.offset=0;cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});state.music=()=>new Promise<unknown>(()=>{});state.loadedMusic.clear();});
+afterEach(()=>{state.painted.mockClear();state.offset=0;cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});state.music=()=>new Promise<unknown>(()=>{});state.loadedMusic.clear();});
 it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'] as const)('renders %s without a playback controller',layout=>{
  const {api}=setup(layout);expect(state.loads).toHaveBeenCalledTimes(1);
  expect(api.settings.display.layoutMode).toBe(layout==='horizontalScreen'?LayoutMode.Horizontal:layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment);
@@ -67,6 +68,17 @@ it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','ho
 });
 it.each(['verticalPage','parchment','verticalScreen','horizontalScreen'] as const)('spaces stacked effect bands with the shared padding in %s (THE-199)',layout=>{
  const {api}=setup(layout);expect(api.settings.display.effectBandPaddingBottom).toBe(EFFECT_BAND_PADDING_BOTTOM);
+});
+it.each(['parchment','verticalScreen','horizontalScreen'] as const)('paints only the pieces in view in %s and leaves the rest to alphaTab (THE-213)',layout=>{
+ // The mock's score area has no size (jsdom), so only the pieces within the paint margin of its corner are in view: the first system.
+ const {api}=setup(layout);
+ expect(api.settings.core.enableLazyLoading).toBe(true);
+ expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0']);
+});
+it.each(['verticalPage','horizontalPage','grid'] as const)('keeps the complete render in %s, which composes every piece itself (THE-213)',layout=>{
+ const {api}=setup(layout);
+ expect(api.settings.core.enableLazyLoading).toBe(false);
+ expect(state.painted).not.toHaveBeenCalled();
 });
 it('changes physical zoom and arrangement without reloading or rerendering notation',()=>{
  const {props,tree,rerender}=setup();const calls=state.renders.mock.calls.length;

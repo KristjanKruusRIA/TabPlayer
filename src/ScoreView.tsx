@@ -38,6 +38,7 @@ import { SymbolPopover,type SymbolView } from './SymbolPopover';
 import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score-entry-hit';
 import { visiblePartials,type LayoutPartial } from './engraving/lazy-paint';
 import { drawFlags } from './engraving/draw-flags';
+import { exposeDrawCheck } from './engraving/draw-check';
 import { useI18n } from './i18n';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
@@ -444,6 +445,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   };
   useEffect(()=>{
     const view=new AlphaTabApi(container.current!,{core:{fontDirectory:'/font/',scriptFile:'/alphatab/alphaTab.mjs',includeNoteBounds:true,useWorkers:false,engine:'svg',enableLazyLoading:false},player:{playerMode:'EnabledExternalMedia',enableCursor:false,enableUserInteraction:false,scrollElement:'.paper-scroll'}});api.current=view;
+    const unhookCheck=exposeDrawCheck(()=>({view:api.current,partials:layoutPartials.current}));
     const adapter=installScreenPlayback(view,()=>({...presentation.current,wrapper:wrapper.current,scrollHost:scrollHost.current,barElement:barElement.current,beatElement:beatElement.current}));playbackPresentation.current=adapter;
     view.settings.player.enableCursor=true;
     // Reuse the facade's public DOM surface classes so its instance-specific font CSS also applies to copied SVGs.
@@ -493,12 +495,14 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
         }
       }
       refreshOverlays();
+      // The layout is done: the pieces in view are painted now (this also covers a render that waited for alphaTab's fonts and so ran after draw() returned).
+      if(view.settings.core.enableLazyLoading)paintVisible(view);
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
     };
     const mouseUp=()=>{drag.current=null;};document.addEventListener('mousemove',mouseMove);document.addEventListener('mouseup',mouseUp);
-    return ()=>{for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);adapter.dispose();playbackPresentation.current=null;roots.current.clear();view.destroy();api.current=null;loaded.current=null;};
+    return ()=>{unhookCheck();for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);adapter.dispose();playbackPresentation.current=null;roots.current.clear();view.destroy();api.current=null;loaded.current=null;};
   },[]);
   useEffect(()=>{anchor.current=null;drag.current=null;},[score,track,projection,visibleTracks]);
   // A selection this view did not publish (an instrument pick, say) ends the click that anchored Shift selection.
@@ -570,7 +574,6 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
       const old=loaded.current;
       if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
       else view.render();
-      if(view.settings.core.enableLazyLoading)paintVisible(view);
     };
     // alphaTab caches a text width table per font family, so a role face has to be in before the first render that uses it, and the music font's
     // metadata before the layout that uses it. One gate covers both. Nothing to load (every Bravura document without role fonts, and a music font

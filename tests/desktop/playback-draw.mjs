@@ -72,7 +72,8 @@ async function probe(path,label,flags={},{strict=true,controlNoHighlight}={}) {
     const slider=page.locator('.transport-scrub'),bars=Number(await slider.getAttribute('max'));
     const pieceOfBar=bar=>page.evaluate(bar=>globalThis.__tabplayerPieceOfBar(bar),bar);
     const emptyAndAway=async(bar,what)=>{
-      let piece;for(let attempt=0;attempt<30;attempt++){piece=await pieceOfBar(bar);if(piece&&piece.empty&&!piece.inView)return piece;await sleep(100);}
+      let piece;for(let attempt=0;attempt<30;attempt++){piece=await pieceOfBar(bar);// On the control run (the complete render) every system is painted and stays so: only the target being out of view can be asked of it.
+      if(piece&&(piece.empty||!strict)&&!piece.inView)return piece;await sleep(100);}
       throw new Error(`${label}: before ${what} the system of bar ${bar+1} was not empty and out of view (${JSON.stringify(piece)}), so the step would prove nothing`);
     };
     const transportButton=name=>page.getByRole('button',{name,exact:true}).click();

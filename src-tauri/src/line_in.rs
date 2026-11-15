@@ -918,13 +918,15 @@ mod tests {
         let state = LineInState::default();
         state.start_source(&*output, Source::Tone(220.0)).unwrap();
         let mut block = vec![[0.0f32; 2]; 441];
+        // The levels are the peak since the previous status call, so the input and the output are each remembered once seen.
+        let mut heard_input = false;
         let status = wait_for(|| {
             transport.render_into(&mut block);
             let status = state.status(&*output);
-            (status.output_level > SILENT_DBFS).then_some(status)
+            heard_input |= status.input_level > SILENT_DBFS;
+            (heard_input && status.output_level > SILENT_DBFS).then_some(status)
         });
         assert!(status.running && status.error.is_none(), "{status:?}");
-        assert!(status.input_level > SILENT_DBFS, "{status:?}");
         assert_eq!(status.input_rate, Some(48_000));
         assert_eq!(status.output_rate, Some(44_100));
         state.stop(&*output);

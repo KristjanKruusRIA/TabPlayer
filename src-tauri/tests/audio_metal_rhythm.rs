@@ -1,38 +1,12 @@
-//! The metal rhythm factory sound (THE-217): its body and fizz measured on synthetic low notes, its level and headroom, the
-//! amp's new `lowEndOct` setting, and that every other factory sound and the default chain are untouched. No recorded audio and
-//! no private material: the notes are sums of harmonics with a plucked decay, as a guitar tuned low would give a chain.
-use std::{
-    alloc::{GlobalAlloc, Layout, System},
-    cell::Cell,
-    f64::consts::TAU,
-};
+//! The amp's `lowEndOct` setting (THE-217) and that nothing that existed before it changed: every other factory sound, the metal
+//! rhythm sound as first released, a driven metal amp and the default chain sound bit for bit as they did on the build before the
+//! setting, and the setting only moves the metal preamp. The final Metal rhythm sound is tested in `audio_metal_rhythm_sound.rs`.
+//! No recorded audio and no private material: the notes are sums of harmonics with a plucked decay.
+use std::f64::consts::TAU;
 use tabplayer_lib::audio::{
     dsp::{FxSettings, TrackDsp},
     tone,
 };
-
-thread_local! {static COUNT_HEAP:Cell<bool>=const {Cell::new(false)};static HEAP_OPERATIONS:Cell<usize>=const {Cell::new(0)};}
-struct CountAllocator;
-unsafe impl GlobalAlloc for CountAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        COUNT_HEAP.with(|flag| {
-            if flag.get() {
-                HEAP_OPERATIONS.with(|n| n.set(n.get() + 1));
-            }
-        });
-        unsafe { System.alloc(layout) }
-    }
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        COUNT_HEAP.with(|flag| {
-            if flag.get() {
-                HEAP_OPERATIONS.with(|n| n.set(n.get() + 1));
-            }
-        });
-        unsafe { System.dealloc(pointer, layout) }
-    }
-}
-#[global_allocator]
-static ALLOCATOR: CountAllocator = CountAllocator;
 
 fn catalog() -> Vec<serde_json::Value> {
     serde_json::from_str(include_str!("../../tests/factory-sounds.json")).unwrap()
@@ -41,20 +15,23 @@ fn factory(id: &str) -> FxSettings {
     let entry = catalog().into_iter().find(|e| e["id"] == id).unwrap();
     serde_json::from_value(entry["effects"].clone()).unwrap()
 }
-/// The metal rhythm sound as it stood before THE-217, which a project that copied its settings still holds.
+/// The metal rhythm sound as first released, before THE-217, which a project that copied its settings still holds: a gate, an
+/// overdrive pedal and the metal amp into the closed cabinet, every other block off and at its defaults.
 fn metal_rhythm_before() -> FxSettings {
-    let mut fx = factory("metal-rhythm");
+    let mut fx = FxSettings::default();
+    fx.gate.enabled = true;
+    fx.gate.threshold_db = -50.0;
+    fx.gate.release_ms = 60.0;
     fx.drive.enabled = true;
     fx.drive.model = "overdrive".into();
     fx.drive.drive = 0.2;
     fx.drive.tone = 0.6;
+    fx.amp.enabled = true;
+    fx.amp.model = "metal".into();
     fx.amp.drive = 0.55;
     fx.amp.gain_db = -2.0;
-    fx.amp.bass_db = 0.0;
-    fx.amp.mid_db = 0.0;
-    fx.amp.treble_db = 0.0;
-    fx.amp.presence_db = 0.0;
-    fx.amp.low_end_oct = 0.0;
+    fx.cabinet.enabled = true;
+    fx.cabinet.model = "closed".into();
     fx
 }
 
@@ -144,227 +121,11 @@ fn bands(signal: &[f32], rate: u32, edges: &[(f64, f64)]) -> (Vec<f64>, f64) {
 fn db(ratio: f64) -> f64 {
     10.0 * ratio.max(1e-30).log10()
 }
-fn rms(signal: &[f32]) -> f64 {
-    (signal.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / signal.len().max(1) as f64).sqrt()
-}
-fn peak(signal: &[f32]) -> f64 {
-    signal.iter().fold(0.0f64, |a, v| a.max(v.abs() as f64))
-}
 
-/// The two notes the sound is judged on: a note of a guitar tuned an octave low (D1 is 36.7 Hz; this is G1, 49 Hz), and one in
-/// standard tuning (A2, 110 Hz). Both are 1 s long, struck at 0.08 peak.
-fn tunings() -> [(&'static str, f64); 2] {
-    [("low tuning, G1", 49.0), ("standard tuning, A2", 110.0)]
-}
-
-/// A palm-muted chug: only the first partials, dying fast.
-fn chug(f0: f64, rate: u32, peak: f64) -> Vec<f32> {
-    note(f0, rate, 1.0, peak, 25.0, 4, 1)
-}
 fn sustained(f0: f64, rate: u32, peak: f64) -> Vec<f32> {
     note(f0, rate, 1.0, peak, 4.0, 24, 1)
 }
 const RATES: [u32; 3] = [44_100, 48_000, 96_000];
-/// The rates the stability test runs at: the usual two, then one and two times the oversampling's limit.
-const STABLE_RATES: [u32; 4] = [44_100, 48_000, 96_000, 192_000];
-/// Shares of the energy, in dB, in 20-250 Hz, 250 Hz-1 kHz, 1-6 kHz and above 6 kHz.
-fn shares(signal: &[f32], rate: u32) -> [f64; 4] {
-    let (b, total) = bands(
-        signal,
-        rate,
-        &[
-            (20.0, 250.0),
-            (250.0, 1000.0),
-            (1000.0, 6000.0),
-            (6000.0, rate as f64 / 2.0),
-        ],
-    );
-    [
-        db(b[0] / total),
-        db(b[1] / total),
-        db(b[2] / total),
-        db(b[3] / total),
-    ]
-}
-/// The sound after the first 100 ms of the note.
-fn settled(fx: &FxSettings, rate: u32, input: &[f32]) -> Vec<f32> {
-    run(fx, rate, input)[rate as usize / 10..].to_vec()
-}
-
-#[test]
-fn the_low_end_carries_the_body_in_both_tunings() {
-    for rate in RATES {
-        for (name, f0) in tunings() {
-            let input = sustained(f0, rate, 0.08);
-            let before = shares(&settled(&metal_rhythm_before(), rate, &input), rate);
-            let after = shares(&settled(&factory("metal-rhythm"), rate, &input), rate);
-            // Energy below 250 Hz: more than 90% after, against under 60% before.
-            assert!(
-                after[0] > -0.5,
-                "{rate} {name}: {:.2} dB of the energy under 250 Hz",
-                after[0]
-            );
-            assert!(
-                before[0] < -2.0,
-                "{rate} {name}: before {:.2} dB under 250 Hz",
-                before[0]
-            );
-            // The mids are not what carries the sound.
-            assert!(
-                after[1] < before[1] - 6.0,
-                "{rate} {name}: 250 Hz-1 kHz {:.1} against {:.1}",
-                after[1],
-                before[1]
-            );
-        }
-    }
-}
-
-#[test]
-fn the_fizz_band_and_the_top_are_far_below_what_they_were() {
-    for rate in RATES {
-        for (name, f0) in tunings() {
-            for (kind, input) in [
-                ("sustained", sustained(f0, rate, 0.08)),
-                ("chug", chug(f0, rate, 0.08)),
-            ] {
-                let before = shares(&settled(&metal_rhythm_before(), rate, &input), rate);
-                let after = shares(&settled(&factory("metal-rhythm"), rate, &input), rate);
-                assert!(
-                    after[2] < before[2] - 10.0,
-                    "{rate} {name} {kind}: 1-6 kHz {:.1} dB against {:.1} before",
-                    after[2],
-                    before[2]
-                );
-                assert!(
-                    after[2] < -20.0,
-                    "{rate} {name} {kind}: 1-6 kHz at {:.1} dB",
-                    after[2]
-                );
-                assert!(
-                    after[3] < -45.0,
-                    "{rate} {name} {kind}: above 6 kHz at {:.1} dB",
-                    after[3]
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn a_chug_stays_close_under_a_sustained_note_and_is_no_flatter_than_before() {
-    for rate in RATES {
-        for (name, f0) in tunings() {
-            let window = rate as usize / 4;
-            let fx = factory("metal-rhythm");
-            let loud = rms(&run(&fx, rate, &sustained(f0, rate, 0.08))[..window]);
-            let damped = rms(&run(&fx, rate, &chug(f0, rate, 0.08))[..window]);
-            let gap = db(damped.powi(2)) - db(loud.powi(2));
-            assert!(
-                (-5.0..=2.0).contains(&gap),
-                "{rate} {name}: chug {gap:.1} dB from a sustained note"
-            );
-            // Struck 12 dB harder, a chug is louder by at least what it was before: the amp compresses by design, and the
-            // new voicing has not made it flatter.
-            let rise = |fx: &FxSettings| {
-                let soft = rms(&run(fx, rate, &chug(f0, rate, 0.08))[..window]);
-                let hard = rms(&run(fx, rate, &chug(f0, rate, 0.32))[..window]);
-                db(hard.powi(2)) - db(soft.powi(2))
-            };
-            let (now, was) = (rise(&fx), rise(&metal_rhythm_before()));
-            println!("{rate} {name}: 12 dB harder is {now:.1} dB louder, was {was:.1}");
-            assert!(
-                now > was - 0.5,
-                "{rate} {name}: {now:.1} dB against {was:.1} before"
-            );
-        }
-    }
-}
-
-#[test]
-fn a_hard_chord_stays_under_the_master_limiter() {
-    for rate in RATES {
-        let mut chord = note(49.0, rate, 0.5, 0.35, 3.0, 12, 1);
-        for (c, v) in chord
-            .iter_mut()
-            .zip(note(73.4, rate, 0.5, 0.35, 3.0, 12, 1))
-        {
-            *c += v;
-        }
-        for (c, v) in chord.iter_mut().zip(note(98.0, rate, 0.5, 0.3, 3.0, 12, 1)) {
-            *c += v;
-        }
-        let out = run(&factory("metal-rhythm"), rate, &chord);
-        assert!(out.iter().all(|v| v.is_finite()));
-        assert!(
-            peak(&out) < 0.8,
-            "{rate}: peak {:.3} approaches the limiter at 0.9",
-            peak(&out)
-        );
-    }
-}
-
-#[test]
-fn it_is_stable_and_sounds_alike_at_every_rate_and_dies_away() {
-    let sound = |fx: &FxSettings, rate: u32| {
-        let mut input = sustained(49.0, rate, 0.08);
-        input.extend(std::iter::repeat_n(0.0, rate as usize * 2));
-        let out = run(fx, rate, &input);
-        assert!(out.iter().all(|v| v.is_finite() && v.abs() < 1.0));
-        let tail = peak(&out[out.len() - rate as usize / 10..]);
-        assert!(
-            tail < 1e-4,
-            "{rate}: {tail} still sounding two seconds after the note"
-        );
-        shares(&out[rate as usize / 10..rate as usize], rate)
-    };
-    let (new, old) = (factory("metal-rhythm"), metal_rhythm_before());
-    let (new_first, old_first) = (sound(&new, 44_100), sound(&old, 44_100));
-    for rate in [48_000, 96_000, 192_000] {
-        let (now, was) = (sound(&new, rate), sound(&old, rate));
-        for band in 0..3 {
-            // Alike to within 1.5 dB up to 96 kHz. At 192 kHz the stages are not oversampled and the cabinet's impulse response is
-            // capped at 1024 taps (about 5 ms there): the old sound moves by as much (the rate dependence is the chain's, not this
-            // sound's), so the new one is held to no more than the old one moved, plus 1 dB.
-            let allowed = if rate == 192_000 {
-                (was[band] - old_first[band]).abs() + 1.0
-            } else {
-                1.5
-            };
-            assert!(
-                (now[band] - new_first[band]).abs() < allowed,
-                "{rate}: band {band} {:.1} against {:.1} dB at 44.1 kHz (the old sound moved {:.1})",
-                now[band],
-                new_first[band],
-                was[band] - old_first[band]
-            );
-        }
-    }
-}
-
-#[test]
-fn it_allocates_nothing_while_it_plays() {
-    let rate = 48_000;
-    let fx = factory("metal-rhythm");
-    let input = sustained(49.0, rate, 0.08);
-    let mut dsp = TrackDsp::new(fx, rate, 1.0).unwrap();
-    for &x in &input[..4800] {
-        dsp.process([x; 2], 120.0);
-    }
-    HEAP_OPERATIONS.with(|n| n.set(0));
-    COUNT_HEAP.with(|flag| flag.set(true));
-    let mut sum = 0.0f32;
-    for &x in &input {
-        sum += dsp.process([x; 2], 120.0)[0];
-    }
-    COUNT_HEAP.with(|flag| flag.set(false));
-    assert!(sum.is_finite());
-    assert_eq!(
-        HEAP_OPERATIONS.with(Cell::get),
-        0,
-        "the chain used the heap while playing"
-    );
-}
 
 #[test]
 fn a_zero_low_end_is_the_amp_as_it_was_and_the_setting_loads_and_saves_unchanged() {
@@ -392,7 +153,7 @@ fn a_zero_low_end_is_the_amp_as_it_was_and_the_setting_loads_and_saves_unchanged
     );
     // The new sound writes it, and reads it back.
     let new = serde_json::to_value(factory("metal-rhythm")).unwrap();
-    assert_eq!(new["amp"]["lowEndOct"], 1.0);
+    assert_eq!(new["amp"]["lowEndOct"], 0.5);
     // Out of range is refused.
     for bad in [-0.1, 1.1, f64::NAN] {
         let mut fx = factory("metal-rhythm");
@@ -598,59 +359,4 @@ fn the_other_amps_ignore_the_setting() {
             }
         }
     }
-}
-
-#[test]
-fn the_level_jump_for_someone_who_picks_the_sound_again_is_known() {
-    // The tone `audio_factory_sounds` levels the factory sounds on: a plucked A2 and A3 for two seconds.
-    let rate = 48_000;
-    let tone: Vec<f32> = (0..rate as usize * 2)
-        .map(|n| {
-            let t = n as f64 / rate as f64;
-            (0.25 * (-1.5 * t).exp() * ((TAU * 110.0 * t).sin() + 0.5 * (TAU * 220.0 * t).sin()))
-                as f32
-        })
-        .collect();
-    let level = |fx: &FxSettings| rms(&run(fx, rate, &tone));
-    let (old, new) = (
-        level(&metal_rhythm_before()),
-        level(&factory("metal-rhythm")),
-    );
-    println!(
-        "old {old:.4} new {new:.4}: {:.1} dB",
-        db(new * new / (old * old))
-    );
-    // Within 6 dB of what it was, so a track that picks it again does not jump.
-    assert!((db(new * new / (old * old))).abs() < 6.0);
-}
-
-/// The tighter voicing (clip 3a), should it be the one that is kept: the same sound with the low end shifted half an octave, bass +6
-/// dB, mid -1 dB, and the gain that puts it where the shipped one sits on the factory level tone.
-fn tighter_voicing() -> FxSettings {
-    let mut fx = factory("metal-rhythm");
-    fx.amp.low_end_oct = 0.5;
-    fx.amp.bass_db = 6.0;
-    fx.amp.mid_db = -1.0;
-    fx.amp.gain_db = -2.5;
-    fx
-}
-
-#[test]
-fn the_tighter_voicing_sits_where_the_shipped_one_does_on_the_factory_level_tone() {
-    let rate = 48_000;
-    let tone: Vec<f32> = (0..rate as usize * 2)
-        .map(|n| {
-            let t = n as f64 / rate as f64;
-            (0.25 * (-1.5 * t).exp() * ((TAU * 110.0 * t).sin() + 0.5 * (TAU * 220.0 * t).sin()))
-                as f32
-        })
-        .collect();
-    let level = |fx: &FxSettings| rms(&run(fx, rate, &tone));
-    let (shipped, tighter) = (level(&factory("metal-rhythm")), level(&tighter_voicing()));
-    println!(
-        "shipped {shipped:.4} tighter {tighter:.4}: {:.1} dB",
-        db(tighter * tighter / (shipped * shipped))
-    );
-    assert!(tighter_voicing().validate().is_ok());
-    assert!(db(tighter * tighter / (shipped * shipped)).abs() < 1.0);
 }

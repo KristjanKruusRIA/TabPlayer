@@ -12,5 +12,5 @@ it('plays a factory choice as the factory sound is defined now, whatever sound i
   expect(read.choice).toBe('factory:metal-rhythm');
   expect(read.sound.effects.amp.drive).toBe(.55);
   const played=soundForChoice(read.choice)!;
-  expect(played.effects.amp.lowEndOct).toBe(1);expect(played.effects.amp.drive).toBe(.2);
+  expect(played.effects.amp.lowEndOct).toBe(.5);expect(played.effects.amp.drive).toBe(.45);
 });

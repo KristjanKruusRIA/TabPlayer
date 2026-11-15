@@ -74,12 +74,12 @@ it('takes the low-tuning setting on the metal amp only, from 0 to 1 octave, and 
   for(const value of [0,.25,.5,1])expect(soundProblem(metal(value)),String(value)).toBeNull();
   for(const value of [-.25,1.25,2,Number.NaN,'1',null])expect(soundProblem(metal(value)),String(value)).toBe('Invalid effect parameter.');
   // The new factory sound uses it; the others do not.
-  expect(factorySound('metal-rhythm')!.effects.amp.lowEndOct).toBe(1);
+  expect(factorySound('metal-rhythm')!.effects.amp.lowEndOct).toBe(.5);
   expect(factorySound('rock-lead')!.effects.amp.lowEndOct).toBeUndefined();
   const onEdit=vi.fn();
   render(<SoundPanel trackId="base/0" sound={factorySound('metal-rhythm')!} onEdit={onEdit}/>);
   const input=screen.getByLabelText('amp Low tune (oct)');
-  expect(input).toHaveValue(1);expect(input).toHaveAttribute('min','0');expect(input).toHaveAttribute('max','1');expect(input.closest('label')).toHaveAttribute('title');
+  expect(input).toHaveValue(.5);expect(input).toHaveAttribute('min','0');expect(input).toHaveAttribute('max','1');expect(input.closest('label')).toHaveAttribute('title');
   fireEvent.change(input,{target:{value:'1.5'}});expect(onEdit).not.toHaveBeenCalled();
   fireEvent.change(input,{target:{value:'0'}});
   expect(Object.hasOwn((onEdit.mock.calls.at(-1)?.[0].sound as TrackSound).effects.amp,'lowEndOct')).toBe(false);

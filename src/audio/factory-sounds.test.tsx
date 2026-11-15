@@ -47,7 +47,7 @@ it('applies a factory sound as one undoable edit that keeps the track voice',asy
   expect([...select.querySelectorAll('optgroup')].map(group=>group.label)).toEqual([...factoryCategories]);
   expect(screen.getByRole('button',{name:'Apply factory sound'})).toBeDisabled();
   fireEvent.change(select,{target:{value:'metal-rhythm'}});
-  expect(select).toHaveAccessibleDescription('Tight, gated high gain with scooped mids. Factory sounds set the effects; the track keeps its instrument.');
+  expect(select).toHaveAccessibleDescription('Tight, modern high gain: a bass-cut boost ahead of the amp, a closed four-by-twelve, and plenty of upper-mid bite. Factory sounds set the effects; the track keeps its instrument.');
   await act(async()=>{fireEvent.click(screen.getByRole('button',{name:'Apply factory sound'}));});
   expect(onEdit).toHaveBeenCalledTimes(1);
   expect(onEdit.mock.calls[0][0]).toEqual({type:'setTrackSound',trackId:'base/0',sound:factorySound('metal-rhythm','black-guitar')});

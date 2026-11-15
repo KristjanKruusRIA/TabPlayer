@@ -23,6 +23,9 @@ fn same(a: &serde_json::Value, b: &serde_json::Value) -> bool {
         (serde_json::Value::Array(a), serde_json::Value::Array(b)) => {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same(a, b))
         }
+        (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+            a.len() == b.len() && a.iter().all(|(k, v)| b.get(k).is_some_and(|w| same(v, w)))
+        }
         _ => a == b || a.as_f64().is_some_and(|v| Some(v) == b.as_f64()),
     }
 }
@@ -44,7 +47,16 @@ fn every_factory_sound_is_accepted_and_saved_unchanged() {
             "{id}"
         );
         for (block, settings) in written["effects"].as_object().unwrap() {
-            for (field, value) in settings.as_object().unwrap() {
+            // A sound that stands its blocks in its own order carries the list itself.
+            let Some(settings) = settings.as_object() else {
+                assert!(
+                    same(settings, &json["effects"][block]),
+                    "{id} {block}: {settings} against {}",
+                    json["effects"][block]
+                );
+                continue;
+            };
+            for (field, value) in settings {
                 let editor = &json["effects"][block][field];
                 assert!(
                     same(value, editor),

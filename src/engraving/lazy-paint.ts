@@ -9,7 +9,7 @@
  */
 
 /** The geometry of a laid-out piece, in pixels of alphaTab's canvas (its `partialLayoutFinished` event). */
-export interface LayoutPartial {id:string;x:number;y:number;width:number;height:number}
+export interface LayoutPartial {id:string;x:number;y:number;width:number;height:number;firstMasterBarIndex?:number;lastMasterBarIndex?:number}
 export interface Box {left:number;top:number;right:number;bottom:number}
 
 /** The ids of the pieces that intersect `view` (the score area, in the same coordinates as `canvas`, the canvas's own top left), widened by `margin` pixels on every side. */

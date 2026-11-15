@@ -9,7 +9,8 @@ import type { LayoutPartial } from './lazy-paint';
  * the geometry of each piece, its SVG, and the bounds alphaTab hands out for hit-testing and the playback cursor. It is meant for the desktop test
  * driver and for tests; it is reachable from outside only in development, in tests and in the desktop test build (`globalThis.__tabplayerCheckDraw`).
  */
-export interface DrawCheck {equal:boolean;pieces:number;differences:string[]}
+/** `signature` is a short hash of everything drawn, so a driver can see that an edit changed the drawing; `breaks` lists the first bar of every system (where the lines break); `bars` is the length of the rendered score. */
+export interface DrawCheck {equal:boolean;pieces:number;differences:string[];signature:string;breaks:string;bars:number}
 interface Piece {x:number;y:number;width:number;height:number;first:number;last:number;svg:string}
 
 /** An SVG string as the DOM serializes it, so that a piece read back from the page equals the string alphaTab produced. */
@@ -49,16 +50,16 @@ function renderComplete(view:AlphaTabApi):{pieces:Piece[];bounds:string[]} {
 function readLive(view:AlphaTabApi,partials:readonly LayoutPartial[]):Piece[]|null {
   const element=(view.canvasElement as unknown as {element?:HTMLElement}).element;if(!element||element.children.length!==partials.length)return null;
   for(const piece of partials)view.renderer.renderResult(piece.id);
-  return partials.map((piece,index)=>({x:piece.x,y:piece.y,width:piece.width,height:piece.height,first:-1,last:-1,svg:normalize(element.children[index].innerHTML)}));
+  return partials.map((piece,index)=>({x:piece.x,y:piece.y,width:piece.width,height:piece.height,first:piece.firstMasterBarIndex??-1,last:piece.lastMasterBarIndex??-1,svg:normalize(element.children[index].innerHTML)}));
 }
 
 export function checkDraw(view:AlphaTabApi,partials:readonly LayoutPartial[]):DrawCheck {
   const differences:string[]=[],full=renderComplete(view),live=readLive(view,partials);
-  if(!live)return {equal:false,pieces:0,differences:['the live view has no pieces to compare (nothing is laid out, or its pieces are not the ones laid out last)']};
+  if(!live)return {equal:false,pieces:0,signature:'',breaks:'',bars:view.score?.masterBars.length??0,differences:['the live view has no pieces to compare (nothing is laid out, or its pieces are not the ones laid out last)']};
   if(live.length!==full.pieces.length)differences.push(`${live.length} pieces drawn, ${full.pieces.length} in a complete render`);
   for(let index=0;index<Math.min(live.length,full.pieces.length);index++) {
     const a=live[index],b=full.pieces[index];
-    for(const key of ['x','y','width','height'] as const)if(Math.abs(a[key]-b[key])>1e-6)differences.push(`piece ${index} ${key}: ${a[key]} drawn, ${b[key]} in a complete render`);
+    for(const key of ['x','y','width','height','first','last'] as const)if(Math.abs(a[key]-b[key])>1e-6)differences.push(`piece ${index} ${key}: ${a[key]} drawn, ${b[key]} in a complete render`);
     if(a.svg!==b.svg){
       let at=0;while(at<a.svg.length&&a.svg[at]===b.svg[at])at++;
       differences.push(`piece ${index} (bars ${b.first}-${b.last}) differs from its complete render at character ${at}: «${a.svg.slice(Math.max(0,at-40),at+60)}» against «${b.svg.slice(Math.max(0,at-40),at+60)}»`);
@@ -67,14 +68,16 @@ export function checkDraw(view:AlphaTabApi,partials:readonly LayoutPartial[]):Dr
   const bounds=describeBounds(view.boundsLookup);
   if(bounds.length!==full.bounds.length)differences.push(`${bounds.length} bounds lines, ${full.bounds.length} in a complete render`);
   for(let index=0;index<Math.min(bounds.length,full.bounds.length);index++)if(bounds[index]!==full.bounds[index]){differences.push(`bounds line ${index}: «${bounds[index]}» against «${full.bounds[index]}»`);break;}
-  return {equal:differences.length===0,pieces:live.length,differences:differences.slice(0,10)};
+  let hash=2166136261;for(const piece of live)for(const number of [piece.first,piece.last])hash=Math.imul(hash^number,16777619);
+  for(const piece of live)for(let at=0;at<piece.svg.length;at++){hash^=piece.svg.charCodeAt(at);hash=Math.imul(hash,16777619);}
+  return {equal:differences.length===0,pieces:live.length,signature:(hash>>>0).toString(16),breaks:live.map(piece=>piece.first).join(','),bars:view.score?.masterBars.length??0,differences:differences.slice(0,10)};
 }
 
 const developerHooks=(()=>{const env=(import.meta as {env?:{DEV?:boolean;MODE?:string;VITE_DESKTOP_TEST?:string}}).env;return !!(env?.DEV||env?.MODE==='test'||env?.VITE_DESKTOP_TEST==='1');})();
 /** Makes the live score area checkable from outside (development, tests and the desktop test build only). Returns what to call when the area goes away. */
 export function exposeDrawCheck(live:()=>{view:AlphaTabApi|null;partials:readonly LayoutPartial[]}):()=>void {
   if(!developerHooks)return ()=>{};
-  const hook=()=>{const {view,partials}=live();return view?checkDraw(view,partials):{equal:false,pieces:0,differences:['no score view']};};
+  const hook=()=>{const {view,partials}=live();return view?checkDraw(view,partials):{equal:false,pieces:0,signature:'',breaks:'',bars:0,differences:['no score view']};};
   const host=globalThis as {__tabplayerCheckDraw?:typeof hook};host.__tabplayerCheckDraw=hook;
   return ()=>{if(host.__tabplayerCheckDraw===hook)delete host.__tabplayerCheckDraw;};
 }

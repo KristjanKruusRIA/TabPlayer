@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync,writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { existsSync,readdirSync } from 'node:fs';
 import { importer,exporter,Settings } from '@coderline/alphatab';
 import { launch,connect,stop } from './harness.mjs';
 import { closeWelcomeLibrary,clickWorkspaceCommand,waitForWorkspaceIdle } from './workstation-commands.mjs';
+import { ownerScoreFiles,runDrawEquivalence } from './draw-equivalence.mjs';
 
 // THE-213: a note edit on a long score shows and accepts the next key within a fraction of a second, does not wait for playback to be
 // prepared again, and an idle or cursor-moving editor does not redraw. The budgets are generous multiples of what one development
@@ -16,6 +18,8 @@ const BUDGET={
   editIpcMedianMs:120,
   /** Key to the editor free again with the score drawn. Was about 1000 ms. */
   editFreeMedianMs:450,editFreeWorstMs:900,
+  /** Key to the first change of the score's drawing (the note appears). The whole score was drawn before (about 290 ms on the owner's largest score); only the systems in view are now (about 80 ms). */
+  firstVisibleMedianMs:250,
   /** One note edit's cost after the 20th is no worse than the first. */
   growthFactor:2,
   /** Each key of a burst typed 150 ms apart, while the earlier edits are still being prepared for playback. */
@@ -29,6 +33,8 @@ const BUDGET={
   /** Heap growth over 240 edits in place after a warm-up, after a forced collection. Every edit used to keep a score, a journal and a rendered copy alive for good (the leak was about 0.3 MB an edit on the owner's largest score). */
   heapGrowthMB:40,
 };
+/** A batch of changes that adds or removes at least this many nodes is the score being drawn (one system is about 400 nodes); the cursor and the selection change a few. */
+const DRAW_NODES=100;
 const median=values=>{const sorted=[...values].sort((a,b)=>a-b),middle=sorted.length>>1;return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2;};
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
@@ -69,7 +75,7 @@ try {
     callbacks.get=function(key){const handler=original.call(this,key);if(typeof handler!=='function')return handler;return function(message){const name=message&&message.event;if(name)probe.events[name]=(probe.events[name]||0)+1;return handler.apply(this,arguments);};};
     window.addEventListener('keydown',event=>probe.keys.push({key:event.key,at:event.timeStamp}),true);
     const host=document.querySelector('.score-paper-host');
-    if(host)new MutationObserver(list=>probe.host.push({at:performance.now(),count:list.length})).observe(host,{subtree:true,childList:true});
+    if(host)new MutationObserver(list=>{let nodes=0,svg=false;for(const record of list){nodes+=record.addedNodes.length+record.removedNodes.length;if(record.target.closest?.('svg')||[...record.addedNodes].some(node=>node.nodeName==='svg'||node.querySelector?.('svg')))svg=true;}probe.host.push({at:performance.now(),count:nodes,svg});}).observe(host,{subtree:true,childList:true});
     new MutationObserver(list=>{for(const record of list)if(record.target.matches?.('.app-shell')&&record.attributeName==='aria-busy')probe.busy.push({at:performance.now(),value:record.target.getAttribute('aria-busy')});}).observe(document.body,{subtree:true,attributes:true,attributeFilter:['aria-busy']});
     let shown=document.querySelector('.statusbar-position')?.textContent;
     new MutationObserver(()=>{const text=document.querySelector('.statusbar-position')?.textContent;if(text!==shown){shown=text;probe.position.push({at:performance.now(),text});}}).observe(document.querySelector('.statusbar'),{subtree:true,childList:true,characterData:true});
@@ -101,12 +107,14 @@ try {
     // A digit writes its fret at once; Enter then adds nothing, so the edit is timed from the digit.
     await reset();await press(String(digits[index%digits.length]));await sleep(60);await settle();
     const data=await dump(),typed=data.keys.at(0).at,apply=data.ipc.find(i=>i.cmd.startsWith('apply_edit'));
-    const freed=data.busy.filter(b=>b.value==='false').at(-1),drawn=data.host.filter(change=>change.count>=40).at(-1);
-    return {ipc:apply.end-typed,free:Math.max(freed?freed.at-typed:0,drawn?drawn.at-typed:0)};
+    const freed=data.busy.filter(b=>b.value==='false').at(-1),drawn=data.host.filter(change=>change.count>=DRAW_NODES).at(-1),first=data.host.find(change=>change.svg&&change.count>=DRAW_NODES&&change.at>=typed);
+    return {ipc:apply.end-typed,free:Math.max(freed?freed.at-typed:0,drawn?drawn.at-typed:0),first:first?first.at-typed:null};
   };
   const edits=[];for(let i=0;i<24;i++)edits.push(await editOnce(i));
   result.editIpcMedianMs=Math.round(median(edits.map(e=>e.ipc)));
   result.editFreeMedianMs=Math.round(median(edits.map(e=>e.free)));result.editFreeWorstMs=Math.round(Math.max(...edits.map(e=>e.free)));
+  result.editFirstVisibleMedianMs=Math.round(median(edits.map(e=>e.first).filter(v=>v!==null)));
+  assert.ok(result.editFirstVisibleMedianMs<=BUDGET.firstVisibleMedianMs,`the typed note first appeared after ${result.editFirstVisibleMedianMs} ms (budget ${BUDGET.firstVisibleMedianMs})`);
   const early=median(edits.slice(1,7).map(e=>e.free)),late=median(edits.slice(-6).map(e=>e.free));result.editFreeEarlyMs=Math.round(early);result.editFreeLateMs=Math.round(late);
   assert.ok(result.editIpcMedianMs<=BUDGET.editIpcMedianMs,`note edit reaches native in ${result.editIpcMedianMs} ms (budget ${BUDGET.editIpcMedianMs})`);
   assert.ok(result.editFreeMedianMs<=BUDGET.editFreeMedianMs,`note edit shown and editor free in ${result.editFreeMedianMs} ms (budget ${BUDGET.editFreeMedianMs})`);
@@ -133,7 +141,7 @@ try {
     await reset();await press(i%2?'ArrowLeft':'ArrowRight');await sleep(250);
     const data=await dump();if(data.position[0])moves.push(data.position[0].at-data.keys[0].at);
     // The caret and the selection are drawn over the score (a few nodes); a drawn score is thousands.
-    assert.ok(data.host.every(change=>change.count<40),`a cursor move drew the score again (${JSON.stringify(data.host)})`);
+    assert.ok(data.host.every(change=>change.count<DRAW_NODES),`a cursor move drew the score again (${JSON.stringify(data.host)})`);
   }
   result.cursorMedianMs=Math.round(median(moves));result.cursorMoves=moves.length;
   assert.ok(moves.length>=15,'the status bar followed the cursor');
@@ -143,7 +151,7 @@ try {
   await settle();await press('ArrowRight');await sleep(400);await settle();
   await press('1');await sleep(250);await reset();await press('2');await sleep(60);await settle();
   const joined=await dump(),second=joined.keys.at(0).at,joinApplies=joined.ipc.filter(i=>/apply_edit|undo_edit/.test(i.cmd));
-  const joinDrawn=joined.host.filter(change=>change.count>=40);
+  const joinDrawn=joined.host.filter(change=>change.count>=DRAW_NODES);
   result.join={ipcs:joinApplies.map(i=>i.cmd.replace(/\?.*/,'')),drawnMs:Math.round(joinDrawn.at(-1).at-second),draws:joinDrawn.length};
   assert.deepEqual(result.join.ipcs,['undo_edit','apply_edit'],'the join is the history native has always seen: write, undo, write');
   assert.ok(result.join.draws<=1,`the join drew the score ${result.join.draws} times`);
@@ -152,7 +160,7 @@ try {
   await settle();await reset();
   await cdp.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'z',code:'KeyZ',windowsVirtualKeyCode:90,modifiers:2});await sleep(15);await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'z',code:'KeyZ',windowsVirtualKeyCode:90,modifiers:2});
   await sleep(60);await settle();
-  const undone=await dump(),undoKey=undone.keys.at(0).at,undoDrawn=undone.host.filter(change=>change.count>=40).at(-1),undoCall=undone.ipc.find(i=>i.cmd.startsWith('undo_edit'));
+  const undone=await dump(),undoKey=undone.keys.at(0).at,undoDrawn=undone.host.filter(change=>change.count>=DRAW_NODES).at(-1),undoCall=undone.ipc.find(i=>i.cmd.startsWith('undo_edit'));
   result.undoMs=Math.round(undoDrawn.at-undoKey);result.undoIpcMs=Math.round(undoCall.end-undoKey);
   assert.ok(result.undoMs<=BUDGET.undoMs,`undo drawn in ${result.undoMs} ms (budget ${BUDGET.undoMs})`);
 
@@ -212,9 +220,38 @@ try {
   result.equivalence={checked:checked.verified-stats.verified,mismatches:checked.mismatches-stats.mismatches,inPlace:checked.inPlace};
   assert.equal(result.equivalence.mismatches,0,'an edit made in place differed from a full rebuild');
   assert.ok(result.equivalence.checked>=3,'the edits were compared with a full rebuild');
+
+  // 6. What is drawn is what a complete render of the score draws: after notes, durations, beats, bars, tracks, layouts, undo and scrolling (draw-equivalence.mjs).
+  const drawn=await runDrawEquivalence(page,cdp,{label:'the generated score'});
+  result.drawEquivalence={steps:drawn.steps.length,allEqual:true,lineBreaksMoved:drawn.breaksMoved};
+  assert.ok(drawn.breaksMoved>=1,'no edit of the series moved a line break, so the comparison did not cover that case');
   console.log(JSON.stringify(result,null,2));
 } finally {
   if(browser)await browser.close().catch(()=>{});
   if(id!==null)stop(id);
   rmSync(directory,{recursive:true,force:true});
 }
+
+// 7. The same series on the owner's real scores, one app each, when a folder of them is named (TP_OWNER_SCORES) and exists. Only counts are printed.
+const ownerFiles=ownerScoreFiles(process.env.TP_OWNER_SCORES);
+const ownerResults=[];
+for(const [index,path] of ownerFiles.entries()) {
+  let ownerId=null,ownerBrowser=null;
+  try {
+    for(let attempt=0;;attempt++) {
+      ownerId=launch({TABPLAYER_TEST_OPEN:path});ownerBrowser=await connect();const ownerPage=ownerBrowser.contexts()[0].pages()[0];
+      try{await closeWelcomeLibrary(ownerPage);break;}catch(error){if(attempt>=2)throw error;await ownerBrowser.close().catch(()=>{});stop(ownerId);ownerId=null;}
+    }
+    const ownerPage=ownerBrowser.contexts()[0].pages()[0];
+    await waitForWorkspaceIdle(ownerPage);await clickWorkspaceCommand(ownerPage,'Open',{waitForIdle:false});await waitForWorkspaceIdle(ownerPage);
+    await ownerPage.waitForFunction(()=>document.querySelector('.score-tools')?.textContent.includes('measures'),{},{timeout:120000});await ownerPage.waitForTimeout(2500);
+    const ownerCdp=await ownerPage.context().newCDPSession(ownerPage);
+    const run=await runDrawEquivalence(ownerPage,ownerCdp,{label:`owner score ${index+1}`});
+    ownerResults.push({score:index+1,steps:run.steps.length,allEqual:true,lineBreaksMoved:run.breaksMoved,pieces:run.steps[0].pieces,bars:run.steps[0].bars});
+  } finally {
+    if(ownerBrowser)await ownerBrowser.close().catch(()=>{});
+    if(ownerId!==null)stop(ownerId);
+  }
+}
+if(ownerResults.length)console.log(JSON.stringify({ownerScores:ownerResults},null,2));
+else console.log('Owner scores: TP_OWNER_SCORES not set or folder absent, skipped.');

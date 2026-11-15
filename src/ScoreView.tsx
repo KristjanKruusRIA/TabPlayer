@@ -481,7 +481,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
       collecting=true;chunks=[];layoutPartials.current=[];generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setLoopBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
     }),view.renderer.partialLayoutFinished.on(event=>{
-      layoutPartials.current.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height});
+      layoutPartials.current.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex});
     }),view.renderer.partialRenderFinished.on(event=>{
       if(collecting&&typeof event.renderResult==='string')chunks.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex,svg:event.renderResult});
     }),view.postRenderFinished.on(()=>{

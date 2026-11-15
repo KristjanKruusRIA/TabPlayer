@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealInspector,propertiesSection,setBeatText} from './workstation-commands.mjs';
+import {closeProperties,waitForWorkspaceIdle,clickWorkstationButton,revealInspector,propertiesSection,setBeatText} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -32,7 +32,7 @@ try{
   const nameMode=async()=>(await page.getByRole('radiogroup',{name:'Name mode',exact:true}).getByRole('radio',{checked:true}).innerText()).toLowerCase();
   const combo=name=>page.getByRole('combobox',{name:new RegExp(`^${name}(?:\\s|$)`)});
   const chord=()=>page.getByRole('dialog',{name:'Harmony chord',exact:true});
-  const openChord=async()=>{await revealInspector(page);await button('Edit chord diagram');await chord().getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('[role="dialog"] fieldset')?.getAttribute('aria-disabled')!=='true');};
+  const openChord=async()=>{await revealInspector(page);await closeProperties(page);await button('Edit chord diagram');await chord().getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('[role="dialog"] fieldset')?.getAttribute('aria-disabled')!=='true');};
   const exportPitches=async()=>{await button('Export GP');const score=importer.ScoreLoader.loadScoreFromBytes(readFileSync(exported),new Settings()),file=new midi.MidiFile();new midi.MidiFileGenerator(score,new Settings(),new midi.AlphaSynthMidiFileHandler(file)).generate();return {score,pitches:file.tracks.flatMap(track=>track.events).filter(event=>event instanceof midi.NoteOnEvent).map(event=>event.noteKey)};};
   const restart=async()=>{await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await closeWelcome(page);await button('Open');};
 

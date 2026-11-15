@@ -112,21 +112,16 @@ reproduced except where noted.
    with one rebuilt from the file and the history, in steps that give way to typing (`verifyEditStepwise`; the rebuild and the two
    descriptions are generators that yield every few thousand objects, and the check waits while `isInputPending`). On a difference
    the rebuilt document replaces it, the console says so, and a quiet note (en, et, de: `status.document_rebuilt`) shows in the
-   status bar until the next edit. **What is true about exports** (corrected by the second review, see M1): the export dialog and GP export first await
-   `controller.verified()`, which returns at once if the document's *score object* is the one a full build made or a check found equal, and
-   otherwise compares it first. Which score is "known good" is tracked by the score object, not by a count of edits, so a settings edit
-   (a page layout changed in the export dialog, a mixer drag) no longer makes an unchecked score look checked. Save writes native's project,
-   which never held the in-place score. Other readers of the score (print preview, the playback plan) are not gated: the plan is built
-   from the in-place score within a second of an edit, and a swap rebuilds it. Tests: the timer waits for the edits to stop,
-   an injected divergence is repaired, a verified document is not checked twice. Cost, measured in node (cold, no UI, so an
-   upper-ish bound on the work, not a replay of what the window feels): the whole check takes 2.8 s on the 6 x 200 score and 0.9 to 1.6 s on
-   the owner's scores, in 13 to 21 slices; the longest slice that cannot be split (parsing the file, the final rebuild, the score's
-   JSON) is 0.64 s on the 6 x 200 score and 0.2 to 0.43 s on the owner's scores. What the user would notice: if a key is typed during
-   one of those slices (it starts 2 s after the last edit, and a new action cancels the check at its next step) the key waits for the
-   slice, up to a fifth to a half second on a real score; nothing else changes on screen unless the documents differ. In the real
-   window on the 6 x 200 score (three runs, one digit edit each, long tasks from 1.9 s after the edit on): 4 to 5 long tasks, the longest
-   211 to 284 ms, 0.7 to 1.0 s in all, which includes the playback preparation's own JavaScript; the check compared once per edit and
-   found no difference.
+   status bar until the next edit. **What "verified" means, and what is true about exports** (third review, N1): a document is *verified* only when it
+   was compared with a rebuild made from the file and the whole edit log through the full edit path (or is that rebuild). There is no weaker
+   notion: the shortcut of the second round (past 12 non-plain edits, compare each track with a round trip of itself) could not see a wrong
+   fret or a beat inserted in the wrong place and is gone. The export dialog, GP export, other exports, Copy and Cut await a verified score
+   (`controller.verified()`, `settled()`): a score object that a full build made or a check found equal returns at once, otherwise it is
+   checked first, in slices that give way to input (in one piece when the window is hidden, where timers are throttled, and after three
+   interrupted tries). A settings edit keeps the score object and so keeps the doubt. Save writes native's project, which never held the in-place score. The
+   print preview and the playback plan still read the in-place score (the plan is built from it within a second of an edit, and a swap rebuilds it).
+   See "Third review" below for how the real check is made affordable on a long history. Tests: the timer waits for the edits to stop,
+   an injected divergence is repaired, a verified document is not checked twice.
 6. **Draw yields to input.** `isInputPending({includeContinuous:false})`, so a moving mouse does not delay a draw; the bound (6 frames
    of 16 ms, then draw) is unchanged.
 7. **Following projection purity.** The result is cached by the score it was made for, so React running the render twice, or a render
@@ -168,18 +163,10 @@ Each was reproduced as a failing test first; all four reproduced.
   console).
 * **Idle check and playback.** The check waits while playback runs (or counts in) and is tried again each second; exports still verify at
   once.
-* **The check's cost grows with the history.** Measured on the owner's largest score in node (cold), one slice per yield: after 0 edits
-  1.0 s in 17 slices, longest 206 ms; after 200 edits (131 beat insertions and deletions) 30.6 s in 217 slices, longest 351 ms, 135 slices over
-  100 ms; after 500 edits (357 of them) 103 s in 517 slices, longest 673 ms. The replay does a whole-score round trip for every edit that is
-  not a plain note, rest or duration change; real histories hold far fewer than this random mix, but there is no bound. So past 12 such
-  edits the idle check does not replay: it compares each track with the track a rebuild's round trip makes of it
-  (`verifyTracksStepwise`: capture the links, serialize, deserialize, restore the links, compare). That costs 0.75 s in total and slices of
-  at most 100 to 117 ms (up to 174 ms while other tests ran) after 0, 200 and 500 edits alike. It finds a derived state (a lookup, an index,
-  a link, a chain) that an in-place edit left different from what a rebuild works out from the same notes; it does not replay the
-  history, so it cannot find a note that was written wrongly. A difference found this way is confirmed by a rebuild in one piece before the
-  document is replaced (which, on a long history, takes as long as the replay: it only happens when something is wrong). A real
-  checkpoint (verify only the edits since the last verified point) would need `buildDocument` to start from a built score and its
-  settings; that was not done.
+* **The check's cost grows with the history.** Measured on the owner's largest score in node (cold), one slice per yield: after 200 edits
+  (131 beat insertions and deletions) 30.6 s, longest slice 351 ms; after 500 edits 103 s. The second round answered that with a track-by-track
+  self-consistency check past 12 non-plain edits; the third review (N1) found that this cannot call a document verified, and replaced it by a
+  checkpoint (below).
 * **`editsFitLive`** answers "unknown" (null) for a pair holding `deleteBeat`, for more than eight commands and for nested sequences
   instead of "false".
 
@@ -197,6 +184,82 @@ Also from the second round, because both sets of code are together now:
   would differ.
 * **One draw for a two-digit fret.** The join (write, undo, write) holds the score's draw until it is done (`holdDraw`), so the score is
   drawn once; there is no 1, original, 12 flicker.
+
+## Third review (N1, N2 and the rest)
+
+Each was reproduced as a failing test first.
+
+* **N1, the long-history check was a self-consistency check.** Reproduced (`controller.faults.test.ts`): 14 `appendMeasure` edits, an
+  in-place bug that writes fret 9 where the log says 5 (self-consistent, so a round trip of the same track agrees with itself), `verifyNow()`
+  returned true and marked the score verified, and Copy, Cut and the export used it. (The reviewer's variant, a fret changed behind the
+  score's back, is caught by the round trip too, because the derived pitch no longer matches; the reproduction therefore injects the wrong
+  edit instead.) Fixed by removing the self-consistency path (`verifyTracksStepwise`, `replayIsHeavy`, `HEAVY_HISTORY` are gone) and making the
+  real check cheaper:
+  * The controller keeps a **checkpoint**: a detached copy of a document that was a real rebuild (or was compared with one and found
+    equal), with the edit count it had. The first one is a copy of the document `buildDocument` made when the file was opened; it is made
+    lazily, just before the first edit in place (or the first check) touches that document, and the same is done after every full
+    build (a refused or non-note edit, a rebuilt undo). After every check that finds the document equal, the replayed document itself
+    (detached from the open one) becomes the checkpoint.
+  * A check replays only the edits after the checkpoint, through the full (non-in-place) path: `buildDocumentSteps(project, canRedo, from)` starts
+    from `cloneDocument(from.built)` instead of the file and runs the same loop from `from.index`. It then compares the replay with the open
+    document (`describeScoreSteps`, stepwise `firstDifference`, settings).
+  * **Why checkpoint + replay is a rebuild.** The rebuild is a loop, `state = apply(state, edit)`, from the state the file gives, then a final
+    `rebuild` of the score. The checkpoint is that state after `index` edits and the replay is the same loop continued from it: one replay
+    split at a point it passed through. What is not true by construction is that the copy the replay starts from (the serialization round
+    trip `rebuild` makes, the same one the loop makes after most non-note edits) changes nothing: finishing a track again is not always a
+    no-op (the let ring and palm mute case that `inPlaceRefusal` knows). So it is tested, and a difference is never acted on from the
+    replay alone: a replay that disagrees is decided by a rebuild from the file made in one piece (a false alarm only costs that rebuild; a
+    real difference replaces the document with it).
+  * **Tests of the equivalence** (`engine.checkpoint.test.ts`): random histories on a rich file score (ties, slides, bends, grace notes,
+    two tracks) and on a blank score with added tracks and measures; edits in place and not (note, rest, duration, beats, sequences,
+    `appendMeasure`, `removeMeasure`, `addTrack`), settings edits (`setTrackMix`), undo and redo; after every step the replay from the
+    checkpoint is compared with a rebuild from scratch, a checkpoint above the length of the log (after an undo) or of another history is
+    checked to be refused (`checkpointFits`) and discarded, and checkpoints are taken both from a real rebuild and from a replay result.
+    Seeds 1 to 5 and 9 with 70 to 120 steps each passed. The owner-score fuzz also compares the replay from a checkpoint with the rebuild
+    every tenth edit on each of the five scores. `controller.faults.test.ts` checks the controller side: the checkpoint advances with each
+    equal check, an undo below it drops it, settings edits do not break it.
+  * **Cost, owner's largest score.** In node (cold, one slice per yield; the typing mix is 75 % notes, a tenth beats inserted or deleted):
+    opening takes 1.1 s, the checkpoint copy 122 ms (once). A check after 200 edits since the checkpoint: replay 3.4 s in 226 slices
+    (longest 149 ms), comparison 1.1 s (longest 118 ms), 4.5 s in all, 15 slices over 100 ms (the whole-score round trip each beat edit makes;
+    from the file instead of the checkpoint it is 5.1 s, longest 157 ms). After 500 edits since the checkpoint: 10.2 s, longest slice 157 ms,
+    51 over 100 ms. Before the slices were split the longest were 278 ms (the replay) and 220 ms (the comparison): a rebuild's round trip now
+    yields between writing the score out and reading it back (`rebuildSteps`), the description of a score walks one track per slice, and the
+    difference of two descriptions is found stepwise (`firstDifferenceSteps`). Real window, same score, typed digits only (notes), a check
+    two seconds after the last key: after 200 edits it ended 2.9 s after the last key with one long task of 126 ms; after 500 edits (300
+    since the last check) 4.0 s, two long tasks, longest 102 ms, 174 ms in all. The shortcut it replaces showed 3 long tasks, longest 161 and 226
+    ms. A check is made only when edits stopped for two seconds, so the replay is the edits since the last quiet moment, not the whole
+    history. The slices that remain over 100 ms are beat edits, whose replay needs a whole-score round trip (the next step would be a
+    per-track round trip, which the loop's links across tracks do not allow yet). In a long uninterrupted burst the check takes seconds, in slices.
+  * **Copy and Cut** await a verified score, so a wrong in-place note cannot become a `pasteMusic` edit (test: an injected wrong fret, the clip
+    holds the rebuilt one). `checkInPlace` (the sampled check) no longer marks the score verified before comparing, and a sampled check that throws
+    leaves the document unchecked instead of failing the edit.
+* **N2, memory grew without bound.** Reproduced (`engine.in-place.memory.test.ts`, WeakRef and forced collection): after 320 edits in place, all
+  269 earlier scores and their rendered copies were alive. The lineage of a score named its predecessor, so the current score held every
+  one since the last full build, each with its journal (the fret of every note of the track, the links, the voice snapshots) and its
+  `followed` entry (a projection of four maps over the whole score and the copy's journal). Fixed: a lineage is cut after the eight steps
+  `followProjection` can walk (`setLineage`), a score's journal entry is deleted once the next score holds it (the chain of `older`
+  journals, 24 deep, is the only reference), and `followed` keeps the newest two projections. The test now finds none of the earlier scores or
+  copies alive, and the chain of journals no deeper than 24. Heap in the real window on the owner's largest score, after a forced collection:
+  the second round's build 51.7 MB at the start, 136.8 after 100 edits, 140.8 after 200, **200.5 after 300** (still growing); this build 51.8,
+  126.3, 105.2, **90.9 after 300**, 90.9 after 400 and **91.2 after 500**. The extra heap over the start is the checkpoint copy, the journals
+  and the projections, which no longer grow. The edit-speed driver checks the heap growth over 240 edits (budget 40 MB).
+* **The queue.** `run()` cancelled a check when an action was merely queued, so an export's own check restarted for every action queued
+  behind it. Now a check an action asked for (`owned`) is not cancelled by the queue; the idle check is (and runs only when the queue is empty: the
+  queue re-arms it, `editNow`, `undo` and `redo` no longer arm it themselves, which let it run and swap in the middle of a queued job). Tests: one
+  check for an export with three actions queued behind it (it ran twice before), and no check while a second edit waits (it ran once too early).
+* **Close.** `DocumentController.dispose()` (called when the workspace drops a document) cancels the timer and any check and arms nothing
+  more; a closed document is not checked.
+* **`verified()` is bounded.** Three interrupted tries, then one rebuild from the file in one piece, compared and, on a difference, swapped in.
+  When the window is hidden (timers throttled) the check is made without waiting on timers.
+* **A rebuild that fails after native acted** (undo, redo or an edit healed by rebuilding) marks the document broken: the error is shown, every
+  action but saving and closing refuses with it, and the failure is thrown, instead of leaving the document silently behind native.
+* **`__tabplayerEditStats` and `__tabplayerCheckEdits`** exist only in development, in tests and in the desktop test build.
+* **`gp-losses.test.ts`** no longer pokes a private field: `adoptVerifiedScoreForTest`.
+* **Merge of `develop`** (click-to-seek and Space, 61ab5fb): conflicts in `App.tsx` (the `ScoreView` line: `holdDraw` and `onSelect={selectByClick}`
+  both kept), `NativePlaybackController.ts` (`quietMs` and `sameTarget`) and its test (both sets of tests). A click-seek or Space that arrives while the plan of a
+  just-edited score is not built is refused or kept waiting by their code (`ready`, five seconds); the plan is built after the edits stop (a frame
+  and a task for the first edit, 300 ms for a burst) and native reports ready, which is the signal their code waits for. Test: seek refused while the
+  plan of an edited score is not built, accepted once it is ready.
 
 ## The equivalence check
 

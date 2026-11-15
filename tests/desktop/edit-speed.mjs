@@ -182,8 +182,9 @@ try {
   assert.deepEqual([onNote.bar,onNote.beat,onNote.string],[typed.bar,typed.beat,typed.string],'a real click on the typed note selects its beat and its string');
   result.clicks={beat:[onBeat.bar,onBeat.beat],note:[onNote.bar,onNote.beat,onNote.string]};
 
-  // 4. Idle: nothing redraws, the engine says little, the main thread rests.
-  await settle();await page.waitForTimeout(1000);await reset();
+  // 4. Idle: nothing redraws, the engine says little, the main thread rests. The check of the edits made in place starts two seconds after the last of them and is work
+  // of its own (measured in the app's own terms elsewhere); idle is what is left once it has ended.
+  await settle();await page.waitForTimeout(2600);await settle();await page.waitForTimeout(1000);await reset();
   await cdp.send('Performance.enable');
   const before=(await cdp.send('Performance.getMetrics')).metrics,metric=(list,name)=>list.find(m=>m.name===name).value;
   await page.waitForTimeout(3000);

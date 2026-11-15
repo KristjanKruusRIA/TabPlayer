@@ -120,3 +120,12 @@ export async function yieldToInput():Promise<void> {
     if(!scheduling?.isInputPending?.())return;
   }
 }
+
+/**
+ * A pause for work somebody is waiting for (an export, a copy): it goes on without waiting while the current run of work is shorter than `budgetMs`, and lets input
+ * go first (`yieldToInput`) once it is longer. A small document is checked in one go, a large one in slices.
+ */
+export function yieldAfter(budgetMs=40):()=>Promise<void> {
+  let since=performance.now();
+  return async()=>{if(performance.now()-since<budgetMs)return;await yieldToInput();since=performance.now();};
+}

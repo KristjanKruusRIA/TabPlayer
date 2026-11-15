@@ -3,7 +3,7 @@ import { admitDocumentBase } from './interchange/archive-gate';
 import { gpExportRefusal,gpLosses } from './interchange/gp-losses';
 import { scoreHasMusicXmlTimeCarry } from './interchange/musicxml-time-symbols';
 import { gpWarning } from './export/gp-warning';
-import { yieldToInput } from './engine-verify';
+import { yieldAfter,yieldToInput } from './engine-verify';
 import { buildDocument, canEditInPlace, canUndoInPlace, checkpointFits, cloneDocument, compareDocuments, compareWithRebuild, makeCheckpoint, checkEditInPlace, editInPlace, editStats, idleVerification, registerLiveDocument, undoInPlace, verifyEditStepwise, effectiveAudioSettings,exportGp, forgetPreview, previewEdit, replayDocumentSettings, shouldCheckEdit, type BuiltDocument, type Checkpoint } from './engine';
 import { appliesFilePartialCapo, projectCommands, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
 import { getPartialCapo } from './editor/partial-capo';
@@ -186,7 +186,7 @@ export class DocumentController {
    */
   private async settled(): Promise<DocumentState> {
     const hidden=typeof document!=='undefined'&&document.visibilityState==='hidden';
-    for(let attempt=0;this.isUnverified()&&!this.closed&&attempt<3;attempt++)await this.verifyNow(hidden?async()=>{}:yieldToInput,true);
+    for(let attempt=0;this.isUnverified()&&!this.closed&&attempt<3;attempt++)await this.verifyNow(hidden?async()=>{}:yieldAfter(),true);
     if(this.isUnverified()&&!this.closed){
       // One uninterrupted rebuild from the file, compared with the open document.
       let whole:BuiltDocument;

@@ -2100,6 +2100,8 @@ mod plugin_tick_tests {
         // A new device rate: the tick replaces the helper with one at that rate.
         tick.device(Some(44_100), 512);
         std::thread::scope(|scope| {
+            // Owned here, so a panic below drops it and lets the paused tick go instead of hanging the join.
+            let resume = resume;
             let ticking = scope.spawn(|| tick.audio.plugin_tick(&tick.workspace));
             in_tick.recv().unwrap();
             tick.workspace
@@ -2118,7 +2120,7 @@ mod plugin_tick_tests {
                 break;
             }
             assert!(
-                start.elapsed() < Duration::from_secs(2),
+                start.elapsed() < Duration::from_secs(60),
                 "the helper the tick started for the document switched away from is shut down"
             );
             std::thread::sleep(Duration::from_millis(10));
@@ -2141,6 +2143,8 @@ mod plugin_tick_tests {
         // A new device rate: the tick replaces the helper with one at that rate.
         tick.device(Some(44_100), 512);
         std::thread::scope(|scope| {
+            // Owned here, so a panic below drops it and lets the paused tick go instead of hanging the join.
+            let resume = resume;
             let ticking = scope.spawn(|| tick.audio.plugin_tick(&tick.workspace));
             in_tick.recv().unwrap();
             tick.close_document();

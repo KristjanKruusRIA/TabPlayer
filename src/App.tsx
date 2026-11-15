@@ -327,7 +327,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const closePendingWindowAt=(end:number)=>{
     pendingTimer.current=setTimeout(()=>{
       const left=end-Date.now();
-      if(left>0){closePendingWindowAt(end);return;}
+      // More than a whole window left means the clock stepped backwards: close now instead of waiting it out.
+      if(left>0&&left<=FRET_DIGIT_WINDOW_MS){closePendingWindowAt(end);return;}
       pendingTimer.current=null;fretRun.current=null;setPendingFret(null);
     },Math.max(1,end-Date.now()));
   };

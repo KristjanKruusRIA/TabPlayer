@@ -36,11 +36,15 @@ import { targetSymbols,type SymbolRef } from './editor/symbol-edit';
 import { resolveSymbol,systemAt } from './editor/symbol-hit';
 import { SymbolPopover,type SymbolView } from './SymbolPopover';
 import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score-entry-hit';
+import { visiblePartials,type LayoutPartial } from './engraving/lazy-paint';
+import { drawFlags } from './engraving/draw-flags';
 import { useI18n } from './i18n';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
 /** How often, and for how long each time, a draw gives way to keys and clicks that are waiting. */
-const DRAW_DEFERRALS_MAX=6,DRAW_DEFERRAL_MS=16;
+const DRAW_DEFERRAL_MS=16;
+/** Pieces of the score this far (in pixels) beyond the score area are painted with the draw, so a small scroll never shows a blank system. */
+const PAINT_MARGIN=150;
 const diagramScale=.45,chipHeight=16,chipGap=2;
 const chipWidth=(diagram:ScaleDiagram)=>18+6*Math.min(14,(diagram.name||'Scale').length);
 const chipLabel=(diagram:ScaleDiagram)=>(diagram.name||'Scale').slice(0,14);
@@ -473,7 +477,9 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     };
     pointerActions.current={downBeat,downNote,move};
     const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
-      collecting=true;chunks=[];generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setLoopBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
+      collecting=true;chunks=[];layoutPartials.current=[];generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setLoopBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
+    }),view.renderer.partialLayoutFinished.on(event=>{
+      layoutPartials.current.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height});
     }),view.renderer.partialRenderFinished.on(event=>{
       if(collecting&&typeof event.renderResult==='string')chunks.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex,svg:event.renderResult});
     }),view.postRenderFinished.on(()=>{
@@ -482,7 +488,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
         if(c.sourcePhysical){if(planned)setCompleted({score:c.renderedScore,tracks:c.trackKey,page:c.page,engraving:c.engraving,chunks:[...chunks],bounds:view.boundsLookup,plan:planned.plan,metrics:planned.metrics});}
         else if(planned?.plan){try{setOverlay(accoladeOverlay(planned.plan,planned.metrics,view.boundsLookup.staffSystems));}catch{setOverlay(null);}}
         if((c.display.layout==='verticalScreen'||c.display.layout==='horizontalScreen')&&c.display.zoomMode!=='manual'&&c.baseWidth===null){
-          const width=Math.max(1,...chunks.map(chunk=>chunk.x+chunk.width),...view.boundsLookup.staffSystems.map(system=>system.realBounds.x+system.realBounds.w));
+          const width=Math.max(1,...layoutPartials.current.map(piece=>piece.x+piece.width),...view.boundsLookup.staffSystems.map(system=>system.realBounds.x+system.realBounds.w));
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
         }
       }
@@ -513,17 +519,25 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   useEffect(()=>{refreshCaret.current();},[score,track,zoom,profile,projection,visibleTracks,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
   useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){const host=scrollHost.current;if(host){const box=caretElement.current.getBoundingClientRect(),viewport=host.getBoundingClientRect();if(box.top<viewport.top)host.scrollTop+=box.top-viewport.top;else if(box.bottom>viewport.bottom)host.scrollTop+=box.bottom-viewport.bottom;if(box.left<viewport.left)host.scrollLeft+=box.left-viewport.left;else if(box.right>viewport.right)host.scrollLeft+=box.right-viewport.right;}revealCaret.current=false;}},[caret]);
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
-  const loaded=useRef<{score:model.Score;tracks:string}|null>(null);
+  const loaded=useRef<{score:model.Score;tracks:string}|null>(null),layoutPartials=useRef<LayoutPartial[]>([]);
   // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
   const [drawFailure,setDrawFailure]=useState<{error:unknown}|null>(null);
   const renderGeneration=useRef(0);
   // A draw of a long score takes a fifth of a second and cannot be interrupted. When keys or clicks are already waiting (a pointer merely moving over the page does not count) (a run of edits typed
   // quickly), the draw lets them go first, a few frames at most; each of them changes the score again, and only the newest is drawn.
   const [drawRetry,setDrawRetry]=useState(0),drawDeferred=useRef(0);
+  /** With lazy loading alphaTab paints a piece when its browser says the piece is on screen, a frame after the layout; the pieces in view are painted here, in the same turn, so no frame shows them blank or as they were. */
+  const paintVisible=(view:AlphaTabApi)=>{
+    try{
+      const host=scrollHost.current;if(!host||!layoutPartials.current.length)return;
+      const offset=view.uiFacade.getOffset(null,view.canvasElement),area=host.getBoundingClientRect();
+      for(const id of visiblePartials(layoutPartials.current,{left:offset.x-window.scrollX,top:offset.y-window.scrollY},area,PAINT_MARGIN))view.renderer.renderResult(id);
+    }catch{ /* alphaTab paints them as they scroll into view */ }
+  };
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0||holdDraw)return;
     const scheduling=(navigator as Navigator&{scheduling?:{isInputPending?:(options?:{includeContinuous?:boolean})=>boolean}}).scheduling;
-    if(drawDeferred.current<DRAW_DEFERRALS_MAX&&scheduling?.isInputPending?.({includeContinuous:false})){
+    if(drawDeferred.current<drawFlags.deferrals&&scheduling?.isInputPending?.({includeContinuous:false})){
       drawDeferred.current++;const timer=setTimeout(()=>setDrawRetry(count=>count+1),DRAW_DEFERRAL_MS);return()=>clearTimeout(timer);
     }
     drawDeferred.current=0;
@@ -549,11 +563,14 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
           try{configureAccolades(view.settings,projection.score,null,projection.bracketMode);}catch{/* nothing more can be undone */}
         }
       }
+      // Live layouts paint only what is on screen (alphaTab does the rest as it scrolls into view); the page layouts compose every piece themselves.
+      view.settings.core.enableLazyLoading=!sourcePhysical&&drawFlags.lazy;
       view.renderer.width=sourceWidth;view.updateSettings();
       accolade.current={plan,metrics:accoladeMetrics(view.settings)};
       const old=loaded.current;
       if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
       else view.render();
+      if(view.settings.core.enableLazyLoading)paintVisible(view);
     };
     // alphaTab caches a text width table per font family, so a role face has to be in before the first render that uses it, and the music font's
     // metadata before the layout that uses it. One gate covers both. Nothing to load (every Bravura document without role fonts, and a music font

@@ -30,8 +30,8 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
   };
   const click=async point=>{for(const type of ['mouseMoved','mousePressed','mouseReleased'])await cdp.send('Input.dispatchMouseEvent',{type,x:point.x,y:point.y,button:type==='mouseMoved'?'none':'left',buttons:type==='mouseReleased'?0:1,clickCount:type==='mouseMoved'?0:1});await sleep(250);};
   /** The n-th fret number in view (scrolling down until there are enough): clicking it puts the cursor and the keyboard focus on the score. */
-  const fretInView=async(n=2)=>{
-    for(let attempt=0;attempt<80;attempt++) {
+  const fretInView=async(n=2,attempts=80)=>{
+    for(let attempt=0;attempt<attempts;attempt++) {
       const found=await page.evaluate(n=>{
         const area=document.querySelector('.paper-scroll').getBoundingClientRect();
         const numbers=[...document.querySelector('.score-paper-host').querySelectorAll('svg text')].filter(text=>/^\d{1,2}$/.test(text.textContent)).filter(text=>{
@@ -41,7 +41,7 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
         if(numbers.length<=n)return null;const box=numbers[n].getBoundingClientRect();return {x:box.x+box.width/2,y:box.y+box.height/2};
       },n);
       if(found)return found;
-      await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop+=250;});await sleep(200);
+      await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop+=250;host.scrollLeft+=600;});await sleep(200);
     }
     throw new Error('no fret number in view');
   };
@@ -75,13 +75,24 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
   for(let i=0;i<5;i++)await key('Insert',{modifiers:2,vk:45});await check('five beats inserted');
   await focusScore();await toolbar('Append measure');await check('a measure appended');
   await toolbar('Remove measure');await check('a measure removed');
-  // Another track: the cursor goes there, the score shows it, a digit is typed on it, and the edit is taken back.
-  await focusScore();await key('ArrowDown',{modifiers:2,vk:40});await sleep(400);await quiet();
+  // Another track: the cursor goes there, the score shows it, a digit is typed on it (when it has a tablature staff), and the edit is taken back.
+  let otherTrack=false,moved=0;
+  await focusScore();
+  for(let step=0;step<5&&!otherTrack;step++) {
+    moved++;await key('ArrowDown',{modifiers:2,vk:40});await sleep(400);await quiet();
+    await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(300);
+    otherTrack=await fretInView(0,12).then(()=>true,()=>false);
+  }
   await check('another track shown',{changes:false});
-  await focusScore();await key('5');await check('a digit on the other track');
-  await key('z',{modifiers:2,code:'KeyZ',vk:90});await check('undo on the other track');
+  if(otherTrack) {
+    await focusScore();await key('5');await check('a digit on the other track');
+    await key('z',{modifiers:2,code:'KeyZ',vk:90});await check('undo on the other track');
+  }
+  // Back to the first track, so that the rest of the series has tablature to click on.
+  for(let step=0;step<moved;step++)await key('ArrowUp',{modifiers:2,vk:38});
+  await sleep(400);await quiet();await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(300);
   // Scrolling: every system in view is painted by the time the scroll has settled, and the drawing still equals a complete render.
-  await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=host.scrollHeight;});await sleep(500);await quiet();
+  await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=host.scrollHeight;host.scrollLeft=0;});await sleep(500);await quiet();
   const unpainted=await page.evaluate(()=>{
     const area=document.querySelector('.paper-scroll').getBoundingClientRect(),surface=document.querySelector('.score-paper-host .at-surface');
     return [...surface.children].filter(piece=>{const box=piece.getBoundingClientRect();return box.height>0&&box.bottom>area.top&&box.top<area.bottom&&!piece.querySelector('svg');}).length;
@@ -90,7 +101,7 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
   await check('scrolled to the end',{changes:false});
   await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(500);await check('scrolled back',{changes:false});
   // Layouts that place the lines by content (the screen layouts) move their line breaks when a bar gets wider or narrower; the page layouts are painted whole.
-  const layout=async value=>{await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption(value);await sleep(700);await quiet();};
+  const layout=async value=>{await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption(value);await sleep(700);await quiet();await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=0;host.scrollLeft=0;});await sleep(300);};
   for(const mode of ['verticalScreen','horizontalScreen','verticalPage']) {
     await layout(mode);await check(`${mode}: shown`,{changes:false});
     if(mode==='verticalPage')continue;
@@ -99,7 +110,7 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
     for(let i=0;i<8;i++)await key('Insert',{modifiers:2,vk:45});await check(`${mode}: eight beats inserted`);
   }
   await layout('parchment');await check('parchment again',{changes:false});
-  return {steps,breaksMoved:steps.filter(step=>step.breaksMoved).length};
+  return {steps,otherTrack,breaksMoved:steps.filter(step=>step.breaksMoved).length};
 }
 
 /** The owner's scores, when a folder of them is named (`TP_OWNER_SCORES`) and exists; their names and contents never leave this process. */

@@ -79,8 +79,9 @@ try {
     let shown=document.querySelector('.statusbar-position')?.textContent;
     new MutationObserver(()=>{const text=document.querySelector('.statusbar-position')?.textContent;if(text!==shown){shown=text;probe.position.push({at:performance.now(),text});}}).observe(document.querySelector('.statusbar'),{subtree:true,childList:true,characterData:true});
   });
-  const reset=()=>page.evaluate(()=>{const p=window.__editSpeed;p.ipc.length=0;p.events={};p.keys.length=0;p.host.length=0;p.busy.length=0;p.position.length=0;});
-  const dump=()=>page.evaluate(()=>JSON.parse(JSON.stringify(window.__editSpeed)));
+  const reset=()=>page.evaluate(()=>{globalThis.__tabplayerDrawStatsLog=[];const p=window.__editSpeed;p.ipc.length=0;p.events={};p.keys.length=0;p.host.length=0;p.busy.length=0;p.position.length=0;});
+  // `draws` are the times at which the app finished drawing the score (the count it keeps at the end of each draw); `host` also holds the background painting of the systems around the view, which is not a draw.
+  const dump=()=>page.evaluate(()=>({...JSON.parse(JSON.stringify(window.__editSpeed)),draws:(globalThis.__tabplayerDrawStatsLog??[]).filter(entry=>entry.where==='draw').map(entry=>entry.at)}));
   const settle=()=>page.waitForFunction(()=>{
     const p=window.__editSpeed,button=document.querySelector('[aria-keyshortcuts="Space"]'),ready=button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'&&document.querySelector('.app-shell')?.getAttribute('aria-busy')==='false';
     const last=Math.max(0,...p.host.map(m=>m.at),...p.ipc.map(i=>i.end||0),...p.busy.map(b=>b.at));
@@ -106,8 +107,8 @@ try {
     // A digit writes its fret at once; Enter then adds nothing, so the edit is timed from the digit.
     await reset();await press(String(digits[index%digits.length]));await sleep(60);await settle();
     const data=await dump(),typed=data.keys.at(0).at,apply=data.ipc.find(i=>i.cmd.startsWith('apply_edit'));
-    const freed=data.busy.filter(b=>b.value==='false').at(-1),drawn=data.host.filter(change=>change.count>=DRAW_NODES).at(-1),first=data.host.find(change=>change.svg&&change.count>=DRAW_NODES&&change.at>=typed);
-    return {ipc:apply.end-typed,free:Math.max(freed?freed.at-typed:0,drawn?drawn.at-typed:0),first:first?first.at-typed:null};
+    const freed=data.busy.filter(b=>b.value==='false').at(-1),drawAt=data.draws.filter(at=>at>=typed).at(-1),first=data.host.find(change=>change.svg&&change.count>=DRAW_NODES&&change.at>=typed);
+    return {ipc:apply.end-typed,free:Math.max(freed?freed.at-typed:0,drawAt!==undefined?drawAt-typed:0),first:first?first.at-typed:null};
   };
   const edits=[];for(let i=0;i<24;i++)edits.push(await editOnce(i));
   result.editIpcMedianMs=Math.round(median(edits.map(e=>e.ipc)));
@@ -139,8 +140,8 @@ try {
   for(let i=0;i<20;i++){
     await reset();await press(i%2?'ArrowLeft':'ArrowRight');await sleep(250);
     const data=await dump();if(data.position[0])moves.push(data.position[0].at-data.keys[0].at);
-    // The caret and the selection are drawn over the score (a few nodes); a drawn score is thousands.
-    assert.ok(data.host.every(change=>change.count<DRAW_NODES),`a cursor move drew the score again (${JSON.stringify(data.host)})`);
+    // The caret and the selection are drawn over the score; the score itself is not drawn again (the background painting of systems around the view after a scroll is not a draw).
+    assert.equal(data.draws.length,0,`a cursor move drew the score again (${JSON.stringify(data.draws)})`);
   }
   result.cursorMedianMs=Math.round(median(moves));result.cursorMoves=moves.length;
   assert.ok(moves.length>=15,'the status bar followed the cursor');
@@ -150,7 +151,7 @@ try {
   await settle();await press('ArrowRight');await sleep(400);await settle();
   await press('1');await sleep(250);await reset();await press('2');await sleep(60);await settle();
   const joined=await dump(),second=joined.keys.at(0).at,joinApplies=joined.ipc.filter(i=>/apply_edit|undo_edit/.test(i.cmd));
-  const joinDrawn=joined.host.filter(change=>change.count>=DRAW_NODES);
+  const joinDrawn=joined.draws.map(at=>({at}));
   result.join={ipcs:joinApplies.map(i=>i.cmd.replace(/\?.*/,'')),drawnMs:Math.round(joinDrawn.at(-1).at-second),draws:joinDrawn.length};
   assert.deepEqual(result.join.ipcs,['undo_edit','apply_edit'],'the join is the history native has always seen: write, undo, write');
   assert.ok(result.join.draws<=1,`the join drew the score ${result.join.draws} times`);
@@ -159,7 +160,7 @@ try {
   await settle();await reset();
   await cdp.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'z',code:'KeyZ',windowsVirtualKeyCode:90,modifiers:2});await sleep(15);await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'z',code:'KeyZ',windowsVirtualKeyCode:90,modifiers:2});
   await sleep(60);await settle();
-  const undone=await dump(),undoKey=undone.keys.at(0).at,undoDrawn=undone.host.filter(change=>change.count>=DRAW_NODES).at(-1),undoCall=undone.ipc.find(i=>i.cmd.startsWith('undo_edit'));
+  const undone=await dump(),undoKey=undone.keys.at(0).at,undoDrawn={at:undone.draws.at(-1)},undoCall=undone.ipc.find(i=>i.cmd.startsWith('undo_edit'));
   result.undoMs=Math.round(undoDrawn.at-undoKey);result.undoIpcMs=Math.round(undoCall.end-undoKey);
   assert.ok(result.undoMs<=BUDGET.undoMs,`undo drawn in ${result.undoMs} ms (budget ${BUDGET.undoMs})`);
 

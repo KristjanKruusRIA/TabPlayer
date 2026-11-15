@@ -93,7 +93,7 @@ async function probe(path,label,flags={},{strict=true,controlNoHighlight}={}) {
     const frames=await stopFrameSampler(page);
     await page.locator('.transport-stopbutton').click().catch(()=>{});
     const counts=(await drawStatsLog(page));
-    const result={score:label,frames:frames.frames,blankFrames:frames.blank,blankAt:frames.blankFrames,longestBlankRun:frames.longestBlankRun,noHighlightFrames:frames.noHighlight,noHighlightRuns:frames.noHighlightRuns.slice(0,12),marks:frames.marks,lineChangesBeforeSeek:afterLines.lineChanges,loopWraps:wraps,drawCounts:{entries:counts.length,maxEmptyInView:Math.max(0,...counts.map(c=>c.emptyInView)),overPainted:counts.filter(c=>c.painted>c.allowed+1).length}};
+    const result={score:label,frames:frames.frames,blankFrames:frames.blank,blankAt:frames.blankFrames,longestBlankRun:frames.longestBlankRun,noHighlightFrames:frames.noHighlight,noHighlightRuns:frames.noHighlightRuns.slice(0,12),noHighlightInfo:frames.noHighlightInfo,blankInfo:frames.blankInfo,marks:frames.marks,lineChangesBeforeSeek:afterLines.lineChanges,loopWraps:wraps,drawCounts:{entries:counts.length,maxEmptyInView:Math.max(0,...counts.map(c=>c.emptyInView)),overPainted:counts.filter(c=>c.painted>c.allowed+1).length}};
     console.log(JSON.stringify(result));
     if(!strict)return result;
     assert.equal(frames.blank,BUDGET.blankFrames,`${label}: ${frames.blank} presented frames had a system in view without a drawing (frames ${frames.blankFrames.join(',')})`);

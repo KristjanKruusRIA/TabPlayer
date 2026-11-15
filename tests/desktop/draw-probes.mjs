@@ -9,7 +9,7 @@
  */
 export async function startFrameSampler(page) {
   await page.evaluate(() => {
-    const state = window.__frames = { on: true, frames: 0, blank: 0, blankFrames: [], run: 0, longestBlankRun: 0, expectHighlight: false, noHighlight: 0, noHighlightFrames: [], noHighlightRuns: [], hlRun: 0, cursorMoves: 0, lineChanges: 0, lastCursorTop: null, lastCursorLeft: null, log: [] };
+    const state = window.__frames = { on: true, frames: 0, blank: 0, blankFrames: [], run: 0, longestBlankRun: 0, expectHighlight: false, noHighlight: 0, noHighlightFrames: [], noHighlightRuns: [], noHighlightInfo: [], hlRun: 0, cursorMoves: 0, lineChanges: 0, lastCursorTop: null, lastCursorLeft: null, log: [] };
     const host = document.querySelector('.paper-scroll'), surface = document.querySelector('.score-paper-host .at-surface');
     const channel = new MessageChannel();
     const sample = () => {
@@ -21,8 +21,17 @@ export async function startFrameSampler(page) {
         if (box.height > 0 && box.bottom > area.top && box.top < area.bottom && !piece.querySelector('svg')) blank++;
       }
       state.frames++;
+      if (blank && (state.blankInfo ??= []).length < 6) state.blankInfo.push({ frame: state.frames, scrollTop: host.scrollTop, pieces: [...surface.children].map((piece, index) => { const rect = piece.getBoundingClientRect(); return { index, top: Math.round(rect.top), h: Math.round(rect.height), children: piece.childElementCount, inView: rect.height > 0 && rect.bottom > area.top && rect.top < area.bottom }; }).filter(piece => piece.inView), highlights: document.querySelectorAll('.at-highlight').length });
       if (blank) { state.blank++; state.run++; state.longestBlankRun = Math.max(state.longestBlankRun, state.run); if (state.blankFrames.length < 20) state.blankFrames.push(state.frames); } else state.run = 0;
-      if (state.expectHighlight && document.querySelectorAll('.at-highlight').length === 0) { state.noHighlight++; state.hlRun++; if (state.noHighlightFrames.length < 20) state.noHighlightFrames.push(state.frames); } else if (state.hlRun) { state.noHighlightRuns.push([state.frames - state.hlRun, state.hlRun]); state.hlRun = 0; }
+      // The sounding beat is expected to be highlighted while the bar cursor is in the score area; out of it (the person scrolled away) alphaTab clears the drawing and the highlight comes back with it.
+      const cursorBox = document.querySelector('.at-cursor-bar')?.getBoundingClientRect(), cursorInView = !!cursorBox && cursorBox.bottom > area.top && cursorBox.top < area.bottom;
+      if (state.expectHighlight && cursorInView && document.querySelectorAll('.at-highlight').length === 0 && state.hlRun === 0 && (state.noHighlightInfo ??= []).length < 6) {
+        // What the page looks like where the first frame without a highlighted beat is: which system the cursor is in and whether it has a drawing.
+        const bar = document.querySelector('.at-cursor-bar'), box = bar && bar.getBoundingClientRect();
+        const pieces = [...surface.children].map((piece, index) => { const rect = piece.getBoundingClientRect(); return { index, top: Math.round(rect.top), h: Math.round(rect.height), children: piece.childElementCount, hit: !!box && box.top + box.height / 2 >= rect.top && box.top + box.height / 2 <= rect.bottom }; });
+        state.noHighlightInfo.push({ frame: state.frames, scrollTop: host.scrollTop, cursor: box && [Math.round(box.left), Math.round(box.top), Math.round(box.width), Math.round(box.height)], cursorPiece: pieces.find(piece => piece.hit) ?? null, inView: pieces.filter(piece => piece.top < area.bottom && piece.top + piece.h > area.top) });
+      }
+      if (state.expectHighlight && cursorInView && document.querySelectorAll('.at-highlight').length === 0) { state.noHighlight++; state.hlRun++; if (state.noHighlightFrames.length < 20) state.noHighlightFrames.push(state.frames); } else if (state.hlRun) { state.noHighlightRuns.push([state.frames - state.hlRun, state.hlRun]); state.hlRun = 0; }
       // The bar cursor is placed by a transform (translate(x, y) in the score's own coordinates), so a change of y is a change of line, whatever the scroll position.
       const cursor = document.querySelector('.at-cursor-bar'), moved = cursor && /translate\(([-\d.]+)px,\s*([-\d.]+)px\)/.exec(cursor.style.transform);
       if (moved) {
@@ -41,7 +50,7 @@ export async function startFrameSampler(page) {
 /** Zeroes the counters (keeps sampling). */
 export const resetFrameSampler = page => page.evaluate(() => {
   const state = window.__frames;
-  Object.assign(state, { frames: 0, blank: 0, blankFrames: [], run: 0, longestBlankRun: 0, noHighlight: 0, noHighlightFrames: [], noHighlightRuns: [], hlRun: 0, cursorMoves: 0, lineChanges: 0 });
+  Object.assign(state, { frames: 0, blank: 0, blankFrames: [], run: 0, longestBlankRun: 0, noHighlight: 0, noHighlightFrames: [], noHighlightRuns: [], noHighlightInfo: [], hlRun: 0, cursorMoves: 0, lineChanges: 0 });
 });
 
 /** Tells the sampler whether a highlighted beat is to be expected in every frame (playing). */

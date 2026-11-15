@@ -448,6 +448,13 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   useEffect(()=>{
     const view=new AlphaTabApi(container.current!,{core:{fontDirectory:'/font/',scriptFile:'/alphatab/alphaTab.mjs',includeNoteBounds:true,useWorkers:false,engine:'svg',enableLazyLoading:false},player:{playerMode:'EnabledExternalMedia',enableCursor:false,enableUserInteraction:false,scrollElement:'.paper-scroll'}});api.current=view;
     const unhookCheck=developerHooks?exposeDrawCheck(()=>({view:api.current,partials:layoutPartials.current})):()=>{};
+    // alphaTab empties a piece when its browser reports the piece out of view, one frame late: a piece that is back in view by then would be shown empty. The mutation callback runs
+    // before the next frame is drawn, so the piece is painted again in time (only pieces emptied from outside count: ours are painted, never emptied, while in view).
+    const surface=(view.canvasElement as unknown as {element?:HTMLElement}).element;
+    const emptied=surface&&typeof MutationObserver!=='undefined'?new MutationObserver(records=>{
+      if(view.settings.core.enableLazyLoading&&records.some(record=>record.removedNodes.length>0&&record.addedNodes.length===0&&record.target.parentElement===surface))areaChanged.current();
+    }):null;
+    if(surface)emptied?.observe(surface,{childList:true,subtree:true});
     const adapter=installScreenPlayback(view,()=>({...presentation.current,wrapper:wrapper.current,scrollHost:scrollHost.current,barElement:barElement.current,beatElement:beatElement.current,ensurePainted:index=>ensurePaintedRef.current(index)}));playbackPresentation.current=adapter;
     view.settings.player.enableCursor=true;
     // Reuse the facade's public DOM surface classes so its instance-specific font CSS also applies to copied SVGs.
@@ -504,7 +511,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
     };
     const mouseUp=()=>{drag.current=null;};document.addEventListener('mousemove',mouseMove);document.addEventListener('mouseup',mouseUp);
-    return ()=>{unhookCheck();for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);adapter.dispose();playbackPresentation.current=null;roots.current.clear();view.destroy();api.current=null;loaded.current=null;};
+    return ()=>{unhookCheck();emptied?.disconnect();for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);adapter.dispose();playbackPresentation.current=null;roots.current.clear();view.destroy();api.current=null;loaded.current=null;};
   },[]);
   useEffect(()=>{anchor.current=null;drag.current=null;},[score,track,projection,visibleTracks]);
   // A selection this view did not publish (an instrument pick, say) ends the click that anchored Shift selection.

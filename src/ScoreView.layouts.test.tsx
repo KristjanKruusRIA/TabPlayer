@@ -92,6 +92,16 @@ it('paints the system of a bar before the playback cursor highlights and scrolls
  view.customCursorHandler.placeBarCursor({setBounds(){},transitionToX(){},stopAnimation(){}},bounds);
  expect(state.painted).toHaveBeenCalledTimes(3);
 });
+it('paints a system in view again when alphaTab empties it a frame late (THE-213)',async()=>{
+ const {api}=setup('parchment');const element=(api as unknown as {canvasElement:{element:HTMLElement}}).canvasElement.element;
+ expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0']);
+ element.children[0].replaceChildren();      // what its visibility handling does to a piece that left the view
+ await new Promise(resolve=>setTimeout(resolve,10));
+ expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0','chunk-0']);
+ element.children[2].replaceChildren();      // out of view: nothing to paint
+ await new Promise(resolve=>setTimeout(resolve,10));
+ expect(state.painted).toHaveBeenCalledTimes(2);
+});
 it.each([['parchment',false],['verticalScreen',false],['verticalPage',true],['horizontalScreen',true]] as const)('a draw of %s %s waits for a key that is waiting (THE-213)',(layout,waits)=>{
  Object.defineProperty(navigator,'scheduling',{configurable:true,value:{isInputPending:()=>true}});
  try{setup(layout);expect(state.loads).toHaveBeenCalledTimes(waits?0:1);}finally{Reflect.deleteProperty(navigator,'scheduling');}

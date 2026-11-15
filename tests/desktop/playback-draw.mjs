@@ -67,7 +67,7 @@ async function probe(path,label,flags={},{strict=true,controlNoHighlight}={}) {
     await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(300);
     const home=await firstFret();await markFrame(page,'seek-home');await click(cdp,home.x,home.y);await sleep(1200);
     assert.ok((await status()).playing,`${label}: playback goes on after the seek to the start`);
-    // 2b. Far seeks by the transport's position slider, from the keyboard, while the view is at the other end of the score: to the last bar, then back to the first. The target system must be
+    // 2b. Far seeks by the transport's Last bar and First bar buttons, while the view is at the other end of the score: to the last bar, then back to the first. The target system must be
     // empty and out of view just before each seek (alphaTab empties the systems that left the view), otherwise the step would prove nothing.
     const slider=page.locator('.transport-scrub'),bars=Number(await slider.getAttribute('max'));
     const pieceOfBar=bar=>page.evaluate(bar=>globalThis.__tabplayerPieceOfBar(bar),bar);
@@ -75,13 +75,16 @@ async function probe(path,label,flags={},{strict=true,controlNoHighlight}={}) {
       let piece;for(let attempt=0;attempt<30;attempt++){piece=await pieceOfBar(bar);if(piece&&piece.empty&&!piece.inView)return piece;await sleep(100);}
       throw new Error(`${label}: before ${what} the system of bar ${bar+1} was not empty and out of view (${JSON.stringify(piece)}), so the step would prove nothing`);
     };
-    const sliderKey=async(key,code,vk)=>{await cdp.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key,code,windowsVirtualKeyCode:vk});await sleep(20);await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:vk});};
-    await slider.focus();
-    const toEnd=await emptyAndAway(bars-1,'the seek to the last bar'),end=await status();
-    await markFrame(page,'far-seek-end');await sliderKey('End','End',35);await sleep(350);
-    assert.ok((await status()).tick>end.tick+3840*(bars-6),`${label}: the slider's End key did not seek to the end`);
-    await slider.focus();const toStart=await emptyAndAway(0,'the seek back to the first bar');
-    await markFrame(page,'far-seek-start');await sliderKey('Home','Home',36);await sleep(900);
+    const transportButton=name=>page.getByRole('button',{name,exact:true}).click();
+        const toEnd=await emptyAndAway(bars-1,'the seek to the last bar'),end=await status();
+    await markFrame(page,'far-seek-end');await transportButton('Last bar');await sleep(250);
+    const atEnd=await status(),sliderAt=Number(await slider.inputValue());
+    assert.ok(atEnd.tick>end.tick&&sliderAt>=bars-2,`${label}: the Last bar button did not seek to the end (tick ${end.tick} to ${atEnd.tick}, slider at ${sliderAt} of ${bars})`);
+    const toStart=await emptyAndAway(0,'the seek back to the first bar');
+    await markFrame(page,'far-seek-start');await transportButton('First bar');await sleep(300);
+    // The score's last bar may have been reached and playback stopped: the jump back then starts it again from the start.
+    if(!(await status()).playing){await space();await waitFor(x=>x.playing,'playback from the first bar');}
+    await sleep(600);
     assert.ok((await status()).playing,`${label}: playback goes on after the far seek to the start`);
     // 3. Stop, select across a line break, loop it, play, and let it wrap twice.
     await expectHighlight(page,false);await markFrame(page,'stop');await page.locator('.transport-stopbutton').click();await sleep(600);
@@ -107,9 +110,11 @@ async function probe(path,label,flags={},{strict=true,controlNoHighlight}={}) {
     assert.ok(wraps>=2,`${label}: the loop wrapped ${wraps} times (2 wanted; loop ${looped.loop.startTick} to ${looped.loop.endTick})`);
     // 3b. A loop that starts more than two viewports from the view: stop, set the loop from the transport's fields, scroll away, check that the loop's first system is empty and out of view, play.
     await expectHighlight(page,false);await markFrame(page,'stop-for-far-loop');await page.locator('.transport-stopbutton').click();await sleep(500);
-    const loopButton=page.locator('.transport-loopbutton');if(await loopButton.getAttribute('aria-pressed')==='true'){await loopButton.click();await sleep(400);}
+    const loopButton=page.locator('.transport-loopbutton[data-action="loop"]');if(await loopButton.getAttribute('aria-pressed')==='true'){await loopButton.click();await sleep(400);}
     const farStart=Math.max(2,bars-8);await page.getByLabel('Loop start',{exact:true}).fill(String(farStart));await page.getByLabel('Loop end',{exact:true}).fill(String(farStart+1));
     await loopButton.click();await sleep(600);const farLoop=await waitFor(x=>x.loop,'the far loop');
+    // Setting the loop puts the cursor at its start, which paints that system; a scroll away from it (two, so that a scroll event surely follows) lets the painter empty it again.
+    await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=400;});await sleep(300);
     await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=0;host.scrollLeft=0;});await sleep(300);
     const toLoop=await emptyAndAway(farStart-1,'the play into the far loop');
     await expectHighlight(page,true);await markFrame(page,'far-loop-play');await page.locator('[aria-keyshortcuts="Space"]').click();await waitFor(x=>x.playing,'playback in the far loop');

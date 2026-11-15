@@ -1,4 +1,5 @@
 import { rendering,type AlphaTabApi } from '@coderline/alphatab';
+import '../tremolo-guard';
 import type { LayoutPartial } from './lazy-paint';
 
 /**

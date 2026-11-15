@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,openProperties,closeProperties,moveCursor,cursorPosition} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -27,24 +27,26 @@ try{
   await closeLibrary();
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const fill=(name,value)=>page.getByLabel(name,{exact:true}).fill(String(value));
+  // The score-error list is in Properties > Score (the Selection tab is gone); the dialog is opened whenever the list is read and closed again before the score is edited.
+  const dialog=()=>openProperties(page,'score');
   const summary=()=>page.locator('summary').filter({hasText:/^Score errors \(/}).first();
   const open=()=>summary().evaluate(node=>{node.parentElement.open=true;});
   const markers=()=>page.locator('.score-error-bar');
   const message='Measure 2 · Guitar · Voice 1: 1 quarter note missing';
   await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();
-  assert.equal(await summary().textContent(),'Score errors (0)');await open();
+  await dialog();assert.equal(await summary().textContent(),'Score errors (0)');await open();
   await page.getByText('Every measure is complete.',{exact:true}).waitFor();assert.equal(await markers().count(),0);
 
-  await fill('Measure',2);await fill('Beat',4);await button('Delete beat');
-  await page.waitForFunction(()=>[...document.querySelectorAll('summary')].some(node=>node.textContent==='Score errors (1)'));
+  await moveCursor(page,{bar:2,beat:4});await button('Delete beat');
+  await dialog();await page.waitForFunction(()=>[...document.querySelectorAll('summary')].some(node=>node.textContent==='Score errors (1)'));
   await open();const entry=page.getByRole('button',{name:message,exact:true});await entry.waitFor();
   await markers().first().waitFor();assert.equal(await markers().count(),1);
   assert.equal(await markers().first().getAttribute('aria-label'),`Score error: ${message}`);
   const box=await markers().first().boundingBox();assert.ok(box&&box.width>20&&box.height>20,'The marker covers the measure.');
 
-  await fill('Measure',1);await fill('Beat',1);await entry.click();
-  assert.equal(await page.getByLabel('Measure',{exact:true}).inputValue(),'2','The entry selects the incomplete measure.');
+  await closeProperties(page);await moveCursor(page,{bar:1,beat:1});await dialog();await open();await entry.click();
+  assert.equal((await cursorPosition(page)).bar,2,'The entry selects the incomplete measure.');
+  await dialog();await open();
 
   const mark=page.getByRole('checkbox',{name:'Mark errors in the score',exact:true});
   assert.equal(await mark.isChecked(),true);await mark.click();await markers().first().waitFor({state:'detached'});
@@ -54,8 +56,8 @@ try{
   await page.waitForTimeout(500);assert.equal(await markers().count(),0);
   await mark.click();await markers().first().waitFor();assert.equal(await markers().count(),1);
 
-  await button('Undo');
-  await page.waitForFunction(()=>[...document.querySelectorAll('summary')].some(node=>node.textContent==='Score errors (0)'));
+  await closeProperties(page);await button('Undo');
+  await dialog();await page.waitForFunction(()=>[...document.querySelectorAll('summary')].some(node=>node.textContent==='Score errors (0)'));await closeProperties(page);
   await markers().first().waitFor({state:'detached'});
   await page.waitForFunction(async()=>{const status=await window.__TAURI_INTERNALS__.invoke('audio_status');if(status.error)throw new Error(status.error);return status.ready;},undefined,{timeout:20000});
   assert.deepEqual(errors,[]);

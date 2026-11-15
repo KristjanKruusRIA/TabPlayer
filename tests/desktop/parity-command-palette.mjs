@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,cursorPosition} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
@@ -38,7 +38,7 @@ try{
   await command('duration 8');
   assert.deepEqual((await edits()).at(-1),{type:'setBeatRhythm',target:{track:0,staff:0,bar:0,voice:0,beat:0},duration:8,dots:0,tupletNumerator:1,tupletDenominator:1,graceType:0});
   await command('go to measure 3');
-  assert.equal(await page.getByLabel('Measure',{exact:true}).inputValue(),'3');
+  assert.equal((await cursorPosition(page)).bar,3);
   await command('tempo 90');
   assert.deepEqual((await edits()).at(-1),{type:'setScoreInfo',title:'',artist:'',tempo:90});
 

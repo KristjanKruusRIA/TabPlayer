@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,styleSection,moveCursor} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
@@ -50,7 +50,8 @@ try{
   await closeLibrary();
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const details=name=>page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});
+  // Engraving, typography, saved styles, the design sections and page layout are in the Score style dialog (Song tab); the dialog closes when a button in it is used, so each section is reopened before its next control.
+  const details=name=>styleSection(page,name);
   const field=name=>page.getByLabel(name,{exact:true});
   const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
@@ -82,7 +83,7 @@ try{
   };
   // Selects a bar (the caret's bar picks the system) from the Edit tab, then shows the Presentation tools.
   const selectBar=async bar=>{
-    await button('Edit');await field('Measure').fill(String(bar));await field('Measure').press('Tab');await idle();
+    await moveCursor(page,{bar});await idle();
     await button('Presentation');await details('Design: system gaps');
     const system=SYSTEMS.find(([first,last])=>bar>=first&&bar<=last);
     await page.getByRole('status').filter({hasText:'Selected system:'}).filter({hasText:`bars ${system[0]} to ${system[1]}.`}).waitFor({timeout:10000});

@@ -128,8 +128,10 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     step('The baseline exports exist and the document is untouched',{baseMidi,baseWave:{onset:baseWave.onset,peak:baseWave.peak}});
 
     // The inspector: the first note's three fields, each committed on Enter or blur, each one setNoteTechniques edit.
-    await ui.revealInspector(page);await page.getByRole('combobox',{name:/^String/}).first().selectOption('1');await idle();
-    await reveal(page.locator('summary').filter({hasText:'Notes & techniques'}).first());
+    // The note's fields are in Properties > Note (Notes & techniques); the cursor string is set in the score. A button clicked through the helpers closes the dialog, so it is shown again before its fields are read.
+    const showNote=()=>ui.propertiesSection(page,'Notes & techniques');
+    await ui.moveCursor(page,{string:1});await idle();
+    await showNote();
     await page.getByText('Note controls apply to string 1.',{exact:false}).waitFor();
     const length=field('Sounding length'),offset=field('Start offset'),velocity=field('Velocity change');
     assert.deepEqual([await length.inputValue(),await offset.inputValue(),await velocity.inputValue()],['100','0','0'],'A note starts at the plain values');
@@ -182,16 +184,16 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     step('The written notes and rhythm are unchanged',{notes:notesOf(editedGp)});
 
     // Undo and redo take the settings off and put them back, one edit at a time.
-    await button('Undo');assert.equal((await edits()).length,2);
+    await button('Undo');assert.equal((await edits()).length,2);await showNote();
     assert.equal(await velocity.inputValue(),'0','Undo shows the earlier value');
-    await button('Undo');await button('Undo');assert.deepEqual((await record()).snapshot.project,initial.snapshot.project,'Undo restores the project');
+    await button('Undo');await button('Undo');assert.deepEqual((await record()).snapshot.project,initial.snapshot.project,'Undo restores the project');await showNote();
     assert.deepEqual([await length.inputValue(),await offset.inputValue(),await velocity.inputValue()],['100','0','0']);
-    await button('Redo');await button('Redo');await button('Redo');assert.deepEqual((await record()).snapshot.project,edited.snapshot.project,'Redo restores the edits');
+    await button('Redo');await button('Redo');await button('Redo');assert.deepEqual((await record()).snapshot.project,edited.snapshot.project,'Redo restores the edits');await showNote();
     assert.deepEqual([await length.inputValue(),await offset.inputValue(),await velocity.inputValue()],[String(settings.length),String(settings.offset),String(settings.velocity)]);
     await native();step('Undo and redo restore the settings',{});
 
     // Reset takes the settings off in one edit that carries null.
-    await page.getByRole('button',{name:'Reset note audio',exact:true}).click();await idle();
+    await showNote();await page.getByRole('button',{name:'Reset note audio',exact:true}).click();await idle();
     const reset=await poll(record,value=>value.snapshot.project.edits.length===4,'reset edit');
     assert.deepEqual(reset.snapshot.project.edits[3],command(null),'Reset clears the settings');
     assert.deepEqual([await length.inputValue(),await offset.inputValue(),await velocity.inputValue()],['100','0','0']);
@@ -200,10 +202,10 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     step('Reset clears the settings and the export returns to the baseline',{});
 
     // A finalized document keeps its notes: the fields are disabled.
-    await button('Finalize document');
+    await button('Finalize document');await showNote();
     for(const name of ['Sounding length','Start offset','Velocity change'])assert.equal(await field(name).isDisabled(),true,`${name} is locked`);
     assert.equal((await edits()).length,4,'Locking is not an edit');
-    await button('Unfinalize document');assert.equal(await field('Sounding length').isDisabled(),false);
+    await button('Unfinalize document');await showNote();assert.equal(await field('Sounding length').isDisabled(),false);
     step('A finalized document disables the fields',{});
     healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};if(page)try{await page.screenshot({path:resolve(paths.results,'failure.png')});}catch{}}

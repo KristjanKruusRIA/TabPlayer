@@ -114,15 +114,16 @@ export async function runPartialCapoAcceptance({buildPath}={}){
     step('A GP file with a capo and a partial capo plays and shows each string by its own capo',{keys:opened});
 
     // Change the partial capo from the staff settings: fret 7 over strings 4 and 5 only.
-    await ui.revealInspector(page);
-    await page.locator('summary').filter({hasText:'Staff, voices'}).first().evaluate(node=>{node.parentElement.open=true;});
+    // The partial capo is in the Tuning dialog's Capo section (Track tab); Keep fingering applies it (with the capo) as one setStaffSettings.
+    await ui.revealInspectorTab(page,'Track');await page.getByRole('button',{name:/^Edit tuning/}).click();
+    const tuning=page.getByRole('dialog',{name:'Tuning',exact:true});await tuning.waitFor();await ui.openSection(tuning,/^Partial capo and banjo drone$/);
     assert.deepEqual(await checked(),[true,true,true,false,false,false],'The settings show the staff\'s partial capo');
     assert.equal(await page.getByLabel('Partial capo fret',{exact:true}).inputValue(),'5');
     for(const string of [1,2,3])await page.getByRole('checkbox',{name:new RegExp(`^String ${string} \\(`)}).uncheck();
     for(const string of [4,5])await page.getByRole('checkbox',{name:new RegExp(`^String ${string} \\(`)}).check();
     const fret=page.getByLabel('Partial capo fret',{exact:true});await fret.fill('7');await fret.press('Enter');
     assert.deepEqual(await edits(),[],'Choosing a partial capo changes nothing until it is applied');
-    await button('Apply staff settings');
+    await tuning.getByRole('button',{name:'Keep fingering',exact:true}).click();await tuning.waitFor({state:'hidden'});await idle();
     const after=await poll(record,value=>value.snapshot.project.edits.length===1,'one staff settings edit');
     assert.deepEqual(after.snapshot.project.edits[0].settings.partialCapo,{fret:7,strings:[4,5]},'The command carries the partial capo');
     assert.equal(after.snapshot.project.edits[0].settings.capo,2);

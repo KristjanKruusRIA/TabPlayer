@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,styleSection,moveCursor} from './workstation-commands.mjs';
 import {readActiveDocument} from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -73,7 +73,8 @@ try{
   };
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const details=name=>page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});
+  // Engraving, typography, saved styles, the design sections and page layout are in the Score style dialog (Song tab); the dialog closes when a button in it is used, so each section is reopened before its next control.
+  const details=name=>styleSection(page,name);
   const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const waitStatus=async predicate=>{const deadline=Date.now()+15000;while(Date.now()<deadline){const value=await status();if(predicate(value))return value;await sleep(25);}throw new Error(`Audio status timeout: ${JSON.stringify(await status())}`);};

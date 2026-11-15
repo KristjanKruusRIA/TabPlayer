@@ -6,7 +6,7 @@ import {createServer} from 'node:net';
 import {basename,isAbsolute,resolve} from 'node:path';
 import {chromium} from 'playwright';
 import {readDocumentRecord} from './document-context.mjs';
-import {clickWorkspaceCommand,clickWorkstationButton,revealInspector,waitForWorkspaceIdle} from './workstation-commands.mjs';
+import {clickWorkspaceCommand,clickWorkstationButton,revealInspector,waitForWorkspaceIdle,writeNote} from './workstation-commands.mjs';
 
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -65,8 +65,7 @@ export async function runProductionRecoveryAcceptance({executable,nativeDirector
     owned();await idle();const live=await snapshot();assert.deepEqual(live,before,'Cancel preserves every tab, exact revision, live history and active owner');assert.equal(await page.getByRole('tab').count(),2);const disk=checkpoint();assert.equal(disk.manifest.lifecycle,'running');assert.equal(disk.manifestSha256,backup.manifestSha256,'Cancelled close cannot acknowledge a Clean/new-epoch replacement');assert.deepEqual(disk.manifest,backup.manifest);recordStep(label,{identity,live,checkpoint:disk});
   }
   async function editPair(first,second){
-    await revealInspector(page);await button('Edit');await page.getByRole('combobox',{name:'String',exact:true}).selectOption('6');
-    for(const fret of [first,second]){await page.getByLabel('Fret',{exact:true}).fill(String(fret));await button('Set note');}
+    for(const fret of [first,second]){await writeNote(page,6,fret);await idle();}
     await button('Undo');const live=await snapshot(),active=live.documents.find(document=>document.documentId===live.active.documentId);assert.deepEqual(active.snapshot.project.edits,[command(first)]);assert.deepEqual(active.snapshot.redoEdit,command(second));assert.equal(active.snapshot.dirty,true);return active;
   }
   try{

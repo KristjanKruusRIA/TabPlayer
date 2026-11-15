@@ -120,7 +120,8 @@ async function pickFret(){
     const o=list[0];return o?{text:o.t,x:o.r.x+o.r.width/2,y:o.r.y+o.r.height/2}:null;
   });
 }
-const inspectorFields=async()=>{const v=async l=>{const c=page.getByLabel(l,{exact:true});return await c.count()?await c.first().inputValue().catch(()=>null):null;};return {measure:await v('Measure'),beat:await v('Beat'),fret:await v('Fret'),ann:await page.locator('.score-edit-announcement').first().innerText().catch(()=>null)};};
+// The cursor reading is in the status bar now (the inspector's Measure, Beat and Fret fields are gone): 'Bar 3 · Beat 2 · String 6 · Voice 1' and 'Fret 5 · A3'.
+const inspectorFields=async()=>{const position=await page.locator('.statusbar-position').first().innerText().catch(()=>''),value=await page.getByTestId('status-value').first().innerText().catch(()=>''),at=/Bar (\d+) · Beat (\d+)/.exec(position),fret=/^Fret (\d+)/.exec(value);return {measure:at?at[1]:null,beat:at?at[2]:null,fret:fret?fret[1]:null,ann:await page.locator('.score-edit-announcement').first().innerText().catch(()=>null)};};
 
 async function clickTest(area,dense){
   const target=await pickFret();

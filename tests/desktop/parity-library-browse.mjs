@@ -68,7 +68,7 @@ export async function runLibraryBrowseAcceptance({buildPath}={}){
     assert.equal(start.documents.length,1);assert.equal(start.documents[0].documentId,openId);
     assert.equal(clean.snapshot.project.base.title,first.title);assert.ok(samePath(clean.snapshot.path,state.sourcePath));assert.equal(clean.snapshot.dirty,false);
     // Leave it with unsaved edits and undo history: opening a result must keep all of that.
-    await page.getByRole('combobox',{name:/^String/}).selectOption('5');await page.getByLabel('Fret',{exact:true}).fill('3');await button('Set note');
+    await ui.writeNote(page,5,3);await idle();
     const openBefore=await poll(()=>record(openId),value=>value.snapshot.dirty,'Unsaved edit');
     assert.equal(openBefore.snapshot.project.edits.length,clean.snapshot.project.edits.length+1);assert.equal(openBefore.snapshot.canUndo,true);
     step('A dirty score with undo history is open before browsing',{openId,title:first.title});

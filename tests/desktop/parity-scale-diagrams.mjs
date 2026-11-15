@@ -68,7 +68,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     // The app reports busy for as long as the modal is open, so nothing inside it may wait for the shell to go idle.
     const browse=async()=>{owned();await ui.clickWorkstationButton(page,'Browse scales',{waitForIdle:false});await scales().waitFor();};
     const inModal=async name=>{const before=await record();await scales().getByRole('button',{name,exact:true}).click();await poll(record,current=>current.revision!==before.revision,name);};
-    const select=async(measure,beat)=>{await ui.revealInspector(page);await page.getByLabel('Measure',{exact:true}).fill(String(measure));await page.getByLabel('Beat',{exact:true}).fill(String(beat));await idle();};
+    const select=async(measure,beat)=>{await ui.moveCursor(page,{bar:measure,beat});await idle();};
     const scales=()=>page.getByRole('dialog',{name:'Scale browser',exact:true});
     const diagramSection=()=>scales().getByRole('region',{name:'Scale diagram',exact:true});
     const inScore=()=>page.locator('.score-scale-diagram');

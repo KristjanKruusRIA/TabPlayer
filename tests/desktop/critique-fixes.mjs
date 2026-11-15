@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,closeWelcomeLibrary,hidePractice,revealPlaybackControls,hidePlaybackControls} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,closeWelcomeLibrary,hidePractice,revealPlaybackControls,hidePlaybackControls,styleSection,closeScoreStyle} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
@@ -58,9 +58,11 @@ try{
   assert.equal(await tuning.getAttribute('aria-invalid'),'true');assert.ok(await tuning.evaluate(element=>element===document.activeElement));
   const tuningError=page.getByRole('alert').filter({hasText:'WHAT'});await tuningError.waitFor();const errorBox=await tuningError.boundingBox();assert.ok(errorBox&&errorBox.y>=0&&errorBox.y+errorBox.height<=900,'Tuning error must be visible');
   await snapshot('tuning-error-1280');await tuning.fill('E4 B3 G3 D3 A2 E2');await tuningDialog.getByRole('button',{name:'Cancel',exact:true}).click();await tuningDialog.waitFor({state:'hidden'});
-  await click('Practice');await summary('Practice settings');await page.getByLabel('Relative speed (%)').fill('123');await click('Presentation');await summary('Page layout');
-  await page.getByLabel('Width (mm)',{exact:true}).fill('250');await snapshot('presentation-1280');await click('Edit');await click('Practice');assert.equal(await page.getByLabel('Relative speed (%)').inputValue(),'123');
-  await click('Presentation');assert.equal(await page.getByLabel('Width (mm)',{exact:true}).inputValue(),'250');await click('Edit');
+  await click('Practice');await summary('Practice settings');await page.getByLabel('Relative speed (%)').fill('123');
+  // Page layout is in the Score style dialog (Song tab, Page and view). The practice setting is kept when the dialog opens and closes; a half-typed width is not (the dialog's panels are drawn only while it is open), so it shows the saved width again.
+  await hidePractice(page);await styleSection(page,'Page layout');const savedWidth=await page.getByLabel('Width (mm)',{exact:true}).inputValue();
+  await page.getByLabel('Width (mm)',{exact:true}).fill('250');await snapshot('presentation-1280');await closeScoreStyle(page);await click('Practice');assert.equal(await page.getByLabel('Relative speed (%)').inputValue(),'123');
+  await styleSection(page,'Page layout');assert.equal(await page.getByLabel('Width (mm)',{exact:true}).inputValue(),savedWidth);await closeScoreStyle(page);
   await clickWorkstationButton(page,'Edit chord diagram',{waitForIdle:false});const harmony=page.getByRole('dialog',{name:'Harmony chord',exact:true});await harmony.waitFor();
   await harmony.getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('.harmony-body fieldset')?.getAttribute('aria-disabled')!=='true');
   const nameInput=await harmony.getByLabel('Chord name',{exact:true}).elementHandle();await page.waitForFunction(input=>input===document.activeElement,nameInput);

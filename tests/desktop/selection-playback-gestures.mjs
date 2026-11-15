@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls,closeWelcomeLibrary} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls,closeWelcomeLibrary,moveCursor,setBeatText,openProperties,closeProperties} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -21,8 +21,10 @@ async function waitStatus(predicate){const deadline=Date.now()+15000;let value;d
 async function disclosure(label){if(label==='Selected playback')await revealPlaybackControls(page);const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();await published();}
 async function dismissPlayback(){const summary=page.locator('.transport-more>summary');if(await summary.evaluate(node=>node.parentElement.open)){await summary.press('Escape');await published();}}
 async function center(locator){await dismissPlayback();await locator.scrollIntoViewIfNeeded();await published();const box=await locator.boundingBox();assert.ok(box&&box.width>0&&box.height>0,'Actual rendered gesture target must have geometry');return {x:box.x+box.width/2,y:box.y+box.height/2};}
-async function location(beat){await page.getByLabel('Editing location',{exact:true}).filter({hasText:`Selection guitar · Measure 1 · Beat ${beat}`}).waitFor();await published();}
-async function count(notes,beats){await page.locator('.inspector').getByText(`${notes} ${notes===1?'note':'notes'} · ${beats} ${beats===1?'beat':'beats'}`,{exact:true}).waitFor();await published();}
+// The cursor's track and place are read from the status bar (the Selection tab's Editing location card is gone).
+async function location(beat){await page.locator('.statusbar-track').filter({hasText:'Selection guitar'}).waitFor();await page.locator('.statusbar-position').filter({hasText:`Bar 1 · Beat ${beat}`}).waitFor();await published();}
+// The selection summary is in Properties > Selection.
+async function count(notes,beats){const dialog=await openProperties(page,'selection');await dialog.getByText(`${notes} ${notes===1?'note':'notes'} · ${beats} ${beats===1?'beat':'beats'}`,{exact:true}).waitFor();await closeProperties(page);await published();}
 const frets=value=>page.locator('[aria-label="Music notation"] svg text').filter({hasText:new RegExp(`^${value}$`)});
 const occurrence=async number=>{await disclosure('Selected playback');return page.getByRole('combobox',{name:'Selection occurrence',exact:true}).selectOption({label:`Measure 1, occurrence ${number} → measure 1, occurrence ${number}`});};
 async function unchanged(before,native){assert.deepEqual(await snapshot(),before,'Gesture/transport must preserve complete project history and redo');if(native)assert.deepEqual(transport(await status()),transport(native),'Selecting alone must preserve native clock, range, loop, generation and run intent');}
@@ -39,7 +41,7 @@ try{
   await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await published();
   // Make a real redo entry, then restore source music before acceptance.
-  const beforeEdit=await status();await button('Edit');await disclosure('Beat text');await page.getByLabel('Beat text',{exact:true}).fill('Original gesture redo sentinel');await button('Apply beat text');
+  const beforeEdit=await status();await setBeatText(page,'Original gesture redo sentinel');
   const edited=await waitStatus(value=>value.ready&&value.generation>beforeEdit.generation);await button('Undo');await waitStatus(value=>value.ready&&value.generation>edited.generation);
   const baseline=await snapshot();assert.equal(baseline.canRedo,true);assert.equal(baseline.redoEdit.type,'setBeatText');assert.deepEqual(baseline.project.edits,[]);assert.equal(baseline.project.base.sha256,fixture.fixtures.main.sha256);
   const stationary=await status();assert.equal(stationary.playing,false);assert.equal(stationary.tick,0);
@@ -56,7 +58,7 @@ try{
 
   // Establish beat3's actual caret geometry in case its tied fret is omitted.
   await dismissPlayback();
-  await page.getByLabel('Beat',{exact:true}).fill('3');await page.getByRole('combobox',{name:'String',exact:true}).selectOption('6');await location(3);
+  await moveCursor(page,{beat:3,string:6});await location(3);
   await page.getByRole('img',{name:'Edit target',exact:true}).scrollIntoViewIfNeeded();await published();
   // Keep both endpoints in the current score viewport, then measure anew.
   await center(frets(5).first());await center(page.getByRole('img',{name:'Edit target',exact:true}));

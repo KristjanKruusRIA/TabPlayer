@@ -3,7 +3,7 @@
 // then Cut, Undo, Paste, and a restart replay of the saved project.
 // The keys only make ranges whose END is inside a note, so this covers that case. A start edge inside a note, a middle cut, tuplets, ties,
 // grace notes, several voices and the refusals are covered by unit tests only (src/editor/cut-sustained.test.ts).
-import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,setFret,runCommand} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -24,9 +24,9 @@ try{
   await button('New');
   const workspace=page.getByRole('region',{name:'Score workspace'});await workspace.focus();
   // Bar 1 = [half note, quarter, quarter]: a note on beat 1, beat 2 deleted, beat 1 made a half note.
-  await page.getByLabel('Fret',{exact:true}).fill('5');await button('Set note');
+  await setFret(page,5);await idle();
   await workspace.focus();await page.keyboard.press('ArrowRight');await page.keyboard.press('Shift+Delete');await idle();await page.keyboard.press('ArrowLeft');
-  await page.locator('label').filter({hasText:/^Duration/}).locator('select').selectOption('2');await button('Apply rhythm');
+  await runCommand(page,'duration 2');await idle();
   const base=(await snapshot()).project.edits.length;
   // Range over beats 1 and 2 (Shift+Right), then the end back by the entry duration twice: it now ends 960 ticks into the half note, between two beats' worth of its length.
   await workspace.focus();await page.keyboard.press('Shift+ArrowRight');

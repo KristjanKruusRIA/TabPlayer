@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask,revealInspectorTab} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,openSoundDialog,closeSoundDialog,propertiesSection} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { mkdir,readdir,readFile,writeFile } from 'node:fs/promises';
@@ -54,8 +54,9 @@ try{
     await new Promise(r=>setTimeout(r,300));return leftChannel(await readFile(join(folder,file)));
   };
   const dry=await exportWav('dry'),pitch=strongest(dry);
-  await revealLeftTask(page,'Sound');const panel=page.getByRole('region',{name:'Track sound'});
+  // The pedals are in the Sound and pedalboard dialog (Track tab); it is modal and closes before anything outside it is used, so each use opens it again.
   const block=async(name,label,enabled,values={})=>{
+    const panel=await openSoundDialog(page);
     const details=panel.locator('details.sound-block').filter({has:page.locator('.sound-block-name',{hasText:new RegExp(`^${name}$`)})});
     if(!await details.evaluate(node=>node.open))await details.locator('summary').click();
     for(const [field,value] of Object.entries(values)){const input=panel.getByLabel(`${label} ${field}`,{exact:true});await input.fill(String(value));await input.blur();await waitForWorkspaceIdle(page);}
@@ -72,11 +73,10 @@ try{
   const down=await exportWav('octave-down');
   await block('Octaver','octaver',false);
   // Transpose the score up a fourth: the shift still adds an octave, at the same level, from the new pitch.
-  const workspace=page.getByRole('region',{name:'Score workspace'});await workspace.focus();await page.keyboard.press('Control+a');
-  await revealInspectorTab(page,'Selection');await page.locator('summary').filter({hasText:/^Music selection$/}).first().evaluate(node=>{node.parentElement.open=true;});
-  for(let step=0;step<5;step++)await button('Up semitone');
+  await closeSoundDialog(page);const workspace=page.getByRole('region',{name:'Score workspace'});await workspace.focus();await page.keyboard.press('Control+a');
+  for(let step=0;step<5;step++){await propertiesSection(page,'Music selection');await button('Up semitone');}
   const dryT=await exportWav('dry-transposed'),pitchT=strongest(dryT);
-  await revealLeftTask(page,'Sound');await block('Pitch shift','pitch',true);
+  await block('Pitch shift','pitch',true);
   const upT=await exportWav('up-octave-transposed');
   const aboveT=render=>power(render,pitchT*2)/power(render,pitchT);
   const results={pitch,pitchT,dryAbove:above(dry),upAbove:above(up),dryBelow:below(dry),downBelow:below(down),dryAboveT:aboveT(dryT),upAboveT:aboveT(upT),levelDb:20*Math.log10(level(up)/level(dry)),levelDbT:20*Math.log10(level(upT)/level(dryT))};
@@ -90,7 +90,7 @@ try{
   const final=sounds.at(-1).sound.effects;
   assert.deepEqual([final.pitch.enabled,final.pitch.semitones,final.octaver.octaveDown,final.octaver.direct,final.octaver.enabled],[true,12,1,0,false]);
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001&&!s.error);await button('Stop');
-  await button('Undo');assert.equal(await panel.getByLabel('Enable pitch',{exact:true}).isChecked(),false);
+  await button('Undo');{const panel=await openSoundDialog(page);assert.equal(await panel.getByLabel('Enable pitch',{exact:true}).isChecked(),false);await closeSoundDialog(page);}
   assert.deepEqual(errors,[]);
   await writeFile(join(directory,'pitch-effects-result.json'),JSON.stringify(results,null,2));
   console.log('Pitch effects passed:',JSON.stringify(results));

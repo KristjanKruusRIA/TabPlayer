@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,propertiesSection,moveCursor} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -30,7 +30,8 @@ try{
   const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const panel=()=>page.locator('summary').filter({hasText:'Music selection'}).first().evaluate(node=>{node.parentElement.open=true;});
+  // Music selection (select bar, tie, untie) is in the Properties dialog's Selection tab; moving the cursor or using another control closes it, so it is opened again for each click.
+  const panel=()=>propertiesSection(page,'Music selection');
   const click=async(name,check=idle)=>{await panel();await page.getByRole('button',{name,exact:true}).click();await check();};
   const exportGp=async()=>{await button('Export GP');return load(readFileSync(gp));};
   const edits=async()=>(await readActiveDocument(page)).project.edits;
@@ -38,7 +39,7 @@ try{
   await click('Select bar');
   await click('Tie selected notes',async()=>{await waitForWorkspaceIdle(page);assert.match((await page.getByRole('alert').allTextContents()).join(' '),/to tie from/);});
   assert.equal((await edits()).length,0,'A refused tie records nothing.');
-  await page.getByLabel('Measure',{exact:true}).fill('2');await click('Select bar',()=>waitForWorkspaceIdle(page));// The refusal stays on screen until the next successful edit replaces it.
+  await moveCursor(page,{bar:2});await click('Select bar',()=>waitForWorkspaceIdle(page));// The refusal stays on screen until the next successful edit replaces it.
   await click('Tie selected notes');
   assert.deepEqual((await edits()).map(edit=>[edit.type,edit.tied,edit.selection.firstBar,edit.selection.lastBar]),[['setSelectionTies',true,1,1]]);
   const joined=await exportGp();

@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,propertiesSection,moveCursor} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { mkdir,readdir,readFile } from 'node:fs/promises';
@@ -28,9 +28,9 @@ try{
   const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});await waitForWorkspaceIdle(page);
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   await button('Open');await button('Track 4: Keys');
-  await page.locator('summary').filter({hasText:'Beat notation'}).first().evaluate(node=>{node.parentElement.open=true;});
+  // The sustain pedal is in Properties > Beat (Beat notation); the cursor is moved in the score.
   const pedal=page.getByRole('combobox',{name:/^Sustain pedal/});
-  const mark=async(beat,value)=>{await page.getByLabel('Measure',{exact:true}).fill('2');await page.getByLabel('Beat',{exact:true}).fill(String(beat));await waitForWorkspaceIdle(page);await pedal.selectOption(value);await button('Apply sustain pedal');};
+  const mark=async(beat,value)=>{await moveCursor(page,{bar:2,beat});await propertiesSection(page,'Beat notation');await pedal.selectOption(value);await button('Apply sustain pedal');};
   await mark(1,'down');await mark(3,'up');
   const edits=(await readActiveDocument(page)).project.edits.slice(-2);
   assert.deepEqual(edits.map(edit=>[edit.type,edit.target.track,edit.target.bar,edit.target.beat,edit.pedal]),[['setSustainPedal',3,1,0,'down'],['setSustainPedal',3,1,2,'up']]);

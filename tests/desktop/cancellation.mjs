@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkspaceCommand,closeWelcomeLibrary,revealInspectorTab} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkspaceCommand,closeWelcomeLibrary,setFret} from './workstation-commands.mjs';
 import { readActiveDocument,readDocumentRecord } from './document-context.mjs';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -19,8 +19,8 @@ function completion(promise,label) {
 }
 try {
   browser=await connect();const page=browser.contexts()[0].pages()[0];
-  await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);await revealInspectorTab(page,'Selection');
-  await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();
+  await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);
+  await setFret(page,7);
   await waitForWorkspaceIdle(page);
   const workspace=await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'));
   const before=await readActiveDocument(page),origin=await readDocumentRecord(page,workspace.active.documentId);

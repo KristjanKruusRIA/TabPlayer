@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,revealInspectorTab,revealDock,revealPlaybackControls,setPlaybackSpeed} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,writeNote,moveCursor,setFret,revealDock,revealPlaybackControls,setPlaybackSpeed} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,mkdirSync,readFileSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
@@ -35,8 +35,8 @@ try {
   const waitStatus=async(predicate,timeout=10000)=>{const deadline=Date.now()+timeout;let last;while(Date.now()<deadline){last=await status();if(predicate(last))return last;await page.waitForTimeout(25);}throw new Error(`Native status timed out: ${JSON.stringify(last)}`);};
   const ready=async()=>{await waitStatus(s=>s.ready&&!s.error);await page.waitForFunction(()=>{const play=Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Play');return play&&!play.matches(':disabled');});};
   const button=async(name)=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  await revealInspectorTab(page,'Selection');
-  await page.getByRole('combobox',{name:/^String/}).selectOption('6');await page.getByLabel('Fret',{exact:true}).fill('5');await button('Set note');await ready();
+  // The Selection tab's string, Fret and Set note are the cursor string and the palette's 'fret N'.
+  await writeNote(page,6,5);await idle();await ready();
   await button('Show instrument');const instrument=page.getByRole('region',{name:'Instrument view'});await instrument.getByRole('group',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('g[data-note-id]').count(),0);
   const helper=resolve('src-tauri/target/debug/examples/capture_loopback.exe');if(!existsSync(helper))throw new Error('Build the capture_loopback Cargo example before this native smoke.');
   const capturedPath=join(directory,'native-app-loopback.wav');const readyDevice=await status();const capture=spawn(helper,[capturedPath,readyDevice.deviceId],{windowsHide:true});let captureLog='';
@@ -64,16 +64,14 @@ try {
   await revealPlaybackControls(page);await page.getByLabel('Seek measure',{exact:true}).fill('4');await button('Seek');await waitStatus(s=>Math.abs(s.tick-11520)<.01);
   await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await page.waitForFunction(()=>document.querySelectorAll('.instrument-view g[data-note-id]').length===0);
   await button('Add track');await ready();await button('Track 2: Bass');await instrument.getByRole('group',{name:'Bass fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),4);
-  await revealInspectorTab(page,'Selection');
-  await page.getByRole('combobox',{name:/^String/}).selectOption('4');await page.getByLabel('Fret',{exact:true}).fill('2');await button('Set note');await ready();await button('Play');await waitStatus(s=>s.playing);await instrument.locator('g[data-note-id][data-string="4"][data-fret="2"][data-key="45"]').waitFor({state:'visible'});
+  await writeNote(page,4,2);await idle();await ready();await button('Play');await waitStatus(s=>s.playing);await instrument.locator('g[data-note-id][data-string="4"][data-fret="2"][data-key="45"]').waitFor({state:'visible'});
   await button('Track 1: Guitar');await instrument.getByRole('group',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),6);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await button('Track 2: Bass');await button('Remove track');await ready();await instrument.getByRole('group',{name:'Guitar fretboard'}).waitFor();
-  await revealInspectorTab(page,'Selection');
-  await page.getByRole('combobox',{name:/^String/}).selectOption('6');await button('Hide instrument');assert.equal(await instrument.count(),0);
+  await moveCursor(page,{string:6});await button('Hide instrument');assert.equal(await instrument.count(),0);
   await setPlaybackSpeed(page,50);await button('Loop');await button('Play');
   await waitStatus(s=>s.speed===.5&&s.tick>3600);
   await waitStatus(s=>s.playing&&s.tick<960);await button('Stop');await button('Clear loop');
   await page.getByRole('checkbox',{name:'Metronome',exact:true}).first().click();await waitStatus(s=>s.metronome);
-  await button('Play');await waitStatus(s=>s.playing);const beforeEdit=await status();await page.getByLabel('Fret',{exact:true}).fill('7');await button('Set note');await waitStatus(s=>s.generation>beforeEdit.generation);await ready();assert.equal((await status()).playing,false);assert.equal((await status()).speed,.5);assert.equal((await status()).metronome,true);
+  await button('Play');await waitStatus(s=>s.playing);const beforeEdit=await status();await setFret(page,7);await idle();await waitStatus(s=>s.generation>beforeEdit.generation);await ready();assert.equal((await status()).playing,false);assert.equal((await status()).speed,.5);assert.equal((await status()).metronome,true);
   for(const action of ['Undo','Redo']){await button(action);await ready();assert.equal((await status()).speed,.5);assert.equal((await status()).metronome,true);}
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);
   await button('Import backing');await waitStatus(s=>Math.abs(s.backingDurationSeconds-2)<.001);

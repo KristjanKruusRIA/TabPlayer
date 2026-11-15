@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,moveCursor,propertiesSection} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
@@ -34,10 +34,8 @@ async function open(path,label){
   if(!path.endsWith('.tabplayer')){assert.equal(state.project.base.sha256,hash(source));assert.equal(state.project.base.bytesBase64,source.toString('base64'));assert.deepEqual(state.project.edits,[]);}
 }
 async function gestures(measure){
-  await button('Edit');await page.getByLabel('Measure',{exact:true}).fill(String(measure));
-  const summary=page.getByRole('region',{name:'Edit tools'}).locator('summary').filter({hasText:/^Bar gestures$/});
-  // Disclosure is navigated inside the approved Edit organization.
-  if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();
+  // Bar gestures are in Properties > Bar; the cursor is moved to the measure first.
+  await moveCursor(page,{bar:measure});await propertiesSection(page,/^Bar gestures$/);
   const checkbox=page.getByLabel('Common / cut time',{exact:true});await checkbox.waitFor({state:'visible'});return checkbox;
 }
 async function flags(expected){
@@ -57,7 +55,7 @@ async function apply(measure,enabled){
   assert.deepEqual(after.project.base,before.project.base);return after;
 }
 async function capture(label){
-  await gestures(1);await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});
+  await gestures(1);await page.locator('.workstation-inspector').evaluate(node=>{node.scrollTop=0;});
   await page.evaluate(async()=>{await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
   const path=resolve(directory,`${prefix}-${label}.png`);await page.screenshot({path});result.screenshots.push(path);
   // Retain vector output as supplemental rendering evidence, not glyph proof.

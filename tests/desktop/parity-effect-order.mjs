@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,openSoundDialog,closeSoundDialog} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { mkdir,readdir,readFile,writeFile } from 'node:fs/promises';
@@ -55,7 +55,8 @@ try{
     assert.ok(file,`${name}.wav was written`);await dialog.waitFor({state:'detached',timeout:30000}).catch(()=>{});await waitForWorkspaceIdle(page);
     await new Promise(r=>setTimeout(r,300));return channels(await readFile(join(folder,file)));
   };
-  await revealLeftTask(page,'Sound');const panel=page.getByRole('region',{name:'Track sound'});
+  // The pedals live in the Sound and pedalboard dialog (Track tab); it is modal, so it is closed before exporting or playing and opened again to read or move the chain.
+  let panel=await openSoundDialog(page);
   const open=async name=>{const details=panel.locator('details.sound-block').filter({has:page.locator('.sound-block-name',{hasText:new RegExp(`^${name}$`)})});if(!await details.evaluate(node=>node.open))await details.locator('summary').click();};
   const settle=()=>waitForWorkspaceIdle(page);
   const order=()=>panel.locator('.sound-block-name').allTextContents();
@@ -68,16 +69,17 @@ try{
   await panel.getByLabel('delay Feedback',{exact:true}).fill('0.5');await settle();
   await panel.getByLabel('delay Mix',{exact:true}).fill('1');await settle();
   const recorded=async()=>(await readActiveDocument(page)).project.edits.filter(edit=>edit.type==='setTrackSound').at(-1).sound.effects;
-  const chosen=await recorded();
+  const chosen=await recorded();await closeSoundDialog(page);
   assert.deepEqual({drive:[chosen.drive.enabled,chosen.drive.model,chosen.drive.drive],delay:[chosen.delay.enabled,chosen.delay.quarterNotes,chosen.delay.feedback,chosen.delay.mix]},{drive:[true,'distortion',0.8],delay:[true,1.5,0.5,1]});
   /** Each of three repeats' level against the one before; the note starts at the beginning of the export. */
   const ratios=render=>{const levels=[1,2,3].map(k=>rms(render,0.75*k+0.01,0.75*k+0.25));return levels.slice(1).map((level,k)=>level/levels[k]);};
   const before=await exportWav('drive-then-delay'),again=await exportWav('drive-then-delay-again');
   assert.deepEqual([...before.samples[0]],[...again.samples[0]],'the same order exports the same samples');
   // Drive sits seventh in the default chain; ten moves take it past every block up to the delay.
+  panel=await openSoundDialog(page);await open('Drive');
   for(let move=0;move<10;move++){await panel.getByRole('button',{name:'Move Drive later',exact:true}).click();await settle();}
   assert.deepEqual((await order()).slice(14),['Tremolo','Delay','Drive','Reverb']);
-  const after=await exportWav('delay-then-drive');
+  await closeSoundDialog(page);const after=await exportWav('delay-then-drive');
   const results={before:ratios(before),after:ratios(after),firstRepeat:{before:rms(before,0.76,1.0),after:rms(after,0.76,1.0)}};
   const text=JSON.stringify(results);
   for(const ratio of results.before)assert.ok(ratio>0.3&&ratio<0.7,`the drive before the delay leaves each repeat about half the last: ${text}`);
@@ -86,7 +88,7 @@ try{
   const effects=(await readActiveDocument(page)).project.edits.filter(edit=>edit.type==='setTrackSound').at(-1).sound.effects;
   assert.deepEqual(effects.order,['microphone','gate','compressor','wah','octaver','pitch','amp','cabinet','eq','graphicEq','vibrato','phaser','flanger','chorus','tremolo','delay','drive','reverb']);
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001&&!s.error);await button('Stop');
-  await button('Undo');assert.deepEqual((await order()).slice(14),['Tremolo','Drive','Delay','Reverb']);
+  await button('Undo');panel=await openSoundDialog(page);assert.deepEqual((await order()).slice(14),['Tremolo','Drive','Delay','Reverb']);await closeSoundDialog(page);
   assert.deepEqual(errors,[]);
   await writeFile(join(directory,'effect-order-result.json'),JSON.stringify(results,null,2));
   console.log('Effect order passed:',text);

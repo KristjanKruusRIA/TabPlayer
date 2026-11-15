@@ -67,7 +67,8 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
   // What the score draws, by family and size: tile SVGs are virtualised, so their bytes vary with scrolling.
   const rendered=async()=>{const {families,largest,digitSize,annotationSize,chordSize}=await drawn();return JSON.stringify({families:[...families].sort(),largest,digitSize,annotationSize,chordSize});};
   const shot=async name=>{const path=resolve(results,`${String(result.screenshots.length+1).padStart(2,'0')}-${name}.png`);await page.screenshot({path});result.screenshots.push(path);};
-  const details=async name=>{await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
+  // Engraving, typography, saved styles, the design sections and page layout are in the Score style dialog (Song tab); the dialog closes when a button in it is used, so each section is reopened before its next control.
+  const details=async name=>{await ui.styleSection(page,name);};
   const choose=(name,value)=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)}).selectOption(value);
   const percent=async(label,value)=>{const field=page.getByLabel(label,{exact:true});await field.fill(String(value));await field.press('Enter');};
   const openPanels=async()=>{await button('Presentation');for(const name of ['Engraving','Typography','Notation style presets','Saved styles'])await details(name);};

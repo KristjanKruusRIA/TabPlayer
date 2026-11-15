@@ -49,7 +49,7 @@ export function StatusReadout({ score, target, string, noteIndex, selection, ind
   const tempo = opening && tempoUnitOf(opening) !== quarterUnit
     ? t('editor.context_tempo_unit', { bpm: shownBpm(displayedBpm(opening)), unit: t(tempoUnitKeys[tempoUnitOf(opening)]) })
     : `${score.tempo} BPM`;
-  const value = selection
+  const picked = selection
     ? selection.kind === 'range'
       ? rangeCutsBeat(score, selection.range)
         ? t('editor.range_extent', rangeExtent(score, selection.range))
@@ -57,13 +57,16 @@ export function StatusReadout({ score, target, string, noteIndex, selection, ind
       : selection.kind === 'bars'
         ? t('status.selection_bars', { first: selection.firstBar + 1, last: selection.lastBar + 1 })
         : t(selection.notes.length === 1 ? 'status.selection_notes_one' : 'status.selection_notes_other', { count: selection.notes.length })
-    : note
-      ? indexed
-        ? staff.isPercussion ? t('status.note_selected') : t('status.note_pitch', { pitch: formatPitch(note.realValue) })
-        : t('status.note_fret', { fret: note.fret, pitch: formatPitch(note.realValue) })
-      : beat?.isRest
-        ? t('status.rest', { duration: `${durationLabel(beat.duration)}${beat.dots ? '.'.repeat(beat.dots) : ''}` })
-        : t(indexed ? 'status.no_note' : 'status.no_note_string');
+    : null;
+  // The note under the cursor is always named; a selection is added to it, not shown instead.
+  const here = note
+    ? indexed
+      ? staff.isPercussion ? t('status.note_selected') : t('status.note_pitch', { pitch: formatPitch(note.realValue) })
+      : t('status.note_fret', { fret: note.fret, pitch: formatPitch(note.realValue) })
+    : beat?.isRest
+      ? t('status.rest', { duration: `${durationLabel(beat.duration)}${beat.dots ? '.'.repeat(beat.dots) : ''}` })
+      : t(indexed ? 'status.no_note' : 'status.no_note_string');
+  const value = picked ? `${here} · ${picked}` : here;
   const meta = [`${master.timeSignatureNumerator}/${master.timeSignatureDenominator}`, tempo, ...(beat?.chord?.name ? [t('editor.context_chord', { name: beat.chord.name })] : [])].join(' · ');
   const tags = techniques(note).map(key => t(key));
   return <>

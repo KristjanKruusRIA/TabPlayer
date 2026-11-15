@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls,hidePractice} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls,hidePractice,moveCursor,selectionText,styleSection,setFret} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
@@ -44,14 +44,15 @@ async function open(path){
   await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();await disclosure('Selected playback');await noAlerts();
 }
 async function cursor(measure,beat=1,voice=0){
-  await button('Edit');await page.getByLabel('Measure',{exact:true}).fill(String(measure));await page.getByRole('combobox',{name:'Voice',exact:true}).selectOption(String(voice));await page.getByLabel('Beat',{exact:true}).fill(String(beat));
-  await page.getByLabel('Editing location',{exact:true}).filter({hasText:`Measure ${measure} · Beat ${beat}`}).waitFor();
+  // The cursor is moved in the score (the palette's 'measure N', Ctrl+1..4 for the voice, the arrow keys) and read from the status bar.
+  await hidePlaybackControls(page);await moveCursor(page,{bar:measure,beat,voice:voice+1});
+  await page.locator('.statusbar-position').filter({hasText:`Bar ${measure} · Beat ${beat}`}).waitFor();
 }
 const workspaceRegion=()=>page.getByRole('region',{name:'Score workspace'});
 async function selectTiePassage(occurrence=1){
   await cursor(1,2);await workspaceRegion().focus();await page.keyboard.press('Shift+ArrowRight');
-  await page.getByLabel('Editing location',{exact:true}).filter({hasText:'Measure 1 · Beat 3'}).waitFor();
-  assert.match(await page.locator('.inspector').innerText(),/2 notes · 2 beats/);
+  await page.locator('.statusbar-position').filter({hasText:'Bar 1 · Beat 3'}).waitFor();
+  assert.match(await selectionText(page),/2 notes · 2 beats/);
   const choices=(await playbackCombo('Selection occurrence'));await choices.selectOption({label:`Measure 1, occurrence ${occurrence} → measure 1, occurrence ${occurrence}`});
 }
 async function assertRange(startTick,endTick){
@@ -145,14 +146,14 @@ try{
   // Score projection and actual pointer/keyboard selection stay canonical.
   await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await cursor(1,2);
   const fret=page.locator('[aria-label="Music notation"] svg text').filter({hasText:/^5$/}).first();await fret.scrollIntoViewIfNeeded();await fret.click();assert.match(await page.getByLabel('Editing location',{exact:true}).innerText(),/Selection guitar · Measure 1 · Beat 2/);
-  await page.keyboard.press('Shift+ArrowRight');assert.match(await page.locator('.inspector').innerText(),/2 notes · 2 beats/);await (await playbackCombo('Selection occurrence')).selectOption({label:'Measure 1, occurrence 2 → measure 1, occurrence 2'});await button('Play selection');await assertRange(8640,10560);await waitStatus(value=>value.practice.phase==='ended');await stopPlayback();result.checks.canonicalZoomAllTracksPointerAndShift=true;
+  await page.keyboard.press('Shift+ArrowRight');assert.match(await selectionText(page),/2 notes · 2 beats/);await (await playbackCombo('Selection occurrence')).selectOption({label:'Measure 1, occurrence 2 → measure 1, occurrence 2'});await button('Play selection');await assertRange(8640,10560);await waitStatus(value=>value.practice.phase==='ended');await stopPlayback();result.checks.canonicalZoomAllTracksPointerAndShift=true;
   for(const width of [960,1280,1600])await picture('selected-playback-layout',width);
 
   // A display-only authored history entry must preserve the active native span.
   await selectTiePassage();await button('Play selection');await assertRange(960,2880);await button('Pause');const displayBefore=await waitStatus(value=>!value.playing);
-  await button('Presentation');await disclosure('Engraving');await page.getByLabel('System spacing (%)',{exact:true}).fill('110');await button('Apply engraving');await noAlerts();assert.equal((await status()).generation,displayBefore.generation);assert.deepEqual((await status()).range,displayBefore.range);
+  await hidePlaybackControls(page);await styleSection(page,'Engraving');await page.getByLabel('System spacing (%)',{exact:true}).fill('110');await button('Apply engraving');await noAlerts();assert.equal((await status()).generation,displayBefore.generation);assert.deepEqual((await status()).range,displayBefore.range);
   await button('Undo');assert.deepEqual((await status()).range,displayBefore.range);assert.equal((await status()).generation,displayBefore.generation);await button('Redo');assert.deepEqual((await status()).range,displayBefore.range);await stopPlayback();result.checks.presentationHistoryKeepsRange=true;
-  const withPresentation=await snapshot();await cursor(2,1);await page.getByRole('combobox',{name:'String',exact:true}).selectOption('6');await page.getByLabel('Fret',{exact:true}).fill('9');await button('Set note');await waitStatus(value=>value.ready&&value.generation>displayBefore.generation&&value.range===null&&value.loop===null&&!value.playing);
+  const withPresentation=await snapshot();await cursor(2,1);await moveCursor(page,{string:6});await setFret(page,9);await idle();await waitStatus(value=>value.ready&&value.generation>displayBefore.generation&&value.range===null&&value.loop===null&&!value.playing);
   const afterEdit=await status();await button('Undo');await waitStatus(value=>value.ready&&value.generation>afterEdit.generation&&value.range===null);assert.deepEqual((await snapshot()).project,withPresentation.project);const afterUndo=await status();await button('Redo');await waitStatus(value=>value.ready&&value.generation>afterUndo.generation&&value.range===null);await button('Undo');await waitStatus(value=>value.ready&&!value.playing);result.checks.musicalHistoryInvalidatesGeneration=true;
 
   // Selection/transport alone must leave even the redo slot untouched.

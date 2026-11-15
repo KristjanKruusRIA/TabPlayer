@@ -79,13 +79,13 @@ export async function runNoteAuditionAcceptance({buildPath}={}){
     await page.screenshot({path:resolve(paths.results,'01-tuning-buttons.png')});result.screenshots.push('01-tuning-buttons.png');
 
     // E17: entering a note plays it; with the preference off it stays silent.
-    await ui.revealInspectorTab(page,'Selection');const fret=page.getByLabel('Fret',{exact:true}).first();
-    await fret.fill('5');await heard('set note',async()=>{await page.getByRole('button',{name:'Set note',exact:true}).click();await idle();});
+    // The palette's 'fret N' writes the note (the Fret field and Set note are gone).
+    await heard('set note',async()=>{await ui.setFret(page,5);await idle();});
     let current=await record();assert.equal(current.snapshot.project.edits.length,1);assert.equal(current.snapshot.project.edits[0].type,'setNote');
     await silent('undo',()=>button('Undo'));
     await page.locator('summary',{hasText:'View'}).first().click();const preference=page.getByRole('checkbox',{name:'Play notes while editing',exact:true});
     assert.equal(await preference.isChecked(),true,'Preference defaults on');await preference.uncheck();await page.keyboard.press('Escape');
-    await fret.fill('7');await silent('set note with preference off',async()=>{await page.getByRole('button',{name:'Set note',exact:true}).click();await idle();});
+    await silent('set note with preference off',async()=>{await ui.setFret(page,7);await idle();});
     current=await record();assert.equal(current.snapshot.project.edits.length,1);step('Note entry auditions follow the preference; undo is silent',{auditions:result.auditions});
     healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};if(page)try{await page.screenshot({path:resolve(paths.results,'failure.png')});}catch{}}

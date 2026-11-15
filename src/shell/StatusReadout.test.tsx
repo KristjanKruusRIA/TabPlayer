@@ -36,9 +36,9 @@ it('shows the techniques of the note, the chord, a rest and an empty string', ()
 
 it('shows a selected range and a note selection, and the indexed note position of a percussion staff', () => {
   const view = shown({ selection: { kind: 'bars', tracks: [0], firstBar: 0, lastBar: 1 } });
-  expect(screen.getByTestId('status-value')).toHaveTextContent('Selection · bars 1–2');
+  expect(screen.getByTestId('status-value')).toHaveTextContent('Fret 3 · G4 · Selection · bars 1–2');
   view.rerender(<StatusReadout score={music()} target={target} string={6} noteIndex={null} indexed={false} selection={{ kind: 'notes', notes: [{ target, noteIndex: 0 }] } as never} />);
-  expect(screen.getByTestId('status-value')).toHaveTextContent('Selection · 1 note');
+  expect(screen.getByTestId('status-value')).toHaveTextContent('Fret 3 · G4 · Selection · 1 note');
   const score = music();score.tracks[0].staves[0].isPercussion = true;
   view.rerender(<StatusReadout score={score} target={target} string={6} noteIndex={0} selection={null} indexed />);
   expect(screen.getByText('Bar 1 · Beat 1 · Note 1 · Voice 1')).toBeInTheDocument();expect(screen.getByTestId('status-value')).toHaveTextContent('Note selected');

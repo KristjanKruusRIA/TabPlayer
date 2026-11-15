@@ -62,7 +62,8 @@ export async function runStylesheetsAcceptance({buildPath}={}){
   const idle=async()=>{owned();await ui.waitForWorkspaceIdle(page);healthy();};
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
   const shot=async name=>{const path=resolve(results,`${String(result.screenshots.length+1).padStart(2,'0')}-${name}.png`);await page.screenshot({path});result.screenshots.push(path);};
-  const details=async name=>{await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
+  // Engraving, typography, saved styles, the design sections and page layout are in the Score style dialog (Song tab); the dialog closes when a button in it is used, so each section is reopened before its next control.
+  const details=async name=>{await ui.styleSection(page,name);};
   const choose=(name,value)=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)}).selectOption(value);
   const openStyles=async()=>{await button('Presentation');for(const name of ['Engraving','Stylesheet','Staff profiles','Saved styles'])await details(name);};
   // The whole score as exported, minus only the style: a style may change how the score is drawn, never what it holds.

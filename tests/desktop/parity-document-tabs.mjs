@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,moveCursor,cursorPosition,writeNote} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
 import {execFileSync,spawn} from 'node:child_process';
@@ -62,10 +62,11 @@ async function initialPair(){
 }
 const tab=documentId=>page.locator(`#document-tab-${documentId}`);
 async function activate(documentId){await tab(documentId).click();await idle();assert.equal((await workspace()).active.documentId,documentId);return stopped();}
-async function location(measure,beat=1){await button('Edit');await page.getByLabel('Measure',{exact:true}).fill(String(measure));await page.getByLabel('Beat',{exact:true}).fill(String(beat));await page.getByLabel('Editing location',{exact:true}).filter({hasText:`Measure ${measure} · Beat ${beat}`}).waitFor();}
+// The cursor is moved in the score (the palette's 'measure N' and the arrow keys) and read from the status bar; the Measure and Beat fields are gone.
+async function location(measure,beat=1){await moveCursor(page,{bar:measure,beat});await page.locator('.statusbar-position').filter({hasText:`Bar ${measure} · Beat ${beat}`}).waitFor();}
 async function view(name){const value=fixture.view[name];await location(value.measure,value.beat);await page.getByLabel('Zoom (%)',{exact:true}).fill(String(value.zoom));await page.getByRole('combobox',{name:/^Displayed tracks/}).selectOption(value.display);}
-async function assertView(name){const value=fixture.view[name];assert.equal(await page.getByLabel('Measure',{exact:true}).inputValue(),String(value.measure));assert.equal(await page.getByLabel('Beat',{exact:true}).inputValue(),String(value.beat));assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),String(value.zoom));assert.equal(await page.getByRole('combobox',{name:/^Displayed tracks/}).inputValue(),value.display);}
-async function note(fret){await page.getByRole('combobox',{name:/^String/}).selectOption('5');await page.getByLabel('Fret',{exact:true}).fill(String(fret));await button('Set note');}
+async function assertView(name){const value=fixture.view[name];{const at=await cursorPosition(page);assert.equal(at.bar,value.measure);assert.equal(at.beat,value.beat);}assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),String(value.zoom));assert.equal(await page.getByRole('combobox',{name:/^Displayed tracks/}).inputValue(),value.display);}
+async function note(fret){await writeNote(page,5,fret);await idle();}
 async function disclosure(label){const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();}
 function ownedProcess(pid,path){
   execFileSync('powershell.exe',['-NoProfile','-Command','$p=Get-Process -Id $env:TABS_OWNED_PID -ErrorAction Stop; if(-not [string]::Equals($p.Path,$env:TABS_OWNED_EXE,[StringComparison]::OrdinalIgnoreCase)){throw "Unexpected owned process"}'],{windowsHide:true,env:{...process.env,TABS_OWNED_PID:String(pid),TABS_OWNED_EXE:path}});

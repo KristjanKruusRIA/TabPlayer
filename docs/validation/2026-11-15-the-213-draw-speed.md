@@ -79,9 +79,11 @@ frame with the cursor over it, and its beats were not highlighted (alphaTab does
 at a line change on the generated score.
 
 What changed (`screen-playback.ts`, `ScoreView.tsx`):
-* `placeBarCursor`, the first thing alphaTab calls, now calls `ensurePainted(bar)` (supplied by the score view): the piece that holds the bar **and every piece within one viewport of it** are painted at once when
-  empty. The scroll that follows reveals what lies between the old view and the cursor (found by the probe: a first version that painted only the cursor's piece left the pieces in between blank for one frame
-  at a seek, in three runs on two owner scores); the next line is therefore already painted when the cursor gets there.
+* `placeBarCursor`, the first thing alphaTab calls, now calls `ensurePainted(bar)` (supplied by the score view): the piece that holds the bar is painted at once when empty, and **when that piece is not wholly in view
+  (so that a scroll will follow) every piece within one viewport of it** as well. The scroll that follows reveals what lies between the old view and the cursor (found by the probe: a first version that painted only the
+  cursor's piece left the pieces in between blank for one frame at a seek, in three runs on two owner scores); the next line is therefore already painted when the cursor gets there. alphaTab also updates the cursor after
+  every render, so an edit passes through here too: an earlier version painted the neighbours then as well, **inside the frame that shows the typed note**, which the re-review found; they are now painted only
+  when the cursor's piece is not wholly in view (the numbers are in "Result in one table", under "after the cursor change").
 * New nodes carry no highlight class: after a piece is painted again (scroll, resize, the background painting) the adapter puts the sounding beats' highlight on again (`rehighlight`, from the groups alphaTab
   highlighted last).
 * alphaTab empties a piece that left the view one frame late; a piece that is back in view by then would be shown empty (one blank frame, seen once by the probe at scroll position 808 on the largest score).
@@ -89,10 +91,18 @@ What changed (`screen-playback.ts`, `ScoreView.tsx`):
 * Systems that the score area gains by changing size (a taller area, a closed dock) are painted when it changes.
 
 **The probe** (`tests/desktop/playback-draw.mjs`, `draw-probes.mjs`, committed): every presented frame is sampled (a task posted from the animation-frame callback runs after the frame): for every piece in
-view whether it has a drawing, and the number of highlighted beats while the bar cursor is in the score area. It plays through at least three line changes (counted by the bar cursor's position), a **click-seek**
-while playing (on the number farthest from the cursor), a **seek back to the start** from a scrolled-away view, and a **loop across a line break** until it has wrapped twice, on a generated score and on each of the
-owner's five scores. On the owner's scores the same steps are also run on the complete render as a control. **Final build: 0 blank frames and 0 frames without a highlighted beat in all six scores**, each with 3 line
-changes, the seeks and 2 loop wraps (11 runs counting the controls, all with 0 and 0). The sampler sees the main thread's state after each frame; see "Scrolling" for what it cannot see.
+view whether it has a drawing, and the number of highlighted beats while the bar cursor is in the score area. Steps: playing through at least three line changes (counted by the bar cursor's position); a
+**click-seek** while playing and a **click on the first number** after scrolling back up (both of these only reach targets that are in view or one scroll away, because a click needs something to click on, and after
+the click alphaTab's follow-scroll brings the view back, so they do **not** test a jump into a system that is not painted: an earlier version of this note said they did); a **loop across a line break** until it has wrapped twice;
+and the steps that do test it: (a) **the transport's Last bar button while playing**, then **First bar** again, and (b) **a loop whose start is 8 bars from the end**, set from the transport's Loop start and Loop end
+fields while the view is scrolled to the top, then Play. Before each of those jumps the driver asks the app (development hook `__tabplayerPieceOfBar`) for the system that holds the target bar and **fails the run
+unless that system is empty and outside the score area** (on the generated score: last bar, first bar and loop start systems, each "empty, not in view", of 19 systems). The Home and End keys on the position slider
+did not seek in this driver (a synthetic key press on the range input changed nothing), which is why the bar buttons are used. On a generated score and on each of the owner's five scores; on the owner's scores the same
+steps are also run on the complete render as a control. **With the cursor painting and the background painting switched off** (`DRAW_FLAGS='{"paintOnCursor":false,"ahead":0}'`) the probe fails in all of 3 runs on the generated
+score (a fourth start was a launch collision), with blank frames in 4, 7 and 4 of about 2,800 frames and 10, 11 and 3 frames without a highlighted beat. Every run has a blank frame and a frame without highlight 9 to 15 frames after
+the mark of the Last bar jump, of the First bar jump (a run of 8 or 9 frames without highlight in two runs) and of the far loop's Play: so each of the three jumps is seen to fail. The
+other blank frames of those runs are at the click-seek and the loop. **Final build, switches on: 0 blank frames and 0 frames without a highlighted beat**
+on the generated score (3 line changes, 2 loop wraps, the three far jumps); owner scores: see the verification table. The sampler sees the main thread's state after each frame; see "Scrolling" for what it cannot see.
 
 The probe's own mistakes, so that they are not repeated: its first runs reported frames without a highlight on scores with bars of rests (nothing to highlight) and after the driver scrolled the view away while
 playing (alphaTab empties the system, and its highlight, when it is out of view). It now expects a highlight only while the bar cursor is in the score area, and when a frame is bad it records a snapshot of the page
@@ -227,6 +237,13 @@ is not observable from the page); the scroll painter alone gave 0 blank frames i
 asserts after every step that no piece in view was ever empty and that no more pieces were painted than are in view plus the margin (one viewport right after a draw, two after a scroll or the background
 painting), without waiting for alphaTab. This replaces the check that waited 500 ms and a quiet period (when alphaTab would have painted anyway).
 
+**Which of these assertions are independent evidence.** At the end of a draw the pieces in view are the ones the draw has just painted, so "no piece in view is empty" and "no more pieces painted than in view plus the margin"
+hold **by construction** for the draw entries (they would only fail if painting a piece threw, or left it empty); they guard against a regression in the draw's own bookkeeping, not against alphaTab. The counts at scroll and background
+steps are the same kind. The evidence that does not come from our own code is the frame sampler (the page's real presented frames, with the highlight) and the comparison of the incremental drawing with a complete render
+(`checkDraw`, bounds and drawing). A system whose painting leaves it empty (alphaTab swallows an error while painting an untrusted file's system) is remembered for the layout and not tried again by the background painter, the
+scroll listener or the cursor (unit test: the painter ends, and the renderer is called once for that system per layout); a system painted for an earlier layout (alphaTab starts painting by itself after a resize and the
+drawing can have the old width) is painted again when it is next needed (unit test "paints a system again that was painted for an earlier layout").
+
 ## alphaTab's placeholders when lazy loading is switched off
 
 Read in `alphaTab.core.mjs` (`BrowserUiFacade`): when a draw has fewer pieces than the one before and lazy loading is off, the surplus placeholders are removed without `unobserve` (the call is guarded by
@@ -283,7 +300,15 @@ Measurement scripts (not in the repository, they read the owner's scores): CPU p
   `uiFacade.getOffset`); the check, the driver and the scroll painter also read the facade's placeholder `div`s (the children of the canvas element, one per piece in layout order), which are
   internal: if alphaTab changes them, the check reports that it cannot compare and the scroll painter paints nothing (alphaTab's own lazy painting then applies, with its
   one-frame lag).
+* **macOS and Linux (WebKit) were not measured and differ in two ways that matter here**: WebKit has no `navigator.scheduling.isInputPending` (the background painting then does not yield to a waiting key
+  or click, one piece per task is all that limits it), and scrolling is done on a separate thread there too, so blank systems during a fast scroll are an unmeasured risk (the scroll painter runs on the main thread, after the position
+  is presented, as on Windows).
+* **Evicting a piece frees no memory**: alphaTab keeps the drawn nodes of every piece it painted (`renderedResult`), and emptying a placeholder only removes them from the page; the painted-pieces bound is about
+  what the page has to lay out and paint, not about the heap (the leak check above shows the heap flat). A piece that our code emptied is also no longer in alphaTab's own repaint list, so alphaTab's backstop (repainting what
+  its observer reports when it was emptied by itself) does not cover it: the scroll listener, the cursor and the mutation observer do.
+* After a resize alphaTab starts painting by itself; a system that is out of view could show a drawing of the old width for about a frame when it is scrolled into view. A piece painted for an earlier layout is now treated
+  as needing a paint when it is needed (above); not measured on real hardware beyond the unit test.
 * The blank-frame counts (scroll and playback) are the main thread's state after each frame, from a sampler in the page; the compositor can present a scroll position before the page's `scroll` event runs, which the
   sampler cannot see (the background painting of a viewport around the view is there for that case, and its benefit is not measured).
-* Equivalence is checked on the generated score and the owner's five; the playback probe on the same six, at one tempo each, with one click-seek, one seek to the start and one loop each.
+* Equivalence is checked on the generated score and the owner's five; the playback probe on the same six, at one tempo each, with one click-seek, one click back to the start, one Last bar jump, one First bar jump, one loop and one far loop each.
 * Lazy loading is alphaTab's default and is how it is used elsewhere; the scrolling measure above was made at 2 s of fast wheel scrolling on this machine, not on a slower one.

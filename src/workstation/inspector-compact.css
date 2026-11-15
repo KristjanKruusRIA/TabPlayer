@@ -1,0 +1,46 @@
+/* Compact inspector rows, in the manner of Guitar Pro's inspector: a small label, one control, no stacked forms. */
+.inspector-section :is(.song-information,.sound-summary,.interpretation-rows) { display:grid; gap:6px; min-width:0; margin:0; padding:0; border:0; }
+.inspector-section label { display:grid; grid-template-columns:minmax(64px,34%) minmax(0,1fr); align-items:center; gap:0 8px; margin:0; color:var(--ws-muted); font-size:12px; }
+.inspector-section label.check,.inspector-section .slot-power { display:flex; align-items:center; gap:6px; }
+.inspector-section :is(input:not([type=checkbox]):not([type=color]),select,textarea) { box-sizing:border-box; min-width:0; width:100%; min-height:28px; padding:3px 6px; color:var(--ws-text); background:var(--ws-input); border:1px solid var(--ws-border); border-radius:3px; font:inherit; }
+.inspector-section textarea { min-height:52px; resize:vertical; }
+.inspector-section button { min-height:28px; }
+.inspector-more { padding:2px 0; }
+.inspector-more>summary { min-height:28px; line-height:28px; color:var(--ws-muted); cursor:pointer; font-size:12px; }
+.inspector-more[open] { display:grid; gap:6px; }
+.inspector-more>label { grid-template-columns:1fr; }
+.stylesheet-row { display:grid; grid-template-columns:minmax(64px,34%) minmax(0,1fr); align-items:center; gap:0 8px; font-size:12px; color:var(--ws-muted); }
+.stylesheet-row button { display:flex; align-items:center; gap:6px; justify-content:flex-start; }
+.master-slots { display:grid; gap:4px; }
+.slot-rows { list-style:none; margin:0; padding:0; display:grid; gap:2px; }
+.slot-row { display:grid; grid-template-columns:minmax(0,1fr) 28px; align-items:center; gap:4px; min-height:28px; padding:0 0 0 4px; border-radius:3px; background:color-mix(in srgb,var(--ws-raised) 55%,transparent); }
+.slot-row[data-on=true] { box-shadow:inset 3px 0 var(--ws-accent); }
+.inspector-section .slot-power { display:flex; min-width:0; color:var(--ws-text); font-size:13px; }
+.slot-power input { width:16px; height:16px; margin:0; accent-color:var(--ws-accent); flex:0 0 auto; }
+.slot-power .slot-name { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.slot-power .slot-state { flex:0 0 auto; color:var(--ws-muted); font-size:11px; }
+.inspector-section .slot-edit { width:28px; padding:0; display:inline-grid; place-items:center; border-radius:3px; }
+.slot-more { justify-self:start; background:transparent; border:0; color:var(--ws-muted); text-decoration:underline; font-size:12px; padding:0 4px; }
+.sound-summary { display:grid; gap:6px; min-width:0; }
+.sound-choices { display:grid; gap:6px; min-width:0; margin:0; padding:0; border:0; }
+.effect-strip { list-style:none; margin:0; padding:0; display:flex; flex-wrap:wrap; gap:4px; }
+.effect-strip li { min-width:0; }
+.effect-chip { max-width:100%; min-height:24px; padding:2px 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border-radius:12px; font-size:12px; background:color-mix(in srgb,var(--ws-accent) 22%,var(--ws-raised)); color:var(--ws-text); border:1px solid color-mix(in srgb,var(--ws-accent) 55%,var(--ws-border)); }
+.effect-strip-empty { color:var(--ws-muted); font-size:12px; line-height:24px; }
+.inspector-section .sound-editor-open { display:flex; align-items:center; gap:6px; justify-content:flex-start; }
+.sound-dialog { width:min(820px,calc(100vw - 32px)); max-height:min(88vh,calc(100vh - 32px)); }
+.sound-dialog .tp-dialog-body { overflow:auto; }
+.track-info-row { display:grid; grid-template-columns:28px minmax(0,1fr) minmax(0,.55fr); align-items:center; gap:6px; }
+.inspector-section .track-info-row input:not([type=color]) { min-width:0; }
+.track-color-input { width:28px; height:28px; padding:0; border:1px solid var(--ws-border); border-radius:4px; background:transparent; cursor:pointer; }
+.track-notation { display:grid; gap:6px; }
+.notation-toggles { display:flex; align-items:center; gap:4px; }
+.notation-toggles-label { flex:1 1 auto; color:var(--ws-muted); font-size:12px; }
+.notation-toggle { display:inline-grid; place-items:center; width:32px; min-width:32px; height:28px; padding:0; border-radius:4px; border:1px solid var(--ws-border); background:var(--ws-input); color:var(--ws-muted); }
+.notation-toggle[aria-pressed=true] { background:var(--ws-accent); color:var(--ws-accent-ink); border-color:var(--ws-accent); box-shadow:inset 0 -3px 0 color-mix(in srgb,var(--ws-accent-ink) 55%,transparent); }
+.notation-toggle-tab { font:700 10px/1 var(--tp-font-ui); letter-spacing:.04em; }
+.notation-staff { color:var(--ws-muted); font-size:12px; }
+.track-staff-actions { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.inspector-add-section { padding-top:0; }
+.interpretation-rows { display:grid; gap:6px; }
+.interpretation-rows fieldset { display:grid; gap:6px; margin:0; padding:0; border:0; min-width:0; }

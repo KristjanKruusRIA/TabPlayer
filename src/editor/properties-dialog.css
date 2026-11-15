@@ -1,0 +1,20 @@
+/* The Properties dialog: what the inspector's Selection tab held, one tab per kind of thing it edits. */
+.tp-dialog.properties-dialog,.tp-dialog.score-style-dialog { width:min(760px,calc(100vw - 32px)); max-height:min(86vh,calc(100vh - 32px)); display:flex; flex-direction:column; }
+.properties-dialog .tp-dialog-body,.score-style-dialog .tp-dialog-body { min-height:0; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+.properties-location { margin:0; }
+.properties-tabs { display:flex; flex-wrap:wrap; gap:1px; position:sticky; top:0; z-index:1; background:var(--ws-panel,var(--tp-panel,#1c2128)); padding-bottom:4px; }
+.properties-tabs>[role=tab] { flex:1 1 auto; min-height:28px; padding:0 10px; border:0; border-radius:0; background:var(--ws-raised,#2a323d); color:var(--ws-text,inherit); font:500 12px/1 var(--tp-font-ui,inherit); letter-spacing:.04em; text-transform:uppercase; }
+.properties-tabs>[role=tab]:first-child { border-radius:5px 0 0 5px; }
+.properties-tabs>[role=tab]:last-child { border-radius:0 5px 5px 0; }
+.properties-tabs>[role=tab][aria-selected=true] { background:var(--ws-accent,#4f9cf5); color:var(--ws-accent-ink,#fff); }
+.properties-body { min-width:0; }
+.properties-body details { margin:0 0 6px; }
+.properties-body summary { min-height:28px; line-height:28px; cursor:pointer; }
+.properties-body fieldset { min-width:0; border:0; margin:0; padding:0 0 4px; display:grid; gap:6px; }
+.properties-body label { display:grid; gap:3px; min-width:0; }
+.properties-body label.check { display:flex; align-items:center; gap:6px; }
+.properties-body .pair { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:6px; }
+.properties-body :is(input:not([type=checkbox]):not([type=radio]),select,textarea) { min-width:0; max-width:100%; box-sizing:border-box; }
+.properties-body button { min-height:28px; }
+.master-dialog,.defaults-dialog { width:min(520px,calc(100vw - 32px)); max-height:min(86vh,calc(100vh - 32px)); }
+.master-dialog .tp-dialog-body,.defaults-dialog .tp-dialog-body { overflow:auto; }

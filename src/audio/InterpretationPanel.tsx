@@ -3,6 +3,8 @@ import { defaultMix } from '../document-settings';
 import type { ChannelMix, EditCommand, TrackInterpretation } from '../edit-types';
 import { canonicalInterpretation } from './interpretation';
 import { useI18n } from '../i18n';
+import { BusyFieldset } from '../ui/BusyFieldset';
+import { busySelect } from '../ui/useBusyGuard';
 
 type Option<K extends keyof TrackInterpretation> = NonNullable<TrackInterpretation[K]>;
 
@@ -26,13 +28,13 @@ export function InterpretationPanel({ trackId, mix, stringed, busy = false, onEd
     setError(null);
     Promise.resolve(onEdit({ type: 'setTrackMix', trackId, mix: next ? { ...rest, interpretation: next } : rest })).catch(e => setError(String(e instanceof Error ? e.message : e)));
   };
-  return <section className="sound-panel interpretation-panel" aria-label={t('sound.interpretation_title')}><h3>{t('sound.interpretation_heading')}</h3><fieldset disabled={busy}>
+  return <section className="sound-panel interpretation-panel interpretation-rows" aria-label={t('sound.interpretation_title')} aria-describedby="interpretation-hint"><BusyFieldset busy={busy}>
     {(Object.keys(choices) as (keyof typeof choices)[]).map(key => <label key={key}>{choices[key].label}
-      <select value={current[key] ?? ''} onChange={e => change({ [key]: e.target.value || undefined })}>
+      <select value={current[key] ?? ''} {...busySelect(busy)} onChange={e => { if (!busy) change({ [key]: e.target.value || undefined }); }}>
         <option value="">{choices[key].none}</option>{choices[key].options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>)}
-    <label className="check"><input type="checkbox" checked={current.letRing === true} onChange={e => change({ letRing: e.target.checked ? true : undefined })} />{t('sound.interp_auto_let_ring')}</label>
-  </fieldset>
-  <p className="hint">{t('sound.interp_hint')}</p>
+    <label className="check"><input type="checkbox" checked={current.letRing === true} onChange={e => { if (!busy) change({ letRing: e.target.checked ? true : undefined }); }} />{t('sound.interp_auto_let_ring')}</label>
+  </BusyFieldset>
+  <p id="interpretation-hint" className="tp-sr">{t('sound.interp_hint')}</p>
   {error && <p role="alert">{error}</p>}</section>;
 }

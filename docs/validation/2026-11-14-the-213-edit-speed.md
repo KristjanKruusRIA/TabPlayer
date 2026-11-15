@@ -230,6 +230,10 @@ Each was reproduced as a failing test first.
     ms. A check is made only when edits stopped for two seconds, so the replay is the edits since the last quiet moment, not the whole
     history. The slices that remain over 100 ms are beat edits, whose replay needs a whole-score round trip (the next step would be a
     per-track round trip, which the loop's links across tracks do not allow yet). In a long uninterrupted burst the check takes seconds, in slices.
+  * **Found by the owner-score fuzz, after the first full run:** a replay from a checkpoint gave documents with repeated beat ids on four of the five
+    scores. The copy keeps the ids of the document it was made from, and a counter that another import set back to zero hands them out again.
+    The replay now raises the counters above the copy's ids before it creates anything (`raiseIdCounters`); `engine.checkpoint.test.ts` has the
+    sequence (it fails without the line, with repeated beat ids), and it would have shown in the app after opening a second file.
   * **Copy and Cut** await a verified score, so a wrong in-place note cannot become a `pasteMusic` edit (test: an injected wrong fret, the clip
     holds the rebuilt one). `checkInPlace` (the sampled check) no longer marks the score verified before comparing, and a sampled check that throws
     leaves the document unchecked instead of failing the edit.
@@ -296,25 +300,26 @@ with the final code:
 
 ## Verification run
 
-Final working tree after the second review, `develop` merged twice (1d00286, then d6aad14
-with the tuning dialog; no conflicts). The primary-directory note of the environment changed twice (`stretch`, `sidebar`); every command
-ran in the task's own worktree by explicit path.
+Final working tree after the third review: `develop` merged three times (1d00286, d6aad14 with the tuning dialog, 61ab5fb with click-to-seek and Space).
+Every command ran in the task's own worktree by explicit path.
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | no errors |
-| `npm test -- --testTimeout=60000` | Node resource tests and the secret scan pass; Vitest 7300 passed, 8 skipped, 0 failed (the one failure of the first run, `gp-losses.test.ts`, put a score into the controller by hand and did not say it was the verified one; the test now does) |
-| `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` | clean. Rust has not changed since the first round (status de-duplication in `device.rs`), when `cargo test --locked --workspace --no-fail-fast` passed: 2026 passed, 0 failed |
-| owner-score fuzz (`TP_OWNER_SCORES`, 5 scores, 100 edits each, undo and redo in the other fuzzes) | passed: 500 edits over the 5 scores, 430 in place, 57 refused up front, 13 sent to the full rebuild (the let ring or palm mute beside a rest case) |
-| `scripts/build-desktop-test.ps1` | built (merge and review fixes) |
-| `node tests/desktop/edit-speed.mjs` | exit 0: digit edit median 197 ms drawn (worst 513), burst of 6 edits worst call 85 ms and 1 prepare, join 605 ms drawn once, undo 156 ms, cursor 12 ms, idle 0.6 %, real clicks on an inserted beat (bar 1, beat 5) and on the note typed on it (string 4) land on them, 3 edits compared with a rebuild with 0 mismatches |
-| `editor`, `parity-entry`, `loop-through-edit`, `exports`, `parity-document-tabs`, `parity-mix-drag`, `parity-fret-typing`, `parity-track-click`, `parity-clipboard`, `parity-tuning-dialog`, `parity-workstation` | exit 0 each |
-| M3 on the build from before the fix | the new click step fails there ("a real click on the inserted beat selects it"), as the unit test did |
+| `npm test -- --testTimeout=60000` | Node resource tests and the secret scan pass; Vitest 7350 passed, 8 skipped, 0 failed (an earlier full run of this round failed once, `App.test.tsx` Sound view: Copy now waits for a verified score and that check, made in timer slices, kept the app busy so the following Ctrl+Z was refused; Copy, Cut and the exports now check in slices of up to 40 ms of work, so a small document is checked in one go) |
+| `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` | clean |
+| `cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml` | 2028 passed, 0 failed, 96 ignored (Rust is merged from two branches now; run on the tree before the last TypeScript-only commits) |
+| owner-score fuzz (`TP_OWNER_SCORES`, 5 scores, 100 edits each, with the replay from a checkpoint compared with the rebuild every tenth edit) | passed on the final tree (it found the id-counter bug above on its first run) |
+| `scripts/build-desktop-test.ps1` | built three times this round; the last build is the tree reported here |
+| `node tests/desktop/edit-speed.mjs` | exit 0 in every run. Digit edit median, key to drawn and free, on the 6 x 200 score, over five runs on a machine other work was using: 186, 228, 280, 237, 198 ms (the second round measured 197 and 230); an A/B of this build against the second round's on one score alternately showed no difference in the edit, undo (about 260 ms) or redo (about 270 ms) draw. Join 331 to 483 ms drawn once, undo 144 to 271 ms, cursor 11 ms, idle 0.1 to 0.3 % (it is measured after the idle check has ended), heap growth over 240 edits negative after a warm-up (budget 40 MB), real clicks on an inserted beat and on the typed note land on them, 3 edits compared with a rebuild, no mismatch |
+| `editor`, `parity-entry`, `loop-through-edit`, `exports`, `parity-document-tabs`, `parity-mix-drag`, `parity-fret-typing`, `parity-track-click`, `parity-clipboard`, `parity-tuning-dialog`, `parity-workstation`, `parity-click-seek-space`, `parity-click-seek-repeat`, `parity-click-seek-backing`, `native-audio` | exit 0 each, on the final build |
 
-`plan.performance.test.ts.snap` is rewritten by the run and was restored with `git checkout --`. macOS and Linux were not measured.
+`plan.performance.test.ts.snap` is rewritten by the run and was restored with `git checkout --`. macOS and Linux were not measured. The 200 ms median
+is the hard requirement and is met in some runs and missed by up to 80 ms in others on a shared machine; the edit's own work (native call 13 to 17 ms, the
+in-place edit and the draw) did not change in this round.
 
-New Vitest files in the second round: `controller.faults.test.ts` (undo and redo faults, the id counters during the idle check, the long-history check),
-additions to `controller.test.ts`, `follow.test.ts`, `apply-in-order.test.ts`.
+New Vitest files in the third round: `engine.checkpoint.test.ts`, `engine.in-place.memory.test.ts`, additions to `controller.faults.test.ts` and
+`NativePlaybackController.test.ts`.
 
 ## What remains slow, and the next step
 

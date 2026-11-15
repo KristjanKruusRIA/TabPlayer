@@ -4,7 +4,7 @@ import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
 import { appliesFilePartialCapo,projectCommands } from './project';
 import { isSettingsEdit } from './edit-types';
 import type { BackingSettings, ChannelMix, DocumentSettings, SingleCommand } from './edit-types';
-import { describeScore, describeScoreSteps, duplicateIds, firstDifference } from './engine-verify';
+import { describeScore, describeScoreSteps, duplicateIds, firstDifference, firstDifferenceSteps } from './engine-verify';
 import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings, completeSound, completeMaster } from './document-settings';
 import { getLyricsSource, setLyricsSource } from './editor/lyrics-source';
 import { copyHarmonyChord } from './harmony/chord-source';
@@ -363,41 +363,93 @@ function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undef
   if(backing) backing.anchors=backing.anchors.filter(a=>a.bar!==bar).map(a=>({...a,bar:a.bar>bar?a.bar-1:a.bar}));
 }
 
+/**
+ * A checkpoint: a detached copy of a document that was a real rebuild from the file and its first `index` edits (or was compared with one and found equal),
+ * kept so that a later check replays only the edits after it instead of all of them.
+ *
+ * Why a replay from a checkpoint is a rebuild: the rebuild is a loop over the edits, `state = apply(state, edit)`, from the state the file gives, then a final
+ * rebuild of the score. A checkpoint is that state after `index` edits, so replaying edits `index..n` from it is the same loop split at a point the
+ * loop passed through. The state is the whole of a `BuiltDocument` (score, settings, identities, backing); the copy the replay starts from is the one `rebuild`
+ * makes of a score (the serialization round trip with its links put back), which the loop itself does after most edits. What is not guaranteed by construction
+ * is that this extra round trip changes nothing (finishing a track again is not always a no-op, which is why `inPlaceRefusal` knows a case), so it is tested:
+ * the fuzz compares the replay from a checkpoint with the rebuild from scratch after every step (`engine.checkpoint.test.ts`), and a check that finds a
+ * difference is decided by a rebuild from scratch, never by the replay alone.
+ */
+export interface Checkpoint {
+  built:BuiltDocument;index:number;
+  /** What the first `index` edits and the base were, and whether the file's partial capo applied when the base was loaded: the checkpoint only fits a project that still has them. */
+  prefix:string;base:string;partialCapo:boolean;
+}
+const baseKey=(project:ProjectInput):string=>project.base.kind==='file'?`file:${project.base.sha256}`:JSON.stringify(project.base);
+/** A checkpoint of `built`, which must be the real rebuild of `project`'s edits (or equal to it) and must not be a document that is edited from now on: it is kept as it is. */
+export function makeCheckpoint(project:ProjectInput,built:BuiltDocument,canRedo:boolean):Checkpoint {
+  const normalized=validateProject(project),edits=projectCommands(normalized);
+  return {built,index:edits.length,prefix:JSON.stringify(edits),base:baseKey(normalized),partialCapo:normalized.base.kind==='file'&&appliesFilePartialCapo(normalized,canRedo)};
+}
+/** Whether `project` still begins with the base and the edits the checkpoint holds (a checkpoint above the end of the history, or of another history, is not valid). */
+export function checkpointFits(checkpoint:Checkpoint,project:ProjectInput,canRedo:boolean):boolean {
+  const edits=projectCommands(project);
+  if(checkpoint.index>edits.length||baseKey(project)!==checkpoint.base)return false;
+  if(project.base.kind==='file'&&appliesFilePartialCapo(project,canRedo)!==checkpoint.partialCapo)return false;
+  return JSON.stringify(edits.slice(0,checkpoint.index))===checkpoint.prefix;
+}
+/** A detached copy of a document: its score as `rebuild` makes it (so it shares no object with the original), its settings by value. */
+export function cloneDocument(built:BuiltDocument):BuiltDocument {
+  const steps=cloneDocumentSteps(built);
+  for(;;){const step=steps.next();if(step.done)return step.value;}
+}
+function* cloneDocumentSteps(built:BuiltDocument):Generator<void,BuiltDocument> {
+  const identities=built.score.tracks.map(trackIdentity),score=yield* rebuildSteps(built.score);
+  score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
+  return {...built,score,settings:structuredClone(built.settings),embeddedBackingSettings:built.embeddedBackingSettings&&structuredClone(built.embeddedBackingSettings),sourceMixes:built.sourceMixes&&structuredClone(built.sourceMixes)};
+}
+
 /** `canRedo`: the document has undone edits, so it is not edit-free even when its list is empty. */
 export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocument {
   const steps = buildDocumentSteps(value, canRedo);
   for (;;) { const step = steps.next(); if (step.done) return step.value; }
 }
 /** `buildDocument` in steps: each `yield` is a point where the caller may let other work go first (the check that compares an edited document with a rebuild uses this so typing is not stalled by a rebuild). */
-export function* buildDocumentSteps(value: ProjectInput, canRedo = false): Generator<void, BuiltDocument> {
-  const project = validateProject(value); yield; const initial = initialScore(project, canRedo); let score = initial.score; yield;
-  const sourceBarCount=score.masterBars.length;
-  const identities=score.tracks.map((_,index)=>`base/${index}`);
-  const documentSettings=defaultDocumentSettings();
-  const embeddedBacking=score.backingTrack?.rawAudioFile?.slice() ?? null;
-  const embeddedAnchors=score.masterBars.flatMap((bar,index)=>(bar.syncPoints ?? []).flatMap(point=>point.syncPointValue?[{
-      bar:index,occurrence:point.syncPointValue.barOccurence,ratio:point.ratioPosition,audioMs:point.syncPointValue.millisecondOffset,
-    }]:[]));
-  const embeddedOffset=Math.max(0,...embeddedAnchors.map(anchor=>-anchor.audioMs));
-  const embeddedBackingSettings=embeddedBacking?{
-    offsetMs:embeddedOffset,mix:defaultMix(),anchors:embeddedAnchors.map(anchor=>({...anchor,audioMs:anchor.audioMs+embeddedOffset})),
-  }:undefined;
-  score.tracks.forEach((track,index)=>{documentSettings.mixes[identities[index]]={...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo};});
-  const sourceMixes=structuredClone(documentSettings.mixes);
-  for (const [index,edit] of projectCommands(project).entries()) {
+export function* buildDocumentSteps(value: ProjectInput, canRedo = false, from?: Checkpoint): Generator<void, BuiltDocument> {
+  const project = validateProject(value); yield;
+  // From a checkpoint the replay starts with the detached copy of the document the first `from.index` edits made, instead of the file; the rest is the same loop.
+  let score:model.Score,sourceBarCount:number,identities:string[],documentSettings:DocumentSettings,embeddedBacking:Uint8Array|null,embeddedBackingSettings:Omit<BackingSettings,'assetId'>|undefined,sourceMixes:Record<string,ChannelMix>|undefined,notice:string|null|undefined,start=0;
+  if(from) {
+    const copy=yield* cloneDocumentSteps(from.built);yield;
+    score=copy.score;sourceBarCount=copy.sourceBarCount!;identities=copy.score.tracks.map(trackIdentity);documentSettings=copy.settings;embeddedBacking=copy.embeddedBacking;
+    embeddedBackingSettings=copy.embeddedBackingSettings;sourceMixes=copy.sourceMixes;notice=copy.importNotice;start=from.index;
+  } else {
+    const initial = initialScore(project, canRedo); score = initial.score; yield;
+    sourceBarCount=score.masterBars.length;
+    identities=score.tracks.map((_,index)=>`base/${index}`);
+    documentSettings=defaultDocumentSettings();
+    embeddedBacking=score.backingTrack?.rawAudioFile?.slice() ?? null;
+    const embeddedAnchors=score.masterBars.flatMap((bar,index)=>(bar.syncPoints ?? []).flatMap(point=>point.syncPointValue?[{
+        bar:index,occurrence:point.syncPointValue.barOccurence,ratio:point.ratioPosition,audioMs:point.syncPointValue.millisecondOffset,
+      }]:[]));
+    const embeddedOffset=Math.max(0,...embeddedAnchors.map(anchor=>-anchor.audioMs));
+    embeddedBackingSettings=embeddedBacking?{
+      offsetMs:embeddedOffset,mix:defaultMix(),anchors:embeddedAnchors.map(anchor=>({...anchor,audioMs:anchor.audioMs+embeddedOffset})),
+    }:undefined;
+    score.tracks.forEach((track,index)=>{documentSettings.mixes[identities[index]]={...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo};});
+    sourceMixes=structuredClone(documentSettings.mixes);notice=initial.notice;
+  }
+  const history=projectCommands(project);
+  for (let index=start;index<history.length;index++) {
+    const edit=history[index];
     yield;
     if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
-    if(documentSettings.backing?.referenceSync)score=rebuild(score);
+    if(documentSettings.backing?.referenceSync)score=yield* rebuildSteps(score);
     const previous=documentSettings.backing?.referenceSync?referenceSyncTiming(documentSettings.backing,backingLocationsForScore(score)):null;
     if(edit.type==='pasteMusic'){
-      const prepared=preparePasteMusic(rebuild(score),edit);score=rebuild(prepared.score);
+      const prepared=preparePasteMusic(yield* rebuildSteps(score),edit);score=yield* rebuildSteps(prepared.score);
       // Tracks a multitrack paste appended get identities of their own, so their mix and engraving settings never reuse another track's.
       for(let added=0;added<(prepared.addedTracks??0);added++)identities.push(`added/${index}/paste/${added}`);
       if(prepared.addedTracks)forgetTrackOrderedEntries(score);
       mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);documentSettings.engraving=mapEngravingBars(documentSettings.engraving,prepared.barMap.oldToNew);
-    }else if(edit.type==='transposeHarmony')score=prepareHarmonyTranspose(rebuild(score),edit,index);
+    }else if(edit.type==='transposeHarmony')score=prepareHarmonyTranspose(yield* rebuildSteps(score),edit,index);
     else {
-      if(!previous&&['setOttava','setCrescendo','setFermata','setSustainPedal','setSimile','eraseSelection','cutSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','tieSelectionToEarlierPitch','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
+      if(!previous&&['setOttava','setCrescendo','setFermata','setSustainPedal','setSimile','eraseSelection','cutSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','tieSelectionToEarlierPitch','insertMeasures','removeMeasures'].includes(edit.type))score=yield* rebuildSteps(score);
       const measureMap=edit.type==='insertMeasures'||edit.type==='removeMeasures'?planMeasureMap(score.masterBars.length,edit):null;
       if(measureMap)mapLyricsMeasures(score,measureMap);
       apply(score, edit,index);
@@ -409,16 +461,16 @@ export function* buildDocumentSteps(value: ProjectInput, canRedo = false): Gener
       if (['addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack'].includes(edit.type)) forgetTrackOrderedEntries(score);
       if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);documentSettings.engraving=mapEngravingBars(documentSettings.engraving,Array.from({length:score.masterBars.length+1},(_,bar)=>bar<edit.bar?bar:bar===edit.bar?null:bar-1));}
       if (!previous&&['insertBeat','deleteBeat','fitVoice','cutSelection','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
-        score = rebuild(score);
+        score = yield* rebuildSteps(score);
       }
     }
     assertDroneFrets(score);
-    if(previous){score=rebuild(score);documentSettings.backing=adjustReferenceSyncBounds(documentSettings.backing!,previous,backingLocationsForScore(score));}
+    if(previous){score=yield* rebuildSteps(score);documentSettings.backing=adjustReferenceSyncBounds(documentSettings.backing!,previous,backingLocationsForScore(score));}
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
-  yield;score=rebuild(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
+  yield;score=yield* rebuildSteps(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
   validateEngravingTracks(score,identities,{...documentSettings.engraving,profiles:documentSettings.engraving.profiles.filter(entry=>identities.includes(entry.trackId))});
-  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes,sourceBarCount,importNotice:initial.notice};
+  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes,sourceBarCount,importNotice:notice};
   validateBackingAnchors(score,effectiveAudioSettings(project,built).backing);return built;
 }
 
@@ -458,14 +510,22 @@ export function effectiveAudioSettings(project:ProjectInput,built:BuiltDocument)
 
 export function buildScore(value:ProjectInput):model.Score {return buildDocument(value).score;}
 
+/** `rebuildSteps` run to the end. */
 function rebuild(score: model.Score) {
+  const steps=rebuildSteps(score);
+  for(;;){const step=steps.next();if(step.done)return step.value;}
+}
+/** What the serialization pass does to a score, with a point (`yield`) between writing it out and reading it back, so a check made in slices has none longer than half of it. */
+function* rebuildSteps(score: model.Score): Generator<void,model.Score> {
   // alphaTab's beat chain requires a carrier even in an empty following voice.
   for (const track of score.tracks) for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) {
     if (!voice.beats.length) { const empty=new Beat();empty.isEmpty=true;voice.addBeat(empty); }
     for (const beat of voice.beats) tripleDotTiming(beat);
   }
   const links=captureNoteLinks(score);
-  const result=scoreFromJson(JsonConverter.scoreToJson(score), settings);
+  const json=JsonConverter.scoreToJson(score);
+  yield;
+  const result=scoreFromJson(json, settings);
   restoreNoteLinks(result,links);
   copyGpInterchangeSource(score,result);
   reflowLyrics(result);
@@ -516,6 +576,17 @@ const inPlaceSteps=(edit:EditCommand):SingleCommand[]|null=>{
 export interface ScoreLineage {previous:model.Score;track:number;/** The edit applied, or null when the edit that made `previous` was taken back. */edit:EditCommand|null}
 const lineages=new WeakMap<model.Score,ScoreLineage>();
 export const scoreLineage=(score:model.Score):ScoreLineage|undefined=>lineages.get(score);
+/**
+ * How many edits back a lineage can be walked (a view that skipped some draws follows the edits in turn; `followProjection` takes at most eight). A lineage
+ * names its predecessor, so one that is never cut keeps every score since the last full build alive, each with the journal and the rendered copy it made.
+ */
+export const LINEAGE_DEPTH=8;
+function setLineage(next:model.Score,step:ScoreLineage):void {
+  lineages.set(next,step);
+  let at=step.previous;
+  for(let depth=1;depth<LINEAGE_DEPTH;depth++){const earlier=lineages.get(at);if(!earlier)return;at=earlier.previous;}
+  lineages.delete(at);
+}
 /** Why `edit` may not be applied to `current` in place (anything not known to be safe is refused and takes the full rebuild), or null when it may. */
 export function inPlaceRefusal(current:BuiltDocument,edit:EditCommand):string|null {
   const steps=inPlaceSteps(edit);if(!steps)return 'edit type';
@@ -656,7 +727,7 @@ export function newScoreIdentity(old:model.Score):model.Score {
   return next;
 }
 function reviseScore(old:model.Score,track:number,edit:EditCommand):model.Score {
-  const next=newScoreIdentity(old);lineages.set(next,{previous:old,track,edit});timerScores.set(next,false);return next;
+  const next=newScoreIdentity(old);setLineage(next,{previous:old,track,edit});timerScores.set(next,false);return next;
 }
 /**
  * What it takes to put a track back as it was before an edit applied in place: the beats of the voices the edit touched (their own fields and
@@ -687,6 +758,8 @@ function captureJournal(score:model.Score,trackIndex:number,steps:SingleCommand[
 const JOURNAL_DEPTH=24;
 interface Journal {restore:()=>void;older:Journal|null;track:number}
 const journals=new WeakMap<model.Score,Journal>();
+/** How many edits applied in place can be taken back from `score` one after the other (for tests of what is kept alive). */
+export function journalDepth(score:model.Score):number {let depth=0;for(let at=journals.get(score)??null;at;at=at.older)depth++;return depth;}
 /** Whether the last edit that made this document's score can be taken back without a rebuild. */
 export const canUndoInPlace=(score:model.Score):boolean=>journals.has(score);
 /**
@@ -705,7 +778,7 @@ function undoScore(score:model.Score):model.Score {
   noteIdCeilings(score);journals.delete(score);
   const next=newScoreIdentity(score);
   if(journal.older)journals.set(next,journal.older);
-  lineages.set(next,{previous:score,track:journal.track,edit:null});timerScores.set(next,false);
+  setLineage(next,{previous:score,track:journal.track,edit:null});timerScores.set(next,false);
   return next;
 }
 /** The rendered copy of a document, with the edit that was applied to the document applied to it (returns the copy under a new identity; the copy can then take the edit back in place too). */
@@ -716,7 +789,7 @@ export function editCopyInPlace(copy:model.Score,edit:EditCommand,index=0):model
   const restore=captureJournal(copy,track,steps);
   for(const step of steps){apply(copy,step,index);settleTrack(copy.tracks[track]);}
   noteIdCeilings(copy);
-  const next=newScoreIdentity(copy),journal:Journal={restore,older:journals.get(copy)??null,track};journals.set(next,journal);
+  const next=newScoreIdentity(copy),journal:Journal={restore,older:journals.get(copy)??null,track};journals.set(next,journal);journals.delete(copy);
   let oldest:Journal=journal;for(let depth=1;depth<JOURNAL_DEPTH&&oldest.older;depth++)oldest=oldest.older;oldest.older=null;
   return next;
 }
@@ -739,6 +812,8 @@ export function editInPlace(current:BuiltDocument,edit:EditCommand,index:number)
   }
   noteIdCeilings(score);
   const next=reviseScore(score,track,edit),journal:Journal={restore,older:journals.get(score)??null,track};journals.set(next,journal);
+  // The next score holds this journal as its predecessor's: the shell that is no longer shown keeps nothing of its own.
+  journals.delete(score);
   // Only the newest edits keep what it takes to take them back.
   let oldest:Journal=journal;for(let depth=1;depth<JOURNAL_DEPTH&&oldest.older;depth++)oldest=oldest.older;oldest.older=null;
   return {...current,score:next};
@@ -791,7 +866,9 @@ export function editsFitLive(project:ProjectInput,commands:EditCommand[]):boolea
 }
 /** What the edits did so far: in place, by a full rebuild, rebuilt after an in-place edit was refused or failed, and compared with a full rebuild. */
 export const editStats={inPlace:0,full:0,healed:0,verified:0,mismatches:0};
-(globalThis as {__tabplayerEditStats?:typeof editStats}).__tabplayerEditStats=editStats;
+/** The counters and the sampled check are reachable from outside (`globalThis.__tabplayerEditStats`, `__tabplayerCheckEdits`) only in development, in tests and in the desktop test build; a release build offers neither. */
+const developerHooks=(()=>{const env=(import.meta as {env?:{DEV?:boolean;MODE?:string;VITE_DESKTOP_TEST?:string}}).env;return !!(env?.DEV||env?.MODE==='test'||env?.VITE_DESKTOP_TEST==='1');})();
+if(developerHooks)(globalThis as {__tabplayerEditStats?:typeof editStats}).__tabplayerEditStats=editStats;
 /**
  * How often an edit made in place is compared with a full rebuild (every n-th; 0 never). The comparison costs as much as the
  * rebuild it replaces, so it is on for tests and development builds, and a person or a test can turn it on in a running app with
@@ -801,7 +878,7 @@ export const editCheck={every:(import.meta as {env?:{DEV?:boolean}}).env?.DEV?25
 /** How long after the last edit the document edited in place is compared with a rebuild, in every build (0 turns it off: the unit tests start it themselves). */
 export const idleVerification={afterMs:(import.meta as {env?:{MODE?:string}}).env?.MODE==='test'?0:2000};
 export function shouldCheckEdit():boolean {
-  const override=(globalThis as {__tabplayerCheckEdits?:number}).__tabplayerCheckEdits,every=typeof override==='number'?override:editCheck.every;
+  const override=developerHooks?(globalThis as {__tabplayerCheckEdits?:number}).__tabplayerCheckEdits:undefined,every=typeof override==='number'?override:editCheck.every;
   return every>0&&++editCheck.count%every===0;
 }
 /** How two documents differ (their scores as `describeScore` sees them, then their settings), as a readable path, or null when they are the same. Repeated ids in `built` count as a difference. */
@@ -814,52 +891,22 @@ export function compareDocuments(built:BuiltDocument,full:BuiltDocument):string|
 }
 /** The document a full rebuild gives for `project`, compared with `built`: null when they are the same, otherwise where they first differ. */
 export function verifyEditInPlace(project:ProjectInput,built:BuiltDocument,canRedo=false):string|null {
-  const repeated=duplicateIds(built.score);if(repeated)return `duplicate ids: ${repeated}`;
-  return compareDocuments(built,buildDocument(project,canRedo));
+  return compareWithRebuild(project,built,canRedo).problem;
+}
+/** `verifyEditInPlace` that also hands back the document it rebuilt (a real rebuild from scratch, in one piece). */
+export function compareWithRebuild(project:ProjectInput,built:BuiltDocument,canRedo=false):{problem:string|null;rebuilt:BuiltDocument|null} {
+  const repeated=duplicateIds(built.score);if(repeated)return {problem:`duplicate ids: ${repeated}`,rebuilt:null};
+  const rebuilt=buildDocument(project,canRedo);
+  return {problem:compareDocuments(built,rebuilt),rebuilt};
 }
 
 /**
- * Replaying a history costs a whole-score round trip for every edit in it that is not a plain note, rest or duration change (the replay
- * rebuilds after each), so the check against a replay grows with the history: 30 s for 130 beat insertions or deletions on a long score. Past this many
- * such edits the idle check compares each track with the track a rebuild's round trip makes of it instead (`verifyTracksStepwise`), which costs the
- * same however long the history is.
- */
-export const HEAVY_HISTORY=12;
-export function replayIsHeavy(project:ProjectInput):boolean {
-  const plain=new Set(['setNote','removeNote','setRest','setDuration']);
-  let heavy=0;for(const edit of projectCommands(project))if(!plain.has(edit.type)&&!isSettingsEdit(edit)&&++heavy>HEAVY_HISTORY)return true;
-  return false;
-}
-/**
- * Compares every track of `built` with the track that the serialization pass of a rebuild makes of it (the same capture, round trip and restore of the
- * links that `rebuild` does), in steps that let other work go first. It finds a derived state (a lookup, an index, a link, a chain) that an edit
- * applied in place left different from what a rebuild works out from the same notes; it does not replay the history, so it cannot find a note that
- * is wrong in the way it was written. Resolves null when cancelled, otherwise the first difference or null.
- */
-export async function verifyTracksStepwise(built:BuiltDocument,pause:()=>Promise<void>,cancelled:()=>boolean):Promise<{problem:string|null}|null> {
-  const repeated=duplicateIds(built.score);if(repeated)return {problem:`duplicate ids: ${repeated}`};
-  for(const track of built.score.tracks) {
-    await pause();if(cancelled())return null;
-    const alone=Object.assign(Object.create(Object.getPrototypeOf(built.score)),built.score,{tracks:[track],masterBars:built.score.masterBars}) as model.Score;
-    const links=captureNoteLinks(alone),json=JsonConverter.scoreToJson(alone);
-    await pause();if(cancelled())return null;
-    const round=scoreFromJson(json,settings);restoreNoteLinks(round,links);round.tracks[0].index=track.index;
-    await pause();if(cancelled())return null;
-    // A track's pointer to its score is the one thing that differs by construction (one score holds the track, the other holds it among the rest).
-    const one=describeScoreSteps(alone,['score']),other=describeScoreSteps(round,['score']);
-    let a=one.next(),b=other.next();
-    while(!a.done||!b.done){await pause();if(cancelled())return null;if(!a.done)a=one.next();if(!b.done)b=other.next();}
-    const difference=firstDifference(a.value,b.value);
-    if(difference)return {problem:`track ${track.index} ${difference}`};
-  }
-  return {problem:null};
-}
-/**
  * `verifyEditInPlace` that lets other work go first between its steps (`pause`) and gives up when `cancelled()` says the document moved on.
- * Resolves null when cancelled, otherwise the difference found (null when the documents are the same) and the document rebuilt from the project.
+ * Resolves null when cancelled, otherwise the difference found (null when the documents are the same) and the document rebuilt from the project, from the file
+ * and every edit, or, given a checkpoint that fits, from the checkpoint and the edits after it.
  */
-export async function verifyEditStepwise(project:ProjectInput,built:BuiltDocument,canRedo:boolean,pause:()=>Promise<void>,cancelled:()=>boolean):Promise<{problem:string|null;rebuilt:BuiltDocument}|null> {
-  const build=buildDocumentSteps(project,canRedo);let step=build.next();
+export async function verifyEditStepwise(project:ProjectInput,built:BuiltDocument,canRedo:boolean,pause:()=>Promise<void>,cancelled:()=>boolean,from?:Checkpoint):Promise<{problem:string|null;rebuilt:BuiltDocument}|null> {
+  const build=buildDocumentSteps(project,canRedo,from);let step=build.next();
   // Opening another file sets the global id counters back to zero. The rebuild's own objects must never share an id, so at each resume the counters
   // are put back to where this rebuild had taken them (never lowered below what it reached).
   let reached=counterMark();
@@ -874,7 +921,9 @@ export async function verifyEditStepwise(project:ProjectInput,built:BuiltDocumen
   const described=describeScoreSteps(built.score),expected=describeScoreSteps(rebuilt.score);
   let one=described.next(),other=expected.next();
   while(!one.done||!other.done){await pause();if(cancelled())return null;if(!one.done)one=described.next();if(!other.done)other=expected.next();}
-  const difference=firstDifference(one.value,other.value);
+  const comparing=firstDifferenceSteps(one.value,other.value);let compared=comparing.next();
+  while(!compared.done){await pause();if(cancelled())return null;compared=comparing.next();}
+  const difference=compared.value;
   const settingsDifference=difference?null:firstDifference(JSON.parse(JSON.stringify(built.settings)),JSON.parse(JSON.stringify(rebuilt.settings)));
   return {rebuilt,problem:repeated?`duplicate ids: ${repeated}`:difference?`score ${difference}`:settingsDifference?`settings ${settingsDifference}`:null};
 }

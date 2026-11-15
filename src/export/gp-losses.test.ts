@@ -184,9 +184,8 @@ describe('the app asks before writing',()=>{
   });
   it('the document export shows a refusal instead of asking, when the export would throw',async()=>{
     const bridge=bridgeFor([]),controller=await DocumentController.create(bridge);
-    // The test puts a score into the controller by hand, so it also says that score is the one known to equal a rebuild (otherwise the export would check it first, and rebuild it).
-    const inner=controller as unknown as {state:{score:model.Score};verifiedScore:model.Score|null};
-    inner.state.score=refusedCarrierScore();inner.verifiedScore=inner.state.score;
+    // The test puts a score into the controller by hand and vouches for it (otherwise the export would check it against a rebuild first, and rebuild it).
+    controller.adoptVerifiedScoreForTest(refusedCarrierScore());
     await expect(controller.export()).rejects.toThrow(carrierMessage);
     expect(bridge.confirmExport).not.toHaveBeenCalled();expect(bridge.exportGp).not.toHaveBeenCalled();
   });

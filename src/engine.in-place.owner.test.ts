@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { existsSync,readdirSync,readFileSync,writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildDocument,checkEditInPlace,editInPlace,inPlaceRefusal,verifyEditInPlace,type BuiltDocument } from './engine';
+import { buildDocument,buildDocumentSteps,checkEditInPlace,cloneDocument,compareDocuments,compareWithRebuild,editInPlace,inPlaceRefusal,makeCheckpoint,type BuiltDocument,type Checkpoint } from './engine';
 import { blankProject,projectCommands,type EditCommand,type Project } from './project';
 
 /**
@@ -33,6 +33,9 @@ describe.skipIf(files.length===0)('the owner\'s scores: edits in place equal a f
       const bytes=readFileSync(join(folder!,name));
       let project:Project={...blankProject(),base:{kind:'file',filename:`score-${index+1}.gp`,bytesBase64:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}};
       let built=buildDocument(project);
+      // The check replays only the edits after a checkpoint: here every tenth edit, the replay from the checkpoint is compared with the rebuild from the file.
+      let checkpoint:Checkpoint=makeCheckpoint(project,cloneDocument(built),false);let replays=0;
+      const replay=(from:Checkpoint)=>{const steps=buildDocumentSteps(project,false,from);for(;;){const step=steps.next();if(step.done)return step.value;}};
       const next=random(100+index),stats={tracks:built.score.tracks.length,bars:built.score.masterBars.length,inPlace:0,refused:0,fallback:0,fallbackByReason:{} as Record<string,number>,tracksFallingBack:new Set<number>(),tracksInPlace:new Set<number>()};
       const trackReasons=built.score.tracks.map((_,track)=>[...new Set(built.score.tracks[track].staves.flatMap((_staff,staffIndex)=>built.score.masterBars.map((__,bar)=>inPlaceRefusal(built,{type:'setRest',target:{track,staff:staffIndex,bar,voice:0,beat:0}}))))].map(reason=>reason??'ok').sort());
       const total=Number(process.env.TP_OWNER_COUNT??60);
@@ -50,7 +53,13 @@ describe.skipIf(files.length===0)('the owner\'s scores: edits in place equal a f
         if(expected){expect(failure?.message,`edit ${i} refused by the full build`).toBe(expected.message);stats.refused++;continue;}
         expect(failure,`edit ${i} refused by the check only`).toBeNull();
         built=editInPlace(built,edit,projectCommands(project).length);project=after;stats.inPlace++;stats.tracksInPlace.add(track);
-        expect(verifyEditInPlace(project,built),`score ${index+1} after edit ${i} ${JSON.stringify(edit)}`).toBeNull();
+        const {problem,rebuilt}=compareWithRebuild(project,built);
+        expect(problem,`score ${index+1} after edit ${i} ${JSON.stringify(edit)}`).toBeNull();
+        if(stats.inPlace%10===0){
+          const replayed=replay(checkpoint);replays++;
+          expect(compareDocuments(replayed,rebuilt!),`score ${index+1}: the replay from a checkpoint at ${checkpoint.index} of ${project.edits.length} edits`).toBeNull();
+          checkpoint=makeCheckpoint(project,replays%2?replayed:cloneDocument(rebuilt!),false);
+        }
       }
       report[`score ${index+1}`]={...stats,tracksFallingBack:[...stats.tracksFallingBack].sort(),tracksInPlace:[...stats.tracksInPlace].sort(),trackReasons};
       if(process.env.TP_OWNER_OUT)writeFileSync(process.env.TP_OWNER_OUT,JSON.stringify(report,null,1));

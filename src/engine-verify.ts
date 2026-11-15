@@ -42,7 +42,9 @@ export function* describeScoreSteps(score:model.Score,skip:readonly string[]=[])
   for(const [object,path] of paths){rows[path]=fields(object);if(++counted%1500===0)yield;}
   yield;
   // Ids differ between two builds of one document, so they are numbered by position, wherever they occur in the JSON.
-  const json=JSON.parse(model.JsonConverter.scoreToJson(score)) as unknown;
+  const text=model.JsonConverter.scoreToJson(score);
+  yield;
+  const json=JSON.parse(text) as unknown;
   yield;
   // Ids differ between two builds of one document: an object is named by its position instead, wherever its id occurs in the JSON.
   // A new note takes the next id of a counter that has no knowledge of loaded files, so two objects can share an id; a reference names all of them.
@@ -60,7 +62,14 @@ export function* describeScoreSteps(score:model.Score,skip:readonly string[]=[])
     }));
     return node;
   };
-  return {json:walk(json,'score'),links:rows};
+  // The same walk, one track at a time, so that no slice is longer than a track's worth.
+  const top:Record<string,unknown>={};
+  for(const [key,item] of Object.entries(json as Record<string,unknown>)){
+    if(typeof item==='number'&&item>=0){top[key]=key==='id'?'#':/noteid$/.test(key)?named(item):item;continue;}
+    if(key==='tracks'&&Array.isArray(item)){const walked:unknown[]=[];for(const track of item){walked.push(walk(track,key));yield;}top[key]=walked;continue;}
+    top[key]=walk(item,key);
+  }
+  return {json:top,links:rows};
 }
 
 /** The first place two descriptions differ, as a readable path, or null when they are the same. */
@@ -70,6 +79,19 @@ export function firstDifference(a:unknown,b:unknown,path='$'):string|null {
   if(Array.isArray(a)!==Array.isArray(b))return `${path}: array mismatch`;
   const keys=new Set([...Object.keys(a as object),...Object.keys(b as object)]);
   for(const key of keys){const found=firstDifference((a as Record<string,unknown>)[key],(b as Record<string,unknown>)[key],`${path}.${key}`);if(found)return found;}
+  return null;
+}
+
+/** `firstDifference` in steps (a `yield` every few thousand values compared), for the check that must not stall typing. */
+export function* firstDifferenceSteps(a:unknown,b:unknown,path='$',count={n:0}):Generator<void,string|null> {
+  if(Object.is(a,b))return null;
+  if(typeof a!==typeof b||a===null||b===null||typeof a!=='object')return `${path}: ${JSON.stringify(a)} != ${JSON.stringify(b)}`;
+  if(Array.isArray(a)!==Array.isArray(b))return `${path}: array mismatch`;
+  const keys=new Set([...Object.keys(a as object),...Object.keys(b as object)]);
+  for(const key of keys){
+    if(++count.n%3000===0)yield;
+    const found=yield* firstDifferenceSteps((a as Record<string,unknown>)[key],(b as Record<string,unknown>)[key],`${path}.${key}`,count);if(found)return found;
+  }
   return null;
 }
 

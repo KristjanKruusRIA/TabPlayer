@@ -14,9 +14,12 @@ export interface ProjectionBasis {source:model.Score;ids:readonly string[];value
  * On a refusal the basis is no longer usable (its copy may be half edited), so the caller makes a whole new projection.
  */
 /** The projection already made for a score from a basis, so that React running the same render twice (or a render that was thrown away) edits the rendered copy once. */
-const followed=new WeakMap<model.Score,{basis:model.Score;ids:readonly string[];value:EngravingOverrides;projection:EngravingProjection}>();
+interface Followed {source:model.Score;basis:model.Score;ids:readonly string[];value:EngravingOverrides;projection:EngravingProjection}
+/** Only the newest two are kept: a projection holds maps over the whole score and a copy of it, and one per edit would pile up. */
+const followed:Followed[]=[];
+const FOLLOWED_KEPT=2;
 export function followProjection(basis:ProjectionBasis,source:model.Score,ids:readonly string[],value:EngravingOverrides):EngravingProjection|null {
-  const known=followed.get(source);
+  const known=followed.find(entry=>entry.source===source);
   if(known&&known.basis===basis.source&&sameData(ids,known.ids)&&(value===known.value||sameData(value,known.value)))return known.projection;
   // Several edits can have passed since the basis (React may draw once for two); each is taken in turn, oldest first.
   const edits:ReturnType<typeof scoreLineage>[]=[];
@@ -34,7 +37,7 @@ export function followProjection(basis:ProjectionBasis,source:model.Score,ids:re
       score=next;
     }
     const projection={...mapProjection(source,score,ids,value),score,bracketMode:basis.projection.bracketMode};
-    followed.set(source,{basis:basis.source,ids,value,projection});
+    followed.push({source,basis:basis.source,ids,value,projection});if(followed.length>FOLLOWED_KEPT)followed.shift();
     return projection;
   } catch {return null;}
 }

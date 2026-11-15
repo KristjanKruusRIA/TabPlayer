@@ -2,7 +2,7 @@ import { useI18n } from '../i18n';
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
-import { factorySound, factorySounds } from '../audio/factory-sounds';
+import { earlierFactorySound, earlierFactorySounds, factorySound, factorySounds } from '../audio/factory-sounds';
 import { MasterPanel } from '../audio/MasterPanel';
 import { automaticVoice, presetName, soundPreset, voiceNames } from '../audio/sound-model';
 import { completeSound } from '../document-settings';
@@ -21,9 +21,9 @@ const noState=()=>null;
 const effectsKey=(sound:TrackSound)=>JSON.stringify(completeSound(sound).effects);
 const baseKeys=new Map<string,string>();
 /** The effects of factory sound `factory:id` or preset `preset:id` as a key, worked out once: they do not depend on the instrument. */
-function baseKey(kind:'factory'|'preset',id:string):string {
+function baseKey(kind:'factory'|'earlier'|'preset',id:string):string {
   const name=`${kind}:${id}`;let key=baseKeys.get(name);
-  if(key===undefined){const sound=kind==='factory'?factorySound(id):soundPreset(id as TrackSound['presetId']);key=sound?effectsKey(sound):'';baseKeys.set(name,key);}
+  if(key===undefined){const sound=kind==='factory'?factorySound(id):kind==='earlier'?earlierFactorySound(id):soundPreset(id as TrackSound['presetId']);key=sound?effectsKey(sound):'';baseKeys.set(name,key);}
   return key;
 }
 
@@ -42,6 +42,9 @@ export function describeTrackSound(track:model.Track,sound?:TrackSound):{voice:s
   const {presetId}=completeSound(sound),key=effectsKey(sound);
   const matched=factorySounds.find(item=>item.presetId===presetId&&baseKey('factory',item.id)===key);
   if(matched)return {voice,tone:matched.name};
+  // Settings a project copied from a factory sound before it was retuned are named as that version, not as the preset marked edited.
+  const earlier=earlierFactorySounds.find(item=>item.presetId===presetId&&baseKey('earlier',item.id)===key);
+  if(earlier)return {voice,tone:earlier.name};
   return {voice,tone:key===baseKey('preset',presetId)?presetName(presetId):`${presetName(presetId)} (edited)`};
 }
 

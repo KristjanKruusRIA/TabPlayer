@@ -6,6 +6,9 @@ import {SoundPanel,soundPreset} from './SoundPanel';
 import {defaultEffects,soundProblem} from '../document-settings';
 import {readSoundLibrary,saveSoundPreset} from './sound-library';
 import type {TrackSound} from '../edit-types';
+import {getMessage} from '../i18n';
+import {factorySound} from './factory-sounds';
+import {visibleParameters} from './sound-model';
 afterEach(()=>{cleanup();localStorage.clear();});
 const controls=[['bassDb','Bass (dB)'],['midDb','Mid (dB)'],['trebleDb','Treble (dB)'],['presenceDb','Presence (dB)']] as const;
 type Loose=Record<string,Record<string,unknown>>;
@@ -63,4 +66,44 @@ it('offers every amp and cabinet the native player knows, and refuses any other 
 it('keeps the tone stack in saved sounds',()=>{
   expect(saveSoundPreset('Dark crunch',shaped('trebleDb',-6)).ok).toBe(true);
   expect((readSoundLibrary()[0].sound.effects.amp as unknown as Record<string,unknown>).trebleDb).toBe(-6);
+});
+
+it('takes the low-tuning setting on the metal amp only, from 0 to 1 octave, and saves nothing at 0 (THE-217)',()=>{
+  const metal=(value:unknown)=>{const sound=soundPreset('lead');sound.effects.amp.model='metal';(sound.effects.amp as unknown as Record<string,unknown>).lowEndOct=value;return sound;};
+  expect(Object.hasOwn(defaultEffects().amp,'lowEndOct')).toBe(false);
+  for(const value of [0,.25,.5,1])expect(soundProblem(metal(value)),String(value)).toBeNull();
+  for(const value of [-.25,1.25,2,Number.NaN,'1',null])expect(soundProblem(metal(value)),String(value)).toBe('Invalid effect parameter.');
+  // The new factory sound uses it; the others do not.
+  expect(factorySound('metal-rhythm')!.effects.amp.lowEndOct).toBe(1);
+  expect(factorySound('rock-lead')!.effects.amp.lowEndOct).toBeUndefined();
+  const onEdit=vi.fn();
+  render(<SoundPanel trackId="base/0" sound={factorySound('metal-rhythm')!} onEdit={onEdit}/>);
+  const input=screen.getByLabelText('amp Low tuning (oct)');
+  expect(input).toHaveValue(1);expect(input).toHaveAttribute('min','0');expect(input).toHaveAttribute('max','1');expect(input.closest('label')).toHaveAttribute('title');
+  fireEvent.change(input,{target:{value:'1.5'}});expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.change(input,{target:{value:'0'}});
+  expect(Object.hasOwn((onEdit.mock.calls.at(-1)?.[0].sound as TrackSound).effects.amp,'lowEndOct')).toBe(false);
+});
+
+it('hides the low-tuning setting where it does nothing, and keeps a stored value there (THE-217)',()=>{
+  for(const model of ['clean','crunch','lead','bass','bassDrive'] as const){
+    const sound=soundPreset('lead');sound.effects.amp.model=model;sound.effects.amp.lowEndOct=.5;
+    expect(visibleParameters('amp',sound.effects).map(p=>p.key),model).toEqual(['drive','gainDb','bassDb','midDb','trebleDb','presenceDb']);
+    const {unmount}=render(<SoundPanel trackId="base/0" sound={sound} onEdit={vi.fn()}/>);
+    expect(screen.queryByLabelText('amp Low tuning (oct)'),model).toBeNull();
+    expect(sound.effects.amp.lowEndOct).toBe(.5);expect(soundProblem(sound)).toBeNull();
+    unmount();
+  }
+  const metal=soundPreset('lead');metal.effects.amp.model='metal';
+  expect(visibleParameters('amp',metal.effects)).toHaveLength(7);
+});
+
+it('says in every language what the low-tuning setting does',()=>{
+  const names=new Set<string>();
+  for(const lang of ['en','et','de'] as const){
+    const label=getMessage(lang,'param.low_end_oct'),hint=getMessage(lang,'param.low_end_oct_hint');
+    expect(label.length,lang).toBeGreaterThan(5);expect(hint.length,lang).toBeGreaterThan(40);expect(hint,lang).not.toMatch(/^param\./);
+    names.add(label);
+  }
+  expect(names.size).toBe(3);
 });

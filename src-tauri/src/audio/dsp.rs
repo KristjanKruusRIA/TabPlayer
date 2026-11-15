@@ -125,7 +125,7 @@ pub struct Amp {
     pub treble_db: f64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub presence_db: f64,
-    /// Octaves down that the preamp's low cut moves, for a guitar tuned low (0 for the amp as designed).
+    /// Octaves down, 0 to 1, that the metal preamp's low cut moves, for a guitar tuned low (0 for the amp as designed).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub low_end_oct: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1187,7 +1187,7 @@ impl FxSettings {
             ("amp mid", self.amp.mid_db, -12.0, 12.0),
             ("amp treble", self.amp.treble_db, -12.0, 12.0),
             ("amp presence", self.amp.presence_db, -12.0, 12.0),
-            ("amp low end", self.amp.low_end_oct, 0.0, 2.0),
+            ("amp low end", self.amp.low_end_oct, 0.0, 1.0),
             ("EQ low", self.eq.low_db, -24.0, 24.0),
             ("EQ mid", self.eq.mid_db, -24.0, 24.0),
             ("EQ high", self.eq.high_db, -24.0, 24.0),

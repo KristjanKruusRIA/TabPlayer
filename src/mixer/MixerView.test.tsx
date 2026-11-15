@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { model } from '@coderline/alphatab';
-import { factorySound } from '../audio/factory-sounds';
+import { earlierFactorySound, factorySound } from '../audio/factory-sounds';
 import { DEFAULT_PRACTICE } from '../audio/practice-types';
 import { soundPreset } from '../audio/sound-model';
 import type { PlaybackState } from '../audio/types';
@@ -345,6 +345,20 @@ it('reads a tweaked sound as edited, and a restored one as its preset or factory
   // The strip shows it too.
   render(<MixerView {...props(base(),{[trackIdentity(guitar)]:tweakedPreset})}/>);
   expect(within(screen.getByRole('group',{name:'Sound Guitar'})).getByText('Crunch (edited)')).toBeInTheDocument();
+});
+
+it('names the settings an earlier version of a factory sound saved, instead of a preset marked edited (THE-217)', ()=>{
+  const [guitar]=base().tracks;
+  const tone=(sound:TrackSound)=>describeTrackSound(guitar,sound).tone;
+  const earlier=earlierFactorySound('metal-rhythm')!;
+  // A project that copied the old Metal rhythm keeps its settings and says so; it is not the current sound, nor a Lead.
+  expect(earlier.effects.amp.model).toBe('metal');expect(earlier.effects.amp.drive).toBe(.55);expect(earlier.effects.drive.enabled).toBe(true);
+  expect(tone(earlier)).toBe('Metal rhythm (earlier version)');
+  expect(tone(factorySound('metal-rhythm')!)).toBe('Metal rhythm');
+  // Edited from there it is still the preset it started from, as every edited sound is.
+  earlier.effects.amp.drive=.9;
+  expect(tone(earlier)).toBe('Lead (edited)');
+  expect(earlierFactorySound('jazz-clean')).toBeNull();
 });
 
 it('puts the master output in the mixer and sends its changes through setMaster, not the track mix', async()=>{

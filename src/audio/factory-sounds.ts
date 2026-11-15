@@ -58,12 +58,27 @@ const definitions:readonly FactoryDefinition[]=[
     octaver:{octaveDown:.7,twoOctavesDown:0,direct:.6},amp:{model:'bass',drive:.4,gainDb:-5},cabinet:{model:'bass'},eq:{highDb:-4}}},
 ];
 
+/** Factory sounds as an earlier version defined them, for naming the settings a project copied before a sound was retuned. They are not
+ * offered to apply. */
+const earlierDefinitions:readonly FactoryDefinition[]=[
+  {id:'metal-rhythm',name:'Metal rhythm (earlier version)',category:'Lead and high gain',presetId:'lead',description:'The Metal rhythm of before it gained body for low tunings (THE-217).',effects:{
+    gate:{thresholdDb:-50,releaseMs:60},drive:{model:'overdrive',drive:.2,tone:.6},amp:{model:'metal',drive:.55,gainDb:-2},cabinet:{model:'closed'}}},
+];
+function build(definition:FactoryDefinition,voiceId:string|null):TrackSound {
+  const effects=defaultEffects() as unknown as Record<string,Record<string,unknown>>;
+  for(const [block,patch] of Object.entries(definition.effects))effects[block]={...effects[block],...patch,enabled:true};
+  return {voiceId,presetId:definition.presetId,effects:effects as unknown as FxSettings};
+}
+/** The earlier versions that have a name, for the mixer. */
+export const earlierFactorySounds:readonly FactorySound[]=earlierDefinitions.map(({effects:_effects,...sound})=>sound);
+/** The settings of the earlier version of factory sound `id`, or null when it has none. */
+export function earlierFactorySound(id:string):TrackSound|null {
+  const definition=earlierDefinitions.find(entry=>entry.id===id);
+  return definition?build(definition,null):null;
+}
 export const factorySounds:readonly FactorySound[]=definitions.map(({effects:_effects,...sound})=>sound);
 /** The factory sound `id` for a track with `voiceId`, or null when there is none. */
 export function factorySound(id:string,voiceId:string|null=null):TrackSound|null {
   const definition=definitions.find(entry=>entry.id===id);
-  if(!definition)return null;
-  const effects=defaultEffects() as unknown as Record<string,Record<string,unknown>>;
-  for(const [block,patch] of Object.entries(definition.effects))effects[block]={...effects[block],...patch,enabled:true};
-  return {voiceId,presetId:definition.presetId,effects:effects as unknown as FxSettings};
+  return definition?build(definition,voiceId):null;
 }

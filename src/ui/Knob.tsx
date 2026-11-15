@@ -18,6 +18,8 @@ export interface ControlProps {
   onInputEnd?:(committed:boolean)=>void;
 }
 export interface KnobProps extends ControlProps {
+  /** One line shown as a tooltip over the whole knob. */
+  title?:string;
   /** `amp` is the dark knob on a tungsten faceplate; `pedal` the pale one on a dark face. */
   tone?:'pedal'|'amp';
   /** Draws the value arc from the middle of the range, for controls that are flat at the centre. */
@@ -41,7 +43,7 @@ const arc=(from:number,to:number,radius:number)=>{
 
 /** A rotary control drawn in SVG. Drag it vertically, use the arrow keys or the wheel while it has focus, double-click to
  * reset it, or click its readout to type a value. */
-export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,busy=false,onCommit,onInput,onInputEnd,tone='pedal',bipolar=false,className,scale}:KnobProps) {
+export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,busy=false,onCommit,onInput,onInputEnd,tone='pedal',bipolar=false,className,scale,title}:KnobProps) {
   const gid=useId().replace(/[^a-zA-Z0-9]/g,'_');
   const range=useRange({value,min,max,step,defaultValue,disabled,busy,onCommit,onInput,onInputEnd});
   const {shown,handlers}=range;
@@ -50,7 +52,7 @@ export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,forma
   const text=formatValue(shown,{min,step,unit,format});
   const typing=useTypedValue({text:()=>formatValue(shown,{min,step}),commit:number=>range.commit(number),done:()=>dial.current?.focus({preventScroll:true})});
   const {editing,typed,setTyped,finish:finishTyping}=typing,beginTyping=()=>{if(!range.refusing)typing.begin();};
-  return <div className={`tp-knob ${className??''}`} data-tone={tone} data-disabled={disabled||busy||undefined}>
+  return <div className={`tp-knob ${className??''}`} data-tone={tone} data-disabled={disabled||busy||undefined} title={title}>
     <div ref={el=>{dial.current=el;range.wheelRef.current=el;}} className="tp-knob-dial" role="slider" tabIndex={disabled?-1:0} aria-label={ariaLabel??label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={shown} aria-valuetext={text} aria-disabled={disabled||busy||undefined}
       onPointerDown={handlers.onPointerDown} onPointerMove={handlers.onPointerMove} onPointerUp={handlers.onPointerUp} onPointerCancel={handlers.onPointerCancel} onDoubleClick={handlers.onDoubleClick} onLostPointerCapture={handlers.onLostPointerCapture} onBlur={handlers.onBlur}
       onKeyDown={event=>{if(handlers.key(event)){event.stopPropagation();return;}if(event.key==='Enter'&&!range.refusing){event.preventDefault();event.stopPropagation();beginTyping();}}}>

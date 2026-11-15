@@ -154,6 +154,32 @@ try {
   result.undoMs=Math.round(undoDrawn.at-undoKey);result.undoIpcMs=Math.round(undoCall.end-undoKey);
   assert.ok(result.undoMs<=BUDGET.undoMs,`undo drawn in ${result.undoMs} ms (budget ${BUDGET.undoMs})`);
 
+  // 3c. A beat inserted and a note typed in place are the document's own new objects: a real click on each selects them (the rendered copy gave them ids of its own).
+  await settle();
+  const position=()=>page.evaluate(()=>document.querySelector('.statusbar-position')?.textContent??'');
+  const parsed=text=>({bar:Number(text.match(/Bar (\d+)/)?.[1]),beat:Number(text.match(/Beat (\d+)/)?.[1]),string:Number(text.match(/String (\d+)/)?.[1])});
+  const clickAt=async(x,y)=>{for(const type of ['mouseMoved','mousePressed','mouseReleased'])await cdp.send('Input.dispatchMouseEvent',{type,x,y,button:type==='mouseMoved'?'none':'left',buttons:type==='mouseReleased'?0:1,clickCount:type==='mouseMoved'?0:1});await sleep(250);};
+  const withModifiers=async(key,code,vk,modifiers)=>{await cdp.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key,code,windowsVirtualKeyCode:vk,modifiers});await sleep(15);await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key,code,windowsVirtualKeyCode:vk,modifiers});await sleep(80);await settle();};
+  const caretCentre=()=>page.evaluate(()=>{const box=document.querySelector('.score-edit-target')?.getBoundingClientRect();return box&&{x:box.x+box.width/2,y:box.y+box.height/2};});
+  await press('ArrowRight');await sleep(400);await settle();
+  const home=parsed(await position());
+  await withModifiers('Delete','Delete',46,8);      // Shift+Delete: the beat goes (its bar was full)
+  await withModifiers('Insert','Insert',45,2);      // Ctrl+Insert: a new beat in its place
+  const created=await caretCentre();assert.ok(created,'the cursor is drawn on the new beat');
+  await clickAt(point.x,point.y);
+  const away=parsed(await position());assert.notDeepEqual([away.bar,away.beat],[home.bar,home.beat],'the click elsewhere moved the cursor');
+  await clickAt(created.x,created.y);
+  const onBeat=parsed(await position());
+  assert.deepEqual([onBeat.bar,onBeat.beat],[home.bar,home.beat],'a real click on the inserted beat selects it');
+  // A note typed on it, then a click elsewhere and a click on the note.
+  await press('5');await sleep(120);await settle();
+  const typed=parsed(await position()),noteAt=await caretCentre();
+  await clickAt(point.x,point.y);
+  await clickAt(noteAt.x,noteAt.y);
+  const onNote=parsed(await position());
+  assert.deepEqual([onNote.bar,onNote.beat,onNote.string],[typed.bar,typed.beat,typed.string],'a real click on the typed note selects its beat and its string');
+  result.clicks={beat:[onBeat.bar,onBeat.beat],note:[onNote.bar,onNote.beat,onNote.string]};
+
   // 4. Idle: nothing redraws, the engine says little, the main thread rests.
   await settle();await page.waitForTimeout(1000);await reset();
   await cdp.send('Performance.enable');

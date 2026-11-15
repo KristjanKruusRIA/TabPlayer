@@ -112,8 +112,12 @@ reproduced except where noted.
    with one rebuilt from the file and the history, in steps that give way to typing (`verifyEditStepwise`; the rebuild and the two
    descriptions are generators that yield every few thousand objects, and the check waits while `isInputPending`). On a difference
    the rebuilt document replaces it, the console says so, and a quiet note (en, et, de: `status.document_rebuilt`) shows in the
-   status bar until the next edit. Every export (the export dialog and GP export) first awaits `controller.verified()`, which checks if any
-   edit is unverified; Save writes native's project, which never held the in-place score. Tests: the timer waits for the edits to stop,
+   status bar until the next edit. **What is true about exports** (corrected by the second review, see M1): the export dialog and GP export first await
+   `controller.verified()`, which returns at once if the document's *score object* is the one a full build made or a check found equal, and
+   otherwise compares it first. Which score is "known good" is tracked by the score object, not by a count of edits, so a settings edit
+   (a page layout changed in the export dialog, a mixer drag) no longer makes an unchecked score look checked. Save writes native's project,
+   which never held the in-place score. Other readers of the score (print preview, the playback plan) are not gated: the plan is built
+   from the in-place score within a second of an edit, and a swap rebuilds it. Tests: the timer waits for the edits to stop,
    an injected divergence is repaired, a verified document is not checked twice. Cost, measured in node (cold, no UI, so an
    upper-ish bound on the work, not a replay of what the window feels): the whole check takes 2.8 s on the 6 x 200 score and 0.9 to 1.6 s on
    the owner's scores, in 13 to 21 slices; the longest slice that cannot be split (parsing the file, the final rebuild, the score's
@@ -136,6 +140,48 @@ reproduced except where noted.
    and supersede one another. Playback is invalidated at once either way and Play never uses a stale plan.
 9. **`sameData`.** Maps and sets are compared by their entries (keys by identity); two different ones are no longer "equal"; tested.
 10. This note.
+
+## Second review (M1 to M4 and the rest)
+
+Each was reproduced as a failing test first; all four reproduced.
+
+* **M1, a settings edit marked the in-place score as verified.** Reproduced (`controller.test.ts`: an in-place edit, the score corrupted, a
+  mixer edit, `verified()` returned without comparing). The counter is gone: the controller remembers the *score object* that is known to
+  equal a rebuild (set by a full build or an equal check), and a settings edit keeps the score object, so it keeps the doubt. Every action
+  that ends while the document is unchecked (save, copy, lock, protect, an edit that records nothing, a settings edit, undo or redo of one)
+  arms the 2 s check again.
+* **M2, undo and redo in place had no fallback.** Reproduced with an injected throw (`controller.faults.test.ts`): native had acted and
+  the controller rejected. A throw in `undoInPlace` or `editInPlace` after native acted now rebuilds the document from what native holds
+  (the shared tracks are then dropped, so a half-edited redo cannot stay); a refusal by `checkEditInPlace` before a redo falls back to
+  the full path instead of blocking it.
+* **M3, notes and beats made in place could not be clicked.** The copy's objects get ids from the counters, so the document's new beat and
+  the copy's new beat had different ids, and `canonicalBeat` looked the clicked object up by its id in a map keyed by the document's ids.
+  The projection now also keeps the reverse maps by object (`renderedBeats`, `renderedNotes`), `ScoreView` uses them, and `follow.test.ts`
+  checks every rendered beat and note, new ones included. The desktop driver does the real clicks: delete the beat under the cursor
+  (Shift+Delete), insert one (Ctrl+Insert), click elsewhere, click the new beat, type a note on it, click elsewhere, click the note, and
+  assert the status bar's bar, beat and string each time.
+* **M4, the stepwise idle rebuild and the id counters.** Reproduced (`controller.faults.test.ts`: the counters put on the ids of the score's
+  first note and beat between the steps: the check counted a mismatch and swapped in the corrupt rebuild). Three changes: the stepwise
+  build puts the counters back to where it had taken them at every resume (`raiseCounters`); a rebuilt document that holds a repeated id
+  cancels the check (it is never a repair); and a mismatch is never acted on from the stepwise result: a rebuild made in one piece is
+  compared, and only that one can replace the document (if it equals the edited one, the check was a false alarm and says so in the
+  console).
+* **Idle check and playback.** The check waits while playback runs (or counts in) and is tried again each second; exports still verify at
+  once.
+* **The check's cost grows with the history.** Measured on the owner's largest score in node (cold), one slice per yield: after 0 edits
+  1.0 s in 17 slices, longest 206 ms; after 200 edits (131 beat insertions and deletions) 30.6 s in 217 slices, longest 351 ms, 135 slices over
+  100 ms; after 500 edits (357 of them) 103 s in 517 slices, longest 673 ms. The replay does a whole-score round trip for every edit that is
+  not a plain note, rest or duration change; real histories hold far fewer than this random mix, but there is no bound. So past 12 such
+  edits the idle check does not replay: it compares each track with the track a rebuild's round trip makes of it
+  (`verifyTracksStepwise`: capture the links, serialize, deserialize, restore the links, compare). That costs 0.75 s in total and slices of
+  at most 100 to 117 ms (up to 174 ms while other tests ran) after 0, 200 and 500 edits alike. It finds a derived state (a lookup, an index,
+  a link, a chain) that an in-place edit left different from what a rebuild works out from the same notes; it does not replay the
+  history, so it cannot find a note that was written wrongly. A difference found this way is confirmed by a rebuild in one piece before the
+  document is replaced (which, on a long history, takes as long as the replay: it only happens when something is wrong). A real
+  checkpoint (verify only the edits since the last verified point) would need `buildDocument` to start from a built score and its
+  settings; that was not done.
+* **`editsFitLive`** answers "unknown" (null) for a pair holding `deleteBeat`, for more than eight commands and for nested sequences
+  instead of "false".
 
 Also from the second round, because both sets of code are together now:
 
@@ -187,20 +233,25 @@ with the final code:
 
 ## Verification run
 
-All on the final working tree, in `E:\git\TabPlayer\.worktrees\edit-speed`. The worktree's primary-directory note changed to
-`.worktrees\stretch` during the work; every command was run in `edit-speed` by explicit path and nothing in `stretch` was touched.
+Final working tree after the second review, `develop` merged twice (1d00286, then d6aad14
+with the tuning dialog; no conflicts). The primary-directory note of the environment changed twice (`stretch`, `sidebar`); every command
+ran in the task's own worktree by explicit path.
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | no errors |
-| `npm test -- --testTimeout=60000` | 419 files passed, 5 skipped; 7288 tests passed, 8 skipped, none failed (834 s). `plan.performance.test.ts.snap` was restored with `git checkout --` |
-| `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` | clean. Rust did not change in this round (the status de-duplication in `device.rs` is from the first round and passed `cargo test --locked --workspace --no-fail-fast` then: 2026 passed, 0 failed), so the workspace was not rerun |
-| `TP_OWNER_SCORES=... npx vitest run src/engine.in-place.owner.test.ts` | 5 scores passed, 500 edits (see above) |
-| `scripts/build-desktop-test.ps1` | built (develop merged, review fixes) |
-| `node tests/desktop/edit-speed.mjs` | exit 0 (digit edit median 230 ms drawn, burst of 6 edits worst call 133 ms, 1 prepare, join 656 ms drawn once, undo 284 ms, cursor 21 ms, idle 0.4 %, 3 status events in 3 s, 3 edits compared with a rebuild, 0 mismatches) |
-| `editor`, `parity-entry`, `loop-through-edit`, `exports`, `parity-document-tabs`, `parity-mix-drag`, `parity-fret-typing`, `parity-track-click` | exit 0 each |
-| `parity-clipboard` | exit 0 (the first five attempts, across three rounds, did not start: another agent's app held the shared port or took over the launch; run again when the port was free) |
+| `npm test -- --testTimeout=60000` | Node resource tests and the secret scan pass; Vitest 7300 passed, 8 skipped, 0 failed (the one failure of the first run, `gp-losses.test.ts`, put a score into the controller by hand and did not say it was the verified one; the test now does) |
+| `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` | clean. Rust has not changed since the first round (status de-duplication in `device.rs`), when `cargo test --locked --workspace --no-fail-fast` passed: 2026 passed, 0 failed |
+| owner-score fuzz (`TP_OWNER_SCORES`, 5 scores, 100 edits each, undo and redo in the other fuzzes) | passed: 500 edits over the 5 scores, 430 in place, 57 refused up front, 13 sent to the full rebuild (the let ring or palm mute beside a rest case) |
+| `scripts/build-desktop-test.ps1` | built (merge and review fixes) |
+| `node tests/desktop/edit-speed.mjs` | exit 0: digit edit median 197 ms drawn (worst 513), burst of 6 edits worst call 85 ms and 1 prepare, join 605 ms drawn once, undo 156 ms, cursor 12 ms, idle 0.6 %, real clicks on an inserted beat (bar 1, beat 5) and on the note typed on it (string 4) land on them, 3 edits compared with a rebuild with 0 mismatches |
+| `editor`, `parity-entry`, `loop-through-edit`, `exports`, `parity-document-tabs`, `parity-mix-drag`, `parity-fret-typing`, `parity-track-click`, `parity-clipboard`, `parity-tuning-dialog`, `parity-workstation` | exit 0 each |
+| M3 on the build from before the fix | the new click step fails there ("a real click on the inserted beat selects it"), as the unit test did |
 
+`plan.performance.test.ts.snap` is rewritten by the run and was restored with `git checkout --`. macOS and Linux were not measured.
+
+New Vitest files in the second round: `controller.faults.test.ts` (undo and redo faults, the id counters during the idle check, the long-history check),
+additions to `controller.test.ts`, `follow.test.ts`, `apply-in-order.test.ts`.
 
 ## What remains slow, and the next step
 

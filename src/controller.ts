@@ -4,7 +4,7 @@ import { gpExportRefusal,gpLosses } from './interchange/gp-losses';
 import { scoreHasMusicXmlTimeCarry } from './interchange/musicxml-time-symbols';
 import { gpWarning } from './export/gp-warning';
 import { yieldToInput } from './engine-verify';
-import { buildDocument, canEditInPlace, canUndoInPlace, compareDocuments, checkEditInPlace, editInPlace, editStats, idleVerification, registerLiveDocument, undoInPlace, verifyEditStepwise, effectiveAudioSettings,exportGp, forgetPreview, previewEdit, replayDocumentSettings, shouldCheckEdit, verifyEditInPlace, type BuiltDocument } from './engine';
+import { buildDocument, canEditInPlace, canUndoInPlace, compareDocuments, replayIsHeavy, verifyTracksStepwise, checkEditInPlace, editInPlace, editStats, idleVerification, registerLiveDocument, undoInPlace, verifyEditStepwise, effectiveAudioSettings,exportGp, forgetPreview, previewEdit, replayDocumentSettings, shouldCheckEdit, verifyEditInPlace, type BuiltDocument } from './engine';
 import { appliesFilePartialCapo, projectCommands, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
 import { getPartialCapo } from './editor/partial-capo';
 import type { DocumentId,DocumentRevision,DocumentSnapshot } from './workspace/types';
@@ -118,7 +118,8 @@ export class DocumentController {
     if(!this.isUnverified())return true;
     const run=++this.verifyRun,live=this.state;
     const cancelled=()=>run!==this.verifyRun||this.state.score!==live.score||this.state.revision!==live.revision;
-    const result=await verifyEditStepwise(live.snapshot.project,live,live.snapshot.canRedo,pause,cancelled);
+    // A long history is not replayed (that costs a round trip of the whole score per beat inserted or deleted in it): the tracks are compared with what a rebuild's round trip makes of them.
+    const result=replayIsHeavy(live.snapshot.project)?await verifyTracksStepwise(live,pause,cancelled):await verifyEditStepwise(live.snapshot.project,live,live.snapshot.canRedo,pause,cancelled);
     if(!result||cancelled())return false;
     editStats.verified++;
     if(result.problem){

@@ -819,6 +819,42 @@ export function verifyEditInPlace(project:ProjectInput,built:BuiltDocument,canRe
 }
 
 /**
+ * Replaying a history costs a whole-score round trip for every edit in it that is not a plain note, rest or duration change (the replay
+ * rebuilds after each), so the check against a replay grows with the history: 30 s for 130 beat insertions or deletions on a long score. Past this many
+ * such edits the idle check compares each track with the track a rebuild's round trip makes of it instead (`verifyTracksStepwise`), which costs the
+ * same however long the history is.
+ */
+export const HEAVY_HISTORY=12;
+export function replayIsHeavy(project:ProjectInput):boolean {
+  const plain=new Set(['setNote','removeNote','setRest','setDuration']);
+  let heavy=0;for(const edit of projectCommands(project))if(!plain.has(edit.type)&&!isSettingsEdit(edit)&&++heavy>HEAVY_HISTORY)return true;
+  return false;
+}
+/**
+ * Compares every track of `built` with the track that the serialization pass of a rebuild makes of it (the same capture, round trip and restore of the
+ * links that `rebuild` does), in steps that let other work go first. It finds a derived state (a lookup, an index, a link, a chain) that an edit
+ * applied in place left different from what a rebuild works out from the same notes; it does not replay the history, so it cannot find a note that
+ * is wrong in the way it was written. Resolves null when cancelled, otherwise the first difference or null.
+ */
+export async function verifyTracksStepwise(built:BuiltDocument,pause:()=>Promise<void>,cancelled:()=>boolean):Promise<{problem:string|null}|null> {
+  const repeated=duplicateIds(built.score);if(repeated)return {problem:`duplicate ids: ${repeated}`};
+  for(const track of built.score.tracks) {
+    await pause();if(cancelled())return null;
+    const alone=Object.assign(Object.create(Object.getPrototypeOf(built.score)),built.score,{tracks:[track],masterBars:built.score.masterBars}) as model.Score;
+    const links=captureNoteLinks(alone),json=JsonConverter.scoreToJson(alone);
+    await pause();if(cancelled())return null;
+    const round=scoreFromJson(json,settings);restoreNoteLinks(round,links);round.tracks[0].index=track.index;
+    await pause();if(cancelled())return null;
+    // A track's pointer to its score is the one thing that differs by construction (one score holds the track, the other holds it among the rest).
+    const one=describeScoreSteps(alone,['score']),other=describeScoreSteps(round,['score']);
+    let a=one.next(),b=other.next();
+    while(!a.done||!b.done){await pause();if(cancelled())return null;if(!a.done)a=one.next();if(!b.done)b=other.next();}
+    const difference=firstDifference(a.value,b.value);
+    if(difference)return {problem:`track ${track.index} ${difference}`};
+  }
+  return {problem:null};
+}
+/**
  * `verifyEditInPlace` that lets other work go first between its steps (`pause`) and gives up when `cancelled()` says the document moved on.
  * Resolves null when cancelled, otherwise the difference found (null when the documents are the same) and the document rebuilt from the project.
  */

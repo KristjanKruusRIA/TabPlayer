@@ -101,3 +101,29 @@ describe('the idle check while other files are opened',()=>{
     } finally {errors.mockRestore();warn.mockRestore();}
   });
 });
+
+describe('the idle check after a long history',()=>{
+  it('compares the tracks with a rebuild round trip instead of replaying the history, and still finds a divergence',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+    const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+    try {
+      const project:Project={...blank(),edits:Array.from({length:14},()=>({type:'appendMeasure'}) as EditCommand)};
+      expect(engine.replayIsHeavy(project)).toBe(true);
+      const controller=await DocumentController.create(makeBridge(project));
+      await controller.edit({type:'setNote',target:at(0,1),string:2,fret:5});
+      // The replay is not made: the rebuild's own steps are not run.
+      const steps=vi.spyOn(engine,'verifyEditStepwise');
+      expect(await controller.verifyNow(async()=>{})).toBe(true);
+      expect(steps).not.toHaveBeenCalled();
+      expect(warn,'a sound document raised no alarm').not.toHaveBeenCalled();
+      expect(controller.getState().repaired).toBeFalsy();
+      // A derived state a rebuild would work out differently is found, and the document is replaced by a rebuild.
+      await controller.edit({type:'setNote',target:at(1,1),string:3,fret:7});
+      controller.getState().score.tracks[0].staves[0].bars[1].voices[0].beats[1].notes[0].index=5;
+      const mismatches=editStats.mismatches;
+      await controller.verifyNow(async()=>{});
+      expect(editStats.mismatches-mismatches).toBe(1);expect(controller.getState().repaired).toBe(true);
+      expect(verifyEditInPlace(controller.getState().snapshot.project,controller.getState())).toBeNull();
+    } finally {errors.mockRestore();warn.mockRestore();}
+  },120000);
+});

@@ -135,7 +135,7 @@ export async function selectWorkspaceTrack(page,name) {
   if(returnToInstrument)await revealDock(page,'Instrument');
 }
 
-const trackActions=new Set(['Apply tuning','Apply instrument settings','Add track','Remove track','Add pitched track','Add percussion track']);
+const trackActions=new Set(['Apply instrument settings','Add track','Remove track','Move track up','Move track down','Duplicate track','Add pitched track','Add percussion track']);
 const backingActions=new Set(['Import backing','Remove backing']);
 const playbackActions=new Set(['Seek','Loop','Clear loop','Play from cursor','Play selection','Loop selection']);
 

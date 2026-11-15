@@ -104,7 +104,7 @@ function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,t
   const staves=track.staves;
   if(track.isPercussion||staves.some(staff=>staff.isPercussion||!staff.tuning.length))throw new Error('Only stringed guitar or bass tracks have strings to add or remove.');
   if(staves.some(staff=>getBanjoDrone(staff)>0))throw new Error('Remove the banjo drone in the staff settings before changing the string count.');
-  if(staves.some(staff=>staff.tuning.length===tuning.length))throw new Error('The string count is unchanged; use Apply tuning to retune.');
+  if(staves.some(staff=>staff.tuning.length===tuning.length))throw new Error('The string count is unchanged; retune with Keep fingering or Keep pitch instead.');
   const moves:({note:model.Note}&Place)[]=[],to=tuning.length,remapped=new Map<model.Staff,ReturnType<typeof getPartialCapo>>();
   for(const staff of staves){
     // Fret and pitch are compared under the capo each string has before and after; a staff without a partial capo lifts nothing, as before.

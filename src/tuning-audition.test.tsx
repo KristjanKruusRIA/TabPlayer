@@ -41,12 +41,19 @@ it('turns a strum into the exact low-to-high payload',()=>{
 it('auditions the addressed track for its tuning and the default sound of the chosen program for a new track',()=>{
   const score=buildScore(blankProject()),onAudition=vi.fn(),id=trackIdentity(score.tracks[0]);
   render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={vi.fn()} onAudition={onAudition}/>);
-  fireEvent.click(screen.getAllByRole('button',{name:'Play string 6 (E2)'})[0]);expect(onAudition).toHaveBeenLastCalledWith({trackId:id},[40],false);
+  // The sidebar row plays the saved tuning; the dialog plays the draft, string by string.
+  fireEvent.click(within(document.querySelector('.track-tuning-row') as HTMLElement).getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({trackId:id},standard,true);
+  fireEvent.click(screen.getByRole('button',{name:/^Edit tuning/}));const tuningDialog=within(screen.getByRole('dialog',{name:'Tuning'}));
+  fireEvent.click(tuningDialog.getByRole('button',{name:'Play string 6 (E2)'}));expect(onAudition).toHaveBeenLastCalledWith({trackId:id},[40],false);
+  fireEvent.click(tuningDialog.getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({trackId:id},standard,true);
+  fireEvent.click(tuningDialog.getByRole('button',{name:'Cancel'}));
   fireEvent.click(screen.getAllByRole('button',{name:'Play tuning'})[0]);expect(onAudition).toHaveBeenLastCalledWith({trackId:id},standard,true);
   fireEvent.click(screen.getByText('Add instrument'));fireEvent.change(screen.getByLabelText('MIDI instrument'),{target:{value:'33'}});
-  const field=screen.getByLabelText('New track tuning').closest('.tuning-field') as HTMLElement;
-  fireEvent.click(within(field).getByRole('button',{name:'Play string 4 (E1)'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[28],false);
-  fireEvent.click(within(field).getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[43,38,33,28],true);
+  const newRow=document.querySelectorAll('.track-tuning-row')[1] as HTMLElement;
+  fireEvent.click(within(newRow).getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[43,38,33,28],true);
+  fireEvent.click(within(newRow).getByRole('button',{name:/^Edit new track tuning/}));const newDialog=within(screen.getByRole('dialog',{name:'Tuning'}));
+  fireEvent.click(newDialog.getByRole('button',{name:'Play string 4 (E1)'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[28],false);
+  fireEvent.click(newDialog.getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[43,38,33,28],true);
 });
 it('auditions the structure panel staff tuning through the addressed track and sends no edit',()=>{
   const score=buildScore({...blankProject(),edits:[{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}]}),onAudition=vi.fn(),onEdit=vi.fn();

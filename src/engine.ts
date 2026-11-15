@@ -416,6 +416,8 @@ export function* buildDocumentSteps(value: ProjectInput, canRedo = false, from?:
   let score:model.Score,sourceBarCount:number,identities:string[],documentSettings:DocumentSettings,embeddedBacking:Uint8Array|null,embeddedBackingSettings:Omit<BackingSettings,'assetId'>|undefined,sourceMixes:Record<string,ChannelMix>|undefined,notice:string|null|undefined,start=0;
   if(from) {
     const copy=yield* cloneDocumentSteps(from.built);yield;
+    // The copy keeps the ids of the document it was made from, and the counters new objects take theirs from may have been set back since (another file was opened).
+    raiseIdCounters(copy.score);
     score=copy.score;sourceBarCount=copy.sourceBarCount!;identities=copy.score.tracks.map(trackIdentity);documentSettings=copy.settings;embeddedBacking=copy.embeddedBacking;
     embeddedBackingSettings=copy.embeddedBackingSettings;sourceMixes=copy.sourceMixes;notice=copy.importNotice;start=from.index;
   } else {

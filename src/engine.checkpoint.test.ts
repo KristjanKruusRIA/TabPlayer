@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { importer, Settings } from '@coderline/alphatab';
+import { importer, model, Settings } from '@coderline/alphatab';
 import { buildDocument, buildDocumentSteps, checkpointFits, cloneDocument, compareDocuments, exportGp, makeCheckpoint, verifyEditStepwise, type BuiltDocument, type Checkpoint } from './engine';
 import { duplicateIds } from './engine-verify';
 import { blankProject, projectCommands, type EditCommand, type Project } from './project';
@@ -110,5 +110,16 @@ describe('a replay from a checkpoint equals the rebuild from the file and every 
     full.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret=9;
     const differs=await verifyEditStepwise(project,full,false,async()=>{},()=>false,checkpoint);
     expect(differs?.problem).not.toBeNull();
+  });
+  it('gives the objects a replay creates ids no object of the checkpoint has, after another file was opened and set the counters back',()=>{
+    // Found by the owner-score fuzz: a copy keeps the ids of the document it was made from, and a counter that another import set back to zero hands them out again.
+    const start={...fileProject(),edits:[1,2,3].map(()=>({type:'appendMeasure'}) as EditCommand)};
+    const checkpoint=makeCheckpoint(start,cloneDocument(buildDocument(start)),false);
+    const project={...start,edits:[...start.edits,...[1,2,3,4].map(()=>({type:'appendMeasure'}) as EditCommand)]};
+    const counters=model as unknown as {Beat:{_globalBeatId:number};Note:{globalNoteId:number};Bar:{_globalBarId:number};Voice:{_globalVoiceId:number}};
+    counters.Beat._globalBeatId=0;counters.Note.globalNoteId=0;counters.Bar._globalBarId=0;counters.Voice._globalVoiceId=0;
+    const replayed=replayFrom(project,false,checkpoint);
+    expect(duplicateIds(replayed.score)).toBeNull();
+    expect(compareDocuments(replayed,buildDocument(project))).toBeNull();
   });
 });

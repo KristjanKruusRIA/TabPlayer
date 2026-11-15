@@ -255,8 +255,8 @@ Each was reproduced as a failing test first.
   more; a closed document is not checked.
 * **`verified()` is bounded.** Three interrupted tries, then one rebuild from the file in one piece, compared and, on a difference, swapped in.
   When the window is hidden (timers throttled) the check is made without waiting on timers.
-* **A rebuild that fails after native acted** (undo, redo or an edit healed by rebuilding) marks the document broken: the error is shown, every
-  action but saving and closing refuses with it, and the failure is thrown, instead of leaving the document silently behind native.
+* **A rebuild that fails after native acted** (undo, redo or an edit healed by rebuilding) marks the document broken and the failure is thrown, instead of
+  leaving the document silently behind native. (The first version still allowed saving; the fourth review replaced that, see below.)
 * **`__tabplayerEditStats` and `__tabplayerCheckEdits`** exist only in development, in tests and in the desktop test build.
 * **`gp-losses.test.ts`** no longer pokes a private field: `adoptVerifiedScoreForTest`.
 * **Merge of `develop`** (click-to-seek and Space, 61ab5fb): conflicts in `App.tsx` (the `ScoreView` line: `holdDraw` and `onSelect={selectByClick}`
@@ -264,6 +264,49 @@ Each was reproduced as a failing test first.
   just-edited score is not built is refused or kept waiting by their code (`ready`, five seconds); the plan is built after the edits stop (a frame
   and a task for the first edit, 300 ms for a burst) and native reports ready, which is the signal their code waits for. Test: seek refused while the
   plan of an edited score is not built, accepted once it is ready.
+
+## Fourth review (the broken document, and three small items)
+
+* **A document that cannot be rebuilt after native has acted.** The sequence the reviewer traced: the in-place check accepts an edit that the full
+  replay refuses; the idle check's replay throws and so does the rebuild in one piece; the document was marked broken but Save was still
+  allowed and wrote the edit to the file, which then no longer opened (`buildDocument` throws on every open); Save's `run` also cleared the
+  alert. Reproduced as failing tests first (`controller.faults.test.ts`: an edit that `verifyEditStepwise` and `buildDocument` refuse, accepted
+  in place). Now:
+  * The message goes through `src/i18n` (`document.broken`, `document.broken_refused`, `document.taken_back_one`, `document.taken_back_other`
+    in en, et and de). It says what to do: undo the last edit, or close without saving.
+  * **Automatic take-back.** When the break is detected the newest edits are taken back at once: native undo, then a rebuild of what native
+    holds, one edit at a time, up to the edits made since the last checkpoint (at most 16). When the rebuild succeeds the document is whole, verified,
+    the checkpoint starts again from it, and a notice says "the last N edits could not be kept and were taken back" (the edits stay in native's redo
+    stack). The check runs as an action in the queue, so it is serialized with everything else.
+  * **If that does not make it whole** (native undo fails, or the bound is reached) the document stays broken. Then Undo is allowed and does the
+    same one edit at a time (repeatable until a rebuild succeeds); Save, Save As, edits, redo, copy, cut, lock, protect and every export are refused
+    with the translated reason; the alert stays (no action clears it, and an action queued before the break is refused when its turn comes);
+    Close is allowed and does not ask whether to save (the question offers to save what cannot be rebuilt), so it closes without saving.
+  * **The recovery backup.** It is written by native from native's own live history, not by the window, and the window cannot hold it back. While a
+    document is broken native still holds the bad edit, so a backup captured in that window has it. The automatic take-back removes the edit from
+    native's history in the same task as the failed check, so in the normal case the next capture no longer has it as an applied edit; I did not
+    check whether a backup keeps native's redo stack. A session restored from such a backup opens through the next item.
+  * **Opening a saved history that does not replay** (defence in depth, `DocumentController.create`): the longest prefix of the log that replays is
+    found by bisection (a failing prefix makes every longer one fail), the rest is taken back with native undo (nothing is written to the file until the
+    user saves), and a notice says so. A base that does not open at all is still an error. Test: a history whose third edit fails opens with the first two.
+* **The idle check stops when playback or a count-in starts** (`holdVerification`, driven by the player's state instead of a gate read once at the start): a
+  running check is cancelled and an armed one does not start; the check is armed again when playback ends. Checks an action asked for (export, copy) are not held.
+* **`settled()` rejects when the document is closed while it waits** (`DocumentClosedError`) instead of returning an unchecked state; Copy, Cut and
+  the exports ignore that error quietly.
+* **`adoptVerifiedScoreForTest`** is a module-level seam that throws outside tests (`MODE==='test'`), no public method of the controller; the unused
+  `skip` parameter of `describeScoreSteps` is gone.
+* **The sampled check** (`editCheck`, every 25th edit in development) made the controller tests depend on how many edits earlier tests had made; the
+  fault tests turn it off.
+
+### Known limits, left for after the owner's test build
+
+* A replay that disagrees with the open document is decided by a rebuild from the file in one piece (about 1.1 s on the owner's largest score, synchronous),
+  not by a second replay from another checkpoint; a document that disagrees persistently would pay that once per idle check.
+* After an undo below the checkpoint the check replays from the file (4 to 5 s in slices after 200 edits on the owner's largest score) instead of from an
+  older checkpoint.
+* The first checkpoint is copied on the first keystroke after opening (122 ms on the owner's largest score) instead of while the document is idle.
+* Copy and Cut after a burst of edits wait for the check (in slices of at most 40 ms of work, 4.5 s after 200 edits since the last check and 10.2 s after
+  500 in node on that score), during which the editor is busy and keys are refused.
 
 ## The equivalence check
 
@@ -300,16 +343,16 @@ with the final code:
 
 ## Verification run
 
-Final working tree after the third review: `develop` merged three times (1d00286, d6aad14 with the tuning dialog, 61ab5fb with click-to-seek and Space).
+Final working tree after the fourth review: `develop` merged three times (1d00286, d6aad14 with the tuning dialog, 61ab5fb with click-to-seek and Space).
 Every command ran in the task's own worktree by explicit path.
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | no errors |
-| `npm test -- --testTimeout=60000` | Node resource tests and the secret scan pass; Vitest 7350 passed, 8 skipped, 0 failed (an earlier full run of this round failed once, `App.test.tsx` Sound view: Copy now waits for a verified score and that check, made in timer slices, kept the app busy so the following Ctrl+Z was refused; Copy, Cut and the exports now check in slices of up to 40 ms of work, so a small document is checked in one go) |
+| `npm test -- --testTimeout=60000` | Node resource tests and the secret scan pass; Vitest 7355 passed, 8 skipped, 0 failed (fourth review) |
 | `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` | clean |
 | `cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml` | 2028 passed, 0 failed, 96 ignored (Rust is merged from two branches now; run on the tree before the last TypeScript-only commits) |
-| owner-score fuzz (`TP_OWNER_SCORES`, 5 scores, 100 edits each, with the replay from a checkpoint compared with the rebuild every tenth edit) | passed on the final tree (it found the id-counter bug above on its first run) |
+| owner-score fuzz (`TP_OWNER_SCORES`, 5 scores, 100 edits each, with the replay from a checkpoint compared with the rebuild every tenth edit) | passed on the final tree (5 of 5) |
 | `scripts/build-desktop-test.ps1` | built three times this round; the last build is the tree reported here |
 | `node tests/desktop/edit-speed.mjs` | exit 0 in every run. Digit edit median, key to drawn and free, on the 6 x 200 score, over five runs on a machine other work was using: 186, 228, 280, 237, 198 ms (the second round measured 197 and 230); an A/B of this build against the second round's on one score alternately showed no difference in the edit, undo (about 260 ms) or redo (about 270 ms) draw. Join 331 to 483 ms drawn once, undo 144 to 271 ms, cursor 11 ms, idle 0.1 to 0.3 % (it is measured after the idle check has ended), heap growth over 240 edits negative after a warm-up (budget 40 MB), real clicks on an inserted beat and on the typed note land on them, 3 edits compared with a rebuild, no mismatch |
 | `editor`, `parity-entry`, `loop-through-edit`, `exports`, `parity-document-tabs`, `parity-mix-drag`, `parity-fret-typing`, `parity-track-click`, `parity-clipboard`, `parity-tuning-dialog`, `parity-workstation`, `parity-click-seek-space`, `parity-click-seek-repeat`, `parity-click-seek-backing`, `native-audio` | exit 0 each, on the final build |
@@ -320,6 +363,12 @@ in-place edit and the draw) did not change in this round.
 
 New Vitest files in the third round: `engine.checkpoint.test.ts`, `engine.in-place.memory.test.ts`, additions to `controller.faults.test.ts` and
 `NativePlaybackController.test.ts`.
+
+Fourth review, on its final build (rebuilt once, drivers `edit-speed`, `editor`, `parity-entry`, `exports`, `parity-document-tabs`, `parity-clipboard`,
+`parity-fret-typing`, `parity-click-seek-space`: exit 0 each; the others of the third review's list were not rerun for this change, which touches the controller
+and the translations only): `edit-speed` median 234 ms (worst 432), join 439 ms drawn once, undo 277 ms, cursor 11 ms, idle 0.3 %, heap growth over
+240 edits negative; `npm run typecheck` clean, `cargo fmt --check` clean (Rust is unchanged since the third review, whose workspace run passed: 2028 passed, 0 failed).
+The median is again above 200 ms on this shared machine in this run (earlier runs 186 to 280 ms; see the A/B above): the edit's own path was not touched.
 
 ## What remains slow, and the next step
 

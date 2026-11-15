@@ -1661,9 +1661,23 @@ mod plugin_tick_tests {
             *self.audio.test_device.lock().unwrap() = Some((rate, frames));
         }
 
+        /// The rates the helpers were started at, once every launch the tick began has finished. A launch is marked Loading
+        /// in the plug-in service before its thread starts, so waiting for no Loading slot waits for exactly the launches
+        /// there are, however slow the machine: a fixed pause reads the list too early on a busy one.
         fn launches(&self) -> Vec<u32> {
             let start = Instant::now();
-            while start.elapsed() < Duration::from_millis(100) {
+            while self
+                .rig
+                .service
+                .statuses(&self.owner.document_id)
+                .iter()
+                .any(|slot| slot.status == PluginStatus::Loading)
+            {
+                // A hang detector, not a measure: a launch that is only slow is waited for.
+                assert!(
+                    start.elapsed() < Duration::from_secs(60),
+                    "a launch never finished"
+                );
                 std::thread::sleep(Duration::from_millis(5));
             }
             self.rig.launcher.rates.lock().unwrap().clone()
@@ -2076,9 +2090,12 @@ mod plugin_tick_tests {
             .remember_mix(&owner, settings, 1, 512, Some(48_000));
         tick.ready_helper();
         let (reached, in_tick) = std::sync::mpsc::channel();
+        let (resume, paused) = std::sync::mpsc::channel::<()>();
+        // The tick waits here until the test has acted (a dropped sender lets it go too), so the order never depends on how fast
+        // either thread runs.
         *tick.audio.tick_pause.lock().unwrap() = Some(Box::new(move || {
             reached.send(()).unwrap();
-            std::thread::sleep(Duration::from_millis(200));
+            let _ = paused.recv();
         }));
         // A new device rate: the tick replaces the helper with one at that rate.
         tick.device(Some(44_100), 512);
@@ -2090,6 +2107,7 @@ mod plugin_tick_tests {
                 .unwrap()
                 .activate_document(&other)
                 .unwrap();
+            resume.send(()).unwrap();
             ticking.join().unwrap();
         });
         let start = Instant::now();
@@ -2114,9 +2132,11 @@ mod plugin_tick_tests {
         tick.record_mixes();
         tick.ready_helper();
         let (reached, in_tick) = std::sync::mpsc::channel();
+        let (resume, paused) = std::sync::mpsc::channel::<()>();
+        // As above: the tick waits for the close instead of sleeping through it.
         *tick.audio.tick_pause.lock().unwrap() = Some(Box::new(move || {
             reached.send(()).unwrap();
-            std::thread::sleep(Duration::from_millis(200));
+            let _ = paused.recv();
         }));
         // A new device rate: the tick replaces the helper with one at that rate.
         tick.device(Some(44_100), 512);
@@ -2124,16 +2144,27 @@ mod plugin_tick_tests {
             let ticking = scope.spawn(|| tick.audio.plugin_tick(&tick.workspace));
             in_tick.recv().unwrap();
             tick.close_document();
+            resume.send(()).unwrap();
             ticking.join().unwrap();
         });
         // Its states went with it, so nothing could start; and the statuses the tick's request recorded are gone.
-        std::thread::sleep(Duration::from_millis(100));
-        let sessions = tick.rig.launcher.sessions.lock().unwrap().clone();
-        assert!(
-            sessions
-                .iter()
-                .all(|session| session.shutdown_called.load(Ordering::SeqCst))
-        );
+        let start = Instant::now();
+        loop {
+            let sessions = tick.rig.launcher.sessions.lock().unwrap().clone();
+            // The helper made ready above is among them, so this is never an empty list passing for a shutdown.
+            if !sessions.is_empty()
+                && sessions
+                    .iter()
+                    .all(|session| session.shutdown_called.load(Ordering::SeqCst))
+            {
+                break;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(60),
+                "a helper was left running for the closed document"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert!(
             tick.rig
                 .service

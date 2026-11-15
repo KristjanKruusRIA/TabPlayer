@@ -5988,7 +5988,10 @@ mod tests {
             let result = worker.command(TransportCommand::Invalidate { generation: 7 });
             sender.send(result).unwrap();
         });
-        let immediate = received.recv_timeout(Duration::from_millis(100));
+        // The invalidation either returns while the control mutex is held, which it does at once, or waits for the
+        // mutex, which is held until this test lets go: a wait that never ends. So the answer does not depend on how
+        // quickly the thread is scheduled; the deadline only ends the wait that would otherwise be for ever.
+        let immediate = received.recv_timeout(Duration::from_secs(30));
         drop(preparation);
         thread.join().unwrap();
         assert!(

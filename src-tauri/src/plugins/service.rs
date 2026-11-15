@@ -2756,7 +2756,8 @@ pub(crate) mod fakes {
         track_id: &str,
     ) -> PluginStatus {
         let start = Instant::now();
-        while start.elapsed() < Duration::from_secs(2) {
+        // A hang detector: a launch on a busy machine is only slow, and is waited for.
+        while start.elapsed() < Duration::from_secs(60) {
             let statuses = service.statuses(doc_id);
             if let Some(s) = statuses.iter().find(|s| s.track_id == track_id) {
                 if s.status != PluginStatus::Loading {

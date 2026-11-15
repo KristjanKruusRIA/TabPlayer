@@ -118,7 +118,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     step('Applied the saved style to another document as one undoable edit; it kept its own profile and the music is unchanged',{command,ownProfiles,drawnBefore,drawnApplied});
 
     // Force default style returns the engraving to the defaults in one edit, and undo restores the style.
-    await page.getByRole('button',{name:'Force default style',exact:true}).click();await idle();
+    await styles();await page.getByRole('button',{name:'Force default style',exact:true}).click();await idle();
     const forced=await record();assert.equal(forced.snapshot.project.edits.length,3);assert.equal(forced.snapshot.project.edits[2].engraving.stylesheet.hideDynamics,null);assert.equal(forced.snapshot.project.edits[2].engraving.systemSpacing,null);assert.deepEqual(forced.snapshot.project.edits[2].engraving.profiles,ownProfiles);
     await button('Undo');assert.deepEqual((await record()).snapshot.project,applied.snapshot.project);await exportCheck('forced-undo');
     step('Force default style was one undoable edit',{});

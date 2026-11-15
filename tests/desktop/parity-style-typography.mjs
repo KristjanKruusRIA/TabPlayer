@@ -126,7 +126,7 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
   const edits=async()=>(await record()).snapshot.project.edits;
   // A preset fills the form (no edit), then Apply is exactly one more edit holding the preset's choices.
   const preset=async(name,typography,stylesheet,notation,family)=>{
-    const count=(await edits()).length;await page.getByRole('button',{name:`Load ${name} preset`,exact:true}).click();await idle();
+    const count=(await edits()).length;await panels();await page.getByRole('button',{name:`Load ${name} preset`,exact:true}).click();await idle();
     assert.equal((await edits()).length,count,`${name}: loading never edits`);await button('Apply engraving');
     const after=await record(),edit=after.snapshot.project.edits.at(-1);assert.equal(after.snapshot.project.edits.length,count+1,`${name}: one edit`);
     assert.equal(edit.type,'setEngraving');assert.deepEqual(typography?edit.engraving.typography:Object.hasOwn(edit.engraving,'typography'),typography??false,`${name}: typography`);

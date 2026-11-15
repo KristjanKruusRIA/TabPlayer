@@ -77,6 +77,8 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     const assertDrawn=async label=>{
       await inScore().waitFor();assert.equal(await inScore().count(),1,`${label}: one diagram chip in the score`);
       // The chip opens the diagram on hover or focus, so no mark is hidden by a neighbour.
+      // The pointer may rest on the chip after a dialog click; move it off first so entering it again raises the mouseenter that opens the diagram.
+      await page.mouse.move(1,1);
       await inScore().getByRole('button',{name:'Show scale diagram Open position',exact:true}).hover();
       await inScore().getByRole('group',{name:'Scale diagram Open position',exact:true}).waitFor();
       const high=await centre(inScore().getByLabel(/^String 9, open/)),lower=await centre(inScore().getByLabel(/^String 5, fret 3/));

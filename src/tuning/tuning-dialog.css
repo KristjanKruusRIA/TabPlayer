@@ -1,0 +1,33 @@
+.tp-dialog.tuning-dialog { width: min(600px, 94vw); max-height: 90dvh; }
+.tuning-dialog .tp-dialog-foot { flex-wrap: wrap; }
+.tuning-dialog .tuning-saved { margin-right: auto; }
+.tuning-dialog-body { display: grid; gap: 10px; }
+.tuning-dialog-label { color: var(--tp-muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.tuning-dialog :is(input, select) { box-sizing: border-box; min-width: 0; min-height: 28px; padding: 3px 6px; color: var(--tp-text); background: var(--tp-input); border: 1px solid var(--tp-line-strong); border-radius: var(--tp-radius-s); font: inherit; font-size: 13px; }
+.tuning-dialog :is(input, select):focus-visible { outline: 2px solid var(--tp-edit); outline-offset: 1px; }
+.tuning-library { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1.3fr); align-items: center; gap: 6px; }
+.tuning-notes-line { display: grid; grid-template-columns: auto minmax(0, 1fr) 28px; align-items: center; gap: 8px; }
+.tuning-notes-line:not(:has(.tuning-play-all)) { grid-template-columns: auto minmax(0, 1fr); }
+.tuning-notes-line input { font-family: var(--tp-font-mono); font-variant-numeric: tabular-nums; }
+.tuning-play-all, .tuning-string-play { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--tp-text); background: var(--tp-raised); border: 1px solid var(--tp-line-strong); border-radius: var(--tp-radius-s); cursor: pointer; }
+.tuning-play-all:hover:not(:disabled):not([aria-disabled=true]), .tuning-string-play:hover { border-color: var(--tp-on); color: var(--tp-on); }
+.tuning-play-all:disabled { opacity: .45; cursor: default; }
+.tuning-dialog :is(button):focus-visible { outline: 2px solid var(--tp-edit); outline-offset: 1px; }
+.tuning-strings { list-style: none; margin: 0; padding: 6px 8px; display: grid; gap: 4px; background: var(--tp-base); border: 1px solid var(--tp-line-subtle); border-radius: var(--tp-radius-m); }
+.tuning-string-row { display: grid; grid-template-columns: 22px 124px minmax(24px, 1fr) 28px; align-items: center; gap: 8px; }
+.tuning-string-number { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--tp-raised); color: var(--tp-muted); font: 600 11px/1 var(--tp-font-mono); }
+.tuning-string-note { display: grid; grid-template-columns: minmax(0, 1fr) 28px 28px; border: 1px solid var(--tp-line-strong); border-radius: var(--tp-radius-s); background: var(--tp-input); }
+.tuning-string-note input { border: 0; background: transparent; min-height: 26px; font-family: var(--tp-font-mono); font-variant-numeric: tabular-nums; }
+.tuning-string-step { min-width: 28px; min-height: 28px; padding: 0; border: 0; border-left: 1px solid var(--tp-line-subtle); border-radius: 0; background: transparent; color: var(--tp-muted); font: 600 15px/1 var(--tp-font-mono); cursor: pointer; }
+.tuning-string-step:hover { color: var(--tp-text); background: var(--tp-raised); }
+.tuning-string-step[aria-disabled=true] { opacity: .35; cursor: default; }
+.tuning-string-line { height: var(--string-weight, 1px); min-height: 1px; background: var(--tp-line-strong); border-radius: 1px; opacity: .8; }
+.tuning-dialog .tuning-error { margin: 0; color: var(--tp-danger); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.tuning-dialog .tuning-hint { margin: 0; color: var(--tp-muted); font-size: 12px; line-height: 1.45; }
+.tuning-dialog fieldset.string-count { display: grid; gap: 6px; margin: 0; padding: 8px; border: 1px solid var(--tp-line-subtle); border-radius: var(--tp-radius-m); }
+.tuning-dialog fieldset.string-count label { display: grid; gap: 4px; color: var(--tp-muted); font-size: 12px; }
+@media (max-width: 520px) {
+  .tuning-library { grid-template-columns: 1fr 1fr; }
+  .tuning-library .tuning-dialog-label { grid-column: 1 / -1; }
+  .tuning-library select:nth-of-type(3) { grid-column: 1 / -1; }
+}

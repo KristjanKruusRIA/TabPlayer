@@ -48,6 +48,8 @@ export function Dialog({title,onClose,children,actions,className,backdropClassNa
     }
 
     const handleKeyDown=(event:KeyboardEvent)=>{
+      // A dialog opened over this one has made it inert: Escape and Tab belong to the top dialog only.
+      if(panel.current?.closest('[inert]'))return;
       if(event.key==='Escape'){
         if(locked.current)return;
         event.preventDefault();event.stopPropagation();close.current();return;

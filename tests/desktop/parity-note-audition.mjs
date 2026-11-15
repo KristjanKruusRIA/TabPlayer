@@ -67,15 +67,15 @@ export async function runNoteAuditionAcceptance({buildPath}={}){
     const initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
 
     // S16: a single string and the whole tuning, from the track's tuning field, without editing.
-    await ui.revealLeftTask(page,'Track');const field=page.locator('.tuning-field').first();
+    await ui.revealLeftTask(page,'Track');await page.getByRole('button',{name:/^Edit tuning/}).click();const field=page.getByRole('dialog',{name:'Tuning',exact:true});
     await heard('string 6',()=>field.getByRole('button',{name:'Play string 6 (E2)',exact:true}).click());
     await heard('string 1',()=>field.getByRole('button',{name:'Play string 1 (E4)',exact:true}).click());
     const single=result.auditions[0].peak,strum=await heard('tuning',()=>field.getByRole('button',{name:'Play tuning',exact:true}).click());
     assert.ok(strum.auditionPeak>=single*0.5,`Strummed tuning is about as loud as one string: ${strum.auditionPeak} vs ${single}`);
     // A typed draft is auditioned as typed, before any Apply.
-    await page.getByLabel('Tuning (notes, high to low)',{exact:true}).fill('D4 A3 F3 D3 A2 D2');
+    await field.getByLabel('Notes, high to low').fill('D4 A3 F3 D3 A2 D2');
     await heard('draft string 6',()=>field.getByRole('button',{name:'Play string 6 (D2)',exact:true}).click());
-    assert.deepEqual(await record(),initial,'Tuning auditions never edit');step('String, tuning and draft auditions sounded without editing',{auditions:result.auditions});
+    assert.deepEqual(await record(),initial,'Tuning auditions never edit');await field.getByRole('button',{name:'Cancel',exact:true}).click();await field.waitFor({state:'hidden'});step('String, tuning and draft auditions sounded without editing',{auditions:result.auditions});
     await page.screenshot({path:resolve(paths.results,'01-tuning-buttons.png')});result.screenshots.push('01-tuning-buttons.png');
 
     // E17: entering a note plays it; with the preference off it stays silent.

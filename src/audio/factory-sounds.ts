@@ -39,7 +39,7 @@ const definitions:readonly FactoryDefinition[]=[
     // The boost (the EQ with a bass cut and a mid hump) stands ahead of the pedal and amp, which a sound's own order allows.
     order:['microphone','gate','compressor','wah','octaver','pitch','eq','drive','amp','cabinet','graphicEq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'],effects:{
     gate:{thresholdDb:-50,releaseMs:60},eq:{lowDb:-10,midDb:9,highDb:0,midHz:1000},drive:{model:'overdrive',drive:.1,tone:.8,levelDb:3},
-    amp:{model:'metal',drive:.45,gainDb:-4.2,lowEndOct:.5,bassDb:2,midDb:0,trebleDb:0,presenceDb:4},
+    amp:{model:'metal',drive:.45,gainDb:-4.2,lowEndOct:.5,bassDb:2,presenceDb:4},
     // One of the closed four-by-twelve responses the app bundles; a machine without it plays the closed cabinet model instead.
     cabinet:{model:'closed',ir:{id:'04eae0ad866f1badc2d7f2bdc5da06a2',name:'bundled closed four-by-twelve',levelDb:0}},
     graphicEq:{gainsDb:[-12,6,6,.92,-5.17,.21,2.3,-8.08,3,-12],levelDb:0}}},

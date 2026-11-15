@@ -144,6 +144,12 @@ enum Source {
     Silent {
         delay: Duration,
     },
+    /// Opens at once and hands its producer to the test through `producer`, which then plays the
+    /// capture side itself on a clock of its own. The thread only holds the session open.
+    #[cfg(test)]
+    Driven {
+        producer: mpsc::Sender<crate::audio::line_in::LineInProducer>,
+    },
 }
 
 #[cfg(any(test, feature = "desktop-test"))]
@@ -162,6 +168,27 @@ impl ToneSynth {
     }
 }
 
+/// Generates what `elapsed` since the start says is due: the real-time pacing of the test tone,
+/// with the time passed in so a test can supply a simulated one. `produced` counts the samples
+/// written so far.
+#[cfg(any(test, feature = "desktop-test"))]
+fn pace_tone(
+    synth: &mut ToneSynth,
+    producer: &mut crate::audio::line_in::LineInProducer,
+    produced: &mut u64,
+    elapsed: Duration,
+) {
+    use crate::audio_input::SampleSink;
+    let due = (elapsed.as_secs_f64() * TEST_TONE_RATE) as u64;
+    let mut chunk = [0.0f32; 256];
+    while *produced < due {
+        let count = ((due - *produced) as usize).min(chunk.len());
+        synth.fill(&mut chunk[..count]);
+        producer.push_samples(&chunk[..count]);
+        *produced += count as u64;
+    }
+}
+
 enum Live {
     /// Held only so the stream keeps running until it is dropped.
     #[allow(dead_code)]
@@ -171,6 +198,9 @@ enum Live {
     #[cfg(test)]
     #[allow(dead_code)]
     Idle(crate::audio::line_in::LineInProducer),
+    /// The producer went to the test (`Source::Driven`); nothing is fed here.
+    #[cfg(test)]
+    Handed,
 }
 
 type Ready = Result<(Arc<MonitorRing>, Arc<LineInMeter>), String>;
@@ -204,6 +234,8 @@ fn capture_main(
             thread::sleep(*delay);
             Ok((None, TEST_TONE_RATE))
         }
+        #[cfg(test)]
+        Source::Driven { .. } => Ok((None, TEST_TONE_RATE)),
     };
     let (device_config, device_rate) = match opened {
         Ok(opened) => opened,
@@ -235,6 +267,11 @@ fn capture_main(
         ),
         #[cfg(test)]
         (Source::Silent { .. }, _) => Live::Idle(producer),
+        #[cfg(test)]
+        (Source::Driven { producer: to_test }, _) => {
+            let _ = to_test.send(producer);
+            Live::Handed
+        }
         (Source::Device(_), None) => unreachable!("a device source always opens a device"),
     };
     // A stop (or a newer start) that arrived while the device was opening wins.
@@ -292,16 +329,8 @@ fn run_capture(live: Live, fault: &StreamFault, stop: &mpsc::Receiver<()>) -> bo
         }
         #[cfg(any(test, feature = "desktop-test"))]
         if let Live::Tone(synth, producer) = &mut live {
-            use crate::audio_input::SampleSink;
             // Real-time pacing: generate whatever the elapsed time says is due.
-            let due = (started.elapsed().as_secs_f64() * TEST_TONE_RATE) as u64;
-            let mut chunk = [0.0f32; 256];
-            while produced < due {
-                let count = ((due - produced) as usize).min(chunk.len());
-                synth.fill(&mut chunk[..count]);
-                producer.push_samples(&chunk[..count]);
-                produced += count as u64;
-            }
+            pace_tone(synth, producer, &mut produced, started.elapsed());
         }
     }
     // Stop the stream first so nothing writes while the rest winds down.
@@ -788,83 +817,121 @@ mod tests {
         state.stop(&*output);
     }
 
-    /// One run of the whole path against the wall clock: a capture thread paces a tone in real
-    /// time, and this thread pulls the output as a stream would. Scheduling hiccups on a busy
-    /// machine can starve it once, so `Err` carries what was wrong for a retry to report.
-    fn tone_round_trip() -> Result<(), String> {
-        macro_rules! ensure {
-            ($condition:expr, $($message:tt)+) => {
-                if !$condition {
-                    return Err(format!($($message)+));
-                }
-            };
-        }
+    /// The whole path on a simulated clock, with nothing left to the scheduler: the test plays both sides itself. The capture
+    /// side is the tone generator the capture thread uses (`pace_tone`), given the simulated time instead of the wall clock,
+    /// every 10 ms as the thread's poll does; the output side is the transport rendered for the frames the same clock says the
+    /// device has asked for. `Source::Driven` only hands over the producer, so the session, the attach, the status and the stop
+    /// are the real ones. The same input produces the same output on every run.
+    ///
+    /// This is what a starved capture thread on a busy machine used to break in the wall-clock version of this test (a gap
+    /// left too few periods in the last second and, after the buffer ran dry, a flat tone). A simulated run has no gaps, so
+    /// the bounds below are tight: a ring that never runs dry, a pitch within a cent, a count of periods that is the tone's.
+    #[test]
+    fn a_tone_flows_from_capture_to_the_output_at_the_expected_level() {
+        const SECONDS: u64 = 8;
+        const TICK_MICROS: u64 = 5_000;
         let (output, mut transport) = FakeOutput::new(44_100);
         let state = LineInState::default();
-        state.start_source(&*output, Source::Tone(220.0))?;
+        let (to_test, from_capture) = mpsc::channel();
+        state
+            .start_source(&*output, Source::Driven { producer: to_test })
+            .unwrap();
+        let mut producer = from_capture
+            .try_recv()
+            .expect("the capture hands over its producer before it reports ready");
+        let mut synth = ToneSynth {
+            phase: 0.0,
+            step: 220.0 / TEST_TONE_RATE,
+        };
+        let (mut produced, mut rendered) = (0u64, 0u64);
         let mut captured = Vec::new();
-        let started = Instant::now();
         let mut block = vec![[0.0f32; 2]; 441];
-        let mut rendered = 0u64;
-        while started.elapsed() < Duration::from_millis(3000) {
+        for tick in 1..=(SECONDS * 1_000_000 / TICK_MICROS) {
+            let now = Duration::from_micros(tick * TICK_MICROS);
+            if tick % 2 == 0 {
+                pace_tone(&mut synth, &mut producer, &mut produced, now);
+            }
             // As many frames as the clock says the device has asked for by now.
-            let due = (started.elapsed().as_secs_f64() * 44_100.0) as u64;
+            let due = tick * TICK_MICROS * 44_100 / 1_000_000;
             while rendered < due {
                 let count = ((due - rendered) as usize).min(block.len());
                 transport.render_into(&mut block[..count]);
                 captured.extend(block[..count].iter().map(|f| f[0]));
                 rendered += count as u64;
             }
-            thread::sleep(Duration::from_millis(2));
         }
         let status = state.status(&*output);
-        ensure!(status.running && status.error.is_none(), "{status:?}");
-        ensure!(status.input_rate == Some(48_000), "{status:?}");
-        ensure!(status.output_rate == Some(44_100), "{status:?}");
+        assert!(status.running && status.error.is_none(), "{status:?}");
+        assert_eq!(status.input_rate, Some(48_000), "{status:?}");
+        assert_eq!(status.output_rate, Some(44_100), "{status:?}");
+        // Nothing starved, overran or was dropped: with exact clocks the buffer never runs dry.
+        assert_eq!(
+            (
+                status.underruns,
+                status.skips,
+                status.dropped,
+                status.resets
+            ),
+            (0, 0, 0, 0),
+            "{status:?}"
+        );
         // The default sound chain is flat, so the tone leaves at input amplitude times level.
         let tail = &captured[captured.len() - 44_100..];
         let peak = tail.iter().fold(0.0f32, |p, x| p.max(x.abs()));
         let expected: f32 = 0.35 * 0.8;
-        ensure!((peak - expected).abs() < 0.02, "peak {peak}");
+        assert!((peak - expected).abs() < 0.02, "peak {peak}");
         let (measured, periods) = zero_crossing_frequency(tail, 44_100.0);
-        // A clean second holds about 220 periods; fewer than 100 means the output was mostly gaps.
-        ensure!(periods >= 100, "only {periods} periods in the last second");
-        // The resampler moves its ratio up to 1 % (`MAX_ADJUST` in audio/line_in.rs, about 17 cents) to hold its buffer.
-        // On a busy machine the ring underruns, each restart re-arms the fast loop, and its proportional term reaches that
-        // limit: the tone read 10 to 17 cents flat. This checks the path end to end, where a wrong rate is 147 cents off;
-        // `drift_correction_keeps_the_pitch_true_in_real_time` holds the pitch to 1 cent on a simulated clock.
-        let limit = -1200.0 * 0.99f64.log2() + 3.0;
-        ensure!(
-            (1200.0 * (measured / 220.0).log2()).abs() < limit,
-            "frequency {measured}"
+        // A clean second of 220 Hz holds 220 periods (219 or 220 whole ones are counted).
+        assert!(
+            (218..=221).contains(&periods),
+            "{periods} periods in the last second"
         );
-        ensure!(
+        // The resampler holds its buffer by moving its ratio, up to 1 % (`MAX_ADJUST` in audio/line_in.rs, about 17 cents), and
+        // after eight seconds on exact clocks it has settled on the true ratio: a wrong rate would be 147 cents off.
+        // `drift_correction_keeps_the_pitch_true_in_real_time` holds the pitch of a drifting device to a cent, also simulated.
+        let off = 1200.0 * (measured / 220.0).log2();
+        assert!(off.abs() < 1.0, "frequency {measured}, {off} cents off");
+        assert!(
             (status.input_level - 20.0 * 0.35f32.log10()).abs() < 1.0,
             "{status:?}"
         );
-        ensure!(
+        assert!(
             (status.output_level - 20.0 * expected.log10()).abs() < 1.5,
             "{status:?}"
         );
-        let latency = status.latency_ms.ok_or("no latency")?;
-        ensure!((8.0..80.0).contains(&latency), "latency {latency}");
+        let latency = status
+            .latency_ms
+            .expect("a latency once the buffer has filled");
+        assert!((8.0..80.0).contains(&latency), "latency {latency}");
         state.stop(&*output);
-        ensure!(!state.status(&*output).running, "still running");
-        ensure!(output.detaches.load(Ordering::Relaxed) >= 1, "not detached");
-        Ok(())
+        assert!(!state.status(&*output).running, "still running");
+        assert!(output.detaches.load(Ordering::Relaxed) >= 1, "not detached");
     }
 
+    /// The real-time source on real threads, for what a simulation cannot show: the capture thread starts, its audio reaches
+    /// the output, and a stop ends it and lets the output go. It asserts nothing about timing, periods or pitch, which depend
+    /// on the scheduler; the simulated test above holds the level, the pitch, the buffer and the latency. It waits for progress
+    /// (the deadline in `wait_for` is a hang detector, not a measurement), so a slow machine only makes it take longer.
     #[test]
-    fn a_tone_flows_from_capture_to_the_output_at_the_expected_level() {
-        // Up to three tries: the run depends on this machine's scheduler.
-        let mut last = Ok(());
-        for _ in 0..3 {
-            last = tone_round_trip();
-            if last.is_ok() {
-                break;
-            }
-        }
-        last.unwrap();
+    fn a_real_time_tone_starts_passes_audio_and_stops() {
+        let (output, mut transport) = FakeOutput::new(44_100);
+        let state = LineInState::default();
+        state.start_source(&*output, Source::Tone(220.0)).unwrap();
+        let mut block = vec![[0.0f32; 2]; 441];
+        // The levels are the peak since the previous status call, so the input and the output are each remembered once seen.
+        let mut heard_input = false;
+        let status = wait_for(|| {
+            transport.render_into(&mut block);
+            let status = state.status(&*output);
+            heard_input |= status.input_level > SILENT_DBFS;
+            (heard_input && status.output_level > SILENT_DBFS).then_some(status)
+        });
+        assert!(status.running && status.error.is_none(), "{status:?}");
+        assert_eq!(status.input_rate, Some(48_000));
+        assert_eq!(status.output_rate, Some(44_100));
+        state.stop(&*output);
+        assert!(!state.status(&*output).running, "still running");
+        assert!(output.detaches.load(Ordering::Relaxed) >= 1, "not detached");
     }
 
     #[test]

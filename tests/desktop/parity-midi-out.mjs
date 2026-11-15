@@ -19,9 +19,9 @@ try{
   const until=async(read,predicate,label,timeout=10000)=>{const deadline=Date.now()+timeout;let last;while(Date.now()<deadline){last=await read();if(predicate(last))return last;await page.waitForTimeout(50);}throw new Error(`${label} timed out: ${JSON.stringify(last)}`);};
   const ports=(await invoke('midi_out_ports')).map(port=>port.name);
   assert.ok(ports.includes(TEST),`the test port is listed: ${ports}`);
-  const panel=page.locator('section[aria-labelledby="inspector-track-midi-out"]'),output=panel.getByLabel('Output');
+  const panel=page.locator('details.midi-out-more'),output=panel.getByLabel('Output');
   const route=async(track,port)=>{
-    await selectWorkspaceTrack(page,track);await revealInspectorTab(page,'Track');
+    await selectWorkspaceTrack(page,track);await revealInspectorTab(page,'Track');await panel.evaluate(node=>{node.open=true;});
     await output.selectOption(port);await waitForWorkspaceIdle(page);
     assert.equal(await output.inputValue(),port,`${track} shows ${port||'the internal sound'}`);
   };

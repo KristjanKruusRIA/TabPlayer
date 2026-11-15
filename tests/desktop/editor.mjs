@@ -19,7 +19,7 @@ try {
   const note=page.getByText('7',{exact:true});await note.waitFor();await note.click();
   // The status bar reads the cursor: the click put it back on beat 1, whose note is the fret written first.
   assert.notEqual((await cursorPosition(page)).text,moved);assert.equal((await cursorPosition(page)).bar,1);assert.equal((await cursorPosition(page)).beat,1);
-  assert.match(await page.getByTestId('status-value').innerText(),/^Fret 7/);
+  assert.match((await page.getByTestId('status-value').innerText()).replace(/\s+/g,' '),/Fret 7/);
   assert.equal((await snapshot()).project.edits.length,3);
   await page.screenshot({path:'.analysis/editor-two-tracks.png'});
   console.log('Native editor: two tracks, fret entry, real rendered note selection, native command history passed.');

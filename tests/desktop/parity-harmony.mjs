@@ -20,7 +20,8 @@ try{
   // An open chord or scale dialog holds the workspace operation lease, so the shell stays busy until it closes.
   const dialogs=()=>page.locator('[role="dialog"]'),openers=new Set(['Edit chord diagram','Browse scales']),closers=new Set(['Apply chord','Cancel','Close scales']);
   const dialogReady=()=>page.waitForFunction(()=>{const d=document.querySelector('[role="dialog"]');return !!d&&d.querySelector('fieldset')?.getAttribute('aria-disabled')!=='true';});
-  const button=async name=>{const inDialog=await dialogs().count()>0;await clickWorkstationButton(page,name,{waitForIdle:false});
+  const paletteIds={'Edit chord diagram':'chord-diagram','Browse scales':'scale-diagram'};
+  const button=async name=>{const inDialog=await dialogs().count()>0;if(paletteIds[name])await page.locator(`[data-palette-id="${paletteIds[name]}"]`).click();else await clickWorkstationButton(page,name,{waitForIdle:false});
     if(openers.has(name)){await dialogs().first().waitFor({state:'visible'});await dialogReady();}
     else if(closers.has(name)){await dialogs().first().waitFor({state:'hidden'});await idle();}
     else if(inDialog){await dialogReady();assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);}

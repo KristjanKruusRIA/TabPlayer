@@ -260,7 +260,7 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, busy = fals
             <input id="tuning-dialog-capo" type="number" min={0} max={127} value={capoText} aria-invalid={!capoValid || undefined} onChange={event => { setCapoText(event.target.value); setError(null); setRefused(false); }} />
             <span className="tuning-hint">{t('tuning_dialog.capo_fret')}</span>
           </div>
-          <details className="tuning-capo-more">
+          <details className="tuning-capo-more" onKeyDown={event => { if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.preventDefault(); }}>
             <summary>{t('tuning_dialog.capo_more')}</summary>
             <PartialCapoControls key={`partial/${staff.tuning.join()}`} staff={staff} value={partial} onChange={setPartial} onInvalid={setPartialInvalid} />
             <BanjoDroneControls key={`drone/${staff.tuning.length}`} staff={staff} value={drone} onChange={setDrone} onInvalid={setDroneInvalid} />

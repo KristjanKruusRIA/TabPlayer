@@ -66,6 +66,8 @@ export async function runStylesheetsAcceptance({buildPath}={}){
   const details=async name=>{await ui.styleSection(page,name);};
   const choose=(name,value)=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)}).selectOption(value);
   const openStyles=async()=>{await button('Presentation');for(const name of ['Engraving','Stylesheet','Staff profiles','Saved styles'])await details(name);};
+  // A button used in the dialog closes it; reopen it before the next control.
+  const styles=async()=>{if(!await page.locator('.score-style-dialog').isVisible())await openStyles();};
   // The whole score as exported, minus only the style: a style may change how the score is drawn, never what it holds.
   const musicOf=bytes=>{const raw=jsonModel.scoreToJson(load(bytes)),value=typeof raw==='string'?JSON.parse(raw):JSON.parse(JSON.stringify(raw));delete value.stylesheet;return JSON.stringify(value);};
   let baseline=null;
@@ -89,7 +91,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     await openStyles();await page.locator('option',{hasText:'No saved styles yet'}).waitFor({state:'attached'});assert.equal(existsSync(libraryPath),false,'Reading must not create the library');
     await profileEdit('slash');await choose('Hide dynamics','true');await choose('Bar numbers','hidden');await page.getByLabel('System spacing (%)',{exact:true}).fill(String(spacing));await button('Apply engraving');
     const authored=await record();assert.deepEqual(authored.snapshot.project.edits.map(edit=>edit.type),['setEngraving']);assert.equal(authored.snapshot.project.edits[0].engraving.profiles.length,1,'The first document has a staff profile');
-    await page.getByLabel('Style name',{exact:true}).fill(styleName);await page.getByRole('button',{name:'Save current style',exact:true}).click();
+    await styles();await page.getByLabel('Style name',{exact:true}).fill(styleName);await page.getByRole('button',{name:'Save current style',exact:true}).click();
     await poll(()=>existsSync(libraryPath),Boolean,'library file written');await page.getByRole('status').filter({hasText:`Saved ${styleName}.`}).waitFor();
     const library=json(libraryPath);assert.deepEqual(Object.keys(library).sort(),['entries','format','version']);assert.equal(library.format,'tabplayer-style-library');assert.equal(library.version,1);assert.equal(library.entries.length,1);
     const [entry]=library.entries;assert.equal(entry.name,styleName);assert.deepEqual(entry.engraving.profiles,[]);assert.equal(entry.engraving.stylesheet.hideDynamics,true);assert.equal(entry.engraving.stylesheet.barNumbers,'hidden');assert.equal(entry.engraving.systemSpacing,spacing/100);
@@ -126,7 +128,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     // Launch 3: a damaged library is reported and left byte for byte.
     const damaged=Buffer.from('{"format":"tabplayer-style-library","version":1,"entries":[{"broken":true}]}');writeFileSync(libraryPath,damaged);const damagedHash=hashFile(libraryPath);
     await launch('launch-3',firstPath);await openStyles();await page.getByRole('alert').filter({hasText:'Could not read saved styles'}).waitFor();assert.equal(await page.locator('option',{hasText:'No saved styles yet'}).count(),0,'A damaged library is not called empty');
-    await page.getByLabel('Style name',{exact:true}).fill('Rejected');await page.getByRole('button',{name:'Save current style',exact:true}).click();
+    await styles();await page.getByLabel('Style name',{exact:true}).fill('Rejected');await page.getByRole('button',{name:'Save current style',exact:true}).click();
     // The failed save has its own message, separate from the read failure shown above it.
     await page.getByRole('alert').filter({hasNotText:'Could not read saved styles'}).filter({hasText:'Invalid style library'}).waitFor();
     await page.getByRole('alert').filter({hasText:'Could not read saved styles'}).waitFor();

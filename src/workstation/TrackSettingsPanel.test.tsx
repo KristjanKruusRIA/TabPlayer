@@ -328,6 +328,12 @@ it('the Tuning dialog Capo section: a capo alone is one setStaffSettings with th
   expect(onEdit).toHaveBeenCalledTimes(1);expect(lastSettings(onEdit)).toEqual({type:'setStaffSettings',track:0,staff:0,settings:expect.objectContaining({capo:2,tuning:standard,tuningName:'Imported'})});
   expect(lastSettings(onEdit).settings).not.toHaveProperty('partialCapo');expect(lastSettings(onEdit).settings).not.toHaveProperty('droneFret');expect(lastSettings(onEdit).settings).not.toHaveProperty('keepPitch');
 });
+it('Enter in a partial capo or drone field settles that field and does not submit the Tuning dialog',()=>{
+  const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());const fret=within(dialog()).getByLabelText('Partial capo fret');
+  fireEvent.change(fret,{target:{value:'3'}});expect(fireEvent.keyDown(fret,{key:'Enter'})).toBe(false);
+  expect(onEdit).not.toHaveBeenCalled();expect(dialog()).toBeInTheDocument();
+});
 it('Cancel discards a capo draft',()=>{
   const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
   fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'5'}});fireEvent.click(inDialog('Cancel'));

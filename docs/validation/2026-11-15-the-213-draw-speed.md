@@ -46,7 +46,7 @@ change made the edit faster by the 5 to 13 ms the medians show**, only that it d
 that the work no longer happens in that frame (a count, not a timing: an edit with the cursor in view paints one piece), and the unit test "paints the neighbours of the cursor only when its system is not wholly in view"
 checks it. The tail is still 142 to 154 ms at p90 (worst 206).
 
-The hard requirement (a typed note on screen and the next key accepted, median under 200 ms on the owner's largest score in the real app) is **met**: 93 to 95 ms to the note with the
+The hard requirement (a typed note on screen and the next key accepted, median under 200 ms on the owner's largest score in the real app) is **met by the measure used here**: 93 to 95 ms to the first change of the drawing (not a presented frame; the browser's style, layout and paint, about 30 ms, come after it, and this holds for every edit timing in this note) with the
 machine calm, 112 to 181 ms in runs with it busy, and 53 to 74 ms for a key typed meanwhile to be taken up. The aim of about 100 ms is met at the median on a calm machine and
 missed at the tail (worst of 16: 116 ms calm, 201 to 260 ms busy).
 
@@ -254,7 +254,7 @@ asserts after every step that no piece in view was ever empty and that no more p
 painting), without waiting for alphaTab. This replaces the check that waited 500 ms and a quiet period (when alphaTab would have painted anyway).
 
 **Which of these assertions are independent evidence.** At the end of a draw the pieces in view are the ones the draw has just painted, so "no piece in view is empty" and "no more pieces painted than in view plus the margin"
-hold **by construction** for the draw entries (they would only fail if painting a piece threw, or left it empty); they guard against a regression in the draw's own bookkeeping, not against alphaTab. The counts at scroll and background
+hold **by construction** for the draw entries of a full render (they would only fail if painting a piece threw, or left it empty; a draw through alphaTab's own resize path keeps every piece's old drawing, so the second count would not hold there, and no step of the driver is known to take that path); they guard against a regression in the draw's own bookkeeping, not against alphaTab. The counts at scroll and background
 steps are the same kind. The evidence that does not come from our own code is the frame sampler (the page's real presented frames, with the highlight) and the comparison of the incremental drawing with a complete render
 (`checkDraw`, bounds and drawing). A system whose painting leaves it empty (alphaTab swallows an error while painting an untrusted file's system) is remembered for the layout and not tried again by the background painter, the
 scroll listener or the cursor (unit test: the painter ends, and the renderer is called once for that system per layout); a system painted for an earlier layout (alphaTab starts painting by itself after a resize and the

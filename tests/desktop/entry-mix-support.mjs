@@ -1,15 +1,15 @@
 // Shared by parity-mix-drag.mjs, parity-fret-typing.mjs and parity-track-click.mjs (THE-213): real CDP mouse and key input
 // against a small and a large generated score. Nothing here sets a control's value directly.
-import { writeFileSync } from 'node:fs';
+import { existsSync,writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { directory,launch,connect,stop } from './harness.mjs';
 import { closeWelcomeLibrary,waitForWorkspaceIdle,clickWorkspaceCommand } from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 
 export const sleep=ms=>new Promise(done=>setTimeout(done,ms));
-export const SIZES={small:{tracks:3,bars:8},large:{tracks:6,bars:200}};
+export const SIZES={small:{tracks:3,bars:8},large:{tracks:6,bars:200},/** One track whose first four bars repeat, the fourth with a first ending and a fifth bar for the second. */repeat:{tracks:1,bars:6,repeat:true}};
 
-function alphaTex(tracks,bars) {
+function alphaTex(tracks,bars,repeat=false) {
   const B=String.fromCharCode(92),N=String.fromCharCode(10);
   let out=`${B}title "Entry mix ${tracks}x${bars}"${N}${B}tempo 120${N}.${N}`;
   for(let t=0;t<tracks;t++){
@@ -17,7 +17,9 @@ function alphaTex(tracks,bars) {
     out+=`${B}track "Track ${t+1}"${N}${B}staff {tabs}${N}${B}instrument ${bass?33:25}${N}${B}tuning ${bass?'g2 d2 a1 e1':'e4 b3 g3 d3 a2 e2'}${N}`;
     const strings=bass?4:6;
     for(let b=0;b<bars;b++){
-      let bar=':8 ';
+      // Repeat bars (alphaTex metadata at the start of the bar): open at the first, a close with a first ending at the fourth, the second ending the fifth.
+      let bar=repeat?(b===0?`${B}ro `:b===3?`${B}ae (1) ${B}rc 2 `:b===4?`${B}ae (2) `:''):'';
+      bar+=':8 ';
       for(let i=0;i<8;i++)bar+=`${(b+i*3+t)%12}.${1+((b+i+t)%strings)} `;
       out+=`${bar}|${N}`;
     }
@@ -27,7 +29,9 @@ function alphaTex(tracks,bars) {
 
 /** Writes the score `size` names, made by alphaTab's own exporter inside the app, to the test directory; returns its path. */
 export async function makeScore(size) {
-  const {tracks,bars}=SIZES[size],path=resolve(directory,`entry-mix-${size}.gp`);
+  const {tracks,bars,repeat=false}=SIZES[size],path=resolve(directory,`entry-mix-${size}.gp`);
+  // Made once per build directory: a second launch for the same file only widens the window in which another test app can take the port.
+  if(existsSync(path))return path;
   const id=launch();let browser;
   try{
     browser=await connect();const page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);
@@ -35,17 +39,19 @@ export async function makeScore(size) {
       const {importer,exporter,Settings}=await import('/alphatab/alphaTab.mjs');
       const settings=new Settings(),reader=new importer.AlphaTexImporter();reader.initFromString(tex,settings);
       return [...new exporter.Gp7Exporter().export(reader.readScore(),settings)];
-    },alphaTex(tracks,bars));
+    },alphaTex(tracks,bars,repeat));
     writeFileSync(path,Uint8Array.from(bytes));
   }finally{if(browser)await browser.close();stop(id);}
   return path;
 }
 
 /** Opens `size`'s score in the test app and returns the page, a CDP session and helpers; `close` ends the app. */
-export async function openScore(size) {
+export async function openScore(size,environment={}) {
   const path=await makeScore(size);
-  const id=launch({TABPLAYER_TEST_OPEN:path});
-  const browser=await connect(),page=browser.contexts()[0].pages()[0];
+  const id=launch({TABPLAYER_TEST_OPEN:path,...environment});let browser=null;
+  // A start that fails (another agent's app on the port, a slow load) must not leave this app running.
+  try{
+  browser=await connect();const page=browser.contexts()[0].pages()[0];
   await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);
   await clickWorkspaceCommand(page,'Open',{waitForIdle:false});await waitForWorkspaceIdle(page);
   await page.waitForFunction(()=>document.querySelector('.score-tools')?.textContent.includes('measures'),{},{timeout:180000});
@@ -57,9 +63,12 @@ export async function openScore(size) {
     edits:async()=>(await readActiveDocument(page)).project.edits,
     async close(){try{await browser.close();}finally{stop(id);}},
   };
-  await settle(page);
+  // Where the cursor starts in a repeated bar Play waits for a chosen occurrence, so only the document being idle can be waited for.
+  if(size==='repeat'){await waitForWorkspaceIdle(page);await sleep(1500);}else await settle(page);
   return session;
+  }catch(error){try{await browser?.close();}catch{ /* Already gone. */ }try{stop(id);}catch{ /* Already gone. */ }throw error;}
 }
+
 
 /** Waits until the app is neither busy nor loading audio for a moment, so the next input starts from rest. */
 export async function settle(page,quiet=800,timeout=180000) {
@@ -92,13 +101,15 @@ export async function drag(cdp,points,delay=25,midway=null) {
 
 const keyDefinition=key=>{
   if(/^\d$/.test(key))return {key,code:`Digit${key}`,windowsVirtualKeyCode:48+Number(key),text:key};
-  const named={Shift:{key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16},Control:{key:'Control',code:'ControlLeft',windowsVirtualKeyCode:17},Enter:{key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'},Escape:{key:'Escape',code:'Escape',windowsVirtualKeyCode:27},ArrowRight:{key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39},ArrowLeft:{key:'ArrowLeft',code:'ArrowLeft',windowsVirtualKeyCode:37},ArrowUp:{key:'ArrowUp',code:'ArrowUp',windowsVirtualKeyCode:38},ArrowDown:{key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40},z:{key:'z',code:'KeyZ',windowsVirtualKeyCode:90}};
+  const named={' ':{key:' ',code:'Space',windowsVirtualKeyCode:32,text:' '},Shift:{key:'Shift',code:'ShiftLeft',windowsVirtualKeyCode:16},Control:{key:'Control',code:'ControlLeft',windowsVirtualKeyCode:17},Enter:{key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r'},Escape:{key:'Escape',code:'Escape',windowsVirtualKeyCode:27},ArrowRight:{key:'ArrowRight',code:'ArrowRight',windowsVirtualKeyCode:39},ArrowLeft:{key:'ArrowLeft',code:'ArrowLeft',windowsVirtualKeyCode:37},ArrowUp:{key:'ArrowUp',code:'ArrowUp',windowsVirtualKeyCode:38},ArrowDown:{key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40},z:{key:'z',code:'KeyZ',windowsVirtualKeyCode:90}};
   if(named[key])return named[key];throw new Error(`No key definition for ${key}`);
 };
 /** A real key press; `modifiers` is CDP's bit set (2 is Ctrl). */
-export async function press(cdp,key,{hold=20,modifiers=0}={}) {
+export async function press(cdp,key,{hold=20,modifiers=0,repeats=0}={}) {
   const definition=keyDefinition(key);
   await cdp.send('Input.dispatchKeyEvent',{type:definition.text&&!modifiers?'keyDown':'rawKeyDown',modifiers,...definition});
+  // Held-key repeats: the same key down again, flagged as auto-repeat.
+  for(let repeat=0;repeat<repeats;repeat++){await sleep(30);await cdp.send('Input.dispatchKeyEvent',{type:definition.text&&!modifiers?'keyDown':'rawKeyDown',modifiers,autoRepeat:true,...definition});}
   await sleep(hold);
   await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',modifiers,key:definition.key,code:definition.code,windowsVirtualKeyCode:definition.windowsVirtualKeyCode});
 }
@@ -121,3 +132,6 @@ export const ipcSince=(page,since)=>page.evaluate(since=>{
   const idle=log.busy.filter(b=>b.t>=since&&b.v==='false').at(-1);
   return {counts,busyEndedMs:idle?Math.round(idle.t-since):null};
 },since);
+
+/** Native transport status: tick, whether it plays and the practice phase. */
+export const transport=page=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status')).then(status=>({tick:Math.round(status.tick),playing:Boolean(status.playing),phase:status.practice?.phase}));

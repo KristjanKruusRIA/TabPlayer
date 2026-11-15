@@ -491,3 +491,19 @@ it('Loop, Slower and Faster buttons carry their keyboard shortcuts and data-acti
   expect(faster).toHaveAttribute('data-action','faster');
   expect(faster).toHaveAttribute('aria-keyshortcuts',']');
 });
+
+it('Play starts from the occurrence the last click on the beat sought, also when the same beat is clicked again for the other one', () => {
+  const idle = snapshot({ practice: { ...snapshot().practice, phase: 'idle' } }), { player, update } = playerFor(idle);
+  let sought: typeof cursorChoices[number] | null = null;
+  Object.assign(player, { cursorSeekChoice: vi.fn(() => sought) });
+  renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false} />);
+  // Nothing sought: a repeated bar needs a choice.
+  expect(screen.getByRole('button', { name: 'Play' })).toBeDisabled();
+  // A click chose the first occurrence.
+  sought = cursorChoices[0]; update({ ...idle });
+  expect(screen.getByRole('button', { name: 'Play' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Play' })); expect(player.play).toHaveBeenLastCalledWith(cursor, cursorChoices[0]);
+  // The same beat clicked again, now meaning the other occurrence: the cursor did not change, Play follows the choice.
+  sought = cursorChoices[1]; update({ ...idle });
+  fireEvent.click(screen.getByRole('button', { name: 'Play' })); expect(player.play).toHaveBeenLastCalledWith(cursor, cursorChoices[1]);
+});

@@ -1,5 +1,14 @@
 import type { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, PointerEvent, SyntheticEvent } from 'react';
 
+/** Space is the app's play/pause key, so a Space that a guard refuses (a busy or unavailable control that holds focus) still reaches the app, but not through the control's own handlers: the guard stops the event, so nothing the control or its neighbours do on Space can run, and hands it to the one handler the app registers here. */
+export interface RefusedSpace { repeat: boolean; target: EventTarget | null; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }
+let refusedSpaceHandler: ((event: RefusedSpace) => void) | null = null;
+export function onRefusedSpace(handler: ((event: RefusedSpace) => void) | null): () => void {
+  refusedSpaceHandler = handler;
+  return () => { if (refusedSpaceHandler === handler) refusedSpaceHandler = null; };
+}
+const passSpace = (event: SyntheticEvent) => { refusedSpaceHandler?.(event as unknown as RefusedSpace); };
+
 export interface BusyGuardProps<T = HTMLElement> {
   busy?: boolean;
   /** Unavailable for a reason other than busy; the control keeps `disabled` off the element, so it can hold focus. */
@@ -42,11 +51,13 @@ export function busyGuard<T extends HTMLElement = HTMLButtonElement>({
       }
       onClick?.(event);
     },
+    // A refused Space is not activation and runs nothing of the control's own: it is stopped here and handed to the app as play/pause.
     onKeyDown: (event: KeyboardEvent<T>) => {
       if (isRefusing) {
         if (event.key === ' ' || event.key === 'Enter') {
           event.preventDefault();
           event.stopPropagation();
+          if (event.key === ' ') passSpace(event);
           return;
         }
       }
@@ -111,6 +122,14 @@ export function busyRegion(busy: boolean) {
     },
     onKeyDownCapture: (event: KeyboardEvent<HTMLElement>) => {
       if (!busy || passing.includes(event.key) || event.ctrlKey || event.metaKey) return;
+      // Space in a busy region: on a control that is not a text field it activates nothing, whatever handler it has (a role=button cell, a slider), and goes to the app as play/pause; in a text field a typed space is refused.
+      if (event.key === ' ') {
+        const target = event.target;
+        const text = target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || (target instanceof HTMLInputElement && !['range', 'checkbox', 'radio', 'button'].includes(target.type));
+        refuse(event);
+        if (!text) passSpace(event);
+        return;
+      }
       const target = event.target;
       // Moving the caret inside a text field changes nothing.
       const text = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== 'checkbox' && target.type !== 'radio');

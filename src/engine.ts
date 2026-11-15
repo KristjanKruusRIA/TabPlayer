@@ -377,6 +377,8 @@ function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undef
  */
 export interface Checkpoint {
   built:BuiltDocument;index:number;
+  /** How many history entries (not commands: a sequence is one entry) the project had, for the controller's bound on how far back a take-back goes. */
+  entries:number;
   /** What the first `index` edits and the base were, and whether the file's partial capo applied when the base was loaded: the checkpoint only fits a project that still has them. */
   prefix:string;base:string;partialCapo:boolean;
 }
@@ -384,7 +386,7 @@ const baseKey=(project:ProjectInput):string=>project.base.kind==='file'?`file:${
 /** A checkpoint of `built`, which must be the real rebuild of `project`'s edits (or equal to it) and must not be a document that is edited from now on: it is kept as it is. */
 export function makeCheckpoint(project:ProjectInput,built:BuiltDocument,canRedo:boolean):Checkpoint {
   const normalized=validateProject(project),edits=projectCommands(normalized);
-  return {built,index:edits.length,prefix:JSON.stringify(edits),base:baseKey(normalized),partialCapo:normalized.base.kind==='file'&&appliesFilePartialCapo(normalized,canRedo)};
+  return {built,index:edits.length,entries:normalized.edits.length,prefix:JSON.stringify(edits),base:baseKey(normalized),partialCapo:normalized.base.kind==='file'&&appliesFilePartialCapo(normalized,canRedo)};
 }
 /** Whether `project` still begins with the base and the edits the checkpoint holds (a checkpoint above the end of the history, or of another history, is not valid). */
 export function checkpointFits(checkpoint:Checkpoint,project:ProjectInput,canRedo:boolean):boolean {

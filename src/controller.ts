@@ -76,42 +76,32 @@ export class DocumentController {
   /** Why the document cannot be used (it could not be rebuilt after native changed it), as the alert shows it: every action but Undo and closing refuses. */
   private broken:string|null=null;
   private healing=false;
+  /** How many history entries the document had when it was last known to equal a rebuild: a take-back goes no further back than that. */
+  private verifiedEntries=0;
   /** The edits taken back since the document broke (what the user is told once it is whole again). */
   private takenBackWhileBroken=0;
+  /** What made it break (for the message, which also says how many edits were taken back since), and whether taking edits back cannot help (no memory, no stack). */
+  private brokenReason='';private brokenFatal=false;
+  /** How many of the newest entries on the redo stack are edits that were taken back because they could not be rebuilt: they are redone through the full path, which fails before native acts. */
+  private taintedRedo=0;
+  /** Counts the times a take-back made the document whole (a close that settled and found edits taken back does not go on). */
+  private healedCount=0;
 
-  private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: BeforeChange, private isWorkspaceTransitioning:()=>boolean, built:BuiltDocument, takenBack=0) {
+  private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: BeforeChange, private isWorkspaceTransitioning:()=>boolean) {
     this.verifyRecord(record);
-    this.state={...record,...built,documentEpoch:0,busy:false,error:null,...(takenBack?{takenBack}:{})};
+    this.state={...record,...buildDocument(record.snapshot.project,record.snapshot.canRedo),documentEpoch:0,busy:false,error:null};
     this.adoptRebuilt(this.state);
   }
   static async create(bridge: NativeBridge, beforeChange: BeforeChange = () => {},initial?:DocumentSnapshot,isWorkspaceTransitioning:()=>boolean=()=>false) {
-    let record=initial ?? await bridge.snapshot();
+    const record=initial ?? await bridge.snapshot();
     await admitDocumentBase(record.snapshot.project);
-    let built:BuiltDocument,takenBack=0;
-    try {built=buildDocument(record.snapshot.project,record.snapshot.canRedo);}
-    catch(error) {
-      // A saved history that does not replay (an edit that an older or buggier build let in): the document opens at the last edit that does, the rest is taken back
-      // (it stays in native's redo stack, and nothing is written to the file until the user saves).
-      const opened=await DocumentController.openAtLastReplayableEdit(bridge,record,error);
-      record=opened.record;built=opened.built;takenBack=opened.takenBack;
-    }
-    return new DocumentController(bridge,record,beforeChange,isWorkspaceTransitioning,built,takenBack);
-  }
-  /** The longest prefix of the history that replays (found by bisection: a prefix that fails makes every longer one fail), and the document taken back to it. Throws the original error when not even the base opens. */
-  private static async openAtLastReplayableEdit(bridge:NativeBridge,record:DocumentSnapshot,error:unknown):Promise<{record:DocumentSnapshot;built:BuiltDocument;takenBack:number}> {
-    const project=record.snapshot.project,edits=projectCommands(project);
-    const replays=(count:number)=>{try{buildDocument({...project,edits:edits.slice(0,count)},true);return true;}catch{return false;}};
-    if(!edits.length||!replays(0))throw error;
-    let good=0,bad=edits.length;
-    while(bad-good>1){const middle=(good+bad)>>1;if(replays(middle))good=middle;else bad=middle;}
-    let current=record;
-    for(let remaining=edits.length-good;remaining>0;remaining--){
-      current=await bridge.undo(current.revision);
-      if(current.documentId!==bridge.documentId)throw new Error('The native response belongs to a different document.');
-    }
-    return {record:current,built:buildDocument(current.snapshot.project,current.snapshot.canRedo),takenBack:edits.length-good};
+    return new DocumentController(bridge,record,beforeChange,isWorkspaceTransitioning);
   }
   private message(key:MessageKey,params?:Record<string,string|number>):string {return getMessage(getResolvedLanguage(),key,params);}
+  private refreshBrokenMessage() {
+    this.broken=this.message(this.takenBackWhileBroken>0?'document.broken_after_take_back':'document.broken',{reason:this.brokenReason,count:this.takenBackWhileBroken});
+    this.update({error:this.broken});
+  }
   /** Whether the document could not be rebuilt after native changed it, and has not been made whole again. */
   isBroken():boolean {return this.broken!==null;}
   private verifyRecord(record:DocumentSnapshot) {
@@ -152,10 +142,10 @@ export class DocumentController {
   private isUnverified():boolean {return this.state.score!==this.verifiedScore;}
   /** Whether the document is known to equal a rebuild from the file and the history. */
   isVerified():boolean {return !this.isUnverified();}
-  private markVerified():void {this.verifiedScore=this.state.score;}
+  private markVerified():void {this.verifiedScore=this.state.score;this.verifiedEntries=this.state.snapshot.project.edits.length;}
   /** The open document is a real rebuild (a full build just made it): it is known to equal one, and is kept to be copied for a checkpoint before it is edited in place. */
   private adoptRebuilt(built:BuiltDocument) {
-    this.verifiedScore=built.score;this.checkpoint=null;
+    this.verifiedScore=built.score;this.verifiedEntries=this.state.snapshot.project.edits.length;this.checkpoint=null;
     this.lazyCheckpoint={built:{...built},project:this.state.snapshot.project,canRedo:this.state.snapshot.canRedo};
   }
   /** Copies the real rebuild that is the open document before anything edits it in place (what is kept then is the copy, which nothing edits). */
@@ -216,7 +206,7 @@ export class DocumentController {
     // file made in one piece does, and it is the one that replaces the document if the two differ.
     let whole:BuiltDocument;
     try {whole=buildDocument(live.snapshot.project,live.snapshot.canRedo);}
-    catch(error) {this.fail(error);return false;}
+    catch(error) {this.fail(error,!owned);if(owned)await this.healBroken();return false;}
     const problem=compareDocuments(live,whole);
     if(problem){
       editStats.mismatches++;console.error(`Edit in place differs from a full rebuild: ${problem}`);
@@ -237,11 +227,14 @@ export class DocumentController {
     if(this.broken!==null)throw new Error(this.broken);
     if(this.isUnverified()&&!this.closed){
       // One uninterrupted rebuild from the file, compared with the open document.
-      let whole:BuiltDocument;
-      try {whole=buildDocument(this.state.snapshot.project,this.state.snapshot.canRedo);} catch(error) {this.fail(error);throw new Error(this.broken!);}
-      const problem=compareDocuments(this.state,whole);
-      if(problem){editStats.mismatches++;console.error(`Edit in place differs from a full rebuild: ${problem}`);forgetPreview();this.update({...whole,repaired:true});this.adoptRebuilt(whole);}
-      else {this.checkpoint=makeCheckpoint(this.state.snapshot.project,whole,this.state.snapshot.canRedo);this.markVerified();}
+      let whole:BuiltDocument|null=null;
+      try {whole=buildDocument(this.state.snapshot.project,this.state.snapshot.canRedo);}
+      catch(error) {this.fail(error,false);await this.healBroken();if(this.broken!==null)throw new Error(this.broken);}
+      if(whole){
+        const problem=compareDocuments(this.state,whole);
+        if(problem){editStats.mismatches++;console.error(`Edit in place differs from a full rebuild: ${problem}`);forgetPreview();this.update({...whole,repaired:true});this.adoptRebuilt(whole);}
+        else {this.checkpoint=makeCheckpoint(this.state.snapshot.project,whole,this.state.snapshot.canRedo);this.markVerified();}
+      }
     }
     if(this.closed&&this.isUnverified())throw new DocumentClosedError();
     return this.state;
@@ -249,43 +242,46 @@ export class DocumentController {
   verified():Promise<DocumentState> {return this.run(()=>this.settled());}
   /**
    * The document could not be rebuilt after native changed it, so what is shown is not what native holds. The failure is the same every time and the newest
-   * edits caused it, so the newest edits are taken back at once (native undo, then a rebuild), up to a small bound; only if that does not make the document
-   * whole is it left broken, where Undo takes edits back one by one and Close leaves without saving. Nothing is saved, exported or edited while it is broken.
+   * edits caused it, so they are taken back at once (native undo, then a rebuild), up to a small bound; only if that does not make the document whole is it
+   * left broken, where Undo takes edits back one by one and Close leaves without saving. Nothing is saved, exported or edited while it is broken.
+   * `queue` says whether the take-back is queued as an action of its own (for a check that runs on the side) or is made by the caller, inside its own action.
    */
-  private fail(error:unknown) {
+  private fail(error:unknown,queue=true) {
     const reason=error instanceof Error?error.message:String(error);
-    if(this.broken===null)this.takenBackWhileBroken=0;
-    this.broken=this.message('document.broken',{reason});this.update({error:this.broken});
-    if(this.healing||this.closed)return;
+    if(this.broken===null){this.takenBackWhileBroken=0;this.brokenFatal=error instanceof RangeError||/out of memory/i.test(reason);}
+    this.brokenReason=reason;this.refreshBrokenMessage();
+    if(queue)this.queueHeal();
+  }
+  private queueHeal() {
+    if(this.healing||this.closed||this.broken===null||this.brokenFatal)return;
     this.healing=true;
-    void this.run(()=>this.healBroken(),true,true).catch(()=>{}).finally(()=>{this.healing=false;});
+    void this.run(async()=>{try{await this.healBroken();}finally{this.healing=false;}},true,true).catch(()=>{this.healing=false;});
   }
   /** One native undo, then a rebuild of what native now holds: the rebuilt document, or null when it still cannot be rebuilt (or there is nothing left to take back). */
   private async takeBackOne():Promise<BuiltDocument|null> {
     const removed=this.state.snapshot.project.edits.at(-1);if(!removed)return null;
     const record=await this.bridge.undo(this.state.revision);this.verifyRecord(record);
-    this.undone.push(removed);this.takenBackWhileBroken++;this.update({...record});
+    this.undone.push(removed);this.takenBackWhileBroken++;this.taintedRedo++;this.update({...record});
     try {return buildDocument(record.snapshot.project,record.snapshot.canRedo);} catch {return null;}
   }
   /** The document is whole again after edits were taken back: the rebuilt one is the open document, verified, and the user is told. */
   private adoptHealed(built:BuiltDocument) {
     this.beforeChange();forgetPreview();
-    this.broken=null;
+    this.broken=null;this.healedCount++;
     this.update({...built,repaired:false,takenBack:this.takenBackWhileBroken,error:null});this.adoptRebuilt(this.state);
   }
-  /** Takes back the newest edits, one after another and only as far as the edits made since the last checkpoint (and at most `MAX_TAKE_BACK`), until the document rebuilds. */
+  /** Takes back the newest edits, one after another and only as far as the history entries made since the last checkpoint (and at most `MAX_TAKE_BACK`), until the document rebuilds. */
   private async healBroken():Promise<void> {
-    if(this.broken===null)return;
-    const known=this.checkpoint?.index??(this.lazyCheckpoint?projectCommands(this.lazyCheckpoint.project).length:0);
-    const limit=Math.max(1,Math.min(MAX_TAKE_BACK,projectCommands(this.state.snapshot.project).length-known));
+    if(this.broken===null||this.brokenFatal)return;
+    const limit=Math.max(1,Math.min(MAX_TAKE_BACK,this.state.snapshot.project.edits.length-this.verifiedEntries));
     try {
       for(let attempt=0;attempt<limit;attempt++){
         const built=await this.takeBackOne();
         if(built){this.adoptHealed(built);return;}
-        if(!this.state.snapshot.project.edits.length)return;
+        if(!this.state.snapshot.project.edits.length)break;
       }
     } catch(error) {console.warn(`Edits could not be taken back: ${error instanceof Error?error.message:String(error)}`);}
-    this.update({error:this.broken});
+    this.refreshBrokenMessage();
   }
   private async saveNow(saveAs: boolean) {
     const record=await this.bridge.saveProject(saveAs,this.state.revision);
@@ -293,11 +289,16 @@ export class DocumentController {
     this.verifyRecord(record);this.update(record); return true;
   }
   private async canLeave() {
-    // A broken document is closed without asking: the question offers to save, and what would be saved cannot be rebuilt.
-    if (this.broken!==null) return true;
+    // A broken document cannot be saved: the question is only whether to discard it (and the unsaved work made before the break), never whether to save.
+    if (this.broken!==null) return (await this.bridge.confirmDiscardBroken?.(this.state.score.title || 'Untitled')) ?? false;
     if (!this.state.snapshot.dirty) return true;
     const choice=await this.bridge.askUnsaved(this.state.score.title || 'Untitled',this.state.snapshot.path);
-    return choice==='discard' || (choice==='save' && await this.saveNow(false));
+    if (choice!=='save') return choice==='discard';
+    // The check comes first, so a bad edit is never written; if it took edits back the document stays open, and the notice shows what the file would have lacked.
+    const healed=this.healedCount;
+    try {await this.settled();} catch {return false;}
+    if (this.healedCount!==healed) return false;
+    return this.saveNow(false);
   }
   private needsPartialCapoMark() {
     const project=this.state.snapshot.project;
@@ -340,7 +341,7 @@ export class DocumentController {
     }
     const scoreBefore=this.state.score;
     if(!isSettingsEdit(command))this.beforeChange(barMapOfEdit(command,this.state.score.masterBars.length)??undefined);
-    this.undone=[];this.update({...record,repaired:false,takenBack:0,score:candidate!.score,settings:candidate!.settings,embeddedBacking:candidate!.embeddedBacking,embeddedBackingSettings:candidate!.embeddedBackingSettings,sourceMixes:candidate!.sourceMixes});
+    this.undone=[];this.taintedRedo=0;this.update({...record,repaired:false,takenBack:0,score:candidate!.score,settings:candidate!.settings,embeddedBacking:candidate!.embeddedBacking,embeddedBackingSettings:candidate!.embeddedBackingSettings,sourceMixes:candidate!.sourceMixes});
     // Only a score a full build made is known to equal a rebuild. A settings edit keeps the score object, and with it what is known of it. The check of an edit made in place is armed when the queue empties.
     if(inPlace&&!rebuilt)this.checkInPlace();
     else if(this.state.score!==scoreBefore)this.adoptRebuilt(this.state);
@@ -422,7 +423,7 @@ export class DocumentController {
     if(this.broken!==null){
       const built=await this.takeBackOne();
       if(built)this.adoptHealed(built);
-      else this.update({error:this.broken});
+      else this.refreshBrokenMessage();
       return;
     }
     const project=this.state.snapshot.project,removed=project.edits.at(-1);if(!removed)return;
@@ -447,12 +448,13 @@ export class DocumentController {
     const restored=this.state.snapshot.redoEdit ?? this.undone.at(-1);
     if(!restored){if(this.state.snapshot.canRedo)throw new Error('The next redo command is unavailable; reopen the document.');return;}
     const project={...this.state.snapshot.project,edits:[...this.state.snapshot.project.edits,restored]},settingsOnly=isSettingsEdit(restored);
-    let quick=!settingsOnly&&canEditInPlace(this.state,restored)&&appliesFilePartialCapo(project,false)===appliesFilePartialCapo(this.state.snapshot.project,this.state.snapshot.canRedo);
+    // An edit that was taken back because the document could not be rebuilt with it comes back through the full path: building the document with it fails before native acts, so it cannot break the document again and be taken back in a loop.
+    let quick=!settingsOnly&&this.taintedRedo===0&&canEditInPlace(this.state,restored)&&appliesFilePartialCapo(project,false)===appliesFilePartialCapo(this.state.snapshot.project,this.state.snapshot.canRedo);
     // A redo that is applied in place is checked first, on copies, as an edit is; one the check refuses is rebuilt like any other.
     if(quick){try{checkEditInPlace(this.state,restored,projectCommands(this.state.snapshot.project).length);}catch{quick=false;}}
     const built=quick?null:settingsOnly?replayDocumentSettings(project,this.state):buildDocument(project);
     const record=await this.bridge.redo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange(barMapOfEdit(restored,this.state.score.masterBars.length)??undefined);
-    this.undone.pop();
+    this.undone.pop();if(this.taintedRedo>0)this.taintedRedo--;
     if(quick){
       this.detachCheckpoint();
       try {
@@ -464,27 +466,35 @@ export class DocumentController {
       if(this.state.score!==before)this.adoptRebuilt(this.state);
     }
   }); }
-  /** Finalizes or unfinalizes the document. A lock change is not an edit, so history and the redo stack stay as they are. */
+  /**
+   * Finalizes or unfinalizes the document. A lock change is not an edit, so history and the redo stack stay as they are. A document is verified (and a bad edit taken
+   * back) before it is locked, because native refuses to undo a finalized document; unlocking is allowed while broken, and then the take-back is tried again.
+   */
   setLock(lock:DocumentLock|null) { return this.run(async()=>{
+    if(this.broken===null)await this.settled();
     const current=this.state,wanted=lock?.kind??null;
-    if((current.snapshot.project.lock?.kind??null)===wanted)return;
+    if((current.snapshot.project.lock?.kind??null)===wanted){this.queueHeal();return;}
     const record=await this.bridge.setLock(lock,current.revision);this.verifyRecord(record);
     this.update({...record});
-  }); }
+    this.queueHeal();
+  },false,lock===null); }
   /**
    * Gives or withdraws the password to edit, or sets, changes or removes a password. Not an edit: history and the redo
    * stack stay as they are. A refused password rejects without leaving the controller's own error behind, because the
-   * dialog that asked shows the reason beside the field.
+   * dialog that asked shows the reason beside the field (the alert of a broken document stays). Verified before it acts, like locking;
+   * giving the password to edit is allowed while broken.
    */
   protect(request:ProtectionRequest) {
     return this.run(async()=>{
       if(!this.bridge.protect)throw new Error('Password protection is unavailable.');
+      if(this.broken===null)await this.settled();
       const record=await this.bridge.protect(request,this.state.revision);this.verifyRecord(record);
       this.update({...record});
-    }).catch(error=>{this.update({error:null});throw error;});
+      this.queueHeal();
+    },false,request.kind==='unlockEditing').catch(error=>{this.update({error:this.broken});throw error;});
   }
-  /** Refused while the document is broken: what would be written cannot be rebuilt. */
-  save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
+  /** Refused while the document is broken: what would be written cannot be rebuilt. It waits for the check first (idle checks are held for the whole of playback), and writes the healed history if the check takes edits back. */
+  save(saveAs = false) { return this.run(async()=>{await this.settled();return this.saveNow(saveAs);}); }
   export() { return this.run(async()=>{
     // What the file cannot keep is worked out first, so the user is asked once, with it, and not after confirming.
     await this.settled();

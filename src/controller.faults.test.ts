@@ -27,9 +27,9 @@ function makeBridge(project:Project) {
     documentId:'document-a',snapshot:vi.fn(async()=>snapshot()),cancelAsset:vi.fn(async()=>true),
     readBackingAsset:async()=>{throw new Error('no backing');},
     applyEdit:vi.fn(async command=>{undone=[];current={...current,project:{...current.project,edits:[...current.project.edits,command]},canUndo:true,canRedo:false,dirty:true};revision++;return snapshot();}),
-    undo:async()=>{const edits=current.project.edits.slice();undone.push(edits.pop()!);current={...current,project:{...current.project,edits},canUndo:edits.length>0,canRedo:true};revision++;return snapshot();},
+    undo:async()=>{if(current.project.lock)throw new Error('This document is finalized. Unfinalize it to make changes.');const edits=current.project.edits.slice();undone.push(edits.pop()!);current={...current,project:{...current.project,edits},canUndo:edits.length>0,canRedo:true};revision++;return snapshot();},
     redo:async()=>{const edits=[...current.project.edits,undone.pop()!];current={...current,project:{...current.project,edits},canUndo:true,canRedo:undone.length>0};revision++;return snapshot();},
-    setLock:vi.fn() as never,saveProject:vi.fn(async()=>null),exportGp:vi.fn(async()=>true),askUnsaved:async()=>'discard',confirmExport:async()=>true,
+    setLock:vi.fn(async lock=>{current={...current,project:{...current.project,lock:lock??undefined}};revision++;return snapshot();}),saveProject:vi.fn(async()=>null),exportGp:vi.fn(async()=>true),askUnsaved:async()=>'discard',confirmExport:async()=>true,
   };
   return bridge;
 }
@@ -195,7 +195,7 @@ describe('what the check does around the queue, the window and a failed rebuild'
       const checking=controller.verified();
       // The check is under way (it works in slices that let other work go first) when the others are queued.
       await wait(3);
-      const queued=[controller.edit({type:'setNote',target:at(1),string:2,fret:6}),controller.edit({type:'setNote',target:at(2),string:2,fret:7}),controller.save()];
+      const queued=[controller.edit({type:'setNote',target:at(1),string:2,fret:6}),controller.edit({type:'setNote',target:at(2),string:2,fret:7}),controller.edit({type:'setNote',target:at(3),string:2,fret:8})];
       await Promise.all([checking,...queued]);
       expect(vi.mocked(engine.verifyEditStepwise).mock.calls.length-calls,'the check an action asked for ran once, not again for every action queued behind it').toBe(1);
     } finally {errors.mockRestore();}
@@ -319,6 +319,7 @@ describe('a document that cannot be rebuilt from what native holds',()=>{
   const withBridge=(project:Project)=>{
     const bridge=makeBridge(project),saved:string[]=[];
     const undo=bridge.undo;bridge.undo=vi.fn(undo);
+    bridge.confirmDiscardBroken=vi.fn(async()=>true);
     bridge.saveProject=vi.fn(async()=>{saved.push(JSON.stringify((await bridge.snapshot()).snapshot.project.edits));return null;});
     return {bridge,saved};
   };
@@ -368,11 +369,12 @@ describe('a document that cannot be rebuilt from what native holds',()=>{
       await controller.save();expect(saved).toHaveLength(1);expect(saved[0]).not.toContain('13');
     } finally {errors.mockRestore();warn.mockRestore();}
   },60000);
-  it('can be closed while broken without asking to save the broken history',async()=>{
+  it('asks only whether to discard when it is closed while broken, never whether to save, and stays open when the answer is cancel',async()=>{
     const errors=vi.spyOn(console,'error').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
     try {
       const {bridge}=withBridge(blank());
       const asked=vi.fn(async()=>'save' as const);bridge.askUnsaved=asked;
+      const discard=vi.fn(async()=>false);bridge.confirmDiscardBroken=discard;
       const controller=await DocumentController.create(bridge);
       await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
       refuseBad();
@@ -380,28 +382,131 @@ describe('a document that cannot be rebuilt from what native holds',()=>{
       vi.mocked(bridge.undo).mockRejectedValueOnce(new Error('native undo failed'));
       await controller.verifyNow(async()=>{});await controller.whenIdle();
       expect(controller.isBroken()).toBe(true);
-      expect(await controller.requestClose(),'close does not offer to save what cannot be saved').toBe(true);
-      expect(asked).not.toHaveBeenCalled();expect(bridge.saveProject).not.toHaveBeenCalled();
+      expect(await controller.requestClose(),'cancel keeps the document open').toBe(false);
+      discard.mockResolvedValue(true);
+      expect(await controller.requestClose(),'discard closes it').toBe(true);
+      expect(discard).toHaveBeenCalledTimes(2);expect(asked,'Save is never offered').not.toHaveBeenCalled();expect(bridge.saveProject).not.toHaveBeenCalled();
     } finally {errors.mockRestore();warn.mockRestore();}
   },60000);
-  it('opens a saved history that ends in an edit that does not replay at the last edit that does, and says so',async()=>{
-    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+  it('settles before it saves: a bad edit accepted during playback is taken back, and the file gets the healed history and the notice shows',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
     try {
-      refuseBad();
-      const history:Project={...blank(),edits:[
-        {type:'setNote',target:at(0),string:2,fret:5},{type:'setNote',target:at(1),string:2,fret:6},
-        {type:'setNote',target:at(2),string:2,fret:13},{type:'setNote',target:at(3),string:2,fret:7},
-      ]};
-      const {bridge,saved}=withBridge(history);
+      const {bridge,saved}=withBridge(blank());
       const controller=await DocumentController.create(bridge);
-      expect(controller.getState().snapshot.project.edits.map(edit=>(edit as {fret:number}).fret),'opened at the last edit that replays').toEqual([5,6]);
-      expect(controller.getState().takenBack,'the two edits from the failing one on').toBe(2);
-      expect(controller.isBroken()).toBe(false);expect(controller.isVerified()).toBe(true);
-      expect(saved,'the file is not written by opening').toHaveLength(0);
-      // A base that does not open at all is still an error.
-      vi.mocked(engine.buildDocument).mockImplementation(()=>{throw new Error('the file does not open');});
-      await expect(DocumentController.create(makeBridge(history))).rejects.toThrow('the file does not open');
-    } finally {allowAll();errors.mockRestore();}
+      await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+      refuseBad();
+      // Playback holds the idle check for as long as it runs; the edit is accepted in place and nothing has compared it with a rebuild.
+      controller.holdVerification(true);
+      await controller.edit({type:'setNote',target:at(1),string:2,fret:13});
+      expect(controller.isVerified()).toBe(false);
+      await controller.save();
+      expect(saved).toHaveLength(1);expect(saved[0],'the bad edit was never written').not.toContain('13');
+      expect(controller.getState().takenBack,'the notice shows').toBe(1);expect(controller.isBroken()).toBe(false);
+      // The same through Save As and through the save answered at close.
+      controller.holdVerification(true);
+      await controller.edit({type:'setNote',target:at(2),string:2,fret:13});
+      await controller.save(true);
+      expect(saved).toHaveLength(2);expect(saved[1]).not.toContain('13');
+      bridge.askUnsaved=vi.fn(async()=>'save' as const);
+      await controller.edit({type:'setNote',target:at(3),string:2,fret:13});
+      expect(await controller.requestClose(),'edits were taken back while closing: the document stays open so that the notice is seen').toBe(false);
+      expect(saved).toHaveLength(2);expect(controller.getState().takenBack).toBe(1);
+    } finally {errors.mockRestore();warn.mockRestore();}
+  },60000);
+  it('is verified before it is finalized, so a bad edit is taken back before the lock stops native from undoing it',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+    try {
+      const {bridge}=withBridge(blank());
+      const controller=await DocumentController.create(bridge);
+      await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+      refuseBad();controller.holdVerification(true);
+      await controller.edit({type:'setNote',target:at(1),string:2,fret:13});
+      await controller.setLock({kind:'finalized'});
+      expect(vi.mocked(bridge.undo).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(bridge.setLock).mock.invocationCallOrder[0]);
+      expect(controller.getState().snapshot.project.edits).toHaveLength(1);expect(controller.getState().snapshot.project.lock?.kind).toBe('finalized');
+      expect(controller.isBroken()).toBe(false);expect(controller.getState().takenBack).toBe(1);
+    } finally {errors.mockRestore();warn.mockRestore();}
+  },60000);
+  it('can be unlocked while broken, and is then taken back',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+    try {
+      const {bridge}=withBridge(blank());
+      const controller=await DocumentController.create(bridge);
+      await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+      refuseBad();
+      await controller.edit({type:'setNote',target:at(1),string:2,fret:13});
+      // Native refuses the take-back because the document is finalized (the window and native disagree for a moment).
+      vi.mocked(bridge.undo).mockRejectedValueOnce(new Error('This document is finalized. Unfinalize it to make changes.'));
+      await controller.verifyNow(async()=>{});await controller.whenIdle();
+      expect(controller.isBroken()).toBe(true);
+      await expect(controller.edit({type:'setNote',target:at(2),string:2,fret:6})).rejects.toThrow(/Undo/i);
+      await controller.setLock(null);await controller.whenIdle();
+      expect(controller.isBroken(),'unlocking was allowed and the take-back ran after it').toBe(false);
+      expect(controller.getState().snapshot.project.edits).toHaveLength(1);expect(controller.getState().takenBack).toBe(1);
+    } finally {errors.mockRestore();warn.mockRestore();}
+  },60000);
+  it('keeps the alert when a password attempt is refused while broken, and allows unlocking editing',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+    try {
+      const {bridge}=withBridge(blank());
+      bridge.protect=vi.fn(async()=>{throw new Error('wrong password');});
+      const controller=await DocumentController.create(bridge);
+      await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+      refuseBad();
+      await controller.edit({type:'setNote',target:at(1),string:2,fret:13});
+      vi.mocked(bridge.undo).mockRejectedValueOnce(new Error('native undo failed'));
+      await controller.verifyNow(async()=>{});await controller.whenIdle();
+      const alert=controller.getState().error;expect(alert).toMatch(/Undo/i);
+      await expect(controller.protect({kind:'unlockEditing',password:'x'})).rejects.toThrow('wrong password');
+      expect(controller.getState().error,'the alert stays after a refused password').toBe(alert);
+      await expect(controller.protect({kind:'set',password:'x'} as never)).rejects.toThrow(/Undo/i);
+    } finally {errors.mockRestore();warn.mockRestore();}
+  },60000);
+  it('says how many edits were already taken back when it stays broken, and goes back only as far as the entries since the checkpoint',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+    try {
+      // Three entries before the checkpoint (the first holds the fret that fails once the refusal is on), then one entry holding three commands, then one more.
+      const history:Project={...blank(),edits:[
+        {type:'setNote',target:at(0),string:2,fret:13},{type:'setNote',target:at(1),string:2,fret:6},{type:'setNote',target:at(2),string:2,fret:7},
+      ]};
+      const {bridge}=withBridge(history);
+      const controller=await DocumentController.create(bridge);
+      refuseBad();
+      const target=at(3);
+      await controller.edit({type:'sequence',commands:[{type:'setDuration',target,duration:8,dots:0},{type:'setNote',target,string:2,fret:4},{type:'setNote',target,string:3,fret:5}]} as EditCommand);
+      await controller.edit({type:'setNote',target:at(0,1),string:2,fret:9});
+      await controller.verifyNow(async()=>{});await controller.whenIdle();
+      expect(vi.mocked(bridge.undo),'two entries since the checkpoint, not four commands').toHaveBeenCalledTimes(2);
+      expect(controller.isBroken()).toBe(true);expect(controller.getState().error).toMatch(/taken back so far: 2/i);
+    } finally {errors.mockRestore();warn.mockRestore();}
+  },60000);
+  it('does not take edits back when the rebuild failed for want of memory or stack, and says what failed',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+    try {
+      const {bridge}=withBridge(blank());
+      const controller=await DocumentController.create(bridge);
+      await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+      vi.mocked(engine.verifyEditStepwise).mockImplementation(async()=>{throw new RangeError('Invalid array length');});
+      vi.mocked(engine.buildDocument).mockImplementation(()=>{throw new RangeError('Invalid array length');});
+      await controller.verifyNow(async()=>{});await controller.whenIdle();
+      expect(bridge.undo).not.toHaveBeenCalled();expect(controller.isBroken()).toBe(true);expect(controller.getState().error).toMatch(/Invalid array length/);
+    } finally {allowAll();errors.mockRestore();warn.mockRestore();}
+  },60000);
+  it('refuses to bring a taken-back edit back unchecked: redo goes through the full path, which fails before native acts, so nothing loops',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});const warn=vi.spyOn(console,'warn').mockImplementation(()=>{});
+    try {
+      const {bridge}=withBridge(blank());
+      bridge.redo=vi.fn(bridge.redo);
+      const controller=await DocumentController.create(bridge);
+      await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+      refuseBad();
+      await controller.edit({type:'setNote',target:at(1),string:2,fret:13});
+      await controller.verifyNow(async()=>{});await controller.whenIdle();
+      expect(controller.getState().takenBack).toBe(1);
+      await expect(controller.redo()).rejects.toThrow('this edit cannot be replayed');
+      expect(bridge.redo,'native was not asked').not.toHaveBeenCalled();
+      expect(controller.isBroken()).toBe(false);expect(controller.getState().snapshot.project.edits).toHaveLength(1);
+    } finally {errors.mockRestore();warn.mockRestore();}
   },60000);
 });
 

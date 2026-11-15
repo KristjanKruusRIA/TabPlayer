@@ -281,14 +281,12 @@ Each was reproduced as a failing test first.
   * **If that does not make it whole** (native undo fails, or the bound is reached) the document stays broken. Then Undo is allowed and does the
     same one edit at a time (repeatable until a rebuild succeeds); Save, Save As, edits, redo, copy, cut, lock, protect and every export are refused
     with the translated reason; the alert stays (no action clears it, and an action queued before the break is refused when its turn comes);
-    Close is allowed and does not ask whether to save (the question offers to save what cannot be rebuilt), so it closes without saving.
+    Close is allowed; the fifth review made it ask only whether to discard (it first closed silently).
   * **The recovery backup.** It is written by native from native's own live history, not by the window, and the window cannot hold it back. While a
     document is broken native still holds the bad edit, so a backup captured in that window has it. The automatic take-back removes the edit from
     native's history in the same task as the failed check, so in the normal case the next capture no longer has it as an applied edit; I did not
     check whether a backup keeps native's redo stack. A session restored from such a backup opens through the next item.
-  * **Opening a saved history that does not replay** (defence in depth, `DocumentController.create`): the longest prefix of the log that replays is
-    found by bisection (a failing prefix makes every longer one fail), the rest is taken back with native undo (nothing is written to the file until the
-    user saves), and a notice says so. A base that does not open at all is still an error. Test: a history whose third edit fails opens with the first two.
+  * **Opening a saved history that does not replay**: a first version bisected the log and took the tail back at open; the fifth review removed it (below).
 * **The idle check stops when playback or a count-in starts** (`holdVerification`, driven by the player's state instead of a gate read once at the start): a
   running check is cancelled and an armed one does not start; the check is armed again when playback ends. Checks an action asked for (export, copy) are not held.
 * **`settled()` rejects when the document is closed while it waits** (`DocumentClosedError`) instead of returning an unchecked state; Copy, Cut and
@@ -307,6 +305,33 @@ Each was reproduced as a failing test first.
 * The first checkpoint is copied on the first keystroke after opening (122 ms on the owner's largest score) instead of while the document is idle.
 * Copy and Cut after a burst of edits wait for the check (in slices of at most 40 ms of work, 4.5 s after 200 edits since the last check and 10.2 s after
   500 in node on that score), during which the editor is busy and keys are refused.
+
+## Fifth review (simplified: no open-time defence, saving and locking wait for the check)
+
+* **The open-time defence is removed.** `DocumentController.create` is as it was before the fourth review: if the build fails at open, the original error is
+  thrown. The defence counted in the wrong units (`projectCommands` includes the baseline edits and splits sequences, native undo takes back one
+  history entry per call), changed the error for finalized and locked files, and was unbounded for an untrusted file (a crafted log makes about a
+  million `bridge.undo` calls). It was not needed for the owner's build, because a bad edit can no longer be saved or locked in. A possible later feature,
+  to be made natively with one "undo to index" call and bounds.
+* **Save waits for the check.** Save, Save As and the "Save" answer at close all `await settled()` first (it costs nothing when the document is already
+  verified). The idle check is held for the whole of playback, so before this a bad edit made during playback could be saved with Ctrl+S. If the
+  check takes edits back, the save writes the healed history and the notice shows; at close the document stays open instead, so the notice is seen. Test:
+  playback held, a bad edit accepted in place, then Save, Save As and the close-save: the file never holds the bad edit.
+* **Locking waits for the check.** `setLock` and `protect` settle before they act, so a document is verified (and a bad edit taken back) before it is
+  finalized or password-protected; native refuses to undo a finalized document, which is what left the document stuck. Unlocking (`setLock(null)`,
+  `unlockEditing`) is allowed while broken, and the take-back is tried again after it. Tests: finalize with a bad edit pending (the undo comes before the lock);
+  unlock while broken.
+* **Loose ends of the broken state.**
+  * `protect` no longer clears the alert after a refused password.
+  * Closing a broken document (a tab, Close All, the window) asks only "Discard changes / Cancel" (`confirmDiscardBroken`, translated in en, et, de), never
+    "Save": it names the unsaved work made before the break. A bridge without the question cancels.
+  * The take-back bound counts history entries since the document was last known verified, not commands; when it stays broken the message says how many edits
+    were already taken back.
+  * A rebuild that fails with a `RangeError` or out of memory marks the document broken and shows the error without taking edits back.
+  * A redo after a take-back goes through the full path (the document is built with the edit first), which fails before native acts, so the edit cannot be
+    brought back, break the document and be taken back again in a loop; the redo is refused with the error.
+  * The notice after a take-back says that Redo brings the edits back and that saving now drops them for good (en, et, de).
+  * The broken message uses a stored reason and is rewritten as edits are taken back.
 
 ## The equivalence check
 

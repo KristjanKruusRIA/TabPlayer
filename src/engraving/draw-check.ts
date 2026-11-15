@@ -49,13 +49,17 @@ function renderComplete(view:AlphaTabApi):{pieces:Piece[];bounds:string[]} {
 }
 
 /**
- * Every piece of the live view, painted (`renderResult`) and read back at once, in layout order (the facade keeps one placeholder `div` per piece, in that order). This changes the page:
- * pieces out of view are painted too, and alphaTab clears them again the next time it sees them leave the view. Null when the placeholders are not the pieces laid out last.
+ * Every piece of the live view, painted (`renderResult`) and read back at once, in layout order (the facade keeps one placeholder `div` per piece, in that order). The pieces that were empty are
+ * emptied again afterwards, so that the check leaves the page as it found it (the ones in view are painted again at once by the score view, which watches for pieces being emptied).
+ * Null when the placeholders are not the pieces laid out last.
  */
 function readLive(view:AlphaTabApi,partials:readonly LayoutPartial[]):Piece[]|null {
   const element=(view.canvasElement as unknown as {element?:HTMLElement}).element;if(!element||element.children.length!==partials.length)return null;
+  const painted=Array.from(element.children,piece=>piece.childElementCount>0);
   for(const piece of partials)view.renderer.renderResult(piece.id);
-  return partials.map((piece,index)=>({x:piece.x,y:piece.y,width:piece.width,height:piece.height,first:piece.firstMasterBarIndex??-1,last:piece.lastMasterBarIndex??-1,svg:normalize(element.children[index].innerHTML)}));
+  const pieces=partials.map((piece,index)=>({x:piece.x,y:piece.y,width:piece.width,height:piece.height,first:piece.firstMasterBarIndex??-1,last:piece.lastMasterBarIndex??-1,svg:normalize(element.children[index].innerHTML)}));
+  painted.forEach((was,index)=>{if(!was)element.children[index].replaceChildren();});
+  return pieces;
 }
 
 export function checkDraw(view:AlphaTabApi,partials:readonly LayoutPartial[]):DrawCheck {

@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,closeWelcomeLibrary,hidePractice,revealPlaybackControls,hidePlaybackControls,styleSection,closeScoreStyle} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,closeWelcomeLibrary,hidePractice,revealPlaybackControls,hidePlaybackControls,styleSection,closeScoreStyle,closeProperties} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
@@ -26,11 +26,12 @@ try{
   await page.setViewportSize({width:1280,height:900});await waitForWorkspaceIdle(page);await idle();
   await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent?.startsWith('New score'));
   await snapshot('new-1280');
-  const workspace=page.getByRole('region',{name:'Score workspace'}),editTask=page.locator('.inspector-task[id$="-edit"]');
-  await click('Select bar');await workspace.focus();await page.keyboard.press('Control+c');await page.getByLabel('Paste repetitions').waitFor({state:'attached'});
-  await editTask.locator(':scope>summary').click();assert.equal(await editTask.evaluate(element=>element.open),false);
+  const workspace=page.getByRole('region',{name:'Score workspace'});
+  // Ctrl+Shift+V opens the Properties dialog at the Musical clipboard section and focuses it (the Selection tab no longer exists).
+  await click('Select bar');await workspace.focus();await page.keyboard.press('Control+c');
   await workspace.focus();await page.keyboard.press('Control+Shift+v');
-  await page.waitForFunction(()=>document.querySelector('.inspector-task[id$="-edit"]')?.open&&document.activeElement?.textContent==='Musical clipboard');
+  await page.waitForFunction(()=>document.querySelector('.properties-dialog')&&document.activeElement?.textContent==='Musical clipboard');
+  await page.getByLabel('Paste repetitions').waitFor();await closeProperties(page);
   result.clipboardReveal=true;await click('Open');await page.waitForFunction(()=>document.querySelector('.document-title')?.textContent?.includes('engraving'));
   assert.ok((await page.locator('.statusbar').innerText()).startsWith('Not saved'),'Imported score must not claim to be saved or new');
   await page.getByRole('img',{name:'Edit target',exact:true}).waitFor();await page.waitForTimeout(250);
@@ -78,7 +79,7 @@ try{
   await exports.getByRole('combobox',{name:'Export format'}).selectOption('wav');await snapshot('export-audio-1280');
   await exports.getByRole('combobox',{name:'Export format'}).selectOption('gp');await exports.locator('.export-track>label input').evaluateAll(nodes=>nodes.forEach(node=>{if(node.checked)node.click();}));
   await exports.getByRole('button',{name:'Export',exact:true}).click();assert.equal(await exports.getByRole('alert').innerText(),'Select at least one track to export.');await page.keyboard.press('Escape');
-  await revealPlaybackControls(page);await summary('Selected playback');await page.getByRole('combobox',{name:/^Cursor occurrence/}).selectOption({index:1});await hidePlaybackControls(page);await page.waitForFunction(()=>{const button=document.querySelector('button.transport-playbutton');return button&&!button.disabled&&/^Play/.test(button.title);},{},{timeout:60000});await workspace.focus();const playing=value=>page.waitForFunction(async value=>(await window.__TAURI_INTERNALS__.invoke('audio_status')).playing===value,value,{timeout:10000});const transport=page.locator('.transport');await page.keyboard.press('Space');await playing(true);await transport.getByRole('button',{name:'Pause',exact:true}).waitFor();await page.keyboard.press('Space');await playing(false);await transport.getByRole('button',{name:'Play',exact:true}).waitFor();await click('Stop');
+  await hidePractice(page);await revealPlaybackControls(page);await summary('Selected playback');await page.getByRole('combobox',{name:/^Cursor occurrence/}).selectOption({index:1});await hidePlaybackControls(page);await page.waitForFunction(()=>{const button=document.querySelector('button.transport-playbutton');return button&&!button.disabled&&/^Play/.test(button.title);},{},{timeout:60000});await workspace.focus();const playing=value=>page.waitForFunction(async value=>(await window.__TAURI_INTERNALS__.invoke('audio_status')).playing===value,value,{timeout:10000});const transport=page.locator('.transport');await page.keyboard.press('Space');await playing(true);await transport.getByRole('button',{name:'Pause',exact:true}).waitFor();await page.keyboard.press('Space');await playing(false);await transport.getByRole('button',{name:'Play',exact:true}).waitFor();await click('Stop');
   result.final=await readActiveDocument(page);assert.deepEqual(result.final.project,result.initial.project);assert.equal(hash(),result.sourceHash);assert.deepEqual(result.errors,[]);
   result.passed=true;save();console.log(JSON.stringify({passed:true,states:result.states.map(state=>state.name),sourceHash:result.sourceHash,pid}));
 }catch(error){result.failure=String(error.stack??error);if(page)await page.screenshot({path:resolve(output,'failure.png')}).catch(()=>{});save();throw error;}

@@ -24,7 +24,7 @@ async function center(locator){await dismissPlayback();await locator.scrollIntoV
 // The cursor's track and place are read from the status bar (the Selection tab's Editing location card is gone).
 async function location(beat){await page.locator('.statusbar-track').filter({hasText:'Selection guitar'}).waitFor();await page.locator('.statusbar-position').filter({hasText:`Bar 1 · Beat ${beat}`}).waitFor();await published();}
 // The selection summary is in Properties > Selection.
-async function count(notes,beats){const dialog=await openProperties(page,'selection');await dialog.getByText(`${notes} ${notes===1?'note':'notes'} · ${beats} ${beats===1?'beat':'beats'}`,{exact:true}).waitFor();await closeProperties(page);await published();}
+async function count(notes,beats){const dialog=await openProperties(page,'selection');await dialog.getByText(`${notes} ${notes===1?'note':'notes'} · ${beats} ${beats===1?'beat':'beats'}`,{exact:true}).waitFor();await closeProperties(page);await revealPlaybackControls(page);await published();}
 const frets=value=>page.locator('[aria-label="Music notation"] svg text').filter({hasText:new RegExp(`^${value}$`)});
 const occurrence=async number=>{await disclosure('Selected playback');return page.getByRole('combobox',{name:'Selection occurrence',exact:true}).selectOption({label:`Measure 1, occurrence ${number} → measure 1, occurrence ${number}`});};
 async function unchanged(before,native){assert.deepEqual(await snapshot(),before,'Gesture/transport must preserve complete project history and redo');if(native)assert.deepEqual(transport(await status()),transport(native),'Selecting alone must preserve native clock, range, loop, generation and run intent');}

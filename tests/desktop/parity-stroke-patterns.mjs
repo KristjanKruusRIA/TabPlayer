@@ -33,7 +33,7 @@ try{
   const picked=await exportGp(),expected=['D','U'];
   for(const lane of lanes(picked))lane.forEach((beat,index)=>assert.equal(beat.pickStroke,expected[index%2]==='D'?model.PickStroke.Down:model.PickStroke.Up,`beat ${index} of a Guitar9 voice`));
   assert.equal(pitches(picked),pitches(source),'Patterns never change notes.');
-  await panel();await page.getByRole('combobox',{name:/^Pattern technique/}).selectOption('brush');await page.getByLabel('Stroke pattern',{exact:true}).fill('D D U -');await click('Apply stroke pattern');
+  await panel();await page.getByRole('combobox',{name:/^Pattern technique/}).selectOption('brush');await page.getByLabel('Stroke pattern',{exact:true}).fill('D D U -');await page.getByRole('dialog',{name:'Properties',exact:true}).getByRole('button',{name:'Apply stroke pattern',exact:true}).click();await waitForWorkspaceIdle(page);
   const brushed=await exportGp(),brushes=[model.BrushType.BrushDown,model.BrushType.BrushDown,model.BrushType.BrushUp,model.BrushType.None];
   for(const lane of lanes(brushed))lane.forEach((beat,index)=>{assert.equal(beat.brushType,brushes[index%4]);assert.ok(beat.pickStroke!==model.PickStroke.None,'brushes keep the pick strokes');assert.equal(beat.brushDuration>0,brushes[index%4]!==model.BrushType.None,'brushes stay audible after GP export');});
   const edits=(await readActiveDocument(page)).project.edits.slice(-2);

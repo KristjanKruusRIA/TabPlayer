@@ -47,7 +47,7 @@ try{
   assert.equal(new Set(events.map(event=>event.channel)).size,2);
   assert.equal(ticks[2]-ticks[1],2880,'The release follows the quarter and half note after the press.');
   await button('Undo');await button('Undo');
-  assert.equal(await pedal.inputValue(),'none');
+  await propertiesSection(page,'Beat notation');assert.equal(await pedal.inputValue(),'none');
   assert.deepEqual(errors,[]);
   console.log(`sustain pedal: MIDI CC64 ${events.map(event=>`${event.tick}/ch${event.channel}=${event.value}`).join(', ')}; undo cleared the marks.`);
 }finally{if(browser)await browser.close().catch(()=>{});stop(id);}

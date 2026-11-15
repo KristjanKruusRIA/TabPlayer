@@ -1,0 +1,141 @@
+import assert from 'node:assert/strict';
+import { existsSync,readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { clickWorkstationButton } from './workstation-commands.mjs';
+import { startFrameSampler,stopFrameSampler,drawStatsLog,clearDrawStatsLog } from './draw-probes.mjs';
+
+// THE-213 (draw speed): the score is laid out whole but painted only where it is in view. After each of a series of edits the drawing in the page is compared with a
+// complete render of the same score made in a renderer of its own (`globalThis.__tabplayerCheckDraw`, see src/engraving/draw-check.ts): the geometry and SVG of every
+// system, and the bounds used for clicks and the playback cursor. The series changes notes, durations, the number of beats and bars (so the line breaks), and tracks,
+// and takes edits back. Nothing here reads a title or a track name.
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+
+/** Runs the series on the score the page shows. Returns what happened per step; throws on a difference. */
+export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
+  await page.evaluate(()=>{
+    const state=window.__drawEq={last:performance.now()};
+    const host=document.querySelector('.score-paper-host');
+    new MutationObserver(()=>{state.last=performance.now();}).observe(host,{subtree:true,childList:true,characterData:true});
+    new MutationObserver(()=>{state.last=performance.now();}).observe(document.querySelector('.app-shell'),{attributes:true,attributeFilter:['aria-busy']});
+  });
+  const quiet=async(ms=600)=>{
+    await page.waitForFunction(quietFor=>{
+      const button=document.querySelector('[aria-keyshortcuts="Space"]'),state=window.__drawEq;
+      return button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'&&document.querySelector('.app-shell')?.getAttribute('aria-busy')==='false'&&performance.now()-state.last>quietFor;
+    },ms,{polling:50,timeout:120000});
+  };
+  const key=async(name,{modifiers=0,code=name,vk}={})=>{
+    const digit=/^\d$/.test(name),definition={key:name,code:digit?`Digit${name}`:code,windowsVirtualKeyCode:vk??(digit?48+Number(name):0)};
+    await cdp.send('Input.dispatchKeyEvent',{type:digit&&!modifiers?'keyDown':'rawKeyDown',...definition,modifiers,...digit&&!modifiers?{text:name}:{}});await sleep(15);
+    await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:definition.key,code:definition.code,windowsVirtualKeyCode:definition.windowsVirtualKeyCode,modifiers});await sleep(120);
+  };
+  const click=async point=>{for(const type of ['mouseMoved','mousePressed','mouseReleased'])await cdp.send('Input.dispatchMouseEvent',{type,x:point.x,y:point.y,button:type==='mouseMoved'?'none':'left',buttons:type==='mouseReleased'?0:1,clickCount:type==='mouseMoved'?0:1});await sleep(250);};
+  /** The n-th fret number in view (scrolling down until there are enough): clicking it puts the cursor and the keyboard focus on the score. */
+  const fretInView=async(n=2,attempts=80)=>{
+    for(let attempt=0;attempt<attempts;attempt++) {
+      const found=await page.evaluate(n=>{
+        const area=document.querySelector('.paper-scroll').getBoundingClientRect();
+        const numbers=[...document.querySelector('.score-paper-host').querySelectorAll('svg text')].filter(text=>/^\d{1,2}$/.test(text.textContent)).filter(text=>{
+          const fill=getComputedStyle(text).fill;if(/rgb\(2(0|2)\d, ?\d+, ?\d+\)/.test(fill)||/red/.test(fill))return false;
+          const box=text.getBoundingClientRect();return box.width>0&&box.top>area.top+20&&box.bottom<area.bottom-20&&box.left>area.left&&box.right<area.right;
+        });
+        if(numbers.length<=n)return null;const box=numbers[n].getBoundingClientRect();return {x:box.x+box.width/2,y:box.y+box.height/2};
+      },n);
+      if(found)return found;
+      await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop+=250;host.scrollLeft+=600;});await sleep(200);
+    }
+    throw new Error('no fret number in view');
+  };
+  const focusScore=async()=>{await click(await fretInView());await quiet();};
+  const steps=[];let previous=null,lazyLayout=true,scrollFrames=null;
+  const check=async(name,{changes=true}={})=>{
+    await quiet();
+    // What was painted, counted by the app itself at the end of each draw and scroll (no waiting for alphaTab, so no dependence on timing): no piece in view is empty, and no more
+    // pieces are painted than are in view plus the margin that is painted ahead. Read before the check below, which paints every piece.
+    const counts=await drawStatsLog(page);await clearDrawStatsLog(page);
+    if(lazyLayout&&changes)assert.ok(counts.some(entry=>entry.where==='draw'),`${label}: after "${name}" the app counted no draw`);
+    for(const entry of counts){
+      assert.equal(entry.emptyInView,0,`${label}: after "${name}" (${entry.where}) ${entry.emptyInView} of ${entry.inView} pieces in view were empty`);
+      // A scroll's own count is taken before the background painting has emptied the pieces left far behind; the count after a draw and the one the background painting ends with are settled states.
+      if(entry.where!=='scroll')assert.ok(entry.painted<=entry.allowed,`${label}: after "${name}" (${entry.where}) ${entry.painted} pieces were painted, at most ${entry.allowed} are in view or in the margin`);
+    }
+    const result=await page.evaluate(()=>window.__tabplayerCheckDraw());
+    assert.ok(result.equal,`${label}: after "${name}" the drawing differs from a complete render: ${result.differences.slice(0,3).join(' || ')}`);
+    assert.ok(result.pieces>0,`${label}: after "${name}" nothing is laid out`);
+    const changed=previous===null||result.signature!==previous.signature;
+    if(changes)assert.ok(changed,`${label}: "${name}" did not change the drawing, so it checked nothing`);
+    steps.push({name,pieces:result.pieces,bars:result.bars,changed,breaksMoved:previous!==null&&result.breaks!==previous.breaks});
+    previous=result;
+  };
+  const toolbar=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await sleep(250);await quiet();};
+
+  await quiet();await focusScore();await check('opened',{changes:false});
+  await key('ArrowRight',{vk:39});await key('7');await check('a typed digit');
+  await key('ArrowRight',{vk:39});await key('1');await key('2');await sleep(300);await check('a two-digit fret');
+  // A shorter duration: the cursor's beat may already be a sixteenth in a real score, so the next shorter one is tried until the drawing changes.
+  for(const name of ['Sixteenth note (1/16)','Thirty-second note (1/32)','Sixty-fourth note (1/64)']) {
+    await toolbar(name);
+    if((await page.evaluate(()=>window.__tabplayerCheckDraw())).signature!==previous.signature)break;
+  }
+  await check('a shorter duration');
+  await focusScore();await key('z',{modifiers:2,code:'KeyZ',vk:90});await check('undo');
+  await key('y',{modifiers:2,code:'KeyY',vk:89});await check('redo');
+  // Beats go and come back, five at a time: the bar gets narrower, then wider, and the line breaks after it move.
+  await focusScore();for(let i=0;i<5;i++)await key('Delete',{modifiers:8,vk:46});await check('five beats deleted');
+  for(let i=0;i<5;i++)await key('Insert',{modifiers:2,vk:45});await check('five beats inserted');
+  await focusScore();await toolbar('Append measure');await check('a measure appended');
+  await toolbar('Remove measure');await check('a measure removed');
+  // Another track: the cursor goes there, the score shows it, a digit is typed on it (when it has a tablature staff), and the edit is taken back.
+  let otherTrack=false,moved=0;
+  await focusScore();
+  for(let step=0;step<5&&!otherTrack;step++) {
+    moved++;await key('ArrowDown',{modifiers:2,vk:40});await sleep(400);await quiet();
+    await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(300);
+    otherTrack=await fretInView(0,12).then(()=>true,()=>false);
+  }
+  await check('another track shown',{changes:false});
+  if(otherTrack) {
+    await focusScore();await key('5');await check('a digit on the other track');
+    await key('z',{modifiers:2,code:'KeyZ',vk:90});await check('undo on the other track');
+  }
+  // Back to the first track, so that the rest of the series has tablature to click on.
+  for(let step=0;step<moved;step++)await key('ArrowUp',{modifiers:2,vk:38});
+  await sleep(400);await quiet();await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(300);
+  // Scrolling: fast wheel scrolling over the whole score, every presented frame sampled (draw-probes.mjs): no system in view is ever without its drawing. The sampler sees the main
+  // thread's state after each frame; a compositor scroll can present a new position before its `scroll` event runs, which it cannot see.
+  await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=0;host.scrollLeft=0;});await sleep(500);await quiet();await clearDrawStatsLog(page);
+  await startFrameSampler(page);
+  const middle=await page.evaluate(()=>{const box=document.querySelector('.paper-scroll').getBoundingClientRect();return {x:box.x+box.width/2,y:box.y+box.height/2};});
+  for(let tick=0;tick<60;tick++){await cdp.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:middle.x,y:middle.y,deltaX:0,deltaY:300});await sleep(33);}
+  await sleep(300);
+  const frames=await stopFrameSampler(page);
+  assert.equal(frames.blank,0,`${label}: ${frames.blank} of ${frames.frames} frames of a fast scroll had a system in view without a drawing (frames ${frames.blankFrames.join(',')})`);
+  for(const entry of await drawStatsLog(page))assert.equal(entry.emptyInView,0,`${label}: after a scroll (${entry.where}) ${entry.emptyInView} pieces in view were empty`);
+  scrollFrames={frames:frames.frames,blank:frames.blank};
+  await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=host.scrollHeight;host.scrollLeft=0;});await sleep(500);await quiet();
+  const unpainted=await page.evaluate(()=>{
+    const area=document.querySelector('.paper-scroll').getBoundingClientRect(),surface=document.querySelector('.score-paper-host .at-surface');
+    return [...surface.children].filter(piece=>{const box=piece.getBoundingClientRect();return box.height>0&&box.bottom>area.top&&box.top<area.bottom&&!piece.querySelector('svg');}).length;
+  });
+  assert.equal(unpainted,0,`${label}: ${unpainted} systems in view were left blank after scrolling`);
+  await check('scrolled to the end',{changes:false});
+  await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(500);await check('scrolled back',{changes:false});
+  // Layouts that place the lines by content (the screen layouts) move their line breaks when a bar gets wider or narrower; the page layouts are painted whole.
+  const layout=async value=>{await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption(value);await sleep(700);await quiet();await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=0;host.scrollLeft=0;});await sleep(300);};
+  for(const mode of ['verticalScreen','horizontalScreen','verticalPage']) {
+    lazyLayout=mode==='verticalScreen';
+    await layout(mode);await check(`${mode}: shown`,{changes:false});
+    if(mode==='verticalPage')continue;
+    await focusScore();for(let i=0;i<8;i++)await key('Delete',{modifiers:8,vk:46});await check(`${mode}: eight beats deleted`);
+    await key('z',{modifiers:2,code:'KeyZ',vk:90});await check(`${mode}: undo`);
+    for(let i=0;i<8;i++)await key('Insert',{modifiers:2,vk:45});await check(`${mode}: eight beats inserted`);
+  }
+  lazyLayout=true;await layout('parchment');await check('parchment again',{changes:false});
+  return {steps,otherTrack,scrollFrames,breaksMoved:steps.filter(step=>step.breaksMoved).length};
+}
+
+/** The owner's scores, when a folder of them is named (`TP_OWNER_SCORES`) and exists; their names and contents never leave this process. */
+export function ownerScoreFiles(directory) {
+  if(!directory||!existsSync(directory))return [];
+  return readdirSync(directory).filter(name=>/\.(gp|gpx|gp3|gp4|gp5)$/i.test(name)).sort().map(name=>join(directory,name));
+}

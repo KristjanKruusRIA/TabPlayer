@@ -591,7 +591,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   const scheduleAheadRef=useRef(scheduleAhead);scheduleAheadRef.current=scheduleAhead;
   /** Called by the playback cursor before it highlights and scrolls (screen-playback.ts): the system with this bar is painted now, the one after it soon after, outside the frame. */
   const ensurePainted=(masterBarIndex:number)=>{
-    const view=api.current;if(!view||!view.settings.core.enableLazyLoading)return;
+    const view=api.current;if(!view||!view.settings.core.enableLazyLoading||!drawFlags.paintOnCursor)return;
     try{
       const partials=layoutPartials.current,index=partials.findIndex(piece=>piece.firstMasterBarIndex!==undefined&&masterBarIndex>=piece.firstMasterBarIndex&&masterBarIndex<=(piece.lastMasterBarIndex??piece.firstMasterBarIndex));
       if(index<0)return;

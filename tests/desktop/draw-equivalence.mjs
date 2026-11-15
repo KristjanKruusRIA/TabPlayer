@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync,readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { clickWorkstationButton } from './workstation-commands.mjs';
+import { startFrameSampler,stopFrameSampler,drawStatsLog,clearDrawStatsLog } from './draw-probes.mjs';
 
 // THE-213 (draw speed): the score is laid out whole but painted only where it is in view. After each of a series of edits the drawing in the page is compared with a
 // complete render of the same score made in a renderer of its own (`globalThis.__tabplayerCheckDraw`, see src/engraving/draw-check.ts): the geometry and SVG of every
@@ -46,9 +47,17 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
     throw new Error('no fret number in view');
   };
   const focusScore=async()=>{await click(await fretInView());await quiet();};
-  const steps=[];let previous=null;
+  const steps=[];let previous=null,lazyLayout=true,scrollFrames=null;
   const check=async(name,{changes=true}={})=>{
     await quiet();
+    // What was painted, counted by the app itself at the end of each draw and scroll (no waiting for alphaTab, so no dependence on timing): no piece in view is empty, and no more
+    // pieces are painted than are in view plus the margin that is painted ahead. Read before the check below, which paints every piece.
+    const counts=await drawStatsLog(page);await clearDrawStatsLog(page);
+    if(lazyLayout&&changes)assert.ok(counts.some(entry=>entry.where==='draw'),`${label}: after "${name}" the app counted no draw`);
+    for(const entry of counts){
+      assert.equal(entry.emptyInView,0,`${label}: after "${name}" (${entry.where}) ${entry.emptyInView} of ${entry.inView} pieces in view were empty`);
+      assert.ok(entry.painted<=entry.allowed,`${label}: after "${name}" (${entry.where}) ${entry.painted} pieces were painted, at most ${entry.allowed} are in view or in the margin`);
+    }
     const result=await page.evaluate(()=>window.__tabplayerCheckDraw());
     assert.ok(result.equal,`${label}: after "${name}" the drawing differs from a complete render: ${result.differences.slice(0,3).join(' || ')}`);
     assert.ok(result.pieces>0,`${label}: after "${name}" nothing is laid out`);
@@ -91,7 +100,17 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
   // Back to the first track, so that the rest of the series has tablature to click on.
   for(let step=0;step<moved;step++)await key('ArrowUp',{modifiers:2,vk:38});
   await sleep(400);await quiet();await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(300);
-  // Scrolling: every system in view is painted by the time the scroll has settled, and the drawing still equals a complete render.
+  // Scrolling: fast wheel scrolling over the whole score, every presented frame sampled (draw-probes.mjs): no system in view is ever without its drawing. The sampler sees the main
+  // thread's state after each frame; a compositor scroll can present a new position before its `scroll` event runs, which it cannot see.
+  await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=0;host.scrollLeft=0;});await sleep(500);await quiet();await clearDrawStatsLog(page);
+  await startFrameSampler(page);
+  const middle=await page.evaluate(()=>{const box=document.querySelector('.paper-scroll').getBoundingClientRect();return {x:box.x+box.width/2,y:box.y+box.height/2};});
+  for(let tick=0;tick<60;tick++){await cdp.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:middle.x,y:middle.y,deltaX:0,deltaY:300});await sleep(33);}
+  await sleep(300);
+  const frames=await stopFrameSampler(page);
+  assert.equal(frames.blank,0,`${label}: ${frames.blank} of ${frames.frames} frames of a fast scroll had a system in view without a drawing (frames ${frames.blankFrames.join(',')})`);
+  for(const entry of await drawStatsLog(page))assert.equal(entry.emptyInView,0,`${label}: after a scroll (${entry.where}) ${entry.emptyInView} pieces in view were empty`);
+  scrollFrames={frames:frames.frames,blank:frames.blank};
   await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=host.scrollHeight;host.scrollLeft=0;});await sleep(500);await quiet();
   const unpainted=await page.evaluate(()=>{
     const area=document.querySelector('.paper-scroll').getBoundingClientRect(),surface=document.querySelector('.score-paper-host .at-surface');
@@ -103,14 +122,15 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
   // Layouts that place the lines by content (the screen layouts) move their line breaks when a bar gets wider or narrower; the page layouts are painted whole.
   const layout=async value=>{await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption(value);await sleep(700);await quiet();await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=0;host.scrollLeft=0;});await sleep(300);};
   for(const mode of ['verticalScreen','horizontalScreen','verticalPage']) {
+    lazyLayout=mode==='verticalScreen';
     await layout(mode);await check(`${mode}: shown`,{changes:false});
     if(mode==='verticalPage')continue;
     await focusScore();for(let i=0;i<8;i++)await key('Delete',{modifiers:8,vk:46});await check(`${mode}: eight beats deleted`);
     await key('z',{modifiers:2,code:'KeyZ',vk:90});await check(`${mode}: undo`);
     for(let i=0;i<8;i++)await key('Insert',{modifiers:2,vk:45});await check(`${mode}: eight beats inserted`);
   }
-  await layout('parchment');await check('parchment again',{changes:false});
-  return {steps,otherTrack,breaksMoved:steps.filter(step=>step.breaksMoved).length};
+  lazyLayout=true;await layout('parchment');await check('parchment again',{changes:false});
+  return {steps,otherTrack,scrollFrames,breaksMoved:steps.filter(step=>step.breaksMoved).length};
 }
 
 /** The owner's scores, when a folder of them is named (`TP_OWNER_SCORES`) and exists; their names and contents never leave this process. */

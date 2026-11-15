@@ -12,6 +12,8 @@ export const drawFlags={
   deferrals:0,
   /** The same for the layouts that still draw the whole score (the page layouts and the horizontal strip, 200 to 290 ms on a long score): a waiting key goes first. */
   completeDeferrals:6,
+  /** The playback cursor has the system of its bar painted, and the highlight put back, before it highlights and scrolls (off: alphaTab paints it a frame later, blank for that frame). */
+  paintOnCursor:true,
   /** Viewports of empty systems above and below the score area that are painted in the background after a draw and a scroll (0: none). */
   ahead:1,
 };

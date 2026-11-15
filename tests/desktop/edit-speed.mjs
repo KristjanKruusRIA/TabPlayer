@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync,writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { existsSync,readdirSync } from 'node:fs';
 import { importer,exporter,Settings } from '@coderline/alphatab';
 import { launch,connect,stop } from './harness.mjs';
 import { closeWelcomeLibrary,clickWorkspaceCommand,waitForWorkspaceIdle } from './workstation-commands.mjs';

@@ -816,3 +816,68 @@ it('prepares the first change after a quiet spell at once, and edits that follow
     expect(player.getState().ready,'playback is for the newest score').toBe(false);
   } finally {vi.useRealTimers();}
 });
+it('seekToCursor moves playback to a clicked beat, says no while the plan is not ready, and never edits',async()=>{
+  const {player,bridge,onEdit,emit}=fixture();const p=blankProject();
+  expect(player.seekToCursor(cursor)).toBe(false);expect(bridge.command).not.toHaveBeenCalled();
+  await player.loadDocument(p,buildDocument(p));
+  // Loaded but not yet reported ready by native: nothing is sent against a plan that is not ready.
+  expect(player.seekToCursor(cursor)).toBe(false);expect(bridge.command).not.toHaveBeenCalledWith(expect.objectContaining({type:'seekWithin'}));
+  emit();
+  const tick=player.cursorPlaybackChoices(cursor)[0].startTick;
+  expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).toHaveBeenLastCalledWith({type:'seekWithin',tick,generation:player.generation});
+  expect(onEdit).not.toHaveBeenCalled();
+});
+it('seekToCursor picks the first performed occurrence when stopped and the one nearest the playhead while playing, and remembers the choice for Play',async()=>{
+  const {player,bridge,emit}=await selectionFixture(true);
+  const choices=player.cursorPlaybackChoices(cursor);expect(choices.length).toBeGreaterThan(1);
+  expect(player.cursorSeekChoice(cursor)).toBeNull();
+  expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).toHaveBeenLastCalledWith({type:'seekWithin',tick:choices[0].startTick,generation:player.generation});
+  expect(player.cursorSeekChoice(cursor)).toEqual(choices[0]);
+  const last=choices.at(-1)!;
+  emit({playing:true,tick:last.startTick+50,practice:practiceStatus(defaults(),{phase:'playing'})});
+  player.chooseCursorOccurrence(cursor);expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).toHaveBeenLastCalledWith({type:'seekWithin',tick:last.startTick,generation:player.generation});
+  expect(player.cursorSeekChoice(cursor)).toEqual(last);
+  // A click somewhere else forgets it for this beat.
+  expect(player.cursorSeekChoice({...cursor,beat:0})).toBeNull();
+});
+it('seekToCursor moves nothing during a count-in, and outside a running loop or played selection; inside it seeks and leaves them alone',async()=>{
+  const {player,bridge,emit}=await selectionFixture();
+  const tick=player.cursorPlaybackChoices(cursor)[0].startTick;
+  // Count-in: the click only moves the cursor.
+  emit({practice:practiceStatus(defaults(),{phase:'countIn',countInRemaining:3})});vi.mocked(bridge.command).mockClear();
+  expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).not.toHaveBeenCalled();
+  emit({practice:practiceStatus(defaults(),{phase:'paused',countInRemaining:3})});expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).not.toHaveBeenCalled();
+  // A loop that does not contain the beat, then one that does.
+  emit({loop:{startTick:tick+4000,endTick:tick+8000},playing:true,practice:practiceStatus(defaults(),{phase:'playing'})});
+  expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).not.toHaveBeenCalled();
+  emit({loop:{startTick:tick-10,endTick:tick+960},playing:true,practice:practiceStatus(defaults(),{phase:'playing'})});
+  expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).toHaveBeenLastCalledWith({type:'seekWithin',tick,generation:player.generation});
+  // The same for a played selection (the range).
+  vi.mocked(bridge.command).mockClear();
+  emit({loop:null,range:{startTick:tick+4000,endTick:tick+8000},playing:true,practice:practiceStatus(defaults(),{phase:'playing'})});
+  expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).not.toHaveBeenCalled();
+  emit({range:{startTick:tick,endTick:tick+960},playing:true,practice:practiceStatus(defaults(),{phase:'playing'})});
+  expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).toHaveBeenLastCalledWith({type:'seekWithin',tick,generation:player.generation});
+});
+it('seekToCursor takes a seek that native refuses quietly: no error, and the note state is put back',async()=>{
+  const {player,bridge,emit}=fixture();const p=blankProject();await player.loadDocument(p,buildDocument(p));emit();
+  vi.mocked(bridge.command).mockImplementation(async command=>{if(command.type==='seekWithin')throw new Error('Seek position is outside the loop or the selection.');});
+  expect(player.seekToCursor(cursor)).toBe(true);
+  await vi.waitFor(()=>expect(bridge.command).toHaveBeenCalledWith(expect.objectContaining({type:'seekWithin'})));await new Promise(resolve=>setTimeout(resolve,10));
+  expect(player.getState().error).toBeNull();
+});
+it('a click chooses among the occurrences inside a running loop or played selection first',async()=>{
+  const {player,bridge,emit}=await selectionFixture(true);
+  const choices=player.cursorPlaybackChoices(cursor);expect(choices.length).toBeGreaterThan(1);
+  const second=choices.at(-1)!;
+  // The loop is on the second pass: the click means the second occurrence, though the first comes first.
+  emit({loop:{startTick:second.startTick-100,endTick:second.startTick+960},practice:practiceStatus(defaults(),{phase:'paused'})});
+  vi.mocked(bridge.command).mockClear();
+  expect(player.chooseCursorOccurrence(cursor)).toEqual(second);
+  expect(player.seekToCursor(cursor)).toBe(true);expect(bridge.command).toHaveBeenLastCalledWith({type:'seekWithin',tick:second.startTick,generation:player.generation});
+  // The same for a played selection.
+  emit({loop:null,range:{startTick:second.startTick,endTick:second.startTick+960},practice:practiceStatus(defaults(),{phase:'paused'})});
+  expect(player.chooseCursorOccurrence(cursor)).toEqual(second);
+  // No passage: the first.
+  emit({range:null,practice:practiceStatus()});expect(player.chooseCursorOccurrence(cursor)).toEqual(choices[0]);
+});

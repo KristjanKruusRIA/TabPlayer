@@ -139,6 +139,16 @@ it('drops a dock drag when the track list changes under it, and never saves it o
   fireEvent.pointerUp(document.body,{clientY:150,pointerId:1});
   expect(pan.player.setPan).not.toHaveBeenCalled();
 });
+it('keeps the dock controls\' keys to themselves, except Space, which is play and stop',()=>{
+  setup(false);const seen:string[]=[];const spy=(event:KeyboardEvent)=>seen.push(event.key);
+  document.addEventListener('keydown',spy);
+  try{
+    const mute=screen.getByRole('button',{name:'Mute Bass'}),volume=screen.getByRole('slider',{name:'Bass volume'});
+    for(const control of [mute,volume])for(const key of ['Escape','a','L','[','Enter'])fireEvent.keyDown(control,{key,ctrlKey:key==='a'});
+    expect(seen).toEqual([]);
+    fireEvent.keyDown(mute,{key:' '});fireEvent.keyDown(volume,{key:' '});expect(seen).toEqual([' ',' ']);
+  }finally{document.removeEventListener('keydown',spy);}
+});
 it('lets Ctrl+Z, Ctrl+S and other shortcuts through a focused track name, and Enter still presses it',()=>{
   const view=setup(false);const seen:string[]=[];const spy=(event:KeyboardEvent)=>seen.push(`${event.ctrlKey?'Ctrl+':''}${event.key}`);
   document.addEventListener('keydown',spy);

@@ -7,7 +7,7 @@ import type { BeatTarget, EditCommand } from './project';
 import type { SequenceStep } from './edit-types';
 import { isEditPasswordLocked, isFinalized, projectCommands } from './project';
 import { ProtectionDialog,UnlockEditingDialog } from './protection/PasswordDialogs';
-import { busyGuard } from './ui/useBusyGuard';
+import { busyGuard,onRefusedSpace,type RefusedSpace } from './ui/useBusyGuard';
 import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
 import { EditorPanel, type InspectorContextScope } from './EditorPanel';
@@ -141,6 +141,10 @@ interface QueuedEntryKey{item:EntryItem;at:number;documentId:string}
 const ENTRY_QUEUE_MAX=8,ENTRY_QUEUE_STALE_MS=2000,DROPPED_NOTICE_PAUSE_MS=1500;
 /** A digit typed within this long of the one before it joins it into a two-digit fret, as in Guitar Pro. */
 const FRET_DIGIT_WINDOW_MS=1000;
+/** A Space or a click that found playback not ready waits this long for it. */
+const SPACE_PENDING_MS=5000;
+/** Clicks on the score this close together send only the last seek. */
+const SEEK_COALESCE_MS=200;
 /** Chords that may wait in the entry queue at once; more are counted as not written. */
 const CHORD_QUEUE_MAX=4;
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)&&!(target instanceof HTMLInputElement&&target.type==='range')||target.isContentEditable);
@@ -609,6 +613,35 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** A selection the user made: it also drops any keys still waiting, which were typed for the old cursor. Entry itself moves the cursor with `moveTo`. */
   const select=(next:BeatTarget,s=string,index?:number)=>{userMoves.current++;clearEntryQueue();moveTo(next,s,index);};
+  /**
+   * A plain single left click on a beat in the score also makes that beat the playback position (stopped, paused or playing). A shift, ctrl, cmd or alt click, a double or triple click, a right click, a click while MIDI capture runs,
+   * and any click the player must leave alone (a count-in, a loop or played selection the beat is not in) only move the cursor. Navigation: nothing is recorded. Which occurrence of a repeated beat it means is decided at once (Play and Space
+   * start from it); the seek itself waits a moment so a burst of clicks sends only the last. A click the player cannot take yet (no plan for the current document) waits for it, and is dropped if the cursor has moved on or it is old.
+   */
+  const pendingSeek=useRef<{documentId:string;target:BeatTarget;at:number}|null>(null),seekTimer=useRef<ReturnType<typeof setTimeout>|null>(null),lastPress=useRef<{button:number;plain:boolean;detail:number}|null>(null);
+  useEffect(()=>{
+    const note=(event:MouseEvent)=>{lastPress.current={button:event.button,plain:!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey,detail:event.detail};};
+    document.addEventListener('mousedown',note,true);return()=>{document.removeEventListener('mousedown',note,true);if(seekTimer.current!==null)clearTimeout(seekTimer.current);};
+  },[]);
+  const cancelSeek=()=>{if(seekTimer.current!==null){clearTimeout(seekTimer.current);seekTimer.current=null;}pendingSeek.current=null;};
+  const sendSeek=(point:BeatTarget)=>{
+    if(!player||!sameBeat(point,repairSelection(controller.getState().score,cursorNow.current)))return;
+    if(!player.seekToCursor(point))pendingSeek.current={documentId:state.documentId,target:point,at:Date.now()};else pendingSeek.current=null;
+  };
+  const selectByClick=(next:BeatTarget,s?:number,index?:number)=>{
+    select(next,s,index);
+    const press=lastPress.current;
+    if(!press||press.button!==0||!press.plain||press.detail>1||midiCaptureSession().get().phase==='running'){cancelSeek();return;}
+    if(!player||!validSelectionIndices(next))return;
+    const fixed=repairSelection(controller.getState().score,next);
+    cancelSeek();player.chooseCursorOccurrence?.(fixed);
+    seekTimer.current=setTimeout(()=>{seekTimer.current=null;sendSeek(fixed);},SEEK_COALESCE_MS);
+  };
+  useEffect(()=>{
+    const wait=pendingSeek.current;if(!wait||!player||!playbackState?.ready)return;
+    if(wait.documentId!==state.documentId||Date.now()-wait.at>SPACE_PENDING_MS||!sameBeat(wait.target,repairSelection(controller.getState().score,cursorNow.current))){pendingSeek.current=null;return;}
+    if(player.seekToCursor(wait.target))pendingSeek.current=null;
+  },[playbackState?.ready,playbackState?.practicePending,state.documentId,state.revision]);
   /** A click or Enter on a track's name in the dock or the Mixer view makes it the active track: the cursor goes to the same bar and beat there (the nearest the track has), on the same string where it has one. Navigation only: nothing is recorded, and it works while the app is busy. */
   const selectTrack=(track:number,by?:'pointer')=>{
     const next=state.score.tracks[track];if(!next)return;
@@ -1090,7 +1123,64 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }else editorSelection(null);
     select(next);event.preventDefault();
   }
+  /**
+   * Whether Space means play/stop for `target`. Space plays on a plain button, a slider, a track name, a tab (it activates with Enter), the score and the page. It keeps its own meaning on a control whose only standard keyboard activation is Space or that
+   * takes typed text: a text field, textarea, select, contenteditable, a checkbox, radio, color or file input, the checkbox, switch, radio, menu item and option roles, a disclosure's summary; and while a modal dialog or an open menu or list box is up.
+   */
+  const spacePlays=(target:EventTarget|null)=>{
+    if(exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null)return false;
+    if(document.querySelector('[role="dialog"],[aria-modal="true"],dialog[open]'))return false;
+    if(commandBar.current?.querySelector('details[open]')||shell.current?.querySelector('[role="menu"],[role="listbox"]'))return false;
+    if(!(target instanceof Element))return true;
+    if(target instanceof HTMLInputElement)return ['range','button','submit','reset','image'].includes(target.type);
+    if(target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||(target instanceof HTMLElement&&target.isContentEditable))return false;
+    return !target.closest('summary,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="searchbox"],[role="combobox"],[role="spinbutton"],[role="checkbox"],[role="switch"],[role="radio"],[role="menuitemcheckbox"],[role="menuitemradio"],[role="option"]');
+  };
+  const playPending=useRef<{at:number;documentId:string;epoch:number;cursor:string}|null>(null),playWaitingText=t('transport.play_waiting');
+  /** A Space that was waiting for playback to be ready is forgotten (and its notice withdrawn). */
+  const clearPlayPending=()=>{if(playPending.current){playPending.current=null;setInputNotice(old=>old?.text===playWaitingText?null:old);}};
+  const clearPlayPendingNow=useRef(clearPlayPending);clearPlayPendingNow.current=clearPlayPending;
+  /** Space: the Play button's own toggle (play from the cursor when stopped, pause in place when playing). A Space that finds playback not ready (the plan is being rebuilt, or the app is busy) plays once it is, and says so; a second Space cancels it. */
+  const playOrStop=()=>{
+    if(playPending.current){clearPlayPending();return;}
+    const button=shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]');if(!button)return;
+    if(button.disabled||button.getAttribute('aria-disabled')==='true'){
+      if(!playbackState?.ready||playbackState.practicePending||controlsBusy){playPending.current={at:Date.now(),documentId:state.documentId,epoch:state.documentEpoch,cursor:JSON.stringify(target)};setInputNotice({text:playWaitingText,at:JSON.stringify(target)});}
+      // Play is refused for another reason: this bar is played more than once and no occurrence is chosen yet.
+      else setInputNotice({text:t('transport.choose_start'),at:JSON.stringify(target)});
+      return;
+    }
+    button.click();
+  };
+  useEffect(()=>{
+    const pending=playPending.current;if(!pending)return;
+    // Forgotten when it is old, or the document, the cursor or the focus changed (a dialog, a menu, a text field) while it waited.
+    if(Date.now()-pending.at>SPACE_PENDING_MS||pending.documentId!==state.documentId||pending.epoch!==state.documentEpoch||pending.cursor!==JSON.stringify(target)||!spacePlays(document.activeElement)){clearPlayPending();return;}
+    const button=shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]');
+    if(button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'){clearPlayPending();button.click();}
+  },[playbackState?.ready,playbackState?.practicePending,controlsBusy,state.documentId,state.documentEpoch,target.track,target.staff,target.bar,target.voice,target.beat,exportOpen,harmonyOpen,scaleOpen,paletteOpen,asciiOpen,midiOpen,batchOpen,helpTopic]);
+  useEffect(()=>{if(!playPending.current)return;const timer=setTimeout(clearPlayPending,SPACE_PENDING_MS);return()=>clearTimeout(timer);});
+  useEffect(()=>()=>{playPending.current=null;},[]);
+  // Whatever starts, pauses or stops playback (a button, the scrubber, a key) makes a Space that was still waiting stale.
+  useEffect(()=>{clearPlayPending();},[playbackState?.playing,playbackState?.practice.phase]);
+  // A Space refused by a busy control comes here instead of through the control's handlers.
+  const refusedSpace=useRef<(event:RefusedSpace)=>void>(()=>{});
+  refusedSpace.current=event=>{if(event.repeat||event.ctrlKey||event.metaKey||event.altKey||!spacePlays(event.target))return;playOrStop();};
+  useEffect(()=>onRefusedSpace(event=>refusedSpace.current(event)),[]);
+  /** Space, with or without Shift (Ctrl+Space is "play from the start of this bar", a separate key). */
+  const plainSpace=(event:KeyboardEvent)=>event.key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey;
+  // When focus has fallen to the page itself (a control that held it was disabled or removed), the keys do not pass through the app shell: Space is still play/stop.
+  const spaceAtPage=useRef<(event:globalThis.KeyboardEvent)=>void>(()=>{});
+  spaceAtPage.current=event=>{
+    if(!plainSpace(event as never)||event.defaultPrevented||(event.target!==document.body&&event.target!==document.documentElement)||!spacePlays(event.target))return;
+    event.preventDefault();if(!event.repeat&&event.type==='keydown')playOrStop();
+  };
+  useEffect(()=>{const cancel=(event:globalThis.KeyboardEvent)=>{if(event.key==='Escape'||(event.key===' '&&(event.ctrlKey||event.metaKey)))clearPlayPendingNow.current();};document.addEventListener('keydown',cancel,true);return()=>document.removeEventListener('keydown',cancel,true);},[]);
+  useEffect(()=>{const handler=(event:globalThis.KeyboardEvent)=>spaceAtPage.current(event);document.addEventListener('keydown',handler);document.addEventListener('keyup',handler);return()=>{document.removeEventListener('keydown',handler);document.removeEventListener('keyup',handler);};},[]);
+  function spaceKeyUp(event:KeyboardEvent){if(plainSpace(event)&&!event.defaultPrevented&&spacePlays(event.target))event.preventDefault();}
   function selectionKeys(event:KeyboardEvent){
+    if(event.key==='Escape')clearPlayPending();
+    if(plainSpace(event)&&!event.defaultPrevented&&spacePlays(event.target)){event.preventDefault();if(!event.repeat)playOrStop();return;}
     if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!midiOpen&&!batchOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
     if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
@@ -1112,10 +1202,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if(editLocked){setClipboardError(t('project.finalized'));return;}
       edit(event.shiftKey?{type:'setSelectionTies',selection:musicSelection,tied:false}:{type:'tieSelectionToEarlierPitch',selection:musicSelection});return;
     }
-    if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
-      event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();return;
-    }
-    if(!event.defaultPrevented&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&key===' '&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
+    if(!event.defaultPrevented&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&key===' '&&!event.repeat&&spacePlays(event.target)){
       event.preventDefault();
       if(player){try{player.seekToMeasure(target.bar);if(!player.getState().playing)player.play();}catch{}}
       return;
@@ -1156,7 +1243,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       editorSelection(null);setPendingAccidental(null);clearEntryQueue();event.preventDefault();
     }
   }
-  return <div ref={shell} className="app-shell" lang={lang} aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys}>
+  return <div ref={shell} className="app-shell" lang={lang} aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys} onKeyUp={spaceKeyUp} onClickCapture={event=>{if(playPending.current&&event.target instanceof Element&&event.target.closest('.transport-stopbutton'))clearPlayPending();}}>
     <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure&&!other.contains(disclosure)&&!disclosure.contains(other))other.open=false;});else if(event.target.closest('button')&&!event.target.closest('[data-menu-keep]'))closeCommands(true);}}><nav className="gp-menus" aria-label={t('menu.file_and_history')}><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>{t('action.new')}</button>
@@ -1271,7 +1358,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label={t('workspace.score_workspace')} tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
-        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView holdDraw={drawHold} score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
+        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView holdDraw={drawHold} score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={selectByClick} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
         {lyricsCutNotice&&lyricsCutNotice.edits===state.snapshot.project.edits.length&&<div className="score-hint score-hint-lyrics-cut" role="status">{t(`editor.cut_lyrics_removed_${lyricsCutNotice.count===1?'one':'other'}` as MessageKey,{count:lyricsCutNotice.count})}</div>}
         {droppedNotice&&<div className="score-hint score-hint-dropped" role="status">{t(`editor.entry_queue_stale_${droppedNotice.count===1?'one':'other'}` as MessageKey,{count:droppedNotice.count})}</div>}
         {pendingFret!==null?<div className="score-hint score-hint-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</div>:inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}

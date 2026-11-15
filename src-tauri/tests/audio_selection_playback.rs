@@ -129,6 +129,18 @@ fn play_range_is_atomic_and_nullable_end_is_meaningful() {
             generation: 1,
             tick: f64::NAN,
         },
+        TransportCommand::SeekWithin {
+            generation: 1,
+            tick: f64::NAN,
+        },
+        TransportCommand::SeekWithin {
+            generation: 1,
+            tick: -1.0,
+        },
+        TransportCommand::SeekWithin {
+            generation: 1,
+            tick: 9_999.0,
+        },
         TransportCommand::SetPractice {
             generation: 1,
             settings: PracticeSettings {
@@ -237,6 +249,14 @@ fn range_transition_policy() {
             true,
         ),
         (
+            TransportCommand::SeekWithin {
+                generation: 1,
+                tick: 1200.0,
+            },
+            true,
+            true,
+        ),
+        (
             TransportCommand::SetLoop {
                 generation: 1,
                 start_tick: 0.0,
@@ -333,4 +353,87 @@ fn finite_passage_cuts_the_complete_mix_and_backing_at_one_endpoint() {
         transport.render_into(&mut output);
         assert!(output.iter().all(|frame| *frame == [0.0; 2]));
     }
+}
+
+#[test]
+fn seek_within_keeps_the_passage_and_its_passes_and_is_refused_where_it_would_break_them() {
+    let seek = |tick: f64| TransportCommand::SeekWithin {
+        generation: 1,
+        tick,
+    };
+    // A loop that has completed passes: a seek inside keeps the loop, the phase, the playing state and every pass.
+    let mut transport = installed(48_000, false, false);
+    transport
+        .command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 480.0,
+            end_tick: 1440.0,
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    for _ in 0..400 {
+        transport.render_into(&mut [[0.0; 2]; 4096]);
+        if transport.status().practice.completed_passes >= 2 {
+            break;
+        }
+    }
+    let passes = transport.status().practice.completed_passes;
+    assert!(passes >= 2, "the loop has completed passes");
+    let before = snapshot(&transport);
+    for tick in [0.0, 479.0, 1440.0, 2000.0] {
+        assert!(transport.command(seek(tick)).is_err(), "{tick}");
+        assert_eq!(snapshot(&transport), before, "{tick}");
+    }
+    transport.command(seek(600.0)).unwrap();
+    let after = transport.status();
+    assert!(after.playing);
+    assert_eq!(after.practice.phase, PracticePhase::Playing);
+    assert_eq!(after.practice.completed_passes, passes);
+    assert_eq!(after.tick, 600.0);
+    assert_eq!(snapshot(&transport)["loop"], before["loop"]);
+    // The same, paused: it stays paused, in the loop, with its passes.
+    transport
+        .command(TransportCommand::Pause { generation: 1 })
+        .unwrap();
+    transport.command(seek(900.0)).unwrap();
+    let paused = transport.status();
+    assert!(!paused.playing);
+    assert_eq!(paused.practice.phase, PracticePhase::Paused);
+    assert_eq!(paused.practice.completed_passes, passes);
+    assert_eq!(snapshot(&transport)["loop"], before["loop"]);
+
+    // A played selection: outside it (before, at its end, past it) is refused unchanged; inside keeps it playing.
+    let mut transport = installed(48_000, false, false);
+    play_range(&mut transport, 960.0, Some(1920.0));
+    transport.render_into(&mut [[0.0; 2]; 64]);
+    let before = snapshot(&transport);
+    for tick in [100.0, 959.0, 1920.0, 3000.0] {
+        assert!(transport.command(seek(tick)).is_err(), "{tick}");
+        assert_eq!(snapshot(&transport), before, "{tick}");
+    }
+    transport.command(seek(1200.0)).unwrap();
+    let after = transport.status();
+    assert!(after.playing);
+    assert_eq!(after.practice.phase, PracticePhase::Playing);
+    assert_eq!(after.range, before_range(&before));
+    assert_eq!(after.tick, 1200.0);
+
+    // A count-in, running or paused: refused, and nothing changes (the count keeps its own bar's meter and tempo).
+    let mut transport = installed(48_000, false, true);
+    play_range(&mut transport, 960.0, Some(1920.0));
+    assert_eq!(transport.status().practice.phase, PracticePhase::CountIn);
+    let before = snapshot(&transport);
+    assert!(transport.command(seek(1000.0)).is_err());
+    assert_eq!(snapshot(&transport), before);
+    transport
+        .command(TransportCommand::Pause { generation: 1 })
+        .unwrap();
+    let paused = snapshot(&transport);
+    assert!(transport.command(seek(1000.0)).is_err());
+    assert_eq!(snapshot(&transport), paused);
+}
+fn before_range(snapshot: &serde_json::Value) -> Option<PlaybackSpan> {
+    serde_json::from_value(snapshot["range"].clone()).unwrap()
 }

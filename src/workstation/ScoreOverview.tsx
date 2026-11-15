@@ -103,7 +103,7 @@ export function ScoreOverview({model,target,playbackBar,onSelect,onSelectTrack,o
   const rows=useMemo(()=>overviewWindow(viewport.top,Math.max(0,viewport.height-cellSize),model.tracks.length,cellSize,2),[viewport.top,viewport.height,model.tracks.length]);
   function keyDown(event:KeyboardEvent<HTMLDivElement>) {
     // A button inside the grid (a track's name, mute, solo) takes its own keys; the grid's cell keys are for the cells.
-    if(event.target instanceof Element&&event.target.closest('button'))return;
+    if(event.target instanceof Element&&event.target.closest('button,input,select,[role="slider"]'))return;
     if(event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
     if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Enter',' ','Escape'].includes(event.key))return;
     event.preventDefault();event.stopPropagation();

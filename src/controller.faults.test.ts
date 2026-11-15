@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { importer, model, Settings } from '@coderline/alphatab';
-import { DocumentController } from './controller';
+import { DocumentClosedError,DocumentController } from './controller';
 import { editCheck, editStats, exportGp, idleVerification, verifyEditInPlace } from './engine';
 import * as engine from './engine';
 const engineActual=await vi.importActual<typeof import('./engine')>('./engine');
@@ -14,6 +14,10 @@ vi.mock('./engine',async importOriginal=>{
   const actual=await importOriginal<typeof import('./engine')>();
   return {...actual,undoInPlace:vi.fn(actual.undoInPlace),editInPlace:vi.fn(actual.editInPlace),checkEditInPlace:vi.fn(actual.checkEditInPlace),compareWithRebuild:vi.fn(actual.compareWithRebuild),verifyEditStepwise:vi.fn(actual.verifyEditStepwise),buildDocument:vi.fn(actual.buildDocument)};
 });
+
+// The sampled check (every 25th edit in development) verifies and makes checkpoints of its own: off here, so that what these tests see does not depend on how many edits other tests made.
+const sampledDefault=editCheck.every;
+beforeEach(()=>{editCheck.every=0;});afterEach(()=>{editCheck.every=sampledDefault;});
 
 function makeBridge(project:Project) {
   let current:ProjectSnapshot={project,canUndo:project.edits.length>0,canRedo:false,dirty:false,path:null};
@@ -328,7 +332,7 @@ describe('a document that cannot be rebuilt from what native holds',()=>{
       refuseBad();
       await controller.edit({type:'setNote',target:at(1),string:2,fret:13});
       expect(controller.getState().snapshot.project.edits,'accepted in place').toHaveLength(2);
-      await controller.verifyNow(async()=>{});
+      await controller.verifyNow(async()=>{});await controller.whenIdle();
       const state=controller.getState();
       expect(state.snapshot.project.edits.map(edit=>(edit as {fret:number}).fret),'the last edit was taken back').toEqual([5]);
       expect(state.takenBack,'the user is told how many edits were taken back').toBe(1);
@@ -346,7 +350,7 @@ describe('a document that cannot be rebuilt from what native holds',()=>{
       refuseBad();
       await controller.edit({type:'setNote',target:at(1),string:2,fret:13});
       vi.mocked(bridge.undo).mockRejectedValueOnce(new Error('native undo failed'));
-      await controller.verifyNow(async()=>{});
+      await controller.verifyNow(async()=>{});await controller.whenIdle();
       expect(controller.isBroken()).toBe(true);
       const alert=controller.getState().error;expect(alert).toMatch(/Undo/i);expect(alert).toMatch(/without saving/i);
       // Not saveable and not exportable in its broken form; each refusal says why, and none clears the alert.
@@ -374,10 +378,61 @@ describe('a document that cannot be rebuilt from what native holds',()=>{
       refuseBad();
       await controller.edit({type:'setNote',target:at(1),string:2,fret:13});
       vi.mocked(bridge.undo).mockRejectedValueOnce(new Error('native undo failed'));
-      await controller.verifyNow(async()=>{});
+      await controller.verifyNow(async()=>{});await controller.whenIdle();
       expect(controller.isBroken()).toBe(true);
       expect(await controller.requestClose(),'close does not offer to save what cannot be saved').toBe(true);
       expect(asked).not.toHaveBeenCalled();expect(bridge.saveProject).not.toHaveBeenCalled();
     } finally {errors.mockRestore();warn.mockRestore();}
+  },60000);
+  it('opens a saved history that ends in an edit that does not replay at the last edit that does, and says so',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+    try {
+      refuseBad();
+      const history:Project={...blank(),edits:[
+        {type:'setNote',target:at(0),string:2,fret:5},{type:'setNote',target:at(1),string:2,fret:6},
+        {type:'setNote',target:at(2),string:2,fret:13},{type:'setNote',target:at(3),string:2,fret:7},
+      ]};
+      const {bridge,saved}=withBridge(history);
+      const controller=await DocumentController.create(bridge);
+      expect(controller.getState().snapshot.project.edits.map(edit=>(edit as {fret:number}).fret),'opened at the last edit that replays').toEqual([5,6]);
+      expect(controller.getState().takenBack,'the two edits from the failing one on').toBe(2);
+      expect(controller.isBroken()).toBe(false);expect(controller.isVerified()).toBe(true);
+      expect(saved,'the file is not written by opening').toHaveLength(0);
+      // A base that does not open at all is still an error.
+      vi.mocked(engine.buildDocument).mockImplementation(()=>{throw new Error('the file does not open');});
+      await expect(DocumentController.create(makeBridge(history))).rejects.toThrow('the file does not open');
+    } finally {allowAll();errors.mockRestore();}
+  },60000);
+});
+
+describe('the idle check and playback, and a document that closes while it is waited for',()=>{
+  const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+  it('stops a check that started before playback, and starts again when playback ends',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+    const afterMs=idleVerification.afterMs;
+    try {
+      idleVerification.afterMs=20;
+      const controller=await DocumentController.create(makeBridge(blank()));
+      await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+      // The timer fires and the check is running (each of its steps takes a while) when playback starts.
+      const slowStep=vi.mocked(engine.verifyEditStepwise).getMockImplementation()!;
+      vi.mocked(engine.verifyEditStepwise).mockImplementationOnce(async(project,built,canRedo,pause,cancelled,from)=>slowStep(project,built,canRedo,async()=>{await wait(15);},cancelled,from));
+      const counted=editStats.verified;
+      await wait(60);controller.holdVerification(true);
+      await wait(400);
+      expect(controller.isVerified(),'the check that was running was stopped').toBe(false);expect(editStats.verified-counted).toBe(0);
+      controller.holdVerification(false);
+      await wait(500);
+      expect(controller.isVerified(),'it ran when playback ended').toBe(true);
+    } finally {idleVerification.afterMs=afterMs;errors.mockRestore();}
+  },60000);
+  it('rejects Copy and export with a closed-document error, not a state it did not check, when the document is closed while they wait',async()=>{
+    const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+    try {
+      const controller=await DocumentController.create(makeBridge(blank()));
+      await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+      vi.mocked(engine.verifyEditStepwise).mockImplementationOnce(async()=>{controller.dispose();return null;});
+      await expect(controller.copyMusic({kind:'bars',tracks:[0],firstBar:0,lastBar:0},'singleTrack')).rejects.toBeInstanceOf(DocumentClosedError);
+    } finally {errors.mockRestore();}
   },60000);
 });

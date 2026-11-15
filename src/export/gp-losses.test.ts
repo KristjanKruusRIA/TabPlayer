@@ -3,7 +3,7 @@ import { afterEach,describe,expect,it,vi } from 'vitest';
 import { act,cleanup,renderHook } from '@testing-library/react';
 import { model,Settings } from '@coderline/alphatab';
 import { strToU8 } from 'fflate';
-import { DocumentController } from '../controller';
+import { adoptVerifiedScoreForTest,DocumentController } from '../controller';
 import { blankProject,type EditCommand,type ProjectSnapshot } from '../project';
 import type { NativeBridge } from '../bridge';
 import type { DocumentSnapshot } from '../workspace/types';
@@ -185,7 +185,7 @@ describe('the app asks before writing',()=>{
   it('the document export shows a refusal instead of asking, when the export would throw',async()=>{
     const bridge=bridgeFor([]),controller=await DocumentController.create(bridge);
     // The test puts a score into the controller by hand and vouches for it (otherwise the export would check it against a rebuild first, and rebuild it).
-    controller.adoptVerifiedScoreForTest(refusedCarrierScore());
+    adoptVerifiedScoreForTest(controller,refusedCarrierScore());
     await expect(controller.export()).rejects.toThrow(carrierMessage);
     expect(bridge.confirmExport).not.toHaveBeenCalled();expect(bridge.exportGp).not.toHaveBeenCalled();
   });

@@ -11,7 +11,7 @@ export function describeScore(score:model.Score):unknown {
   for(;;){const step=steps.next();if(step.done)return step.value;}
 }
 /** `describeScore` in steps (a `yield` between slices of the work), for the check that must not stall typing. */
-export function* describeScoreSteps(score:model.Score,skip:readonly string[]=[]):Generator<void,unknown> {
+export function* describeScoreSteps(score:model.Score):Generator<void,unknown> {
   const paths=new Map<object,string>();
   score.tracks.forEach((track,t)=>{
     paths.set(track,`t${t}`);
@@ -36,7 +36,7 @@ export function* describeScoreSteps(score:model.Score,skip:readonly string[]=[])
     // Plain value objects (a bend point, an automation) are compared by content; model objects were handled above.
     return Object.fromEntries(Object.entries(input as object).filter(([key])=>key!=='id').map(([key,item])=>[key,value(item,depth+1)]));
   };
-  const fields=(object:object)=>Object.fromEntries(Object.entries(object).filter(([key])=>key!=='id'&&!skip.includes(key)).map(([key,item])=>[key,value(item)]));
+  const fields=(object:object)=>Object.fromEntries(Object.entries(object).filter(([key])=>key!=='id').map(([key,item])=>[key,value(item)]));
   const rows:Record<string,unknown>={};
   let counted=0;
   for(const [object,path] of paths){rows[path]=fields(object);if(++counted%1500===0)yield;}

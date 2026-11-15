@@ -4,6 +4,7 @@ import { gpExportRefusal,gpLosses } from './interchange/gp-losses';
 import { scoreHasMusicXmlTimeCarry } from './interchange/musicxml-time-symbols';
 import { gpWarning } from './export/gp-warning';
 import { yieldAfter,yieldToInput } from './engine-verify';
+import { getMessage,getResolvedLanguage,type MessageKey } from './i18n';
 import { buildDocument, canEditInPlace, canUndoInPlace, checkpointFits, cloneDocument, compareDocuments, compareWithRebuild, makeCheckpoint, checkEditInPlace, editInPlace, editStats, idleVerification, registerLiveDocument, undoInPlace, verifyEditStepwise, effectiveAudioSettings,exportGp, forgetPreview, previewEdit, replayDocumentSettings, shouldCheckEdit, type BuiltDocument, type Checkpoint } from './engine';
 import { appliesFilePartialCapo, projectCommands, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
 import { getPartialCapo } from './editor/partial-capo';
@@ -40,7 +41,15 @@ const backingState=(backing:BackingSettings|null)=>JSON.stringify(backing?[
 
 export interface DocumentState extends BuiltDocument { documentId:DocumentId; revision:number; snapshot: ProjectSnapshot; documentEpoch:number; busy: boolean; error: string | null;
   /** The edited document differed from one rebuilt from its history, and the rebuilt one was put in its place (shown as a quiet note until the next edit). */
-  repaired?:boolean }
+  repaired?:boolean;
+  /** How many of the newest edits could not be replayed and were taken back to keep the document usable (shown until the next edit). */
+  takenBack?:number }
+
+/** What an action that waited for the check gets when the document was closed meanwhile: not a failure to show, only the end of that work. */
+export class DocumentClosedError extends Error {constructor(){super('The document was closed.');this.name='DocumentClosedError';}}
+
+/** The most edits one automatic take-back goes through when the document cannot be rebuilt (each costs a native undo and a rebuild attempt). */
+const MAX_TAKE_BACK=16;
 
 export class DocumentController {
   private state: DocumentState;
@@ -55,7 +64,8 @@ export class DocumentController {
   private marks=new WeakMap<model.Score,number>();
   /** The score object known to equal a rebuild from the history: the one a full build made, or one a check found equal. A settings edit keeps the score object, so it keeps what was or was not known about it. */
   private verifiedScore:model.Score|null=null;private verifyTimer:ReturnType<typeof setTimeout>|null=null;private verifyRun=0;
-  private verifyGate:()=>boolean=()=>true;
+  /** Playback or a count-in is running: the idle check does not start, and one that runs stops (a swap would stop playback, and its slices would stall the moving cursor). */
+  private verifyHeld=false;
   /**
    * What the check replays from: a detached copy of a document that was a real rebuild (or was compared with one and found equal), at the edit count it had.
    * `lazyCheckpoint` is a real rebuild that is the open document and has not been edited in place yet; it is copied just before the first edit in place touches it.
@@ -63,19 +73,47 @@ export class DocumentController {
   private checkpoint:Checkpoint|null=null;
   private lazyCheckpoint:{built:BuiltDocument;project:ProjectSnapshot['project'];canRedo:boolean}|null=null;
   private closed=false;
-  /** Why the document cannot be used any more (it could not be rebuilt after native changed it): every action but saving and closing refuses with it. */
+  /** Why the document cannot be used (it could not be rebuilt after native changed it), as the alert shows it: every action but Undo and closing refuses. */
   private broken:string|null=null;
+  private healing=false;
+  /** The edits taken back since the document broke (what the user is told once it is whole again). */
+  private takenBackWhileBroken=0;
 
-  private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: BeforeChange, private isWorkspaceTransitioning:()=>boolean) {
+  private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: BeforeChange, private isWorkspaceTransitioning:()=>boolean, built:BuiltDocument, takenBack=0) {
     this.verifyRecord(record);
-    this.state={...record,...buildDocument(record.snapshot.project,record.snapshot.canRedo),documentEpoch:0,busy:false,error:null};
+    this.state={...record,...built,documentEpoch:0,busy:false,error:null,...(takenBack?{takenBack}:{})};
     this.adoptRebuilt(this.state);
   }
   static async create(bridge: NativeBridge, beforeChange: BeforeChange = () => {},initial?:DocumentSnapshot,isWorkspaceTransitioning:()=>boolean=()=>false) {
-    const record=initial ?? await bridge.snapshot();
+    let record=initial ?? await bridge.snapshot();
     await admitDocumentBase(record.snapshot.project);
-    return new DocumentController(bridge,record,beforeChange,isWorkspaceTransitioning);
+    let built:BuiltDocument,takenBack=0;
+    try {built=buildDocument(record.snapshot.project,record.snapshot.canRedo);}
+    catch(error) {
+      // A saved history that does not replay (an edit that an older or buggier build let in): the document opens at the last edit that does, the rest is taken back
+      // (it stays in native's redo stack, and nothing is written to the file until the user saves).
+      const opened=await DocumentController.openAtLastReplayableEdit(bridge,record,error);
+      record=opened.record;built=opened.built;takenBack=opened.takenBack;
+    }
+    return new DocumentController(bridge,record,beforeChange,isWorkspaceTransitioning,built,takenBack);
   }
+  /** The longest prefix of the history that replays (found by bisection: a prefix that fails makes every longer one fail), and the document taken back to it. Throws the original error when not even the base opens. */
+  private static async openAtLastReplayableEdit(bridge:NativeBridge,record:DocumentSnapshot,error:unknown):Promise<{record:DocumentSnapshot;built:BuiltDocument;takenBack:number}> {
+    const project=record.snapshot.project,edits=projectCommands(project);
+    const replays=(count:number)=>{try{buildDocument({...project,edits:edits.slice(0,count)},true);return true;}catch{return false;}};
+    if(!edits.length||!replays(0))throw error;
+    let good=0,bad=edits.length;
+    while(bad-good>1){const middle=(good+bad)>>1;if(replays(middle))good=middle;else bad=middle;}
+    let current=record;
+    for(let remaining=edits.length-good;remaining>0;remaining--){
+      current=await bridge.undo(current.revision);
+      if(current.documentId!==bridge.documentId)throw new Error('The native response belongs to a different document.');
+    }
+    return {record:current,built:buildDocument(current.snapshot.project,current.snapshot.canRedo),takenBack:edits.length-good};
+  }
+  private message(key:MessageKey,params?:Record<string,string|number>):string {return getMessage(getResolvedLanguage(),key,params);}
+  /** Whether the document could not be rebuilt after native changed it, and has not been made whole again. */
+  isBroken():boolean {return this.broken!==null;}
   private verifyRecord(record:DocumentSnapshot) {
     if(record.documentId!==this.bridge.documentId) throw new Error('The native response belongs to a different document.');
   }
@@ -91,14 +129,18 @@ export class DocumentController {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private update(change: Partial<DocumentState>) { this.state={...this.state,...change};registerLiveDocument(this.state.snapshot.project,this.state); for (const listener of this.listeners) listener(); }
   private run<T>(action: () => Promise<T>,allowTransition=false,allowBroken=false): Promise<T> {
-    if(this.broken&&!allowBroken) return Promise.reject(new Error(this.broken));
+    if(this.broken&&!allowBroken) return Promise.reject(new Error(this.message('document.broken_refused')));
     if(!allowTransition && this.isWorkspaceTransitioning()) return Promise.reject(new Error('Wait for the current workspace transition to finish.'));
     this.cancelVerify();
     this.pendingActions++;
     const job=this.tail.then(async()=>{
-      this.update({busy:true,error:null});
-      try { return await action(); }
-      catch(error) { this.update({error:error instanceof Error ? error.message : String(error)}); throw error; }
+      // The alert of a broken document stays: no action clears it, and one that was queued before the break is refused when its turn comes.
+      this.update({busy:true,error:this.broken});
+      try {
+        if(this.broken&&!allowBroken)throw new Error(this.message('document.broken_refused'));
+        return await action();
+      }
+      catch(error) { this.update({error:this.broken??(error instanceof Error ? error.message : String(error))}); throw error; }
       finally { this.pendingActions--;this.update({busy:this.hasPendingActions()});if(this.pendingActions===0&&this.isUnverified())this.scheduleVerify(); }
     });
     this.tail=job.then(()=>{},()=>{}); return job;
@@ -128,16 +170,21 @@ export class DocumentController {
     if(this.checkpoint&&!checkpointFits(this.checkpoint,live.snapshot.project,live.snapshot.canRedo))this.checkpoint=null;
     return this.checkpoint;
   }
-  /** Whether the idle check may run now: not while playback runs (a swap stops it, and the check's slices stall the moving cursor). */
-  setVerifyGate(gate:()=>boolean) {this.verifyGate=gate;}
-  /** The check starts once the edits stop, and starts over with the next one; while playback runs it waits for it to stop. It never runs with actions queued: the queue re-arms it when it empties. */
+  /** Playback or a count-in starts (true) or ends (false): the idle check waits, and one that runs stops, until it ends. A check an action asked for (export, copy) is not held. */
+  holdVerification(held:boolean) {
+    if(this.verifyHeld===held)return;
+    this.verifyHeld=held;
+    if(held)this.cancelVerify();
+    else if(this.pendingActions===0&&this.isUnverified())this.scheduleVerify();
+  }
+  /** The check starts once the edits stop, and starts over with the next one; while playback runs it waits (`holdVerification` re-arms it). It never runs with actions queued: the queue re-arms it when it empties. */
   private scheduleVerify(delay=idleVerification.afterMs) {
     this.cancelVerify();
     if(delay<=0||this.closed)return;
     this.verifyTimer=setTimeout(()=>{
       this.verifyTimer=null;
       if(this.closed||this.pendingActions>0)return;
-      if(!this.verifyGate()){this.scheduleVerify(1000);return;}
+      if(this.verifyHeld)return;
       void this.verifyNow().catch(()=>{});
     },delay);
   }
@@ -186,22 +233,59 @@ export class DocumentController {
    */
   private async settled(): Promise<DocumentState> {
     const hidden=typeof document!=='undefined'&&document.visibilityState==='hidden';
-    for(let attempt=0;this.isUnverified()&&!this.closed&&attempt<3;attempt++)await this.verifyNow(hidden?async()=>{}:yieldAfter(),true);
+    for(let attempt=0;this.isUnverified()&&!this.closed&&this.broken===null&&attempt<3;attempt++)await this.verifyNow(hidden?async()=>{}:yieldAfter(),true);
+    if(this.broken!==null)throw new Error(this.broken);
     if(this.isUnverified()&&!this.closed){
       // One uninterrupted rebuild from the file, compared with the open document.
       let whole:BuiltDocument;
-      try {whole=buildDocument(this.state.snapshot.project,this.state.snapshot.canRedo);} catch(error) {this.fail(error);throw error;}
+      try {whole=buildDocument(this.state.snapshot.project,this.state.snapshot.canRedo);} catch(error) {this.fail(error);throw new Error(this.broken!);}
       const problem=compareDocuments(this.state,whole);
       if(problem){editStats.mismatches++;console.error(`Edit in place differs from a full rebuild: ${problem}`);forgetPreview();this.update({...whole,repaired:true});this.adoptRebuilt(whole);}
       else {this.checkpoint=makeCheckpoint(this.state.snapshot.project,whole,this.state.snapshot.canRedo);this.markVerified();}
     }
+    if(this.closed&&this.isUnverified())throw new DocumentClosedError();
     return this.state;
   }
   verified():Promise<DocumentState> {return this.run(()=>this.settled());}
-  /** The document could not be rebuilt after native changed it, so what is shown is not what native holds: nothing is edited or exported until it is reopened. */
+  /**
+   * The document could not be rebuilt after native changed it, so what is shown is not what native holds. The failure is the same every time and the newest
+   * edits caused it, so the newest edits are taken back at once (native undo, then a rebuild), up to a small bound; only if that does not make the document
+   * whole is it left broken, where Undo takes edits back one by one and Close leaves without saving. Nothing is saved, exported or edited while it is broken.
+   */
   private fail(error:unknown) {
-    const message=`The document could not be rebuilt (${error instanceof Error?error.message:String(error)}). Reopen it to continue; its saved history is untouched.`;
-    this.broken=message;this.update({error:message});
+    const reason=error instanceof Error?error.message:String(error);
+    if(this.broken===null)this.takenBackWhileBroken=0;
+    this.broken=this.message('document.broken',{reason});this.update({error:this.broken});
+    if(this.healing||this.closed)return;
+    this.healing=true;
+    void this.run(()=>this.healBroken(),true,true).catch(()=>{}).finally(()=>{this.healing=false;});
+  }
+  /** One native undo, then a rebuild of what native now holds: the rebuilt document, or null when it still cannot be rebuilt (or there is nothing left to take back). */
+  private async takeBackOne():Promise<BuiltDocument|null> {
+    const removed=this.state.snapshot.project.edits.at(-1);if(!removed)return null;
+    const record=await this.bridge.undo(this.state.revision);this.verifyRecord(record);
+    this.undone.push(removed);this.takenBackWhileBroken++;this.update({...record});
+    try {return buildDocument(record.snapshot.project,record.snapshot.canRedo);} catch {return null;}
+  }
+  /** The document is whole again after edits were taken back: the rebuilt one is the open document, verified, and the user is told. */
+  private adoptHealed(built:BuiltDocument) {
+    this.beforeChange();forgetPreview();
+    this.broken=null;
+    this.update({...built,repaired:false,takenBack:this.takenBackWhileBroken,error:null});this.adoptRebuilt(this.state);
+  }
+  /** Takes back the newest edits, one after another and only as far as the edits made since the last checkpoint (and at most `MAX_TAKE_BACK`), until the document rebuilds. */
+  private async healBroken():Promise<void> {
+    if(this.broken===null)return;
+    const known=this.checkpoint?.index??(this.lazyCheckpoint?projectCommands(this.lazyCheckpoint.project).length:0);
+    const limit=Math.max(1,Math.min(MAX_TAKE_BACK,projectCommands(this.state.snapshot.project).length-known));
+    try {
+      for(let attempt=0;attempt<limit;attempt++){
+        const built=await this.takeBackOne();
+        if(built){this.adoptHealed(built);return;}
+        if(!this.state.snapshot.project.edits.length)return;
+      }
+    } catch(error) {console.warn(`Edits could not be taken back: ${error instanceof Error?error.message:String(error)}`);}
+    this.update({error:this.broken});
   }
   private async saveNow(saveAs: boolean) {
     const record=await this.bridge.saveProject(saveAs,this.state.revision);
@@ -209,6 +293,8 @@ export class DocumentController {
     this.verifyRecord(record);this.update(record); return true;
   }
   private async canLeave() {
+    // A broken document is closed without asking: the question offers to save, and what would be saved cannot be rebuilt.
+    if (this.broken!==null) return true;
     if (!this.state.snapshot.dirty) return true;
     const choice=await this.bridge.askUnsaved(this.state.score.title || 'Untitled',this.state.snapshot.path);
     return choice==='discard' || (choice==='save' && await this.saveNow(false));
@@ -254,7 +340,7 @@ export class DocumentController {
     }
     const scoreBefore=this.state.score;
     if(!isSettingsEdit(command))this.beforeChange(barMapOfEdit(command,this.state.score.masterBars.length)??undefined);
-    this.undone=[];this.update({...record,repaired:false,score:candidate!.score,settings:candidate!.settings,embeddedBacking:candidate!.embeddedBacking,embeddedBackingSettings:candidate!.embeddedBackingSettings,sourceMixes:candidate!.sourceMixes});
+    this.undone=[];this.update({...record,repaired:false,takenBack:0,score:candidate!.score,settings:candidate!.settings,embeddedBacking:candidate!.embeddedBacking,embeddedBackingSettings:candidate!.embeddedBackingSettings,sourceMixes:candidate!.sourceMixes});
     // Only a score a full build made is known to equal a rebuild. A settings edit keeps the score object, and with it what is known of it. The check of an edit made in place is armed when the queue empties.
     if(inPlace&&!rebuilt)this.checkInPlace();
     else if(this.state.score!==scoreBefore)this.adoptRebuilt(this.state);
@@ -332,6 +418,13 @@ export class DocumentController {
     }
   }
   undo() { return this.run(async()=>{
+    // A broken document is made whole by taking edits back: native undoes the newest edit, then the document is rebuilt from what native holds.
+    if(this.broken!==null){
+      const built=await this.takeBackOne();
+      if(built)this.adoptHealed(built);
+      else this.update({error:this.broken});
+      return;
+    }
     const project=this.state.snapshot.project,removed=project.edits.at(-1);if(!removed)return;
     const settingsOnly=isSettingsEdit(removed),previous={...project,edits:project.edits.slice(0,-1)};
     // The edit that was applied in place last is taken back in place too, when the document still is what that edit made and the file's partial capo does not depend on the redo it leaves.
@@ -343,13 +436,13 @@ export class DocumentController {
       this.detachCheckpoint();
       try {
         const next=undoInPlace(this.state);if(canUndoInPlace(next.score))this.marks.set(next.score,project.edits.length-1);
-        editStats.inPlace++;this.update({...record,score:next.score,repaired:false});
+        editStats.inPlace++;this.update({...record,score:next.score,repaired:false,takenBack:0});
       } catch(error) {this.rebuildFrom(record,error);}
     } else {
-      const before=this.state.score;this.update({...record,...built!,repaired:false});
+      const before=this.state.score;this.update({...record,...built!,repaired:false,takenBack:0});
       if(this.state.score!==before)this.adoptRebuilt(this.state);
     }
-  }); }
+  },false,true); }
   redo() { return this.run(async()=>{
     const restored=this.state.snapshot.redoEdit ?? this.undone.at(-1);
     if(!restored){if(this.state.snapshot.canRedo)throw new Error('The next redo command is unavailable; reopen the document.');return;}
@@ -364,10 +457,10 @@ export class DocumentController {
       this.detachCheckpoint();
       try {
         const next=editInPlace(this.state,restored,projectCommands(this.state.snapshot.project).length);this.marks.set(next.score,project.edits.length);
-        editStats.inPlace++;this.update({...record,score:next.score,repaired:false});
+        editStats.inPlace++;this.update({...record,score:next.score,repaired:false,takenBack:0});
       } catch(error) {this.rebuildFrom(record,error);}
     } else {
-      const before=this.state.score;this.update({...record,...built!,repaired:false});
+      const before=this.state.score;this.update({...record,...built!,repaired:false,takenBack:0});
       if(this.state.score!==before)this.adoptRebuilt(this.state);
     }
   }); }
@@ -390,7 +483,8 @@ export class DocumentController {
       this.update({...record});
     }).catch(error=>{this.update({error:null});throw error;});
   }
-  save(saveAs = false) { return this.run(()=>this.saveNow(saveAs),false,true); }
+  /** Refused while the document is broken: what would be written cannot be rebuilt. */
+  save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
   export() { return this.run(async()=>{
     // What the file cannot keep is worked out first, so the user is asked once, with it, and not after confirming.
     await this.settled();
@@ -403,6 +497,12 @@ export class DocumentController {
     await this.bridge.exportGp(exportGp(score),current.revision);
   }); }
   requestClose() { return this.run(()=>this.canLeave(),true,true); }
-  /** For tests: puts `score` in the place of the open document's score and says it is known to equal a rebuild. */
-  adoptVerifiedScoreForTest(score:model.Score) {this.update({score});this.adoptRebuilt(this.state);}
+  /** Only for the test seam below. */
+  private adoptVerifiedScore(score:model.Score) {this.update({score});this.adoptRebuilt(this.state);}
+}
+
+/** Test seam: puts `score` in the place of the controller's score and says it is known to equal a rebuild. It exists only where tests run. */
+export function adoptVerifiedScoreForTest(controller:DocumentController,score:model.Score):void {
+  if((import.meta as {env?:{MODE?:string}}).env?.MODE!=='test')throw new Error('This is a test seam.');
+  (controller as unknown as {adoptVerifiedScore(score:model.Score):void}).adoptVerifiedScore(score);
 }

@@ -1,7 +1,7 @@
 import { syncInstrumentViewPreferencesFromNative } from './instruments/view-preferences';
 import { useCallback,useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
 import {model,Settings} from '@coderline/alphatab';
-import { DocumentController } from './controller';
+import { DocumentClosedError,DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings, previewEdit } from './engine';
 import type { BeatTarget, EditCommand } from './project';
 import type { SequenceStep } from './edit-types';
@@ -176,7 +176,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{void syncInstrumentViewPreferencesFromNative();},[]);
   useEffect(()=>{controller.setBeforeChange(bars=>player?.beforeScoreChange(true,bars));return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   // The idle comparison with a rebuild waits for playback to stop: a swap would stop it, and the check's slices would stall the moving cursor.
-  useEffect(()=>{controller.setVerifyGate(()=>!(player?.getState().playing||player?.getState().practice.phase==='countIn'));return()=>controller.setVerifyGate(()=>true);},[controller,player]);
+  const playbackRunning=!!(playbackState?.playing||playbackState?.practice.phase==='countIn');
+  useEffect(()=>{controller.holdVerification(playbackRunning);return()=>controller.holdVerification(false);},[controller,playbackRunning]);
   const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const pluginStatuses = usePluginStatus(state.documentId);
@@ -423,7 +424,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         clipboard.set(value);setClipboardVersion(version=>version+1);
         if(lostWords>0)setLyricsCutNotice({count:lostWords,edits:controller.getState().snapshot.project.edits.length});
         if(cut){setSelection(old=>map?repairMeasureSelection(controller.getState().score,old,map):repairSelection(controller.getState().score,old));editorSelection(null);}
-      }).catch(reason=>setClipboardError(reason instanceof Error?reason.message:String(reason))));
+      }).catch(reason=>{if(!(reason instanceof DocumentClosedError))setClipboardError(reason instanceof Error?reason.message:String(reason));}));
     }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
   };
   const pasteMusic=(options?:PasteOptions)=>{
@@ -508,7 +509,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     await controller.verified();
     const latest=controller.getState();
     if(await exports.run(options,{score:latest.score,settings:effectiveAudioSettings(latest.snapshot.project,latest),embeddedBacking:latest.embeddedBacking,revision:latest.revision})&&!exportCancelled.current)closeModal();
-  })().catch(error=>{setExportError(error instanceof Error?error.message:String(error));}).finally(()=>{setExportLaunching(false);exportRunning.current=null;});exportRunning.current=running;act(running);};
+  })().catch(error=>{if(!(error instanceof DocumentClosedError))setExportError(error instanceof Error?error.message:String(error));}).finally(()=>{setExportLaunching(false);exportRunning.current=null;});exportRunning.current=running;act(running);};
   const cancelExport=()=>{exportCancelled.current=true;const running=exportRunning.current;act((async()=>{let failed=false;try{await exports.cancel();}catch(error){failed=true;setExportError(String(error));}await running;if(!failed)closeModal();})());};
   const backingEdit=(command:EditCommand,candidate?:BackingCandidate)=>controller.edit(command,candidate);
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
@@ -1356,6 +1357,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     />
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
+    {!!state.takenBack && <div className="notice" role="status">{t(state.takenBack===1?'document.taken_back_one':'document.taken_back_other',{count:state.takenBack})}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label={t('workspace.score_workspace')} tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
         <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView holdDraw={drawHold} score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={selectByClick} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>

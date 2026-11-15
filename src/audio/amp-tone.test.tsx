@@ -78,7 +78,7 @@ it('takes the low-tuning setting on the metal amp only, from 0 to 1 octave, and 
   expect(factorySound('rock-lead')!.effects.amp.lowEndOct).toBeUndefined();
   const onEdit=vi.fn();
   render(<SoundPanel trackId="base/0" sound={factorySound('metal-rhythm')!} onEdit={onEdit}/>);
-  const input=screen.getByLabelText('amp Low tuning (oct)');
+  const input=screen.getByLabelText('amp Low tune (oct)');
   expect(input).toHaveValue(1);expect(input).toHaveAttribute('min','0');expect(input).toHaveAttribute('max','1');expect(input.closest('label')).toHaveAttribute('title');
   fireEvent.change(input,{target:{value:'1.5'}});expect(onEdit).not.toHaveBeenCalled();
   fireEvent.change(input,{target:{value:'0'}});
@@ -90,7 +90,7 @@ it('hides the low-tuning setting where it does nothing, and keeps a stored value
     const sound=soundPreset('lead');sound.effects.amp.model=model;sound.effects.amp.lowEndOct=.5;
     expect(visibleParameters('amp',sound.effects).map(p=>p.key),model).toEqual(['drive','gainDb','bassDb','midDb','trebleDb','presenceDb']);
     const {unmount}=render(<SoundPanel trackId="base/0" sound={sound} onEdit={vi.fn()}/>);
-    expect(screen.queryByLabelText('amp Low tuning (oct)'),model).toBeNull();
+    expect(screen.queryByLabelText('amp Low tune (oct)'),model).toBeNull();
     expect(sound.effects.amp.lowEndOct).toBe(.5);expect(soundProblem(sound)).toBeNull();
     unmount();
   }

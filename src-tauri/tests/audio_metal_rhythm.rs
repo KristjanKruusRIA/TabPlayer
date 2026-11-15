@@ -581,8 +581,9 @@ fn raising_low_end_never_thins_the_lows_of_the_amp_that_shows_it() {
 
 #[test]
 fn the_other_amps_ignore_the_setting() {
-    // Crunch and lead thin their lows when it is raised past an octave, the bass drive's path around its stages is tuned
-    // against its cuts, and clean and bass have no stages: a stored value changes nothing there.
+    // Crunch and lead thin the lows of a held note when it is raised past an octave, the bass drive's path around its stages is
+    // tuned against its cuts (on a riff it did not cancel: +2.4 dB over two octaves, so this is a choice), and clean and bass
+    // have no stages: a stored value changes nothing there.
     for rate in RATES {
         for model in ["crunch", "lead", "bassDrive", "clean", "bass"] {
             for drive in [0.2, 0.55] {
@@ -621,4 +622,35 @@ fn the_level_jump_for_someone_who_picks_the_sound_again_is_known() {
     );
     // Within 6 dB of what it was, so a track that picks it again does not jump.
     assert!((db(new * new / (old * old))).abs() < 6.0);
+}
+
+/// The tighter voicing (clip 3a), should it be the one that is kept: the same sound with the low end shifted half an octave, bass +6
+/// dB, mid -1 dB, and the gain that puts it where the shipped one sits on the factory level tone.
+fn tighter_voicing() -> FxSettings {
+    let mut fx = factory("metal-rhythm");
+    fx.amp.low_end_oct = 0.5;
+    fx.amp.bass_db = 6.0;
+    fx.amp.mid_db = -1.0;
+    fx.amp.gain_db = -2.5;
+    fx
+}
+
+#[test]
+fn the_tighter_voicing_sits_where_the_shipped_one_does_on_the_factory_level_tone() {
+    let rate = 48_000;
+    let tone: Vec<f32> = (0..rate as usize * 2)
+        .map(|n| {
+            let t = n as f64 / rate as f64;
+            (0.25 * (-1.5 * t).exp() * ((TAU * 110.0 * t).sin() + 0.5 * (TAU * 220.0 * t).sin()))
+                as f32
+        })
+        .collect();
+    let level = |fx: &FxSettings| rms(&run(fx, rate, &tone));
+    let (shipped, tighter) = (level(&factory("metal-rhythm")), level(&tighter_voicing()));
+    println!(
+        "shipped {shipped:.4} tighter {tighter:.4}: {:.1} dB",
+        db(tighter * tighter / (shipped * shipped))
+    );
+    assert!(tighter_voicing().validate().is_ok());
+    assert!(db(tighter * tighter / (shipped * shipped)).abs() < 1.0);
 }

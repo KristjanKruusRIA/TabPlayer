@@ -1672,7 +1672,7 @@ export const en = {
   'param.mid_db': "Mid (dB)",
   'param.treble_db': "Treble (dB)",
   'param.presence_db': "Presence (dB)",
-  'param.low_end_oct': "Low tuning (oct)",
+  'param.low_end_oct': "Low tune (oct)",
   'param.low_end_oct_hint': "Extends the amp's low end for a guitar tuned low: moves the preamp's low cut down by this many octaves.",
   'param.low_db': "Low (dB)",
   'param.high_db': "High (dB)",

@@ -83,7 +83,7 @@ function AmpStage({editing,board,ampCapture}:{editing:SoundEditing;board:Board;a
   return <div className="rig-amp-stage">
     <div className="rig-art-slot"><div className="rig-amp" data-on={board.effects.amp.enabled} style={{'--knob-ink':look.ink} as React.CSSProperties}>
       <AmpArt look={look} on={board.effects.amp.enabled}/>
-      <div className="rig-amp-knobs" style={{'--amp-knobs':visibleParameters('amp',board.effects).length} as React.CSSProperties}><BlockKnobs editing={editing} board={board} block="amp" tone="amp"/></div>
+      <div className="rig-amp-knobs" data-knobs={visibleParameters('amp',board.effects).length} style={{'--amp-knobs':visibleParameters('amp',board.effects).length} as React.CSSProperties}><BlockKnobs editing={editing} board={board} block="amp" tone="amp"/></div>
     </div></div>
     <div className="rig-slot" data-slot="amp-capture">{ampCapture?.(board)}</div>
   </div>;

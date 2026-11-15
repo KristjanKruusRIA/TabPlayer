@@ -661,9 +661,11 @@ pub struct Voicing {
 }
 /// A driven amp resolved for `rate` and a `voicing`.
 pub fn amp_shape_voiced(model: &str, drive: f64, voicing: Voicing, rate: f64) -> Option<Shape> {
-    // Only the metal preamp takes the setting. Raising it past about an octave makes the other driven preamps thin their lows
-    // (more of the fundamental into the clipping pushes the energy up into its harmonics: measured), and the bass drive's
-    // path around the stages is tuned against the cuts, so a moved cut would make the two cancel.
+    // Only the metal preamp takes the setting, the one it was measured on. On a held synthetic note, raising it past about an
+    // octave made the crunch and lead preamps thin their lows (more of the fundamental into the clipping pushes the energy up
+    // into its harmonics), though a real riff through the crunch preamp gained 1.0 dB over two octaves. The bass drive's low path
+    // around the stages is tuned against the cuts; on a real riff its 60-250 Hz band rose 2.4 dB over two octaves, so the two
+    // did not cancel, and it is left alone as a choice, not a necessity.
     let low = if voicing.low_end_oct == 0.0 || model != "metal" {
         1.0
     } else {

@@ -109,7 +109,7 @@ export function localizedParamLabel(block: EffectBlock, key: string, defaultLabe
 
 export const presetName=(id:string)=>id==='gm'?'Bypass':id[0].toUpperCase()+id.slice(1);
 export const ampModels=['clean','crunch','lead','metal','bass','bassDrive'] as const,cabinetModels=['open','closed','combo','bass','bassStack'] as const;
-/** The amp models that take `lowEndOct`: the metal preamp. The others ignore it: clean and bass have no preamp stages, the crunch and lead thin their lows when it is raised, and the bass drive's low end goes around its stages, tuned against its cuts. */
+/** The amp models that take `lowEndOct`: the metal preamp. The others ignore it: clean and bass have no preamp stages, the crunch and lead were not tuned for it (a held note's lows fall past an octave), and the bass drive's low end goes around its stages, tuned against its cuts. */
 export const lowEndModels=['metal'] as const;
 /** The controls of `block` that do something for its current model, so a knob that is inert is not shown; its stored value stays. */
 export function visibleParameters(block:EffectBlock,effects:FxSettings):NumericControl[] {
@@ -127,7 +127,7 @@ export const parameters:Record<EffectBlock,NumericControl[]>={
   octaver:[{key:'octaveDown',label:'Octave down',min:0,max:1,step:.01},{key:'twoOctavesDown',label:'Two octaves down',min:0,max:1,step:.01},{key:'direct',label:'Direct',min:0,max:1,step:.01}],
   pitch:[{key:'semitones',label:'Semitones',min:-24,max:24,step:1},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
   drive:[{key:'drive',label:'Drive',min:0,max:1,step:.01},{key:'tone',label:'Tone',min:0,max:1,step:.01},{key:'levelDb',label:'Level (dB)',min:-24,max:12,step:.5}],
-  amp:[{key:'drive',label:'Drive',min:0,max:1,step:.01},{key:'gainDb',label:'Gain (dB)',min:-24,max:24,step:.1},{key:'bassDb',label:'Bass (dB)',min:-12,max:12,step:.5},{key:'midDb',label:'Mid (dB)',min:-12,max:12,step:.5},{key:'trebleDb',label:'Treble (dB)',min:-12,max:12,step:.5},{key:'presenceDb',label:'Presence (dB)',min:-12,max:12,step:.5},{key:'lowEndOct',label:'Low tuning (oct)',min:0,max:1,step:.25,hint:"Extends the amp's low end for a guitar tuned low: moves the preamp's low cut down by this many octaves."}],cabinet:[],
+  amp:[{key:'drive',label:'Drive',min:0,max:1,step:.01},{key:'gainDb',label:'Gain (dB)',min:-24,max:24,step:.1},{key:'bassDb',label:'Bass (dB)',min:-12,max:12,step:.5},{key:'midDb',label:'Mid (dB)',min:-12,max:12,step:.5},{key:'trebleDb',label:'Treble (dB)',min:-12,max:12,step:.5},{key:'presenceDb',label:'Presence (dB)',min:-12,max:12,step:.5},{key:'lowEndOct',label:'Low tune (oct)',min:0,max:1,step:.25,hint:"Extends the amp's low end for a guitar tuned low: moves the preamp's low cut down by this many octaves."}],cabinet:[],
   eq:[{key:'lowDb',label:'Low (dB)',min:-24,max:24,step:.1},{key:'midDb',label:'Mid (dB)',min:-24,max:24,step:.1},{key:'highDb',label:'High (dB)',min:-24,max:24,step:.1},{key:'midHz',label:'Mid frequency (Hz)',min:200,max:5000,step:10}],
   graphicEq:[{key:'levelDb',label:'Level (dB)',min:-12,max:12,step:.5}],
   // Listed in the native processing order.

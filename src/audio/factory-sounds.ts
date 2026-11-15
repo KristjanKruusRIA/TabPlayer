@@ -34,7 +34,7 @@ const definitions:readonly FactoryDefinition[]=[
     drive:{model:'overdrive',drive:.3,levelDb:2},amp:{model:'lead',drive:.45,gainDb:1,midDb:1},cabinet:{model:'closed'},
     delay:{model:'analog',quarterNotes:.75,feedback:.35,mix:.2},reverb:{model:'hall',room:.6,mix:.2}}},
   {id:'metal-rhythm',name:'Metal rhythm',category:'Lead and high gain',presetId:'lead',description:'Tight, gated high gain with scooped mids.',effects:{
-    gate:{thresholdDb:-50,releaseMs:60},amp:{model:'metal',drive:.2,gainDb:0,bassDb:8,midDb:-3,trebleDb:-4,presenceDb:3,lowEndOct:1},cabinet:{model:'closed'}}},
+    gate:{thresholdDb:-50,releaseMs:60},amp:{model:'metal',drive:.2,gainDb:-4.5,bassDb:8,midDb:-3,trebleDb:-4,presenceDb:3,lowEndOct:1},cabinet:{model:'closed'}}},
   {id:'fuzz-lead',name:'Fuzz lead',category:'Lead and high gain',presetId:'crunch',description:'Thick fuzz with a tape echo.',effects:{
     drive:{model:'fuzz',drive:.8,tone:.7},amp:{model:'crunch',drive:.2,gainDb:.5,bassDb:-3},cabinet:{model:'closed'},delay:{model:'tape',quarterNotes:.5,feedback:.4,mix:.25}}},
   {id:'octave-lead',name:'Octave-up lead',category:'Lead and high gain',presetId:'lead',description:'Lead doubled an octave up, with an echo.',effects:{

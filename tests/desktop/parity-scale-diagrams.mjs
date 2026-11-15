@@ -79,7 +79,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
       // The chip opens the diagram on hover or focus, so no mark is hidden by a neighbour.
       await inScore().getByRole('button',{name:'Show scale diagram Open position',exact:true}).hover();
       await inScore().getByRole('group',{name:'Scale diagram Open position',exact:true}).waitFor();
-      const high=await centre(inScore().getByLabel('String 9, open',{exact:false})),lower=await centre(inScore().getByLabel('String 5, fret 3',{exact:false}));
+      const high=await centre(inScore().getByLabel(/^String 9, open/)),lower=await centre(inScore().getByLabel(/^String 5, fret 3/));
       assert.ok(high.y<lower.y,`${label}: the highest string is drawn above a lower string`);
     };
     const t={track:0,staff:0,bar:1,voice:0,beat:1};
@@ -109,7 +109,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     assert.equal(await scales().getByLabel(/String 5, fret 7: /).count(),0,'Double-click removes a mark');
     assert.deepEqual(await record(),initial,'Drafting never edits');
     // In the dialog the highest string is the top row, as in the score.
-    const topRow=await centre(scales().getByLabel('String 9, open',{exact:false})),lowerRow=await centre(scales().getByLabel('String 5, fret 3',{exact:false}));
+    const topRow=await centre(scales().getByLabel(/^String 9, open/)),lowerRow=await centre(scales().getByLabel(/^String 5, fret 3/));
     assert.ok(topRow.y<lowerRow.y,'The highest string is the top row');
     await page.screenshot({path:resolve(paths.results,'01-draft.png')});result.screenshots.push('01-draft.png');
     const expected={type:'setScaleDiagram',target:t,diagram:{

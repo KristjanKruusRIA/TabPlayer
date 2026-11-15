@@ -85,8 +85,17 @@ export function checkDraw(view:AlphaTabApi,partials:readonly LayoutPartial[]):Dr
 /** Makes the live score area checkable from outside (development, tests and the desktop test build only). Returns what to call when the area goes away. */
 export function exposeDrawCheck(live:()=>{view:AlphaTabApi|null;partials:readonly LayoutPartial[]}):()=>void {
   const hook=()=>{const {view,partials}=live();return view?checkDraw(view,partials):{equal:false,pieces:0,signature:'',breaks:'',bars:0,differences:['no score view']};};
-  const host=globalThis as {__tabplayerCheckDraw?:typeof hook};host.__tabplayerCheckDraw=hook;
-  return ()=>{if(host.__tabplayerCheckDraw===hook)delete host.__tabplayerCheckDraw;};
+  /** Where the system that holds a bar (0-based) is: whether it has a drawing, and whether it is in the score area. A driver uses it to make sure that a jump lands in a system that is not painted. */
+  const pieceOfBar=(bar:number)=>{
+    const {view,partials}=live();if(!view)return null;
+    const index=partials.findIndex(piece=>piece.firstMasterBarIndex!==undefined&&bar>=piece.firstMasterBarIndex&&bar<=(piece.lastMasterBarIndex??piece.firstMasterBarIndex));
+    const element=(view.canvasElement as unknown as {element?:HTMLElement}).element?.children[index],area=document.querySelector('.paper-scroll')?.getBoundingClientRect();
+    if(index<0||!element||!area)return null;
+    const box=element.getBoundingClientRect();
+    return {index,pieces:partials.length,empty:element.childElementCount===0,inView:box.height>0&&box.bottom>area.top&&box.top<area.bottom};
+  };
+  const host=globalThis as {__tabplayerCheckDraw?:typeof hook;__tabplayerPieceOfBar?:typeof pieceOfBar};host.__tabplayerCheckDraw=hook;host.__tabplayerPieceOfBar=pieceOfBar;
+  return ()=>{if(host.__tabplayerCheckDraw===hook){delete host.__tabplayerCheckDraw;delete host.__tabplayerPieceOfBar;}};
 }
 
 /**

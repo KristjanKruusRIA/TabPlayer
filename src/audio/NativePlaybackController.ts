@@ -8,7 +8,8 @@ import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
 import type { AudioDiagnostics, AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
 import type { AuditionSource } from './audition';
-import { preparePlan,preparePlanFromScore } from './plan';
+import { freezePlan,preparePlan,preparePlanFromScore } from './plan';
+import { sameData } from '../same-data';
 import { interpretationsOf } from './interpretation';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
 import { DEFAULT_PRACTICE,tonalityOf,type PracticeLoop,type PracticeSettings,type PracticeStatus } from './practice-types';
@@ -22,6 +23,14 @@ import { focusedSettings,type TrackFocus } from './focus';
 import { keptLoopOf,mapKeptLoop,resolveKeptLoop,type KeptLoop } from './kept-loop';
 import type { BarIndexMap } from '../editor/measures-types';
 
+/** Resolves once the page has had a chance to paint what changed (a frame and a task after it), and in any case within 60 ms, as a frame never comes to a hidden page. */
+function afterPaint():Promise<void> {
+  return new Promise(resolve=>{
+    let done=false;const finish=()=>{if(!done){done=true;resolve();}};
+    setTimeout(finish,60);
+    if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>setTimeout(finish,0));
+  });
+}
 let nextGeneration=0;
 function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.metronome.sound??"beep",settings.countIn.bars,settings.countIn.betweenLoops,settings.tonality??0]);}
 function idlePractice(settings:PracticeSettings):PracticeStatus {return {settings:structuredClone(settings),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:0,pulse:null};}
@@ -32,7 +41,9 @@ const mixKey=(mix:ChannelMix|undefined)=>{const m=mix??defaultMix();return JSON.
 const mixLanded=(heard:{track:string;mix:ChannelMix;landing:{key:string;project:ProjectView|null}|null},built:BuiltDocument|null,project:ProjectView|null)=>{if(heard.landing===null||!built)return false;if(project!==heard.landing.project)return true;const key=mixKey(built.settings.mixes[heard.track]);return key!==heard.landing.key||key===mixKey(heard.mix);};
 /** How long a practice change waits for the native acknowledgement before it falls back to the acknowledged settings. Native's own wait for the callback is 250 ms. */
 const PENDING_MS=2500;
-type Options={pendingMs?:number;bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined;latestMaster?:()=>MasterSettings|undefined};
+/** `quietMs`: how long a score that changed (an edit) waits, with playback already invalid, before its plan is built, so that a run of edits is prepared once, for the last of them. */
+type Options={pendingMs?:number;quietMs?:number;bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined;latestMaster?:()=>MasterSettings|undefined};
+const sameTarget=(a:BeatTarget,b:BeatTarget)=>a.track===b.track&&a.staff===b.staff&&a.bar===b.bar&&a.voice===b.voice&&a.beat===b.beat;
 export class NativePlaybackController {
   private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,practice:idlePractice(DEFAULT_PRACTICE),practicePending:false,practiceNotice:null,range:null,loop:null,loopNotice:null,error:null};
   private listeners=new Set<()=>void>();private view:AlphaTabApi|null=null;private cleanupView:()=>void=()=>{};
@@ -44,7 +55,7 @@ export class NativePlaybackController {
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private pendingTimer:ReturnType<typeof setTimeout>|null=null;/** Steps taken while a change was pending, added up into one key sent once it is acknowledged. */private queuedKey:number|null=null;/** The key a pending request asked for when the score changed under it, passed on to the next prepare. */private carriedKey:number|null=null;/** What a request that timed out asked for, so a late echo of it clears the notice. */private lateKey:string|null=null;/** Counts changes of document, so a view can tell a key that reset with the document from one that was changed. */private documentSerial=0;private hasBacking=false;
   /** The running loop by bars, so it can follow an edit that rebuilds the plan. `awaitingRestore` holds off reading the loop back from native while the rebuilt plan has none yet; `loopLost` is an edit that took the loop's bars with it. */
   private keptLoop:KeptLoop|null=null;private loopLost=false;private awaitingRestore=false;private loopsSending=0;
-  private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
+  private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;private lastChangeAt:number|null=null;
   private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
   private bridge:NativeAudioBridge;private options:Options;generation=++nextGeneration;
   constructor(options:Options) {
@@ -71,7 +82,15 @@ export class NativePlaybackController {
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener);};};
   private keyTarget(){return this.queuedKey??(this.pendingPractice?tonalityOf(this.pendingPractice):tonalityOf(this.practice));}
-  private update(change:Partial<PlaybackState>){if(this.destroyed)return;this.state={...this.state,...change,keyTarget:this.keyTarget(),documentSerial:this.documentSerial};for(const listener of this.listeners)listener();}
+  /** Publishes a change. Native status arrives about 30 times a second whatever it says, so a change that leaves every field as it was keeps the same state object and tells nobody; the fields that did not change keep their old objects too. An empty change is the explicit wish to notify (a private field the getters read has changed). */
+  private update(change:Partial<PlaybackState>){
+    if(this.destroyed)return;
+    const next={...this.state,...change,keyTarget:this.keyTarget(),documentSerial:this.documentSerial} as PlaybackState,forced=Object.keys(change).length===0;
+    let changed=forced;
+    for(const key of Object.keys(next) as (keyof PlaybackState)[]){if(sameData(this.state[key],next[key]))(next as unknown as Record<string,unknown>)[key]=this.state[key];else changed=true;}
+    if(!changed)return;
+    this.state=forced?{...next}:next;for(const listener of this.listeners)listener();
+  }
   private fail(error:unknown){this.noteMode='stopped';this.pendingNoteTick=undefined;this.operationError=error instanceof Error?error.message:String(error);this.update({error:this.operationError});}
   private receive(status:NativeAudioStatus){
     if(status.generation!==this.generation || this.destroyed)return;
@@ -127,6 +146,7 @@ export class NativePlaybackController {
     if(selection)try{result.spans=selectionPlaybackChoices(score,plan,selection).map(({startTick,endTick})=>({startTick,endTick}));}catch{}
     return result;
   }
+  private cursorSeek:{target:BeatTarget;choice:CursorPlaybackChoice}|null=null;
   private startRange(startTick:number,endTick:number|null){this.noteMode='waiting';this.pendingNoteTick=undefined;this.update({});this.send({type:'playRange',generation:this.generation,startTick,endTick});}
   play(cursor?:BeatTarget,choice?:CursorPlaybackChoice){
     if(cursor){
@@ -146,6 +166,42 @@ export class NativePlaybackController {
   private occurrence(bar:number){const found=this.plan?.occurrences.find(o=>o.bar===bar);if(!Number.isInteger(bar)||!found)throw new Error('Select a measure after playback is ready.');return found;}
   private seekToTick(tick:number){this.noteMode='seeking';this.pendingNoteTick=tick;this.operationError=null;this.update({error:this.lastStatus?.error??null});this.send({type:'seekTick',tick,generation:this.generation});}
   seekToMeasure(index:number){this.seekToTick(this.occurrence(index).startTick);}
+  /** Which performed occurrence a click on `target` means: the first when stopped or paused, the one nearest the playhead while playing. Remembered, so Play and Space start from it (see `cursorSeekChoice`). Null while no plan for the current document is ready. */
+  chooseCursorOccurrence(target:BeatTarget):CursorPlaybackChoice|null{
+    if(!this.selectionReady())return null;
+    const choices=cursorPlaybackChoices(this.built!.score,this.plan!,target);if(!choices.length)return null;
+    const here=this.lastStatus?.tick??0;
+    // A running loop or played selection decides first: the occurrences inside it are the ones a click can mean.
+    const passage=this.state.loop??this.state.range,inside=passage?choices.filter(item=>item.startTick>=passage.startTick&&item.startTick<passage.endTick):[];
+    const pool=inside.length?inside:choices;
+    const choice=this.state.playing?pool.reduce((best,next)=>Math.abs(next.startTick-here)<Math.abs(best.startTick-here)?next:best):pool[0];
+    this.cursorSeek={target:{...target},choice};this.update({});return choice;
+  }
+  /** The occurrence a click chose for `target`, while it is still one of the plan's; null otherwise. */
+  cursorSeekChoice(target:BeatTarget):CursorPlaybackChoice|null{
+    const kept=this.cursorSeek;
+    if(!kept||kept.choice.generation!==this.generation||!sameTarget(kept.target,target))return null;
+    return kept.choice;
+  }
+  /**
+   * Moves playback to a beat the player clicked. Navigation only (no edit), and it keeps the player's practice state: it sends `seekWithin`, which leaves the
+   * selection range, a count-in and the pass counts (loop, speed trainer) alone. While a loop or a played selection is active (playing or paused) a click outside
+   * it moves nothing, and a click inside seeks within it; during a count-in a click moves nothing. Returns false, and sends nothing, only while no plan for the
+   * current document is ready.
+   */
+  seekToCursor(target:BeatTarget):boolean{
+    const choice=this.cursorSeekChoice(target)??this.chooseCursorOccurrence(target);
+    if(!choice)return false;
+    const practice=this.state.practice,phase=practice.phase;
+    if(phase==='countIn'||practice.countInRemaining>0)return true;
+    const passage=this.state.loop??this.state.range;
+    if(passage&&(choice.startTick<passage.startTick||choice.startTick>=passage.endTick))return true;
+    const was={mode:this.noteMode,tick:this.pendingNoteTick};
+    this.noteMode='seeking';this.pendingNoteTick=choice.startTick;this.operationError=null;this.update({error:this.lastStatus?.error??null});
+    // Native refuses a seek that would leave the loop or the played selection, or land in a count-in, using its own newer state: that is not an error the player needs told.
+    const tick=choice.startTick;
+    void this.bridge.command({type:'seekWithin',tick,generation:this.generation}).catch(()=>{if(this.noteMode==='seeking'&&this.pendingNoteTick===tick){this.noteMode=was.mode;this.pendingNoteTick=was.tick;this.update({});}});return true;
+  }
   /** The score's authored tempo range while it has a backing track and its plan is known; a fixed tempo is checked against it. */
   authoredTempos():AuthoredTempos|null{return this.hasBacking&&this.plan?authoredTemposOf(this.plan):null;}
   setPractice(settings:PracticeSettings){
@@ -358,11 +414,19 @@ export class NativePlaybackController {
       }
     }
     let practice=structuredClone(this.practice);
+    // Edits that follow one another are prepared once, for the last. The first change after a quiet spell is built at once; a change while a build is in flight or within the window of the one before it waits for the edits to stop.
+    const quietMs=this.options.quietMs??0,now=Date.now(),recent=this.lastChangeAt!==null&&now-this.lastChangeAt<quietMs;
+    const settling=!documentChanged&&this.built!==null&&quietMs>0&&(this.preparing||recent);
+    this.lastChangeAt=now;
     this.awaitingRestore=this.keptLoop!==null||this.loopLost;
     this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.planTimingKey=timingKey;this.planInterpretationKey=interpretationKey;this.desiredAudioSettingsKey=audioSettingsKey;
     try {
+      // Playback is already invalid. Building the plan is the long step; it waits until the edits stop, and a newer score supersedes it here.
+      if(settling){await new Promise<void>(resolve=>setTimeout(resolve,this.options.quietMs));if(generation!==this.generation||this.destroyed)return;}
+      // Building the plan starts with the whole score serialized, in one piece: the change is drawn first, so the first edit after a quiet spell is not shown any later for it.
+      else if(quietMs>0){await afterPaint();if(generation!==this.generation||this.destroyed)return;}
       const authored=await (this.options.preparePlan?(interpreted?this.options.preparePlan(project,generation,interpretations):this.options.preparePlan(project,generation)):(interpreted?preparePlanFromScore(built.score,generation,interpretations):preparePlanFromScore(built.score,generation)));if(generation!==this.generation||this.destroyed)return;
-      const plan=applyReferenceSyncPlan(authored,audioSettings.backing);
+      freezePlan(authored);const plan=freezePlan(applyReferenceSyncPlan(authored,audioSettings.backing));
       // The plan now in hand decides whether a fixed tempo still keeps the backing within 10% to 300%; a tempo edit can change that.
       const fitted=practiceForBacking(practice,this.hasBacking?authoredTemposOf(plan):null);
       if(fitted.notice){practice=fitted.settings;this.practice=fitted.settings;this.update({practiceNotice:fitted.notice});}

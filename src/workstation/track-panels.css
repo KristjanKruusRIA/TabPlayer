@@ -41,3 +41,17 @@
 .track-settings :is(input,select,button,summary):focus-visible { outline:2px solid var(--ws-accent); outline-offset:2px; }
 .track-settings ::selection,.track-panel ::selection { color:var(--ws-accent-ink); background:var(--ws-accent); }
 .track-panel .track-focus-note { max-width:180px; margin:4px 0 0; color:var(--ws-muted); font-size:12px; line-height:16px; }
+.track-settings .track-actions { display:flex; align-items:center; gap:4px; margin:0 0 8px; }
+.track-settings .track-actions button { flex:0 0 auto; width:28px; min-width:28px; height:28px; padding:0; display:inline-grid; place-items:center; }
+.track-settings .track-actions .track-actions-gap { flex:1 1 auto; }
+.track-settings .track-actions .track-remove { color:var(--ws-error); border-color:color-mix(in srgb,var(--ws-error) 45%,var(--ws-border)); margin-left:8px; }
+.track-settings .track-actions .track-remove:hover:not(:disabled):not([aria-disabled=true]) { border-color:var(--ws-error); }
+.track-settings .track-actions .track-remove:is(:disabled,[aria-disabled=true]) { color:var(--ws-muted); border-color:var(--ws-border); }
+.track-settings button[aria-disabled=true] { opacity:.55; cursor:default; }
+.track-settings .track-tuning-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:0 8px; margin:8px 0; }
+.track-settings .track-tuning-label { color:var(--ws-muted); font-size:12px; }
+.track-settings .track-tuning-button { display:flex; align-items:center; gap:6px; width:100%; text-align:left; border-radius:3px 0 0 3px; border-right-width:0; }
+.track-settings .track-tuning-button svg { flex:0 0 auto; color:var(--ws-muted); }
+.track-settings .track-tuning-notes { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums; letter-spacing:.02em; }
+.track-settings .track-tuning-play { width:30px; padding:0; display:inline-grid; place-items:center; border-radius:0 3px 3px 0; }
+.track-settings .track-tuning-row:not(:has(.track-tuning-play)) .track-tuning-button { border-radius:3px; border-right-width:1px; }

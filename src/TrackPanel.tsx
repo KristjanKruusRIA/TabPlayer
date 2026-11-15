@@ -61,6 +61,8 @@ function useMixGesture(player:DockPlayer,score:model.Score,id:string){
     onInputEnd:(committed:boolean)=>{void live.end({keep:committed});},
   });
 }
+/** The dock's controls keep their keys to themselves (Escape, Ctrl+A, [ ] and the rest never reach the score's handlers), except Space, which is play and stop wherever focus is. */
+const keepInDock=(event:React.KeyboardEvent)=>{if(event.key!==' ')event.stopPropagation();};
 function TrackMixRow({track:index}:{track:number}){
   const {score,player,busy}=useContext(DockRows);const { t } = useI18n();
   useSyncExternalStore(player?.subscribe ?? noSubscribe,player?.getState ?? noState);
@@ -72,7 +74,7 @@ function TrackMixRow({track:index}:{track:number}){
   // The score always shows at least one track, so the last shown track's eye cannot close.
   const isShown=view.shown.includes(index),lastShown=isShown&&view.shown.length<=1;
   const eyeLabel=t(isShown?'overview.hide_track':'overview.show_track',{track:name});
-  return <span className="score-overview-mix" onKeyDown={event=>event.stopPropagation()}>
+  return <span className="score-overview-mix" onKeyDown={keepInDock}>
     {view.toggle?<button type="button" data-kind="shown" aria-pressed={isShown} aria-label={t('overview.track_shown',{track:name})} title={lastShown?t('overview.last_shown_track'):eyeLabel} aria-disabled={busy||lastShown||undefined} onClick={()=>{if(!busy&&!lastShown)view.toggle!(index);}}><EyeGlyph open={isShown}/></button>:<span/>}
     <button type="button" data-kind="mute" aria-pressed={mute} aria-label={t('overview.mute_track',{track:name})} title={t('overview.mute_track',{track:name})} disabled={off} onClick={()=>player?.setMute(index,!mute)}><MuteGlyph width={14} height={14}/></button>
     <button type="button" data-kind="solo" aria-pressed={solo} aria-label={t('overview.solo_track',{track:name})} title={t('overview.solo_track',{track:name})} disabled={off} onClick={()=>player?.setSolo(index,!solo)}><SoloGlyph width={14} height={14}/></button>

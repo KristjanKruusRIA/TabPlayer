@@ -1,13 +1,13 @@
 import { syncInstrumentViewPreferencesFromNative } from './instruments/view-preferences';
 import { useCallback,useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
 import {model,Settings} from '@coderline/alphatab';
-import { DocumentController } from './controller';
+import { DocumentClosedError,DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings, previewEdit } from './engine';
 import type { BeatTarget, EditCommand } from './project';
 import type { SequenceStep } from './edit-types';
 import { isEditPasswordLocked, isFinalized, projectCommands } from './project';
 import { ProtectionDialog,UnlockEditingDialog } from './protection/PasswordDialogs';
-import { busyGuard } from './ui/useBusyGuard';
+import { busyGuard,onRefusedSpace,type RefusedSpace } from './ui/useBusyGuard';
 import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
 import { EditorPanel, type InspectorContextScope } from './EditorPanel';
@@ -110,6 +110,7 @@ import type { SystemSpan } from './engraving/system-gaps';
 import { barScaleOf,sourceWeight,withBarScale } from './engraving/bar-widths';
 import { TrackDisplayControls } from './engraving/TrackDisplayControls';
 import { projectEngraving } from './engraving/projection';
+import { followProjection,type ProjectionBasis } from './engraving/follow';
 import { engravingRenderKey } from './engraving/system-gaps';
 import { effectivePageLayout } from './engraving/page';
 import { resolveVisibleTracks,type TrackView } from './engraving/view';
@@ -127,6 +128,8 @@ import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
 import './workstation/workstation-shell.css';
 import './workstation/gp-shell.css';
 const noPlaybackSubscribe=()=>()=>{};
+/** How long after the last edit the playback plan is built: playback is invalid at once, and a run of edits is prepared once. */
+const PLAN_QUIET_MS=300;
 /** A keyboard entry key that waits for the edit before it. Which key it is (the Plus/Minus swap, the keypad durations) is settled when it is pressed; the cursor, the pending accidental and the fret are read when its turn comes. */
 type EntryItem=
   |{kind:'keypad';keypad:NonNullable<ReturnType<typeof numpadKey>>}
@@ -138,6 +141,10 @@ interface QueuedEntryKey{item:EntryItem;at:number;documentId:string}
 const ENTRY_QUEUE_MAX=8,ENTRY_QUEUE_STALE_MS=2000,DROPPED_NOTICE_PAUSE_MS=1500;
 /** A digit typed within this long of the one before it joins it into a two-digit fret, as in Guitar Pro. */
 const FRET_DIGIT_WINDOW_MS=1000;
+/** A Space or a click that found playback not ready waits this long for it. */
+const SPACE_PENDING_MS=5000;
+/** Clicks on the score this close together send only the last seek. */
+const SEEK_COALESCE_MS=200;
 /** Chords that may wait in the entry queue at once; more are counted as not written. */
 const CHORD_QUEUE_MAX=4;
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)&&!(target instanceof HTMLInputElement&&target.type==='range')||target.isContentEditable);
@@ -164,10 +171,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
   const loopPassage=useLoopPassage(player,playbackState);
-  useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
+  useEffect(()=>{const playback=new NativePlaybackController({quietMs:PLAN_QUIET_MS,bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
   // The person's instrument view options live in the app's native settings; the browser copy only serves the first paint. Read them once, whichever document is open.
   useEffect(()=>{void syncInstrumentViewPreferencesFromNative();},[]);
   useEffect(()=>{controller.setBeforeChange(bars=>player?.beforeScoreChange(true,bars));return()=>controller.setBeforeChange(()=>{});},[controller,player]);
+  // The idle comparison with a rebuild waits for playback to stop: a swap would stop it, and the check's slices would stall the moving cursor.
+  const playbackRunning=!!(playbackState?.playing||playbackState?.practice.phase==='countIn');
+  useEffect(()=>{controller.holdVerification(playbackRunning);return()=>controller.holdVerification(false);},[controller,playbackRunning]);
   const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const pluginStatuses = usePluginStatus(state.documentId);
@@ -309,8 +319,19 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   },[harmonyOpen]);
   /** The fret digits just typed, which wrote the note at once: `pendingFret` is the hint while a second digit may still join them (a second, FRET_DIGIT_WINDOW_MS). `fretRun` is what that join needs: whether the first digit recorded an edit (an undo takes it back before the two digits are written as one), the document revision after it, and the entry duration from before it. */
   const [pendingFret,setPendingFret]=useState<string|null>(null);
+  /** True while a two-digit fret is being joined (write, undo, write): the score is drawn once, when it is done. */
+  const [drawHold,setDrawHold]=useState(false);
   const fretRun=useRef<{text:string;at:number;wrote:boolean;documentId:string;revision:number;edits:number;command:string;target:BeatTarget;string:number;entryBefore:EntryDuration|null}|null>(null);
   const pendingTimer=useRef<ReturnType<typeof setTimeout>|null>(null);
+  /** Ends the wait for a second digit once the clock (Date.now, the one the join and the entry queue are judged by) has reached `end`. The timer only wakes this up: a timer that fires early, or a clock that has not moved, waits for the rest instead of closing the window on its own count of real time. */
+  const closePendingWindowAt=(end:number)=>{
+    pendingTimer.current=setTimeout(()=>{
+      const left=end-Date.now();
+      // More than a whole window left means the clock stepped backwards: close now instead of waiting it out.
+      if(left>0&&left<=FRET_DIGIT_WINDOW_MS){closePendingWindowAt(end);return;}
+      pendingTimer.current=null;fretRun.current=null;setPendingFret(null);
+    },Math.max(1,end-Date.now()));
+  };
   /** Ends the digit window: the hint goes, and the next digit starts a new fret. */
   const endPending=()=>{if(pendingTimer.current!==null){clearTimeout(pendingTimer.current);pendingTimer.current=null;}fretRun.current=null;setPendingFret(null);};
   useEffect(()=>()=>{if(pendingTimer.current!==null)clearTimeout(pendingTimer.current);},[]);
@@ -332,7 +353,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   // projectEngraving ignores system gaps, so a gap-only edit keeps the projected score (and so the notation render and the audio load).
   const engravingKey=engravingRenderKey(state.settings.engraving);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const projection=useMemo(()=>projectEngraving(state.score,trackIds,state.settings.engraving),[state.score,trackIds,engravingKey]);
+  // A score edited in place carries its edit, so its projection is the last one with that edit applied rather than a whole new copy of the score.
+  const projectionBasis=useRef<ProjectionBasis|null>(null);
+  const projection=useMemo(()=>{
+    const basis=projectionBasis.current,next=(basis&&followProjection(basis,state.score,trackIds,state.settings.engraving))||projectEngraving(state.score,trackIds,state.settings.engraving);
+    projectionBasis.current={source:state.score,ids:trackIds,value:state.settings.engraving,projection:next};return next;
+  },[state.score,trackIds,engravingKey]);
   const pageState=useMemo(()=>{
     try{return {page:effectivePageLayout(state.settings),error:null};}
     catch(error){return {page:effectivePageLayout({page:null,print:defaultPrintLayout()}),error:t('app.print_layout_error',{error:error instanceof Error?error.message:String(error)})};}
@@ -407,7 +433,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         clipboard.set(value);setClipboardVersion(version=>version+1);
         if(lostWords>0)setLyricsCutNotice({count:lostWords,edits:controller.getState().snapshot.project.edits.length});
         if(cut){setSelection(old=>map?repairMeasureSelection(controller.getState().score,old,map):repairSelection(controller.getState().score,old));editorSelection(null);}
-      }).catch(reason=>setClipboardError(reason instanceof Error?reason.message:String(reason))));
+      }).catch(reason=>{if(!(reason instanceof DocumentClosedError))setClipboardError(reason instanceof Error?reason.message:String(reason));}));
     }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
   };
   const pasteMusic=(options?:PasteOptions)=>{
@@ -488,9 +514,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       else if(JSON.stringify(options.layout)!==JSON.stringify(state.settings.print))await controller.edit({type:'setPrintLayout',layout:options.layout});
     }
     if(exportCancelled.current)return;
+    // An edit applied in place is compared with a rebuild before anything is exported from it.
+    await controller.verified();
     const latest=controller.getState();
     if(await exports.run(options,{score:latest.score,settings:effectiveAudioSettings(latest.snapshot.project,latest),embeddedBacking:latest.embeddedBacking,revision:latest.revision})&&!exportCancelled.current)closeModal();
-  })().catch(error=>{setExportError(error instanceof Error?error.message:String(error));}).finally(()=>{setExportLaunching(false);exportRunning.current=null;});exportRunning.current=running;act(running);};
+  })().catch(error=>{if(!(error instanceof DocumentClosedError))setExportError(error instanceof Error?error.message:String(error));}).finally(()=>{setExportLaunching(false);exportRunning.current=null;});exportRunning.current=running;act(running);};
   const cancelExport=()=>{exportCancelled.current=true;const running=exportRunning.current;act((async()=>{let failed=false;try{await exports.cancel();}catch(error){failed=true;setExportError(String(error));}await running;if(!failed)closeModal();})());};
   const backingEdit=(command:EditCommand,candidate?:BackingCandidate)=>controller.edit(command,candidate);
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
@@ -595,6 +623,35 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** A selection the user made: it also drops any keys still waiting, which were typed for the old cursor. Entry itself moves the cursor with `moveTo`. */
   const select=(next:BeatTarget,s=string,index?:number)=>{userMoves.current++;clearEntryQueue();moveTo(next,s,index);};
+  /**
+   * A plain single left click on a beat in the score also makes that beat the playback position (stopped, paused or playing). A shift, ctrl, cmd or alt click, a double or triple click, a right click, a click while MIDI capture runs,
+   * and any click the player must leave alone (a count-in, a loop or played selection the beat is not in) only move the cursor. Navigation: nothing is recorded. Which occurrence of a repeated beat it means is decided at once (Play and Space
+   * start from it); the seek itself waits a moment so a burst of clicks sends only the last. A click the player cannot take yet (no plan for the current document) waits for it, and is dropped if the cursor has moved on or it is old.
+   */
+  const pendingSeek=useRef<{documentId:string;target:BeatTarget;at:number}|null>(null),seekTimer=useRef<ReturnType<typeof setTimeout>|null>(null),lastPress=useRef<{button:number;plain:boolean;detail:number}|null>(null);
+  useEffect(()=>{
+    const note=(event:MouseEvent)=>{lastPress.current={button:event.button,plain:!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey,detail:event.detail};};
+    document.addEventListener('mousedown',note,true);return()=>{document.removeEventListener('mousedown',note,true);if(seekTimer.current!==null)clearTimeout(seekTimer.current);};
+  },[]);
+  const cancelSeek=()=>{if(seekTimer.current!==null){clearTimeout(seekTimer.current);seekTimer.current=null;}pendingSeek.current=null;};
+  const sendSeek=(point:BeatTarget)=>{
+    if(!player||!sameBeat(point,repairSelection(controller.getState().score,cursorNow.current)))return;
+    if(!player.seekToCursor(point))pendingSeek.current={documentId:state.documentId,target:point,at:Date.now()};else pendingSeek.current=null;
+  };
+  const selectByClick=(next:BeatTarget,s?:number,index?:number)=>{
+    select(next,s,index);
+    const press=lastPress.current;
+    if(!press||press.button!==0||!press.plain||press.detail>1||midiCaptureSession().get().phase==='running'){cancelSeek();return;}
+    if(!player||!validSelectionIndices(next))return;
+    const fixed=repairSelection(controller.getState().score,next);
+    cancelSeek();player.chooseCursorOccurrence?.(fixed);
+    seekTimer.current=setTimeout(()=>{seekTimer.current=null;sendSeek(fixed);},SEEK_COALESCE_MS);
+  };
+  useEffect(()=>{
+    const wait=pendingSeek.current;if(!wait||!player||!playbackState?.ready)return;
+    if(wait.documentId!==state.documentId||Date.now()-wait.at>SPACE_PENDING_MS||!sameBeat(wait.target,repairSelection(controller.getState().score,cursorNow.current))){pendingSeek.current=null;return;}
+    if(player.seekToCursor(wait.target))pendingSeek.current=null;
+  },[playbackState?.ready,playbackState?.practicePending,state.documentId,state.revision]);
   /** A click or Enter on a track's name in the dock or the Mixer view makes it the active track: the cursor goes to the same bar and beat there (the nearest the track has), on the same string where it has one. Navigation only: nothing is recorded, and it works while the app is busy. */
   const selectTrack=(track:number,by?:'pointer')=>{
     const next=state.score.tracks[track];if(!next)return;
@@ -726,14 +783,14 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setFret(fretValue);setPendingFret(text);
     if(pendingTimer.current!==null)clearTimeout(pendingTimer.current);
     // Once the window closes the hint ends and the next digit starts a new fret.
-    pendingTimer.current=setTimeout(()=>{pendingTimer.current=null;fretRun.current=null;setPendingFret(null);},FRET_DIGIT_WINDOW_MS);
+    closePendingWindowAt(Date.now()+FRET_DIGIT_WINDOW_MS);
     const fretName=`${t('editor.fret')} ${text}`;
     const remember=(wrote:boolean,entryBefore:EntryDuration|null)=>{const now=controller.getState(),edits=now.snapshot.project.edits;fretRun.current={text,at,wrote,documentId:now.documentId,revision:now.revision,edits:edits.length,command:JSON.stringify(edits.at(-1)),target,string,entryBefore};};
     if(joined&&run){
       const entryBefore=run.entryBefore,point=target,entryNow=entryDuration.current;
       // One of our own edits is under way until the undo and the write are both done, so keys typed meanwhile wait behind it.
-      ownEdits.current++;
-      const finish=()=>{unseenSettles.current++;setSettled(count=>count+1);};
+      ownEdits.current++;setDrawHold(true);
+      const finish=()=>{unseenSettles.current++;setSettled(count=>count+1);setDrawHold(false);};
       const failed=(why:string)=>{entryFailure.current={text:why};setInputNotice({text:why,at:JSON.stringify(point)});};
       /** Puts the first digit back after the join failed, and says so; a Redo that fails is told, never swallowed. */
       const restore=async(reason:string)=>{
@@ -1076,7 +1133,64 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }else editorSelection(null);
     select(next);event.preventDefault();
   }
+  /**
+   * Whether Space means play/stop for `target`. Space plays on a plain button, a slider, a track name, a tab (it activates with Enter), the score and the page. It keeps its own meaning on a control whose only standard keyboard activation is Space or that
+   * takes typed text: a text field, textarea, select, contenteditable, a checkbox, radio, color or file input, the checkbox, switch, radio, menu item and option roles, a disclosure's summary; and while a modal dialog or an open menu or list box is up.
+   */
+  const spacePlays=(target:EventTarget|null)=>{
+    if(exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null)return false;
+    if(document.querySelector('[role="dialog"],[aria-modal="true"],dialog[open]'))return false;
+    if(commandBar.current?.querySelector('details[open]')||shell.current?.querySelector('[role="menu"],[role="listbox"]'))return false;
+    if(!(target instanceof Element))return true;
+    if(target instanceof HTMLInputElement)return ['range','button','submit','reset','image'].includes(target.type);
+    if(target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||(target instanceof HTMLElement&&target.isContentEditable))return false;
+    return !target.closest('summary,[contenteditable]:not([contenteditable="false"]),[role="textbox"],[role="searchbox"],[role="combobox"],[role="spinbutton"],[role="checkbox"],[role="switch"],[role="radio"],[role="menuitemcheckbox"],[role="menuitemradio"],[role="option"]');
+  };
+  const playPending=useRef<{at:number;documentId:string;epoch:number;cursor:string}|null>(null),playWaitingText=t('transport.play_waiting');
+  /** A Space that was waiting for playback to be ready is forgotten (and its notice withdrawn). */
+  const clearPlayPending=()=>{if(playPending.current){playPending.current=null;setInputNotice(old=>old?.text===playWaitingText?null:old);}};
+  const clearPlayPendingNow=useRef(clearPlayPending);clearPlayPendingNow.current=clearPlayPending;
+  /** Space: the Play button's own toggle (play from the cursor when stopped, pause in place when playing). A Space that finds playback not ready (the plan is being rebuilt, or the app is busy) plays once it is, and says so; a second Space cancels it. */
+  const playOrStop=()=>{
+    if(playPending.current){clearPlayPending();return;}
+    const button=shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]');if(!button)return;
+    if(button.disabled||button.getAttribute('aria-disabled')==='true'){
+      if(!playbackState?.ready||playbackState.practicePending||controlsBusy){playPending.current={at:Date.now(),documentId:state.documentId,epoch:state.documentEpoch,cursor:JSON.stringify(target)};setInputNotice({text:playWaitingText,at:JSON.stringify(target)});}
+      // Play is refused for another reason: this bar is played more than once and no occurrence is chosen yet.
+      else setInputNotice({text:t('transport.choose_start'),at:JSON.stringify(target)});
+      return;
+    }
+    button.click();
+  };
+  useEffect(()=>{
+    const pending=playPending.current;if(!pending)return;
+    // Forgotten when it is old, or the document, the cursor or the focus changed (a dialog, a menu, a text field) while it waited.
+    if(Date.now()-pending.at>SPACE_PENDING_MS||pending.documentId!==state.documentId||pending.epoch!==state.documentEpoch||pending.cursor!==JSON.stringify(target)||!spacePlays(document.activeElement)){clearPlayPending();return;}
+    const button=shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]');
+    if(button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'){clearPlayPending();button.click();}
+  },[playbackState?.ready,playbackState?.practicePending,controlsBusy,state.documentId,state.documentEpoch,target.track,target.staff,target.bar,target.voice,target.beat,exportOpen,harmonyOpen,scaleOpen,paletteOpen,asciiOpen,midiOpen,batchOpen,helpTopic]);
+  useEffect(()=>{if(!playPending.current)return;const timer=setTimeout(clearPlayPending,SPACE_PENDING_MS);return()=>clearTimeout(timer);});
+  useEffect(()=>()=>{playPending.current=null;},[]);
+  // Whatever starts, pauses or stops playback (a button, the scrubber, a key) makes a Space that was still waiting stale.
+  useEffect(()=>{clearPlayPending();},[playbackState?.playing,playbackState?.practice.phase]);
+  // A Space refused by a busy control comes here instead of through the control's handlers.
+  const refusedSpace=useRef<(event:RefusedSpace)=>void>(()=>{});
+  refusedSpace.current=event=>{if(event.repeat||event.ctrlKey||event.metaKey||event.altKey||!spacePlays(event.target))return;playOrStop();};
+  useEffect(()=>onRefusedSpace(event=>refusedSpace.current(event)),[]);
+  /** Space, with or without Shift (Ctrl+Space is "play from the start of this bar", a separate key). */
+  const plainSpace=(event:KeyboardEvent)=>event.key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey;
+  // When focus has fallen to the page itself (a control that held it was disabled or removed), the keys do not pass through the app shell: Space is still play/stop.
+  const spaceAtPage=useRef<(event:globalThis.KeyboardEvent)=>void>(()=>{});
+  spaceAtPage.current=event=>{
+    if(!plainSpace(event as never)||event.defaultPrevented||(event.target!==document.body&&event.target!==document.documentElement)||!spacePlays(event.target))return;
+    event.preventDefault();if(!event.repeat&&event.type==='keydown')playOrStop();
+  };
+  useEffect(()=>{const cancel=(event:globalThis.KeyboardEvent)=>{if(event.key==='Escape'||(event.key===' '&&(event.ctrlKey||event.metaKey)))clearPlayPendingNow.current();};document.addEventListener('keydown',cancel,true);return()=>document.removeEventListener('keydown',cancel,true);},[]);
+  useEffect(()=>{const handler=(event:globalThis.KeyboardEvent)=>spaceAtPage.current(event);document.addEventListener('keydown',handler);document.addEventListener('keyup',handler);return()=>{document.removeEventListener('keydown',handler);document.removeEventListener('keyup',handler);};},[]);
+  function spaceKeyUp(event:KeyboardEvent){if(plainSpace(event)&&!event.defaultPrevented&&spacePlays(event.target))event.preventDefault();}
   function selectionKeys(event:KeyboardEvent){
+    if(event.key==='Escape')clearPlayPending();
+    if(plainSpace(event)&&!event.defaultPrevented&&spacePlays(event.target)){event.preventDefault();if(!event.repeat)playOrStop();return;}
     if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!midiOpen&&!batchOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
     if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
@@ -1098,10 +1212,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if(editLocked){setClipboardError(t('project.finalized'));return;}
       edit(event.shiftKey?{type:'setSelectionTies',selection:musicSelection,tied:false}:{type:'tieSelectionToEarlierPitch',selection:musicSelection});return;
     }
-    if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
-      event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();return;
-    }
-    if(!event.defaultPrevented&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&key===' '&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
+    if(!event.defaultPrevented&&(event.ctrlKey||event.metaKey)&&!event.altKey&&!event.shiftKey&&key===' '&&!event.repeat&&spacePlays(event.target)){
       event.preventDefault();
       if(player){try{player.seekToMeasure(target.bar);if(!player.getState().playing)player.play();}catch{}}
       return;
@@ -1142,7 +1253,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       editorSelection(null);setPendingAccidental(null);clearEntryQueue();event.preventDefault();
     }
   }
-  return <div ref={shell} className="app-shell" lang={lang} aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys}>
+  return <div ref={shell} className="app-shell" lang={lang} aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys} onKeyUp={spaceKeyUp} onClickCapture={event=>{if(playPending.current&&event.target instanceof Element&&event.target.closest('.transport-stopbutton'))clearPlayPending();}}>
     <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure&&!other.contains(disclosure)&&!disclosure.contains(other))other.open=false;});else if(event.target.closest('button')&&!event.target.closest('[data-menu-keep]'))closeCommands(true);}}><nav className="gp-menus" aria-label={t('menu.file_and_history')}><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>{t('action.new')}</button>
@@ -1255,9 +1366,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     />
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
+    {!!state.takenBack && <div className="notice" role="status">{t(state.takenBack===1?'document.taken_back_one':'document.taken_back_other',{count:state.takenBack})}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label={t('workspace.score_workspace')} tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
-        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
+        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView holdDraw={drawHold} score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={selectByClick} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
         {lyricsCutNotice&&lyricsCutNotice.edits===state.snapshot.project.edits.length&&<div className="score-hint score-hint-lyrics-cut" role="status">{t(`editor.cut_lyrics_removed_${lyricsCutNotice.count===1?'one':'other'}` as MessageKey,{count:lyricsCutNotice.count})}</div>}
         {droppedNotice&&<div className="score-hint score-hint-dropped" role="status">{t(`editor.entry_queue_stale_${droppedNotice.count===1?'one':'other'}` as MessageKey,{count:droppedNotice.count})}</div>}
         {pendingFret!==null?<div className="score-hint score-hint-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</div>:inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}
@@ -1270,7 +1382,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <section className="inspector-section" aria-labelledby="inspector-sound-mastering"><h3 id="inspector-sound-mastering">{t('inspector.sound_mastering')}</h3><MasterPanel master={player?.master?.()} disabled={controlsBusy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/></section>
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
-        <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3><TrackSettingsPanel key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></section>
+        <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3><TrackSettingsPanel key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} refusal={state.error} onEdit={edit} onAudition={auditionTuning}/></section>
         <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}</section>
         <section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
         <section className="inspector-section" aria-labelledby="inspector-track-midi-out"><h3 id="inspector-track-midi-out">{t('inspector.midi_out')}</h3><MidiOutPanel key={trackId} keyShift={playbackState?.practice.settings.tonality??0} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
@@ -1318,6 +1430,6 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound',key:{shift:playbackState?.keyTarget??playbackState?.practice.settings.tonality??0,ready:playbackState?.ready??false}}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onNote={editLocked?undefined:instrumentEdit} onClose={closeModal}/>}
-    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? t('status.save_hint')}</span>}{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?t('status.hint_note'):t('status.hint_score')}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
+    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? t('status.save_hint')}</span>}{state.repaired&&<span className="statusbar-note" role="status">{t('status.document_rebuilt')}</span>}{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?t('status.hint_note'):t('status.hint_score')}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
   </div>;
 }

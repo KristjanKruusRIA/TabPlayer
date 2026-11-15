@@ -5,7 +5,8 @@ import { nativeWorkspaceBridge } from './bridge';
 import { buildDocument } from './engine';
 import { admitDocumentBase } from './interchange/archive-gate';
 import { WorkspaceController } from './workspace/WorkspaceController';
-import { WorkspaceApp } from './workspace/WorkspaceApp';
+import { WorkspaceApp,type RecoveryStatusSource } from './workspace/WorkspaceApp';
+import { sameData } from './same-data';
 import { RecoveryPrompt } from './workspace/RecoveryPrompt';
 import { nativeSessionBridge } from './workspace/session-bridge';
 import type { RecoveryIssue,RecoveryPreview,RecoveryStatus,SessionPreferences } from './workspace/recovery-types';
@@ -25,6 +26,15 @@ let pending=false,sessionError:string|null=null,resumeFailure:string|null=null;
 let library:WorkspaceLibrary|undefined,closing=false,destroyed=false;
 const libraryUnlisteners:(()=>void)[]=[];
 let issues:RecoveryIssue[]=[];
+/** The recovery status the feedback text shows. It is a store of its own so the many status events a session sends (every cursor move changes the view being backed up) redraw that text only, never the workspace. */
+const statusListeners=new Set<()=>void>();
+let shownStatus:RecoveryStatus=status,workspaceShown=false;
+const statusSource:RecoveryStatusSource={subscribe:listener=>{statusListeners.add(listener);return()=>{statusListeners.delete(listener);};},get:()=>shownStatus};
+function publishStatus() {
+  const next=resumeFailure!==null?{...status,state:'failed' as const,error:'Recovery could not resume. Retry to enable editing.'}:status;
+  if(sameData(next,shownStatus))return;
+  shownStatus=next;for(const listener of statusListeners)listener();
+}
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 let launchWaiting=false,launchRunning=false,launchTimer:ReturnType<typeof setTimeout>|null=null,libraryFailed=false;
 /**
@@ -64,7 +74,8 @@ function retainLibraryListener(unlisten:()=>void){if(destroyed)void Promise.reso
 
 function renderWorkspace() {
   if(!workspace||destroyed)return;
-  root.render(<WorkspaceApp workspace={workspace} library={library} session={{preferences,status:resumeFailure!==null?{...status,state:'failed',error:'Recovery could not resume. Retry to enable editing.'}:status,error:sessionError,issues,pending,
+  publishStatus();workspaceShown=true;
+  root.render(<WorkspaceApp workspace={workspace} library={library} session={{preferences,status:shownStatus,statusSource,error:sessionError,issues,pending,
     onPreferencesChange:value=>{void changePreference(value);},onRetry:()=>{void retry();}}}/>);
 }
 function renderPreview() {
@@ -142,7 +153,7 @@ async function retry() {
     catch(error){if(workspace){await workspace.resumeAfterWindowCloseFailure(error);if(workspace.getState().busy)resumeFailure=message(error);renderWorkspace();}}
     finally {closing=false;}
   });
-  await listen<RecoveryStatus>('recovery-status',event=>{statusSequence++;status=event.payload;renderWorkspace();});
+  await listen<RecoveryStatus>('recovery-status',event=>{statusSequence++;status=event.payload;publishStatus();if(!workspaceShown)renderWorkspace();});
   try {
     retainLibraryListener(await listen<FileLibraryChangedEvent>('file-library-changed',event=>{if(!destroyed&&library){if(event.payload.warning)library.reportError(event.payload.warning);void library.refresh();}}));
     retainLibraryListener(await listen<ScoreFilesDroppedEvent>('score-files-dropped',event=>{

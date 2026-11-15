@@ -75,9 +75,13 @@ export async function runSavedTuningsAcceptance({buildPath}={}){
   const idle=async()=>{owned();await ui.waitForWorkspaceIdle(page);healthy();};
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
   const shot=async(name,locator=page)=>{const path=resolve(results,`${String(result.screenshots.length+1).padStart(2,'0')}-${name}.png`);await locator.screenshot({path});result.screenshots.push(path);};
-  const tuningField=()=>page.getByLabel('Tuning (notes, high to low)',{exact:true});
+  // The Track tab's tuning row opens the Tuning dialog; Saved tunings opens over it, and its Cancel or Use leaves the Tuning dialog open.
+  const tuningDlg=()=>page.getByRole('dialog',{name:'Tuning',exact:true});
+  const tuningField=()=>tuningDlg().getByLabel('Notes, high to low',{exact:true});
+  const openTuning=async()=>{owned();await ui.revealLeftTask(page,'Track');await page.getByRole('button',{name:/^Edit tuning/}).click();await tuningDlg().waitFor();};
+  const closeTuning=async()=>{if(await tuningDlg().isVisible()){await tuningDlg().getByRole('button',{name:'Cancel',exact:true}).click();await tuningDlg().waitFor({state:'hidden'});}};
   const dialog=()=>page.getByRole('dialog',{name:'Saved tunings',exact:true});
-  const openDialog=async()=>{owned();await ui.revealLeftTask(page,'Track');await page.getByRole('button',{name:'Saved tunings for Tuning (notes, high to low)',exact:true}).click();await dialog().waitFor();await dialog().getByText('Loading saved tunings…').waitFor({state:'detached'});};
+  const openDialog=async()=>{if(!await tuningDlg().isVisible())await openTuning();await tuningDlg().getByRole('button',{name:'Saved tunings…',exact:true}).click();await dialog().waitFor();await dialog().getByText('Loading saved tunings…').waitFor({state:'detached'});};
   const personal=()=>dialog().getByRole('region',{name:'Personal',exact:true}).getByRole('button');
   const personalRows=async()=>{const rows=personal();const out=[];for(let i=0;i<await rows.count();i++){const row=rows.nth(i);out.push({name:await row.locator('.saved-tuning-row-name').textContent(),pitches:await row.locator('.saved-tuning-row-pitches').textContent()});}return out;};
   const details=async(name,pitches)=>{const d=dialog();await d.getByLabel('Saved tuning pitches (notes, high to low)').fill(pitches);await d.getByLabel('Saved tuning name').fill(name);};
@@ -105,7 +109,7 @@ export async function runSavedTuningsAcceptance({buildPath}={}){
     let entries=libraryEntries(libraryPath);assert.equal(entries.length,2);assert.notEqual(entries[0].id.toLowerCase(),entries[1].id.toLowerCase());assert.deepEqual(entries.map(e=>[e.name,e.tuning]),[[firstName,openD],[secondName,openD]]);const ids=entries.map(e=>e.id);
     assert.deepEqual(await record(),initial,'Saving leaves the project, history and revision unchanged');assert.equal(realHash(),realBefore,'Real user library untouched');
     await shot('two-personal-tunings',dialog());
-    await dialog().getByRole('button',{name:'Cancel',exact:true}).click();await dialog().waitFor({state:'detached'});assert.equal(await tuningField().inputValue(),'E4 B3 G3 D3 A2 E2','Cancel keeps the draft');
+    await dialog().getByRole('button',{name:'Cancel',exact:true}).click();await dialog().waitFor({state:'detached'});assert.equal(await tuningField().inputValue(),'E4 B3 G3 D3 A2 E2','Cancel keeps the draft');await closeTuning();
     step('Saved two same-pitch personal tunings without editing the document',{entries,record:initial.revision});
     await stop();
 
@@ -122,7 +126,7 @@ export async function runSavedTuningsAcceptance({buildPath}={}){
 
     // Apply is one edit carrying pitches and name; undo and redo restore both.
     const commandA={type:'setTuning',track:0,tuning:openD,tuningName:firstName};
-    await page.getByRole('button',{name:'Apply tuning',exact:true}).click();await idle();await native();
+    await tuningDlg().getByRole('button',{name:'Keep fingering',exact:true}).click();await tuningDlg().waitFor({state:'hidden'});await idle();await native();
     let current=await record();assert.deepEqual(current.snapshot.project.edits,[commandA]);assert.equal(current.snapshot.canUndo,true);
     const notation=await page.locator('[aria-label="Music notation"]').first().textContent();result.notationShowsName=notation.includes(firstName);assert.equal(result.notationShowsName,true,"Score shows the applied tuning name");await shot('applied');
     await exportCheck('applied',openD,firstName);
@@ -133,17 +137,17 @@ export async function runSavedTuningsAcceptance({buildPath}={}){
     // Deleting the library record leaves the applied snapshot alone.
     const beforeDelete=await record();await openDialog();await personal().nth(0).click();await dialogButton('Delete',rows=>rows.length===1);
     entries=libraryEntries(libraryPath);assert.deepEqual(entries.map(e=>e.id),[ids[1]]);assert.equal((await personalRows()).length,1);
-    await dialog().getByRole('button',{name:'Cancel',exact:true}).click();await dialog().waitFor({state:'detached'});assert.deepEqual(await record(),beforeDelete,'Delete does not edit');
+    await dialog().getByRole('button',{name:'Cancel',exact:true}).click();await dialog().waitFor({state:'detached'});await closeTuning();assert.deepEqual(await record(),beforeDelete,'Delete does not edit');
     await exportCheck('after-delete',openD,firstName);step('Library delete kept the applied name',{entries});
 
     // An invalid pitch is refused without damage.
-    const beforeInvalid=await record();await tuningField().fill('E4 Q9 G3');await page.getByRole('button',{name:'Apply tuning',exact:true}).click();await idle();
-    assert.ok((await page.getByRole('alert').allTextContents()).join(' ').length>0,'Invalid pitch shows an alert');assert.deepEqual(await record(),beforeInvalid,'Invalid pitch refused atomically');step('Invalid pitch refused',{});
+    const beforeInvalid=await record();await openTuning();await tuningField().fill('E4 Q9 G3');await tuningDlg().getByRole('button',{name:'Keep fingering',exact:true}).click();await tuningDlg().getByRole('alert').waitFor();
+    assert.ok((await page.getByRole('alert').allTextContents()).join(' ').length>0,'Invalid pitch shows an alert');assert.deepEqual(await record(),beforeInvalid,'Invalid pitch refused atomically');await closeTuning();step('Invalid pitch refused',{});
 
     // A built-in seven-string tuning goes through the S14 string-count route with its name.
     await openDialog();const group=dialog().getByRole('group',{name:'Guitar · 7 strings',exact:true});const seventh=group.getByRole('button').first();const presetName=await seventh.locator('.saved-tuning-row-name').textContent();
     assert.equal(await seventh.locator('.saved-tuning-row-pitches').textContent(),'E4 B3 G3 D3 A2 E2 B1');await seventh.click();await dialog().getByRole('button',{name:'Use tuning',exact:true}).click();await dialog().waitFor({state:'detached'});
-    await page.getByRole('combobox',{name:/^Strings kept in place/}).selectOption('high');await page.getByRole('button',{name:'Change string count',exact:true}).click();await idle();await native();
+    await tuningDlg().getByRole('combobox',{name:/^Strings kept in place/}).selectOption('high');await tuningDlg().getByRole('button',{name:'Change string count',exact:true}).click();await tuningDlg().waitFor({state:'hidden'});await idle();await native();
     const commandB={type:'setStringCount',track:0,tuning:seven,keep:'high',tuningName:presetName,crossVoice:true};current=await record();assert.deepEqual(current.snapshot.project.edits,[commandA,commandB]);
     await exportCheck('seven-string',seven,presetName);step('Built-in seven-string tuning applied through the string-count route',{commandB});
 
@@ -153,7 +157,7 @@ export async function runSavedTuningsAcceptance({buildPath}={}){
       // The shared Dialog frame owns the scrolling body and the foot, so those are measured; the foot must really hold both buttons.
       await openDialog();const layout=await dialog().evaluate(section=>{const rect=e=>e.getBoundingClientRect();const footer=[...section.querySelectorAll('.tp-dialog-foot button')].map(b=>({text:b.textContent,top:rect(b).top,bottom:rect(b).bottom}));const body=section.querySelector('.tp-dialog-body');return {height:innerHeight,footer,bodyScrolls:body.scrollHeight>body.clientHeight,overflow:getComputedStyle(body).overflowY};});
       assert.equal(layout.height,420);assert.deepEqual(layout.footer.map(b=>b.text),['Cancel','Use tuning']);for(const b of layout.footer)assert.ok(b.top>=0&&b.bottom<=420,`${b.text} reachable`);assert.equal(layout.bodyScrolls,true);assert.match(layout.overflow,/^(auto|scroll)$/);result.shortLayout=layout;await shot('short-height');
-      await dialog().getByRole('button',{name:'Cancel',exact:true}).click();await dialog().waitFor({state:'detached'});
+      await dialog().getByRole('button',{name:'Cancel',exact:true}).click();await dialog().waitFor({state:'detached'});await closeTuning();
     }finally{await cdp.send('Emulation.clearDeviceMetricsOverride');}
     step('Short window keeps Cancel and Use tuning reachable',result.shortLayout);
     assert.equal(realHash(),realBefore,'Real user library untouched');healthy();

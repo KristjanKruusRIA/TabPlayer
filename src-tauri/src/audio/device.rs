@@ -174,6 +174,12 @@ pub enum TransportCommand {
         generation: u64,
         tick: f64,
     },
+    /// Moves the playhead like `SeekTick` but leaves the practice state alone: the selection range, a count-in
+    /// in progress and the pass counts (loop passes, speed trainer) all stay. A click on the score uses it.
+    SeekWithin {
+        generation: u64,
+        tick: f64,
+    },
     SetPractice {
         generation: u64,
         settings: PracticeSettings,
@@ -200,6 +206,7 @@ impl TransportCommand {
             | Self::Stop { generation }
             | Self::Invalidate { generation }
             | Self::SeekTick { generation, .. }
+            | Self::SeekWithin { generation, .. }
             | Self::SetPractice { generation, .. }
             | Self::SetLoop { generation, .. }
             | Self::ClearLoop { generation }
@@ -221,7 +228,9 @@ impl TransportCommand {
             {
                 Err("Select a valid playback passage within the score.")
             }
-            Self::SeekTick { tick, .. } if !tick.is_finite() || *tick < 0.0 || *tick > duration => {
+            Self::SeekTick { tick, .. } | Self::SeekWithin { tick, .. }
+                if !tick.is_finite() || *tick < 0.0 || *tick > duration =>
+            {
                 Err("Seek position is outside the score.")
             }
             // Practice settings are checked in full, with the score's tempos, where the command is applied.
@@ -1342,6 +1351,32 @@ impl CallbackTransport {
                     PracticePhase::Idle
                 };
             }
+            TransportCommand::SeekWithin { tick, .. } => {
+                // Refused before anything changes, whatever the sender last saw: during a count-in (its clock keeps the meter and tempo of the bar it began on),
+                // and outside a loop or a played selection (landing there would wrap, add a pass or end playback at once, or play music outside the passage).
+                if self.count.is_some() || self.resume_count {
+                    return Err("A count-in is running.");
+                }
+                if self
+                    .loop_range
+                    .is_some_and(|(start, end)| tick < start || tick >= end)
+                    || self
+                        .range
+                        .is_some_and(|span| tick < span.start_tick || tick >= span.end_tick)
+                {
+                    return Err("Seek position is outside the loop or the selection.");
+                }
+                // Only the playhead moves: the range, the count-in and the pass counts are the player's practice state.
+                self.seek(tick);
+                self.pulse = None;
+                self.phase = if self.playing {
+                    PracticePhase::Playing
+                } else if self.phase == PracticePhase::Paused {
+                    PracticePhase::Paused
+                } else {
+                    PracticePhase::Idle
+                };
+            }
             TransportCommand::SetPractice { settings, .. } => {
                 // No allocation here: this runs on the audio thread, so the refusal is the short fixed form.
                 settings
@@ -2100,8 +2135,22 @@ impl AudioService {
         thread::Builder::new()
             .name("native-audio-status".into())
             .spawn(move || {
+                // A status that says what the last one said is not published again for a second: the interface reads
+                // an idle engine as 30 changes a second otherwise, and wakes for each. While anything moves (a
+                // position, a meter) the status differs every time and goes out as often as it always did.
+                let mut last: Option<String> = None;
+                let mut last_published = std::time::Instant::now();
                 while !status_shared.shutdown.load(Ordering::Acquire) {
-                    publish(status_shared.read());
+                    let status = status_shared.read();
+                    let key = serde_json::to_string(&status).ok();
+                    if key.is_none()
+                        || key != last
+                        || last_published.elapsed() >= Duration::from_secs(1)
+                    {
+                        publish(status);
+                        last = key;
+                        last_published = std::time::Instant::now();
+                    }
                     thread::sleep(Duration::from_millis(33));
                 }
             })
@@ -4959,6 +5008,49 @@ mod tests {
         assert!(recovered.tick > tick);
     }
     #[test]
+    fn seek_within_keeps_the_range_that_seek_tick_clears_and_is_refused_during_a_count_in() {
+        let document = counted_document();
+        let start = |transport: &mut CallbackTransport| {
+            transport.install_with_practice(
+                AudioService::renderer(&document, 48_000).unwrap(),
+                1,
+                false,
+                document.practice,
+            );
+            transport
+                .command(TransportCommand::PlayRange {
+                    generation: 1,
+                    start_tick: 0.0,
+                    end_tick: Some(1_920.0),
+                })
+                .unwrap();
+        };
+        // During the count-in a seek is refused and nothing changes.
+        let mut counting = CallbackTransport::headless(48_000);
+        start(&mut counting);
+        assert!(counting.count.is_some());
+        let before = (counting.tick, counting.phase, counting.range);
+        assert!(
+            counting
+                .command(TransportCommand::SeekWithin {
+                    generation: 1,
+                    tick: 960.0,
+                })
+                .is_err()
+        );
+        assert_eq!((counting.tick, counting.phase, counting.range), before);
+        assert!(counting.count.is_some());
+        // SeekTick is the command that clears the range and the count.
+        counting
+            .command(TransportCommand::SeekTick {
+                generation: 1,
+                tick: 960.0,
+            })
+            .unwrap();
+        assert!(counting.range.is_none());
+        assert!(counting.count.is_none());
+    }
+    #[test]
     fn count_overflow_rejected_before_prepared_document_mutates() {
         let service = unavailable_device_with_practice();
         let old = service.control.lock().unwrap().document.clone().unwrap();
@@ -5896,7 +5988,10 @@ mod tests {
             let result = worker.command(TransportCommand::Invalidate { generation: 7 });
             sender.send(result).unwrap();
         });
-        let immediate = received.recv_timeout(Duration::from_millis(100));
+        // The invalidation either returns while the control mutex is held, which it does at once, or waits for the
+        // mutex, which is held until this test lets go: a wait that never ends. So the answer does not depend on how
+        // quickly the thread is scheduled; the deadline only ends the wait that would otherwise be for ever.
+        let immediate = received.recv_timeout(Duration::from_secs(30));
         drop(preparation);
         thread.join().unwrap();
         assert!(

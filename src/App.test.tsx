@@ -49,7 +49,7 @@ vi.mock('./bridge',async original=>({...await original<typeof import('./bridge')
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),setSpeed:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),seekToCursor:vi.fn((_target:unknown)=>true),chooseCursorOccurrence:vi.fn((_target:unknown)=>null as unknown),cursorSeekChoice:vi.fn((_target:unknown)=>null as unknown),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),setSpeed:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
 // No MIDI service in jsdom: the inspector's MIDI output panel finds no ports instead of showing a listing error.
 vi.mock('./audio/midi-out',async original=>({...await original<typeof import('./audio/midi-out')>(),nativeMidiOut:{ports:async()=>[],setDelay:async()=>{},status:async()=>({ports:[],sent:0,dropped:0,late:0,maxLateMs:0}),testLog:async()=>[]}}));
@@ -73,7 +73,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   audition=integration.audition;
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
-  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=integration.setSpeed;setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
+  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;seekToCursor=integration.seekToCursor;chooseCursorOccurrence=integration.chooseCursorOccurrence;cursorSeekChoice=integration.cursorSeekChoice;setSpeed=integration.setSpeed;setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
   setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
   mix=(track:{index:number})=>{const value=this.built?.settings.mixes[this.identity(track.index)];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan,...(value.drumKit?{drumKit:value.drumKit}:{})}:undefined;};
@@ -840,7 +840,7 @@ it('inserts a beat into an empty voice and changes score information and tuning'
   click('Insert beat');await waitFor(()=>expect(currentBeat(c)).toBeDefined());
   change('Title','My study');change('Artist','Band');change('Initial tempo','90');click('Apply score info');
   await waitFor(()=>expect(c.getState().score.title).toBe('My study'));
-  change('Tuning (notes, high to low)','E4 B3 G3 D3 A2 D2');click('Apply tuning');
+  click('Edit tuning (E4 B3 G3 D3 A2 E2)');const tuningDialog=within(screen.getByRole('dialog',{name:'Tuning'}));fireEvent.change(tuningDialog.getByLabelText('Notes, high to low'),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(tuningDialog.getByRole('button',{name:'Keep fingering'}));
   await waitFor(()=>expect(c.getState().score.tracks[0].staves[0].tuning.at(-1)).toBe(38));
 });
 
@@ -1004,6 +1004,175 @@ it('Space still plays from the focused scrubber, a number field still counts as 
   const field=screen.getByLabelText('Loop start');field.focus();fireEvent.keyDown(field,{key:' '});expect(integration.play.mock.calls.length).toBe(before+1);
   expect(screen.getByRole('button',{name:'Undo'})).toHaveAttribute('title',expect.stringContaining('Undo'));expect(screen.getByRole('button',{name:'Redo'})).toHaveAttribute('title',expect.stringContaining('Redo'));
 });
+describe('click to seek and Space to play',()=>{
+  const spacePlay=()=>integration.play.mock.calls.length+integration.pause.mock.calls.length;
+  const settleMs=(ms=200)=>new Promise(resolve=>setTimeout(resolve,ms));
+  const pressMouse=(element:Element,init:MouseEventInit={})=>fireEvent.mouseDown(element,init);
+  const clickNote=(init?:MouseEventInit)=>{const button=screen.getByRole('button',{name:'Select rendered note'});pressMouse(button,{button:0,detail:1,...init});fireEvent.click(button);};
+  it('a plain click on a beat moves playback there: navigation only, nothing recorded, not dirty',async()=>{
+    const c=await setup(),edits=c.getState().snapshot.project.edits.length;
+    clickNote();
+    await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({bar:0,beat:1})));
+    expect(integration.chooseCursorOccurrence).toHaveBeenCalledWith(expect.objectContaining({bar:0,beat:1}));
+    expect(c.getState().snapshot.project.edits).toHaveLength(edits);expect(c.getState().snapshot.dirty).toBe(false);
+  });
+  it.each([
+    ['shift-click',{shiftKey:true}],['ctrl-click',{ctrlKey:true}],['cmd-click',{metaKey:true}],['alt-click',{altKey:true}],
+    ['double click',{detail:2}],['triple click',{detail:3}],['right click',{button:2}],
+  ] as const)('a %s moves only the cursor, and cancels a seek that was waiting',async(_name,init)=>{
+    await setup();
+    clickNote();                       // a plain click first: its seek is waiting
+    clickNote(init as MouseEventInit); // then the second press of a double click, or a modified click
+    await settleMs(300);
+    expect(integration.seekToCursor).not.toHaveBeenCalled();
+  });
+  it('sends one seek for a burst of clicks, the last one',async()=>{
+    await setup();
+    clickNote();fireEvent.click(screen.getByRole('button',{name:'Select rendered chord note'}));
+    pressMouse(screen.getByRole('button',{name:'Select rendered note'}),{button:0,detail:1});fireEvent.click(screen.getByRole('button',{name:'Select rendered note'}));
+    await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledTimes(1));await settleMs(300);
+    expect(integration.seekToCursor).toHaveBeenCalledTimes(1);expect(integration.seekToCursor).toHaveBeenCalledWith(expect.objectContaining({bar:0,beat:1}));
+  });
+  it('does not seek while MIDI capture runs',async()=>{
+    await setup();const session=midiCaptureSession();const running=vi.spyOn(session,'get').mockReturnValue({...session.get(),phase:'running'});
+    try{clickNote();await settleMs(300);expect(integration.seekToCursor).not.toHaveBeenCalled();}finally{running.mockRestore();}
+  });
+  it('keeps a click it could not seek yet (the plan is not ready) and applies it once playback is ready, but only if the cursor is still there',async()=>{
+    await setup();const player=integration.players[0];
+    integration.seekToCursor.mockReturnValueOnce(false);
+    clickNote();
+    await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledTimes(1));
+    act(()=>player.publish({ready:false}));act(()=>player.publish({ready:true}));
+    await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledTimes(2));
+    expect(integration.seekToCursor).toHaveBeenLastCalledWith(expect.objectContaining({bar:0,beat:1}));
+    // A pending seek is dropped when the cursor moved on.
+    integration.seekToCursor.mockClear();integration.seekToCursor.mockReturnValueOnce(false);
+    clickNote();await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button',{name:'Select rendered chord note'}));
+    integration.seekToCursor.mockClear();
+    act(()=>player.publish({ready:false}));act(()=>player.publish({ready:true}));
+    await settleMs(100);expect(integration.seekToCursor).not.toHaveBeenCalledWith(expect.objectContaining({beat:1}));
+  });
+  it('a click on a beat inside a repeated section chooses its occurrence, so Play and Space start from it',async()=>{
+    await setup();const player=integration.players[0] as unknown as {cursorPlaybackChoices:(target:{bar:number;beat:number})=>unknown[]};
+    const first={generation:7,occurrenceIndex:0,startTick:960},second={generation:7,occurrenceIndex:1,startTick:5760};
+    player.cursorPlaybackChoices=()=>[first,second];
+    // Nothing chosen: Play is refused, and Space says why.
+    clickNote();await settleMs(50);
+    const workspace=screen.getByRole('region',{name:'Score workspace'}),before=integration.play.mock.calls.length;
+    fireEvent.keyDown(workspace,{key:' '});expect(integration.play.mock.calls.length).toBe(before);
+    expect(await screen.findByText(/played more than once/)).toBeInTheDocument();
+    // The click chose the first occurrence.
+    integration.cursorSeekChoice.mockReturnValue(first);
+    clickNote();await settleMs(50);fireEvent.click(screen.getByRole('button',{name:'Select rendered chord note'}));clickNote();await settleMs(50);
+    fireEvent.keyDown(workspace,{key:' '});
+    await waitFor(()=>expect(integration.play).toHaveBeenCalledWith(expect.objectContaining({beat:1}),expect.objectContaining({occurrenceIndex:0,startTick:960})));
+  });
+  it('Space plays or stops from the score, a button, a slider, a track name and the page, and never also activates the control',async()=>{
+    await setup();
+    const workspace=screen.getByRole('region',{name:'Score workspace'});
+    let before=spacePlay();
+    expect(fireEvent.keyDown(workspace,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    const button=screen.getByRole('button',{name:'Select rendered note'}),clicked=vi.fn();button.addEventListener('click',clicked);button.focus();
+    before=spacePlay();expect(fireEvent.keyDown(button,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    // The release of the key must not click the focused button either.
+    expect(fireEvent.keyUp(button,{key:' '})).toBe(false);expect(clicked).not.toHaveBeenCalled();
+    const scrub=await screen.findByRole('slider',{name:'Playback position'});scrub.focus();
+    before=spacePlay();fireEvent.keyDown(scrub,{key:' '});expect(spacePlay()).toBe(before+1);
+    const name=screen.getAllByRole('button',{name:/^Select track /})[0];name.focus();
+    before=spacePlay();expect(fireEvent.keyDown(name,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    const stop=document.querySelector<HTMLElement>('.transport-stopbutton')!;stop.focus();
+    before=spacePlay();expect(fireEvent.keyDown(stop,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    // Focus that fell to the page (a control that held it was disabled) still plays and stops.
+    (document.activeElement as HTMLElement|null)?.blur();before=spacePlay();expect(fireEvent.keyDown(document.body,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+  });
+  it('Space keeps its own meaning on a checkbox, a radio, a switch, a menu item and an option, and on a text field, textarea, select and contenteditable',async()=>{
+    await setup();const workspace=screen.getByRole('region',{name:'Score workspace'}),before=spacePlay();
+    const real=document.querySelector<HTMLInputElement>('input[type="checkbox"]');expect(real).not.toBeNull();
+    expect(fireEvent.keyDown(real!,{key:' '})).toBe(true);
+    const make=(tag:string,attributes:Record<string,string>={})=>{const element=document.createElement(tag);for(const [name,value] of Object.entries(attributes))element.setAttribute(name,value);element.tabIndex=0;workspace.appendChild(element);return element;};
+    const owners=[make('input',{type:'radio'}),make('input',{type:'color'}),make('input',{type:'file'}),make('input',{type:'text'}),make('input',{type:'number'}),make('textarea'),make('div',{contenteditable:'true'}),make('div',{role:'switch'}),make('div',{role:'radio'}),make('button',{role:'radio'}),make('summary'),make('div',{role:'checkbox'}),make('div',{role:'menuitemcheckbox'}),make('div',{role:'menuitemradio'}),make('div',{role:'option'}),make('div',{role:'textbox'})];
+    const inner=make('div',{role:'option'});const child=document.createElement('span');inner.appendChild(child);
+    const select=document.querySelector('select');expect(select).not.toBeNull();
+    try{for(const element of [...owners,child,select!])expect(fireEvent.keyDown(element,{key:' '}),element.outerHTML.slice(0,60)).toBe(true);expect(spacePlay()).toBe(before);}
+    finally{for(const element of [...owners,inner])element.remove();}
+  });
+  it('Space plays on a tab (Enter and the arrow keys operate it) and on a plain button, and a segmented control keeps it',async()=>{
+    await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});
+    const tab=screen.getAllByRole('tab',{hidden:true})[0];tab.focus();
+    let before=spacePlay();expect(fireEvent.keyDown(tab,{key:' '})).toBe(false);expect(spacePlay()).toBe(before+1);
+    // Enter still activates a tab: it is not held back.
+    expect(fireEvent.keyDown(tab,{key:'Enter'})).toBe(true);
+    const radio=document.querySelector<HTMLElement>('[role="radio"]');expect(radio).not.toBeNull();
+    before=spacePlay();expect(fireEvent.keyDown(radio!,{key:' '})).toBe(true);expect(spacePlay()).toBe(before);
+    void workspace;
+  });
+  it('Space is not play or stop on key repeat, with Alt, in a field, or with an open menu, a modal dialog, a list box; Shift+Space is Space; an open More playback panel does not turn it off',async()=>{
+    await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});
+    let before=spacePlay();
+    fireEvent.keyDown(workspace,{key:' ',repeat:true});fireEvent.keyDown(workspace,{key:' ',altKey:true});expect(spacePlay()).toBe(before);
+    fireEvent.keyDown(workspace,{key:' ',shiftKey:true});expect(spacePlay()).toBe(before+1);
+    const field=screen.getByLabelText('Loop start');field.focus();before=spacePlay();fireEvent.keyDown(field,{key:' '});expect(spacePlay()).toBe(before);
+    // The More playback panel is a disclosure, not a menu.
+    const more=document.querySelector<HTMLDetailsElement>('.transport-more');expect(more).not.toBeNull();more!.open=true;
+    fireEvent.keyDown(workspace,{key:' '});expect(spacePlay()).toBe(before+1);more!.open=false;
+    // An open menu of the menu bar keeps Space.
+    const menu=document.querySelector<HTMLDetailsElement>('header.gp-menubar details');expect(menu).not.toBeNull();menu!.open=true;
+    before=spacePlay();fireEvent.keyDown(workspace,{key:' '});expect(spacePlay()).toBe(before);menu!.open=false;
+    const listbox=document.createElement('div');listbox.setAttribute('role','listbox');document.body.querySelector('.app-shell')!.appendChild(listbox);
+    fireEvent.keyDown(workspace,{key:' '});listbox.remove();expect(spacePlay()).toBe(before);
+    const dialog=document.createElement('div');dialog.setAttribute('role','dialog');document.body.appendChild(dialog);
+    fireEvent.keyDown(workspace,{key:' '});dialog.remove();expect(spacePlay()).toBe(before);
+  });
+  it('Space on a control that refuses it (First bar at bar 1: unavailable, but holding focus) still plays and pauses, and activates nothing',async()=>{
+    await setup();const first=screen.getByRole('button',{name:'First bar'});first.focus();
+    expect(first).toHaveAttribute('aria-disabled','true');expect(first).toHaveFocus();
+    const before=spacePlay(),seeks=integration.seekToMeasure.mock.calls.length;
+    expect(fireEvent.keyDown(first,{key:' '})).toBe(false);
+    expect(spacePlay()).toBe(before+1);expect(integration.seekToMeasure.mock.calls.length).toBe(seeks);
+    // Held down it toggles once; a modifier is not Space.
+    fireEvent.keyDown(first,{key:' ',repeat:true});expect(spacePlay()).toBe(before+1);
+    fireEvent.keyDown(first,{key:' ',ctrlKey:true});expect(spacePlay()).toBe(before+1);
+  });
+  it('Ctrl+Space plays the cursor bar from its start, from a button as well as the score',async()=>{
+    await setup();const button=screen.getByRole('button',{name:'Select rendered note'});button.focus();
+    fireEvent.keyDown(button,{key:' ',ctrlKey:true});
+    expect(integration.seekToMeasure).toHaveBeenCalledWith(0);expect(integration.play).toHaveBeenCalled();
+  });
+  describe('a Space that waits for playback',()=>{
+    const notReady=async()=>{await setup();const player=integration.players[0],workspace=screen.getByRole('region',{name:'Score workspace'});act(()=>player.publish({ready:false}));return {player,workspace,before:integration.play.mock.calls.length};};
+    it('plays once it is ready, and says so while it waits',async()=>{
+      const {player,workspace,before}=await notReady();
+      fireEvent.keyDown(workspace,{key:' '});expect(integration.play.mock.calls.length).toBe(before);
+      expect(screen.getAllByText(/Playback starts when the score is ready/).length).toBeGreaterThan(0);
+      act(()=>player.publish({ready:true}));
+      await waitFor(()=>expect(integration.play.mock.calls.length).toBe(before+1));
+      await waitFor(()=>expect(screen.queryByText(/Playback starts when the score is ready/)).toBeNull());
+    });
+    it('is cancelled by a second Space',async()=>{
+      const {player,workspace,before}=await notReady();
+      fireEvent.keyDown(workspace,{key:' '});fireEvent.keyDown(workspace,{key:' '});
+      act(()=>player.publish({ready:true}));await settleMs(150);expect(integration.play.mock.calls.length).toBe(before);
+    });
+    it('is cancelled by Escape, by Stop, by a cursor change, by a dialog opening, by Ctrl+Space, by playback starting elsewhere and by Escape in a dock row',async()=>{
+      for(const cancel of ['escape','stop','cursor','dialog','ctrlspace','state','dockescape'] as const){
+        cleanup();integration.players=[];integration.play.mockClear();
+        const {player,workspace,before}=await notReady();
+        fireEvent.keyDown(workspace,{key:' '});
+        if(cancel==='escape')fireEvent.keyDown(workspace,{key:'Escape'});
+        else if(cancel==='stop')fireEvent.click(document.querySelector('.transport-stopbutton')!);
+        else if(cancel==='cursor')fireEvent.click(screen.getByRole('button',{name:'Select rendered note'}));
+        else if(cancel==='ctrlspace')fireEvent.keyDown(workspace,{key:' ',ctrlKey:true});
+        else if(cancel==='state'){act(()=>player.publish({playing:true}));act(()=>player.publish({playing:false}));}
+        else if(cancel==='dockescape'){const mute=document.querySelector<HTMLElement>('.score-overview-mix button')!;fireEvent.keyDown(mute,{key:'Escape'});}
+        else{const dialog=document.createElement('div');dialog.setAttribute('role','dialog');document.body.appendChild(dialog);}
+        act(()=>player.publish({ready:true}));await settleMs(150);
+        expect(integration.play.mock.calls.length-(cancel==='ctrlspace'?1:0),cancel).toBe(before);
+        document.querySelectorAll('[role="dialog"]').forEach(node=>node.remove());
+      }
+    });
+  });
+});
 it('top-bar panel toggles show and hide the palette, inspector and global view, and mirror the View menu',async()=>{
   const c=await setup(),before=c.getState(),shown=(selector:string)=>{const element=document.querySelector<HTMLElement>(selector);return !!element&&!element.closest('[hidden]');};
   for(const [name,menuName,selector] of [['Show or hide the editing palette','Edition palette','.score-palette'],['Toggle inspector','Inspector','.workstation-inspector'],['Toggle bottom dock','Bottom dock','.workstation-dock']] as const){
@@ -1016,17 +1185,17 @@ it('top-bar panel toggles show and hide the palette, inspector and global view, 
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('workstation hidden panes retain their mounted tuning rhythm and text drafts without score changes',async()=>{
-  const c=await setup(),before=c.getState();fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');fireEvent.change(tuning,{target:{value:'E4 B3 G3 D3 A2 D2'}});
+  const c=await setup(),before=c.getState();fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);fireEvent.change(tuning,{target:{value:'Draft lead'}});
   fireEvent.click(paneButton('Inspector'));expect(tuning).not.toBeVisible();const duration=screen.getByLabelText('Duration'),text=screen.getByLabelText('Beat text');revealDetails(text);fireEvent.change(duration,{target:{value:'8'}});fireEvent.change(text,{target:{value:'Unapplied passage note'}});
   viewToggle('Inspector');expect(duration).not.toBeVisible();viewToggle('Inspector');fireEvent.click(paneButton('Track'));
-  expect(screen.getByLabelText('Tuning (notes, high to low)')).toBe(tuning);expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(screen.getByLabelText('Duration')).toBe(duration);expect(duration).toHaveValue('8');expect(screen.getByLabelText('Beat text')).toBe(text);expect(text).toHaveValue('Unapplied passage note');expect(c.getState()).toBe(before);expectSilentNavigation();
+  expect(screen.getByLabelText('Track name')).toBe(tuning);expect(tuning).toHaveValue('Draft lead');expect(screen.getByLabelText('Duration')).toBe(duration);expect(duration).toHaveValue('8');expect(screen.getByLabelText('Beat text')).toBe(text);expect(text).toHaveValue('Unapplied passage note');expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it.each(['hidden-inspector','track-tab'] as const)('workstation paste-options shortcut reveals and focuses the existing Inspector from %s',async mode=>{
-  const c=await setup(blankProject(),undefined,{width:1280});fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');fireEvent.change(tuning,{target:{value:'E4 B3 G3 D3 A2 D2'}});
+  const c=await setup(blankProject(),undefined,{width:1280});fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);fireEvent.change(tuning,{target:{value:'Draft lead'}});
   fireEvent.click(paneButton('Inspector'));const duration=screen.getByLabelText('Duration'),text=screen.getByLabelText('Beat text');revealDetails(text);fireEvent.change(duration,{target:{value:'8'}});fireEvent.change(text,{target:{value:'Draft survives reveal'}});click('Select bar');const score=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(score,{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
   const editTask=document.querySelector<HTMLDetailsElement>('.inspector-task[id$="-edit"]')!;editTask.open=false;const summary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();summary.parentElement!.scrollIntoView=scroll;const selection=engravingView.mock.lastCall?.[0].editorSelection,before=c.getState();
   if(mode==='hidden-inspector')viewToggle('Inspector');else fireEvent.click(paneButton('Track'));expect(duration).not.toBeVisible();
-  fireEvent.keyDown(score,{key:'v',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(summary).toHaveFocus());expect(summary).toBeVisible();expect(editTask.open).toBe(true);expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(duration).toBeVisible();expect(duration).toHaveValue('8');expect(text).toHaveValue('Draft survives reveal');expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(c.getState()).toBe(before);expect(engravingView.mock.lastCall?.[0].editorSelection).toBe(selection);expectSilentNavigation();
+  fireEvent.keyDown(score,{key:'v',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(summary).toHaveFocus());expect(summary).toBeVisible();expect(editTask.open).toBe(true);expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(duration).toBeVisible();expect(duration).toHaveValue('8');expect(text).toHaveValue('Draft survives reveal');expect(tuning).toHaveValue('Draft lead');expect(c.getState()).toBe(before);expect(engravingView.mock.lastCall?.[0].editorSelection).toBe(selection);expectSilentNavigation();
 });
 it('workstation 960px task pane replaces Inspector and resize restores simultaneous wide panes',async()=>{
   await setup(blankProject(),undefined,{width:960});const shell=document.querySelector('.app-shell')!;expect(shell).toHaveAttribute('data-narrow','true');const location=screen.getByLabelText('Editing location');expect(location).toBeVisible();fireEvent.click(paneButton('Sound'));expect(location).not.toBeVisible();expect(screen.getByLabelText('Sound source')).toBeVisible();fireEvent.click(paneButton('Inspector'));expect(location).toBeVisible();expect(screen.getByLabelText('Sound source')).not.toBeVisible();
@@ -1050,13 +1219,13 @@ it.each([{width:1280,height:620},{width:960,height:720}])('short Backing dock at
 });
 it.each([960,1280,1600])('Backing waveform reveals the existing dock at %ipx and preserves drafts and history',async width=>{
   const c=await setup(blankProject(),undefined,{width}),before=c.getState();
-  fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');fireEvent.change(tuning,{target:{value:'E4 B3 G3 D3 A2 D2'}});
+  fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);fireEvent.change(tuning,{target:{value:'Draft lead'}});
   fireEvent.click(paneButton('Backing'));viewToggle('Bottom dock');click('Show waveform');
   expect(screen.getByRole('region',{name:'Backing waveform'})).toBeVisible();
   const dock=screen.getByRole('region',{name:'Bottom dock'});expect(within(dock).getByRole('button',{name:'Backing'})).toHaveAttribute('aria-pressed','true');
   expect(document.querySelector('.workstation-workspace')).toHaveStyle({'--dock-height':`${window.innerHeight<800?176:width>=1440?192:176}px`});
   fireEvent.click(within(dock).getByRole('button',{name:'Overview'}));expect(screen.getByRole('grid',{name:'Written measure overview'})).toBeVisible();
-  fireEvent.click(paneButton('Track'));expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(c.getState()).toBe(before);expectSilentNavigation();
+  fireEvent.click(paneButton('Track'));expect(tuning).toHaveValue('Draft lead');expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('drags the inspector and dock to sizes that are kept for the next run, clamped to the window, with no edit',async()=>{
   const key='tabplayer.panelSizes',workspace=()=>document.querySelector<HTMLElement>('.workstation-workspace')!;
@@ -1225,7 +1394,7 @@ it.each(['percussion','empty-voice'] as const)('workstation Overview selects and
   const edits:EditCommand[]=kind==='percussion'?[{type:'addPercussionTrack',name:'Drums',program:0}]:[0,1,2,3].map(()=>({type:'deleteBeat',target:{track:0,staff:0,bar:0,voice:0,beat:0}}));const c=await setup({...blankProject(),edits}),before=c.getState(),grid=screen.getByRole('grid',{name:'Written measure overview'});const cell=within(grid).getByRole('gridcell',{name:kind==='percussion'?'Drums, measure 1, rest':'Guitar, measure 1, empty'});fireEvent.click(cell);expect(engravingView.mock.lastCall?.[0].editTarget).toEqual({track:kind==='percussion'?1:0,staff:0,bar:0,voice:0,beat:0});if(kind==='percussion')expect(engravingView.mock.lastCall?.[0].editString).toBeUndefined();expect(cell).toHaveFocus();expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('workstation paste-options shortcut keeps input and dialog keyboard exclusions',async()=>{
-  const c=await setup(),before=c.getState(),summary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();summary.parentElement!.scrollIntoView=scroll;fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');tuning.focus();fireEvent.keyDown(tuning,{key:'v',ctrlKey:true,shiftKey:true});expect(tuning).toHaveFocus();expect(screen.getByLabelText('Editing location')).not.toBeVisible();expect(scroll).not.toHaveBeenCalled();
+  const c=await setup(),before=c.getState(),summary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();summary.parentElement!.scrollIntoView=scroll;fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);tuning.focus();fireEvent.keyDown(tuning,{key:'v',ctrlKey:true,shiftKey:true});expect(tuning).toHaveFocus();expect(screen.getByLabelText('Editing location')).not.toBeVisible();expect(scroll).not.toHaveBeenCalled();
   click('Browse scales');const dialog=screen.getByRole('dialog',{name:'Scale browser'}),focus=document.activeElement;fireEvent.keyDown(dialog,{key:'v',ctrlKey:true,shiftKey:true});expect(document.activeElement).toBe(focus);expect(summary.closest('details')).not.toHaveAttribute('open');expect(scroll).not.toHaveBeenCalled();expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 
@@ -1244,19 +1413,19 @@ it('inspector tabs show Song, Track and Selection, follow the arrow keys and kee
   const selection=within(list).getByRole('tab',{name:'Selection'});expect(selection).toHaveAttribute('aria-selected','true');expect(screen.getByLabelText('Editing location')).toBeVisible();
   selection.focus();await user.keyboard('{ArrowRight}');const song=within(list).getByRole('tab',{name:'Song'});expect(song).toHaveFocus();expect(song).toHaveAttribute('aria-selected','true');
   expect(screen.getByLabelText('Title')).toBeVisible();expect(screen.getByRole('button',{name:'Apply score info'})).toBeVisible();expect(screen.getByLabelText('Editing location')).not.toBeVisible();
-  await user.keyboard('{ArrowRight}');expect(within(list).getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByLabelText('Tuning (notes, high to low)')).toBeVisible();
+  await user.keyboard('{ArrowRight}');expect(within(list).getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeVisible();
   await user.keyboard('{ArrowLeft}{ArrowLeft}');expect(selection).toHaveFocus();expect(screen.getByLabelText('Duration')).toBeVisible();
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('menu commands open the inspector tab that holds their settings',async()=>{
   const c=await setup(),before=c.getState();viewToggle('Inspector');expect(document.querySelector('.workstation-inspector')).not.toBeVisible();
-  fireEvent.click(within(openCommand('Track')).getByRole('button',{name:'Track properties…'}));expect(screen.getByRole('tab',{name:'Track'})).toHaveAttribute('aria-selected','true');expect(screen.getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByLabelText('Tuning (notes, high to low)')).toBeVisible();
+  fireEvent.click(within(openCommand('Track')).getByRole('button',{name:'Track properties…'}));expect(screen.getByRole('tab',{name:'Track'})).toHaveAttribute('aria-selected','true');expect(screen.getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeVisible();
   fireEvent.click(within(openCommand('Sound')).getByRole('button',{name:'Sound mastering…'}));expect(screen.getByRole('tab',{name:'Song'})).toHaveAttribute('aria-selected','true');
   fireEvent.click(within(openCommand('Note')).getByRole('button',{name:'Note properties…'}));expect(screen.getByRole('tab',{name:'Selection'})).toHaveAttribute('aria-selected','true');
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('review responsive pane focus leaves an unrelated score focus in place',async()=>{
-  const c=await setup(),before=c.getState(),score=screen.getByRole('region',{name:'Score workspace'});score.focus();Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:960});fireEvent(window,new Event('resize'));expect(screen.getByLabelText('Tuning (notes, high to low)')).not.toBeVisible();expect(score).toHaveFocus();expect(c.getState()).toBe(before);expectSilentNavigation();
+  const c=await setup(),before=c.getState(),score=screen.getByRole('region',{name:'Score workspace'});score.focus();Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:960});fireEvent(window,new Event('resize'));expect(screen.getByRole('button',{name:/^Edit tuning/,hidden:true})).not.toBeVisible();expect(score).toHaveFocus();expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it.each(['View','dock button'] as const)('review instrument toggle shows the actual hidden dock in one click after hiding with %s',async source=>{
   const c=await setup(),before=c.getState();fireEvent.click(screen.getByRole('button',{name:'Instrument'}));expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(screen.getByRole('button',{name:'Hide instrument'})).toHaveAttribute('aria-pressed','true');if(source==='View')viewToggle('Bottom dock');else fireEvent.click(screen.getByRole('button',{name:'Hide bottom dock'}));expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(true);const show=screen.getByRole('button',{name:'Show instrument'});expect(show).toHaveAttribute('aria-pressed','false');fireEvent.click(show);expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(screen.getByRole('button',{name:'Hide instrument'})).toHaveAttribute('aria-pressed','true');expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(true);expect(c.getState()).toBe(before);expect(integration.playerOptions).toHaveBeenCalledOnce();expect(integration.destroy).not.toHaveBeenCalled();expectSilentNavigation();
@@ -1492,7 +1661,7 @@ it('keeps selection, scales, tuning audition and Copy music usable while finaliz
   fireEvent.click(functionalButton('Select bar'));
   await waitFor(()=>expect(functionalButton('Copy music')).toBeEnabled());
   expect(functionalButton('Clear selection')).toBeEnabled();expect(functionalButton('Erase selected notes')).toBeDisabled();
-  expect(functionalButton('Remove track')).toBeDisabled();expect(functionalButton('Apply tuning')).toBeDisabled();
+  expect(functionalButton('Remove track')).toBeDisabled();expect(functionalButton('Edit tuning (E4 B3 G3 D3 A2 E2)')).toBeDisabled();
   expect(functionalButton('Set note')).toBeDisabled();expect(functionalButton('Append measure')).toBeDisabled();
   expect(integration.commits).not.toHaveBeenCalled();
 });
@@ -2139,6 +2308,12 @@ describe('entry key queue',()=>{
 });
 
 describe('GP8 edit and cursor keys',()=>{
+  // Every time rule in the editor (the 1000 ms join of two fret digits, the two-second age of a queued key) reads Date.now, so the clock stands still here
+  // and moves only when a test moves it: how fast the runner is decides nothing. A test that depends on a gap sets it with `later`.
+  let now=1_700_000_000_000,clock:ReturnType<typeof vi.spyOn>|undefined;
+  const later=(ms:number)=>{now+=ms;};
+  beforeEach(()=>{now=1_700_000_000_000;clock=vi.spyOn(Date,'now').mockImplementation(()=>now);});
+  afterEach(()=>{clock?.mockRestore();});
   const pane=()=>screen.getByRole('region',{name:'Score workspace'});
   const press=(init:Parameters<typeof fireEvent.keyDown>[1])=>fireEvent.keyDown(pane(),init);
   const edits=(c:DocumentController)=>c.getState().snapshot.project.edits;
@@ -2348,14 +2523,31 @@ describe('GP8 edit and cursor keys',()=>{
     expect(edits(c)).toHaveLength(3);expect(edits(c)[2]).toMatchObject({type:'setNote',fret:9});
   });
   it('takes a digit typed after the window as a separate fret, not a join',async()=>{
-    let now=1_700_000_000_000;const spy=vi.spyOn(Date,'now').mockImplementation(()=>now);
-    try{
-      const c=await setup(withNotes());
-      press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
-      now+=1500;press({key:'2'});
-      await waitFor(()=>expect(edits(c)).toHaveLength(4));
-      expect(edits(c)[2]).toMatchObject({fret:1});expect(edits(c)[3]).toMatchObject({fret:2});
-    }finally{spy.mockRestore();}
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    later(1500);press({key:'2'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(edits(c)[2]).toMatchObject({fret:1});expect(edits(c)[3]).toMatchObject({fret:2});
+  });
+  it('joins a second digit typed exactly one window after the first, and not one millisecond later',async()=>{
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
+    later(1000);press({key:'2'});
+    await waitFor(()=>expect(lastFret(c)).toBe(12));await quiet();expect(edits(c)).toHaveLength(3);
+    cleanup();
+    const late=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(late)).toHaveLength(3));await quiet();
+    later(1001);press({key:'2'});
+    await waitFor(()=>expect(edits(late)).toHaveLength(4));
+    expect(edits(late)[2]).toMatchObject({fret:1});expect(lastFret(late)).toBe(2);
+  });
+  it('joins when the real time between the two digits runs past the window but the clock has not moved',async()=>{
+    // A slow runner can take longer than a second between two key presses; the join is judged by the clock the keys carry, not by how long the test took.
+    const c=await setup(withNotes());
+    press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    await new Promise(resolve=>setTimeout(resolve,1300));
+    press({key:'2'});
+    await waitFor(()=>expect(lastFret(c)).toBe(12));await quiet();expect(edits(c)).toHaveLength(3);
   });
   it('Escape ends the wait for a second digit, so the next digit is a new fret; nothing is taken back',async()=>{
     const c=await setup(withNotes());
@@ -2380,7 +2572,9 @@ describe('GP8 edit and cursor keys',()=>{
     await waitFor(()=>expect(screen.getAllByText(hint)).toHaveLength(2));
     expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBe('7');
     expect(screen.getAllByRole('status').filter(node=>node.textContent===hint)).toHaveLength(1);
-    await waitFor(()=>expect(screen.queryAllByText(hint)).toHaveLength(0),{timeout:2500});
+    // The window closes when the clock says so; the timer only wakes the check, so it is the real second of the wait that this timeout covers.
+    later(1000);
+    await waitFor(()=>expect(screen.queryAllByText(hint)).toHaveLength(0),{timeout:5000});
     expect((engravingView.mock.lastCall![0] as {editPendingFret:string|null}).editPendingFret).toBeNull();
   });
   it('Backspace after a typed digit removes the note on the string, as it does for any note',async()=>{
@@ -2407,9 +2601,10 @@ describe('GP8 edit and cursor keys',()=>{
     press({key:'1'});await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
     press({key:'2'});await waitFor(()=>expect(hold.held).toHaveLength(1));
     await hold.next('refuse');
-    // The undo was done and the write refused: the first digit is back, and the player is told.
+    // The undo was done and the write refused: the first digit is back, and the player is told once the hint for a second digit is gone.
     await waitFor(()=>expect(edits(c)).toHaveLength(3));expect(lastFret(c)).toBe(1);
-    expect(await screen.findByText(/first digit was put back/)).toBeInTheDocument();
+    later(1000);
+    expect(await screen.findByText(/first digit was put back/,{},{timeout:5000})).toBeInTheDocument();
   });
   it('does not undo or join when another edit came between the two digits',async()=>{
     const c=await setup(withNotes());
@@ -2452,7 +2647,9 @@ describe('GP8 edit and cursor keys',()=>{
     cleanup();
     const c=await setup(withNotes()),hold=holdEdits(c);
     press({key:'7'});await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next('refuse');
-    expect(await screen.findByText(/Fret 7 was not entered: the edit was refused/)).toBeInTheDocument();
+    // The notice shows once the hint for a second digit is gone, and the clock says when that is; the 5 s only covers the real second the timer takes to look.
+    later(1000);
+    expect(await screen.findByText(/Fret 7 was not entered: the edit was refused/,{},{timeout:5000})).toBeInTheDocument();
   });
   it('makes a track active from its name: same bar and beat, nothing recorded, not dirty',async()=>{
     const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}] as EditCommand[]});

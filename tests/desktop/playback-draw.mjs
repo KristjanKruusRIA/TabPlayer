@@ -37,6 +37,8 @@ async function probe(path,label,flags={},{strict=true,controlNoHighlight}={}) {
     await page.waitForFunction(()=>{const button=document.querySelector('[aria-keyshortcuts="Space"]');return button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'&&document.querySelector('.app-shell')?.getAttribute('aria-busy')==='false';},{},{timeout:180000});
     // DRAW_FLAGS='{"paintOnCursor":false}' switches a change off to show that the probe sees what it was made to see.
     await page.evaluate(flags=>Object.assign(window.__tabplayerDrawFlags,flags),{...flags,...JSON.parse(process.env.DRAW_FLAGS??'{}')});
+    // The flags act on the next draw: a changed layout draws the score again with them.
+    if(Object.keys(flags).length){const mode=page.getByRole('combobox',{name:'Display mode',exact:true});await mode.selectOption('verticalScreen');await sleep(1200);await mode.selectOption('parchment');await sleep(1500);}
     await sleep(1500);
     const space=async()=>{await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32,text:' '});await sleep(20);await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});};
     /** The fret numbers in view as {x,y} in client coordinates, top row first. */

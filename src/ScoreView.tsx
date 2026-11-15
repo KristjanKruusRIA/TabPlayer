@@ -134,6 +134,8 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   const pageKey=JSON.stringify({...pageInput,headerFooter:undefined}),page=useMemo(()=>pageInput,[pageKey]);
   const geometry=useMemo(()=>pageGeometry(page),[page]),physicalRequested=isPhysicalPageLayout(display.layout);
   const scrollHost=useRef<HTMLElement|null>(null),[available,setAvailable]=useState({width:0,height:0});
+  /** Called when the score area changes size (it shows other systems without any scroll): paints the ones in view that are empty. */
+  const areaChanged=useRef<()=>void>(()=>{});
   const [completed,setCompleted]=useState<{score:model.Score;tracks:string;page:PageLayout;engraving:EngravingOverrides|undefined;chunks:readonly ScreenRenderChunk[];bounds:ScreenBounds;plan:AccoladePlan|null;metrics:AccoladeMetrics}|null>(null);
   // A completion whose arrangement failed stays through the next render start, so the continuous fallback does not flicker.
   const failedCompletion=useRef<unknown>(null);
@@ -218,7 +220,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   const [rangeBlocks,setRangeBlocks]=useState<Band[]>([]),[loopBlocks,setLoopBlocks]=useState<Band[]>([]),[surfaceClass,setSurfaceClass]=useState('');
   useLayoutEffect(()=>{
     const host=wrapper.current?.closest<HTMLElement>('.paper-scroll')??wrapper.current?.parentElement??null;scrollHost.current=host;
-    const measure=()=>{if(!host)return;const css=getComputedStyle(host),width=Math.max(0,host.clientWidth-(parseFloat(css.paddingLeft)||0)-(parseFloat(css.paddingRight)||0)),height=Math.max(0,host.clientHeight-(parseFloat(css.paddingTop)||0)-(parseFloat(css.paddingBottom)||0));setAvailable(old=>old.width===width&&old.height===height?old:{width,height});};
+    const measure=()=>{if(!host)return;const css=getComputedStyle(host),width=Math.max(0,host.clientWidth-(parseFloat(css.paddingLeft)||0)-(parseFloat(css.paddingRight)||0)),height=Math.max(0,host.clientHeight-(parseFloat(css.paddingTop)||0)-(parseFloat(css.paddingBottom)||0));setAvailable(old=>old.width===width&&old.height===height?old:{width,height});areaChanged.current();};
     measure();const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(measure);if(host)observer?.observe(host);window.addEventListener('resize',measure);
     return()=>{observer?.disconnect();window.removeEventListener('resize',measure);};
   },[]);
@@ -609,8 +611,10 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   useEffect(()=>{
     const host=scrollHost.current;if(!host)return;
     const onScroll=()=>{const view=api.current;if(view&&view.settings.core.enableLazyLoading){paintVisible(view,true,'scroll');scheduleAheadRef.current(view);}};
+    // A taller or wider score area shows systems without any scroll: they are painted when it changes size, too.
+    areaChanged.current=onScroll;
     host.addEventListener('scroll',onScroll,{passive:true});
-    return()=>{host.removeEventListener('scroll',onScroll);ahead.current.token++;clearTimeout(ahead.current.timer||undefined);};
+    return()=>{areaChanged.current=()=>{};host.removeEventListener('scroll',onScroll);ahead.current.token++;clearTimeout(ahead.current.timer||undefined);};
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
   useEffect(()=>{

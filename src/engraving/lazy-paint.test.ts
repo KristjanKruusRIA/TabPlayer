@@ -1,5 +1,5 @@
 import { describe,expect,it } from 'vitest';
-import { visiblePartials,type LayoutPartial } from './lazy-paint';
+import { visibleIndexes,visiblePartials,type LayoutPartial } from './lazy-paint';
 
 const column=(count:number,height:number):LayoutPartial[]=>Array.from({length:count},(_,index)=>({id:`p${index}`,x:0,y:index*height,width:800,height}));
 
@@ -23,5 +23,8 @@ describe('visiblePartials',()=>{
   it('finds the columns of a horizontal layout',()=>{
     const pieces:LayoutPartial[]=Array.from({length:6},(_,index)=>({id:`c${index}`,x:index*300,y:0,width:300,height:400}));
     expect(visiblePartials(pieces,{left:-450,top:0},{left:0,top:0,right:600,bottom:400})).toEqual(['c1','c2','c3']);
+  });
+  it('gives the positions in layout order, for pieces that are checked in the page by position',()=>{
+    expect(visibleIndexes(column(20,200),{left:0,top:0},{left:0,top:1000,right:800,bottom:1300})).toEqual([5,6]);
   });
 });

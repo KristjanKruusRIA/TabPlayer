@@ -36,7 +36,7 @@ import { targetSymbols,type SymbolRef } from './editor/symbol-edit';
 import { resolveSymbol,systemAt } from './editor/symbol-hit';
 import { SymbolPopover,type SymbolView } from './SymbolPopover';
 import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score-entry-hit';
-import { visiblePartials,type LayoutPartial } from './engraving/lazy-paint';
+import { visibleIndexes,type LayoutPartial } from './engraving/lazy-paint';
 import { drawFlags } from './engraving/draw-flags';
 import { exposeDrawCheck } from './engraving/draw-check';
 import { useI18n } from './i18n';
@@ -44,8 +44,8 @@ import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
 /** How often, and for how long each time, a draw gives way to keys and clicks that are waiting. */
 const DRAW_DEFERRAL_MS=16;
-/** Pieces of the score this far (in pixels) beyond the score area are painted with the draw, so a small scroll never shows a blank system. */
-const PAINT_MARGIN=150;
+/** A piece this close (in pixels) to the score area counts as in view when painting: alphaTab's own check treats one pixel as in view, and a piece it clears again would be painted for nothing if this were wider. */
+const PAINT_MARGIN=2;
 const diagramScale=.45,chipHeight=16,chipGap=2;
 const chipWidth=(diagram:ScaleDiagram)=>18+6*Math.min(14,(diagram.name||'Scale').length);
 const chipLabel=(diagram:ScaleDiagram)=>(diagram.name||'Scale').slice(0,14);
@@ -531,14 +531,28 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   // them go first, a few frames at most, and only the newest score was drawn. Painting only what is in view takes a few tens of milliseconds, and the key-up of the key just typed counts as
   // waiting input, so by default (`drawFlags.deferrals`) it no longer waits.
   const [drawRetry,setDrawRetry]=useState(0),drawDeferred=useRef(0);
-  /** With lazy loading alphaTab paints a piece when its browser says the piece is on screen, a frame after the layout; the pieces in view are painted here, in the same turn, so no frame shows them blank or as they were. */
-  const paintVisible=(view:AlphaTabApi)=>{
+  /**
+   * With lazy loading alphaTab paints a piece when its browser says the piece is on screen, a frame after the layout, and clears it again when it leaves; the pieces in view are
+   * painted here instead, in the same turn, so no frame shows one blank or as it was. `onlyEmpty` (used while scrolling, which comes before the frame is drawn) paints only the
+   * ones that have nothing in them: those are the ones alphaTab has cleared or not painted yet, and painting them now is what keeps a scroll from showing a blank system.
+   */
+  const paintVisible=(view:AlphaTabApi,onlyEmpty=false)=>{
     try{
-      const host=scrollHost.current;if(!host||!layoutPartials.current.length)return;
+      const host=scrollHost.current,partials=layoutPartials.current;if(!host||!partials.length)return;
       const offset=view.uiFacade.getOffset(null,view.canvasElement),area=host.getBoundingClientRect();
-      for(const id of visiblePartials(layoutPartials.current,{left:offset.x-window.scrollX,top:offset.y-window.scrollY},area,PAINT_MARGIN))view.renderer.renderResult(id);
+      const pieces=(view.canvasElement as unknown as {element?:HTMLElement}).element?.children;
+      for(const index of visibleIndexes(partials,{left:offset.x-window.scrollX,top:offset.y-window.scrollY},area,PAINT_MARGIN)){
+        if(onlyEmpty&&(!pieces||pieces.length!==partials.length||pieces[index].childElementCount>0))continue;
+        view.renderer.renderResult(partials[index].id);
+      }
     }catch{ /* alphaTab paints them as they scroll into view */ }
   };
+  useEffect(()=>{
+    const host=scrollHost.current;if(!host)return;
+    const onScroll=()=>{const view=api.current;if(view&&view.settings.core.enableLazyLoading)paintVisible(view,true);};
+    host.addEventListener('scroll',onScroll,{passive:true});return()=>host.removeEventListener('scroll',onScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0||holdDraw)return;
     const scheduling=(navigator as Navigator&{scheduling?:{isInputPending?:(options?:{includeContinuous?:boolean})=>boolean}}).scheduling;

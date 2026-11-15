@@ -12,14 +12,19 @@
 export interface LayoutPartial {id:string;x:number;y:number;width:number;height:number;firstMasterBarIndex?:number;lastMasterBarIndex?:number}
 export interface Box {left:number;top:number;right:number;bottom:number}
 
-/** The ids of the pieces that intersect `view` (the score area, in the same coordinates as `canvas`, the canvas's own top left), widened by `margin` pixels on every side. */
-export function visiblePartials(partials:readonly LayoutPartial[],canvas:{left:number;top:number},view:Box,margin=0):string[] {
-  const ids:string[]=[];
-  for(const piece of partials) {
+/** The positions (in layout order) of the pieces that intersect `view` (the score area, in the same coordinates as `canvas`, the canvas's own top left), widened by `margin` pixels on every side. */
+export function visibleIndexes(partials:readonly LayoutPartial[],canvas:{left:number;top:number},view:Box,margin=0):number[] {
+  const found:number[]=[];
+  for(let index=0;index<partials.length;index++) {
+    const piece=partials[index];
     if(!(piece.width>0)||!(piece.height>0))continue;
     const left=canvas.left+piece.x,top=canvas.top+piece.y;
     if(left>=view.right+margin||left+piece.width<=view.left-margin||top>=view.bottom+margin||top+piece.height<=view.top-margin)continue;
-    ids.push(piece.id);
+    found.push(index);
   }
-  return ids;
+  return found;
+}
+/** The ids of those pieces. */
+export function visiblePartials(partials:readonly LayoutPartial[],canvas:{left:number;top:number},view:Box,margin=0):string[] {
+  return visibleIndexes(partials,canvas,view,margin).map(index=>partials[index].id);
 }

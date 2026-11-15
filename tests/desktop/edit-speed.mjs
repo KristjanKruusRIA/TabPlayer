@@ -33,7 +33,7 @@ const BUDGET={
   /** Heap growth over 240 edits in place after a warm-up, after a forced collection. Every edit used to keep a score, a journal and a rendered copy alive for good (the leak was about 0.3 MB an edit on the owner's largest score). */
   heapGrowthMB:40,
 };
-/** A batch of changes that adds or removes at least this many nodes is the score being drawn (one system is about 400 nodes); the cursor and the selection change a few. */
+/** A batch of changes that adds at least this many nodes (counting what is inside the added ones) is the score being drawn (one system is about 400 nodes); the cursor and the selection add a few. */
 const DRAW_NODES=100;
 const median=values=>{const sorted=[...values].sort((a,b)=>a-b),middle=sorted.length>>1;return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2;};
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -75,7 +75,7 @@ try {
     callbacks.get=function(key){const handler=original.call(this,key);if(typeof handler!=='function')return handler;return function(message){const name=message&&message.event;if(name)probe.events[name]=(probe.events[name]||0)+1;return handler.apply(this,arguments);};};
     window.addEventListener('keydown',event=>probe.keys.push({key:event.key,at:event.timeStamp}),true);
     const host=document.querySelector('.score-paper-host');
-    if(host)new MutationObserver(list=>{let nodes=0,svg=false;for(const record of list){nodes+=record.addedNodes.length+record.removedNodes.length;if(record.target.closest?.('svg')||[...record.addedNodes].some(node=>node.nodeName==='svg'||node.querySelector?.('svg')))svg=true;}probe.host.push({at:performance.now(),count:nodes,svg});}).observe(host,{subtree:true,childList:true});
+    if(host)new MutationObserver(list=>{let nodes=0,svg=false;for(const record of list){for(const node of record.addedNodes)nodes+=1+(node.getElementsByTagName?.('*').length??0);if(record.target.closest?.('svg')||[...record.addedNodes].some(node=>node.nodeName==='svg'||node.querySelector?.('svg')))svg=true;}probe.host.push({at:performance.now(),count:nodes,svg});}).observe(host,{subtree:true,childList:true});
     new MutationObserver(list=>{for(const record of list)if(record.target.matches?.('.app-shell')&&record.attributeName==='aria-busy')probe.busy.push({at:performance.now(),value:record.target.getAttribute('aria-busy')});}).observe(document.body,{subtree:true,attributes:true,attributeFilter:['aria-busy']});
     let shown=document.querySelector('.statusbar-position')?.textContent;
     new MutationObserver(()=>{const text=document.querySelector('.statusbar-position')?.textContent;if(text!==shown){shown=text;probe.position.push({at:performance.now(),text});}}).observe(document.querySelector('.statusbar'),{subtree:true,childList:true,characterData:true});

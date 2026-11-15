@@ -16,9 +16,31 @@ import type { RecoveryIssue,RecoveryStatus,SessionPreferences } from './recovery
 import { useI18n } from '../i18n';
 import './document-tabs.css';
 
+/** The recovery status as a store of its own: a status change redraws the feedback text only, not the workspace around it. */
+export interface RecoveryStatusSource {subscribe:(listener:()=>void)=>()=>void;get:()=>RecoveryStatus}
 export interface WorkspaceSession {
   preferences:SessionPreferences;status:RecoveryStatus;error:string|null;issues:readonly RecoveryIssue[];pending:boolean;
+  /** When present the live status comes from here and `status` is only what it was at the time of the render. */
+  statusSource?:RecoveryStatusSource;
   onPreferencesChange:(value:boolean)=>void;onRetry:()=>void;
+}
+const noSubscribe=()=>()=>{};
+function RecoveryFeedback({session,workspace}:{session:WorkspaceSession;workspace:WorkspaceController}) {
+  const { t } = useI18n();
+  const source=session.statusSource;
+  const status=useSyncExternalStore(source?.subscribe??noSubscribe,()=>source?source.get():session.status);
+  const recoveryError=useSyncExternalStore(workspace.subscribe,()=>workspace.getState().recoveryError);
+  const backupError=recoveryError ?? (status.state==='failed'?status.error:null);
+  const backupState=status.state;
+  const backupTime=status.capturedAtUnixMs===null||status.capturedAtUnixMs===undefined?null:new Date(status.capturedAtUnixMs);
+  const backupText=backupError?t('session.backup_failed_error', { error: backupError }):backupState==='failed'?t('session.backup_failed'):backupState==='writing'?t('session.backup_updating'):backupState==='pending'?t('session.backup_pending'):backupState==='ready'?t('session.backup_complete'):t('session.backup_none');
+  return <div className="recovery-feedback">
+    <span className="recovery-status" role="status">{backupText}{backupTime&&Number.isFinite(backupTime.getTime())&&<> {t('session.last_backup')}<time dateTime={backupTime.toISOString()}>{backupTime.toLocaleTimeString()}</time>.</>}</span>
+    {status.state==='ready'&&status.error&&<span className="recovery-status">{status.error}</span>}
+    {(backupError||backupState==='failed')&&<button disabled={session.pending} onClick={session.onRetry}>{t('action.retry')}</button>}
+    {session.error&&<span className="session-error" role="alert">{session.error}</span>}
+    {session.issues.length>0&&<details className="recovery-notices"><summary>{t('session.details_count', { count: session.issues.length })}</summary><ul>{session.issues.map((issue,index)=><li key={index}>{issue.message}</li>)}</ul></details>}
+  </div>;
 }
 const noLibrarySubscribe=()=>()=>{};
 const noLibraryState:WorkspaceLibraryState={open:false,welcome:false,error:null,closeReason:null};
@@ -91,20 +113,13 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
     else {const index=state.documents.indexOf(active),next=(index+(event.shiftKey?-1:1)+state.documents.length)%state.documents.length;run(perform(()=>workspace.activate(state.documents[next].id)));}
   }
   const tabs=state.documents.map(entry=>{const value=entry.controller.getState();return {id:entry.id,title:value.score.title,path:value.snapshot.path,dirty:value.snapshot.dirty,locked:value.snapshot.project.lock?.kind==='finalized'};});
-  const backupError=state.recoveryError ?? (session?.status.state==='failed'?session.status.error:null);
-  const backupState=session?.status.state;
-  const backupTime=session?.status.capturedAtUnixMs===null||session?.status.capturedAtUnixMs===undefined?null:new Date(session.status.capturedAtUnixMs);
-  const backupText=backupError?t('session.backup_failed_error', { error: backupError }):backupState==='failed'?t('session.backup_failed'):backupState==='writing'?t('session.backup_updating'):backupState==='pending'?t('session.backup_pending'):backupState==='ready'?t('session.backup_complete'):t('session.backup_none');
   const sessionMenu=session&&<section className="session-options" aria-label={t('session.settings')}>
     <label className="check"><input type="checkbox" checked={session.preferences.restorePreviousSession} disabled={session.pending||state.busy} onChange={event=>session.onPreferencesChange(event.target.checked)}/>{t('session.restore_previous_session')}</label>
   </section>;
-  const recoveryStatus=session&&<div className="recovery-feedback">
-    <span className="recovery-status" role="status">{backupText}{backupTime&&Number.isFinite(backupTime.getTime())&&<> {t('session.last_backup')}<time dateTime={backupTime.toISOString()}>{backupTime.toLocaleTimeString()}</time>.</>}</span>
-    {session.status.state==='ready'&&session.status.error&&<span className="recovery-status">{session.status.error}</span>}
-    {(backupError||backupState==='failed')&&<button disabled={session.pending} onClick={session.onRetry}>{t('action.retry')}</button>}
-    {session.error&&<span className="session-error" role="alert">{session.error}</span>}
-    {session.issues.length>0&&<details className="recovery-notices"><summary>{t('session.details_count', { count: session.issues.length })}</summary><ul>{session.issues.map((issue,index)=><li key={index}>{issue.message}</li>)}</ul></details>}
-  </div>;
+  // Everything the feedback shows besides the status is a dependency here, so its element only changes with them: a recovery status change reaches it through its own subscription, without rendering App.
+  const sessionPending=session?.pending,sessionError=session?.error,sessionIssues=session?.issues,sessionRetry=session?.onRetry,sessionSource=session?.statusSource,sessionStatus=sessionSource?null:session?.status;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const recoveryStatus=useMemo(()=>session&&<RecoveryFeedback session={session} workspace={workspace}/>,[workspace,!!session,sessionPending,sessionError,sessionIssues,sessionRetry,sessionSource,sessionStatus]);
   return <div ref={panel} role="tabpanel" id={`document-panel-${encodeURIComponent(documentId)}`} aria-labelledby={`document-tab-${encodeURIComponent(documentId)}`}
     onKeyDownCapture={keys} onFocusCapture={event=>{tabFocus.current=event.target instanceof Element&&!!event.target.closest('[role="tablist"]');}}>
     <App key={activationId} controller={active.controller} audioBridge={audio} waveformBridge={waveform} exportBridge={exports} documentBridge={documentBridge}

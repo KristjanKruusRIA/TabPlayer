@@ -427,3 +427,125 @@ it('refuses the same paste as a new gesture, before anything is recorded, and sa
   expect(inside.applyEdit).not.toHaveBeenCalled();
   await second.edit({type:'pasteMusic',clip,options:pasteOptions(1)});expect(inside.applyEdit).toHaveBeenCalledOnce();
 });
+
+it('applies note edits in place, matches a full rebuild through undo and redo, and keeps the score when native refuses',async()=>{
+  const {editCheck,editStats,verifyEditInPlace}=await import('./engine');
+  const previous=editCheck.every;editCheck.every=1;
+  try {
+    const project:Project={...blankProject(),base:{kind:'blank',title:'T',artist:'',tempo:120,tuning:[64,59,55,50,45,40],measureCount:4},edits:[{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}]};
+    const bridge=makeBridge(project),controller=await DocumentController.create(bridge);
+    const at=(track:number,bar:number,beat:number)=>({track,staff:0,bar,voice:0,beat});
+    const before={...editStats};
+    await controller.edit({type:'setNote',target:at(0,0,0),string:2,fret:5});
+    await controller.edit({type:'setNote',target:at(1,1,0),string:1,fret:3});
+    await controller.edit({type:'sequence',commands:[{type:'setDuration',target:at(0,0,1),duration:8,dots:0},{type:'setNote',target:at(0,0,1),string:3,fret:7}]});
+    await controller.edit({type:'removeNote',target:at(0,0,0),string:2});
+    expect(editStats.inPlace-before.inPlace).toBe(4);expect(editStats.mismatches).toBe(before.mismatches);expect(editStats.verified-before.verified).toBe(4);
+    const edited=controller.getState().score;
+    await controller.undo();await controller.undo();
+    expect(verifyEditInPlace(controller.getState().snapshot.project,controller.getState(),controller.getState().snapshot.canRedo)).toBeNull();
+    await controller.redo();
+    await controller.edit({type:'setNote',target:at(1,2,0),string:2,fret:9});
+    expect(verifyEditInPlace(controller.getState().snapshot.project,controller.getState())).toBeNull();
+    expect(controller.getState().score).not.toBe(edited);
+    // A refusal by the check and a refusal by native both leave the very same score, and the document as the project says.
+    const kept=controller.getState();
+    await expect(controller.edit({type:'setNote',target:at(0,0,0),string:99,fret:1})).rejects.toThrow();
+    expect(controller.getState().score).toBe(kept.score);expect(controller.getState().snapshot).toBe(kept.snapshot);
+    bridge.applyEdit=async()=>{throw new Error('native commit rejected');};
+    await expect(controller.edit({type:'setNote',target:at(0,1,0),string:1,fret:2})).rejects.toThrow('native commit rejected');
+    expect(controller.getState().score).toBe(kept.score);
+    expect(verifyEditInPlace(kept.snapshot.project,controller.getState())).toBeNull();
+  } finally {editCheck.every=previous;}
+},60000);
+
+it('compares an edit made in place with a rebuild once the edits stop, replaces a document that differs, and checks before anything is exported',async()=>{
+  const {editStats,idleVerification,verifyEditInPlace}=await import('./engine');
+  const previous=idleVerification.afterMs,errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+  const at=(bar:number,beat:number)=>({track:0,staff:0,bar,voice:0,beat});
+  const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+  try {
+    idleVerification.afterMs=250;
+    const project:Project={...blankProject(),base:{kind:'blank',title:'T',artist:'',tempo:120,tuning:[64,59,55,50,45,40],measureCount:4},edits:[]};
+    const controller=await DocumentController.create(makeBridge(project));
+    const base={...editStats};
+    // A new edit starts the wait over: nothing is compared while edits keep coming.
+    await controller.edit({type:'setNote',target:at(0,0),string:2,fret:5});await wait(120);
+    await controller.edit({type:'setNote',target:at(1,0),string:2,fret:5});await wait(180);
+    expect(editStats.verified-base.verified).toBe(0);
+    await wait(900);
+    expect(editStats.verified-base.verified,'compared once the edits stopped').toBe(1);expect(editStats.mismatches).toBe(base.mismatches);
+    expect(controller.getState().repaired).toBeFalsy();
+    // A divergence is repaired: the rebuilt document takes the edited one's place, with a note, and nothing was blocked.
+    await controller.edit({type:'setNote',target:at(2,0),string:3,fret:7});
+    const damaged=controller.getState().score;damaged.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret=12;
+    const repaired=await controller.verified();
+    expect(editStats.mismatches-base.mismatches).toBe(1);expect(errors).toHaveBeenCalled();
+    expect(repaired.repaired).toBe(true);expect(repaired.score).not.toBe(damaged);
+    expect(verifyEditInPlace(repaired.snapshot.project,repaired)).toBeNull();
+    // The next edit clears the note, and a verified document is not compared again.
+    await controller.edit({type:'setNote',target:at(3,0),string:1,fret:1});
+    expect(controller.getState().repaired).toBe(false);
+    const done=editStats.verified;await controller.verified();expect(editStats.verified-done).toBe(1);await controller.verified();expect(editStats.verified-done).toBe(1);
+  } finally {idleVerification.afterMs=previous;errors.mockRestore();}
+},60000);
+
+it('takes back and redoes edits applied in place without rebuilding the document, and each step equals a rebuild',async()=>{
+  const {editCheck,editStats,verifyEditInPlace}=await import('./engine');
+  const previous=editCheck.every;editCheck.every=0;
+  try {
+    const project:Project={...blankProject(),base:{kind:'blank',title:'T',artist:'',tempo:120,tuning:[64,59,55,50,45,40],measureCount:4},edits:[]};
+    const controller=await DocumentController.create(makeBridge(project));
+    const at=(bar:number,beat:number)=>({track:0,staff:0,bar,voice:0,beat});
+    const same=()=>verifyEditInPlace(controller.getState().snapshot.project,controller.getState(),controller.getState().snapshot.canRedo);
+    await controller.edit({type:'setNote',target:at(0,0),string:2,fret:5});
+    await controller.edit({type:'setNote',target:at(0,0),string:2,fret:12});
+    await controller.edit({type:'sequence',commands:[{type:'setDuration',target:at(1,0),duration:8,dots:0},{type:'setNote',target:at(1,0),string:3,fret:7}]});
+    const base=editStats.inPlace,scoreBefore=controller.getState().score;
+    await controller.undo();expect(same(),'after the first undo').toBeNull();
+    await controller.undo();expect(same(),'after the second undo').toBeNull();
+    expect(editStats.inPlace-base,'both were taken back in place').toBe(2);
+    expect(controller.getState().score).not.toBe(scoreBefore);
+    await controller.redo();expect(same(),'after a redo').toBeNull();
+    // The join of two typed digits: write 1, take it back, write 12.
+    await controller.undo();await controller.edit({type:'setNote',target:at(0,0),string:2,fret:12});expect(same(),'after write, undo, write').toBeNull();
+    // An edit that was not applied in place cannot be taken back in place, and the history is still right.
+    await controller.edit({type:'appendMeasure'});
+    await controller.undo();expect(same(),'after undoing a measure').toBeNull();
+    await controller.undo();expect(same(),'after undoing past it').toBeNull();
+  } finally {editCheck.every=previous;}
+},60000);
+
+it('a settings edit does not make an unchecked in-place score look checked, and the check is wanted again afterwards',async()=>{
+  const {editCheck,editStats,idleVerification,verifyEditInPlace}=await import('./engine');
+  const previous=editCheck.every,afterMs=idleVerification.afterMs,errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+  const at=(bar:number)=>({track:0,staff:0,bar,voice:0,beat:0});
+  const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+  try {
+    editCheck.every=0;idleVerification.afterMs=0;
+    const project:Project={...blankProject(),base:{kind:'blank',title:'T',artist:'',tempo:120,tuning:[64,59,55,50,45,40],measureCount:4},edits:[]};
+    const controller=await DocumentController.create(makeBridge(project));
+    const mix={gain:.5,pan:0,mute:false,solo:false};
+    // 1. An edit in place, then a settings edit (a page layout, a mixer drag) before the check ran: the score is still unchecked.
+    await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+    controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret=12;
+    const base=editStats.mismatches;
+    await controller.edit({type:'setTrackMix',trackId:'base/0',mix});
+    const state=await controller.verified();
+    expect(editStats.mismatches-base,'the divergence was found after the settings edit').toBe(1);
+    expect(state.repaired).toBe(true);expect(verifyEditInPlace(state.snapshot.project,state,state.snapshot.canRedo)).toBeNull();
+    // 2. The same after an undo of a settings edit.
+    await controller.edit({type:'setNote',target:at(1),string:2,fret:5});
+    controller.getState().score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes[0].fret=11;
+    await controller.undo();await controller.redo();
+    const second=await controller.verified();
+    expect(second.repaired,'an undo and redo of the edit did not hide it').toBeFalsy();
+    // 3. With the timer on, a settings edit does not turn the check off for good.
+    idleVerification.afterMs=200;
+    await controller.edit({type:'setNote',target:at(2),string:3,fret:7});
+    const counted=editStats.verified;
+    await controller.edit({type:'setTrackMix',trackId:'base/0',mix:{...mix,gain:.4}});
+    await wait(900);
+    expect(editStats.verified-counted,'the check ran after the settings edit').toBe(1);
+  } finally {editCheck.every=previous;idleVerification.afterMs=afterMs;errors.mockRestore();}
+},60000);

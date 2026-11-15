@@ -494,7 +494,22 @@ export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConv
   return buildWithIdentities(scoreFromJson(json, settings), generation, identities, undefined, interpretations);
 }
 
+/**
+ * Plans that were frozen all the way down (`freezePlan`) and then passed `validatePlaybackPlan`. A plan nobody can change needs checking
+ * once, and the cursor and selection code asks on every move, which walks every note of a long score. A plan that is not frozen is
+ * checked on every call, as the caller may have changed it.
+ */
+const frozenPlans=new WeakSet<PlaybackPlan>(),validatedPlans=new WeakSet<PlaybackPlan>();
+export function freezePlan<T extends PlaybackPlan>(plan:T):T {
+  const freeze=(value:unknown)=>{if(value&&typeof value==='object'&&!Object.isFrozen(value)){Object.freeze(value);for(const item of Object.values(value))freeze(item);}};
+  freeze(plan);frozenPlans.add(plan);return plan;
+}
 export function validatePlaybackPlan(plan: PlaybackPlan) {
+  if(validatedPlans.has(plan))return;
+  checkPlaybackPlan(plan);
+  if(frozenPlans.has(plan))validatedPlans.add(plan);
+}
+function checkPlaybackPlan(plan: PlaybackPlan) {
   const validTime = (n: number) => Number.isFinite(n) && n >= 0;
   const integer = (n: number, maximum: number) => Number.isSafeInteger(n) && n >= 0 && n <= maximum;
   const fail = (reason = 'structure') => { throw new Error(`Invalid native playback plan (${reason}).`); };

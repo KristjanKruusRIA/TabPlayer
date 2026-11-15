@@ -15,10 +15,10 @@ import type { MusicSelection } from '../editor/range-types';
 const defaults=():PracticeSettings=>structuredClone(DEFAULT_PRACTICE);
 function practiceStatus(settings=defaults(),change:Partial<PracticeStatus>={}):PracticeStatus{return {settings,phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:120,pulse:null,...change};}
 
-function fixture(preparePlan?:ConstructorParameters<typeof NativePlaybackController>[0]['preparePlan']) {
+function fixture(preparePlan?:ConstructorParameters<typeof NativePlaybackController>[0]['preparePlan'],quietMs?:number) {
   let receive: (status:NativeAudioStatus)=>void=()=>{};
   const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async listener=>{receive=listener;return()=>{};}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
-  const onEdit=vi.fn();const player=new NativePlaybackController({bridge,onEdit,preparePlan});
+  const onEdit=vi.fn();const player=new NativePlaybackController({bridge,onEdit,preparePlan,quietMs});
   const emit=(change:Partial<NativeAudioStatus>={})=>{const settings=defaults();settings.tempo={kind:'relative',ratio:change.speed??1};settings.metronome.enabled=change.metronome??false;receive({generation:player.generation,ready:true,playing:false,tick:0,seconds:0,durationSeconds:8,speed:1,metronome:false,error:null,deviceId:null,range:null,loop:null,practice:practiceStatus(settings,{phase:change.playing?'playing':'paused'}),...change});};
   return {bridge,onEdit,player,emit};
 }
@@ -793,6 +793,53 @@ it('a change of document is marked in the state, so the shown key can reset with
   await player.loadDocument(b,buildDocument(b),0,1);expect(player.getState().documentSerial).toBeGreaterThan(first);player.destroy();
 });
 
+it('prepares the first change after a quiet spell at once, and edits that follow it once, for the last',async()=>{
+  vi.useFakeTimers();
+  try {
+    const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
+    const planned:number[]=[];
+    const preparePlan:ConstructorParameters<typeof NativePlaybackController>[0]['preparePlan']=async(project,generation)=>{planned.push(project.edits.length);return buildPlaybackPlan(buildDocument(project).score,generation);};
+    const player=new NativePlaybackController({bridge,onEdit:vi.fn(),preparePlan,quietMs:300});
+    const note=(fret:number)=>({type:'setNote' as const,target:{track:0,staff:0,bar:0,voice:0,beat:0},string:1,fret});
+    let current=blankProject(),built=buildDocument(current);
+    const load=()=>player.loadDocument(current,built);
+    const change=(fret:number)=>{const next=previewEdit(current,note(fret));current=next.project;built=next;};
+    // The document opens, then one edit after a quiet spell: no wait.
+    const opening=load();await vi.advanceTimersByTimeAsync(100);await opening;vi.advanceTimersByTime(1000);planned.length=0;
+    change(3);const first=load();await vi.advanceTimersByTimeAsync(0);expect(planned,'not before the change was drawn').toEqual([]);await vi.advanceTimersByTimeAsync(70);await first;
+    expect(planned,'the first edit after a quiet spell is built once it was drawn, without the quiet period').toEqual([1]);
+    // Three edits inside the window: only the last is built, after the quiet period.
+    change(4);const second=load();vi.advanceTimersByTime(100);change(5);const third=load();vi.advanceTimersByTime(100);change(6);const fourth=load();
+    await vi.advanceTimersByTimeAsync(0);expect(planned,'edits in a burst wait for the edits to stop').toEqual([1]);
+    await vi.advanceTimersByTimeAsync(300);await Promise.all([second,third,fourth]);
+    expect(planned).toEqual([1,4]);
+    expect(player.getState().ready,'playback is for the newest score').toBe(false);
+  } finally {vi.useRealTimers();}
+});
+it('a click-seek or Space that arrives while the plan of a just-edited score is not built is refused, and the plan becomes ready once the edits have stopped',async()=>{
+  vi.useFakeTimers();
+  try {
+    const planned:number[]=[];
+    const preparePlan:ConstructorParameters<typeof NativePlaybackController>[0]['preparePlan']=async(project,generation)=>{planned.push(project.edits.length);return buildPlaybackPlan(buildDocument(project).score,generation);};
+    const {player,bridge,emit}=fixture(preparePlan,300);
+    const note=(fret:number)=>({type:'setNote' as const,target:{track:0,staff:0,bar:0,voice:0,beat:0},string:1,fret});
+    let current=blankProject(),built=buildDocument(current);
+    const load=()=>player.loadDocument(current,built);
+    const change=(fret:number)=>{const next=previewEdit(current,note(fret));current=next.project;built=next;};
+    const opening=load();await vi.advanceTimersByTimeAsync(100);await opening;emit();vi.advanceTimersByTime(1000);planned.length=0;vi.mocked(bridge.command).mockClear();
+    // A burst of edits: the plan of the newest score is not built yet, and a click-seek is refused (the shell then waits for the ready state, for five seconds).
+    change(3);const first=load();vi.advanceTimersByTime(100);change(4);const second=load();vi.advanceTimersByTime(100);change(5);const third=load();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(player.getState().ready,'playback is for the newest score only once it is built').toBe(false);
+    expect(player.seekToCursor(cursor)).toBe(false);expect(bridge.command).not.toHaveBeenCalledWith(expect.objectContaining({type:'seekWithin'}));
+    // The edits stop: the plan is built after the quiet period (well inside the five seconds), native reports it ready, and the click-seek that waited goes through.
+    await vi.advanceTimersByTimeAsync(400);await Promise.all([first,second,third]);
+    expect(planned.at(-1),'the plan built is the newest one').toBe(3);
+    emit();
+    expect(player.getState().ready).toBe(true);expect(player.seekToCursor(cursor)).toBe(true);
+    expect(bridge.command).toHaveBeenLastCalledWith(expect.objectContaining({type:'seekWithin',generation:player.generation}));
+  } finally {vi.useRealTimers();}
+});
 it('seekToCursor moves playback to a clicked beat, says no while the plan is not ready, and never edits',async()=>{
   const {player,bridge,onEdit,emit}=fixture();const p=blankProject();
   expect(player.seekToCursor(cursor)).toBe(false);expect(bridge.command).not.toHaveBeenCalled();

@@ -2135,8 +2135,22 @@ impl AudioService {
         thread::Builder::new()
             .name("native-audio-status".into())
             .spawn(move || {
+                // A status that says what the last one said is not published again for a second: the interface reads
+                // an idle engine as 30 changes a second otherwise, and wakes for each. While anything moves (a
+                // position, a meter) the status differs every time and goes out as often as it always did.
+                let mut last: Option<String> = None;
+                let mut last_published = std::time::Instant::now();
                 while !status_shared.shutdown.load(Ordering::Acquire) {
-                    publish(status_shared.read());
+                    let status = status_shared.read();
+                    let key = serde_json::to_string(&status).ok();
+                    if key.is_none()
+                        || key != last
+                        || last_published.elapsed() >= Duration::from_secs(1)
+                    {
+                        publish(status);
+                        last = key;
+                        last_published = std::time::Instant::now();
+                    }
                     thread::sleep(Duration::from_millis(33));
                 }
             })

@@ -1,7 +1,7 @@
 import { useI18n } from '../i18n';
 import { useState } from 'react';
 import type { EditCommand } from '../edit-types';
-import { previewEdit } from '../engine';
+import { editsFitLive, previewEdit } from '../engine';
 import type { BeatTarget,Project } from '../project';
 
 /** Viewer-level score-input choices, kept in this window's storage. Hearing entered notes is a separate, older preference (audition.ts). */
@@ -84,6 +84,8 @@ export function autoDurationSkip(preferences:InputPreferences,beat:EntryBeat|nul
 }
 /** Whether the commands apply one after the other to the project, so a pair is never half done. Any refusal is false. */
 export function applyInOrder(project:Project,commands:EditCommand[]):boolean {
+  // Asked of an open document, the answer comes from checking the commands on copies of the voices they touch, not from building a document for each.
+  const live=editsFitLive(project,commands);if(live!==null)return live;
   try{let built=previewEdit(project,commands[0]);for(const command of commands.slice(1))built=previewEdit(built.project,command,built);return true;}catch{return false;}
 }
 export const AUTO_DURATION_UNFIT='Auto-duration skipped: that duration does not fit this bar, so the note keeps the rest duration.';

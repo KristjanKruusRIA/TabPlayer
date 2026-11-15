@@ -42,7 +42,10 @@ export class WorkspaceController {
   getState=()=>this.state;
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return ()=>{this.listeners.delete(listener);};};
   private update(change:Partial<WorkspaceState>) {
-    this.state={...this.state,...change};for(const listener of this.listeners)listener();
+    // A change that leaves every field as it was keeps the state object (still telling the subscribers), so nothing redraws for it.
+    const entries=Object.entries(change) as [keyof WorkspaceState,unknown][];
+    if(!this.state||entries.some(([key,value])=>!Object.is(this.state[key],value)))this.state={...this.state,...change};
+    for(const listener of this.listeners)listener();
   }
   private async synchronize(snapshot:WorkspaceSnapshot,views:Record<DocumentId,DocumentViewState>={}) {
     const cached=new Map(this.state?.documents.map(entry=>[entry.id,entry]));
@@ -65,7 +68,7 @@ export class WorkspaceController {
         })});
       }));
     }
-    for(const [id,unsubscribe] of this.subscriptions)if(!documents.some(entry=>entry.id===id)){unsubscribe();this.subscriptions.delete(id);this.pendingViews.delete(id);}
+    for(const [id,unsubscribe] of this.subscriptions)if(!documents.some(entry=>entry.id===id)){unsubscribe();this.subscriptions.delete(id);this.pendingViews.delete(id);cached.get(id)?.controller.dispose();}
     this.update({documents,active:snapshot.active,busy:this.transitioning||this.editorOperation!==null,error:null,recoveryError:this.state?.recoveryError ?? null,playbackResumeEpoch:this.state?.playbackResumeEpoch ?? 0});
   }
   /** Why documents cannot be opened or switched right now, or null when they can. */
@@ -217,7 +220,9 @@ export class WorkspaceController {
     const entry=this.state.documents.find(entry=>entry.id===documentId);if(!entry)throw new Error('Select an open document.');
     if(this.transitioning||this.windowClosing)return;
     const repaired=repairDocumentView(entry.controller.getState().score,view);
-    this.update({documents:this.state.documents.map(entry=>entry.id===documentId?{...entry,view:repaired}:entry)});
+    // The view comes from the editor that is showing it, so nothing needs to redraw for it: the state keeps the newest view for the next
+    // reader without telling the subscribers, which would otherwise render the whole workspace for every cursor move.
+    this.state={...this.state,documents:this.state.documents.map(entry=>entry.id===documentId?{...entry,view:repaired}:entry)};
     this.queueView(documentId,repaired);
   }
   setSessionBridge(bridge:NativeSessionBridge):void {

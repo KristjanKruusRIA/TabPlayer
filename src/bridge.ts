@@ -5,6 +5,7 @@ import type { ProtectionRequest } from './protection/protection';
 import type { DocumentId,DocumentSnapshot,NativeWorkspaceBridge } from './workspace/types';
 import {readExportBackingAsset} from './export/backing-asset-read';
 import { newScoreDefaults } from './workspace/author-defaults';
+import { getMessage,getResolvedLanguage } from './i18n';
 
 export interface NativeBridge {
   readonly documentId:DocumentId;
@@ -23,6 +24,8 @@ export interface NativeBridge {
   exportGp(bytes: Uint8Array,revision:number,fileName?:string): Promise<boolean>;
   readBackingAsset(assetId:string,revision:number):Promise<Uint8Array>;
   askUnsaved(title:string,path:string|null): Promise<'save' | 'discard' | 'cancel'>;
+  /** Asks whether to close a document that cannot be rebuilt (and so cannot be saved) and discard its unsaved changes: only Discard or Cancel, never Save. Absent bridges cancel. */
+  confirmDiscardBroken?(title:string): Promise<boolean>;
   /** Asks before a Guitar Pro export; `detail` replaces the general warning with what this export leaves out. */
   confirmExport(detail?:{title:string;message:string}): Promise<boolean>;
 }
@@ -60,6 +63,11 @@ export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSav
   askUnsaved: async (title,path) => {
     const result = await message(`Save changes to “${title}” before closing?${path?`\n${path}`:''}`,{title:'Unsaved score',kind:'warning',buttons:{yes:'Save',no:'Discard',cancel:'Cancel'}});
     return result === 'Yes' || result === 'Save' ? 'save' : result === 'No' || result === 'Discard' ? 'discard' : 'cancel';
+  },
+  confirmDiscardBroken: async title => {
+    const language=getResolvedLanguage(),discard=getMessage(language,'document.discard_changes');
+    const result = await message(getMessage(language,'document.discard_prompt',{title}),{title:getMessage(language,'document.discard_title'),kind:'warning',buttons:{ok:discard,cancel:getMessage(language,'action.cancel')}});
+    return result === 'Ok' || result === discard;
   },
   confirmExport: detail => desktopTest?Promise.resolve(true):confirm(detail?.message??'Guitar Pro export rebuilds the score. Some techniques, layout, or sound settings may change. Your native project and original file are preserved.',{title:detail?.title??'Export Guitar Pro file',kind:'warning'}),
   };

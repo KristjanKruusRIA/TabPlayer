@@ -39,6 +39,8 @@ import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score
 import { useI18n } from './i18n';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
+/** How often, and for how long each time, a draw gives way to keys and clicks that are waiting. */
+const DRAW_DEFERRALS_MAX=6,DRAW_DEFERRAL_MS=16;
 const diagramScale=.45,chipHeight=16,chipGap=2;
 const chipWidth=(diagram:ScaleDiagram)=>18+6*Math.min(14,(diagram.name||'Scale').length);
 const chipLabel=(diagram:ScaleDiagram)=>(diagram.name||'Scale').slice(0,14);
@@ -82,7 +84,7 @@ const accoladeOverlay=(plan:AccoladePlan,metrics:AccoladeMetrics,systems:readonl
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,autoFit=false,onAutoFit,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
+export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,autoFit=false,onAutoFit,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -107,6 +109,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   onSystems?:(systems:SystemSpan[]|null)=>void;
   /** The role fonts that could not be loaded (by file name) and the music symbols drawn from Bravura, after each render that waited for fonts. Not repeated for an equal value. */
   onFontStatus?:(status:{failed:string[];substituted:string[]})=>void;
+  /** The document is being changed by several steps in a row (a two-digit fret is written, taken back and written again): nothing is drawn until they are done, so the score is drawn once. */
+  holdDraw?:boolean;
 }) {
   // System gaps and staff gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
   const renderKey=engravingRenderKey(engravingProp),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
@@ -255,11 +259,11 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const editBeat=editTarget?score.tracks[editTarget.track]?.staves[editTarget.staff]?.bars[editTarget.bar]?.voices[editTarget.voice]?.beats[editTarget.beat]:undefined;
   const editLocation=editBeat&&editTarget?`Editing ${score.tracks[editTarget.track].name || `track ${editTarget.track+1}`}, measure ${editTarget.bar+1}, beat ${editTarget.beat+1}, voice ${editTarget.voice+1}${editBeat.isEmpty?', empty':editBeat.isRest?', rest':''}${editNoteIndex!=null?`, note ${editNoteIndex+1}`:editString?`, string ${editString}`:''}`:'';
   const canonicalBeat=(beat:model.Beat)=>{
-    const value=current.current,pair=value.projection?.beats.get(beat.id),source=value.projection?(pair?.rendered===beat?pair.source:null):beat;
+    const value=current.current,projection=value.projection,pair=projection?.beats.get(beat.id),source=projection?(projection.renderedBeats?projection.renderedBeats.get(beat)??null:pair?.rendered===beat?pair.source:null):beat;
     return source?.voice.bar.staff.track.score===value.score&&value.tracks.includes(source.voice.bar.staff.track.index)?source:null;
   };
   const canonicalNote=(note:model.Note)=>{
-    const value=current.current,pair=value.projection?.notes.get(note.id),source=value.projection?(pair?.rendered===note?pair.source:null):note;
+    const value=current.current,projection=value.projection,pair=projection?.notes.get(note.id),source=projection?(projection.renderedNotes?projection.renderedNotes.get(note)??null:pair?.rendered===note?pair.source:null):note;
     return source&&canonicalBeat(note.beat)&&source.beat.voice.bar.staff.track.score===value.score?source:null;
   };
   const renderedBeat=(beat:model.Beat)=>{
@@ -513,8 +517,16 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
   const [drawFailure,setDrawFailure]=useState<{error:unknown}|null>(null);
   const renderGeneration=useRef(0);
+  // A draw of a long score takes a fifth of a second and cannot be interrupted. When keys or clicks are already waiting (a pointer merely moving over the page does not count) (a run of edits typed
+  // quickly), the draw lets them go first, a few frames at most; each of them changes the score again, and only the newest is drawn.
+  const [drawRetry,setDrawRetry]=useState(0),drawDeferred=useRef(0);
   useEffect(()=>{
-    const view=api.current!;if(sourceWidth<=0)return;
+    const view=api.current!;if(sourceWidth<=0||holdDraw)return;
+    const scheduling=(navigator as Navigator&{scheduling?:{isInputPending?:(options?:{includeContinuous?:boolean})=>boolean}}).scheduling;
+    if(drawDeferred.current<DRAW_DEFERRALS_MAX&&scheduling?.isInputPending?.({includeContinuous:false})){
+      drawDeferred.current++;const timer=setTimeout(()=>setDrawRetry(count=>count+1),DRAW_DEFERRAL_MS);return()=>clearTimeout(timer);
+    }
+    drawDeferred.current=0;
     // `music` is the font the layout is drawn with: the chosen font's loaded data, or Bravura's (also when the chosen font failed to load).
     const draw=(music:MusicFontData,drawn=engraving)=>{
       view.settings.display.scale=sourceScale;applyEffectBandSpacing(view.settings);
@@ -561,7 +573,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       reportFonts();
     });
     return()=>{renderGeneration.current++;};
-  },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page,idsKey]);
+  },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page,idsKey,drawRetry,holdDraw]);
   useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refreshOverlays();},[pagination,arrangement,pageError]);
   /** Places every mark drawn over the score again from where the renderer now has it. The last pass's cost is kept as a user-timing measure. */
   const refreshOverlays=()=>{

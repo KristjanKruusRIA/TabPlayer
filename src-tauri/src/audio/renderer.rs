@@ -308,6 +308,10 @@ struct VoiceSample {
     audio: Arc<DecodedAudio>,
     parameters: VoiceParameters,
     release_decay: f64,
+    /// Frames of recorded silence before a muted or dead note's pick, and the voice's palm mute and dead note trims in dB: measured and
+    /// looked up while preparing, so starting a note on the audio thread scans nothing.
+    lead_frames: f64,
+    trims_db: (f64, f64),
 }
 impl VoiceSample {
     fn new(
@@ -339,11 +343,19 @@ impl VoiceSample {
             audio,
             parameters,
             release_decay: region.release_decay_db_per_second,
+            lead_frames: 0.0,
+            trims_db: (0.0, 0.0),
         })
     }
     fn instantiate(&self, rate: u32) -> SampleVoice {
-        SampleVoice::new(self.audio.clone(), self.parameters, rate)
-            .expect("sample validated during preparation")
+        SampleVoice::prepared(
+            self.audio.clone(),
+            self.parameters,
+            rate,
+            self.lead_frames,
+            self.trims_db,
+        )
+        .expect("sample validated during preparation")
     }
 }
 #[derive(Clone)]
@@ -777,6 +789,7 @@ impl Renderer {
             })
             .collect();
         let mut counters = HashMap::<(usize, usize, u8, u8, &str), usize>::new();
+        let mut lead_cache = HashMap::<String, f64>::new();
         let mut selected = Vec::with_capacity(plan.notes.len());
         for note in &plan.notes {
             let track = track_indices[note.track_id.as_str()];
@@ -829,14 +842,28 @@ impl Renderer {
                 .ok_or_else(|| {
                     format!("No recorded attack for {} key {}.", instrument.id, note.key)
                 })?;
-                let attack = VoiceSample::new(
+                let mut attack = VoiceSample::new(
                     &resources,
                     region,
                     note.key,
                     note.velocity,
                     note.articulation,
                 )?;
-                SampleVoice::new(attack.audio.clone(), attack.parameters, sample_rate)?;
+                attack.trims_db = super::voices::technique_trims_db(&instrument.id);
+                if matches!(note.articulation, Articulation::Muted | Articulation::Dead) {
+                    // One measurement per recording, however many notes use it.
+                    attack.lead_frames = *lead_cache
+                        .entry(region.sample_id.clone())
+                        .or_insert_with(|| super::voices::lead_in_frames(&attack.audio));
+                }
+                SampleVoice::prepared(
+                    attack.audio.clone(),
+                    attack.parameters,
+                    sample_rate,
+                    attack.lead_frames,
+                    attack.trims_db,
+                )?;
+                // A palm mute or dead note ends with the string stopped by the hand: no string-release recording.
                 let release = select_region(
                     instrument,
                     note.key,
@@ -845,6 +872,7 @@ impl Renderer {
                     sequence,
                     "release",
                 )
+                .filter(|_| !matches!(note.articulation, Articulation::Muted | Articulation::Dead))
                 .map(|r| {
                     VoiceSample::new(&resources, r, note.key, note.velocity, Articulation::Picked)
                 })
@@ -1125,6 +1153,17 @@ impl Renderer {
                 }),
             );
             return;
+        }
+        // Striking a string again stops a palm mute still ringing on it.
+        for &slot in &self.active {
+            if let Some(active) = self.slots[slot].as_mut() {
+                if active.track == selected.track
+                    && active.drum.is_none()
+                    && self.plan.notes[active.note].source.string == note.source.string
+                {
+                    active.voice.cut_ring();
+                }
+            }
         }
         let end = self.note_end_ticks[index];
         let mut voice = selected.attack.instantiate(self.rate);

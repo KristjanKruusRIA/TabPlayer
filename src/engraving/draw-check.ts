@@ -88,7 +88,7 @@ export function exposeDrawCheck(live:()=>{view:AlphaTabApi|null;partials:readonl
 /**
  * What is painted, counted at the end of a draw, after a scroll and when the background painting has nothing left to paint (`globalThis.__tabplayerDrawStats`, the last 400 in
  * `__tabplayerDrawStatsLog`): `inView` pieces touch the score area, `emptyInView` of them have nothing in them (must be 0), `painted` pieces have content, `allowed` pieces are
- * within `margin` pixels of the area (what may be painted at most). A driver asserts on these without waiting for alphaTab, so they do not depend on timing.
+ * within `margin` pixels of the area (what may be painted at most: one viewport right after a draw, two after a scroll or the background painting, which empties pieces beyond that). A driver asserts on these without waiting for alphaTab, so they do not depend on timing.
  */
 export interface DrawStats {where:string;pieces:number;inView:number;emptyInView:number;painted:number;allowed:number;at:number}
 export function recordDrawStats(where:string,partials:readonly LayoutPartial[],pieces:HTMLCollection|undefined,canvas:{left:number;top:number},area:{left:number;top:number;right:number;bottom:number},visibleMargin:number,margin:number):void {

@@ -24,7 +24,7 @@ function generate(bars) {
 }
 
 /** Plays `path` through line changes, a click-seek and a loop wrap; returns what the frame sampler saw. */
-async function probe(path,label) {
+async function probe(path,label,flags={},{strict=true,controlNoHighlight}={}) {
   const id=launch({TABPLAYER_TEST_OPEN:path});let browser=null;
   try {
     browser=await connect();const page=browser.contexts()[0].pages()[0];
@@ -36,7 +36,7 @@ async function probe(path,label) {
     const waitFor=async(predicate,what,timeout=40000)=>{const until=Date.now()+timeout;let last;while(Date.now()<until){last=await status();if(predicate(last))return last;await sleep(40);}throw new Error(`${label}: timed out waiting for ${what}: ${JSON.stringify({tick:last?.tick,playing:last?.playing})}`);};
     await page.waitForFunction(()=>{const button=document.querySelector('[aria-keyshortcuts="Space"]');return button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'&&document.querySelector('.app-shell')?.getAttribute('aria-busy')==='false';},{},{timeout:180000});
     // DRAW_FLAGS='{"paintOnCursor":false}' switches a change off to show that the probe sees what it was made to see.
-    if(process.env.DRAW_FLAGS)await page.evaluate(flags=>Object.assign(window.__tabplayerDrawFlags,flags),JSON.parse(process.env.DRAW_FLAGS));
+    await page.evaluate(flags=>Object.assign(window.__tabplayerDrawFlags,flags),{...flags,...JSON.parse(process.env.DRAW_FLAGS??'{}')});
     await sleep(1500);
     const space=async()=>{await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32,text:' '});await sleep(20);await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});};
     /** The fret numbers in view as {x,y} in client coordinates, top row first. */
@@ -91,10 +91,12 @@ async function probe(path,label) {
     const frames=await stopFrameSampler(page);
     await page.locator('.transport-stopbutton').click().catch(()=>{});
     const counts=(await drawStatsLog(page));
-    const result={score:label,frames:frames.frames,blankFrames:frames.blank,longestBlankRun:frames.longestBlankRun,noHighlightFrames:frames.noHighlight,noHighlightRuns:frames.noHighlightRuns.slice(0,12),marks:frames.marks,lineChangesBeforeSeek:afterLines.lineChanges,loopWraps:wraps,drawCounts:{entries:counts.length,maxEmptyInView:Math.max(0,...counts.map(c=>c.emptyInView)),overPainted:counts.filter(c=>c.painted>c.allowed+1).length}};
+    const result={score:label,frames:frames.frames,blankFrames:frames.blank,blankAt:frames.blankFrames,longestBlankRun:frames.longestBlankRun,noHighlightFrames:frames.noHighlight,noHighlightRuns:frames.noHighlightRuns.slice(0,12),marks:frames.marks,lineChangesBeforeSeek:afterLines.lineChanges,loopWraps:wraps,drawCounts:{entries:counts.length,maxEmptyInView:Math.max(0,...counts.map(c=>c.emptyInView)),overPainted:counts.filter(c=>c.painted>c.allowed+1).length}};
     console.log(JSON.stringify(result));
+    if(!strict)return result;
     assert.equal(frames.blank,BUDGET.blankFrames,`${label}: ${frames.blank} presented frames had a system in view without a drawing (frames ${frames.blankFrames.join(',')})`);
-    assert.ok(frames.noHighlight<=BUDGET.noHighlightFrames,`${label}: ${frames.noHighlight} presented frames while playing had no highlighted beat (frames ${frames.noHighlightFrames.join(',')})`);
+    // A beat that is only a rest has nothing to highlight (a real score has such bars): a score's frames without highlight are compared with a run of the same steps on the complete render.
+    assert.ok(frames.noHighlight<=(controlNoHighlight===undefined?BUDGET.noHighlightFrames:controlNoHighlight+BUDGET.noHighlightFrames),`${label}: ${frames.noHighlight} presented frames while playing had no highlighted beat (frames ${frames.noHighlightFrames.join(',')})`);
     assert.equal(result.drawCounts.maxEmptyInView,0,`${label}: a draw or a scroll left a system in view empty`);
     return result;
   } finally {
@@ -105,8 +107,12 @@ async function probe(path,label) {
 
 const directory=mkdtempSync(join(tmpdir(),'tabplayer-playback-draw-')),results=[];
 try {
-  const file=join(directory,'long.gp');writeFileSync(file,generate(48));
-  results.push(await probe(file,'generated score'));
-  for(const [index,path] of ownerScoreFiles(process.env.TP_OWNER_SCORES).entries())results.push(await probe(path,`owner score ${index+1}`));
+  if(process.env.PLAYBACK_SKIP_GENERATED!=='1'){const file=join(directory,'long.gp');writeFileSync(file,generate(48));results.push(await probe(file,'generated score'));}
+  for(const [index,path] of ownerScoreFiles(process.env.TP_OWNER_SCORES).entries()) {
+    if(process.env.PLAYBACK_ONLY&&Number(process.env.PLAYBACK_ONLY)!==index)continue;
+    // The same steps on the complete render first: it shows how many frames a score has no highlighted beat for by itself (bars with only rests have nothing to highlight).
+    const control=await probe(path,`owner score ${index+1} (complete render)`,{lazy:false,ahead:0,paintOnCursor:false},{strict:false});
+    results.push(control,await probe(path,`owner score ${index+1}`,{},{controlNoHighlight:control.noHighlightFrames}));
+  }
   console.log(JSON.stringify(results,null,2));
 } finally {rmSync(directory,{recursive:true,force:true});}

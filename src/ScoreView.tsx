@@ -558,7 +558,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
         if(onlyEmpty){if(paintPiece(view,index))painted=true;}else{view.renderer.renderResult(partials[index].id);painted=true;}
       }
       if(painted)playbackPresentation.current?.rehighlight();
-      if(developerHooks)recordDrawStats(where,partials,pieceElements(view),geometry.canvas,geometry.area,PAINT_MARGIN,geometry.area.height*drawFlags.ahead);
+      if(developerHooks)recordDrawStats(where,partials,pieceElements(view),geometry.canvas,geometry.area,PAINT_MARGIN,geometry.area.height*drawFlags.ahead*(where==='draw'?1:2));
     }catch{ /* alphaTab paints them as they scroll into view */ }
   };
   /**
@@ -582,7 +582,13 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
           if(pieces[index].childElementCount>0)continue;
           const away=Math.abs(geometry.canvas.top+partials[index].y+partials[index].height/2-middle);if(away<distance){distance=away;best=index;}
         }
-        if(best<0){if(developerHooks)recordDrawStats(where,partials,pieces,geometry.canvas,geometry.area,PAINT_MARGIN,geometry.area.height*drawFlags.ahead);return;}
+        if(best<0){
+          // Nothing left to paint ahead: pieces painted earlier and now more than two margins away are emptied again (alphaTab only clears a piece after it has been in view and left it),
+          // so a long scroll or a long playback does not end with the whole score painted. The scroll listener and the cursor paint an empty piece before it is seen.
+          const keep=new Set(visibleIndexes(partials,geometry.canvas,geometry.area,geometry.area.height*drawFlags.ahead*2));
+          for(let index=0;index<pieces.length;index++)if(!keep.has(index)&&pieces[index].childElementCount>0)pieces[index].replaceChildren();
+          if(developerHooks)recordDrawStats(where,partials,pieces,geometry.canvas,geometry.area,PAINT_MARGIN,geometry.area.height*drawFlags.ahead*2);return;
+        }
         paintPiece(view,best);playbackPresentation.current?.rehighlight();state.timer=setTimeout(step,0);
       }catch{ /* alphaTab paints them as they scroll into view */ }
     };

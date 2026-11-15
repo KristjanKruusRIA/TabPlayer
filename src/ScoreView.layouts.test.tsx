@@ -69,13 +69,13 @@ it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','ho
 it.each(['verticalPage','parchment','verticalScreen','horizontalScreen'] as const)('spaces stacked effect bands with the shared padding in %s (THE-199)',layout=>{
  const {api}=setup(layout);expect(api.settings.display.effectBandPaddingBottom).toBe(EFFECT_BAND_PADDING_BOTTOM);
 });
-it.each(['parchment','verticalScreen','horizontalScreen'] as const)('paints only the pieces in view in %s and leaves the rest to alphaTab (THE-213)',layout=>{
+it.each(['parchment','verticalScreen'] as const)('paints only the pieces in view in %s and leaves the rest to alphaTab (THE-213)',layout=>{
  // The mock's score area has no size (jsdom), so only the pieces within the paint margin of its corner are in view: the first system.
  const {api}=setup(layout);
  expect(api.settings.core.enableLazyLoading).toBe(true);
  expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0']);
 });
-it.each(['verticalPage','horizontalPage','grid'] as const)('keeps the complete render in %s, which composes every piece itself (THE-213)',layout=>{
+it.each(['verticalPage','horizontalPage','grid','horizontalScreen'] as const)('keeps the complete render in %s (THE-213): its pieces are composed whole, or its bounds depend on painting',layout=>{
  const {api}=setup(layout);
  expect(api.settings.core.enableLazyLoading).toBe(false);
  expect(state.painted).not.toHaveBeenCalled();

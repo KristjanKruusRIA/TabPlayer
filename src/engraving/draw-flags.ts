@@ -3,7 +3,7 @@
  * `globalThis.__tabplayerDrawFlags` is this object, so a driver can switch a change off and measure the old behaviour on the same build.
  */
 export const drawFlags={
-  /** Paint only the systems in view with the draw; alphaTab paints the others as they scroll into view. */
+  /** Paint only the systems in view with the draw (the vertical live layouts); alphaTab paints the others as they scroll into view. */
   lazy:true,
   /**
    * How many times (16 ms each) a draw gives way to keys that are waiting before it runs anyway. A draw of the whole score took a fifth of a second and could not

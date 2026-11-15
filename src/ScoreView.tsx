@@ -527,8 +527,9 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
   const [drawFailure,setDrawFailure]=useState<{error:unknown}|null>(null);
   const renderGeneration=useRef(0);
-  // A draw of a long score takes a fifth of a second and cannot be interrupted. When keys or clicks are already waiting (a pointer merely moving over the page does not count) (a run of edits typed
-  // quickly), the draw lets them go first, a few frames at most; each of them changes the score again, and only the newest is drawn.
+  // A draw cannot be interrupted. It used to take a fifth of a second or more on a long score, so when keys or clicks were already waiting (a pointer merely moving over the page does not count) it let
+  // them go first, a few frames at most, and only the newest score was drawn. Painting only what is in view takes a few tens of milliseconds, and the key-up of the key just typed counts as
+  // waiting input, so by default (`drawFlags.deferrals`) it no longer waits.
   const [drawRetry,setDrawRetry]=useState(0),drawDeferred=useRef(0);
   /** With lazy loading alphaTab paints a piece when its browser says the piece is on screen, a frame after the layout; the pieces in view are painted here, in the same turn, so no frame shows them blank or as they were. */
   const paintVisible=(view:AlphaTabApi)=>{
@@ -567,8 +568,9 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
           try{configureAccolades(view.settings,projection.score,null,projection.bracketMode);}catch{/* nothing more can be undone */}
         }
       }
-      // Live layouts paint only what is on screen (alphaTab does the rest as it scrolls into view); the page layouts compose every piece themselves.
-      view.settings.core.enableLazyLoading=!sourcePhysical&&drawFlags.lazy;
+      // The vertical live layouts paint only what is on screen (alphaTab does the rest as it scrolls into view). The page layouts compose every piece themselves, and the horizontal strip
+      // stays complete: it builds its bounds again after each piece is painted, so with lazy painting a two-digit fret's note head would get a narrower click area than it has today (found by the draw check).
+      view.settings.core.enableLazyLoading=!sourcePhysical&&display.layout!=='horizontalScreen'&&drawFlags.lazy;
       view.renderer.width=sourceWidth;view.updateSettings();
       accolade.current={plan,metrics:accoladeMetrics(view.settings)};
       const old=loaded.current;

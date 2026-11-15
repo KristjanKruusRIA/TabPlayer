@@ -62,7 +62,12 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
   await quiet();await focusScore();await check('opened',{changes:false});
   await key('ArrowRight',{vk:39});await key('7');await check('a typed digit');
   await key('ArrowRight',{vk:39});await key('1');await key('2');await sleep(300);await check('a two-digit fret');
-  await toolbar('Sixteenth note (1/16)');await check('a shorter duration');
+  // A shorter duration: the cursor's beat may already be a sixteenth in a real score, so the next shorter one is tried until the drawing changes.
+  for(const name of ['Sixteenth note (1/16)','Thirty-second note (1/32)','Sixty-fourth note (1/64)']) {
+    await toolbar(name);
+    if((await page.evaluate(()=>window.__tabplayerCheckDraw())).signature!==previous.signature)break;
+  }
+  await check('a shorter duration');
   await focusScore();await key('z',{modifiers:2,code:'KeyZ',vk:90});await check('undo');
   await key('y',{modifiers:2,code:'KeyY',vk:89});await check('redo');
   // Beats go and come back, five at a time: the bar gets narrower, then wider, and the line breaks after it move.

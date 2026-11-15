@@ -505,7 +505,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
       }
       refreshOverlays();
       // The layout is done: the pieces in view are painted now (this also covers a render that waited for alphaTab's fonts and so ran after draw() returned).
-      if(view.settings.core.enableLazyLoading){paintVisible(view);scheduleAheadRef.current(view,'draw');}
+      if(view.settings.core.enableLazyLoading){paintVisible(view);scheduleAheadRef.current(view);}
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);

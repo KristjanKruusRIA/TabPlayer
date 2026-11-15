@@ -56,7 +56,8 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
     if(lazyLayout&&changes)assert.ok(counts.some(entry=>entry.where==='draw'),`${label}: after "${name}" the app counted no draw`);
     for(const entry of counts){
       assert.equal(entry.emptyInView,0,`${label}: after "${name}" (${entry.where}) ${entry.emptyInView} of ${entry.inView} pieces in view were empty`);
-      assert.ok(entry.painted<=entry.allowed,`${label}: after "${name}" (${entry.where}) ${entry.painted} pieces were painted, at most ${entry.allowed} are in view or in the margin`);
+      // A scroll's own count is taken before the background painting has emptied the pieces left far behind; the count after a draw and the one the background painting ends with are settled states.
+      if(entry.where!=='scroll')assert.ok(entry.painted<=entry.allowed,`${label}: after "${name}" (${entry.where}) ${entry.painted} pieces were painted, at most ${entry.allowed} are in view or in the margin`);
     }
     const result=await page.evaluate(()=>window.__tabplayerCheckDraw());
     assert.ok(result.equal,`${label}: after "${name}" the drawing differs from a complete render: ${result.differences.slice(0,3).join(' || ')}`);

@@ -253,7 +253,7 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, busy = fals
         {parsed && parsed.length > 0 && <ul className="tuning-strings" aria-label={t('tuning_dialog.strings')}>
           {parsed.map((pitch, index) => <StringRow key={index} index={index} pitch={pitch} revision={revision} playable={!!onAudition} onPitch={next => setPitch(index, next)} onInvalid={message => setRowError(message ? { index, message } : current => (current?.index === index ? null : current))} onPlay={() => play([pitch], false)} />)}
         </ul>}
-        {staff && mode === 'track' && <fieldset className="tuning-capo" aria-label={t('tuning_dialog.capo_section')}>
+        {staff && mode === 'track' && <fieldset className="tuning-capo">
           <legend>{t('tuning_dialog.capo_section')}</legend>
           <div className="tuning-capo-row">
             <label htmlFor="tuning-dialog-capo" className="tuning-dialog-label">{t('editor.capo')}</label>

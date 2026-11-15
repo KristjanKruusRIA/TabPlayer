@@ -31,8 +31,12 @@ it('sends each choice as a mix edit that keeps the rest of the mix, and clearing
 it('is hidden for a track with no strings, disabled while busy, and shows a refusal', async () => {
   const { container, rerender } = render(<InterpretationPanel trackId="base/0" mix={mix} stringed={false} onEdit={vi.fn()} />);
   expect(container).toBeEmptyDOMElement();
-  rerender(<InterpretationPanel trackId="base/0" mix={mix} stringed busy onEdit={vi.fn()} />);
-  expect(screen.getByRole('combobox', { name: 'Playing style' })).toBeDisabled();
+  const refused = vi.fn();
+  rerender(<InterpretationPanel trackId="base/0" mix={mix} stringed busy onEdit={refused} />);
+  // Busy refuses the change but keeps the control focusable: it is aria-disabled, not disabled.
+  const style = screen.getByRole('combobox', { name: 'Playing style' });
+  expect(style).not.toBeDisabled();expect(style.closest('fieldset')).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.change(style, { target: { value: 'pick' } });fireEvent.click(screen.getByRole('checkbox', { name: 'Automatic let ring' }));expect(refused).not.toHaveBeenCalled();
   rerender(<InterpretationPanel trackId="base/0" stringed onEdit={() => Promise.reject(new Error('Refused.'))} />);
   fireEvent.click(screen.getByRole('checkbox', { name: 'Automatic let ring' }));
   expect(await screen.findByRole('alert')).toHaveTextContent('Refused.');

@@ -25,7 +25,9 @@ export function MasterSlots({ master, disabled, onChange }: { master: MasterSett
   return <div className="master-slots">
     <ul className="slot-rows" aria-label={t('inspector.sound_mastering')}>
       {effects.map(effect => <li key={effect} className="slot-row" data-on={current[effect].enabled}>
-        <label className="slot-power"><input type="checkbox" role="switch" checked={current[effect].enabled} aria-disabled={disabled || undefined} onChange={event => power(effect, event.target.checked)} /><span className="slot-name">{name[effect]}</span><span className="slot-state">{current[effect].enabled ? t('sound.enabled') : t('sound.bypassed')}</span></label>
+        <input id={`slot-${effect}`} type="checkbox" role="switch" checked={current[effect].enabled} aria-disabled={disabled || undefined} onChange={event => power(effect, event.target.checked)} />
+        <label htmlFor={`slot-${effect}`} className="slot-name">{name[effect]}</label>
+        <span className="slot-state">{current[effect].enabled ? t('sound.enabled') : t('sound.bypassed')}</span>
         <button type="button" className="slot-edit" aria-haspopup="dialog" title={t('master_slots.edit', { name: name[effect] })} aria-label={t('master_slots.edit', { name: name[effect] })} onClick={() => setEditing(effect)}><SlidersGlyph /></button>
       </li>)}
     </ul>

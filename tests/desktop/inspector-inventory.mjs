@@ -32,7 +32,7 @@ const collect=tab=>page.evaluate(tab=>{
 },tab);
 try{
   report.viewport=await page.evaluate(()=>({w:innerWidth,h:innerHeight}));
-  for(const tab of ['Song','Track','Selection']){
+  for(const tab of ['Song','Track']){
     await revealInspectorTab(page,tab);await settle(page,500);
     const result=await collect(tab.toLowerCase());report.tabs[tab]={...result,shown:result.controls.filter(c=>c.shown).length,all:result.controls.length};
     if(shots)await page.screenshot({path:resolve(shots,`inventory-${tab.toLowerCase()}.png`)});

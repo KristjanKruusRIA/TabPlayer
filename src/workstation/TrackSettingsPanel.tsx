@@ -47,7 +47,7 @@ function TrackInfoRow({ score, selected, busy, locked, onEdit }: { score: model.
   const current = score.tracks[selected];
   const program = current.playbackInfo.program;
   const info = (change: { name?: string; shortName?: string; program?: number }) => {
-    if (locked) return;
+    if (locked || ((change.name ?? current.name) === current.name && (change.shortName ?? current.shortName) === current.shortName && (change.program ?? program) === program)) return;
     void onEdit({ type: 'setTrackInfo', track: selected, name: change.name ?? current.name, shortName: change.shortName ?? current.shortName, program: change.program ?? program });
   };
   return <BusyFieldset busy={busy} className="track-info">
@@ -95,9 +95,11 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
     const count = dialogTrack.staves[0].tuning.length;
     const sameTuning = notes.length === count && dialogTrack.staves.every(target => target.tuning.every((pitch, index) => pitch === notes[index]) && target.stringTuning.name === tuningName);
     if (capo?.changed) {
+      // What the dialog opened with is the first staff's tuning and name; a draft equal to that is no retune.
+      const base = dialogTrack.staves[0], retuned = notes.length !== count || notes.some((pitch, index) => pitch !== base.tuning[index]) || tuningName !== base.stringTuning.name;
       const target = dialogTrack.staves[dialogStaffIndex], targetClef = target.bars[barIndex]?.clef ?? target.bars[0]?.clef ?? model.Clef.G2;
       const settings = { ...settingsFor(target, targetClef, { capo: capo.capo }), ...(JSON.stringify(capo.partialCapo) !== JSON.stringify(getPartialCapo(target) ?? noPartialCapo) ? { partialCapo: capo.partialCapo } : {}), ...(capo.droneFret !== getBanjoDrone(target) ? { droneFret: capo.droneFret } : {}) };
-      if (!sameTuning) {
+      if (retuned) {
         // One gesture is one edit: a retune of the whole track and a capo on one staff only share an edit when the track has the one staff and keeps its string count.
         if (notes.length !== count || dialogTrack.staves.length > 1) { setCapoRefusal(t('tuning_dialog.capo_separately')); return Promise.resolve(false); }
         Object.assign(settings, { tuning: notes, tuningName, ...(keepPitch ? { keepPitch: true } : {}) });

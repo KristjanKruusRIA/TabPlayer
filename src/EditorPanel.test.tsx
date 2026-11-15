@@ -1,103 +1,53 @@
 // @vitest-environment jsdom
-import { useState } from 'react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
-import { model } from '@coderline/alphatab';
 import { EditorPanel } from './EditorPanel';
 import { music, target } from './editor/fixtures';
 
-afterEach(cleanup);
+let paletteHost: HTMLElement, practiceHost: HTMLElement;
+beforeEach(() => {
+  paletteHost = document.body.appendChild(document.createElement('aside'));
+  practiceHost = document.body.appendChild(document.createElement('div'));
+});
+afterEach(() => { cleanup(); paletteHost.remove(); practiceHost.remove(); });
 function props() {
-  return {score:music(),target,string:6,fret:3,noteIndex:null,busy:false,musicSelection:null,
-    onSelectNote:vi.fn(),onSelect:vi.fn(),onString:vi.fn(),onFret:vi.fn(),onEdit:vi.fn(),onMusicSelection:vi.fn(),onChord:vi.fn(),onScales:vi.fn()};
+  return {score:music(),target,string:6,fret:3,noteIndex:null,busy:false,musicSelection:null,paletteHost,practiceHost,
+    onSelectNote:vi.fn(),onSelect:vi.fn(),onEdit:vi.fn(),onMusicSelection:vi.fn(),onChord:vi.fn(),onScales:vi.fn(),onOpenLyrics:vi.fn(),onProperties:vi.fn(),onCloseProperties:vi.fn()};
 }
-function Draft({label}:{label:string}) {
-  const [value,setValue]=useState('');
-  return <label>{label}<input value={value} onChange={event=>setValue(event.target.value)}/></label>;
-}
-function disclose(name:string) {fireEvent.click(screen.getByText(name,{selector:'summary'}));}
 
-it('keeps common entry and musical tools visible while all original panels remain reachable by task',()=>{
+it('draws the edition palette into its host and nothing into the inspector: the Selection tab is gone',()=>{
   const input=props();
-  render(<EditorPanel {...input} practiceTools={<Draft label="Practice draft"/>} presentationTools={<Draft label="Presentation draft"/>}><Draft label="Clipboard draft"/></EditorPanel>);
-  expect(screen.getByLabelText('Editing location')).toHaveTextContent('Guitar · Measure 1 · Beat 1');
-  expect(screen.getByLabelText('Duration')).toBeVisible();
-  expect(screen.getByRole('button',{name:'Set note'})).toBeVisible();
-  expect(screen.getByLabelText('Tuplet numerator')).not.toBeVisible();
-  disclose('Advanced rhythm');expect(screen.getByLabelText('Tuplet numerator')).toBeVisible();expect(screen.getByLabelText('Grace type')).toBeVisible();
-  fireEvent.click(screen.getByRole('button',{name:'Edit chord diagram'}));fireEvent.click(screen.getByRole('button',{name:'Browse scales'}));
+  const {container}=render(<EditorPanel {...input}/>);
+  expect(container).toBeEmptyDOMElement();
+  expect(within(paletteHost).getByRole('toolbar',{name:'Editing toolbar'})).toBeInTheDocument();
+  expect(screen.queryByRole('tab',{name:'Selection'})).toBeNull();expect(screen.queryByLabelText('Selection context')).toBeNull();expect(screen.queryByRole('button',{name:'Set note'})).toBeNull();
+});
+
+it('puts the practice tools in the toolbar pop-up host and keeps the tuner outside the busy fieldset',()=>{
+  const input=props();
+  const view=render(<EditorPanel {...input} practiceTools={<button>Practice control</button>} tunerTool={<button>Tuner control</button>}/>);
+  expect(within(practiceHost).getByRole('button',{name:'Practice control'})).toBeEnabled();
+  view.rerender(<EditorPanel {...input} busy practiceTools={<button>Practice control</button>} tunerTool={<button>Tuner control</button>}/>);
+  expect(within(practiceHost).getByRole('button',{name:'Practice control'})).toBeDisabled();expect(within(practiceHost).getByRole('button',{name:'Tuner control'})).toBeEnabled();
+});
+
+it('palette Lyrics asks for the lyrics editor, and Chords and Scale diagram open their editors',()=>{
+  const input=props();
+  render(<EditorPanel {...input}/>);
+  const toolbar=within(paletteHost);
+  fireEvent.click(toolbar.getByRole('button',{name:'Lyrics'}));expect(input.onOpenLyrics).toHaveBeenCalledOnce();
+  fireEvent.click(toolbar.getByRole('button',{name:'Chords'}));fireEvent.click(toolbar.getByRole('button',{name:'Scale diagram'}));
   expect(input.onChord).toHaveBeenCalledOnce();expect(input.onScales).toHaveBeenCalledOnce();
-  const edit=within(screen.getByRole('region',{name:'Edit tools'}));
-  for(const title of ['Notes & techniques','Beat notation','Music selection','Beat text','Measure & notation','Directions','Staff, voices & layout','Bar gestures','Lyrics','Insert & remove measures'])expect(edit.getByText(title,{selector:'summary'})).toBeVisible();
-  expect(edit.getByLabelText('Clipboard draft')).toBeVisible();
-  fireEvent.click(screen.getByRole('button',{name:'Practice'}));expect(screen.getByLabelText('Practice draft')).toBeVisible();
-  fireEvent.click(screen.getByRole('button',{name:'Presentation'}));expect(screen.getByLabelText('Presentation draft')).toBeVisible();
-  const presentation=within(screen.getByRole('region',{name:'Presentation tools'}));
-  expect(presentation.getByText('Score information',{selector:'summary'})).toBeVisible();expect(presentation.getByText('Song metadata',{selector:'summary'})).toBeVisible();
-});
-
-it('preserves parent, child and slot drafts when tasks are closed and reopened',()=>{
-  render(<EditorPanel {...props()} practiceTools={<Draft label="Practice draft"/>} presentationTools={<Draft label="Presentation draft"/>}><Draft label="Clipboard draft"/></EditorPanel>);
-  disclose('Beat text');fireEvent.change(screen.getByLabelText('Beat text'),{target:{value:'Palm mute here'}});
-  fireEvent.change(screen.getByLabelText('Clipboard draft'),{target:{value:'Keep clipboard'}});
-  disclose('Edit');fireEvent.click(screen.getByRole('button',{name:'Practice'}));
-  fireEvent.change(screen.getByLabelText('Practice draft'),{target:{value:'Four passes'}});disclose('Practice');
-  fireEvent.click(screen.getByRole('button',{name:'Presentation'}));disclose('Score information');disclose('Song metadata');
-  fireEvent.change(screen.getByLabelText('Title'),{target:{value:'New title draft'}});fireEvent.change(screen.getByLabelText('Subtitle'),{target:{value:'Verse study'}});
-  fireEvent.change(screen.getByLabelText('Presentation draft'),{target:{value:'Print draft'}});disclose('Presentation');
-  for(const task of ['Edit','Practice','Presentation'])fireEvent.click(screen.getByRole('button',{name:task}));
-  for(const [label,value] of [['Beat text','Palm mute here'],['Clipboard draft','Keep clipboard'],['Practice draft','Four passes'],['Title','New title draft'],['Subtitle','Verse study'],['Presentation draft','Print draft']])expect(screen.getByLabelText(label)).toHaveValue(value);
-});
-
-it('keeps task navigation usable while busy and disables editing and supplied tools',()=>{
-  render(<EditorPanel {...props()} busy practiceTools={<Draft label="Practice draft"/>} presentationTools={<button>Export draft</button>}/>);
-  for(const task of ['Edit','Practice','Presentation']) {
-    const button=screen.getByRole('button',{name:task});expect(button).toBeEnabled();fireEvent.click(button);
-  }
-  expect(screen.getByLabelText('Fret')).toBeDisabled();expect(screen.getByRole('button',{name:'Set note'})).toBeDisabled();
-  expect(screen.getByRole('button',{name:'Edit chord diagram'})).toBeDisabled();expect(screen.getByRole('button',{name:'Browse scales'})).toBeDisabled();
-  expect(screen.getByLabelText('Practice draft')).toBeDisabled();expect(screen.getByRole('button',{name:'Export draft'})).toBeDisabled();
-});
-
-it('opens a task from keyboard navigation and keeps rhythm and selection callbacks intact',async()=>{
-  const user=userEvent.setup(),input=props();render(<EditorPanel {...input} practiceTools={<Draft label="Practice draft"/>}/>);
-  const navigation=within(screen.getByRole('navigation',{name:'Inspector tasks'}));
-  navigation.getByRole('button',{name:'Edit'}).focus();await user.tab();expect(navigation.getByRole('button',{name:'Practice'})).toHaveFocus();
-  await user.keyboard('{Enter}');expect(screen.getByLabelText('Practice draft')).toBeVisible();expect(screen.getByText('Practice',{selector:'summary'})).toHaveFocus();
-  fireEvent.click(navigation.getByRole('button',{name:'Edit'}));
-  fireEvent.change(screen.getByLabelText('Measure'),{target:{value:'2'}});expect(input.onSelect).toHaveBeenCalledWith({...target,bar:1,beat:0});
-  fireEvent.change(screen.getByLabelText('Duration'),{target:{value:'8'}});disclose('Advanced rhythm');
-  fireEvent.change(screen.getByLabelText('Tuplet numerator'),{target:{value:'3'}});fireEvent.change(screen.getByLabelText('Tuplet denominator'),{target:{value:'2'}});
-  fireEvent.click(screen.getByRole('button',{name:'Apply rhythm'}));expect(input.onEdit).toHaveBeenCalledWith({type:'setBeatRhythm',target,duration:8,dots:0,tupletNumerator:3,tupletDenominator:2,graceType:0});
-});
-
-it('retains unapplied rhythm and text drafts when the parent hides and reveals the mounted inspector',()=>{
-  const input=props(),view=render(<div><EditorPanel {...input}/></div>);
-  fireEvent.change(screen.getByLabelText('Duration'),{target:{value:'16'}});
-  disclose('Beat text');fireEvent.change(screen.getByLabelText('Beat text'),{target:{value:'Let this ring'}});
   expect(input.onEdit).not.toHaveBeenCalled();
-  view.rerender(<div hidden><EditorPanel {...input}/></div>);
-  expect(screen.getByLabelText('Editing location')).not.toBeVisible();
-  view.rerender(<div><EditorPanel {...input}/></div>);
-  expect(screen.getByLabelText('Editing location')).toBeVisible();
-  expect(screen.getByLabelText('Duration')).toHaveValue('16');expect(screen.getByLabelText('Beat text')).toHaveValue('Let this ring');
-  fireEvent.click(screen.getByRole('button',{name:'Apply rhythm'}));
-  expect(input.onEdit).toHaveBeenNthCalledWith(1,{type:'setBeatRhythm',target,duration:16,dots:0,tupletNumerator:1,tupletDenominator:1,graceType:0});
-  fireEvent.click(screen.getByRole('button',{name:'Apply beat text'}));
-  expect(input.onEdit).toHaveBeenNthCalledWith(2,{type:'setBeatText',target,text:'Let this ring'});
 });
 
-it('identifies the indexed note in the persistent location and keeps unsupported techniques reachable',()=>{
-  const input=props();input.score.tracks[0].staves[0].isPercussion=true;
-  const view=render(<EditorPanel {...input} noteIndex={0}/>);
-  expect(screen.getByLabelText('Editing location')).toHaveTextContent('Staff 1 · Voice 1 · Note 1');
-  disclose('Notes & techniques');expect(screen.getByLabelText('Palm mute')).toBeVisible();expect(screen.getByLabelText('Palm mute')).toBeDisabled();
-  fireEvent.click(screen.getByLabelText('Ghost note'));
-  expect(input.onEdit).toHaveBeenCalledWith({type:'setNoteTechniquesByIndex',target,noteIndex:0,patch:{ghost:true}});
-  view.rerender(<EditorPanel {...input} noteIndex={null}/>);
-  expect(screen.getByLabelText('Editing location')).toHaveTextContent('No note selected');
+it('shows the Properties dialog only while it is requested, and closing it records nothing',()=>{
+  const input=props(),view=render(<EditorPanel {...input}/>);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  view.rerender(<EditorPanel {...input} properties={{tab:'note',nonce:1}}/>);
+  const dialog=screen.getByRole('dialog',{name:'Properties'});expect(dialog).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole('button',{name:'Close'}));expect(input.onCloseProperties).toHaveBeenCalledOnce();expect(input.onEdit).not.toHaveBeenCalled();
 });
 
 it('glyph editing toolbar dispatches one undoable edit per duration, dot, rest, tie and technique click with roving keyboard navigation',()=>{
@@ -108,7 +58,6 @@ it('glyph editing toolbar dispatches one undoable edit per duration, dot, rest, 
 
   fireEvent.click(toolbar.getByRole('button',{name:'Eighth note (1/8)'}));
   expect(input.onEdit).toHaveBeenLastCalledWith({type:'setDuration',target,duration:8,dots:0});
-  expect(screen.getByLabelText('Duration')).toHaveValue('8');
 
   fireEvent.click(toolbar.getByRole('button',{name:'Dotted'}));
   expect(input.onEdit).toHaveBeenLastCalledWith({type:'setDuration',target,duration:4,dots:1});
@@ -228,94 +177,3 @@ it('toolbar keyboard keeps one tab stop always and keeps focus through an edit',
   expect(tabStops.length).toBeGreaterThanOrEqual(1);
 });
 
-it('contextual inspector shows active selection badges and filters panels by context while preserving drafts',()=>{
-  const input=props();
-  const note=input.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
-  note.isPalmMute=true;
-  note.bendType=1;
-  const view=render(<EditorPanel {...input}><Draft label="Clipboard draft"/></EditorPanel>);
-
-  const contextCard=within(screen.getByRole('region',{name:'Selection context'}));
-  expect(contextCard.getByText(/Selected note · String 6/)).toBeVisible();
-  expect(contextCard.getByLabelText('Active note techniques')).toHaveTextContent('Bend');
-  expect(contextCard.getByLabelText('Active note techniques')).toHaveTextContent('PM');
-
-  disclose('Beat text');
-  fireEvent.change(screen.getByLabelText('Beat text'),{target:{value:'Verse riff'}});
-
-  fireEvent.click(contextCard.getByRole('button',{name:'Note'}));
-  expect(screen.getByLabelText('Fret')).toBeVisible();
-  expect(screen.getByLabelText('Palm mute')).toBeVisible();
-  expect(screen.getByText('Measure & notation',{selector:'summary'})).not.toBeVisible();
-  expect(screen.getByText('Music selection',{selector:'summary'})).not.toBeVisible();
-
-  fireEvent.click(contextCard.getByRole('button',{name:'Measure'}));
-  expect(screen.getByLabelText('Time numerator')).toBeVisible();
-  expect(screen.getByLabelText('Fret')).not.toBeVisible();
-
-  fireEvent.click(contextCard.getByRole('button',{name:'Selection'}));
-  expect(screen.getByLabelText('Clipboard draft')).toBeVisible();
-  expect(screen.getByLabelText('Time numerator')).not.toBeVisible();
-
-  fireEvent.click(contextCard.getByRole('button',{name:'Beat'}));
-  expect(screen.getByLabelText('Beat text')).toHaveValue('Verse riff');
-
-  view.rerender(<EditorPanel {...input} musicSelection={{kind:'bars',tracks:[0],firstBar:0,lastBar:1}}><Draft label="Clipboard draft"/></EditorPanel>);
-  expect(contextCard.getByText('Range selection · Measures 1–2')).toBeVisible();
-});
-
-it('Shift+Ctrl+V reveals clipboard hidden by scope, formats double/quad rests correctly, and omits String on percussion', () => {
-  const input = props();
-  const view = render(<EditorPanel {...input}><Draft label="Clipboard draft" /></EditorPanel>);
-  const contextCard = within(screen.getByRole('region', { name: 'Selection context' }));
-
-  // Switch to note scope -> clipboard draft is hidden
-  fireEvent.click(contextCard.getByRole('button', { name: 'Note' }));
-  expect(screen.getByLabelText('Clipboard draft')).not.toBeVisible();
-
-  // Shift+Ctrl+V pressed on window -> reveals clipboard (Finding 8)
-  fireEvent.keyDown(window, { key: 'v', ctrlKey: true, shiftKey: true });
-  expect(screen.getByLabelText('Clipboard draft')).toBeVisible();
-
-  // Test double whole and quadruple whole rest formatting (LOW finding)
-  const beat = input.score.tracks[0].staves[0].bars[0].voices[0].beats[0];
-  beat.notes = [];
-  beat.duration = -2;
-  view.rerender(<EditorPanel {...input} />);
-  expect(screen.getByText(/Rest beat · Double whole/)).toBeInTheDocument();
-
-  beat.duration = -4;
-  view.rerender(<EditorPanel {...input} />);
-  expect(screen.getByText(/Rest beat · Quadruple whole/)).toBeInTheDocument();
-
-  // Test percussion track omits "String N" when slot is empty (LOW finding)
-  input.score.tracks[0].staves[0].isPercussion = true;
-  input.score.tracks[0].staves[0].stringTuning.tunings = [];
-  const testNote = new model.Note();
-  testNote.fret = 0;
-  beat.notes = [testNote];
-  view.rerender(<EditorPanel {...input} noteIndex={null} />);
-  expect(screen.getByText(/Empty note slot/)).toBeInTheDocument();
-  expect(screen.queryByText(/Empty string slot/)).not.toBeInTheDocument();
-
-  // Test beat scope reveals pick stroke and whammy in TechniquePanel (LOW finding)
-  input.score.tracks[0].staves[0].isPercussion = false;
-  input.score.tracks[0].staves[0].stringTuning.tunings = [64, 59, 55, 50, 45, 40];
-  fireEvent.click(contextCard.getByRole('button', { name: 'Beat' }));
-  expect(screen.getByLabelText('Pick stroke')).toBeVisible();
-  expect(screen.getByText('Whammy curve')).toBeVisible();
-});
-
-it('palette Lyrics reveals and focuses the Lyrics section, and Chords and Scale diagram open their editors',()=>{
-  const input=props();
-  render(<EditorPanel {...input}/>);
-  const toolbar=within(screen.getByRole('toolbar',{name:'Editing toolbar'}));
-  fireEvent.click(screen.getByRole('button',{name:'Measure'}));
-  const summary=screen.getByText('Lyrics',{selector:'summary'});
-  expect(summary).not.toBeVisible();
-  fireEvent.click(toolbar.getByRole('button',{name:'Lyrics'}));
-  expect(summary).toBeVisible();expect(summary.parentElement).toHaveAttribute('open');expect(summary).toHaveFocus();
-  fireEvent.click(toolbar.getByRole('button',{name:'Chords'}));fireEvent.click(toolbar.getByRole('button',{name:'Scale diagram'}));
-  expect(input.onChord).toHaveBeenCalledOnce();expect(input.onScales).toHaveBeenCalledOnce();
-  expect(input.onEdit).not.toHaveBeenCalled();
-});

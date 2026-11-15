@@ -40,12 +40,34 @@ async function showPane(page,name) {
   await view.click();
 }
 
-/** Opens an inspector tab: Song (score settings), Track (track, sound and interpretation) or Selection (the editor). */
+/** Opens an inspector tab: Song (score information, style and mastering) or Track (track, notation, sound and interpretation).
+ * The Selection tab is gone: its controls live in the palette, the status bar, the menus and the Properties dialog (see openProperties). */
 export async function revealInspectorTab(page,tab) {
-  if(!['Song','Track','Selection'].includes(tab))throw new Error(`Unknown inspector tab: ${tab}`);
+  if(!['Song','Track'].includes(tab))throw new Error(`Unknown inspector tab: ${tab}. The Selection tab is gone; use openProperties(page,tab).`);
   await revealInspector(page);
   const button=page.getByRole('tablist',{name:'Inspector',exact:true}).getByRole('tab',{name:tab,exact:true});
   if(await button.getAttribute('aria-selected')!=='true')await button.click();
+}
+
+const propertiesTabs={note:'Note',beat:'Beat',bar:'Bar',selection:'Selection',staff:'Staff and voices',entry:'Pitch entry',score:'Score'};
+/** Opens the Properties dialog (the Note menu's Note properties) on a tab and returns the dialog locator.
+ * @param {'note'|'beat'|'bar'|'selection'|'staff'|'entry'|'score'} tab */
+export async function openProperties(page,tab='note') {
+  if(!propertiesTabs[tab])throw new Error(`Unknown Properties tab: ${tab}`);
+  const dialog=page.getByRole('dialog',{name:'Properties',exact:true});
+  if(!await dialog.isVisible()) {
+    await openDisclosure(summary(page,/^Note$/));
+    await page.getByRole('button',{name:'Note properties…',exact:true}).click();
+    await dialog.waitFor({state:'visible'});
+  }
+  const button=dialog.getByRole('tab',{name:propertiesTabs[tab],exact:true});
+  if(await button.getAttribute('aria-selected')!=='true')await button.click();
+  return dialog;
+}
+/** Closes the Properties dialog if it is open. */
+export async function closeProperties(page) {
+  const dialog=page.getByRole('dialog',{name:'Properties',exact:true});
+  if(await dialog.isVisible()){await dialog.getByRole('button',{name:'Close',exact:true}).click();await dialog.waitFor({state:'hidden'});}
 }
 
 /** The former left-pane tasks: Track and Sound live in the inspector's Track tab, Backing in the global view's Backing tab.
@@ -70,15 +92,20 @@ export async function revealInspector(page) {
   await page.locator('.workstation-inspector').waitFor({state:'visible'});
 }
 
-/** The three inspector tabs share one panel, so a control is only visible on its own tab. This opens the first tab in which `locator`
- * is visible and returns it; a driver that does not know where a control lives can call it before acting. */
+/** The inspector's tabs share one panel, so a control is only visible on its own tab. This opens the first tab (or Properties dialog tab)
+ * in which `locator` is visible and returns it; a driver that does not know where a control lives can call it before acting. Close the dialog afterwards (closeProperties). */
 export async function revealInspectorControl(page,locator) {
   await revealInspector(page);
-  for(const tab of ['Selection','Track','Song']) {
+  for(const tab of ['Track','Song']) {
     await revealInspectorTab(page,tab);
     if(await locator.first().isVisible())return locator;
   }
-  throw new Error(`Control is not visible on any inspector tab: ${locator}`);
+  for(const tab of Object.keys(propertiesTabs)) {
+    await openProperties(page,tab);
+    if(await locator.first().isVisible())return locator;
+  }
+  await closeProperties(page);
+  throw new Error(`Control is not visible on any inspector tab or Properties tab: ${locator}`);
 }
 
 /** Practice settings open from the toolbar's practice button. */

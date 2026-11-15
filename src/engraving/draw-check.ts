@@ -1,6 +1,7 @@
 import { rendering,type AlphaTabApi } from '@coderline/alphatab';
 import '../tremolo-guard';
-import type { LayoutPartial } from './lazy-paint';
+import { visibleIndexes,type LayoutPartial } from './lazy-paint';
+import { developerHooks } from './draw-flags';
 
 /**
  * What is drawn equals what a complete render of the same score would draw (THE-213, draw speed).
@@ -47,7 +48,10 @@ function renderComplete(view:AlphaTabApi):{pieces:Piece[];bounds:string[]} {
   } finally {view.settings.core.enableLazyLoading=saved;renderer.destroy();}
 }
 
-/** The live view painted completely: its pieces are painted here, read back at once (before alphaTab's own visibility handling takes the ones out of view away again), and read in the order they were laid out. */
+/**
+ * Every piece of the live view, painted (`renderResult`) and read back at once, in layout order (the facade keeps one placeholder `div` per piece, in that order). This changes the page:
+ * pieces out of view are painted too, and alphaTab clears them again the next time it sees them leave the view. Null when the placeholders are not the pieces laid out last.
+ */
 function readLive(view:AlphaTabApi,partials:readonly LayoutPartial[]):Piece[]|null {
   const element=(view.canvasElement as unknown as {element?:HTMLElement}).element;if(!element||element.children.length!==partials.length)return null;
   for(const piece of partials)view.renderer.renderResult(piece.id);
@@ -74,11 +78,23 @@ export function checkDraw(view:AlphaTabApi,partials:readonly LayoutPartial[]):Dr
   return {equal:differences.length===0,pieces:live.length,signature:(hash>>>0).toString(16),breaks:live.map(piece=>piece.first).join(','),bars:view.score?.masterBars.length??0,differences:differences.slice(0,10)};
 }
 
-const developerHooks=(()=>{const env=(import.meta as {env?:{DEV?:boolean;MODE?:string;VITE_DESKTOP_TEST?:string}}).env;return !!(env?.DEV||env?.MODE==='test'||env?.VITE_DESKTOP_TEST==='1');})();
 /** Makes the live score area checkable from outside (development, tests and the desktop test build only). Returns what to call when the area goes away. */
 export function exposeDrawCheck(live:()=>{view:AlphaTabApi|null;partials:readonly LayoutPartial[]}):()=>void {
-  if(!developerHooks)return ()=>{};
   const hook=()=>{const {view,partials}=live();return view?checkDraw(view,partials):{equal:false,pieces:0,signature:'',breaks:'',bars:0,differences:['no score view']};};
   const host=globalThis as {__tabplayerCheckDraw?:typeof hook};host.__tabplayerCheckDraw=hook;
   return ()=>{if(host.__tabplayerCheckDraw===hook)delete host.__tabplayerCheckDraw;};
+}
+
+/**
+ * What is painted, counted at the end of a draw, after a scroll and when the background painting has nothing left to paint (`globalThis.__tabplayerDrawStats`, the last 400 in
+ * `__tabplayerDrawStatsLog`): `inView` pieces touch the score area, `emptyInView` of them have nothing in them (must be 0), `painted` pieces have content, `allowed` pieces are
+ * within `margin` pixels of the area (what may be painted at most). A driver asserts on these without waiting for alphaTab, so they do not depend on timing.
+ */
+export interface DrawStats {where:string;pieces:number;inView:number;emptyInView:number;painted:number;allowed:number;at:number}
+export function recordDrawStats(where:string,partials:readonly LayoutPartial[],pieces:HTMLCollection|undefined,canvas:{left:number;top:number},area:{left:number;top:number;right:number;bottom:number},visibleMargin:number,margin:number):void {
+  if(!developerHooks||!pieces||pieces.length!==partials.length)return;
+  const inView=visibleIndexes(partials,canvas,area,visibleMargin);
+  const stats:DrawStats={where,pieces:partials.length,inView:inView.length,emptyInView:inView.filter(index=>pieces[index].childElementCount===0).length,painted:Array.from(pieces).filter(piece=>piece.childElementCount>0).length,allowed:visibleIndexes(partials,canvas,area,margin+visibleMargin).length,at:performance.now()};
+  const host=globalThis as {__tabplayerDrawStats?:DrawStats;__tabplayerDrawStatsLog?:DrawStats[]};
+  host.__tabplayerDrawStats=stats;(host.__tabplayerDrawStatsLog??=[]).push(stats);if(host.__tabplayerDrawStatsLog.length>400)host.__tabplayerDrawStatsLog.shift();
 }

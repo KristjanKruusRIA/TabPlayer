@@ -30,13 +30,13 @@ vi.mock('./export/pdf',async original=>({...await original<typeof import('./expo
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
  settings=new Settings();score:model.Score|null=null;tracks:number[]=[0];constructor(){state.api=this;}
  beatMouseDown=event<model.Beat>();noteMouseDown=event<model.Note>();beatMouseMove=event<model.Beat>();beatMouseUp=event<void>();renderStarted=event<void>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
- renderer={width:0,partialRenderFinished:event<unknown>(),partialLayoutFinished:event<unknown>(),renderResult(id:string){state.painted(id);}};boundsLookup={staffSystems:[] as rendering.StaffSystemBounds[],findBeats:(beat:model.Beat)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars.flatMap(m=>m.bars.flatMap(b=>b.beats))).filter(b=>b.beat===beat),findBeat:(beat:model.Beat)=>this.boundsLookup.findBeats(beat)[0],findMasterBarByIndex:(index:number)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars).find(m=>m.index===index)??null,getBeatAtPos:()=>null};
- uiFacade={getOffset:()=>({x:state.offset,y:0}),highlightElements(){},removeHighlights(){}};canvasElement={};customCursorHandler=undefined;customScrollHandler=undefined;
+ renderer={width:0,partialRenderFinished:event<unknown>(),partialLayoutFinished:event<unknown>(),renderResult:(id:string)=>{state.painted(id);this.canvasElement.element.children[Number(id.replace('chunk-',''))]?.append(document.createElement('span'));}};boundsLookup={staffSystems:[] as rendering.StaffSystemBounds[],findBeats:(beat:model.Beat)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars.flatMap(m=>m.bars.flatMap(b=>b.beats))).filter(b=>b.beat===beat),findBeat:(beat:model.Beat)=>this.boundsLookup.findBeats(beat)[0],findMasterBarByIndex:(index:number)=>this.boundsLookup.staffSystems.flatMap(s=>s.bars).find(m=>m.index===index)??null,getBeatAtPos:()=>null};
+ uiFacade={getOffset:()=>({x:state.offset,y:0}),highlightElements(){},removeHighlights(){}};canvasElement={element:document.createElement('div')};customCursorHandler=undefined;customScrollHandler=undefined;
  updateSettings(){} destroy(){}
  highlightPlaybackRange(start:model.Beat,end:model.Beat){const first=this.boundsLookup.findBeat(start),last=this.boundsLookup.findBeat(end);if(first&&last)this.playbackRangeHighlightChanged.emit({startBeat:start,endBeat:end,startBeatBounds:first,endBeatBounds:last,highlightBlocks:this.boundsLookup.staffSystems.filter(s=>s.bars[0].index>=start.voice.bar.index&&s.bars[0].index<=end.voice.bar.index).map(s=>s.realBounds)});}
  clearPlaybackRangeHighlight(){this.playbackRangeHighlightChanged.emit({});}
  renderScore(score:model.Score,tracks?:number[]){state.loads();this.score=score;this.tracks=tracks??[0];this.render();}
- render(){state.renders();this.renderStarted.emit();const score=this.score;if(!score)return;this.boundsLookup.staffSystems=[];state.chunkTops=[];
+ render(){state.renders();this.renderStarted.emit();this.canvasElement.element.replaceChildren(...[0,1,2].map(()=>document.createElement('div')));const score=this.score;if(!score)return;this.boundsLookup.staffSystems=[];state.chunkTops=[];
  for(let i=0;i<3;i++){
  const s=new rendering.StaffSystemBounds(),m=new rendering.MasterBarBounds(),b=new rendering.BarBounds(),beat=new rendering.BeatBounds(),note=new rendering.NoteBounds();
  s.realBounds=s.visualBounds=new rendering.Bounds(0,i*450,500,400);s.bars=[m];m.index=i;m.staffSystemBounds=s;m.realBounds=m.visualBounds=s.realBounds;
@@ -79,6 +79,22 @@ it.each(['verticalPage','horizontalPage','grid','horizontalScreen'] as const)('k
  const {api}=setup(layout);
  expect(api.settings.core.enableLazyLoading).toBe(false);
  expect(state.painted).not.toHaveBeenCalled();
+});
+it('paints the system of a bar before the playback cursor highlights and scrolls, and the next one soon after (THE-213)',async()=>{
+ const {api}=setup('parchment');const view=api as unknown as {customCursorHandler:{placeBarCursor:(container:unknown,bounds:unknown)=>void};canvasElement:{element:HTMLElement}};
+ expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0']);
+ const lookup=(state.api as unknown as {boundsLookup:{staffSystems:Array<{bars:Array<{bars:Array<{beats:unknown[]}>}>}>}}).boundsLookup,bounds=lookup.staffSystems[1].bars[0].bars[0].beats[0];
+ view.customCursorHandler.placeBarCursor({setBounds(){},transitionToX(){},stopAnimation(){}},bounds);
+ expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0','chunk-1']);
+ await new Promise(resolve=>setTimeout(resolve,40));
+ expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0','chunk-1','chunk-2']);
+ // A system that has something in it is not painted again.
+ view.customCursorHandler.placeBarCursor({setBounds(){},transitionToX(){},stopAnimation(){}},bounds);
+ expect(state.painted).toHaveBeenCalledTimes(3);
+});
+it.each([['parchment',false],['verticalScreen',false],['verticalPage',true],['horizontalScreen',true]] as const)('a draw of %s %s waits for a key that is waiting (THE-213)',(layout,waits)=>{
+ Object.defineProperty(navigator,'scheduling',{configurable:true,value:{isInputPending:()=>true}});
+ try{setup(layout);expect(state.loads).toHaveBeenCalledTimes(waits?0:1);}finally{Reflect.deleteProperty(navigator,'scheduling');}
 });
 it('changes physical zoom and arrangement without reloading or rerendering notation',()=>{
  const {props,tree,rerender}=setup();const calls=state.renders.mock.calls.length;

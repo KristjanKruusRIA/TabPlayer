@@ -37,8 +37,8 @@ import { resolveSymbol,systemAt } from './editor/symbol-hit';
 import { SymbolPopover,type SymbolView } from './SymbolPopover';
 import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score-entry-hit';
 import { visibleIndexes,type LayoutPartial } from './engraving/lazy-paint';
-import { drawFlags } from './engraving/draw-flags';
-import { exposeDrawCheck } from './engraving/draw-check';
+import { developerHooks,drawFlags } from './engraving/draw-flags';
+import { exposeDrawCheck,recordDrawStats } from './engraving/draw-check';
 import { useI18n } from './i18n';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
@@ -445,8 +445,8 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   };
   useEffect(()=>{
     const view=new AlphaTabApi(container.current!,{core:{fontDirectory:'/font/',scriptFile:'/alphatab/alphaTab.mjs',includeNoteBounds:true,useWorkers:false,engine:'svg',enableLazyLoading:false},player:{playerMode:'EnabledExternalMedia',enableCursor:false,enableUserInteraction:false,scrollElement:'.paper-scroll'}});api.current=view;
-    const unhookCheck=exposeDrawCheck(()=>({view:api.current,partials:layoutPartials.current}));
-    const adapter=installScreenPlayback(view,()=>({...presentation.current,wrapper:wrapper.current,scrollHost:scrollHost.current,barElement:barElement.current,beatElement:beatElement.current}));playbackPresentation.current=adapter;
+    const unhookCheck=developerHooks?exposeDrawCheck(()=>({view:api.current,partials:layoutPartials.current})):()=>{};
+    const adapter=installScreenPlayback(view,()=>({...presentation.current,wrapper:wrapper.current,scrollHost:scrollHost.current,barElement:barElement.current,beatElement:beatElement.current,ensurePainted:index=>ensurePaintedRef.current(index)}));playbackPresentation.current=adapter;
     view.settings.player.enableCursor=true;
     // Reuse the facade's public DOM surface classes so its instance-specific font CSS also applies to copied SVGs.
     setSurfaceClass(container.current?.querySelector('.at-surface')?.className??'');
@@ -496,7 +496,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
       }
       refreshOverlays();
       // The layout is done: the pieces in view are painted now (this also covers a render that waited for alphaTab's fonts and so ran after draw() returned).
-      if(view.settings.core.enableLazyLoading)paintVisible(view);
+      if(view.settings.core.enableLazyLoading){paintVisible(view);scheduleAheadRef.current(view,'draw');}
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
@@ -531,32 +531,88 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   // them go first, a few frames at most, and only the newest score was drawn. Painting only what is in view takes a few tens of milliseconds, and the key-up of the key just typed counts as
   // waiting input, so by default (`drawFlags.deferrals`) it no longer waits.
   const [drawRetry,setDrawRetry]=useState(0),drawDeferred=useRef(0);
+  const pieceElements=(view:AlphaTabApi)=>(view.canvasElement as unknown as {element?:HTMLElement}).element?.children;
+  /** Where the canvas and the score area are, in client coordinates (one forced layout, which is cheap while the pieces are empty). */
+  const viewGeometry=(view:AlphaTabApi)=>{
+    const host=scrollHost.current;if(!host)return null;
+    const offset=view.uiFacade.getOffset(null,view.canvasElement);
+    return {canvas:{left:offset.x-window.scrollX,top:offset.y-window.scrollY},area:host.getBoundingClientRect()};
+  };
+  /** Paints piece `index` when nothing is in it (alphaTab has not painted it yet, or cleared it when it left the view). */
+  const paintPiece=(view:AlphaTabApi,index:number)=>{
+    const partials=layoutPartials.current,pieces=pieceElements(view);
+    if(!pieces||pieces.length!==partials.length||!pieces[index]||pieces[index].childElementCount>0)return false;
+    view.renderer.renderResult(partials[index].id);return true;
+  };
   /**
    * With lazy loading alphaTab paints a piece when its browser says the piece is on screen, a frame after the layout, and clears it again when it leaves; the pieces in view are
    * painted here instead, in the same turn, so no frame shows one blank or as it was. `onlyEmpty` (used while scrolling, which comes before the frame is drawn) paints only the
    * ones that have nothing in them: those are the ones alphaTab has cleared or not painted yet, and painting them now is what keeps a scroll from showing a blank system.
+   * New nodes carry no highlight, so the sounding beat's is put on again after a piece was painted.
    */
-  const paintVisible=(view:AlphaTabApi,onlyEmpty=false)=>{
+  const paintVisible=(view:AlphaTabApi,onlyEmpty=false,where='draw')=>{
     try{
-      const host=scrollHost.current,partials=layoutPartials.current;if(!host||!partials.length)return;
-      const offset=view.uiFacade.getOffset(null,view.canvasElement),area=host.getBoundingClientRect();
-      const pieces=(view.canvasElement as unknown as {element?:HTMLElement}).element?.children;
-      for(const index of visibleIndexes(partials,{left:offset.x-window.scrollX,top:offset.y-window.scrollY},area,PAINT_MARGIN)){
-        if(onlyEmpty&&(!pieces||pieces.length!==partials.length||pieces[index].childElementCount>0))continue;
-        view.renderer.renderResult(partials[index].id);
+      const geometry=viewGeometry(view),partials=layoutPartials.current;if(!geometry||!partials.length)return;
+      let painted=false;
+      for(const index of visibleIndexes(partials,geometry.canvas,geometry.area,PAINT_MARGIN)){
+        if(onlyEmpty){if(paintPiece(view,index))painted=true;}else{view.renderer.renderResult(partials[index].id);painted=true;}
       }
+      if(painted)playbackPresentation.current?.rehighlight();
+      if(developerHooks)recordDrawStats(where,partials,pieceElements(view),geometry.canvas,geometry.area,PAINT_MARGIN,geometry.area.height*drawFlags.ahead);
     }catch{ /* alphaTab paints them as they scroll into view */ }
   };
+  /**
+   * Paints the empty pieces within `drawFlags.ahead` viewports above and below the score area, nearest first, one per task and only while no key or click is waiting, so a fast scroll
+   * (which can present the new position before its `scroll` event runs) lands on painted systems. alphaTab clears a piece it has not been told about only after the piece has been
+   * in view and left it, so these stay. A new call, a new draw and unmounting end the one before.
+   */
+  const ahead=useRef({token:0,timer:0 as ReturnType<typeof setTimeout>|0});
+  const scheduleAhead=(view:AlphaTabApi,where='ahead',delay=150)=>{
+    const state=ahead.current;state.token++;const token=state.token;clearTimeout(state.timer||undefined);
+    if(!(drawFlags.ahead>0))return;
+    const step=()=>{
+      if(token!==state.token||!view.settings.core.enableLazyLoading)return;
+      try{
+        const scheduling=(navigator as Navigator&{scheduling?:{isInputPending?:(options?:{includeContinuous?:boolean})=>boolean}}).scheduling;
+        if(scheduling?.isInputPending?.({includeContinuous:false})){state.timer=setTimeout(step,50);return;}
+        const geometry=viewGeometry(view),partials=layoutPartials.current,pieces=pieceElements(view);
+        if(!geometry||!pieces||pieces.length!==partials.length)return;
+        const middle=(geometry.area.top+geometry.area.bottom)/2;let best=-1,distance=Infinity;
+        for(const index of visibleIndexes(partials,geometry.canvas,geometry.area,geometry.area.height*drawFlags.ahead)){
+          if(pieces[index].childElementCount>0)continue;
+          const away=Math.abs(geometry.canvas.top+partials[index].y+partials[index].height/2-middle);if(away<distance){distance=away;best=index;}
+        }
+        if(best<0){if(developerHooks)recordDrawStats(where,partials,pieces,geometry.canvas,geometry.area,PAINT_MARGIN,geometry.area.height*drawFlags.ahead);return;}
+        paintPiece(view,best);playbackPresentation.current?.rehighlight();state.timer=setTimeout(step,0);
+      }catch{ /* alphaTab paints them as they scroll into view */ }
+    };
+    state.timer=setTimeout(step,delay);
+  };
+  const scheduleAheadRef=useRef(scheduleAhead);scheduleAheadRef.current=scheduleAhead;
+  /** Called by the playback cursor before it highlights and scrolls (screen-playback.ts): the system with this bar is painted now, the one after it soon after, outside the frame. */
+  const ensurePainted=(masterBarIndex:number)=>{
+    const view=api.current;if(!view||!view.settings.core.enableLazyLoading)return;
+    try{
+      const partials=layoutPartials.current,index=partials.findIndex(piece=>piece.firstMasterBarIndex!==undefined&&masterBarIndex>=piece.firstMasterBarIndex&&masterBarIndex<=(piece.lastMasterBarIndex??piece.firstMasterBarIndex));
+      if(index<0)return;
+      paintPiece(view,index);
+      if(index+1<partials.length)setTimeout(()=>{if(layoutPartials.current===partials&&api.current===view&&paintPiece(view,index+1))playbackPresentation.current?.rehighlight();},0);
+    }catch{ /* alphaTab paints it when it is in view */ }
+  };
+  const ensurePaintedRef=useRef(ensurePainted);ensurePaintedRef.current=ensurePainted;
   useEffect(()=>{
     const host=scrollHost.current;if(!host)return;
-    const onScroll=()=>{const view=api.current;if(view&&view.settings.core.enableLazyLoading)paintVisible(view,true);};
-    host.addEventListener('scroll',onScroll,{passive:true});return()=>host.removeEventListener('scroll',onScroll);
+    const onScroll=()=>{const view=api.current;if(view&&view.settings.core.enableLazyLoading){paintVisible(view,true,'scroll');scheduleAheadRef.current(view);}};
+    host.addEventListener('scroll',onScroll,{passive:true});
+    return()=>{host.removeEventListener('scroll',onScroll);ahead.current.token++;clearTimeout(ahead.current.timer||undefined);};
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0||holdDraw)return;
     const scheduling=(navigator as Navigator&{scheduling?:{isInputPending?:(options?:{includeContinuous?:boolean})=>boolean}}).scheduling;
-    if(drawDeferred.current<drawFlags.deferrals&&scheduling?.isInputPending?.({includeContinuous:false})){
+    // A draw that paints only what is in view is short enough not to wait for keys; one that draws the whole score still lets waiting keys go first (`drawFlags`).
+    const lazyDraw=!sourcePhysical&&display.layout!=='horizontalScreen'&&drawFlags.lazy;
+    if(drawDeferred.current<(lazyDraw?drawFlags.deferrals:drawFlags.completeDeferrals)&&scheduling?.isInputPending?.({includeContinuous:false})){
       drawDeferred.current++;const timer=setTimeout(()=>setDrawRetry(count=>count+1),DRAW_DEFERRAL_MS);return()=>clearTimeout(timer);
     }
     drawDeferred.current=0;
@@ -584,7 +640,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
       }
       // The vertical live layouts paint only what is on screen (alphaTab does the rest as it scrolls into view). The page layouts compose every piece themselves, and the horizontal strip
       // stays complete: it builds its bounds again after each piece is painted, so with lazy painting a two-digit fret's note head would get a narrower click area than it has today (found by the draw check).
-      view.settings.core.enableLazyLoading=!sourcePhysical&&display.layout!=='horizontalScreen'&&drawFlags.lazy;
+      view.settings.core.enableLazyLoading=lazyDraw;
       view.renderer.width=sourceWidth;view.updateSettings();
       accolade.current={plan,metrics:accoladeMetrics(view.settings)};
       const old=loaded.current;

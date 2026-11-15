@@ -24,7 +24,3 @@ export function visibleIndexes(partials:readonly LayoutPartial[],canvas:{left:nu
   }
   return found;
 }
-/** The ids of those pieces. */
-export function visiblePartials(partials:readonly LayoutPartial[],canvas:{left:number;top:number},view:Box,margin=0):string[] {
-  return visibleIndexes(partials,canvas,view,margin).map(index=>partials[index].id);
-}

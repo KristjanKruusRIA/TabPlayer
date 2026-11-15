@@ -26,6 +26,8 @@ const BUDGET={
   idleStatusEvents:8,idleBusyPercent:8,
   /** A two-digit fret typed quickly (write, take back, write) and an undo, key to drawn. A rebuild from the history was about 1.5 s. */
   joinMs:800,undoMs:500,
+  /** Heap growth over 240 edits in place after a warm-up, after a forced collection. Every edit used to keep a score, a journal and a rendered copy alive for good (the leak was about 0.3 MB an edit on the owner's largest score). */
+  heapGrowthMB:40,
 };
 const median=values=>{const sorted=[...values].sort((a,b)=>a-b),middle=sorted.length>>1;return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2;};
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -191,6 +193,15 @@ try {
   assert.equal(idle.host.length,0,'the score changed while idle');
   assert.ok(result.idleStatusEvents<=BUDGET.idleStatusEvents,`${result.idleStatusEvents} status events in 3 s of idle (budget ${BUDGET.idleStatusEvents})`);
   assert.ok(result.idleBusyPercent<=BUDGET.idleBusyPercent,`the main thread was ${result.idleBusyPercent}% busy while idle (budget ${BUDGET.idleBusyPercent}%)`);
+
+  // 4b. Memory: hundreds of edits in place keep a bounded number of earlier scores (each holds the journal and the rendered copy it made). The heap, after a forced collection,
+  // is sampled after a warm-up and again 240 edits later; the deterministic proof is the WeakRef test in engine.in-place.memory.test.ts, this is the coarse check in the real app.
+  const heapMB=async()=>{await cdp.send('HeapProfiler.enable');await cdp.send('HeapProfiler.collectGarbage');await sleep(300);await cdp.send('HeapProfiler.collectGarbage');return +((await cdp.send('Runtime.getHeapUsage')).usedSize/1048576).toFixed(1);};
+  const typeEdits=async count=>{for(let i=0;i<count;i++){await press('ArrowRight');await sleep(50);await press(String(digits[i%digits.length]));await sleep(100);if(i%25===24)await settle();}await settle();};
+  await typeEdits(60);result.heapWarmMB=await heapMB();
+  await typeEdits(240);result.heapAfterMB=await heapMB();result.heapGrowthMB=+(result.heapAfterMB-result.heapWarmMB).toFixed(1);
+  assert.ok(result.heapGrowthMB<=BUDGET.heapGrowthMB,`the heap grew ${result.heapGrowthMB} MB over 240 edits in place (budget ${BUDGET.heapGrowthMB})`);
+  await sleep(2600);await settle();
 
   // 5. The document edited in place is the document a full rebuild gives: the app compares every edit with a rebuild for a few edits.
   await page.evaluate(()=>{window.__tabplayerCheckEdits=1;});

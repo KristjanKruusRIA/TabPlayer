@@ -576,7 +576,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
    * in view and left it, so these stay. A new call, a new draw and unmounting end the one before.
    */
   const ahead=useRef({token:0,timer:0 as ReturnType<typeof setTimeout>|0});
-  const scheduleAhead=(view:AlphaTabApi,where='ahead',delay=150)=>{
+  const scheduleAhead=(view:AlphaTabApi,where='ahead',delay=400)=>{
     const state=ahead.current;state.token++;const token=state.token;clearTimeout(state.timer||undefined);
     if(!(drawFlags.ahead>0))return;
     const step=()=>{
@@ -610,8 +610,10 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     try{
       const partials=layoutPartials.current,index=partials.findIndex(piece=>piece.firstMasterBarIndex!==undefined&&masterBarIndex>=piece.firstMasterBarIndex&&masterBarIndex<=(piece.lastMasterBarIndex??piece.firstMasterBarIndex));
       if(index<0)return;
-      paintPiece(view,index);
-      if(index+1<partials.length)setTimeout(()=>{if(layoutPartials.current===partials&&api.current===view&&paintPiece(view,index+1))playbackPresentation.current?.rehighlight();},0);
+      // The scroll that follows (alphaTab's, made in this same frame) shows the cursor's system and whatever lies within a viewport of it, and its `scroll` event only comes in the next
+      // frame: a seek or a loop wrap that jumps across systems would show the ones between blank for that frame. They are painted now (only the empty ones cost anything).
+      const reach=scrollHost.current?.clientHeight??0,here=partials[index];
+      for(let other=0;other<partials.length;other++){const piece=partials[other];if(other===index||(piece.y+piece.height>=here.y-reach&&piece.y<=here.y+here.height+reach))paintPiece(view,other);}
     }catch{ /* alphaTab paints it when it is in view */ }
   };
   const ensurePaintedRef=useRef(ensurePainted);ensurePaintedRef.current=ensurePainted;

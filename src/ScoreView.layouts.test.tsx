@@ -4,6 +4,7 @@ import {Component,StrictMode,type ReactElement,type ReactNode} from 'react';
 import {readFileSync} from 'node:fs';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import {EngravingSettings,LayoutMode,NotationElement,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
+import {drawFlags} from './engraving/draw-flags';
 import {ScoreView} from './ScoreView';
 import {EFFECT_BAND_PADDING_BOTTOM} from './engraving/effect-bands';
 import {music} from './editor/fixtures';
@@ -80,13 +81,12 @@ it.each(['verticalPage','horizontalPage','grid','horizontalScreen'] as const)('k
  expect(api.settings.core.enableLazyLoading).toBe(false);
  expect(state.painted).not.toHaveBeenCalled();
 });
-it('paints the system of a bar before the playback cursor highlights and scrolls, and the next one soon after (THE-213)',async()=>{
+it('paints the system of a bar and those within a viewport of it before the playback cursor highlights and scrolls (THE-213)',async()=>{
  const {api}=setup('parchment');const view=api as unknown as {customCursorHandler:{placeBarCursor:(container:unknown,bounds:unknown)=>void};canvasElement:{element:HTMLElement}};
  expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0']);
  const lookup=(state.api as unknown as {boundsLookup:{staffSystems:Array<{bars:Array<{bars:Array<{beats:unknown[]}>}>}>}}).boundsLookup,bounds=lookup.staffSystems[1].bars[0].bars[0].beats[0];
  view.customCursorHandler.placeBarCursor({setBounds(){},transitionToX(){},stopAnimation(){}},bounds);
- expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0','chunk-1']);
- await new Promise(resolve=>setTimeout(resolve,40));
+ // The scroll that follows would show the systems around it: they are painted with it, in this frame.
  expect(state.painted.mock.calls.map(call=>call[0])).toEqual(['chunk-0','chunk-1','chunk-2']);
  // A system that has something in it is not painted again.
  view.customCursorHandler.placeBarCursor({setBounds(){},transitionToX(){},stopAnimation(){}},bounds);
@@ -102,9 +102,11 @@ it('paints a system in view again when alphaTab empties it a frame late (THE-213
  await new Promise(resolve=>setTimeout(resolve,10));
  expect(state.painted).toHaveBeenCalledTimes(2);
 });
-it.each([['parchment',false],['verticalScreen',false],['verticalPage',true],['horizontalScreen',true]] as const)('a draw of %s %s waits for a key that is waiting (THE-213)',(layout,waits)=>{
+it.each([['parchment',0,false],['verticalScreen',0,false],['verticalPage',0,false],['horizontalScreen',0,false],['verticalPage',6,true],['horizontalScreen',6,true],['parchment',6,false]] as const)('a draw of %s with %s deferrals for the complete layouts waits for a key that is waiting: %s (THE-213)',(layout,complete,waits)=>{
+ // The deferral for the layouts that draw the whole score is a flag (measured: 0 is as good or better, so it is 0); the lazy layouts have their own, also 0.
+ const flags=drawFlags as {completeDeferrals:number};const was=flags.completeDeferrals;flags.completeDeferrals=complete;
  Object.defineProperty(navigator,'scheduling',{configurable:true,value:{isInputPending:()=>true}});
- try{setup(layout);expect(state.loads).toHaveBeenCalledTimes(waits?0:1);}finally{Reflect.deleteProperty(navigator,'scheduling');}
+ try{setup(layout);expect(state.loads).toHaveBeenCalledTimes(waits?0:1);}finally{Reflect.deleteProperty(navigator,'scheduling');flags.completeDeferrals=was;}
 });
 it('changes physical zoom and arrangement without reloading or rerendering notation',()=>{
  const {props,tree,rerender}=setup();const calls=state.renders.mock.calls.length;

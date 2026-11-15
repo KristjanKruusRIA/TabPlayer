@@ -10,8 +10,11 @@ export const drawFlags={
    * what `isInputPending` reports while a key is typed held every draw back (see docs/validation/2026-11-15-the-213-draw-speed.md). The old behaviour is 6.
    */
   deferrals:0,
-  /** The same for the layouts that still draw the whole score (the page layouts and the horizontal strip, 200 to 290 ms on a long score): a waiting key goes first. */
-  completeDeferrals:6,
+  /**
+   * The same for the layouts that still draw the whole score (the page layouts and the horizontal strip, 200 to 290 ms on a long score). Measured with edits and bursts alternating
+   * between 0 and 6 on the owner's largest score (note, "The deferral" section): 6 was never better, and with a short key press (the drivers' 15 ms) 100 to 300 ms slower.
+   */
+  completeDeferrals:0,
   /** The playback cursor has the system of its bar painted, and the highlight put back, before it highlights and scrolls (off: alphaTab paints it a frame later, blank for that frame). */
   paintOnCursor:true,
   /** Viewports of empty systems above and below the score area that are painted in the background after a draw and a scroll (0: none). */

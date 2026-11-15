@@ -15,7 +15,7 @@ vi.mock('@coderline/alphatab', async original => ({ ...await original<typeof imp
   beatMouseDown = event<model.Beat>(); noteMouseDown = event<model.Note>(); beatMouseMove = event<model.Beat>(); beatMouseUp = event<model.Beat | null>();
   renderStarted = event<boolean>(); postRenderFinished = event<void>(); playbackRangeHighlightChanged = event<unknown>();
   canvasElement = {}; uiFacade = { getOffset: () => ({ x: fake.offset, y: 0, w: 600, h: 300 }), highlightElements() {}, removeHighlights() {} };
-  renderer = { width: 0, partialRenderFinished: event<never>() }; renderScore() {} render() {}
+  renderer = { width: 0, partialRenderFinished: event<never>(), partialLayoutFinished: event<never>(), renderResult(_id: string) {} }; renderScore() {} render() {}
   get boundsLookup() { return { staffSystems: fake.systems, findBeat: () => null, findBeats: () => [], getBeatAtPos: () => null }; }
   highlightPlaybackRange() {} clearPlaybackRangeHighlight() {} destroy() {} updateSettings() {}
 } }));

@@ -13,7 +13,7 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
   settings=new Settings();constructor(){view.api=this;}
   beatMouseDown=event();noteMouseDown=event();beatMouseMove=event();beatMouseUp=event();renderStarted=event();postRenderFinished=event();playbackRangeHighlightChanged=event();
   canvasElement={};uiFacade={getOffset:()=>({x:30,y:40,w:600,h:300}),highlightElements(){},removeHighlights(){}};
-  renderer={width:0,partialRenderFinished:event()};renderScore(){}render(){}
+  renderer={width:0,partialRenderFinished:event(),partialLayoutFinished:event(),renderResult(_id:string){}};renderScore(){}render(){}
   boundsLookup={findBeat:()=>null,findBeats:()=>[],getBeatAtPos:()=>null,staffSystems:[{realBounds:new rendering.Bounds(0,0,400,100),bars:[0,1,2].map(index=>({index,realBounds:new rendering.Bounds(index*200,0,200,100)}))}]};
   highlightPlaybackRange(){}clearPlaybackRangeHighlight(){}destroy(){}updateSettings(){}
 }}));

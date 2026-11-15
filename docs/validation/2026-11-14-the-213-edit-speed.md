@@ -330,7 +330,7 @@ Each was reproduced as a failing test first.
   * A rebuild that fails with a `RangeError` or out of memory marks the document broken and shows the error without taking edits back.
   * A redo after a take-back goes through the full path (the document is built with the edit first), which fails before native acts, so the edit cannot be
     brought back, break the document and be taken back again in a loop; the redo is refused with the error.
-  * The notice after a take-back says that Redo brings the edits back and that saving now drops them for good (en, et, de).
+  * The notice after a take-back says that the edits cannot be redone and are not in the saved file (en, et, de). Sixth review: the earlier wording ("Redo brings them back; saving now drops them") was untrue, because a redo of a taken-back edit is refused and the notice also appears after the save that triggered the take-back.
   * The broken message uses a stored reason and is rewritten as edits are taken back.
 
 ## The equivalence check

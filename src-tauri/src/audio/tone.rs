@@ -573,11 +573,12 @@ impl Tube {
         self.knee = 1.0;
         self
     }
-    fn resolve(&self, gain: f64, rate: f64) -> StageShape {
+    /// `low` scales the corners of the stage's low cut, 1 for the stage as designed.
+    fn resolve(&self, gain: f64, low: f64, rate: f64) -> StageShape {
         let mut shape = StageShape {
-            couple: one_pole(self.couple_hz, rate),
+            couple: one_pole(self.couple_hz * low, rate),
             split: if self.shelf_hz > 0.0 {
-                one_pole(self.shelf_hz, rate)
+                one_pole(self.shelf_hz * low, rate)
             } else {
                 0.0
             },
@@ -595,10 +596,16 @@ impl Tube {
     }
 }
 /// Resolves `tubes`, the one at `pot` scaled by `taper`, as a guitar amp's gain control sits between two stages.
-fn resolved(tubes: &[Tube], pot: usize, taper: f64, rate: f64) -> ([StageShape; STAGES], usize) {
+fn resolved(
+    tubes: &[Tube],
+    pot: usize,
+    taper: f64,
+    low: f64,
+    rate: f64,
+) -> ([StageShape; STAGES], usize) {
     let mut stages = [StageShape::UNUSED; STAGES];
     for (index, tube) in tubes.iter().enumerate() {
-        stages[index] = tube.resolve(if index == pot { taper } else { 1.0 }, rate);
+        stages[index] = tube.resolve(if index == pot { taper } else { 1.0 }, low, rate);
     }
     (stages, tubes.len())
 }
@@ -642,6 +649,23 @@ fn taper(drive: f64, span: f64) -> f64 {
 /// clips: lifted lows and highs around a low-mid dip. The lows it restores cannot intermodulate, and the cabinet then
 /// takes away what lies below the guitar.
 pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
+    amp_shape_voiced(model, drive, Voicing::default(), rate)
+}
+/// How an amp is set up for the guitar it follows, beyond its model and gain. The default leaves the amp as designed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Voicing {
+    /// Octaves down that the low cut ahead of each stage moves. The stages thin a low string where it would beat against
+    /// its neighbours; they are set for a guitar in standard tuning, and take the fundamental from one tuned an octave
+    /// lower before it reaches the clipping.
+    pub low_end_oct: f64,
+}
+/// A driven amp resolved for `rate` and a `voicing`.
+pub fn amp_shape_voiced(model: &str, drive: f64, voicing: Voicing, rate: f64) -> Option<Shape> {
+    let low = if voicing.low_end_oct == 0.0 {
+        1.0
+    } else {
+        2f64.powf(-voicing.low_end_oct)
+    };
     let over = rate * oversampling(rate) as f64;
     let mut shape = flat_shape(over);
     shape.input = PICKUP;
@@ -653,7 +677,7 @@ pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
                 tube(90.0, 16.0, [1.2, 1.0], -0.03, 9_000.0),
                 tube(70.0, 3.5, [1.0, 1.25], 0.02, 12_000.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 38.0), over);
+            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 38.0), low, over);
             shape.voicing = [
                 Section::shelf(190.0, 3.0, over, false),
                 Section::peak(1_100.0, 2.0, 0.8, over),
@@ -671,7 +695,7 @@ pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
                 tube(90.0, 6.0, [0.95, 1.25], 0.03, 6_500.0),
                 tube(60.0, 2.0, [1.2, 1.0], -0.02, 12_000.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), over);
+            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), low, over);
             shape.voicing = [
                 Section::shelf(170.0, 5.0, over, false),
                 Section::peak(900.0, 2.5, 0.7, over),
@@ -690,7 +714,7 @@ pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
                 tube(90.0, 4.0, [1.2, 1.0], -0.02, 7_000.0),
                 tube(60.0, 1.6, [1.1, 1.2], 0.01, 12_000.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), over);
+            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), low, over);
             shape.voicing = [
                 Section::shelf(170.0, 10.0, over, false),
                 Section::peak(520.0, -1.0, 0.6, over),
@@ -708,7 +732,7 @@ pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
                 tube(160.0, 12.0, [1.1, 0.9], -0.04, 5_000.0),
                 tube(90.0, 3.0, [1.0, 1.3], 0.02, 3_800.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), over);
+            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), low, over);
             // Inverted, because a low-pass and the stages' high-passes meet near opposite phase, and would cancel.
             shape.around = Section::low_pass(170.0, 0.707, over);
             shape.around_gain = -0.34;
@@ -759,7 +783,7 @@ pub fn drive_shape(model: &str, drive: f64, rate: f64) -> (Shape, f64) {
                 tube(60.0, DIODE_GAIN, [0.7, 0.7], 0.0, 6_500.0).diode(),
                 tube(50.0, 1.3, [0.9, 0.9], 0.0, 4_500.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, over);
+            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, 1.0, over);
             0.0
         }
         "fuzz" => {
@@ -767,7 +791,7 @@ pub fn drive_shape(model: &str, drive: f64, rate: f64) -> (Shape, f64) {
                 tube(40.0, 1.0 + 120.0 * drive, [0.9, 0.9], 0.0, 5_500.0),
                 tube(60.0, 1.0 + 12.0 * drive, [0.9, 0.9], 0.0, 7_000.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, over);
+            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, 1.0, over);
             shape.voicing[0] = Section::peak(800.0, -2.0, 0.7, over);
             FUZZ_BIAS
         }
@@ -779,7 +803,7 @@ pub fn drive_shape(model: &str, drive: f64, rate: f64) -> (Shape, f64) {
                 0.0,
                 6_500.0,
             )];
-            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, over);
+            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, 1.0, over);
             shape.around_gain = 1.0;
             0.0
         }

@@ -1673,6 +1673,7 @@ export const et: MessageCatalog = {
   'param.mid_db': "Keskhelid (dB)",
   'param.treble_db': "Kõrged (dB)",
   'param.presence_db': "Kohaolu (dB)",
+  'param.low_end_oct': "Madalad (oktavit)",
   'param.low_db': "Madalad (dB)",
   'param.high_db': "Kõrged (dB)",
   'param.mid_hz': "Kesksagedus (Hz)",

@@ -1673,6 +1673,7 @@ export const de: MessageCatalog = {
   'param.mid_db': "Mitten (dB)",
   'param.treble_db': "Höhen (dB)",
   'param.presence_db': "Presence (dB)",
+  'param.low_end_oct': "Tiefbass (Oktaven)",
   'param.low_db': "Tiefen (dB)",
   'param.high_db': "Höhen (dB)",
   'param.mid_hz': "Mittenfrequenz (Hz)",

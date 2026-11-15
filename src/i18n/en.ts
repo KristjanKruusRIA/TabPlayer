@@ -1672,6 +1672,7 @@ export const en = {
   'param.mid_db': "Mid (dB)",
   'param.treble_db': "Treble (dB)",
   'param.presence_db': "Presence (dB)",
+  'param.low_end_oct': "Low end (octaves)",
   'param.low_db': "Low (dB)",
   'param.high_db': "High (dB)",
   'param.mid_hz': "Mid frequency (Hz)",

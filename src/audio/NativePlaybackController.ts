@@ -23,6 +23,14 @@ import { focusedSettings,type TrackFocus } from './focus';
 import { keptLoopOf,mapKeptLoop,resolveKeptLoop,type KeptLoop } from './kept-loop';
 import type { BarIndexMap } from '../editor/measures-types';
 
+/** Resolves once the page has had a chance to paint what changed (a frame and a task after it), and in any case within 60 ms, as a frame never comes to a hidden page. */
+function afterPaint():Promise<void> {
+  return new Promise(resolve=>{
+    let done=false;const finish=()=>{if(!done){done=true;resolve();}};
+    setTimeout(finish,60);
+    if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>setTimeout(finish,0));
+  });
+}
 let nextGeneration=0;
 function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.metronome.sound??"beep",settings.countIn.bars,settings.countIn.betweenLoops,settings.tonality??0]);}
 function idlePractice(settings:PracticeSettings):PracticeStatus {return {settings:structuredClone(settings),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:0,pulse:null};}
@@ -377,6 +385,8 @@ export class NativePlaybackController {
     try {
       // Playback is already invalid. Building the plan is the long step; it waits until the edits stop, and a newer score supersedes it here.
       if(settling){await new Promise<void>(resolve=>setTimeout(resolve,this.options.quietMs));if(generation!==this.generation||this.destroyed)return;}
+      // Building the plan starts with the whole score serialized, in one piece: the change is drawn first, so the first edit after a quiet spell is not shown any later for it.
+      else if(quietMs>0){await afterPaint();if(generation!==this.generation||this.destroyed)return;}
       const authored=await (this.options.preparePlan?(interpreted?this.options.preparePlan(project,generation,interpretations):this.options.preparePlan(project,generation)):(interpreted?preparePlanFromScore(built.score,generation,interpretations):preparePlanFromScore(built.score,generation)));if(generation!==this.generation||this.destroyed)return;
       freezePlan(authored);const plan=freezePlan(applyReferenceSyncPlan(authored,audioSettings.backing));
       // The plan now in hand decides whether a fixed tempo still keeps the backing within 10% to 300%; a tempo edit can change that.

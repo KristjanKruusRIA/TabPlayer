@@ -1,6 +1,7 @@
 # THE-213: note edits on a long score
 
-Date: 2026-11-14. Branch `agy/the-213-edit-speed`, cut from `develop` (77605bb). Work is uncommitted in the working tree.
+Date: 2026-11-14 to 2026-11-15. Branch `agy/the-213-edit-speed`, cut from `develop` (77605bb), then `develop` (1d00286, the mixer drag and
+immediate fret typing) merged in. Everything after the one WIP commit is uncommitted in the working tree.
 
 ## Question
 
@@ -11,154 +12,215 @@ to be prepared again, a cursor move that costs the same on a long score as on a 
 
 ## What was measured, and how
 
-Test score: a synthetic 6-track, 200-bar score (about 310 KB as GP7) generated from alphaTex, against a 1-track, 8-bar one.
-Real app (`scripts/build-desktop-test.ps1` build of this worktree, WebView2, CDP on port 9223), 14 repetitions of "digit key, then
-Enter" on a note, medians. "Key to IPC" is the key to the answer of the native `apply_edit`; "key to drawn" is the key to the last DOM
-change of the score; "key to editor free" is the key to the busy flag dropping; "key to Play" is the key to the Play button being
-enabled again with native playback prepared. Idle is a 5 s CPU profile of the page; arrow keys are 20 moves.
+Test scores: a synthetic 6-track, 200-bar score (about 310 KB as GP7) generated from alphaTex, a 1-track, 8-bar one, and (after the
+first review) five of the owner's own scores, 52 to 79 KB, 81 to 142 bars, six tracks each. The owner's scores are private: they were
+read from a scratch folder outside the repository, nothing from them is in the repository, and they are called "the owner's scores"
+here; "the largest" means the one with the most music in the file (141 bars).
 
-One machine, one run per row, other agents working in the same checkout family on the same machine (the numbers moved by tens of
-percent between runs). The baseline column is this worktree's own build before any change (the small-score baseline edit run failed
-to start twice, so the small baseline edit row is the owner's own measurement from the task).
+Real app (`scripts/build-desktop-test.ps1` build of this worktree, WebView2, CDP on port 9223), medians. "Key to IPC" is the key to the
+answer of the native edit call; "key to drawn" is the key to the last big DOM change of the score; "key to editor free" is the key to
+the busy flag dropping; "key to Play" is the key to the Play button being enabled again with native playback prepared. Idle is a 5 s CPU
+profile of the page; cursor moves are 20 arrow keys. macOS and Linux were not measured: everything below is Windows 11, one machine.
 
-| Large score (6 x 200) | Baseline | Stage A | Final |
-|---|---|---|---|
-| key to native IPC answered | 398 ms | 15 ms | 12 ms |
-| key to score drawn | 920 ms | 195 ms | 190 ms |
-| key to editor free (busy flag) | 1059 ms | 212 ms | 124 ms |
-| key to Play enabled | 3291 ms | 2275 ms | 1925 ms |
-| long task time per edit | 1200 ms | 458 ms | 355 ms |
-| arrow-key cursor move | 91 ms | 62 ms | 22 ms |
-| idle main-thread busy (profile) | 51 % | 4.4 % | 3.0 % |
-| native status events in 5 s idle | 156 | 156 | 5 |
+One machine, other agents running their own apps and test runs on it at the same time, so every number moved by tens of percent between
+runs. Where a run overlapped another heavy process it was repeated.
 
-| Small score (1 x 8) | Baseline | Stage A | Final |
-|---|---|---|---|
-| key to native IPC answered | 19 ms (owner) | 12 ms | 9 ms |
-| key to score drawn | 63 ms (owner) | 70 ms | 62 ms |
-| key to editor free | 75 ms (owner) | 87 ms | 71 ms |
-| key to Play enabled | 430 ms (owner) | 781 ms | 699 ms |
-| arrow-key cursor move | 29 ms | 15.6 ms | 13.8 ms |
-| idle main-thread busy (profile) | 29 % | 5 % | 2.9 % |
+## Headline numbers
 
-Stage A is the build with the in-place edit, the projection that follows the edit, the quiet period before the playback plan, the
-stable playback state, the isolated recovery text and the quiet view update. Final adds the validated-plan reuse, native status
-de-duplication and the draw that gives way to waiting keys. Small-score Play readiness is longer than the owner's figure by the 300 ms
-quiet period (see "What remains").
+All medians, Windows 11, one machine. "Before" is this worktree's own build of `develop` before any change (the owner's small-score
+figures where the small baseline run did not start). "Now" is the final build, **with typed digits** (a digit writes its fret at once on
+this branch since the merge, so the edit key is the digit, not Enter).
 
-The new driver `tests/desktop/edit-speed.mjs` (24 edits, a 6-key burst, 20 cursor moves, 3 s idle, 3 compared edits) on the final build:
+Large synthetic score (6 tracks x 200 bars), a typed digit:
 
-```
-editIpcMedianMs 12, editFreeMedianMs 182 (worst 228; early 196, late 165), burst: 6 edits, worst IPC 22 ms, 1 audio_prepare,
-cursorMedianMs 10, idleBusyPercent 0.4, idleStatusEvents 3 in 3 s, 3 edits compared with a full rebuild, 0 mismatches
-```
-
-Reached: the hard requirement (median under 200 ms from key to the score drawn on the 6 x 200 score: 182 to 190 ms in two drivers,
-worst 228 ms), no growth with edit count (the 24th edit is not slower than the 2nd), no wait for playback preparation (6 edits typed
-150 ms apart answered in at most 22 ms each, one `audio_prepare` for all of them), a cursor move on the long score within 9 ms of the
-short one, idle near zero.
-
-Not reached: "about 100 ms". The floor is the alphaTab layout and SVG painting of the whole rendered score (about 100 ms in
-`renderScore` on this score, plus about 55 ms placing the SVG chunks and about 25 ms of forced layout while placing overlays), which
-alphaTab 1.8.4 cannot do for part of a score. See "What remains".
-
-## Where the time was, and what changed
-
-Profile of one note edit on the long score before the change: file parse and replay of every edit, then a JSON round trip (`rebuild`)
-in `buildDocument` (about 390 ms before the native call), then the engraving projection (another full JSON round trip) and the render,
-then the playback plan (`scoreToJson` on the main thread, a worker, native `audio_prepare` of 0.8 to 1.3 s). After the change a note
-edit costs: a check on copies of one voice (0.1 ms), the native call (9 to 15 ms), the edit applied to the built score and that
-track's derived state worked out again (2 to 3 ms; in node a full rebuild of the same score takes 1.9 s), the render.
-
-| Change | Files | Effect, measured |
+| | Before | Now |
 |---|---|---|
-| Notes, rests, durations and beats are applied to the built document, not rebuilt from file and history. Checked first on detached copies of the touched voices (same refusals as the real edit), applied once native has recorded the edit | `src/engine.ts`, `src/controller.ts` | key to IPC 398 to 12 ms; node: full rebuild 1916 ms, check 0.1 ms, apply 2 to 3 ms |
-| The new score is the same tracks under a new identity, so everything that follows a score by identity still sees a change | `src/engine.ts` (`newScoreIdentity`) | no change to any consumer |
-| The engraving projection (the rendered copy of the score) takes the same edit instead of being rebuilt | `src/engraving/follow.ts`, `src/engraving/projection.ts` (`mapProjection`), `src/App.tsx` | removes the second JSON round trip (about 130 to 300 ms) from the edit |
-| The playback plan waits 300 ms after the last edit (playback is invalid at once); a newer edit supersedes it | `src/audio/NativePlaybackController.ts` (`quietMs`), `src/App.tsx` | 6 edits, 1 `audio_prepare`; Play ready 3291 to 1925 ms; main thread idle during native preparation (profile: 1391 of 1815 ms idle) |
-| Playback state keeps its object when nothing in it changed (native sends status 30 times a second) | `src/audio/NativePlaybackController.ts`, `src/same-data.ts` | idle busy 51 % to 4.4 % |
-| The recovery text is its own subscription; a view update no longer notifies the whole workspace | `src/workspace/WorkspaceApp.tsx`, `src/main.tsx`, `src/workspace/WorkspaceController.ts` | a recovery status or a view change no longer notifies the workspace, so it no longer renders `App` (not counted per render; the driver shows no score redraw on 20 cursor moves and the move at 10 ms) |
-| A plan that was frozen and checked is not checked again on every cursor move | `src/audio/plan.ts` (`freezePlan`), `src/audio/NativePlaybackController.ts` | arrow key on the long score 62 to 22 ms, 20 long tasks to 0 |
-| Native sends an unchanged status once a second instead of 30 times | `src-tauri/src/audio/device.rs` | status events in 5 s idle 156 to 5; idle busy 4.4 to 3.0 % |
-| A draw of the score gives way, up to 6 frames, to keys already waiting; the newest score is drawn | `src/ScoreView.tsx` | burst worst IPC 234 ms to 22 ms (first driver run to final) |
+| key to native edit call answered | 398 ms | 17 ms |
+| key to score drawn | 920 ms | 203 ms |
+| key to editor free (busy flag) | 1059 ms | 222 ms |
+| key to Play enabled | 3291 ms | 2639 ms |
+| undo, key to drawn | not measured (a rebuild: 1.9 s in node) | 274 ms (call 16 ms) |
+| redo, key to drawn | not measured | 222 ms |
+| two-digit fret (write, undo, write), second digit to drawn | not measured | 602 ms, drawn once |
+| arrow-key cursor move | 91 ms | 13 ms (23 ms in the idle driver) |
+| idle main-thread busy (profile) | 51 % | 3.1 % (0.4 % in the new driver) |
+| native status events in 5 s idle | 156 | 5 |
 
-The per-change figures come from consecutive builds and from the profiles, not from isolating each change in its own build: three
-builds were made (baseline, stage A, final), and a build of this app takes minutes.
+Small synthetic score (1 track x 8 bars):
+
+| | Before | Now |
+|---|---|---|
+| key to native edit call answered | 19 ms (owner) | 8 ms |
+| key to editor free | 75 ms (owner) | 65 ms |
+| key to Play enabled | 430 ms (owner) | 443 ms |
+| undo, redo: editor free | | 57 ms |
+| two-digit fret: editor free | | 130 ms |
+| arrow-key cursor move | 29 ms | 8 ms (13.7 ms in the idle driver) |
+| idle main-thread busy (profile) | 29 % | 2.8 % |
+
+Play readiness after item 8: the 300 ms wait before every plan is gone for a single edit, so on the small score Play is back at
+443 ms after an edit (it was 699 ms with the fixed wait, 430 ms before any change); on the long score it is 2.6 s
+(1.9 s measured in the first round: native preparation takes 0.8 to 1.3 s, the plan about 0.5 s more, and the run overlapped
+other work on this machine). During a burst of edits it is prepared once, for the last.
+
+The owner's largest score (89 to 141 bars, six tracks), the same measurements, 16 repetitions (first four are warm-up and are in the
+median; the median without them differs by less than 10 %):
+
+| | Before | Now |
+|---|---|---|
+| edit (key that writes the note) to drawn | 723 ms | 675 ms |
+| edit, native call | 179 ms | 25 ms |
+| undo, key to drawn | 776 ms (call 187 ms) | 281 ms (call 5 ms) |
+| redo, key to drawn | 762 ms | 298 ms |
+| two-digit fret, second digit to drawn | not measured (undo and two edits by rebuild) | 1190 ms, drawn once |
+| arrow-key cursor move | 35 ms | 21 ms |
+
+So on a real score the 200 ms goal is **not** reached for a note edit: alphaTab's layout and painting of the score takes 400 to 650 ms
+and a key typed while it runs waits for it. What changed is everything around it: the native call, the second copy of the score, the plan
+(no longer on the input path), and undo, redo and the cursor, which are now 2.5 to 3 times faster than before. The two-digit fret costs
+about one draw more than a single digit (the first digit is still being drawn when the second arrives 250 ms later in this test).
+
+
+## What the review found, and what was done
+
+The review of the first version listed five required fixes and five more. Each was reproduced as a failing test first; all of them
+reproduced except where noted.
+
+1. **Hammer-on and slide links.** Reproduced (`engine.in-place.review.test.ts` test 1, alphaTex `3.3{h} 5.3 ...`, delete the last beat,
+   insert a rest between the two notes, write a note on it **on the string of the hammered notes**: with another string the sequence
+   does not diverge). In place, finishing re-pointed the hammer-on from the old destination to the new note while the old destination
+   kept its origin; `rebuild()` captures the note links before its round trip and puts them back after it. `settleTrack` now does the
+   same for the track: capture, finish, restore.
+2. **Master bars.** Reproduced for a pickup bar (`\ac`): inserting a beat moved `masterBars[1].start` in a rebuild and not in place.
+   Chosen: the conservative option. An edit to a pickup bar, a free-time bar, a bar whose master bar holds a fermata, or a voice that
+   holds one, is rebuilt (`inPlaceRefusal` says which, so a track's fallback reasons can be listed).
+3. **Ids.** Reproduced (test 3): after another score was opened the counters sat inside the range of the live score's ids and a new
+   note took an existing note's id. `raiseIdCounters` lifts the four counters above the score's highest ids before an edit creates
+   anything (the highest ids are found once per score and carried to its successors). `verifyEditInPlace` and the fuzz now fail on
+   duplicate ids (`duplicateIds`). **The full-rebuild path does not have the same cross-tab collision**: every build of a file parses
+   it again, which sets the counters back to zero and numbers that build's objects in order, so ids are unique within each build; the
+   fuzz asserts it after every undo (a full build) and the blank-project path, which does not parse, only creates objects in
+   increasing order within one build.
+4. **Coverage.** The fuzz now covers every staff and voice of every track; a fixture with a pickup bar, repeats, a fermata, plain lyrics,
+   two voices, two staves and a percussion track; other scores opened between edits (counters reset); and undo and redo between edits
+   (undo in place and by rebuild). The five of the owner's scores are fuzzed too (below). The fixtures found two more divergences that
+   the first fuzz did not: the staff's set of voices that hold music is only ever added to by finishing (it now starts empty, and so
+   comes out in a rebuild's order; test 4), and the let ring and palm mute marks of a rest depend on how many times a track was
+   finished (a rebuild finishes twice, each edit in place once more), so a step that can change a beat into or out of a rest beside a
+   marked beat is rebuilt (test 5; this one was found only by the owner's scores).
+5. **Release safety net.** About 2 s after the last edit (cancelled by any new action) the document that was edited in place is compared
+   with one rebuilt from the file and the history, in steps that give way to typing (`verifyEditStepwise`; the rebuild and the two
+   descriptions are generators that yield every few thousand objects, and the check waits while `isInputPending`). On a difference
+   the rebuilt document replaces it, the console says so, and a quiet note (en, et, de: `status.document_rebuilt`) shows in the
+   status bar until the next edit. Every export (the export dialog and GP export) first awaits `controller.verified()`, which checks if any
+   edit is unverified; Save writes native's project, which never held the in-place score. Tests: the timer waits for the edits to stop,
+   an injected divergence is repaired, a verified document is not checked twice. Cost, measured in node (cold, no UI, so an
+   upper-ish bound on the work, not a replay of what the window feels): the whole check takes 2.8 s on the 6 x 200 score and 0.9 to 1.6 s on
+   the owner's scores, in 13 to 21 slices; the longest slice that cannot be split (parsing the file, the final rebuild, the score's
+   JSON) is 0.64 s on the 6 x 200 score and 0.2 to 0.43 s on the owner's scores. What the user would notice: if a key is typed during
+   one of those slices (it starts 2 s after the last edit, and a new action cancels the check at its next step) the key waits for the
+   slice, up to a fifth to a half second on a real score; nothing else changes on screen unless the documents differ. In the real
+   window on the 6 x 200 score (three runs, one digit edit each, long tasks from 1.9 s after the edit on): 4 to 5 long tasks, the longest
+   211 to 284 ms, 0.7 to 1.0 s in all, which includes the playback preparation's own JavaScript; the check compared once per edit and
+   found no difference.
+6. **Draw yields to input.** `isInputPending({includeContinuous:false})`, so a moving mouse does not delay a draw; the bound (6 frames
+   of 16 ms, then draw) is unchanged.
+7. **Following projection purity.** The result is cached by the score it was made for, so React running the render twice, or a render
+   that is thrown away, edits the rendered copy once (test in `follow.test.ts`). Clicks during the gap: the rendered copy is edited in
+   place, so a beat the edit left is still the object alphaTab laid out and is still found; a beat the edit removed is not (it is not
+   there any more). Before, a new copy was made and nothing alphaTab had laid out was found until the redraw. The first draft of
+   "copy only the touched track" was not done: a track copy costs a JSON round trip of the track (a sixth of 140 ms for six tracks, all of
+   it for one) on every edit.
+8. **Plan debounce.** The first change after a quiet spell builds its plan as soon as the change has been drawn (a frame and a task, at
+   most 60 ms), not after 300 ms; only edits that follow within 300 ms, or arrive while a build is in flight, wait for the edits to stop
+   and supersede one another. Playback is invalidated at once either way and Play never uses a stale plan.
+9. **`sameData`.** Maps and sets are compared by their entries (keys by identity); two different ones are no longer "equal"; tested.
+10. This note.
+
+Also from the second round, because both sets of code are together now:
+
+* **Typed fret digits.** A digit writes at once through `controller.edit`, which is the in-place path end to end. `applyInOrder`
+  (auto-duration pair check, and the join's validity check) used to build a whole document per key; it now asks the open document
+  (`editsFitLive`: checked on copies of the voices the commands touch, with the refusals of applying them) and only builds one when
+  the open document cannot answer. `tryPreview` in pitch entry (`score-entry.ts`, `midi-capture.ts`) still builds a document per key.
+* **Undo and redo in place.** Each edit applied in place keeps a journal (the touched voices' beats and notes, every note's fret, the
+  links; 24 deep): undo restores it and finishes the track again, redo applies the edit in place. Native sees exactly what it saw
+  before: apply, undo, apply for a two-digit fret; the history, the redo stack and the redo entry are unchanged. The rendered copy takes
+  the undo in place too (its own journal), so the redraw after an undo does not make a new copy of the score. Undo is rebuilt when the
+  document is not what the last in-place edit made, the edit before it was not applied in place, or the file's partial capo
+  would differ.
+* **One draw for a two-digit fret.** The join (write, undo, write) holds the score's draw until it is done (`holdDraw`), so the score is
+  drawn once; there is no 1, original, 12 flicker.
 
 ## The equivalence check
 
-An edit applied in place must give the document a full rebuild from file plus edit log gives. This is checked, not argued:
+(unchanged design; see the first version of this note) `describeScore` compares the serialized model with ids replaced by positions,
+plus every plain field and link of bars, voices, beats, notes, staves, tracks and master bars. New since the first version: the private
+fields are in it (that is where `_filledVoices` showed), ids must be unique, and the sets and maps are compared in order.
 
-* `src/engine-verify.ts` describes a score independently of how it was made: the serialized model with object ids replaced by
-  positions (note links by the positions of all notes of that id: a new note takes the next value of a counter that knows nothing of a
-  loaded file, so ids can repeat), plus every plain field and object link of every bar, voice, beat and note, which covers what the
-  serializer leaves out (beat chain, timings, effect slurs, lookups, indices). `firstDifference` names where two descriptions differ.
-* `src/engine.in-place.test.ts` applies random edits (set note, remove note, rest, duration with up to 3 dots, insert and delete beat,
-  two-step sequences; a quarter aimed at the end of a track) to a rich alphaTex score (ties, hammer-ons, slides, bends, grace notes,
-  a triplet, let ring, palm mute, dynamics; each feature asserted present) and to a blank score with an added track. After every
-  accepted edit the document is compared with `buildDocument` of the project; a refused edit must be refused with the same message by
-  the check on copies, and must leave the document equal to the project. About 150 and 60 edits per run; seeds 7, 11, 101, 202, 303,
-  404, 5 and 6 were run, all equal. This found five differences that the first version of the in-place code had (a lookup that is only
-  ever added to, the beat chain at the end of a track, note indices after a removal, ids, and duplicate ids) and all are fixed.
-* `src/engraving/follow.test.ts` compares the followed projection with a new one (with a track profile override and two edits drawn at
-  once) and its maps.
-* `src/controller.test.ts` runs edits, undo and redo through the controller with every edit compared with a rebuild, and checks that a
-  refusal by the check or by native leaves the very same score.
-* At run time `editCheck` compares every n-th in-place edit with a full rebuild (n = 25 in development builds, 0 in release; a person or
-  a test can turn it on with `globalThis.__tabplayerCheckEdits = n`); a difference is reported with `console.error` and the rebuilt
-  document replaces the edited one. The desktop driver compares 3 edits on the long score in the real app: 0 mismatches.
+* `engine.in-place.test.ts`: rich file score (ties, hammer-ons, slides, bends, grace notes, a triplet, let ring, palm mute), a score
+  with the extra features listed under 4, and a blank score; random edits on every staff and voice, other scores opened, undo (in place
+  where the controller would) and redo between edits; every accepted edit compared with a rebuild, every refusal compared with the full
+  path's message and checked to leave the document equal to the project. Seeds 3, 5, 6, 7, 11, 21 to 23, 31 to 34, 101, 202, 303, 404 were run.
+* `engine.in-place.review.test.ts`: the sequences traced in the review, and the two found afterwards.
+* `engine.in-place.owner.test.ts`: the same fuzz over folder of real scores named by `TP_OWNER_SCORES`, skipped when unset; its report
+  holds counts and reasons only.
+* `controller.test.ts`: in place edits, undo and redo each compared with a rebuild; native refusing; the idle check, a divergence repaired.
 
-Fall back to the full rebuild: any other edit type; a track with managed or hidden lyrics or sustain pedals; a score with beats that
-show a timer; reference timing; a track that does not exist; an edit that carries an asset or follows a partial-capo mark.
+### The owner's scores
 
-Audio, schema, history: edit types, the project schema, the recovery file and native history are untouched. `tone.rs` is untouched.
-The file's own content is still validated when it is opened; each edit is still validated by `validateParityCommand` and by native.
+The five scores (89, 81, 141, 103 and 142 bars, six tracks each, drawn from real songs; only counts are kept here), 100 random edits
+each (note, remove note, rest, duration, insert and delete beat, on every track, staff and voice), each compared with a full rebuild
+with the final code:
+
+* 500 edits: 430 applied in place and equal to a rebuild, 57 refused (by the full rebuild with the same message, and by the check on
+  copies), 13 (2.9 % of the accepted ones) rebuilt instead of applied in place.
+* The 13 were all "let ring or palm mute beside a rest" (an edit that turns a beat into a rest, or a rest into a beat, next to a
+  palm-muted or let-ring beat); they were on 1 to 3 of the six tracks of each score (the guitar tracks that carry palm mutes). No other
+  reason (pickup bars, fermatas, lyrics, pedals, timers, free time, reference timing) came up.
+* An earlier run with the broader form of that rule (any edit but a duration change beside a mark) rebuilt 6.8 %; the first run, before
+  that rule existed, found a real divergence on one score (a rest's palm mute mark), and the one before found the staff's voice set;
+  both are in the review tests.
+* The fallback rate decides how often an edit takes the old path: here about one in thirty edits, concentrated in palm-muted passages
+  next to rests.
+
 
 ## Verification run
 
-All on the final working tree, in the worktree `E:\git\TabPlayer\.worktrees\edit-speed`:
+All on the final working tree, in `E:\git\TabPlayer\.worktrees\edit-speed`. The worktree's primary-directory note changed to
+`.worktrees\stretch` during the work; every command was run in `edit-speed` by explicit path and nothing in `stretch` was touched.
 
 | Command | Result |
 |---|---|
 | `npm run typecheck` | no errors |
-| `npm test -- --testTimeout=60000` (Node resource tests, then Vitest) | 415 files passed, 4 skipped; 7238 tests passed, 8 skipped, none failed (853 s). `plan.test.ts` passed here. `plan.performance.test.ts.snap` changed during the run and was restored with `git checkout --` |
-| `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` | clean (after one `cargo fmt` of the new lines in `device.rs`) |
-| `cargo test --locked --workspace --no-fail-fast --manifest-path src-tauri/Cargo.toml` | exit 0; 92 test binaries, 2026 passed, 0 failed, 96 ignored |
-| `scripts/build-desktop-test.ps1` | built three times (baseline, stage A, final) |
-| `node tests/desktop/edit-speed.mjs` (new) | exit 0, numbers above |
-| `node tests/desktop/editor.mjs`, `parity-entry.mjs`, `loop-through-edit.mjs`, `parity-clipboard.mjs` | exit 0 each |
-| `node tests/desktop/native-audio.mjs`, `parity-document-tabs.mjs` | first run exit 1: they need the debug Cargo build and the `capture_loopback` example, which did not exist yet in this worktree; after `cargo test` built them, exit 0 each |
+| `npm test -- --testTimeout=60000` | 419 files passed, 5 skipped; 7288 tests passed, 8 skipped, none failed (834 s). `plan.performance.test.ts.snap` was restored with `git checkout --` |
+| `cargo fmt --all --manifest-path src-tauri/Cargo.toml -- --check` | clean. Rust did not change in this round (the status de-duplication in `device.rs` is from the first round and passed `cargo test --locked --workspace --no-fail-fast` then: 2026 passed, 0 failed), so the workspace was not rerun |
+| `TP_OWNER_SCORES=... npx vitest run src/engine.in-place.owner.test.ts` | 5 scores passed, 500 edits (see above) |
+| `scripts/build-desktop-test.ps1` | built (develop merged, review fixes) |
+| `node tests/desktop/edit-speed.mjs` | exit 0 (digit edit median 230 ms drawn, burst of 6 edits worst call 133 ms, 1 prepare, join 656 ms drawn once, undo 284 ms, cursor 21 ms, idle 0.4 %, 3 status events in 3 s, 3 edits compared with a rebuild, 0 mismatches) |
+| `editor`, `parity-entry`, `loop-through-edit`, `exports`, `parity-document-tabs`, `parity-mix-drag`, `parity-fret-typing`, `parity-track-click` | exit 0 each |
+| `parity-clipboard` | exit 0 (the first five attempts, across three rounds, did not start: another agent's app held the shared port or took over the launch; run again when the port was free) |
 
-The new Vitest files: `src/engine.in-place.test.ts` (4), `src/engraving/follow.test.ts` (1), one test added to `src/controller.test.ts`.
-`TP_FUZZ_SEED` and `TP_FUZZ_COUNT` change the seed and the edit count of the first two tests for a longer fuzz.
 
 ## What remains slow, and the next step
 
-1. The draw: about 100 ms layout and painting of the whole rendered score, 55 ms placing it, 25 ms forced layout. Next step: render
-   only the systems that changed. alphaTab 1.8.4 has no partial layout (its `startBar`/`barCount` settings change what is laid out, not
-   what is redone), so this means keeping the laid-out systems of the unchanged bars and re-laying out from the changed bar to the end
-   of its system (a system's bars do not move unless the changed bar's width changes), which needs a layout cache in front of alphaTab
-   or an alphaTab change. It would also remove `loadMidiForScore` (about 20 ms) from each edit.
-2. Undo and redo still rebuild the document from file and history (about 1 to 2 s on the long score, and growing with the history).
-   Next step: keep the inverse of an in-place edit (the touched voice's beats before the edit, restored through the same
-   `settleTrack`), or a checkpoint of the built score every n edits.
-3. Pitch-entry planning (`tryPreview` in `src/editor/score-entry.ts` and `src/editor/midi-capture.ts`) and the auto-duration pair
-   check (`applyInOrder` in `src/editor/input-preferences.tsx`) still build a whole document per key (about 2 s each on the long
-   score). They need the written score, so they need a speculative copy of one track. I did not change them: they sit next to the
-   keyboard-entry code another change is working on.
-4. The playback plan: `scoreToJson` of the whole score on the main thread (about 75 to 140 ms) once per burst, and native preparation
-   of 0.8 to 1.3 s (off the main thread, but it is why Play is back about 1.9 s after an edit on the long score). Next step: keep the
-   score in the plan worker and send it the edit, and make native preparation reuse the renderer for unchanged tracks.
-5. Other edit types (selection edits, measures, tempo) still rebuild; the list in `inPlaceTypes` grows by adding a type and its
-   cases to the equivalence test.
+1. **The draw is the floor, and it is much bigger on a real score.** On the 6 x 200 synthetic score it is about 100 ms of the 190 to 280;
+   on the owner's largest score it is 400 to 650 ms (profile of one edit: `renderScore` about 390 ms, of which painting the systems about
+   200 ms; about 130 ms of forced layout while placing overlays; about 170 ms of alphaTab inserting its own DOM, which is probably not shown
+   in the page layouts, and was not tested). alphaTab 1.8.4 cannot lay out part of a score. Next steps in order of size: skip alphaTab's
+   own DOM insertion where its output is not the one shown (about 170 of 450 ms on that profile); keep the laid-out systems of the
+   bars an edit did not touch; then draw less than the whole score. On the owner's scores a single edit is therefore **not** at 200 ms:
+   it is a little faster than before (the native call, the second copy of the score and the plan are gone), undo and redo are 2.5 to 3
+   times faster, the cursor and the idle editor are fast.
+2. A key typed while a draw runs waits for it (up to the draw's length): the draw cannot be interrupted.
+3. Pitch-entry planning (`tryPreview`) still builds a whole document per key.
+4. The plan's `scoreToJson` of the whole score runs on the main thread once per burst (70 to 140 ms).
+5. Other edit types (selection edits, measures, tempo, redo of those) still rebuild; the list in `inPlaceTypes` grows by adding a type
+   and its cases to the equivalence test.
 
 ## Limits
 
-* A synthetic score of identical bars and one machine; the owner's real score and machine were not used. Medians of 14 runs per row,
-  one run each. Another agent's app uses the same test port and the same machine, so some runs were repeated.
-* The small-score baseline edit row is the owner's measurement, not mine.
-* `navigator.scheduling.isInputPending` exists in Chromium (WebView2); where it does not exist the draw does not give way.
-* The 300 ms quiet period makes Play ready 300 ms later after a single edit on a short score (430 to about 700 ms); it is what keeps
-  a run of edits to one preparation.
-* The checks that edits equal rebuilds are a fuzzed comparison over the edit types and score features above, not a proof; the
-  runtime comparison is off in release builds.
+* Synthetic scores of identical bars and five real scores, one machine, Windows only; medians of a few repetitions.
+* The draw yielding to waiting keys relies on `navigator.scheduling.isInputPending` (Chromium/WebView2).
+* The equivalence checks are fuzzed comparisons over the edit types and features above, not a proof; the check in release builds is the
+  idle comparison, which runs after the fact.

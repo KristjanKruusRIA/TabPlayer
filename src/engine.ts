@@ -14,7 +14,7 @@ import { captureNoteLinks, restoreNoteLinks, detachNote } from './editor/links';
 import { backingLocationsForScore,validateBackingAnchors } from './audio/plan';
 import { adjustReferenceSyncBounds,referenceSyncTiming } from './audio/reference-sync';
 import { scoreFromJson } from './model-clone';
-import { validateParityCommand } from './parity-commands';
+import { MAX_SEQUENCE_COMMANDS,validateParityCommand } from './parity-commands';
 import { defaultTuningName, validateTuningName } from './editor/structure';
 import { stringCapo } from './editor/partial-capo';
 import { setTempoUnit, tempoUnitOf } from './editor/tempo-unit';
@@ -513,7 +513,7 @@ const inPlaceSteps=(edit:EditCommand):SingleCommand[]|null=>{
   return steps;
 };
 /** How a score came from another by an edit in place: its predecessor and the one track whose content changed. Lets a view of the score (the engraving projection) follow the edit without being rebuilt. */
-export interface ScoreLineage {previous:model.Score;track:number;edit:EditCommand}
+export interface ScoreLineage {previous:model.Score;track:number;/** The edit applied, or null when the edit that made `previous` was taken back. */edit:EditCommand|null}
 const lineages=new WeakMap<model.Score,ScoreLineage>();
 export const scoreLineage=(score:model.Score):ScoreLineage|undefined=>lineages.get(score);
 /** Why `edit` may not be applied to `current` in place (anything not known to be safe is refused and takes the full rebuild), or null when it may. */
@@ -532,7 +532,7 @@ export function inPlaceRefusal(current:BuiltDocument,edit:EditCommand):string|nu
     if(master.isAnacrusis)return 'pickup bar';
     if(master.isFreeTime)return 'free-time bar';
     if(master.fermata!==null||voice.beats.some(beat=>beat.fermata))return 'fermata';
-    if(changesRests(step)&&flagNearby(track.staves[place.staff],place))return 'let ring or palm mute beside a rest';
+    if(changesRests(step,voice.beats[place.beat])&&flagNearby(track.staves[place.staff],place))return 'let ring or palm mute beside a rest';
   }
   // A beat that shows its running time has it worked out from the whole score's playback, which an edit would change for every beat after it.
   return showsTimers(current.score)?'timers':null;
@@ -544,7 +544,15 @@ export const canEditInPlace=(current:BuiltDocument,edit:EditCommand):boolean=>in
  * finishing hands them on to a rest from the beat before and takes them off the rests before a note that lacks them, from whatever the marks were already,
  * so their result depends on how many times the track was finished (a rebuild from the file does it twice, an edit in place once more each time).
  */
-const changesRests=(step:SingleCommand):boolean=>step.type!=='setDuration';
+const changesRests=(step:SingleCommand,beat:model.Beat|undefined):boolean=>{
+  if(step.type==='setDuration')return false;
+  const notes=beat?.notes.length??0;
+  // A note written on a beat that has notes, or one of several removed, leaves it a note; a rest made of a rest changes nothing.
+  if(step.type==='setNote')return notes===0;
+  if(step.type==='removeNote')return notes<=1;
+  if(step.type==='setRest')return notes>0;
+  return true;
+};
 /** Whether a beat in the run of rests around `place`, with the note before and the note after the run, carries a let ring or palm mute mark. */
 function flagNearby(staff:model.Staff,place:BeatTarget):boolean {
   const lane=(bar:number)=>staff.bars[bar]?.voices[place.voice]?.beats??[];
@@ -607,6 +615,13 @@ function settleTrack(track:model.Track) {
 type IdCeilings={note:number;beat:number;bar:number;voice:number};
 const idCeilings=new WeakMap<model.Score,IdCeilings>();
 const idCounters=model as unknown as {Note:{globalNoteId:number};Beat:{_globalBeatId:number};Bar:{_globalBarId:number};Voice:{_globalVoiceId:number}};
+type CounterMark=[number,number,number,number];
+const counterMark=():CounterMark=>[idCounters.Note.globalNoteId,idCounters.Beat._globalBeatId,idCounters.Bar._globalBarId,idCounters.Voice._globalVoiceId];
+const counterMax=(a:CounterMark,b:CounterMark):CounterMark=>[Math.max(a[0],b[0]),Math.max(a[1],b[1]),Math.max(a[2],b[2]),Math.max(a[3],b[3])];
+function raiseCounters(mark:CounterMark):void {
+  idCounters.Note.globalNoteId=Math.max(idCounters.Note.globalNoteId,mark[0]);idCounters.Beat._globalBeatId=Math.max(idCounters.Beat._globalBeatId,mark[1]);
+  idCounters.Bar._globalBarId=Math.max(idCounters.Bar._globalBarId,mark[2]);idCounters.Voice._globalVoiceId=Math.max(idCounters.Voice._globalVoiceId,mark[3]);
+}
 function raiseIdCounters(score:model.Score):void {
   let ceilings=idCeilings.get(score);
   if(!ceilings){
@@ -670,7 +685,7 @@ function captureJournal(score:model.Score,trackIndex:number,steps:SingleCommand[
 }
 /** How many edits applied in place can be taken back one after the other without a rebuild (each keeps the track's frets and links as they were). */
 const JOURNAL_DEPTH=24;
-interface Journal {restore:()=>void;older:Journal|null}
+interface Journal {restore:()=>void;older:Journal|null;track:number}
 const journals=new WeakMap<model.Score,Journal>();
 /** Whether the last edit that made this document's score can be taken back without a rebuild. */
 export const canUndoInPlace=(score:model.Score):boolean=>journals.has(score);
@@ -679,22 +694,34 @@ export const canUndoInPlace=(score:model.Score):boolean=>journals.has(score);
  * The edit before it, if it was also applied in place, can be taken back in turn.
  */
 export function undoInPlace(current:BuiltDocument):BuiltDocument {
-  const journal=journals.get(current.score);if(!journal)throw new Error('There is no edit to take back in place.');
-  raiseIdCounters(current.score);
-  journal.restore();
-  noteIdCeilings(current.score);journals.delete(current.score);
-  const next=newScoreIdentity(current.score);
-  if(journal.older)journals.set(next,journal.older);
-  return {...current,score:next};
+  const score=undoScore(current.score);
+  return {...current,score};
 }
-/** Applies `edit` to `score` in place without any check, and works out the derived state of the track it changed. For a copy of a document that `edit` has already been applied to and checked on. */
-export function editScoreInPlace(score:model.Score,edit:EditCommand,index=0):void {
+/** Takes back the edit that made `score` and returns the same tracks under a new identity (the journal of the edit before it goes with it). */
+function undoScore(score:model.Score):model.Score {
+  const journal=journals.get(score);if(!journal)throw new Error('There is no edit to take back in place.');
+  raiseIdCounters(score);
+  journal.restore();
+  noteIdCeilings(score);journals.delete(score);
+  const next=newScoreIdentity(score);
+  if(journal.older)journals.set(next,journal.older);
+  lineages.set(next,{previous:score,track:journal.track,edit:null});timerScores.set(next,false);
+  return next;
+}
+/** The rendered copy of a document, with the edit that was applied to the document applied to it (returns the copy under a new identity; the copy can then take the edit back in place too). */
+export function editCopyInPlace(copy:model.Score,edit:EditCommand,index=0):model.Score {
   const steps=inPlaceSteps(edit);if(!steps)throw new Error('This edit cannot be applied in place.');
   const track=(steps[0] as {target:BeatTarget}).target.track;
-  raiseIdCounters(score);
-  for(const step of steps){apply(score,step,index);settleTrack(score.tracks[track]);}
-  noteIdCeilings(score);
+  raiseIdCounters(copy);
+  const restore=captureJournal(copy,track,steps);
+  for(const step of steps){apply(copy,step,index);settleTrack(copy.tracks[track]);}
+  noteIdCeilings(copy);
+  const next=newScoreIdentity(copy),journal:Journal={restore,older:journals.get(copy)??null,track};journals.set(next,journal);
+  let oldest:Journal=journal;for(let depth=1;depth<JOURNAL_DEPTH&&oldest.older;depth++)oldest=oldest.older;oldest.older=null;
+  return next;
 }
+/** The rendered copy with the edit that made it taken back (null when it holds nothing to take back). */
+export function undoCopyInPlace(copy:model.Score):model.Score|null {return journals.has(copy)?undoScore(copy):null;}
 /**
  * Applies `edit` to the score of `current` in place and returns the document with a new score identity (the old one is no longer
  * valid, and must not be shown). Throws what the edit refuses with, after which the score is in an unknown state: the caller
@@ -711,7 +738,7 @@ export function editInPlace(current:BuiltDocument,edit:EditCommand,index:number)
     settleTrack(score.tracks[track]);
   }
   noteIdCeilings(score);
-  const next=reviseScore(score,track,edit),journal:Journal={restore,older:journals.get(score)??null};journals.set(next,journal);
+  const next=reviseScore(score,track,edit),journal:Journal={restore,older:journals.get(score)??null,track};journals.set(next,journal);
   // Only the newest edits keep what it takes to take them back.
   let oldest:Journal=journal;for(let depth=1;depth<JOURNAL_DEPTH&&oldest.older;depth++)oldest=oldest.older;oldest.older=null;
   return {...current,score:next};
@@ -756,6 +783,8 @@ export function registerLiveDocument(project:object,document:BuiltDocument):void
  */
 export function editsFitLive(project:ProjectInput,commands:EditCommand[]):boolean|null {
   const live=liveDocuments.get(project);if(!live||!commands.length)return null;
+  // A sequence holds two to eight note-entry steps and no beat deletion: anything else is not a question this can answer.
+  if(commands.length>MAX_SEQUENCE_COMMANDS||commands.some(command=>command.type==='deleteBeat'||command.type==='sequence'))return null;
   const edit:EditCommand=commands.length===1?commands[0]:{type:'sequence',commands:commands as never};
   if(!canEditInPlace(live,edit))return null;
   try{checkEditInPlace(live,edit,projectCommands(project).length);return true;}catch{return false;}
@@ -775,14 +804,18 @@ export function shouldCheckEdit():boolean {
   const override=(globalThis as {__tabplayerCheckEdits?:number}).__tabplayerCheckEdits,every=typeof override==='number'?override:editCheck.every;
   return every>0&&++editCheck.count%every===0;
 }
-/** The document a full rebuild gives for `project`, compared with `built`: null when they are the same, otherwise where they first differ. */
-export function verifyEditInPlace(project:ProjectInput,built:BuiltDocument,canRedo=false):string|null {
+/** How two documents differ (their scores as `describeScore` sees them, then their settings), as a readable path, or null when they are the same. Repeated ids in `built` count as a difference. */
+export function compareDocuments(built:BuiltDocument,full:BuiltDocument):string|null {
   const repeated=duplicateIds(built.score);if(repeated)return `duplicate ids: ${repeated}`;
-  const full=buildDocument(project,canRedo);
   const difference=firstDifference(describeScore(built.score),describeScore(full.score));
   if(difference)return `score ${difference}`;
   const settingsDifference=firstDifference(JSON.parse(JSON.stringify(built.settings)),JSON.parse(JSON.stringify(full.settings)));
   return settingsDifference?`settings ${settingsDifference}`:null;
+}
+/** The document a full rebuild gives for `project`, compared with `built`: null when they are the same, otherwise where they first differ. */
+export function verifyEditInPlace(project:ProjectInput,built:BuiltDocument,canRedo=false):string|null {
+  const repeated=duplicateIds(built.score);if(repeated)return `duplicate ids: ${repeated}`;
+  return compareDocuments(built,buildDocument(project,canRedo));
 }
 
 /**
@@ -791,8 +824,17 @@ export function verifyEditInPlace(project:ProjectInput,built:BuiltDocument,canRe
  */
 export async function verifyEditStepwise(project:ProjectInput,built:BuiltDocument,canRedo:boolean,pause:()=>Promise<void>,cancelled:()=>boolean):Promise<{problem:string|null;rebuilt:BuiltDocument}|null> {
   const build=buildDocumentSteps(project,canRedo);let step=build.next();
-  while(!step.done){await pause();if(cancelled())return null;step=build.next();}
+  // Opening another file sets the global id counters back to zero. The rebuild's own objects must never share an id, so at each resume the counters
+  // are put back to where this rebuild had taken them (never lowered below what it reached).
+  let reached=counterMark();
+  while(!step.done){
+    reached=counterMax(reached,counterMark());
+    await pause();if(cancelled())return null;
+    raiseCounters(reached);step=build.next();
+  }
   const rebuilt=step.value,repeated=duplicateIds(built.score);
+  // A rebuild that holds a repeated id is a disturbed one: the check is called off, it never stands for a repair.
+  if(duplicateIds(rebuilt.score))return null;
   const described=describeScoreSteps(built.score),expected=describeScoreSteps(rebuilt.score);
   let one=described.next(),other=expected.next();
   while(!one.done||!other.done){await pause();if(cancelled())return null;if(!one.done)one=described.next();if(!other.done)other=expected.next();}

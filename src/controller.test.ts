@@ -515,3 +515,37 @@ it('takes back and redoes edits applied in place without rebuilding the document
     await controller.undo();expect(same(),'after undoing past it').toBeNull();
   } finally {editCheck.every=previous;}
 },60000);
+
+it('a settings edit does not make an unchecked in-place score look checked, and the check is wanted again afterwards',async()=>{
+  const {editCheck,editStats,idleVerification,verifyEditInPlace}=await import('./engine');
+  const previous=editCheck.every,afterMs=idleVerification.afterMs,errors=vi.spyOn(console,'error').mockImplementation(()=>{});
+  const at=(bar:number)=>({track:0,staff:0,bar,voice:0,beat:0});
+  const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+  try {
+    editCheck.every=0;idleVerification.afterMs=0;
+    const project:Project={...blankProject(),base:{kind:'blank',title:'T',artist:'',tempo:120,tuning:[64,59,55,50,45,40],measureCount:4},edits:[]};
+    const controller=await DocumentController.create(makeBridge(project));
+    const mix={gain:.5,pan:0,mute:false,solo:false};
+    // 1. An edit in place, then a settings edit (a page layout, a mixer drag) before the check ran: the score is still unchecked.
+    await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
+    controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret=12;
+    const base=editStats.mismatches;
+    await controller.edit({type:'setTrackMix',trackId:'base/0',mix});
+    const state=await controller.verified();
+    expect(editStats.mismatches-base,'the divergence was found after the settings edit').toBe(1);
+    expect(state.repaired).toBe(true);expect(verifyEditInPlace(state.snapshot.project,state,state.snapshot.canRedo)).toBeNull();
+    // 2. The same after an undo of a settings edit.
+    await controller.edit({type:'setNote',target:at(1),string:2,fret:5});
+    controller.getState().score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes[0].fret=11;
+    await controller.undo();await controller.redo();
+    const second=await controller.verified();
+    expect(second.repaired,'an undo and redo of the edit did not hide it').toBeFalsy();
+    // 3. With the timer on, a settings edit does not turn the check off for good.
+    idleVerification.afterMs=200;
+    await controller.edit({type:'setNote',target:at(2),string:3,fret:7});
+    const counted=editStats.verified;
+    await controller.edit({type:'setTrackMix',trackId:'base/0',mix:{...mix,gain:.4}});
+    await wait(900);
+    expect(editStats.verified-counted,'the check ran after the settings edit').toBe(1);
+  } finally {editCheck.every=previous;idleVerification.afterMs=afterMs;errors.mockRestore();}
+},60000);

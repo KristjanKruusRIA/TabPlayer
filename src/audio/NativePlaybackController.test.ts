@@ -805,9 +805,9 @@ it('prepares the first change after a quiet spell at once, and edits that follow
     const load=()=>player.loadDocument(current,built);
     const change=(fret:number)=>{const next=previewEdit(current,note(fret));current=next.project;built=next;};
     // The document opens, then one edit after a quiet spell: no wait.
-    await load();vi.advanceTimersByTime(1000);planned.length=0;
-    change(3);const first=load();await vi.advanceTimersByTimeAsync(0);await first;
-    expect(planned,'the first edit after a quiet spell is built without waiting').toEqual([1]);
+    const opening=load();await vi.advanceTimersByTimeAsync(100);await opening;vi.advanceTimersByTime(1000);planned.length=0;
+    change(3);const first=load();await vi.advanceTimersByTimeAsync(0);expect(planned,'not before the change was drawn').toEqual([]);await vi.advanceTimersByTimeAsync(70);await first;
+    expect(planned,'the first edit after a quiet spell is built once it was drawn, without the quiet period').toEqual([1]);
     // Three edits inside the window: only the last is built, after the quiet period.
     change(4);const second=load();vi.advanceTimersByTime(100);change(5);const third=load();vi.advanceTimersByTime(100);change(6);const fourth=load();
     await vi.advanceTimersByTimeAsync(0);expect(planned,'edits in a burst wait for the edits to stop').toEqual([1]);

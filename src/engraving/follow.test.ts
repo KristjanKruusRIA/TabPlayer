@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { importer, Settings } from '@coderline/alphatab';
-import { buildDocument, checkEditInPlace, editInPlace, exportGp, trackIdentity } from '../engine';
+import { buildDocument, checkEditInPlace, editInPlace, exportGp, trackIdentity, undoInPlace } from '../engine';
 import { describeScore, firstDifference } from '../engine-verify';
 import { blankProject, projectCommands, type EditCommand, type Project } from '../project';
 import { defaultEngraving, projectEngraving } from './projection';
@@ -70,4 +70,45 @@ it('edits the rendered copy once however often the same projection is asked for,
   expect(first!.beats.get(kept.id)!.rendered).toBe(keptRendered);
   expect(first!.beats.has(gone.id)).toBe(false);
   void goneRendered;
+});
+
+it('follows an edit that was taken back in place to the projection a new one gives',()=>{
+  let built=buildDocument(project());
+  const value={...defaultEngraving(),profiles:[{trackId:'base/1',profile:'tablature' as const}]},ids=(score:typeof built.score)=>score.tracks.map(trackIdentity);
+  let basis:ProjectionBasis={source:built.score,ids:ids(built.score),value,projection:projectEngraving(built.score,ids(built.score),value)};
+  const draw=(label:string)=>{
+    const next=followProjection(basis,built.score,ids(built.score),value);
+    expect(next,label).not.toBeNull();same(next!,projectEngraving(built.score,ids(built.score),value));
+    basis={source:built.score,ids:ids(built.score),value,projection:next!};
+  };
+  const edits:EditCommand[]=[{type:'setNote',target:{track:1,staff:0,bar:0,voice:0,beat:1},string:2,fret:9},{type:'deleteBeat',target:{track:1,staff:0,bar:3,voice:0,beat:3}}];
+  for(const edit of edits){built=editInPlace(built,edit,0);draw(`edit ${edit.type}`);}
+  built=undoInPlace(built);draw('undo of the second');
+  built=undoInPlace(built);draw('undo of the first');
+  // Taken back and written again between two draws.
+  built=editInPlace(built,edits[0],0);built=undoInPlace(built);built=editInPlace(built,{type:'setNote',target:{track:1,staff:0,bar:0,voice:0,beat:1},string:2,fret:12},0);draw('write, undo, write');
+});
+
+it('finds the document beat and note of every rendered one, new ones included, whatever ids the copy gave them',()=>{
+  let built=buildDocument(project());
+  const value=defaultEngraving(),ids=(score:typeof built.score)=>score.tracks.map(trackIdentity);
+  const basis:ProjectionBasis={source:built.score,ids:ids(built.score),value,projection:projectEngraving(built.score,ids(built.score),value)};
+  // A beat is inserted and a note typed on it, then a note written on an existing rest: new objects in the document, made again in the copy.
+  const edits:EditCommand[]=[
+    {type:'deleteBeat',target:{track:0,staff:0,bar:2,voice:0,beat:3}},
+    {type:'insertBeat',target:{track:0,staff:0,bar:2,voice:0,beat:1},duration:4,dots:0},
+    {type:'setNote',target:{track:0,staff:0,bar:2,voice:0,beat:1},string:2,fret:7},
+  ];
+  for(const edit of edits)built=editInPlace(built,edit,0);
+  const next=followProjection(basis,built.score,ids(built.score),value)!;expect(next).not.toBeNull();
+  const sourceBeat=built.score.tracks[0].staves[0].bars[2].voices[0].beats[1],sourceNote=sourceBeat.notes[0];
+  const renderedBeat=next.beats.get(sourceBeat.id)!.rendered,renderedNote=next.notes.get(sourceNote.id)!.rendered;
+  expect(next.renderedBeats?.get(renderedBeat),'a click on the new beat').toBe(sourceBeat);
+  expect(next.renderedNotes?.get(renderedNote),'a click on the new note').toBe(sourceNote);
+  // Every rendered beat and note leads back to the one it is a copy of.
+  for(const [,pair] of next.beats)expect(next.renderedBeats?.get(pair.rendered)).toBe(pair.source);
+  for(const [,pair] of next.notes)expect(next.renderedNotes?.get(pair.rendered)).toBe(pair.source);
+  // The same for a projection made whole.
+  const whole=projectEngraving(built.score,ids(built.score),value);
+  for(const [,pair] of whole.beats)expect(whole.renderedBeats?.get(pair.rendered)).toBe(pair.source);
 });

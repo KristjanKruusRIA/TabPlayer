@@ -14,6 +14,9 @@ export interface EngravingProjection {
   score:model.Score;
   beats:Map<number,{source:model.Beat;rendered:model.Beat}>;
   notes:Map<number,{source:model.Note;rendered:model.Note}>;
+  /** Each rendered beat and note to the document's: found by object, so a copy that gave its new objects other ids than the document did still leads back. */
+  renderedBeats?:Map<model.Beat,model.Beat>;
+  renderedNotes?:Map<model.Note,model.Note>;
   /** The rendered score's `stylesheet.bracketExtendMode` after overrides. */
   bracketMode:number;
 }
@@ -63,7 +66,8 @@ function liveTracks(score:model.Score,ids:readonly string[],value:EngravingOverr
 }
 export function validateEngravingTracks(score:model.Score,ids:readonly string[],value:EngravingOverrides):void {validateEngraving(value);liveTracks(score,ids,value,true);}
 /** Gives the rendered copy `score` of `source` the display flags its track profiles ask for, and maps each source beat and note to its copy. */
-export function mapProjection(source:model.Score,score:model.Score,ids:readonly string[],value:EngravingOverrides):Pick<EngravingProjection,'beats'|'notes'> {
+export function mapProjection(source:model.Score,score:model.Score,ids:readonly string[],value:EngravingOverrides):Pick<EngravingProjection,'beats'|'notes'|'renderedBeats'|'renderedNotes'> {
+  const renderedBeats=new Map<model.Beat,model.Beat>(),renderedNotes=new Map<model.Note,model.Note>();
   const beats:EngravingProjection['beats']=new Map(),notes:EngravingProjection['notes']=new Map(),profiles=new Map(value.profiles.map(entry=>[entry.trackId,entry.profile]));
   source.tracks.forEach((track,ti)=>track.staves.forEach((staff,si)=>{
     const rendered=score.tracks[ti].staves[si],profile=profiles.get(ids[ti])??'source',stringed=staff.tuning.length>0&&!staff.isPercussion;
@@ -71,17 +75,17 @@ export function mapProjection(source:model.Score,score:model.Score,ids:readonly 
     const flags=profile==='source'?[staff.showStandardNotation,staff.showTablature,staff.showSlash,staff.showNumbered]:profile==='standard'?[true,false,false,false]:profile==='tablature'?[false,true,false,false]:profile==='standardTab'?[true,stringed,false,false]:profile==='slash'?[false,false,true,false]:[false,false,false,true];
     [rendered.showStandardNotation,rendered.showTablature,rendered.showSlash,rendered.showNumbered]=flags;
     staff.bars.forEach((bar,bi)=>bar.voices.forEach((voice,vi)=>voice.beats.forEach((beat,bti)=>{
-      const copy=rendered.bars[bi].voices[vi].beats[bti];beats.set(beat.id,{source:beat,rendered:copy});beat.notes.forEach((note,ni)=>notes.set(note.id,{source:note,rendered:copy.notes[ni]}));
+      const copy=rendered.bars[bi].voices[vi].beats[bti];beats.set(beat.id,{source:beat,rendered:copy});renderedBeats.set(copy,beat);beat.notes.forEach((note,ni)=>{notes.set(note.id,{source:note,rendered:copy.notes[ni]});renderedNotes.set(copy.notes[ni],note);});
     })));
   }));
   // The public tie-ID JSON replay path omits the continued bend's origin link.
   for(const pair of notes.values())pair.rendered.bendOrigin=pair.source.bendOrigin?notes.get(pair.source.bendOrigin.id)?.rendered??null:null;
-  return {beats,notes};
+  return {beats,notes,renderedBeats,renderedNotes};
 }
 export function projectEngraving(source:model.Score,ids:readonly string[],value:EngravingOverrides):EngravingProjection {
   validateEngraving(value);liveTracks(source,ids,value,false);
   const score=scoreFromJson(model.JsonConverter.scoreToJson(source),new Settings());restoreNoteLinks(score,captureNoteLinks(source));copyGpInterchangeSource(source,score);
-  const {beats,notes}=mapProjection(source,score,ids,value);
+  const {beats,notes,renderedBeats,renderedNotes}=mapProjection(source,score,ids,value);
   const style=score.stylesheet,overrides=value.stylesheet;
   for(const [key,field]of Object.entries(styleBooleans)){const override=overrides[key as keyof typeof styleBooleans];if(override!==null)Object.assign(style,{[field]:override});}
   for(const [key,mapping]of Object.entries(styleEnums)){const override=overrides[key as keyof typeof styleEnums];if(override!=='inherit')Object.assign(style,{[mapping.field]:(mapping.values as Record<string,number>)[override]});}
@@ -91,7 +95,7 @@ export function projectEngraving(source:model.Score,ids:readonly string[],value:
   if(overrides.multiRests!=='inherit'){style.multiTrackMultiBarRest=overrides.multiRests==='on';style.perTrackMultiBarRest=new Set(overrides.multiRests==='on'?score.tracks.map((_,i)=>i):[]);}
   // A bar's width is its weight in the system: master bars decide it when several staves show, each bar when one does. Only the copy changes, so playback and MIDI read the unchanged source.
   for(const {bar,scale} of value.barWidths??[]){const master=score.masterBars[bar];if(!master)continue;master.displayScale=scale;for(const track of score.tracks)for(const staff of track.staves){const copy=staff.bars[bar];if(copy)copy.displayScale=scale;}}
-  return {score,beats,notes,bracketMode:score.stylesheet.bracketExtendMode};
+  return {score,beats,notes,renderedBeats,renderedNotes,bracketMode:score.stylesheet.bracketExtendMode};
 }
 /**
  * Applies `value` to `settings`. The engraving settings always restart from Bravura's, so switching back from another music font leaves none of its

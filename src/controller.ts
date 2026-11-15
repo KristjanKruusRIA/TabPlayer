@@ -4,7 +4,7 @@ import { gpExportRefusal,gpLosses } from './interchange/gp-losses';
 import { scoreHasMusicXmlTimeCarry } from './interchange/musicxml-time-symbols';
 import { gpWarning } from './export/gp-warning';
 import { yieldToInput } from './engine-verify';
-import { buildDocument, canEditInPlace, canUndoInPlace, checkEditInPlace, editInPlace, editStats, idleVerification, registerLiveDocument, undoInPlace, verifyEditStepwise, effectiveAudioSettings,exportGp, forgetPreview, previewEdit, replayDocumentSettings, shouldCheckEdit, verifyEditInPlace, type BuiltDocument } from './engine';
+import { buildDocument, canEditInPlace, canUndoInPlace, compareDocuments, checkEditInPlace, editInPlace, editStats, idleVerification, registerLiveDocument, undoInPlace, verifyEditStepwise, effectiveAudioSettings,exportGp, forgetPreview, previewEdit, replayDocumentSettings, shouldCheckEdit, verifyEditInPlace, type BuiltDocument } from './engine';
 import { appliesFilePartialCapo, projectCommands, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
 import { getPartialCapo } from './editor/partial-capo';
 import type { DocumentId,DocumentRevision,DocumentSnapshot } from './workspace/types';
@@ -53,11 +53,14 @@ export class DocumentController {
   /** Edits applied in place since the document was last checked against a rebuild from its history. */
   /** The edit count a score had when an edit applied in place made it, so the next undo knows the edit it takes back is the one that can be taken back in place. */
   private marks=new WeakMap<model.Score,number>();
-  private unverified=0;private verifyTimer:ReturnType<typeof setTimeout>|null=null;private verifyRun=0;
+  /** The score object known to equal a rebuild from the history: the one a full build made, or one a check found equal. A settings edit keeps the score object, so it keeps what was or was not known about it. */
+  private verifiedScore:model.Score|null=null;private verifyTimer:ReturnType<typeof setTimeout>|null=null;private verifyRun=0;
+  private verifyGate:()=>boolean=()=>true;
 
   private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: BeforeChange, private isWorkspaceTransitioning:()=>boolean) {
     this.verifyRecord(record);
     this.state={...record,...buildDocument(record.snapshot.project,record.snapshot.canRedo),documentEpoch:0,busy:false,error:null};
+    this.verifiedScore=this.state.score;
   }
   static async create(bridge: NativeBridge, beforeChange: BeforeChange = () => {},initial?:DocumentSnapshot,isWorkspaceTransitioning:()=>boolean=()=>false) {
     const record=initial ?? await bridge.snapshot();
@@ -86,37 +89,53 @@ export class DocumentController {
       this.update({busy:true,error:null});
       try { return await action(); }
       catch(error) { this.update({error:error instanceof Error ? error.message : String(error)}); throw error; }
-      finally { this.pendingActions--;this.update({busy:this.hasPendingActions()}); }
+      finally { this.pendingActions--;this.update({busy:this.hasPendingActions()});if(this.pendingActions===0&&this.isUnverified())this.scheduleVerify(); }
     });
     this.tail=job.then(()=>{},()=>{}); return job;
   }
   /** Stops a check of the document that is running or waiting: something else is going to happen to it. */
   private cancelVerify() {this.verifyRun++;if(this.verifyTimer!==null){clearTimeout(this.verifyTimer);this.verifyTimer=null;}}
-  /** The check starts once the edits stop, and starts over with the next one. */
-  private scheduleVerify() {
+  private isUnverified():boolean {return this.state.score!==this.verifiedScore;}
+  private markVerified():void {this.verifiedScore=this.state.score;}
+  /** Whether the idle check may run now: not while playback runs (a swap stops it, and the check's slices stall the moving cursor). */
+  setVerifyGate(gate:()=>boolean) {this.verifyGate=gate;}
+  /** The check starts once the edits stop, and starts over with the next one; while playback runs it waits for it to stop. */
+  private scheduleVerify(delay=idleVerification.afterMs) {
     this.cancelVerify();
-    if(idleVerification.afterMs>0)this.verifyTimer=setTimeout(()=>{this.verifyTimer=null;void this.verifyNow().catch(()=>{});},idleVerification.afterMs);
+    if(delay<=0)return;
+    this.verifyTimer=setTimeout(()=>{
+      this.verifyTimer=null;
+      if(!this.verifyGate()){this.scheduleVerify(1000);return;}
+      void this.verifyNow().catch(()=>{});
+    },delay);
   }
   /**
-   * Compares the document, when edits were applied to it in place, with one rebuilt from the file and the history, in steps that let typing go
-   * first; on a difference the rebuilt document replaces it. Resolves false when something else began meanwhile (the check is then wanted again later).
+   * Compares the document, when it holds edits applied in place that nobody compared, with one rebuilt from the file and the history, in steps that
+   * let typing go first; on a difference the document is replaced by a rebuild made in one piece. Resolves false when something else began meanwhile
+   * (the check is then wanted again later).
    */
   async verifyNow(pause:()=>Promise<void>=yieldToInput):Promise<boolean> {
-    if(this.unverified===0)return true;
+    if(!this.isUnverified())return true;
     const run=++this.verifyRun,live=this.state;
     const cancelled=()=>run!==this.verifyRun||this.state.score!==live.score||this.state.revision!==live.revision;
     const result=await verifyEditStepwise(live.snapshot.project,live,live.snapshot.canRedo,pause,cancelled);
     if(!result||cancelled())return false;
-    editStats.verified++;this.unverified=0;
+    editStats.verified++;
     if(result.problem){
-      editStats.mismatches++;console.error(`Edit in place differs from a full rebuild: ${result.problem}`);
-      forgetPreview();this.update({...result.rebuilt,repaired:true});
+      // The stepwise rebuild can be disturbed by what runs between its steps, so it never decides: a rebuild made in one piece does,
+      // and it is the one that replaces the document if the two differ.
+      const whole=buildDocument(live.snapshot.project,live.snapshot.canRedo),problem=compareDocuments(live,whole);
+      if(problem){
+        editStats.mismatches++;console.error(`Edit in place differs from a full rebuild: ${problem}`);
+        forgetPreview();this.update({...whole,repaired:true});
+      } else console.warn(`The stepwise check disagreed (${result.problem}) and a rebuild in one piece did not.`);
     }
+    this.markVerified();
     return true;
   }
   /** Resolves the state once it is verified (or rebuilt): what is exported or sent anywhere else reads this, never an edit nobody has compared with a rebuild. */
   verified():Promise<DocumentState> {
-    return this.run(async()=>{while(this.unverified>0)await this.verifyNow();return this.state;});
+    return this.run(async()=>{while(this.isUnverified())await this.verifyNow();return this.state;});
   }
   private async saveNow(saveAs: boolean) {
     const record=await this.bridge.saveProject(saveAs,this.state.revision);
@@ -157,27 +176,30 @@ export class DocumentController {
       if(asset) {try {await this.bridge.cancelAsset?.(asset.token);} catch {}}
       throw error;
     }
+    let rebuilt=false;
     if(inPlace) {
       // Native has the edit. The checked edit is applied to the built document now; should that fail all the same, the document is rebuilt from what native holds.
       try {candidate=editInPlace(this.state,command,projectCommands(this.state.snapshot.project).length);editStats.inPlace++;this.marks.set(candidate.score,record.snapshot.project.edits.length);}
       catch(error) {
         editStats.healed++;console.warn(`Edit in place failed after it was checked: ${error instanceof Error?error.message:String(error)}`);
-        candidate=buildDocument(record.snapshot.project,record.snapshot.canRedo);forgetPreview();
+        candidate=buildDocument(record.snapshot.project,record.snapshot.canRedo);forgetPreview();rebuilt=true;
       }
     }
+    const scoreBefore=this.state.score;
     if(!isSettingsEdit(command))this.beforeChange(barMapOfEdit(command,this.state.score.masterBars.length)??undefined);
     this.undone=[];this.update({...record,repaired:false,score:candidate!.score,settings:candidate!.settings,embeddedBacking:candidate!.embeddedBacking,embeddedBackingSettings:candidate!.embeddedBackingSettings,sourceMixes:candidate!.sourceMixes});
-    if(inPlace){this.unverified++;this.checkInPlace();this.scheduleVerify();}
-    else this.unverified=0;
+    // Only a score a full build made is known to equal a rebuild. A settings edit keeps the score object, and with it what is known of it.
+    if(inPlace&&!rebuilt){this.checkInPlace();this.scheduleVerify();}
+    else if(this.state.score!==scoreBefore)this.markVerified();
   }
   /** Compares the document after an edit in place with a full rebuild when asked to (see `editCheck`); on a difference the rebuilt document is used. */
   private checkInPlace() {
     if(!shouldCheckEdit())return;
-    editStats.verified++;this.unverified=0;
+    editStats.verified++;this.markVerified();
     const problem=verifyEditInPlace(this.state.snapshot.project,this.state,this.state.snapshot.canRedo);
     if(!problem)return;
     editStats.mismatches++;console.error(`Edit in place differs from a full rebuild: ${problem}`);
-    this.update({...buildDocument(this.state.snapshot.project,this.state.snapshot.canRedo)});forgetPreview();
+    this.update({...buildDocument(this.state.snapshot.project,this.state.snapshot.canRedo)});forgetPreview();this.markVerified();
   }
   private async admitReferenceTiming(candidate:BuiltDocument) {
     const backing=candidate.settings.backing;
@@ -220,6 +242,11 @@ export class DocumentController {
       return clip;
     });
   }
+  /** What an undo or redo applied in place falls back to when it fails after native has done it: the document is rebuilt from what native now holds. */
+  private rebuildFrom(record:DocumentSnapshot,why:unknown) {
+    editStats.healed++;console.warn(`Undo or redo in place failed: ${why instanceof Error?why.message:String(why)}`);
+    forgetPreview();this.update({...record,...buildDocument(record.snapshot.project,record.snapshot.canRedo),repaired:false});this.markVerified();
+  }
   undo() { return this.run(async()=>{
     const project=this.state.snapshot.project,removed=project.edits.at(-1);if(!removed)return;
     const settingsOnly=isSettingsEdit(removed),previous={...project,edits:project.edits.slice(0,-1)};
@@ -229,24 +256,34 @@ export class DocumentController {
     const record=await this.bridge.undo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange(barMapOfUndo(removed,this.state.score.masterBars.length)??undefined);
     this.undone.push(removed);
     if(quick){
-      const next=undoInPlace(this.state);if(canUndoInPlace(next.score))this.marks.set(next.score,project.edits.length-1);
-      this.unverified++;editStats.inPlace++;this.update({...record,score:next.score,repaired:false});this.scheduleVerify();
-    } else {this.unverified=0;this.update({...record,...built!,repaired:false});}
+      try {
+        const next=undoInPlace(this.state);if(canUndoInPlace(next.score))this.marks.set(next.score,project.edits.length-1);
+        editStats.inPlace++;this.update({...record,score:next.score,repaired:false});this.scheduleVerify();
+      } catch(error) {this.rebuildFrom(record,error);}
+    } else {
+      const before=this.state.score;this.update({...record,...built!,repaired:false});
+      if(this.state.score!==before)this.markVerified();
+    }
   }); }
   redo() { return this.run(async()=>{
     const restored=this.state.snapshot.redoEdit ?? this.undone.at(-1);
     if(!restored){if(this.state.snapshot.canRedo)throw new Error('The next redo command is unavailable; reopen the document.');return;}
     const project={...this.state.snapshot.project,edits:[...this.state.snapshot.project.edits,restored]},settingsOnly=isSettingsEdit(restored);
-    const quick=!settingsOnly&&canEditInPlace(this.state,restored)&&appliesFilePartialCapo(project,false)===appliesFilePartialCapo(this.state.snapshot.project,this.state.snapshot.canRedo);
-    // A redo that is applied in place is checked first, on copies, as an edit is.
-    if(quick)checkEditInPlace(this.state,restored,projectCommands(this.state.snapshot.project).length);
+    let quick=!settingsOnly&&canEditInPlace(this.state,restored)&&appliesFilePartialCapo(project,false)===appliesFilePartialCapo(this.state.snapshot.project,this.state.snapshot.canRedo);
+    // A redo that is applied in place is checked first, on copies, as an edit is; one the check refuses is rebuilt like any other.
+    if(quick){try{checkEditInPlace(this.state,restored,projectCommands(this.state.snapshot.project).length);}catch{quick=false;}}
     const built=quick?null:settingsOnly?replayDocumentSettings(project,this.state):buildDocument(project);
     const record=await this.bridge.redo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange(barMapOfEdit(restored,this.state.score.masterBars.length)??undefined);
     this.undone.pop();
     if(quick){
-      const next=editInPlace(this.state,restored,projectCommands(this.state.snapshot.project).length);this.marks.set(next.score,project.edits.length);
-      this.unverified++;editStats.inPlace++;this.update({...record,score:next.score,repaired:false});this.scheduleVerify();
-    } else {this.unverified=0;this.update({...record,...built!,repaired:false});}
+      try {
+        const next=editInPlace(this.state,restored,projectCommands(this.state.snapshot.project).length);this.marks.set(next.score,project.edits.length);
+        editStats.inPlace++;this.update({...record,score:next.score,repaired:false});this.scheduleVerify();
+      } catch(error) {this.rebuildFrom(record,error);}
+    } else {
+      const before=this.state.score;this.update({...record,...built!,repaired:false});
+      if(this.state.score!==before)this.markVerified();
+    }
   }); }
   /** Finalizes or unfinalizes the document. A lock change is not an edit, so history and the redo stack stay as they are. */
   setLock(lock:DocumentLock|null) { return this.run(async()=>{
@@ -270,7 +307,7 @@ export class DocumentController {
   save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
   export() { return this.run(async()=>{
     // What the file cannot keep is worked out first, so the user is asked once, with it, and not after confirming.
-    while(this.unverified>0)await this.verifyNow();
+    while(this.isUnverified())await this.verifyNow();
     const refusal=gpExportRefusal(this.state.score);if(refusal)throw new Error(refusal);
     const losses=gpLosses(this.state.score);
     if(!await (losses.length?this.bridge.confirmExport(gpWarning(losses)):this.bridge.confirmExport()))return;

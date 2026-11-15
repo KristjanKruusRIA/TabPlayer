@@ -24,6 +24,8 @@ const BUDGET={
   cursorMedianMs:90,
   /** Idle for 3 s: status events per second the engine sends, and the share of the main thread busy. */
   idleStatusEvents:8,idleBusyPercent:8,
+  /** A two-digit fret typed quickly (write, take back, write) and an undo, key to drawn. A rebuild from the history was about 1.5 s. */
+  joinMs:800,undoMs:500,
 };
 const median=values=>{const sorted=[...values].sort((a,b)=>a-b),middle=sorted.length>>1;return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2;};
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -91,13 +93,14 @@ try {
   for(const type of ['mouseMoved','mousePressed','mouseReleased'])await cdp.send('Input.dispatchMouseEvent',{type,x:point.x,y:point.y,button:type==='mouseMoved'?'none':'left',buttons:type==='mouseReleased'?0:1,clickCount:type==='mouseMoved'?0:1});
   await page.waitForTimeout(500);await settle();
 
-  // 1. One note edit, repeated: digit then Enter.
+  // 1. One note edit, repeated: a typed digit.
   const digits=[7,8,9,1,2,3,4,5,6];
   const editOnce=async index=>{
-    await reset();await press(String(digits[index%digits.length]));await sleep(120);await press('Enter');await sleep(60);await settle();
-    const data=await dump(),enter=data.keys.filter(k=>k.key==='Enter').at(-1).at,apply=data.ipc.find(i=>i.cmd.startsWith('apply_edit'));
-    const freed=data.busy.filter(b=>b.value==='false').at(-1),drawn=data.host.at(-1);
-    return {ipc:apply.end-enter,free:Math.max(freed?freed.at-enter:0,drawn?drawn.at-enter:0)};
+    // A digit writes its fret at once; Enter then adds nothing, so the edit is timed from the digit.
+    await reset();await press(String(digits[index%digits.length]));await sleep(60);await settle();
+    const data=await dump(),typed=data.keys.at(0).at,apply=data.ipc.find(i=>i.cmd.startsWith('apply_edit'));
+    const freed=data.busy.filter(b=>b.value==='false').at(-1),drawn=data.host.filter(change=>change.count>=40).at(-1);
+    return {ipc:apply.end-typed,free:Math.max(freed?freed.at-typed:0,drawn?drawn.at-typed:0)};
   };
   const edits=[];for(let i=0;i<24;i++)edits.push(await editOnce(i));
   result.editIpcMedianMs=Math.round(median(edits.map(e=>e.ipc)));
@@ -133,6 +136,23 @@ try {
   result.cursorMedianMs=Math.round(median(moves));result.cursorMoves=moves.length;
   assert.ok(moves.length>=15,'the status bar followed the cursor');
   assert.ok(result.cursorMedianMs<=BUDGET.cursorMedianMs,`cursor move shown in ${result.cursorMedianMs} ms (budget ${BUDGET.cursorMedianMs})`);
+
+  // 3b. Two digits typed together become one two-digit fret: the first write is taken back in place (no rebuild from the history) and the score is drawn once.
+  await settle();await press('ArrowRight');await sleep(400);await settle();
+  await press('1');await sleep(250);await reset();await press('2');await sleep(60);await settle();
+  const joined=await dump(),second=joined.keys.at(0).at,joinApplies=joined.ipc.filter(i=>/apply_edit|undo_edit/.test(i.cmd));
+  const joinDrawn=joined.host.filter(change=>change.count>=40);
+  result.join={ipcs:joinApplies.map(i=>i.cmd.replace(/\?.*/,'')),drawnMs:Math.round(joinDrawn.at(-1).at-second),draws:joinDrawn.length};
+  assert.deepEqual(result.join.ipcs,['undo_edit','apply_edit'],'the join is the history native has always seen: write, undo, write');
+  assert.ok(result.join.draws<=1,`the join drew the score ${result.join.draws} times`);
+  assert.ok(result.join.drawnMs<=BUDGET.joinMs,`two-digit join drawn in ${result.join.drawnMs} ms (budget ${BUDGET.joinMs})`);
+  // Undo of the last edit is taken back in place too.
+  await settle();await reset();
+  await cdp.send('Input.dispatchKeyEvent',{type:'rawKeyDown',key:'z',code:'KeyZ',windowsVirtualKeyCode:90,modifiers:2});await sleep(15);await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'z',code:'KeyZ',windowsVirtualKeyCode:90,modifiers:2});
+  await sleep(60);await settle();
+  const undone=await dump(),undoKey=undone.keys.at(0).at,undoDrawn=undone.host.filter(change=>change.count>=40).at(-1),undoCall=undone.ipc.find(i=>i.cmd.startsWith('undo_edit'));
+  result.undoMs=Math.round(undoDrawn.at-undoKey);result.undoIpcMs=Math.round(undoCall.end-undoKey);
+  assert.ok(result.undoMs<=BUDGET.undoMs,`undo drawn in ${result.undoMs} ms (budget ${BUDGET.undoMs})`);
 
   // 4. Idle: nothing redraws, the engine says little, the main thread rests.
   await settle();await page.waitForTimeout(1000);await reset();

@@ -1,5 +1,5 @@
 import type { model } from '@coderline/alphatab';
-import { editScoreInPlace,newScoreIdentity,scoreLineage } from '../engine';
+import { editCopyInPlace,scoreLineage,undoCopyInPlace } from '../engine';
 import { sameData } from '../same-data';
 import { mapProjection,type EngravingProjection } from './projection';
 import type { EngravingOverrides } from './types';
@@ -26,8 +26,13 @@ export function followProjection(basis:ProjectionBasis,source:model.Score,ids:re
   }
   if(!edits.length||!sameData(ids,basis.ids)||!(value===basis.value||sameData(value,basis.value)))return null;
   try {
-    for(const step of edits)editScoreInPlace(basis.projection.score,step!.edit);
-    const score=newScoreIdentity(basis.projection.score);
+    let score=basis.projection.score;
+    for(const step of edits){
+      // An edit taken back in place is taken back on the copy the same way; a copy that cannot is made again.
+      const next=step!.edit?editCopyInPlace(score,step!.edit):undoCopyInPlace(score);
+      if(!next)return null;
+      score=next;
+    }
     const projection={...mapProjection(source,score,ids,value),score,bracketMode:basis.projection.bracketMode};
     followed.set(source,{basis:basis.source,ids,value,projection});
     return projection;

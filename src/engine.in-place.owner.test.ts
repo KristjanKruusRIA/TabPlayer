@@ -41,7 +41,8 @@ describe.skipIf(files.length===0)('the owner\'s scores: edits in place equal a f
         const reason=inPlaceRefusal(built,edit);
         if(reason!==null){
           stats.fallback++;stats.fallbackByReason[reason]=(stats.fallbackByReason[reason]??0)+1;stats.tracksFallingBack.add(track);
-          try{built=buildDocument(after);project=after;}catch{stats.refused++;}
+          // An edit the full rebuild refuses is a refusal, whatever it would have been rebuilt for.
+          try{built=buildDocument(after);project=after;}catch{stats.fallback--;stats.refused++;stats.fallbackByReason[reason]--;}
           continue;
         }
         let expected:Error|null=null;try{buildDocument(after);}catch(error){expected=error as Error;}

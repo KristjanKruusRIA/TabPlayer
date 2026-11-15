@@ -848,9 +848,7 @@ mod tests {
         let mut block = vec![[0.0f32; 2]; 441];
         for tick in 1..=(SECONDS * 1_000_000 / TICK_MICROS) {
             let now = Duration::from_micros(tick * TICK_MICROS);
-            let gap: u64 = std::env::var("GAP_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-            let in_gap = gap > 0 && now >= Duration::from_millis(7_000 - gap) && now < Duration::from_millis(7_000 - gap + gap.min(1000));
-            if tick % 2 == 0 && !in_gap {
+            if tick % 2 == 0 {
                 pace_tone(&mut synth, &mut producer, &mut produced, now);
             }
             // As many frames as the clock says the device has asked for by now.
@@ -892,7 +890,6 @@ mod tests {
         // after eight seconds on exact clocks it has settled on the true ratio: a wrong rate would be 147 cents off.
         // `drift_correction_keeps_the_pitch_true_in_real_time` holds the pitch of a drifting device to a cent, also simulated.
         let off = 1200.0 * (measured / 220.0).log2();
-        eprintln!("PROBE periods {periods} measured {measured} off {off} status {status:?}");
         assert!(off.abs() < 1.0, "frequency {measured}, {off} cents off");
         assert!(
             (status.input_level - 20.0 * 0.35f32.log10()).abs() < 1.0,

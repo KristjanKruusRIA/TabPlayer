@@ -398,7 +398,7 @@ it('with busy=true a bend preset button has no disabled attribute and a click re
   expect(presetBtn.closest('fieldset[disabled]')).toBeNull();
   expect(presetBtn).not.toHaveAttribute('disabled');
   expect(presetBtn).not.toBeDisabled();
-  expect(presetBtn).toHaveAttribute('aria-disabled', 'true');
+  expect(presetBtn.closest('[aria-disabled="true"]')).not.toBeNull();
   fireEvent.click(presetBtn);
   expect(onEdit).not.toHaveBeenCalled();
 });

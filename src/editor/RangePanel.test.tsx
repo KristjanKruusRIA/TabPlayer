@@ -2,7 +2,7 @@
 import { afterEach,expect,it } from 'vitest';
 import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import { music,target } from './fixtures';
+import { music,target, refused} from './fixtures';
 import { RangePanel } from './RangePanel';
 import type { MusicSelection,RangeCommand } from './range-types';
 
@@ -42,25 +42,25 @@ it('invalid drafts and stale selections produce errors without dispatch',()=>{
   const score=music(),commands:RangeCommand[]=[],props={score,target,selection,busy:false,onSelection:()=>{},onEdit:(edit:RangeCommand)=>commands.push(edit)},view=render(<RangePanel {...props}/>);
   for(const value of ['0','128','1.5','']){fireEvent.change(screen.getByLabelText('Semitones'),{target:{value}});fireEvent.click(screen.getByRole('button',{name:'Transpose selection'}));expect(screen.getByRole('alert')).toHaveTextContent(/semitone/i);}
   fireEvent.change(screen.getByLabelText('Maximum fret'),{target:{value:'0'}});fireEvent.click(screen.getByRole('button',{name:'Re-finger selection'}));expect(screen.getByRole('alert')).toHaveTextContent(/fret/i);
-  expect(commands).toEqual([]);view.rerender(<RangePanel {...props} selection={{kind:'notes',notes:[{target:{...target,beat:999},noteIndex:0}]}}/>);expect(screen.getByRole('alert')).toHaveTextContent(/note|beat/i);expect(screen.getByRole('button',{name:'Erase selected notes'})).toBeDisabled();
+  expect(commands).toEqual([]);view.rerender(<RangePanel {...props} selection={{kind:'notes',notes:[{target:{...target,beat:999},noteIndex:0}]}}/>);expect(screen.getByRole('alert')).toHaveTextContent(/note|beat/i);expect(refused(screen.getByRole('button',{name:'Erase selected notes'}))).toBe(true);
 });
 it('resets drafts and errors on score or selection change and disables controls while busy',()=>{
   const score=music(),props={score,target,selection,busy:false,onSelection:()=>{},onEdit:()=>{}},view=render(<RangePanel {...props}/>);
   fireEvent.change(screen.getByLabelText('Maximum fret'),{target:{value:'99'}});fireEvent.change(screen.getByLabelText('Semitones'),{target:{value:'0'}});fireEvent.click(screen.getByRole('button',{name:'Transpose selection'}));expect(screen.getByRole('alert')).toBeInTheDocument();
   view.rerender(<RangePanel {...props} selection={{kind:'bars',tracks:[0],firstBar:0,lastBar:0}}/>);expect(screen.getByLabelText('Maximum fret')).toHaveValue(24);expect(screen.getByLabelText('Semitones')).toHaveValue(1);expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   view.rerender(<RangePanel {...props} score={music()}/>);expect(screen.getByLabelText('Maximum fret')).toHaveValue(24);
-  view.rerender(<RangePanel {...props} busy/>);for(const button of screen.getAllByRole('button'))expect(button).toBeDisabled();for(const input of [...screen.getAllByRole('spinbutton'),...screen.getAllByRole('checkbox'),...screen.getAllByRole('combobox')])expect(input).toBeDisabled();
+  view.rerender(<RangePanel {...props} busy/>);for(const button of screen.getAllByRole('button'))expect(refused(button)).toBe(true);for(const input of [...screen.getAllByRole('spinbutton'),...screen.getAllByRole('checkbox'),...screen.getAllByRole('combobox')])expect(refused(input)).toBe(true);
 });
 it('pitched lanes keep transpose and erase available while string-only controls are disabled',()=>{
   const score=music(),staff=score.tracks[0].staves[0];staff.stringTuning.tunings=[];const note=staff.bars[0].voices[0].beats[0].notes[0];note.string=-1;note.fret=-1;note.octave=5;note.tone=0;
   render(<RangePanel score={score} target={target} selection={selection} busy={false} onSelection={()=>{}} onEdit={()=>{}}/>);
-  expect(screen.getByRole('button',{name:'Up semitone'})).toBeEnabled();expect(screen.getByRole('button',{name:'Erase selected notes'})).toBeEnabled();expect(screen.getByRole('button',{name:'Move to higher string'})).toBeDisabled();expect(screen.getByRole('button',{name:'Re-finger selection'})).toBeDisabled();expect(screen.getByRole('button',{name:'Enable let ring'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Up semitone'})).toBeEnabled();expect(screen.getByRole('button',{name:'Erase selected notes'})).toBeEnabled();expect(refused(screen.getByRole('button',{name:'Move to higher string'}))).toBe(true);expect(refused(screen.getByRole('button',{name:'Re-finger selection'}))).toBe(true);expect(refused(screen.getByRole('button',{name:'Enable let ring'}))).toBe(true);
 });
 it('shows declared empty lanes in the selection scope and disables string-only actions for mixed lanes',()=>{
   const score=music(),other=music().tracks[0];score.addTrack(other);other.staves[0].stringTuning.tunings=[];for(const bar of other.staves[0].bars)for(const beat of bar.voices[0].beats){beat.notes=[];beat.isEmpty=true;}
   const mixed:MusicSelection={kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:960},lanes:[{track:0,staff:0,voice:0},{track:1,staff:0,voice:0}]}};
   render(<RangePanel score={score} target={target} selection={mixed} busy={false} onSelection={()=>{}} onEdit={()=>{}}/>);
-  expect(screen.getByText(/Track 2.*Staff 1.*Voice 1/)).toBeInTheDocument();expect(screen.getByRole('button',{name:'Enable let ring'})).toBeDisabled();expect(screen.getByRole('button',{name:'Up semitone'})).toBeEnabled();
+  expect(screen.getByText(/Track 2.*Staff 1.*Voice 1/)).toBeInTheDocument();expect(refused(screen.getByRole('button',{name:'Enable let ring'}))).toBe(true);expect(screen.getByRole('button',{name:'Up semitone'})).toBeEnabled();
 });
 it.each(['range','bars'] as const)('reads all-track %s scope after parent rerender and reapplies it idempotently',kind=>{
   const score=music();score.addTrack(music().tracks[0]);let current:MusicSelection=kind==='range'?{kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:960},lanes:[{track:0,staff:0,voice:0}]}}:{kind:'bars',tracks:[0],firstBar:0,lastBar:0};
@@ -71,7 +71,7 @@ it.each(['range','bars'] as const)('reads all-track %s scope after parent rerend
 it('shows custom mixed scope without silently narrowing the selection',()=>{
   const score=music();score.addTrack(music().tracks[0]);score.addTrack(music().tracks[0]);const changes:(MusicSelection|null)[]=[];
   render(<RangePanel score={score} target={target} selection={{kind:'bars',tracks:[0,2],firstBar:0,lastBar:0}} busy={false} onSelection={value=>changes.push(value)} onEdit={()=>{}}/>);
-  expect(screen.getByLabelText('Selection scope')).toHaveValue('custom');expect(screen.getByRole('button',{name:'Apply selection scope'})).toBeDisabled();expect(changes).toEqual([]);
+  expect(screen.getByLabelText('Selection scope')).toHaveValue('custom');expect(refused(screen.getByRole('button',{name:'Apply selection scope'}))).toBe(true);expect(changes).toEqual([]);
 });
 it('applies ordered pick, brush and arpeggio patterns to the selection',()=>{
   const score=music(),commands:RangeCommand[]=[],bars:MusicSelection={kind:'bars',tracks:[0],firstBar:0,lastBar:1};
@@ -117,5 +117,5 @@ it('ties selected notes to the earlier pitch as one command and reports a refusa
 it('disables the earlier-pitch tie for drum selections',()=>{
   const score=music();score.tracks[0].staves[0].isPercussion=true;
   render(<RangePanel score={score} target={target} selection={{kind:'bars',tracks:[0],firstBar:1,lastBar:1}} busy={false} onSelection={()=>{}} onEdit={()=>{}}/>);
-  expect(screen.getByRole('button',{name:'Tie to earlier pitch'})).toBeDisabled();
+  expect(refused(screen.getByRole('button',{name:'Tie to earlier pitch'}))).toBe(true);
 });

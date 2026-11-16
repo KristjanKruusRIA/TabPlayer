@@ -4,7 +4,7 @@ import { cleanup,fireEvent,render,screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { MeasureTransformPanel } from './MeasureTransformPanel';
 import type { MeasureCommand } from './measures-types';
-import { music } from './fixtures';
+import { music, refused} from './fixtures';
 afterEach(cleanup);
 it('uses_one_based_labels_and_dispatches_exact_before_after_inclusive_envelopes',()=>{
   const commands:MeasureCommand[]=[];render(<MeasureTransformPanel score={music()} bar={1} busy={false} onEdit={edit=>commands.push(edit)}/>);
@@ -18,5 +18,5 @@ it('invalid_counts_ranges_and_removing_all_show_errors_without_dispatch',()=>{
   fireEvent.change(screen.getByLabelText('First measure to remove'),{target:{value:'3'}});fireEvent.change(screen.getByLabelText('Last measure to remove'),{target:{value:'2'}});fireEvent.click(screen.getByRole('button',{name:'Remove measure range'}));expect(screen.getByRole('alert')).toHaveTextContent(/inclusive/i);expect(commands).toEqual([]);
 });
 it('busy_blocks_every_control_and_selection_change_resets_the_draft',()=>{
-  const score=music(),props={score,bar:1,busy:false,onEdit:()=>{}},view=render(<MeasureTransformPanel {...props}/>);fireEvent.change(screen.getByLabelText('Measures to insert'),{target:{value:'3'}});view.rerender(<MeasureTransformPanel {...props} bar={2}/>);expect(screen.getByLabelText('Measures to insert')).toHaveValue(1);expect(screen.getByLabelText('First measure to remove')).toHaveValue(3);expect(screen.getByLabelText('Last measure to remove')).toHaveValue(3);view.rerender(<MeasureTransformPanel {...props} busy/>);for(const element of [...screen.getAllByRole('spinbutton'),...screen.getAllByRole('button')])expect(element).toBeDisabled();
+  const score=music(),props={score,bar:1,busy:false,onEdit:()=>{}},view=render(<MeasureTransformPanel {...props}/>);fireEvent.change(screen.getByLabelText('Measures to insert'),{target:{value:'3'}});view.rerender(<MeasureTransformPanel {...props} bar={2}/>);expect(screen.getByLabelText('Measures to insert')).toHaveValue(1);expect(screen.getByLabelText('First measure to remove')).toHaveValue(3);expect(screen.getByLabelText('Last measure to remove')).toHaveValue(3);view.rerender(<MeasureTransformPanel {...props} busy/>);for(const element of [...screen.getAllByRole('spinbutton'),...screen.getAllByRole('button')])expect(refused(element)).toBe(true);
 });

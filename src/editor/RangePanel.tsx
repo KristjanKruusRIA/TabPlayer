@@ -3,6 +3,8 @@ import { useEffect,useState } from 'react';
 import type { RangeCommand,RangePanelProps,StrokeDirection,StrokeTechnique,VoiceAddress } from './range-types';
 import { resolveSelectionBeats,resolveSelectionNotes,selectionForBars,selectionForTrack,validateMusicSelection } from './range-selection';
 import { eraseCommandFor } from './range-cut';
+import { BusyFieldset } from '../ui/BusyFieldset';
+import { busyGuard } from '../ui/useBusyGuard';
 
 function scopeLanes({score,target}:Pick<RangePanelProps,'score'|'target'>,bar:number,scope:string):VoiceAddress[] {
   return score.tracks.filter(track=>scope==='all'||track.index===target.track).flatMap(track=>track.staves.filter(staff=>(scope!=='lane'&&scope!=='staff')||staff.index===target.staff).flatMap(staff=>(staff.bars[bar]?.voices??[]).filter(voice=>scope!=='lane'||voice.index===target.voice).map(voice=>({track:track.index,staff:staff.index,voice:voice.index}))));
@@ -62,12 +64,12 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
     const value=Number(maxFret);if(!maxFret.trim()||!Number.isInteger(value)||value<1||value>127){setError(t('editor.err_max_fret'));return;}
     if(selection)edit({type:'refingerSelection',selection,maxFret:value});
   };
-  return <details className="editor-section" open><summary>{t('editor.music_selection')}</summary><fieldset disabled={busy}>
+  return <details className="editor-section" open><summary>{t('editor.music_selection')}</summary><BusyFieldset busy={busy}>
     <div className="editor-actions">
       <button onClick={()=>action(()=>onSelection(selectionForBars(score,[target.track],target.bar,target.bar)))}>{t('editor.select_bar')}</button>
       <button onClick={()=>action(()=>onSelection(selectionForTrack(score,target.track)))}>{t('editor.select_track')}</button>
       <button onClick={()=>action(()=>onSelection(selectionForBars(score,score.tracks.map(track=>track.index),0,score.masterBars.length-1)))}>{t('editor.select_all')}</button>
-      <button disabled={!selection} onClick={()=>onSelection(null)}>{t('editor.clear_selection')}</button>
+      <button {...busyGuard({busy,unavailable:!selection,onClick:()=>onSelection(null)})}>{t('editor.clear_selection')}</button>
     </div>
     <p>{selectedNotes.length} {selectedNotes.length===1?t('editor.note_singular'):t('editor.note_plural')} · {selectedBeats.length} {selectedBeats.length===1?t('editor.beat_singular'):t('editor.beat_plural')}</p>
     {selection?.kind==='bars'&&<p>{t('editor.bars_tracks_summary',{first:selection.firstBar+1,last:selection.lastBar+1,tracks:selection.tracks.map(track=>track+1).join(', ')})}</p>}
@@ -75,10 +77,10 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
     <label>{t('editor.selection_scope')}<select value={scope} disabled={!selection||selection.kind==='notes'} onChange={event=>setScope(event.target.value)}>
       <option value="custom" disabled>{t('editor.scope_custom')}</option><option value="lane" disabled={selection?.kind==='bars'}>{t('editor.scope_lane')}</option><option value="staff" disabled={selection?.kind==='bars'}>{t('editor.scope_current_staff')}</option><option value="track">{t('editor.scope_current_track')}</option><option value="all">{t('editor.scope_all_tracks')}</option>
     </select></label>
-    <button disabled={!selection||selection.kind==='notes'||!!selectionError||scope==='custom'} onClick={broaden}>{t('editor.apply_selection_scope')}</button>
+    <button {...busyGuard({busy,unavailable:!selection||selection.kind==='notes'||!!selectionError||scope==='custom',onClick:broaden})}>{t('editor.apply_selection_scope')}</button>
     <fieldset disabled={!available||locked}><legend>{t('editor.selected_notes')}</legend>
       <button onClick={()=>selection&&edit(eraseCommandFor(score,selection,{track:target.track,staff:target.staff,voice:target.voice}))}>{t('editor.erase_selected_notes')}</button>
-      <div className="editor-actions"><button disabled={!melodic} onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:true})}>{t('editor.tie_selected_notes')}</button><button onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:false})}>{t('editor.untie_selected_notes')}</button><button disabled={!melodic} title="Ties each note to the earlier note on its string and gives it that fret" onClick={()=>selection&&edit({type:'tieSelectionToEarlierPitch',selection})}>Tie to earlier pitch</button></div>
+      <div className="editor-actions"><button {...busyGuard({busy,unavailable:!melodic,onClick:()=>selection&&edit({type:'setSelectionTies',selection,tied:true})})}>{t('editor.tie_selected_notes')}</button><button onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:false})}>{t('editor.untie_selected_notes')}</button><button title="Ties each note to the earlier note on its string and gives it that fret" {...busyGuard({busy,unavailable:!melodic,onClick:()=>selection&&edit({type:'tieSelectionToEarlierPitch',selection})})}>Tie to earlier pitch</button></div>
       <fieldset disabled={!melodic}><legend>{t('editor.transpose')}</legend>
         <div className="editor-actions"><button onClick={()=>shift(-1)}>{t('editor.down_semitone')}</button><button onClick={()=>shift(1)}>{t('editor.up_semitone')}</button><button onClick={()=>shift(-12)}>{t('editor.down_octave')}</button><button onClick={()=>shift(12)}>{t('editor.up_octave')}</button></div>
         <label>{t('editor.semitones')}<input type="number" min={-127} max={127} step={1} value={semitones} onChange={event=>setSemitones(event.target.value)}/></label><button onClick={()=>shift(semitones.trim()?Number(semitones):0)}>{t('editor.transpose_selection')}</button>
@@ -98,5 +100,5 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
       </fieldset>
     </fieldset>
     {(selectionError||error)&&<p role="alert">{selectionError||error}</p>}
-  </fieldset></details>;
+  </BusyFieldset></details>;
 }

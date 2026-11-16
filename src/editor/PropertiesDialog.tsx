@@ -117,7 +117,7 @@ export function PropertiesDialog(props: PropertiesDialogProps) {
   return <Dialog title={t('properties.title')} onClose={onClose} className="properties-dialog" dismissOnBackdrop closeLabel={t('dialog.close')}>
     <p className="muted properties-location" aria-label={t('properties.location')}>{t('properties.at', { track: score.tracks[target.track].name || t('track_display.track_fallback', { index: target.track + 1 }), bar: target.bar + 1, beat: target.beat + 1, voice: target.voice + 1 })}</p>
     <div className="properties-tabs" role="tablist" aria-label={t('properties.tabs')} onKeyDown={keys}>
-      {propertiesTabs.map(tab => <button key={tab} type="button" role="tab" id={`${id}-tab-${tab}`} aria-controls={`${id}-panel`} data-properties-tab={tab} aria-selected={request.tab === tab} tabIndex={request.tab === tab ? 0 : -1} onClick={() => onTab(tab)}>{t(tabLabels[tab])}</button>)}
+      {propertiesTabs.map(tab => <button key={tab} type="button" role="tab" id={`${id}-tab-${tab}`} aria-controls={`${id}-panel`} data-properties-tab={tab} data-autofocus={request.tab === tab || undefined} aria-selected={request.tab === tab} tabIndex={request.tab === tab ? 0 : -1} onClick={() => onTab(tab)}>{t(tabLabels[tab])}</button>)}
     </div>
     <div ref={body} className="properties-body" role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-tab-${request.tab}`}>{panel}</div>
   </Dialog>;

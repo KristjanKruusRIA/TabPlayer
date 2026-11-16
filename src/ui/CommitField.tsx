@@ -40,6 +40,8 @@ export function CommitField({ label, value, onCommit, target = '', busy = false,
   const text = useRef(value);
   /** Set when typing begins, cleared when the draft is recorded or dropped: the field's value and target at that moment. */
   const origin = useRef<{ target: string; base: string } | null>(null);
+  /** The field lost focus while an edit was in flight (a blur the fieldset refused): its draft is applied when that edit ends. */
+  const left = useRef(false);
   const same = (a: string, b: string) => type === 'number' ? a.trim() !== '' && Number(a) === Number(b) : a === b;
   const show = (next: string) => { text.current = next; setDraft(next); };
   /** Records the draft for the target it was typed for, or puts the document's value back when it is nothing or not a number. */
@@ -47,6 +49,7 @@ export function CommitField({ label, value, onCommit, target = '', busy = false,
     const from = origin.current;
     if (!from) return;
     origin.current = null;
+    left.current = false;
     const typed = text.current, now = latest.current;
     if (type === 'number' && !(typed.trim() !== '' && Number.isFinite(Number(typed)))) { show(now.value); return; }
     if (same(typed, from.base)) { if (from.target === now.target) show(now.value); return; }
@@ -60,10 +63,18 @@ export function CommitField({ label, value, onCommit, target = '', busy = false,
     show(value);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, target]);
-  // A draft left while an edit was in flight is applied when it ends; one still being typed in is left alone.
+  // The surrounding fieldset refuses a blur while busy before React sees it, so the field notes it from the browser's own event.
+  useEffect(() => {
+    const node = field.current;
+    if (!node) return;
+    const note = () => { if (latest.current.busy) left.current = true; };
+    node.addEventListener('blur', note);
+    return () => node.removeEventListener('blur', note);
+  }, []);
+  // A draft left while an edit was in flight (or typed for a target the selection has since left) is applied when that edit ends.
   useEffect(() => {
     if (busy || !origin.current) return;
-    if (origin.current.target === target && document.activeElement === field.current) return;
+    if (!left.current && origin.current.target === target) return;
     flush();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [busy]);
@@ -77,7 +88,7 @@ export function CommitField({ label, value, onCommit, target = '', busy = false,
     if (event.key === 'Enter' && !multiline) { event.preventDefault(); settle(); }
   };
   const control = multiline
-    ? <textarea ref={field} id={id} value={draft} disabled={disabled} placeholder={placeholder} onChange={event => change(event.target.value)} onBlur={settle} onKeyDown={keys} />
-    : <input ref={field} id={id} type={type} min={min} max={max} value={draft} disabled={disabled} placeholder={placeholder} title={hideLabel ? label : undefined} aria-label={hideLabel ? label : undefined} onChange={event => change(event.target.value)} onBlur={settle} onKeyDown={keys} />;
+    ? <textarea ref={field} id={id} value={draft} disabled={disabled} placeholder={placeholder} onChange={event => change(event.target.value)} onFocus={() => { left.current = false; }} onBlur={settle} onKeyDown={keys} />
+    : <input ref={field} id={id} type={type} min={min} max={max} value={draft} disabled={disabled} placeholder={placeholder} title={hideLabel ? label : undefined} aria-label={hideLabel ? label : undefined} onChange={event => change(event.target.value)} onFocus={() => { left.current = false; }} onBlur={settle} onKeyDown={keys} />;
   return hideLabel ? control : <label className={className} htmlFor={id}>{label}{control}</label>;
 }

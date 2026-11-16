@@ -51,12 +51,12 @@ it('Note tab on a percussion staff addresses the note by index, as the tab did',
 it('Beat tab: a tuplet of any ratio and the grace type record setBeatRhythm with the beat\'s own duration and dots; the current values record nothing', () => {
   const { onEdit } = setup('beat');
   const apply = screen.getByRole('button', { name: 'Apply rhythm' });
-  expect(apply).toBeDisabled();fireEvent.click(apply);expect(onEdit).not.toHaveBeenCalled();
+  expect(apply).toHaveAttribute('aria-disabled', 'true');expect(apply).not.toBeDisabled();fireEvent.click(apply);expect(onEdit).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('Tuplet numerator'), { target: { value: '5' } });fireEvent.change(screen.getByLabelText('Tuplet denominator'), { target: { value: '3' } });
   expect(apply).toBeEnabled();fireEvent.click(apply);
   expect(onEdit).toHaveBeenCalledTimes(1);expect(onEdit).toHaveBeenLastCalledWith({ type: 'setBeatRhythm', target, duration: 4, dots: 0, tupletNumerator: 5, tupletDenominator: 3, graceType: 0 });
   fireEvent.change(screen.getByLabelText('Tuplet numerator'), { target: { value: '1' } });fireEvent.change(screen.getByLabelText('Tuplet denominator'), { target: { value: '1' } });
-  expect(apply).toBeDisabled();
+  expect(apply).toHaveAttribute('aria-disabled', 'true');
 });
 
 it('Beat tab: the beat notation panel is there with its picking and whammy controls', () => {
@@ -133,4 +133,29 @@ it('Escape and the close button close it and record nothing; focus goes back to 
   expect(screen.getByRole('dialog', { name: 'Properties' })).toBeInTheDocument();
   fireEvent.keyDown(document, { key: 'Escape' });
   expect(screen.queryByRole('dialog')).toBeNull();expect(opener).toHaveFocus();
+});
+
+it('opens with focus on the selected tab, not on the close button', () => {
+  setup('beat');
+  expect(screen.getByRole('tab', { name: 'Beat' })).toHaveFocus();
+  expect(screen.getByRole('button', { name: 'Close' })).not.toHaveFocus();
+});
+
+/** Every Apply button of the moved panels refuses while an edit is in flight without becoming disabled, so the focus stays on it and a second Enter does not reach the close button. */
+it('a focused Apply button keeps focus when the edit it started is in flight, on every tab', () => {
+  for (const tab of ['note', 'beat', 'bar', 'staff'] as const) {
+    const { view, props } = setup(tab);
+    const dialog = screen.getByRole('dialog', { name: 'Properties' });
+    for (const summary of Array.from(dialog.querySelectorAll('details > summary'))) fireEvent.click(summary);
+    const buttons = Array.from(dialog.querySelectorAll<HTMLButtonElement>('.properties-body button')).filter(button => !button.disabled && /^Apply/.test(button.textContent ?? ''));
+    expect(buttons.length, tab).toBeGreaterThan(0);
+    for (const button of buttons) {
+      button.focus();
+      view.rerender(<PropertiesDialog request={{ tab, nonce: 1 }} {...props} busy />);
+      expect(document.activeElement, `${tab}: ${button.textContent}`).toBe(button);
+      expect(button.disabled, `${tab}: ${button.textContent}`).toBe(false);
+      view.rerender(<PropertiesDialog request={{ tab, nonce: 1 }} {...props} busy={false} />);
+    }
+    cleanup();
+  }
 });

@@ -8,6 +8,7 @@ import { EnumInput } from './controls';
 import { IndexInput } from './IndexInput';
 import { readMeasureSettings } from './measure-settings';
 import { shownBpm, quarterUnit, tempoUnitKeys, tempoUnits, unitQuarters, type TempoUnit } from './tempo-unit';
+import { BusyFieldset } from '../ui/BusyFieldset';
 
 export function MeasurePanel({score,target,busy,onEdit}:EditorProps) {
   const { t } = useI18n();
@@ -23,7 +24,7 @@ export function MeasurePanel({score,target,busy,onEdit}:EditorProps) {
     const point=values.tempos[index],from=unitQuarters[(point.unit??quarterUnit) as TempoUnit];
     tempo(index,{unit:unit===quarterUnit?undefined:unit,bpm:point.bpm*from/unitQuarters[unit]});
   };
-  return <details><summary>{t('editor.measure_and_notation')}</summary><fieldset disabled={busy}>
+  return <details><summary>{t('editor.measure_and_notation')}</summary><BusyFieldset busy={busy}>
     <div className="pair"><label>{t('editor.time_numerator')}<input type="number" min={1} value={values.numerator} onChange={e=>setValues({...values,numerator:Number(e.target.value)})}/></label><label>{t('editor.time_denominator')}<select value={values.denominator} onChange={e=>setValues({...values,denominator:Number(e.target.value)})}>{[1,2,4,8,16,32,64,128,256].map(n=><option key={n} value={n}>{n}</option>)}</select></label></div>
     <div className="pair"><label className="check"><input type="checkbox" checked={values.pickup} onChange={e=>setValues({...values,pickup:e.target.checked})}/>{t('editor.pickup_measure')}</label><label className="check"><input type="checkbox" checked={values.freeTime} onChange={e=>setValues({...values,freeTime:e.target.checked})}/>{t('editor.free_time')}</label></div>
     <label className="check"><input type="checkbox" checked={values.repeatStart} onChange={e=>setValues({...values,repeatStart:e.target.checked})}/>{t('editor.repeat_start')}</label><label className="check"><input type="checkbox" checked={values.repeatCount>0} onChange={e=>setValues({...values,repeatCount:e.target.checked?2:0})}/>{t('editor.repeat_end')}</label><label>{t('editor.repeat_count')}<input type="number" min={2} disabled={!values.repeatCount} value={values.repeatCount||2} onChange={e=>setValues({...values,repeatCount:Number(e.target.value)})}/></label>
@@ -33,5 +34,5 @@ export function MeasurePanel({score,target,busy,onEdit}:EditorProps) {
     <button onClick={()=>setValues({...values,tempos:[...values.tempos,{beat:Math.min(reference.beats.length-1,(values.tempos.at(-1)?.beat??-1)+1),bpm:score.tempo,linear:false}]})}>{t('editor.add_tempo_change')}</button>
     <button onClick={()=>onEdit({type:'setMeasureSettings',bar:target.bar,...values})}>{t('editor.apply_measure_settings')}</button>
     <h3>{t('editor.staff_bar_notation')}</h3><div className="pair"><label>{t('editor.key_signature')}<select value={key} onChange={e=>setKey(Number(e.target.value))}>{Array.from({length:15},(_,i)=>i-7).map(n=><option value={n} key={n}>{n===0?t('editor.key_natural'):n<0?t('editor.key_flats',{count:-n}):t('editor.key_sharps',{count:n})}</option>)}</select></label><EnumInput label={t('editor.key_mode')} value={mode} enumeration={model.KeySignatureType} onValue={setMode}/></div><EnumInput label={t('editor.bar_clef')} value={clef} enumeration={model.Clef} onValue={setClef}/><button onClick={()=>onEdit({type:'setBarNotation',track:target.track,staff:target.staff,bar:target.bar,keySignature:key,keyMode:mode,clef})}>{t('editor.apply_bar_notation')}</button>
-  </fieldset></details>;
+  </BusyFieldset></details>;
 }

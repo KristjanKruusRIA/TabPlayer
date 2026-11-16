@@ -6,7 +6,7 @@ import { model, Settings } from '@coderline/alphatab';
 import { NonTabPanel, NotationTrackControls } from './NonTabPanel';
 import { TechniquePanel } from './TechniquePanel';
 import { applyNonTabEdit } from './non-tab';
-import { target } from './fixtures';
+import { target, refused} from './fixtures';
 afterEach(cleanup);
 function piano(percussion=false) {
   const score=new model.Score();score.addMasterBar(new model.MasterBar());applyNonTabEdit(score,{type:percussion?'addPercussionTrack':'addPitchedTrack',name:'Instrument',program:0});score.finish(new Settings());return score;
@@ -19,14 +19,14 @@ it('named pitched entry validates drafts and dispatches add, update and removal 
   expect(screen.getByLabelText('Written pitch')).toHaveValue('E4');expect(screen.getByLabelText('Chord note')).toHaveValue('1');fireEvent.change(screen.getByLabelText('Chord note'),{target:{value:'0'}});expect(onSelectNote).toHaveBeenLastCalledWith(0);
   fireEvent.change(screen.getByLabelText('Written pitch'),{target:{value:'A4'}});fireEvent.click(screen.getByRole('button',{name:'Update pitched note'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setPitchedNote',target,noteIndex:1,pitch:69});
   fireEvent.click(screen.getByRole('button',{name:'Remove selected note'}));expect(onEdit).toHaveBeenLastCalledWith({type:'removeNoteByIndex',target,noteIndex:1});
-  view.rerender(<NonTabPanel {...props} noteIndex={1} busy/>);expect(screen.getByRole('button',{name:'Add pitched note'})).toBeDisabled();
+  view.rerender(<NonTabPanel {...props} noteIndex={1} busy/>);expect(refused(screen.getByRole('button',{name:'Add pitched note'}))).toBe(true);
 });
 it('percussion entry exposes named standard and custom articulations and selected-note readback',()=>{
   const score=piano(true),onEdit=vi.fn(),onSelectNote=vi.fn();score.tracks[0].percussionArticulations=[new model.InstrumentArticulation('Custom shaker',-1,82)];applyNonTabEdit(score,{type:'addPercussionNote',target,articulation:0});
   const view=render(<NonTabPanel score={score} target={target} noteIndex={0} busy={false} onEdit={onEdit} onSelectNote={onSelectNote}/>);const choices=screen.getByLabelText('Percussion articulation');
   expect(within(choices).getByRole('option',{name:/Custom shaker/})).toHaveValue('0');expect(within(choices).getByRole('option',{name:/Snare \(rim shot\)/})).toHaveValue('91');expect(choices).toHaveValue('0');
   fireEvent.change(choices,{target:{value:'92'}});fireEvent.click(screen.getByRole('button',{name:'Update percussion note'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setPercussionNote',target,noteIndex:0,articulation:92});fireEvent.click(screen.getByRole('button',{name:'Add percussion note'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:92});
-  view.rerender(<NonTabPanel score={score} target={{...target,beat:1}} noteIndex={null} busy={false} onEdit={onEdit} onSelectNote={onSelectNote}/>);expect(screen.getByRole('button',{name:'Update percussion note'})).toBeDisabled();
+  view.rerender(<NonTabPanel score={score} target={{...target,beat:1}} noteIndex={null} busy={false} onEdit={onEdit} onSelectNote={onSelectNote}/>);expect(refused(screen.getByRole('button',{name:'Update percussion note'}))).toBe(true);
 });
 it('creates pitched and percussion tracks from finite name and program controls',()=>{
   const onEdit=vi.fn();render(<NotationTrackControls busy={false} onEdit={onEdit}/>);
@@ -43,11 +43,11 @@ it('generic technique controls use the selected note index, piano finger numbers
   render(<TechniquePanel score={score} target={target} string={1} noteIndex={1} busy={false} onEdit={onEdit}/>);
   fireEvent.click(screen.getByLabelText('Ghost note'));expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniquesByIndex',target,noteIndex:1,patch:{ghost:true}});
   expect(within(screen.getByLabelText('Left-hand finger')).getByRole('option',{name:'5 (little)'})).toHaveValue('4');fireEvent.change(screen.getByLabelText('Left-hand finger'),{target:{value:'4'}});expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniquesByIndex',target,noteIndex:1,patch:{leftFinger:4}});
-  expect(screen.getByLabelText('Palm mute')).toBeDisabled();expect(screen.getByLabelText('Pick stroke')).toBeDisabled();{const bend=screen.getByLabelText('Enable Bend'),before=onEdit.mock.calls.length;expect(bend).not.toHaveAttribute('disabled');expect(bend.closest('fieldset')).toHaveAttribute('aria-disabled','true');bend.focus();fireEvent.click(bend);expect(bend).not.toBeChecked();expect(bend).toHaveFocus();expect(onEdit.mock.calls.length).toBe(before);}expect(screen.getByRole('button',{name:'Hammer/pull to next'})).toBeDisabled();
+  expect(refused(screen.getByLabelText('Palm mute'))).toBe(true);expect(refused(screen.getByLabelText('Pick stroke'))).toBe(true);{const bend=screen.getByLabelText('Enable Bend'),before=onEdit.mock.calls.length;expect(bend).not.toHaveAttribute('disabled');expect(bend.closest('fieldset')).toHaveAttribute('aria-disabled','true');bend.focus();fireEvent.click(bend);expect(bend).not.toBeChecked();expect(bend).toHaveFocus();expect(onEdit.mock.calls.length).toBe(before);}expect(refused(screen.getByRole('button',{name:'Hammer/pull to next'}))).toBe(true);
   fireEvent.click(screen.getByRole('button',{name:'Tie to next note'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteLinkByIndex',from:{target,noteIndex:1},to:{target:{...target,beat:1},noteIndex:1},kind:'tie'});
   fireEvent.change(screen.getByLabelText('Slur note'),{target:{value:'2'}});fireEvent.click(screen.getByRole('button',{name:'Create slur'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteLinkByIndex',from:{target,noteIndex:1},to:{target:{...target,beat:1},noteIndex:1},kind:'slur'});
 });
 it('percussion techniques disable pitch and fingering effects while keeping dynamics usable',()=>{
   const score=piano(true),onEdit=vi.fn();applyNonTabEdit(score,{type:'addPercussionNote',target,articulation:91});render(<TechniquePanel score={score} target={target} string={1} noteIndex={0} busy={false} onEdit={onEdit}/>);
-  for(const label of ['Left-hand finger','Right-hand finger','Vibrato','Ornament','Trill','Trill pitch','Trill speed'])expect(screen.getByLabelText(label)).toBeDisabled();fireEvent.change(screen.getByLabelText('Dynamics'),{target:{value:'3'}});expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniquesByIndex',target,noteIndex:0,patch:{dynamics:3}});
+  for(const label of ['Left-hand finger','Right-hand finger','Vibrato','Ornament','Trill','Trill pitch','Trill speed'])expect(refused(screen.getByLabelText(label))).toBe(true);fireEvent.change(screen.getByLabelText('Dynamics'),{target:{value:'3'}});expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniquesByIndex',target,noteIndex:0,patch:{dynamics:3}});
 });

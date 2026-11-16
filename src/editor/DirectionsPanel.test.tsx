@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { DirectionsPanel } from './DirectionsPanel';
 import { applyDirectionEdit } from './directions';
-import { music, target } from './fixtures';
+import { music, target, refused} from './fixtures';
 
 afterEach(cleanup);
 it('offers all nineteen directions and applies the chosen signs to the selected measure',()=>{
@@ -23,5 +23,5 @@ it('refreshes the selection and permits removing all directions',()=>{
   fireEvent.click(screen.getByLabelText('Fine'));view.rerender(<DirectionsPanel {...props} target={{...target,bar:1}}/>);
   expect(screen.getByLabelText('Fine')).not.toBeChecked();expect(screen.getByLabelText('Coda')).toBeChecked();
   fireEvent.click(screen.getByLabelText('Coda'));fireEvent.click(screen.getByRole('button',{name:'Apply directions'}));expect(score.masterBars[1].directions).toBeNull();
-  view.rerender(<DirectionsPanel {...props} busy/>);expect(screen.getByLabelText('Fine')).toBeDisabled();
+  view.rerender(<DirectionsPanel {...props} busy/>);expect(refused(screen.getByLabelText('Fine'))).toBe(true);
 });

@@ -6,6 +6,7 @@ import type { EditCommand } from '../edit-types';
 import { describeSelection } from '../engine';
 import { EnumInput } from './controls';
 import { BusyFieldset } from '../ui/BusyFieldset';
+import { busyGuard } from '../ui/useBusyGuard';
 
 /**
  * The rhythm of one beat that the palette's duration, dot and tuplet buttons cannot say: a tuplet of any ratio and the
@@ -30,6 +31,6 @@ export function BeatRhythmPanel({ score, target, busy, onEdit }: { score: model.
       <label>{t('editor.tuplet_denominator')}<input type="number" min={1} value={denominator} onChange={event => setDenominator(Number(event.target.value))} /></label>
     </div>
     <EnumInput label={t('editor.grace_type')} value={grace} enumeration={model.GraceType} onValue={setGrace} />
-    <button type="button" disabled={unchanged} onClick={apply}>{t('editor.apply_rhythm')}</button>
+    <button type="button" {...busyGuard({ busy, unavailable: unchanged, onClick: apply })}>{t('editor.apply_rhythm')}</button>
   </BusyFieldset></details>;
 }

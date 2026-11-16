@@ -30,6 +30,19 @@ it('the preset and the source record one setTrackSound each, and choosing the cu
   expect(onEdit).toHaveBeenCalledTimes(2);
 });
 
+it('a drum track names its automatic source as the recorded drum kit, in the summary and the editor, unless its kit is one the sound bank plays', () => {
+  const { rerender } = render(<SoundSummary trackId="drums" percussion sound={soundPreset('gm')} onEdit={vi.fn()} />);
+  const first = (select: HTMLElement) => (select as HTMLSelectElement).options[0];
+  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Recorded drum kit');expect(first(screen.getByLabelText('Sound source')).value).toBe('');
+  fireEvent.click(screen.getByRole('button', { name: /Sound and pedalboard|Open/ }));
+  expect(first(within(screen.getByRole('dialog')).getByLabelText('Sound source')).textContent).toBe('Recorded drum kit');
+  fireEvent.keyDown(document, { key: 'Escape' });
+  rerender(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), drumKit: 8 }} onEdit={vi.fn()} />);
+  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic instrument');
+  rerender(<SoundSummary trackId="guitar" sound={soundPreset('gm')} onEdit={vi.fn()} />);
+  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic instrument');
+});
+
 it('a chip opens the sound editor on that pedal; the editor holds everything the inspector held and Escape returns focus to the chip', () => {
   render(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} />);
   const chip = screen.getByRole('button', { name: 'Edit Delay' });expect(chip).toHaveAttribute('aria-haspopup', 'dialog');

@@ -1573,6 +1573,7 @@ export const et: MessageCatalog = {
   'sound.cab_bass_stack': "Bassistack",
   'sound.sound_source': "Heliallikas",
   'sound.automatic_instrument': "Automaatne instrument",
+  'sound.recorded_drum_kit': "Salvestatud trummikomplekt",
   'sound.sound_preset': "Helieelseadistus",
   'sound.restore_preset': "Taasta eelseadistus",
   'sound.factory_sound': "Tehaseheli",

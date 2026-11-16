@@ -6,7 +6,7 @@ import { AmpCapture } from './AmpCapture';
 import type { NativePlaybackController } from './NativePlaybackController';
 import { factoryCategories, factorySounds } from './factory-sounds';
 import { chainOrder } from '../document-settings';
-import { ampModels, blockNames, cabinetModels, graphicBands, modelName, visibleParameters, localizedParamHint, presetIds, presetName, soundPreset, localizedBlockName, localizedPresetName, localizedAmpModelName, localizedCabinetModelName, localizedParamLabel } from './sound-model';
+import { ampModels, blockNames, playsRecordedKit, cabinetModels, graphicBands, modelName, visibleParameters, localizedParamHint, presetIds, presetName, soundPreset, localizedBlockName, localizedPresetName, localizedAmpModelName, localizedCabinetModelName, localizedParamLabel } from './sound-model';
 import { SoundLock } from './SoundLock';
 import { BusyFieldset, busyGuard } from '../ui';
 import { useI18n } from '../i18n';
@@ -67,7 +67,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
     <SoundLock editing={editing} className="check"/>
     {percussion&&<DrumKitPicker editing={editing} className="drum-kit"/>}
     <BusyFieldset busy={busy}>
-    <label>{t('sound.sound_source')}<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">{t('sound.automatic_instrument')}</option><option value="gm">General MIDI</option><option value="green-guitar">Green Guitar</option><option value="black-guitar">Black Guitar</option><option value="darkblack-bass">Darkblack Bass</option><option value="babyblue-bass">Babyblue Bass</option></select></label>
+    <label>{t('sound.sound_source')}<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">{t(playsRecordedKit(0,percussion,current.drumKit)?'sound.recorded_drum_kit':'sound.automatic_instrument')}</option><option value="gm">General MIDI</option><option value="green-guitar">Green Guitar</option><option value="black-guitar">Black Guitar</option><option value="darkblack-bass">Darkblack Bass</option><option value="babyblue-bass">Babyblue Bass</option></select></label>
     <label>{t('sound.sound_preset')}<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{localizedPresetName(id,lang)}</option>)}</select></label>
     <button onClick={()=>void editing.restorePreset()}>{t('sound.restore_preset')}</button>
     <label>{t('sound.factory_sound')}<select aria-label={t('sound.factory_sound')} aria-describedby={factoryNote} value={factoryChoice} onChange={e=>setFactoryChoice(e.target.value)}><option value="">{t('sound.choose_factory_sound')}</option>{factoryCategories.map(category=><optgroup key={category} label={category}>{factorySounds.filter(item=>item.category===category).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}</select></label>

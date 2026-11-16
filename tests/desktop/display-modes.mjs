@@ -102,7 +102,7 @@ function measureLayout(){
   return {inner:[innerWidth,innerHeight],outer:[outerWidth,outerHeight],host:{x:hr.x,y:hr.y,w:hr.width,h:hr.height,cw:host.clientWidth,ch:host.clientHeight,sw:host.scrollWidth,sh:host.scrollHeight,sl:host.scrollLeft,st:host.scrollTop,overflowX:style.overflowX,overflowY:style.overflowY,scrollbarX:host.offsetHeight-host.clientHeight-host.clientTop*2,scrollbarY:host.offsetWidth-host.clientWidth-host.clientLeft*2},
     fonts:{status:document.fonts.status,faces:[...new Set(faces)],families,alphaTab:document.fonts.check('16px alphaTab')},
     frets:{total:frets.length,visible:visible.length,minHeight:heights[0]??null,medianHeight:heights[Math.floor(heights.length/2)]??null,overlaps},
-    sheets:sheets.length,sheetWidth:sheets[0]?.w??null,content,clippedRight:content.right>clientRight+1&&host.scrollWidth<=host.clientWidth+1,clippedLeft:content.left<clientLeft-1,
+    sheets:sheets.length,sheetWidth:sheets[0]?.w??null,sheetHeight:sheets[0]?.h??null,content,clippedRight:content.right>clientRight+1&&host.scrollWidth<=host.clientWidth+1,clippedLeft:content.left<clientLeft-1,
     toolbarOverflow,toolbarRight:display?display.right:null,toolbarBottom:display?display.bottom:null,
     actualZoom:document.querySelector('.score-actual-zoom')?.textContent??null,limited:document.querySelector('.score-fit-help[role=status]')?.textContent??null,
     svgCount:svgs.length};
@@ -308,6 +308,8 @@ try {
   // ===== 4. resize: 1440x900, 1280x800, 960x600, emulated =====
   await section('resize',async()=>{
     result.observations.resizeNote='Sizes are emulated with Emulation.setDeviceMetricsOverride (page.setViewportSize); the native window is not resized.';
+    // Measured in this app: the window of an app started again can differ by a pixel, so it is not compared with the first one's.
+    const outerBefore=await page.evaluate(()=>[outerWidth,outerHeight]);
     for(const doc of [['example',docA],['dense',docB]]){
       await activate(doc[1]);
       for(const layout of modes){
@@ -319,7 +321,9 @@ try {
             await page.setViewportSize(size);await sleep(400);await stable('resize');
             const m=await measure();const area=`resize/${doc[0]}/${layout}/${policy}/${size.width}x${size.height}`;
             Object.assign(rowOf(`${doc[0]}@${size.width}x${size.height}`,layout,policy),{actual:m.actualZoom,limited:m.limited,fretMin:m.frets.minHeight,fretMedian:m.frets.medianHeight,visibleFrets:m.frets.visible,overlaps:m.frets.overlaps,scrollW:m.host.sw,clientW:m.host.cw,clientH:m.host.ch,toolbarOverflow:m.toolbarOverflow,outer:m.outer});
-            check(area,'tab digits stay at least 6px tall',m.frets.minHeight===null||m.frets.minHeight>=6,{min:m.frets.minHeight,median:m.frets.medianHeight,actual:m.actualZoom});
+            // Fit page shows a whole sheet in the area: an overview whose digits are small by design (the whole sheet must fit, and the digits may be no smaller than at the 25% floor, about 3 px). Every other policy keeps the 6 px heuristic.
+            if(policy==='fitPage'){check(area,'fit page shows the whole sheet and its digits are not below the 25% floor',m.sheetHeight!==null&&m.sheetHeight<=m.host.ch+2&&(m.frets.minHeight===null||m.frets.minHeight>=3),{sheetHeight:m.sheetHeight,clientH:m.host.ch,min:m.frets.minHeight,median:m.frets.medianHeight,actual:m.actualZoom});}
+            else check(area,'tab digits stay at least 6px tall',m.frets.minHeight===null||m.frets.minHeight>=6,{min:m.frets.minHeight,median:m.frets.medianHeight,actual:m.actualZoom});
             check(area,'no tab digits overlap',m.frets.overlaps===0,m.frets);
             check(area,'nothing is clipped without a scrollbar',!m.clippedRight&&!m.clippedLeft,m.content);
             check(area,'toolbar controls are not cut off',m.toolbarOverflow.length===0&&(m.toolbarRight===null||m.toolbarRight<=size.width+1),{overflow:m.toolbarOverflow,right:m.toolbarRight});
@@ -331,7 +335,7 @@ try {
       }
     }
     const after=await page.evaluate(()=>({outer:[outerWidth,outerHeight]}));result.observations.windowAfter=after;
-    check('resize','native window size never changed',after.outer[0]===result.observations.windowBefore.outer[0]&&after.outer[1]===result.observations.windowBefore.outer[1],{before:result.observations.windowBefore.outer,after:after.outer});
+    check('resize','native window size never changed',after.outer[0]===outerBefore[0]&&after.outer[1]===outerBefore[1],{before:outerBefore,after:after.outer});
   });
 } catch(error) {
   result.errors.push({section:'main',message:String(error?.stack??error)});console.log(error);

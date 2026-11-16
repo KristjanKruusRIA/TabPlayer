@@ -12,7 +12,8 @@ const frontendLog=execSync('npm run build',{encoding:'utf8',env:{...process.env,
 const base=JSON.parse(readFileSync(resolve(worktree,'.analysis/desktop-smoke/tauri-test.json'),'utf8'));
 // The acceptance run names its own WebView2 profile through WEBVIEW2_USER_DATA_FOLDER, so no data directory is pinned.
 const windows=base.app.windows.map(({dataDirectory:_,...window})=>window);
-writeFileSync(resolve(owned,'tauri-test.json'),JSON.stringify({app:{windows},build:{beforeBuildCommand:''}},null,2));
+// The test identifier keeps this build apart from an installed TabPlayer: with the shared one, the single-instance plugin hands the launch to that app and the test process exits.
+writeFileSync(resolve(owned,'tauri-test.json'),JSON.stringify({identifier:base.identifier,app:{windows},build:{beforeBuildCommand:''}},null,2));
 await new Promise(r=>setTimeout(r,1100));
 const sourceHashes=sourceManifest(worktree),sourceRevision=execSync('git rev-parse HEAD',{encoding:'utf8'}).trim();
 await new Promise(r=>setTimeout(r,50));

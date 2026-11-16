@@ -181,3 +181,19 @@ it('a partial capo fret typed and not settled is settled, not dropped, when the 
   expect(onEdit).toHaveBeenCalledTimes(1);
   expect(lastEdit(onEdit)).toMatchObject({ type: 'setStaffSettings', track: 0, staff: 0, settings: { partialCapo: { fret: 5, strings: [1] } } });
 });
+
+it('browsing the MIDI instrument and the clef with the arrow keys records one edit each, when the select is left, not one per key', () => {
+  const onEdit = vi.fn();
+  render(panel(twoTracks(), 0, onEdit));
+  const browse = (select: HTMLElement, key: string, value: string) => { fireEvent.keyDown(select, { key });fireEvent.change(select, { target: { value } });fireEvent.keyUp(select, { key }); };
+  const program = screen.getByLabelText('Track MIDI instrument') as HTMLSelectElement, saved = Number(program.value);
+  browse(program, 'ArrowDown', String(saved + 1));browse(program, 'ArrowDown', String(saved + 2));browse(program, 'ArrowDown', String(saved + 3));
+  expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.blur(program);
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(lastEdit(onEdit)).toMatchObject({ type: 'setTrackInfo', track: 0, program: saved + 3 });
+  const clef = screen.getByLabelText('Staff clef') as HTMLSelectElement, options = Array.from(clef.options).map(option => option.value), at = options.indexOf(clef.value);
+  browse(clef, 'ArrowUp', options[at - 1]);browse(clef, 'ArrowUp', options[at - 2]);
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  fireEvent.blur(clef);
+  expect(onEdit).toHaveBeenCalledTimes(2);expect(lastEdit(onEdit)).toMatchObject({ type: 'setStaffSettings', settings: { clef: Number(options[at - 2]) } });
+});

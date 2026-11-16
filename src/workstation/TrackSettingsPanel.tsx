@@ -9,6 +9,7 @@ import { TuningDialog, type TuningChoice } from '../tuning/TuningDialog';
 import { busyGuard, busySelect } from '../ui/useBusyGuard';
 import { BusyFieldset } from '../ui/BusyFieldset';
 import { CommitField } from '../ui/CommitField';
+import { CommitSelect } from '../ui/CommitSelect';
 import { ArrowDownGlyph, ArrowUpGlyph, DuplicateGlyph, ScoreGlyph, TrashGlyph } from '../shell/glyphs';
 import { trackIdentity } from '../engine';
 import type { TuningAudition } from '../audio/audition';
@@ -63,7 +64,7 @@ function TrackInfoRow({ score, selected, busy, locked, onEdit }: { score: model.
     </div>
     {!current.isPercussion && <details className="inspector-more">
       <summary>{t('inspector.more')}</summary>
-      <label>{t('track_settings.track_midi_instrument')}<select value={program} disabled={locked} {...busySelect(busy)} onChange={event => { if (!busy) info({ program: Number(event.target.value) }); }}>{midiPrograms.map((name, index) => <option key={index} value={index}>{index + 1}. {name}</option>)}</select></label>
+      <label>{t('track_settings.track_midi_instrument')}<CommitSelect value={program} disabled={locked} {...busySelect(busy)} onCommit={chosen => { if (!busy) info({ program: Number(chosen) }); }}>{midiPrograms.map((name, index) => <option key={index} value={index}>{index + 1}. {name}</option>)}</CommitSelect></label>
     </details>}
   </BusyFieldset>;
 }
@@ -151,7 +152,7 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
     <BusyFieldset busy={busy} className="track-notation-more">
       <details className="inspector-more">
         <summary>{t('inspector.more')}</summary>
-        <label>{t('editor.staff_clef')}<select value={clef} disabled={locked} {...busySelect(busy)} onChange={event => { if (!busy) applySettings({ clef: Number(event.target.value) }); }}>{Object.entries(model.Clef).filter(([, value]) => typeof value === 'number').map(([name, value]) => <option key={name} value={value as number}>{name.replace(/([a-z])([A-Z])/g, '$1 $2')}</option>)}</select></label>
+        <label>{t('editor.staff_clef')}<CommitSelect value={clef} disabled={locked} {...busySelect(busy)} onCommit={chosen => { if (!busy) applySettings({ clef: Number(chosen) }); }}>{Object.entries(model.Clef).filter(([, value]) => typeof value === 'number').map(([name, value]) => <option key={name} value={value as number}>{name.replace(/([a-z])([A-Z])/g, '$1 $2')}</option>)}</CommitSelect></label>
         <CommitField type="number" label={t('editor.sounding_transposition')} value={String(staff.transpositionPitch)} target={staffKey} busy={busy} disabled={locked} onCommit={(value, key) => applySettings({ transposition: Number(value) }, key)} />
         <CommitField type="number" label={t('editor.display_transposition')} value={String(staff.displayTranspositionPitch)} target={staffKey} busy={busy} disabled={locked} onCommit={(value, key) => applySettings({ displayTransposition: Number(value) }, key)} />
         <div className="track-staff-actions">

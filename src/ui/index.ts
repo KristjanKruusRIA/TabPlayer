@@ -13,3 +13,4 @@ export { busyGuard, busyRegion, busySelect } from './useBusyGuard';
 export type { BusyGuardProps } from './useBusyGuard';
 export { BusyFieldset } from './BusyFieldset';
 export { CommitField } from './CommitField';
+export { CommitSelect } from './CommitSelect';

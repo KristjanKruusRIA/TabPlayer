@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, lstat, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 
 const api = () => import('./prepare-audio.mjs');
@@ -190,4 +190,80 @@ test('an_extension_cannot_carry_kit_processing_or_companion_recordings', async (
   const plain = { instruments: [] };
   addInstrument(plain, { id: 'kit', regions: [], processing: {} }, { id: 'kit' }, 'main');
   assert.equal(plain.instruments.length, 1);
+});
+
+async function pruneFixture() {
+  const out = await mkdtemp(join(tmpdir(), 'tabplayer-prune-'));
+  const put = async (path, text = 'x') => { await mkdir(dirname(join(out, path)), { recursive: true }); await writeFile(join(out, path), text); };
+  for (const path of ['samples/drums/Kit/kept1.flac', 'samples/drums/Kit/kept2.wav', 'samples/drums/Kit/stale1.flac', 'samples/drums/Old/stale2.wav', 'samples/gone/stale3.wav', 'manifest.json', 'notes.txt', 'licenses/drums.txt', 'soundfont/sonivox.sf2']) await put(path);
+  const manifest = { samples: [{ path: 'samples/drums/Kit/kept1.flac' }, { path: 'samples/drums/Kit/kept2.wav' }] };
+  return { out, manifest, put };
+}
+const exists = async path => { try { await lstat(path); return true; } catch { return false; } };
+
+test('the_prepare_script_removes_recordings_the_pins_no_longer_name_and_nothing_else', async () => {
+  const { prunePreparedSamples } = await api();
+  const { out, manifest } = await pruneFixture();
+  assert.equal(await prunePreparedSamples(out, manifest), 3);
+  for (const path of ['samples/drums/Kit/kept1.flac', 'samples/drums/Kit/kept2.wav', 'manifest.json', 'notes.txt', 'licenses/drums.txt', 'soundfont/sonivox.sf2']) assert.ok(await exists(join(out, path)), path);
+  for (const path of ['samples/drums/Kit/stale1.flac', 'samples/drums/Old/stale2.wav', 'samples/gone/stale3.wav']) assert.ok(!await exists(join(out, path)), path);
+  assert.equal(await prunePreparedSamples(out, manifest), 0);
+});
+
+test('pruning_neither_follows_nor_removes_a_link_inside_the_sample_tree', async () => {
+  const { prunePreparedSamples } = await api();
+  const { out, manifest } = await pruneFixture();
+  const outside = await mkdtemp(join(tmpdir(), 'tabplayer-outside-'));
+  await writeFile(join(outside, 'precious.wav'), 'keep');
+  const link = join(out, 'samples/drums/Linked');
+  try { await symlink(outside, link, 'junction'); } catch (error) { return; /* this platform cannot create one */ }
+  assert.equal(await prunePreparedSamples(out, manifest), 3);
+  assert.equal(await readFile(join(outside, 'precious.wav'), 'utf8'), 'keep');
+  assert.ok((await lstat(link)).isSymbolicLink());
+});
+
+test('pruning_leaves_a_linked_sample_folder_alone', async () => {
+  const { prunePreparedSamples } = await api();
+  const out = await mkdtemp(join(tmpdir(), 'tabplayer-prune-'));
+  const outside = await mkdtemp(join(tmpdir(), 'tabplayer-outside-'));
+  await writeFile(join(outside, 'other.wav'), 'keep');
+  try { await symlink(outside, join(out, 'samples'), 'junction'); } catch (error) { return; }
+  assert.equal(await prunePreparedSamples(out, { samples: [] }), 0);
+  assert.equal(await readFile(join(outside, 'other.wav'), 'utf8'), 'keep');
+});
+
+test('a_failed_prepare_removes_nothing_and_a_successful_one_prunes_after_verifying_everything', async () => {
+  const { prepareAudio } = await api();
+  const root = await mkdtemp(join(tmpdir(), 'tabplayer-root-'));
+  const put = async (path, data) => { await mkdir(dirname(join(root, path)), { recursive: true }); await writeFile(join(root, path), data); };
+  const wav = Buffer.alloc(60);
+  wav.write('RIFF'); wav.writeUInt32LE(52, 4); wav.write('WAVEfmt ', 8);
+  wav.writeUInt32LE(16, 16); wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22);
+  wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28);
+  wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36);
+  wav.writeUInt32LE(16, 40); wav.writeInt16LE(16384, 44);
+  const sf = Buffer.from('soundfont');
+  await put('assets/audio/sources.json', JSON.stringify({ sources: [{ id: 'fx', localRoot: 'fx', licensePath: 'LICENSE', inventoryPath: 'fx.inventory.json', instruments: [{ id: 'kit', name: 'Kit', maps: [{ path: 'Programs/main.sfz', articulation: 'picked' }] }] }], soundFont: { package: 'sfpkg', version: '1.0.0', path: 'a.sf2', sha256: createHash('sha256').update(sf).digest('hex') } }));
+  await put('assets/audio/fx/LICENSE', 'CC0\n');
+  await put('assets/audio/fx/Programs/main.sfz', '<region> sample=../Samples/a.wav key=36');
+  await put('assets/audio/fx/Samples/a.wav', wav);
+  await put('node_modules/sfpkg/package.json', JSON.stringify({ version: '1.0.0' }));
+  await put('node_modules/sfpkg/a.sf2', sf);
+  await put('node_modules/sfpkg/LICENSE', 'sf license');
+  await put('legal/Apache-2.0.txt', 'apache');
+  const stale = join(root, 'src-tauri/resources/audio/samples/fx/Samples/stale.wav');
+  await put('src-tauri/resources/audio/samples/fx/Samples/stale.wav', 'old');
+  // Recording is missing from the source, so the run fails and the stale file is untouched.
+  const missing = join(root, 'assets/audio/fx/Samples/a.wav');
+  await rm(missing);
+  const quiet = async fn => { const log = console.log; console.log = () => {}; try { return await fn(); } finally { console.log = log; } };
+  await assert.rejects(quiet(() => prepareAudio({ root, recordInventory: true, offline: true })));
+  assert.ok(await exists(stale));
+  await put('assets/audio/fx/Samples/a.wav', wav);
+  const lines = []; const log = console.log; console.log = line => lines.push(String(line));
+  try { await prepareAudio({ root, recordInventory: true, offline: true }); } finally { console.log = log; }
+  assert.ok(!await exists(stale));
+  assert.ok(await exists(join(root, 'src-tauri/resources/audio/samples/fx/Samples/a.wav')));
+  assert.equal(lines.filter(line => /stale/i.test(line)).length, 1);
+  assert.match(lines.find(line => /stale/i.test(line)), /^Removed 1 stale/);
 });

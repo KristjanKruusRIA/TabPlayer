@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, copyFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, copyFile, rename, readdir, lstat, unlink } from 'node:fs/promises';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -347,8 +347,29 @@ async function fetchSource(source, path, cacheRoot, inventory, offline, root) {
   await mkdir(dirname(destination),{recursive:true});await writeFile(destination,bytes);
 }
 
-export async function prepareAudio({recordInventory=false,offline=false}={}) {
-  const root=fileURLToPath(new URL('../',import.meta.url));
+// samples/ holds only what this script writes: one recording per manifest sample. After a run that verified every sample, the
+// regular files there that the manifest no longer lists (left by an earlier inventory) are removed. A link or junction is
+// never followed or removed, and nothing outside samples/ is touched.
+export async function prunePreparedSamples(outputRoot, manifest) {
+  const keep=new Set(manifest.samples.map(item=>item.path.replaceAll('\\','/').toLowerCase()));
+  let removed=0;
+  async function walk(dir, name) {
+    for(const entry of await readdir(dir)) {
+      const path=join(dir,entry),child=`${name}/${entry}`,info=await lstat(path);
+      if(info.isSymbolicLink())continue;
+      if(info.isDirectory())await walk(path,child);
+      else if(info.isFile()&&!keep.has(child.toLowerCase())) {await unlink(path);removed++;}
+    }
+  }
+  const base=join(outputRoot,'samples');
+  let info;
+  try {info=await lstat(base);}catch(error) {if(error.code==='ENOENT')return 0;throw error;}
+  if(info.isDirectory()&&!info.isSymbolicLink())await walk(base,'samples');
+  return removed;
+}
+function reportPruned(count) {if(count>0)console.log(`Removed ${count} stale recorded sample${count===1?'':'s'}`);}
+
+export async function prepareAudio({recordInventory=false,offline=false,root=fileURLToPath(new URL('../',import.meta.url))}={}) {
   const config=JSON.parse(await readFile(join(root,'assets/audio/sources.json'),'utf8'));
   const outputRoot=join(root,'src-tauri/resources/audio');
   // App-owned maps and licenses are part of the preparation, so editing one prepares again. A source may own its maps
@@ -376,6 +397,7 @@ ${path}
         const bytes=await readFile(confined(outputRoot,item.path));
         if(sha256(bytes)!==item.sha256)throw new Error(`Bundled audio hash mismatch: ${item.path}`);
       }
+      reportPruned(await prunePreparedSamples(outputRoot,manifest));
       console.log(`Verified offline audio: ${manifest.instruments.reduce((n,i)=>n+i.regions.length,0)} regions, ${manifest.samples.length} samples`);return manifest;
     }
   }catch(error){if(error.code!=='ENOENT')throw error;}
@@ -414,6 +436,7 @@ ${path}
   await copyFile(join(root,'legal/Apache-2.0.txt'),join(outputRoot,'licenses/Apache-2.0.txt'));
   manifest.soundFont={path:'soundfont/sonivox.sf2',sha256:sha256(sf),size:sf.length};
   await writeFile(join(outputRoot,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
+  reportPruned(await prunePreparedSamples(outputRoot,manifest));
   console.log(`Prepared ${manifest.samples.length} recorded samples offline at ${outputRoot}`);return manifest;
 }
 

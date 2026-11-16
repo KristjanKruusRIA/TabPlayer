@@ -1636,3 +1636,378 @@ fn recorded_kit_fidelity() {
         );
     }
 }
+// "Raw against produced": how short, how dry and how dense each drum is, per hit, beside General MIDI's. Used to tune the kit's
+// processing table (assets/audio/drums/Programs/tabplayer-kit.processing.json) and to assert its targets.
+
+/// The elements measured: name, kit sound, velocity.
+const PRODUCED_ELEMENTS: [(&str, u8, u8); 11] = [
+    ("kick", 36, 95),
+    ("kick", 36, 127),
+    ("snare", 38, 110),
+    ("rim shot", 1, 110),
+    ("low tom", 45, 100),
+    ("high tom", 48, 100),
+    ("closed hat", 42, 100),
+    ("open hat", 46, 100),
+    ("crash", 49, 100),
+    ("ride", 51, 100),
+    ("crash", 49, 127),
+];
+
+/// What one hit of an element measures, from its first sound (the recording's lead-in is not counted).
+struct ProducedHit {
+    /// Peak over RMS of the first 300 ms, dB: high is a spike on little body, low is dense.
+    crest: f64,
+    /// The time its 10 ms power takes to fall 20 and 40 dB below its loudest, s.
+    t20: f64,
+    t40: f64,
+    /// The first 50 ms against the next 1.45 s, dB: high is dry.
+    direct_late: f64,
+    /// Where the energy of the first 50 ms is: share above 100 Hz and in 2 to 6 kHz, dB under the total.
+    above_100: f64,
+    click: f64,
+    /// Energy after 200 ms from the hit's start as a share of the first 1.5 s, dB (low is tight, 0 is all tail).
+    tail: f64,
+    /// Level of the first 300 ms, K-weighted, dB.
+    k300: f64,
+    peak: f64,
+}
+
+fn produced_hit(out: &[[f32; 2]]) -> ProducedHit {
+    let top = out
+        .iter()
+        .map(|f| f[0].abs().max(f[1].abs()))
+        .fold(0.0, f32::max);
+    let start = out
+        .iter()
+        .position(|f| f[0].abs().max(f[1].abs()) > top * 0.0316)
+        .unwrap_or(0);
+    let x = &out[start..];
+    let s = hit_stats(&x[..x.len().min(RATE as usize * 3 / 2)]);
+    let bands = band_levels(x, 0.0, 0.05);
+    let total = db(bands[..6].iter().map(|l| 10f64.powf(l / 10.0)).sum::<f64>());
+    let rms300 = (mean_power(x, 0.0, 0.3)).sqrt();
+    let peak300 = x[..(0.3 * RATE as f64) as usize]
+        .iter()
+        .map(|f| f[0].abs().max(f[1].abs()))
+        .fold(0.0, f32::max) as f64;
+    ProducedHit {
+        crest: 20.0 * (peak300 / rms300.max(1e-12)).log10(),
+        t20: s.t20,
+        t40: s.t40,
+        direct_late: s.early_late,
+        tail: db(mean_power(x, 0.2, 1.5) * 1.3) - db(mean_power(x, 0.0, 1.5) * 1.5),
+        above_100: bands[6] - total,
+        click: bands[4] - total,
+        k300: s.k300,
+        peak: s.peak,
+    }
+}
+
+/// One hit of each element named above on the kit (or General MIDI with `TABPLAYER_DRUM_GM=1`), 4 s long at channel volume 119.
+fn produced_hits(recorded: bool) -> Vec<(&'static str, u8, u8, ProducedHit)> {
+    PRODUCED_ELEMENTS
+        .iter()
+        .map(|&(name, sound, velocity)| {
+            let strokes = [(0.0, sound, velocity)];
+            let resources = bundled_resources(&strokes);
+            let out = render_pattern(
+                &strokes,
+                120.0,
+                4.0,
+                Some(FILE_VOLUME),
+                recorded,
+                &resources,
+            );
+            (name, sound, velocity, produced_hit(&out))
+        })
+        .collect()
+}
+
+/// `cargo test --release --test audio_recorded_kit -- --ignored --nocapture recorded_kit_produced_report`
+#[test]
+#[ignore = "needs the prepared bundled audio"]
+fn recorded_kit_produced_report() {
+    let (label, recorded) = row_label();
+    println!(
+        "produced,{label}: element velocity | crest dB | to -20 dB s | to -40 dB s | direct/late dB | tail dB | above 100 Hz re total dB | 2-6k re total dB | K300 dB | peak dBFS"
+    );
+    for (name, _, velocity, h) in produced_hits(recorded) {
+        println!(
+            "produced,{label}: {name} {velocity} | {:.1} | {:.2} | {:.2} | {:+.1} | {:.1} | {:.1} | {:.1} | {:.1} | {:.1}",
+            h.crest, h.t20, h.t40, h.direct_late, h.tail, h.above_100, h.click, h.k300, h.peak
+        );
+    }
+}
+
+/// How long the kit takes to load for the two measurement patterns, and how much decoded audio it holds: best of five loads. The
+/// processing runs inside this load. `cargo test --release --test audio_recorded_kit -- --ignored --nocapture recorded_kit_load_cost`
+#[test]
+#[ignore = "needs the prepared bundled audio"]
+fn recorded_kit_load_cost() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio");
+    let (label, _) = row_label();
+    for (name, strokes) in [("groove", groove(95)), ("metal", metal())] {
+        let plan = pattern_plan(&strokes, 120.0, 1.0, None, true);
+        let requests = resource_requests(&plan, &DocumentSettings::default());
+        let mut best = f64::MAX;
+        let mut loaded = None;
+        for _ in 0..5 {
+            let started = std::time::Instant::now();
+            let resources = AudioResources::load_for_requests(&root, &requests).unwrap();
+            best = best.min(started.elapsed().as_secs_f64());
+            loaded = Some(resources);
+        }
+        let resources = loaded.unwrap();
+        let kit: Vec<_> = resources
+            .samples
+            .keys()
+            .filter(|id| id.starts_with("drums:"))
+            .collect();
+        let frames: usize = kit
+            .iter()
+            .map(|id| resources.samples[*id].frames.len())
+            .sum();
+        println!(
+            "load,{label},{name}: {:.3} s, {} recordings, {} frames, {:.1} MB decoded",
+            best,
+            kit.len(),
+            frames,
+            frames as f64 * 8.0 / 1e6
+        );
+    }
+}
+
+/// The kick's two microphones, raw: for every kick recording and its companion in the bundled manifest, how the companion lies
+/// against it (the time offset the loader moves it by, its polarity and the correlation of the two thumps), read from the files
+/// without the loader's processing. `cargo test --release --test audio_recorded_kit -- --ignored --nocapture recorded_kit_kick_pairs`
+#[test]
+#[ignore = "needs the prepared bundled audio"]
+fn recorded_kit_kick_pairs() {
+    use tabplayer_lib::audio::{decode::decode_audio, kit_processing::align_companion};
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio");
+    let manifest: InstrumentManifest =
+        serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();
+    let instrument = manifest
+        .instruments
+        .iter()
+        .find(|i| i.id == RECORDED_KIT)
+        .unwrap();
+    let table = instrument
+        .processing
+        .as_ref()
+        .expect("the kit has a processing table");
+    let companion = table.profiles["kick"].companion.as_ref().unwrap();
+    let path = |id: &str| {
+        let asset = manifest.samples.iter().find(|s| s.id == id).unwrap();
+        decode_audio(
+            &std::fs::read(root.join(&asset.path)).unwrap(),
+            Some("flac"),
+        )
+        .unwrap()
+    };
+    let (mut lags, mut worst) = (vec![], 1.0f64);
+    let mut inverted = 0;
+    let mut pairs = 0;
+    for region in instrument
+        .regions
+        .iter()
+        .filter(|r| r.companion_id.is_some())
+    {
+        let (main, other) = (
+            path(&region.sample_id),
+            path(region.companion_id.as_ref().unwrap()),
+        );
+        let found = align_companion(
+            &main.frames,
+            &other.frames,
+            RATE as f64,
+            companion.max_offset_ms,
+            companion.min_correlation,
+        )
+        .unwrap();
+        lags.push(found.lag as f64 * 1000.0 / RATE as f64);
+        worst = worst.min(found.correlation);
+        inverted += (found.sign < 0.0) as usize;
+        pairs += 1;
+    }
+    let low = lags.iter().cloned().fold(f64::MAX, f64::min);
+    let high = lags.iter().cloned().fold(f64::MIN, f64::max);
+    println!(
+        "kickpairs: {pairs} pairs, the companion moves {low:.2} to {high:.2} ms earlier, {inverted} inverted, worst correlation {worst:.3}"
+    );
+    assert_eq!(pairs, 32);
+    // The two arrive 3 to 5 ms apart (the offset measured between the microphones), none is inverted, and the thumps match.
+    assert!(low > 3.0 && high < 5.5, "{low} to {high} ms");
+    assert_eq!(inverted, 0);
+    assert!(worst > 0.6, "{worst}");
+}
+/// How far the first 50 ms of the metal pattern's kicks stand above the rest of the mix at that moment, above 100 Hz and in 2 to
+/// 6 kHz, dB, power-averaged over the kicks.
+fn metal_kick_presence(recorded: bool) -> (f64, f64) {
+    let strokes = metal();
+    let resources = bundled_resources(&strokes);
+    let all = render_pattern(
+        &strokes,
+        180.0,
+        15.0,
+        Some(FILE_VOLUME),
+        recorded,
+        &resources,
+    );
+    let kicks: Vec<Stroke> = strokes
+        .iter()
+        .copied()
+        .filter(|s| group_of(s.1) == 0)
+        .collect();
+    let solo = render_pattern(&kicks, 180.0, 15.0, Some(FILE_VOLUME), recorded, &resources);
+    let rest: Vec<[f32; 2]> = all
+        .iter()
+        .zip(&solo)
+        .map(|(a, b)| [a[0] - b[0], a[1] - b[1]])
+        .collect();
+    let average = |signal: &[[f32; 2]], band: usize| {
+        let sum: f64 = kicks
+            .iter()
+            .map(|k| {
+                let at = k.0 / (16.0 * 180.0);
+                10f64.powf(band_levels(signal, at, at + 0.05)[band] / 10.0)
+            })
+            .sum();
+        db(sum / kicks.len() as f64)
+    };
+    (
+        average(&solo, 6) - average(&rest, 6),
+        average(&solo, 4) - average(&rest, 4),
+    )
+}
+
+/// What the produced kit is held to. The numbers come from General MIDI's drums (the owner's floor for a tight, normal sound),
+/// from the kit before its processing (the "raw" figures, measured on the same recordings with the processing off: the kick
+/// rang 0.80 s to -40 dB, the snare 0.35 s, the low tom more than 1.5 s) and from what a metal mix needs of a kick.
+/// `cargo test --release --test audio_recorded_kit -- --ignored --nocapture recorded_kit_meets_its_produced_targets`
+#[test]
+#[ignore = "needs the prepared bundled audio"]
+fn recorded_kit_meets_its_produced_targets() {
+    // Tails: the time to fall 40 dB must be under the ceiling (General MIDI's own, or for the kick and the toms a little over:
+    // a 70 Hz thump needs about 0.15 s to be heard as a kick) and over the floor, so nothing is choked.
+    let bounds = [
+        ("kick", 0.20, 0.12),
+        ("snare", 0.15, 0.08),
+        ("rim shot", 0.15, 0.08),
+        ("low tom", 0.45, 0.20),
+        ("high tom", 0.45, 0.20),
+        ("closed hat", 0.15, 0.05),
+        ("open hat", 1.10, 0.60),
+        ("crash", 1.60, 0.80),
+        ("ride", 1.20, 0.60),
+    ];
+    let (kit, general) = (produced_hits(true), produced_hits(false));
+    for ((name, _, velocity, h), (_, _, _, g)) in kit.iter().zip(&general) {
+        let &(_, ceiling, floor) = bounds.iter().find(|b| b.0 == *name).unwrap();
+        assert!(
+            h.t40 <= ceiling && h.t40 >= floor,
+            "{name} {velocity}: {:.2} s to -40 dB, wanted {floor} to {ceiling} (General MIDI {:.2})",
+            h.t40,
+            g.t40
+        );
+        // Not louder at the peak than General MIDI is at its own: the produced kit does not get its level from spikes.
+        assert!(h.peak < -9.0, "{name} {velocity}: peak {:.1} dBFS", h.peak);
+        // Its body is dense: a drum's first 300 ms is not a lone spike (crest factor within 8 dB of General MIDI's).
+        if matches!(
+            *name,
+            "kick" | "snare" | "rim shot" | "low tom" | "high tom"
+        ) {
+            assert!(
+                h.crest < g.crest + 8.0,
+                "{name} {velocity}: crest {:.1} dB against General MIDI's {:.1}",
+                h.crest,
+                g.crest
+            );
+        }
+        // And what is left after 200 ms is a small share of what it did: the tails are short.
+        if matches!(*name, "kick" | "snare" | "rim shot" | "closed hat") {
+            assert!(h.tail < -30.0, "{name} {velocity}: tail {:.1} dB", h.tail);
+        }
+        if matches!(*name, "low tom" | "high tom") {
+            assert!(h.tail < -20.0, "{name} {velocity}: tail {:.1} dB", h.tail);
+        }
+    }
+    let hit = |hits: &[(&str, u8, u8, ProducedHit)], name: &str, velocity: u8| {
+        let found = hits
+            .iter()
+            .find(|h| h.0 == name && h.2 == velocity)
+            .unwrap();
+        (found.3.above_100, found.3.click)
+    };
+    // The kick has weight above 100 Hz, which a small speaker plays, and a click in 2 to 6 kHz, each within 3 dB of General MIDI's
+    // share of the kick's energy (the kit before had its click 8.5 dB under General MIDI's).
+    let (kit_weight, kit_click) = hit(&kit, "kick", 95);
+    let (gm_weight, gm_click) = hit(&general, "kick", 95);
+    assert!(
+        kit_weight > gm_weight - 3.0 && kit_click > gm_click - 3.0,
+        "kick: {kit_weight:.1} and {kit_click:.1} dB, General MIDI {gm_weight:.1} and {gm_click:.1}"
+    );
+    // The snare has its crack in 2 to 6 kHz.
+    let (_, snare_click) = hit(&kit, "snare", 110);
+    let (_, gm_snare_click) = hit(&general, "snare", 110);
+    assert!(
+        snare_click > gm_snare_click - 2.0,
+        "{snare_click} against {gm_snare_click}"
+    );
+    // In the mix: the double kick stands over the rest of the metal pattern above 100 Hz by at least 2 dB (General MIDI 3.5, the
+    // kit before it -0.2 or -2.7) and in 2 to 6 kHz is no more than 6 dB under it (General MIDI 5.9 under, the kit before 23).
+    let (over, click) = metal_kick_presence(true);
+    assert!(
+        over >= 2.0,
+        "the kick stands {over:.1} dB over the rest above 100 Hz"
+    );
+    assert!(
+        click >= -6.0,
+        "the kick is {click:.1} dB against the rest in 2 to 6 kHz"
+    );
+    // Loudness within 1 dB of General MIDI's, whole clips, and nothing near clipping.
+    for (name, strokes, bpm, seconds) in [
+        ("groove", groove(100), 120.0, 4.5),
+        ("groove95", groove(95), 120.0, 4.5),
+        ("metal", metal(), 180.0, 15.0),
+    ] {
+        let resources = bundled_resources(&strokes);
+        let level = |recorded| {
+            let out = render_pattern(
+                &strokes,
+                bpm,
+                seconds,
+                Some(FILE_VOLUME),
+                recorded,
+                &resources,
+            );
+            (
+                db(mean_power(&k_weighted(&out), 0.0, seconds)),
+                peak_db(&out),
+            )
+        };
+        let ((kit_k, kit_peak), (gm_k, _)) = (level(true), level(false));
+        assert!(
+            (kit_k - gm_k).abs() <= 1.0,
+            "{name}: {kit_k:.1} dB K against General MIDI's {gm_k:.1}"
+        );
+        assert!(kit_peak < -3.0, "{name}: peak {kit_peak:.1} dBFS");
+    }
+    // Loading: the recordings the metal pattern asks for hold less decoded audio than the unprocessed kit's 38.4 MB (the tails
+    // are cut), and load, processing included, in well under a second (0.09 s before the processing, about 0.12 s with it).
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio");
+    let plan = pattern_plan(&metal(), 120.0, 1.0, None, true);
+    let requests = resource_requests(&plan, &DocumentSettings::default());
+    let started = std::time::Instant::now();
+    let loaded = AudioResources::load_for_requests(&root, &requests).unwrap();
+    let seconds = started.elapsed().as_secs_f64();
+    let megabytes: f64 = loaded
+        .samples
+        .iter()
+        .filter(|(id, _)| id.starts_with("drums:"))
+        .map(|(_, audio)| audio.frames.len() as f64 * 8.0 / 1e6)
+        .sum();
+    assert!(megabytes < 12.0, "{megabytes:.1} MB decoded");
+    assert!(seconds < 2.0, "{seconds:.2} s to load");
+}

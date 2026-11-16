@@ -138,6 +138,25 @@ impl ReferenceSyncMap {
         let milliseconds = 1000.0 * frame as f64 / rate as f64;
         milliseconds >= self.entry_source_ms && milliseconds < self.exit_source_ms
     }
+    /// The frames `contains_frame` accepts among the first `len`, as the range `first..end` (the same comparison, so the
+    /// same frames).
+    pub(super) fn frame_range(&self, len: usize, rate: u32) -> (usize, usize) {
+        // The first frame in 0..len at or past `limit` milliseconds (the times rise with the frame).
+        let past = |limit: f64| {
+            let (mut lo, mut hi) = (0, len);
+            while lo < hi {
+                let mid = lo + (hi - lo) / 2;
+                if 1000.0 * mid as f64 / (rate as f64) < limit {
+                    lo = mid + 1;
+                } else {
+                    hi = mid;
+                }
+            }
+            lo
+        };
+        let first = past(self.entry_source_ms);
+        (first, past(self.exit_source_ms).max(first))
+    }
     pub(super) fn frame_score_seconds(&self, frame: usize, rate: u32) -> f64 {
         self.entry_seconds + (1000.0 * frame as f64 / rate as f64 - self.entry_source_ms) / 1000.0
     }

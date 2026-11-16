@@ -97,13 +97,15 @@ function StringRow({ index, pitch, revision, onPitch, onInvalid, onPlay, playabl
 }
 
 /** The tuning editor. Mounted only while open, so Cancel and Escape discard every change; nothing is recorded until Keep fingering or Keep pitch. */
-export function TuningDialog({ pitches, name, mode = 'track', staff, busy = false, locked = false, refusal = null, onApply, onClose, onAudition }: {
+export function TuningDialog({ pitches, name, mode = 'track', staff, staffCount = 1, busy = false, locked = false, refusal = null, onApply, onClose, onAudition }: {
   pitches: readonly number[];
   name: string;
   /** `track` retunes a track that has notes (Keep fingering, Keep pitch, string count). `draft` fills in a tuning for something not made yet: one Use tuning button, any string count. */
   mode?: 'track' | 'draft';
   /** The staff whose capo, partial capo and banjo drone the Capo section edits with the tuning. Without it there is no Capo section. */
   staff?: model.Staff;
+  /** How many staves the track has; a string count change applies to all of them, and the dialog says so before it is applied. */
+  staffCount?: number;
   busy?: boolean;
   locked?: boolean;
   /** The app's reason for refusing the last edit. It is shown in the dialog, beside the draft it refused, once an apply comes back refused. */
@@ -280,6 +282,7 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, busy = fals
           <legend>{t('track_settings.recount_legend', { from: pitches.length, to: draft.length })}</legend>
           <label>{t('track_settings.strings_kept')}<select value={keep} aria-describedby="string-count-help" onChange={event => setKeep(event.target.value as StringCountKeep)}><option value="high">{t('track_settings.high_strings_option')}</option><option value="low">{t('track_settings.low_strings_option')}</option></select></label>
           <p className="tuning-hint" id="string-count-help">{t('track_settings.string_count_help')}</p>
+          {staffCount > 1 && <p className="tuning-hint" role="note">{t('track_settings.string_count_all_staves', { count: staffCount })}</p>}
         </fieldset>}
         {mode === 'track' && !recount && <p className="tuning-hint">{t('tuning_dialog.apply_hint')}</p>}
       </div>

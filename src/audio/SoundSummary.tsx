@@ -30,8 +30,8 @@ export function SoundSummary(props: Props) {
   const active = order.filter(block => first.effects[block].enabled);
   return <div className="sound-summary">
     <BusyFieldset busy={busy} className="sound-choices">
-      <label>{t('sound.sound_source')}<CommitSelect value={current.voiceId ?? ''} {...busySelect(busy)} onCommit={chosen => { if (!busy) void save({ ...current, voiceId: chosen || null }); }}><option value="">{t('sound.automatic_instrument')}</option>{(['gm', 'green-guitar', 'black-guitar', 'darkblack-bass', 'babyblue-bass'] as const).map(id => <option key={id} value={id}>{voiceNames[id]}</option>)}</CommitSelect></label>
-      <label>{t('sound.sound_preset')}<CommitSelect value={current.presetId} {...busySelect(busy)} onCommit={chosen => { if (!busy) void save(soundPreset(chosen as TrackSound['presetId'], current.voiceId)); }}>{presetIds.map(id => <option value={id} key={id}>{localizedPresetName(id, lang)}</option>)}</CommitSelect></label>
+      <label>{t('sound.sound_source')}<CommitSelect value={current.voiceId ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : save({ ...current, voiceId: chosen || null }))}><option value="">{t('sound.automatic_instrument')}</option>{(['gm', 'green-guitar', 'black-guitar', 'darkblack-bass', 'babyblue-bass'] as const).map(id => <option key={id} value={id}>{voiceNames[id]}</option>)}</CommitSelect></label>
+      <label>{t('sound.sound_preset')}<CommitSelect value={current.presetId} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : save(soundPreset(chosen as TrackSound['presetId'], current.voiceId)))}>{presetIds.map(id => <option value={id} key={id}>{localizedPresetName(id, lang)}</option>)}</CommitSelect></label>
     </BusyFieldset>
     <ul className="effect-strip" aria-label={t('sound_summary.strip')}>
       {active.length === 0 && <li className="effect-strip-empty">{t('sound_summary.no_effects')}</li>}

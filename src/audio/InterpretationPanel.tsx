@@ -31,7 +31,7 @@ export function InterpretationPanel({ trackId, mix, stringed, busy = false, onEd
   };
   return <section className="sound-panel interpretation-panel interpretation-rows" aria-label={t('sound.interpretation_title')} aria-describedby="interpretation-hint"><BusyFieldset busy={busy}>
     {(Object.keys(choices) as (keyof typeof choices)[]).map(key => <label key={key}>{choices[key].label}
-      <CommitSelect value={current[key] ?? ''} {...busySelect(busy)} onCommit={chosen => { if (!busy) change({ [key]: chosen || undefined }); }}>
+      <CommitSelect value={current[key] ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => { if (!busy) change({ [key]: chosen || undefined }); }}>
         <option value="">{choices[key].none}</option>{choices[key].options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </CommitSelect></label>)}
     <label className="check"><input type="checkbox" checked={current.letRing === true} onChange={e => { if (!busy) change({ letRing: e.target.checked ? true : undefined }); }} />{t('sound.interp_auto_let_ring')}</label>

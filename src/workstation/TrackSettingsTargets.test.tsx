@@ -23,7 +23,7 @@ const inDialog = (name: string | RegExp) => within(dialog()).getByRole('button',
 const panel = (score: ReturnType<typeof twoTracks>, selected: number, onEdit: (command: EditCommand) => unknown, extra: Partial<Parameters<typeof TrackSettingsPanel>[0]> = {}) =>
   <TrackSettingsPanel score={score} selected={selected} busy={false} onEdit={onEdit} {...extra} />;
 
-it('a track name typed for one track is recorded for that track when the selection moves before the field is left, and only once', () => {
+it('a track name typed for one track is recorded for that track when the selection moves first and the blur arrives after, and only once', () => {
   const score = twoTracks(), onEdit = vi.fn(), view = render(panel(score, 0, onEdit));
   fireEvent.change(screen.getByLabelText('Track name'), { target: { value: 'Lead' } });
   // The score selects on mouse down, before the field loses focus: the panel is drawn for the other track first.
@@ -35,7 +35,7 @@ it('a track name typed for one track is recorded for that track when the selecti
   expect(screen.getByLabelText('Track name')).toHaveValue('Bass');
 });
 
-it('a name left by a blur that arrives after the selection moved still goes to the track it was typed for', () => {
+it('a name left by a blur before the selection moves is recorded once, for the track it was typed for', () => {
   const score = twoTracks(), onEdit = vi.fn(), view = render(panel(score, 0, onEdit));
   const field = screen.getByLabelText('Track name');
   fireEvent.change(field, { target: { value: 'Lead' } });
@@ -196,4 +196,106 @@ it('browsing the MIDI instrument and the clef with the arrow keys records one ed
   expect(onEdit).toHaveBeenCalledTimes(1);
   fireEvent.blur(clef);
   expect(onEdit).toHaveBeenCalledTimes(2);expect(lastEdit(onEdit)).toMatchObject({ type: 'setStaffSettings', settings: { clef: Number(options[at - 2]) } });
+});
+
+it('a draft typed for one track is dropped, not recorded later, when an edit is in flight as the selection moves to another track', () => {
+  const score = twoTracks(), onEdit = vi.fn(), view = render(panel(score, 0, onEdit));
+  const field = screen.getByLabelText('Track name');
+  field.focus();
+  fireEvent.change(field, { target: { value: 'Lead' } });
+  // The selection moves while an edit is in flight: the draft cannot be recorded now, and is never recorded later.
+  view.rerender(panel(score, 1, onEdit, { busy: true }));
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Track name')).toHaveValue('Bass');
+  view.rerender(panel(score, 1, onEdit, { busy: false }));
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Track name')).toHaveValue('Bass');
+});
+
+it('a refused commit (the edit comes back false) puts the saved name back on screen', () => {
+  const score = twoTracks(), onEdit = vi.fn(() => false);
+  render(panel(score, 0, onEdit));
+  const field = screen.getByLabelText('Track name');
+  fireEvent.change(field, { target: { value: 'Lead' } });fireEvent.blur(field);
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(screen.getByLabelText('Track name')).toHaveValue(score.tracks[0].name);
+});
+
+it('a locked score refuses the commit and the field shows the document\'s name again', () => {
+  const score = twoTracks(), onEdit = vi.fn(), view = render(panel(score, 0, onEdit));
+  const field = screen.getByLabelText('Track name');
+  fireEvent.change(field, { target: { value: 'Lead' } });
+  view.rerender(panel(score, 0, onEdit, { locked: true }));
+  fireEvent.blur(field);
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Track name')).toHaveValue(twoTracks().tracks[0].name);
+});
+
+it('a draft typed on a staff is dropped when that staff was removed or an earlier staff was removed so its index names another staff', () => {
+  const base = previewEdit(blankProject(), { type: 'addStaff', track: 0, settings: saved() }), three = previewEdit(base.project, { type: 'addStaff', track: 0, settings: saved() });
+  const onEdit = vi.fn(), view = render(panel(three.score, 0, onEdit, { staff: 2 }));
+  fireEvent.change(screen.getByLabelText('Display transposition'), { target: { value: '7' } });
+  // The last staff is removed: index 2 no longer exists, so the draft goes nowhere (it does not land on the new last staff).
+  const two = previewEdit(three.project, { type: 'removeStaff', track: 0, staff: 2 }).score;
+  view.rerender(panel(two, 0, onEdit, { staff: 1 }));
+  expect(onEdit).not.toHaveBeenCalled();
+  cleanup();
+  const again = render(panel(three.score, 0, onEdit, { staff: 2 }));
+  fireEvent.change(screen.getByLabelText('Display transposition'), { target: { value: '7' } });
+  // The first staff is removed: index 2 is gone and the staff count changed, so the index is not trusted.
+  const rest = previewEdit(three.project, { type: 'removeStaff', track: 0, staff: 0 }).score;
+  again.rerender(panel(rest, 0, onEdit, { staff: 1 }));
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('a browsed choice that was left while an edit was in flight is dropped, so a track with the same stored value does not show or take it', () => {
+  const score = twoTracks();
+  const sameProgram = (previewEdit(blankProject(), { type: 'addTrack', name: 'Bass', tuning: [43, 38, 33, 28], program: score.tracks[0].playbackInfo.program }).score);
+  const onEdit = vi.fn(), view = render(panel(sameProgram, 0, onEdit));
+  const program = () => screen.getByLabelText('Track MIDI instrument') as HTMLSelectElement;
+  const stored = program().value;
+  program().focus();
+  fireEvent.keyDown(program(), { key: 'ArrowDown' });fireEvent.change(program(), { target: { value: String(Number(stored) + 1) } });fireEvent.keyUp(program(), { key: 'ArrowDown' });
+  expect(program()).toHaveValue(String(Number(stored) + 1));
+  // An edit is in flight and the select is left (the fieldset refuses that blur); then the other track, with the same stored value, is selected.
+  view.rerender(panel(sameProgram, 0, onEdit, { busy: true }));
+  program().blur();
+  view.rerender(panel(sameProgram, 1, onEdit, { busy: true }));
+  view.rerender(panel(sameProgram, 1, onEdit, { busy: false }));
+  expect(program()).toHaveValue(stored);
+  fireEvent.blur(program());
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('a browsed choice is dropped when the selection moves to another track, and recorded once for its own track when the select is left', () => {
+  const score = twoTracks(), onEdit = vi.fn(), view = render(panel(score, 0, onEdit));
+  const program = () => screen.getByLabelText('Track MIDI instrument') as HTMLSelectElement;
+  const stored = Number(program().value);
+  fireEvent.keyDown(program(), { key: 'ArrowDown' });fireEvent.change(program(), { target: { value: String(stored + 1) } });fireEvent.keyUp(program(), { key: 'ArrowDown' });
+  view.rerender(panel(score, 1, onEdit));
+  fireEvent.blur(program());
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(program()).toHaveValue(String(score.tracks[1].playbackInfo.program));
+  view.rerender(panel(score, 0, onEdit));
+  fireEvent.keyDown(program(), { key: 'ArrowDown' });fireEvent.change(program(), { target: { value: String(stored + 1) } });fireEvent.keyUp(program(), { key: 'ArrowDown' });
+  fireEvent.blur(program());
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(lastEdit(onEdit)).toMatchObject({ type: 'setTrackInfo', track: 0, program: stored + 1 });
+});
+
+it('a field that is unmounted with a draft records nothing', () => {
+  const onEdit = vi.fn(), view = render(panel(twoTracks(), 0, onEdit));
+  fireEvent.change(screen.getByLabelText('Track name'), { target: { value: 'Lead' } });
+  view.unmount();
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('changing the string count of a track with several staves says so before it is applied; a single-staff track has no such line', () => {
+  const onEdit = vi.fn(), view = render(panel(twoStaves(), 0, onEdit, { staff: 1 }));
+  fireEvent.click(edit());fireEvent.change(notes(), { target: { value: 'D4 A3 F3 C3 G2 D2 A1' } });
+  expect(within(dialog()).getByText(/applies to every staff of the track/)).toBeInTheDocument();
+  fireEvent.click(inDialog('Cancel'));
+  view.rerender(panel(twoTracks(), 0, onEdit));
+  fireEvent.click(edit());fireEvent.change(notes(), { target: { value: 'G2 D2 A1 E1 B0' } });
+  expect(within(dialog()).queryByText(/applies to every staff of the track/)).toBeNull();
 });

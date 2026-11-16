@@ -820,6 +820,7 @@ export const et: MessageCatalog = {
   'track_settings.high_strings_option': 'Kõrged keeled (muuda madalamat otsa)',
   'track_settings.low_strings_option': 'Madalad keeled (muuda kõrgemat otsa)',
   'track_settings.string_count_help': 'Noodid säilitavad oma helikõrguse. Eemaldatud või mittemängitava keele noodid liiguvad samas löögis vabale keelele; akordidiagrammid järgivad allesjäetud keeli.',
+  'track_settings.string_count_all_staves': "Sellel rajal on {count} noodirida: uus keelte arv kehtib kõigile raja noodiridadele ja teiste noodiridade häälestused asendatakse nende nootidega.",
   'track_settings.change_string_count': 'Muuda keelte arvu',
   'track_settings.keep_pitch': 'Säilita helikõrgus',
   'track_settings.track_actions': 'Raja toimingud',

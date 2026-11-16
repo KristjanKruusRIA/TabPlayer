@@ -51,10 +51,10 @@ function TrackInfoRow({ score, selected, busy, locked, onEdit }: { score: model.
   /** Records the change for the track with identity `owner`: a name typed for one track is still that track's when the selection has moved on. */
   const info = (change: { name?: string; shortName?: string; program?: number }, owner = id) => {
     const index = score.tracks.findIndex(track => trackIdentity(track) === owner);
-    if (locked || index < 0) return;
+    if (locked || index < 0) return false;
     const track = score.tracks[index], saved = track.playbackInfo.program;
-    if ((change.name ?? track.name) === track.name && (change.shortName ?? track.shortName) === track.shortName && (change.program ?? saved) === saved) return;
-    void onEdit({ type: 'setTrackInfo', track: index, name: change.name ?? track.name, shortName: change.shortName ?? track.shortName, program: change.program ?? saved });
+    if ((change.name ?? track.name) === track.name && (change.shortName ?? track.shortName) === track.shortName && (change.program ?? saved) === saved) return false;
+    return onEdit({ type: 'setTrackInfo', track: index, name: change.name ?? track.name, shortName: change.shortName ?? track.shortName, program: change.program ?? saved });
   };
   return <BusyFieldset busy={busy} className="track-info">
     <div className="track-info-row">
@@ -64,7 +64,7 @@ function TrackInfoRow({ score, selected, busy, locked, onEdit }: { score: model.
     </div>
     {!current.isPercussion && <details className="inspector-more">
       <summary>{t('inspector.more')}</summary>
-      <label>{t('track_settings.track_midi_instrument')}<CommitSelect value={program} disabled={locked} {...busySelect(busy)} onCommit={chosen => { if (!busy) info({ program: Number(chosen) }); }}>{midiPrograms.map((name, index) => <option key={index} value={index}>{index + 1}. {name}</option>)}</CommitSelect></label>
+      <label>{t('track_settings.track_midi_instrument')}<CommitSelect value={program} target={id} busy={busy} disabled={locked} {...busySelect(busy)} onCommit={chosen => (busy ? false : info({ program: Number(chosen) }))}>{midiPrograms.map((name, index) => <option key={index} value={index}>{index + 1}. {name}</option>)}</CommitSelect></label>
     </details>}
   </BusyFieldset>;
 }
@@ -91,21 +91,23 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
   const dialogBase = dialogTrack ? dialogTrack.staves[dialogSeveral ? dialogStaffIndex : 0] : null;
   /** The staff's settings as they are now, plus the changes; the same payload the old Apply staff settings button sent. */
   const settingsFor = (target: model.Staff, targetClef: number, change: Partial<ReturnType<typeof readStaffSettings>> & { tuningName?: string; keepPitch?: boolean } = {}) => ({ ...readStaffSettings(target, targetClef), ...(!target.isPercussion && target.tuning.length ? { tuningName: target.stringTuning.name } : {}), ...change });
-  const staffKey = `${trackIdentity(current)}\u001f${staffAt}`;
-  /** The track and staff a key made by `staffKey` names, in the score as it is now; null when that track is gone. */
+  const staffKey = `${trackIdentity(current)}\u001f${staffAt}\u001f${current.staves.length}`;
+  /** The track and staff a key made by `staffKey` names, in the score as it is now. Null when the track is gone, the staff is gone, or the track's staves were added or removed since (the index may then name another staff). */
   const resolve = (key: string) => {
-    const cut = key.lastIndexOf('\u001f'), track = score.tracks.findIndex(candidate => trackIdentity(candidate) === key.slice(0, cut));
+    const [owner, at, count] = key.split('\u001f'), track = score.tracks.findIndex(candidate => trackIdentity(candidate) === owner);
     if (track < 0) return null;
-    const index = Math.min(Number(key.slice(cut + 1)), score.tracks[track].staves.length - 1), owner = score.tracks[track].staves[index];
-    return { track, index, staff: owner, clef: owner.bars[barIndex]?.clef ?? owner.bars[0]?.clef ?? model.Clef.G2 };
+    const staves = score.tracks[track].staves, index = Number(at);
+    if (staves.length !== Number(count) || !(index < staves.length)) return null;
+    const found = staves[index];
+    return { track, index, staff: found, clef: found.bars[barIndex]?.clef ?? found.bars[0]?.clef ?? model.Clef.G2 };
   };
   /** Records the change on the staff `key` names, which a field that was typed in earlier passes back so the change reaches that staff even when the cursor has moved. */
   const applySettings = (change: Partial<ReturnType<typeof readStaffSettings>>, key = staffKey) => {
-    if (locked || busy) return;
+    if (locked || busy) return false;
     const at = resolve(key);
-    if (!at) return;
+    if (!at) return false;
     const next = settingsFor(at.staff, at.clef, change);
-    if (staffSettingsUnchanged(at.staff, at.clef, next)) return;
+    if (staffSettingsUnchanged(at.staff, at.clef, next)) return false;
     return onEdit({ type: 'setStaffSettings', track: at.track, staff: at.index, settings: next });
   };
   /** Records nothing when the tuning, its name, the string count and the capo section are the ones the track already has. Targets the track the dialog was opened for, and does nothing if that track is gone. */
@@ -148,11 +150,11 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
         : <span className="notation-staff">{t('editor.staff_n', { staff: staffAt + 1 })}</span>)}
     </div>
     <TuningRow label={t('track_settings.tuning_row')} notes={pitches} title={savedName ? `${savedName}: ${pitches}` : pitches} unavailable={tuningUnavailable} busy={busy} locked={locked} onOpen={() => { setCapoRefusal(null); setTuningFor(trackIdentity(current)); }} onPlay={onAudition && (() => audition([...tuned.tuning], true))} playDisabled={strings > 12} />
-    {dialogTrack && <TuningDialog pitches={dialogBase!.tuning} name={dialogBase!.stringTuning.name} staff={dialogTrack.staves[dialogStaffIndex]} busy={busy} locked={locked} refusal={capoRefusal ?? refusal} onApply={applyTuning} onClose={() => setTuningFor(null)} onAudition={onAudition && ((list, strum) => onAudition({ trackId: trackIdentity(dialogTrack) }, list, strum))} />}
+    {dialogTrack && <TuningDialog pitches={dialogBase!.tuning} name={dialogBase!.stringTuning.name} staff={dialogTrack.staves[dialogStaffIndex]} staffCount={dialogTrack.staves.length} busy={busy} locked={locked} refusal={capoRefusal ?? refusal} onApply={applyTuning} onClose={() => setTuningFor(null)} onAudition={onAudition && ((list, strum) => onAudition({ trackId: trackIdentity(dialogTrack) }, list, strum))} />}
     <BusyFieldset busy={busy} className="track-notation-more">
       <details className="inspector-more">
         <summary>{t('inspector.more')}</summary>
-        <label>{t('editor.staff_clef')}<CommitSelect value={clef} disabled={locked} {...busySelect(busy)} onCommit={chosen => { if (!busy) applySettings({ clef: Number(chosen) }); }}>{Object.entries(model.Clef).filter(([, value]) => typeof value === 'number').map(([name, value]) => <option key={name} value={value as number}>{name.replace(/([a-z])([A-Z])/g, '$1 $2')}</option>)}</CommitSelect></label>
+        <label>{t('editor.staff_clef')}<CommitSelect value={clef} target={staffKey} busy={busy} disabled={locked} {...busySelect(busy)} onCommit={chosen => applySettings({ clef: Number(chosen) })}>{Object.entries(model.Clef).filter(([, value]) => typeof value === 'number').map(([name, value]) => <option key={name} value={value as number}>{name.replace(/([a-z])([A-Z])/g, '$1 $2')}</option>)}</CommitSelect></label>
         <CommitField type="number" label={t('editor.sounding_transposition')} value={String(staff.transpositionPitch)} target={staffKey} busy={busy} disabled={locked} onCommit={(value, key) => applySettings({ transposition: Number(value) }, key)} />
         <CommitField type="number" label={t('editor.display_transposition')} value={String(staff.displayTranspositionPitch)} target={staffKey} busy={busy} disabled={locked} onCommit={(value, key) => applySettings({ displayTransposition: Number(value) }, key)} />
         <div className="track-staff-actions">

@@ -819,6 +819,7 @@ export const en = {
   'track_settings.high_strings_option': 'High strings (change the low end)',
   'track_settings.low_strings_option': 'Low strings (change the high end)',
   'track_settings.string_count_help': 'Notes keep their pitch. Notes on a removed or unplayable string move to a free string in the same beat; chord diagrams follow the kept strings.',
+  'track_settings.string_count_all_staves': "This track has {count} staves: a new string count applies to every staff of the track, and the tunings of the other staves are replaced by these notes.",
   'track_settings.change_string_count': 'Change string count',
   'track_settings.keep_pitch': 'Keep pitch',
   'track_settings.track_actions': 'Track actions',

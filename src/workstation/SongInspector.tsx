@@ -38,11 +38,12 @@ export function SongInspector({ score, busy, locked, onEdit, styleGroups, master
   const [styleOpen, setStyleOpen] = useState(false), [defaultsOpen, setDefaultsOpen] = useState(false);
   const fields = Object.fromEntries(metadataFields.map(key => [key, score[key]])) as Pick<model.Score, typeof metadataFields[number]>;
   const info = (change: { title?: string; artist?: string; tempo?: number }) => {
-    if (locked) return;
+    if (locked) return false;
     const tempo = change.tempo ?? score.tempo;
-    void onEdit({ type: 'setScoreInfo', title: change.title ?? score.title, artist: change.artist ?? score.artist, tempo, ...(tempo === score.tempo ? { preserveOpeningMark: true } : {}) });
+    if ((change.title ?? score.title) === score.title && (change.artist ?? score.artist) === score.artist && tempo === score.tempo) return false;
+    return onEdit({ type: 'setScoreInfo', title: change.title ?? score.title, artist: change.artist ?? score.artist, tempo, ...(tempo === score.tempo ? { preserveOpeningMark: true } : {}) });
   };
-  const metadata = (key: typeof metadataFields[number], value: string) => { if (!locked) void onEdit({ type: 'setScoreMetadata', fields: { ...fields, [key]: value } }); };
+  const metadata = (key: typeof metadataFields[number], value: string) => (locked ? false : onEdit({ type: 'setScoreMetadata', fields: { ...fields, [key]: value } }));
   return <>
     <section className="inspector-section" aria-labelledby="inspector-song-information">
       <h3 id="inspector-song-information">{t('inspector.information')}</h3>

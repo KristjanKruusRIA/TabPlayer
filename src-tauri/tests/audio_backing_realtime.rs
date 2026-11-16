@@ -154,6 +154,125 @@ fn rendering_seeking_and_changing_speed_allocate_nothing() {
     }
 }
 
+fn voice(
+    rate: u32,
+    output_rate: u32,
+    frames: Vec<[f32; 2]>,
+    offset_ms: f64,
+    shift: i8,
+) -> BackingVoice {
+    BackingVoice::new_with_processing_shifted(
+        Arc::new(DecodedAudio {
+            sample_rate: rate,
+            channels: 2,
+            frames: Arc::new(frames),
+        }),
+        BackingMap::new(&[], offset_ms, &plan()).unwrap(),
+        output_rate,
+        BackingProcessing {
+            semitones: 0.0,
+            cents: 0.0,
+            filter: BackingFilter::None,
+        },
+        shift,
+    )
+    .unwrap()
+}
+
+/// A map or a file far outside what the low band is made for neither stalls the callback nor panics: an offset that puts
+/// the clock beyond any position a sample index can hold, files at up to 128 times the output rate, and the steepest
+/// read the low band still takes (a 384 kHz file at 48 kHz, an octave up) at every practice speed.
+#[test]
+fn extreme_maps_and_rates_neither_stall_nor_panic() {
+    let sine = |rate: u32, seconds: f64| -> Vec<[f32; 2]> {
+        (0..(seconds * f64::from(rate)) as usize)
+            .map(|n| [(0.4 * (TAU * 55.0 * n as f64 / f64::from(rate)).sin()) as f32; 2])
+            .collect()
+    };
+    for offset_ms in [-1e22, 1e22, -1e9] {
+        let mut voice = voice(48_000, 48_000, sine(48_000, 1.0), offset_ms, 0);
+        voice.seek(0.0);
+        let mut clock = 0.0f64;
+        for _ in 0..12_000 {
+            clock += 0.5 / 48_000.0;
+            assert!(voice.next_frame(clock).iter().all(|v| v.is_finite()));
+        }
+    }
+    for (rate, output, shift) in [
+        (6_144_000u32, 48_000u32, 0i8),
+        (768_000, 22_050, 12),
+        (384_000, 48_000, 12),
+    ] {
+        let mut voice = voice(rate, output, sine(rate, 0.5), 0.0, shift);
+        voice.seek(0.0);
+        let mut clock = 0.0f64;
+        for speed in [0.1, 0.5, 1.0, 3.0] {
+            clock = clock.min(0.2);
+            for _ in 0..2_000 {
+                clock += speed / f64::from(output);
+                assert!(voice.next_frame(clock).iter().all(|v| v.is_finite()));
+            }
+        }
+    }
+}
+
+/// Changing the speed while playing, a few times a second and mid-hop, across attacks and across the share of the speed
+/// below which V waits for whole windows, never makes the low band leave at once: no step from one output frame to the
+/// next is larger than a smooth low line has.
+#[test]
+fn speed_changes_near_attacks_never_click() {
+    let rate = 48_000u32;
+    // Low notes every 0.37 s, each starting over 3 ms and dying away over 0.3 s, and nothing else: every step from one
+    // frame to the next in it is under 0.02.
+    let frames: Vec<[f32; 2]> = (0..6 * rate as usize)
+        .map(|n| {
+            let t = n as f64 / f64::from(rate);
+            let mut x = 0.0;
+            let mut k = 0usize;
+            while k as f64 * 0.37 <= t {
+                let age = t - k as f64 * 0.37;
+                let hz = [41.2, 55.0, 61.7, 49.0][k % 4];
+                x += 0.4 * (age / 0.003).min(1.0) * (-age / 0.3).exp() * (TAU * hz * age).sin();
+                k += 1;
+            }
+            [x as f32, (0.7 * x) as f32]
+        })
+        .collect();
+    let largest = frames
+        .windows(2)
+        .map(|w| (w[1][0] - w[0][0]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(largest < 0.02, "the source steps by {largest}");
+    for shift in [0i8, 7] {
+        let neutral = 2.0_f64.powf(f64::from(shift) / 12.0);
+        let mut voice = voice(rate, rate, frames.clone(), 0.0, shift);
+        voice.seek(0.0);
+        let mut clock = 0.0f64;
+        let mut last = [0.0f32; 2];
+        let mut worst = (0.0f32, 0usize);
+        let mut n = 0usize;
+        for round in 0..90 {
+            let speed = [0.5, 0.3, 0.9, 0.35, 1.0, 0.45, 0.2, 0.75][round % 8] * neutral;
+            for _ in 0..1_499 {
+                clock += speed / f64::from(rate);
+                let x = voice.next_frame(clock);
+                let step = (x[0] - last[0]).abs().max((x[1] - last[1]).abs());
+                if n > 0 && step > worst.0 {
+                    worst = (step, n);
+                }
+                last = x;
+                n += 1;
+            }
+        }
+        assert!(
+            worst.0 < 0.05,
+            "key shift {shift}: a step of {} at output frame {}",
+            worst.0,
+            worst.1
+        );
+    }
+}
+
 /// The amplitude of the partial at `hz` in `x`, through a Hann window.
 fn tone(x: &[f32], hz: f64, rate: u32) -> f64 {
     let n = x.len() as f64;

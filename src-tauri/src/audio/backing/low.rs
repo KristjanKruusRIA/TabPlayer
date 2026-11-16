@@ -62,6 +62,13 @@ const WHOLE_BELOW: f64 = 0.4;
 /// Decimated samples kept (a power of two), and attacks kept.
 const CACHE: usize = 4096;
 const ONSETS: usize = 64;
+/// V follows the clock between these shares of the neutral speed: the practice speeds of 10 to 300% with key shifts of
+/// more than an octave either way. Outside them the clock counts as unknown (a leap of it, or a map far too steep).
+const MIN_RATIO: f64 = 1.0 / 32.0;
+const MAX_RATIO: f64 = 8.0;
+/// V is made only where a grain reads at most this many decimated samples (twice what it reads with the grain search
+/// at its usual radius); further, the search radius is at its cap and a frame would not span what the grains read.
+const MOST_READ: f64 = 32.0;
 
 /// What the grains read: the decoded frames, the frames the sync map lets through, and the isolated impulses the voice
 /// takes out and adds back on the clock.
@@ -142,7 +149,8 @@ pub(super) struct LowBand {
 impl LowBand {
     /// The low band of a voice reading `step` source frames per output frame with a grain search of `radius` source
     /// frames, or None when the search is too narrow for a decimated band (under 16 frames either side, which needs a
-    /// file at a sixteenth of the output rate or less).
+    /// file at a sixteenth of the output rate or less) or held at its cap far below what a grain reads (a file at many
+    /// times the output rate, shifted up).
     pub(super) fn new(step: f64, radius: i32, source_rate: u32) -> Option<Box<Self>> {
         if radius < 16 || !step.is_finite() || step <= 0.0 {
             return None;
@@ -152,6 +160,9 @@ impl LowBand {
         let lock = rate / (2.0 * radius as f64);
         let factor = (radius / 16).max(1) as i64;
         let d = factor as f64;
+        if HOP as f64 * step / d > MOST_READ {
+            return None;
+        }
         let taps = lowpass(rate, 2.625 * lock, 2.75 * lock);
         let window: Vec<f64> = (0..N)
             .map(|n| 0.5 - 0.5 * (2.0 * PI * n as f64 / N as f64).cos())
@@ -248,26 +259,66 @@ impl LowBand {
         best: f64,
         previous: Option<f64>,
     ) -> bool {
+        // Far outside the source there is nothing to hear (the voice is silent there), and positions that far out need not
+        // even be whole numbers of decimated samples: V stays out, and starts over when it comes back in.
+        let far = 2.0 * (N as f64) * self.d + MAX_AIM;
+        if !(clock > source.first as f64 - far && clock < source.end as f64 + far) {
+            self.framed = false;
+            self.tail_valid = false;
+            self.alpha = 0.0;
+            return false;
+        }
+        // V follows a clock that moves at a speed it was made for (the practice speeds, with key shifts of an octave or
+        // more either way); a clock that leaps (a jump that is not a seek, or a map that steep) counts as unknown.
+        let rate = rate.filter(|r| {
+            r.is_finite() && *r >= MIN_RATIO * self.step && *r <= MAX_RATIO * self.step
+        });
         // V comes in only while the voice stretches; once in, it stays through a return to the neutral speed until it hands
         // the low band back to the grains at an attack (or a seek). Handing it back while a partial sounds would cross-fade
         // two versions of it whose phases disagree, which can cancel it for a moment.
-        let known = rate.is_some_and(f64::is_finite);
         let active =
-            known && ((rate.unwrap() - self.step).abs() >= NEUTRAL_RATE || self.alpha > 0.0);
+            rate.is_some_and(|r| (r - self.step).abs() >= NEUTRAL_RATE || self.alpha > 0.0);
         if !active && self.alpha == 0.0 {
             self.framed = false;
             self.tail_valid = false;
             return false;
         }
-        if let Some(rate) = rate.filter(|r| r.is_finite()) {
+        if let Some(rate) = rate {
             self.rate = rate;
         }
         let ahead = HOP as f64 * self.rate;
         let reach = HOP as f64 * self.step;
         let (s0, s1) = (clock, clock + ahead);
         let s2 = s1 + ahead;
-        let span = ((N / 2) as i64 + DELTA + 4) as f64 * self.d;
-        self.scan(source, s0.min(s2) - span, s0.max(s2) + span);
+        // Every attack that decides how a frame here is windowed, or whether the grains may hear it (`usable`), is known:
+        // a frame reads N / 2 + DELTA decimated samples either side of its centre and `usable` looks N / 2 + TAPER past it.
+        let span = ((N / 2) as f64 + TAPER + (DELTA + 8) as f64) * self.d;
+        let margin = 4.0 * self.d;
+        let hold = ATTACK_HOLD * self.d;
+        // What this grain hears from the grains (the previous grain's continuation and this grain's start), and what the
+        // next grain may: it continues this one and starts where its search lands, within `radius` of where it aims.
+        let (now_lo, now_hi) = match previous {
+            Some(previous) => (
+                (previous + reach).min(best),
+                (previous + 2.0 * reach).max(best + reach),
+            ),
+            None => (best, best + reach),
+        };
+        let aim = s1 + ((HOP as f64 - 0.5) * (self.rate - self.step)).clamp(-MAX_AIM, MAX_AIM);
+        let (next_lo, next_hi) = (
+            (best + reach).min(aim - self.radius),
+            (best + 2.0 * reach).max(aim + self.radius + reach),
+        );
+        // The attacks are needed wherever the frames or the grains read, only while V may stay in.
+        if active {
+            self.scan(
+                source,
+                (s0.min(s2) - span).min(now_lo.min(next_lo) - margin - hold),
+                (s0.max(s2) + span).max(now_hi.max(next_hi) + margin),
+            );
+        } else {
+            self.scan(source, s0.min(s2) - span, s0.max(s2) + span);
+        }
         if !self.framed {
             // Nothing carries into this grain: its first half comes from a frame centred on its first output frame.
             self.frame(source, s0, best, true);
@@ -282,29 +333,17 @@ impl LowBand {
         // centre on, and up to it), nor the grains (the previous grain's continuation and this grain's start). Where the
         // grains read an attack earlier or later than the clock, V's frames on the other side of it would leave the
         // attack's low half out, or put it in twice.
-        let margin = 4.0 * self.d;
-        let hold = ATTACK_HOLD * self.d;
-        let (now_lo, now_hi) = match previous {
-            Some(previous) => (
-                (previous + reach).min(best),
-                (previous + 2.0 * reach).max(best + reach),
-            ),
-            None => (best, best + reach),
-        };
-        let now = !self.attack_near(now_lo - margin, now_hi + margin, 0.0, hold)
+        let now = active
+            && !self.attack_near(now_lo - margin, now_hi + margin, 0.0, hold)
             && self.usable(s0)
             && self.usable(s1);
-        // The next grain continues this one and starts where its search lands, within `radius` of where it aims.
-        let aim = s1 + ((HOP as f64 - 0.5) * (self.rate - self.step)).clamp(-MAX_AIM, MAX_AIM);
-        let next = !self.attack_near(
-            (best + reach).min(aim - self.radius) - margin,
-            (best + 2.0 * reach).max(aim + self.radius + reach) + margin,
-            0.0,
-            hold,
-        ) && self.usable(s1)
+        let next = now
+            && !self.attack_near(next_lo - margin, next_hi + margin, 0.0, hold)
             && self.usable(s2);
-        let a0 = if now { self.alpha } else { 0.0 };
-        let a1 = if active && now && next { 1.0 } else { 0.0 };
+        // At a steady speed the previous grain's look ahead has already kept V out of a grain that cannot use it; when
+        // the speed changes, V still leaves over this grain's ramp, never at once.
+        let a0 = self.alpha;
+        let a1 = if next { 1.0 } else { 0.0 };
         self.alpha = a1;
         if a0 == 0.0 && a1 == 0.0 {
             self.tail_valid = false;
@@ -428,7 +467,8 @@ impl LowBand {
     /// Finds the attacks between source positions `from` and `to`, continuing from where the last call stopped.
     fn scan(&mut self, source: &Source, from: f64, to: f64) {
         let lo = (from / self.d).floor() as i64;
-        let hi = (to / self.d).ceil() as i64;
+        // A grain's range is at most about a quarter of the cache; this bounds the work of one call whatever it is given.
+        let hi = ((to / self.d).ceil() as i64).min(lo.saturating_add((CACHE / 2) as i64));
         if !self.scanning || lo < self.scan_from || lo > self.scan_next + (CACHE / 4) as i64 {
             self.scanning = true;
             self.scan_from = lo;

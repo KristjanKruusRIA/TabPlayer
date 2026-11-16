@@ -1034,9 +1034,34 @@ fn cost_of_a_second_of_audio() {
             })
             .collect();
         runs.sort_by(f64::total_cmp);
+        // The first 1024 output frames after a seek (four grains, 21 ms of audio, where the low band's first frames and
+        // its scan of the attacks are made), median of 41 seeks, against the same frames a second later.
+        let mut after_seek = Vec::new();
+        let mut steady = Vec::new();
+        for k in 0..41 {
+            let at = 1.0 + f64::from(k) * 0.37;
+            voice.seek(at);
+            let mut sum = 0.0f32;
+            let mut m = 0usize;
+            for (untimed, times) in [(0usize, &mut after_seek), (47_000, &mut steady)] {
+                for _ in 0..untimed {
+                    sum += voice.next_frame(at + m as f64 * speed / SR)[0];
+                    m += 1;
+                }
+                let started = std::time::Instant::now();
+                for _ in 0..1_024 {
+                    sum += voice.next_frame(at + m as f64 * speed / SR)[0];
+                    m += 1;
+                }
+                times.push(started.elapsed().as_secs_f64() * 1e6);
+            }
+            std::hint::black_box(sum);
+        }
+        after_seek.sort_by(f64::total_cmp);
+        steady.sort_by(f64::total_cmp);
         eprintln!(
-            "G {speed}x key {shift}: {:.2} ms per second of audio (median of 5; min {:.2}, max {:.2}); voice built in {build_ms:.1} ms",
-            runs[2], runs[0], runs[4]
+            "G {speed}x key {shift}: {:.2} ms per second of audio (median of 5; min {:.2}, max {:.2}); 1024 frames after a seek {:.0} us, later {:.0} us (medians); voice built in {build_ms:.1} ms",
+            runs[2], runs[0], runs[4], after_seek[20], steady[20]
         );
     }
 }

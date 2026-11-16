@@ -5,89 +5,34 @@
     "size": 7048
   },
   {
-    "path": "Programs/mappings/mid/crash_crash_map.sfz",
-    "sha256": "a11934cfe29ee8ab9ca010223e210684ed237455aab2465de0255917fdcf7844",
-    "size": 1521
+    "path": "Programs/mappings/oh/crash_sizzle_map.sfz",
+    "sha256": "5ac76853055dc336c532d2c6b17923608e398c7f9ce35b868cf72854ea1d17c8",
+    "size": 1509
   },
   {
-    "path": "Programs/mappings/mid/crash_sizzle_map.sfz",
-    "sha256": "27890f5e2c0e3bc8aa1e7df25d72206618c578cbe112af797b8b4533e020748e",
-    "size": 1533
+    "path": "Programs/mappings/oh/flatride_crash_map.sfz",
+    "sha256": "51935dae3094446fe101fc75e9d0858a118177767311f8f3ef2b544b67b17e76",
+    "size": 374
   },
   {
-    "path": "Programs/mappings/mid/flatride_crash_map.sfz",
-    "sha256": "5548feda0169ea795c589db250c679ce59edde4015f102554fd875ccc8b1185b",
-    "size": 382
+    "path": "Programs/mappings/oh/flatride_ride_map.sfz",
+    "sha256": "0437fc2c8d3cfe2caa5b98b7d9beb4fc9ba8d4c104199f9ba2c0d40d0317cf0f",
+    "size": 1473
   },
   {
-    "path": "Programs/mappings/mid/flatride_ride_map.sfz",
-    "sha256": "c7644c944273009570a94a9c258439ce427504745ceb1e01a0ea0b732b6c45db",
-    "size": 1497
+    "path": "Programs/mappings/oh/hh_half_map.sfz",
+    "sha256": "03c83618fd63f1ea84867e2af11c2e62ba8c47493836aab3dbc704364b8160b5",
+    "size": 1748
   },
   {
-    "path": "Programs/mappings/mid/hh_closed_map.sfz",
-    "sha256": "375bad58dd8f3763978642a9f4834953fedf5079da2e5bfae1acee3f7e7ff0cc",
-    "size": 1812
+    "path": "Programs/mappings/oh/hh_pedal_map.sfz",
+    "sha256": "bfd815d5823ed9cb8c76787c81ae59c32838889e1a90a450a3e2f29efc2aef7a",
+    "size": 1341
   },
   {
-    "path": "Programs/mappings/mid/hh_half_map.sfz",
-    "sha256": "95a082a8bf8a8de85044f3543a89701e4015adc2cbc77a469e75b55cc65f84e7",
-    "size": 1780
-  },
-  {
-    "path": "Programs/mappings/mid/hh_open_map.sfz",
-    "sha256": "a3ffe560f25daf219fc0820e4196b2d60d3c5c80a51fe4a03392c315dd8e8dd1",
-    "size": 1321
-  },
-  {
-    "path": "Programs/mappings/mid/hh_pedal_map.sfz",
-    "sha256": "d20bfc9fd2ece2ebb2aa3cccb2e0f636abc0d38d63b3d8862fa86273009f6882",
-    "size": 1365
-  },
-  {
-    "path": "Programs/mappings/mid/htom_center_map.sfz",
-    "sha256": "cead380516daf8b357af1a0939171bda9faf505f51c1c1e06a6fea4a5d92f6f5",
-    "size": 1272
-  },
-  {
-    "path": "Programs/mappings/mid/kick_snoff_map.sfz",
-    "sha256": "329713b84b9ff6e3bae42d53209eb73f1a8d71a726e676ad73b1840eeb5b151b",
-    "size": 1860
-  },
-  {
-    "path": "Programs/mappings/mid/kick_snon_map.sfz",
-    "sha256": "117647fda55b9c2b28981c5e6f4303384d8d5cce029fa1074ae531ffe94bf3d5",
-    "size": 1844
-  },
-  {
-    "path": "Programs/mappings/mid/ltom_center_map.sfz",
-    "sha256": "e9d742138ccdb3d6f1a88bb4a09316d0aa8f31a0effeec374fcf707e71e4eee8",
-    "size": 1272
-  },
-  {
-    "path": "Programs/mappings/mid/ride_bell_map.sfz",
-    "sha256": "48afd8cdcdcc06e36ebc756d1c91f8d5d52c277bb903fac3512a788f2cbda8a1",
-    "size": 1053
-  },
-  {
-    "path": "Programs/mappings/mid/ride_ride_map.sfz",
-    "sha256": "d2d799e9819dc43a62a8ae1c44a0f731b7e3bb95a28372b70b7c43459cabfa33",
-    "size": 1401
-  },
-  {
-    "path": "Programs/mappings/mid/snare_center_map.sfz",
-    "sha256": "925db156dc01567fa609723a9f4708f77cc9fbcdc456bd56fab5d91481ffe44c",
-    "size": 2971
-  },
-  {
-    "path": "Programs/mappings/mid/snare_crossstick_map.sfz",
-    "sha256": "8979c8ba8f020d0ca8e7f59d841416451b7bc778948f440f47cde0d2c1228a58",
-    "size": 1368
-  },
-  {
-    "path": "Programs/mappings/mid/snare_rimshot_map.sfz",
-    "sha256": "109c8ba4a842d0457d67d76aff4b93eada3b37ceaba8b90047703f9d89cdaa52",
-    "size": 984
+    "path": "Programs/mappings/oh/ride_bell_map.sfz",
+    "sha256": "2a3855b88b8fa9cf5758d23254f7a8b5e43f4d06efeb20fe8b8a8ec07c93f925",
+    "size": 1035
   },
   {
     "path": "Programs/mappings/perc/close/whistle_long_map.sfz",
@@ -200,1234 +145,779 @@
     "size": 2018
   },
   {
+    "path": "Programs/mappings/snaremic/htom_center_map.sfz",
+    "sha256": "b78c5b9bbd4ee3d9258353bc917da2ce7a0410f999411cf28579deca949267d7",
+    "size": 1432
+  },
+  {
+    "path": "Programs/mappings/snaremic/ltom_center_map.sfz",
+    "sha256": "febdb844a360a6392d9a3cd336aaf70d5a1268134f67d94b8960498a7445e166",
+    "size": 1432
+  },
+  {
+    "path": "Programs/mappings/snaremic/snare_center_map.sfz",
+    "sha256": "6f7aa41772236f14e9f8c036656fbac70cb5ef9972c42eedafba68b2a24afd73",
+    "size": 3331
+  },
+  {
+    "path": "Programs/mappings/snaremic/snare_crossstick_map.sfz",
+    "sha256": "f866216d28ac28658e0bc6df2b7ec9c3ca3685ab24c665eaf3cd83fd1a265db9",
+    "size": 1528
+  },
+  {
+    "path": "Programs/mappings/snaremic/snare_rimshot_map.sfz",
+    "sha256": "7a8a52d4e2bb3e5f511364ab9ecb5f1043e848e9940738c0dc20ea2158876c2c",
+    "size": 1104
+  },
+  {
     "path": "Programs/tabplayer-kit.sfz",
-    "sha256": "a5d75aa1e71f112a1033945ccd5e0c299af1dc2c2c871bc5d307d7cc8dc96dee",
-    "size": 4761
+    "sha256": "00d62b533690626bb8a5ec915e26942465745fe1a8b57f6172018c88961c654c",
+    "size": 18112
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl1_rr1.flac",
-    "sha256": "05d4849408a3ed79aa94a071482905facb948eaf5fc15650afe8b4291f73b816",
-    "size": 1431477
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl1_rr1.flac",
+    "sha256": "0597fce86b081caf032d4f4cc97310008253b61f49566e02f9c29d7c79ff14f4",
+    "size": 86292
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl1_rr2.flac",
-    "sha256": "61e223756a2c767f75e0ecf8ec208fe631973fdb03e6d76dd4fff153dceef1c4",
-    "size": 1486940
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl1_rr2.flac",
+    "sha256": "88001d8ce1e26afc39b0f1f5592a01be2a47a7006f0dd21b5d0c315cde37e4e7",
+    "size": 81124
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl1_rr3.flac",
-    "sha256": "4f2f1d8d8782ffa7e655487c56e32da77bc599e506144f07c70b89cdb5cb5284",
-    "size": 1374768
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl1_rr3.flac",
+    "sha256": "761245a305079cf173e5c73387b6329e46d77d14dc85c5c0e99d491123d51d5f",
+    "size": 72839
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl1_rr4.flac",
-    "sha256": "1d926f33947c2cf9b8b472a5000c4ad2c0834085c7e23a2344bfb5b04dcd5e47",
-    "size": 1484048
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl1_rr4.flac",
+    "sha256": "66986eeb66175ee76503a98b9e4cd930397ee23576fde66ec332c163834ebb8d",
+    "size": 84674
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl2_rr1.flac",
-    "sha256": "6e51e885a3f0fa3bfbad1349526e3781aefae4063f36691185bc176fad3ce588",
-    "size": 1609725
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl2_rr1.flac",
+    "sha256": "fde168d5cb5e9b1149dbe5b8a47e89b81ce160f1b178db8cff088b72304f45ff",
+    "size": 90094
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl2_rr2.flac",
-    "sha256": "2f1e15ddfb237e257b07bf5ad409a6a664644df5cd95fe11c9811d8d0cc6512b",
-    "size": 1479537
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl2_rr2.flac",
+    "sha256": "94d8a8ed4fa15b15c7d627b859751b9d3d0865c860b4c8a0d3bb5f0f868dcd9e",
+    "size": 88184
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl2_rr3.flac",
-    "sha256": "9f4aac175d883860bf88bf16a5c93dc05428261634b3bf9737ab8fca9bce6b74",
-    "size": 1407404
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl2_rr3.flac",
+    "sha256": "84a097841ebce311501f116e6daa7c84183a9b6710da3a306dba5526dc6f1ec2",
+    "size": 83489
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl2_rr4.flac",
-    "sha256": "fa832501989a0da2b151d87fd59e0d22bfb4cf1b77e021d828ce4f7c8441d619",
-    "size": 1641374
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl2_rr4.flac",
+    "sha256": "3495343e1265c2801dfdc87e885edf3164539b6a002ebe426bae9c02243a92fa",
+    "size": 75860
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl3_rr1.flac",
-    "sha256": "0469cb31e5228e084d839e425f76efaea093bc18b23fa3fe405d26705182024d",
-    "size": 1832655
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl3_rr1.flac",
+    "sha256": "4f5ce76c313c39f3f3af340deee3c5d2058632b6d1c6c1aab561d3f2433f30d4",
+    "size": 97631
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl3_rr2.flac",
-    "sha256": "69922376a3428e169bc88299e11051e447b1ce150fdc89d9aa2e3ff759178e69",
-    "size": 1785775
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl3_rr2.flac",
+    "sha256": "a8150dac10dff5f34a581e2359dd98dc245571aaaeed23c3228e8b02516574e5",
+    "size": 95182
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl3_rr3.flac",
-    "sha256": "733e595a945995bd1dcf20729c30daf06d54ec31dfffb077b4763a602936ccfd",
-    "size": 1697299
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl3_rr3.flac",
+    "sha256": "c39b4c3263f7e096336aff33acac5087534af7ed9f613aaec007ae733af03d57",
+    "size": 99899
   },
   {
-    "path": "Samples/mid/crash/mid_crash_crash_vl3_rr4.flac",
-    "sha256": "c15e14c4ff689dea2ec60c438b31ffcafeb043b35f7af07c88f80e20dd884972",
-    "size": 1741934
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl3_rr4.flac",
+    "sha256": "178f8226ff80ff4328f057110ed7b190444d414b41849c0999339ce5e36595eb",
+    "size": 106444
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl1_rr1.flac",
-    "sha256": "408fd02a990baf8d0ed3c16304d5dc1c4647d05e639300f36fcebed20e30f2ce",
-    "size": 1203726
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl4_rr1.flac",
+    "sha256": "27b2a5a46b0c361f5712c76f577076270edbb019c9c9df5b4de2d25e853ed52d",
+    "size": 140891
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl1_rr2.flac",
-    "sha256": "8652919f300b66ce12e086515d829953bb86c5387f6ccc7391b3c6b3cbe2bbbf",
-    "size": 1362017
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl4_rr2.flac",
+    "sha256": "69b113f5c7ceb4e7479490dab30f3af14b4210a04de92e139a96fab8710d3033",
+    "size": 134265
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl1_rr3.flac",
-    "sha256": "c5e7ca5bb14bc2a18843ef137c46b4624417bd029af3690f1aa6782da52453e4",
-    "size": 1313089
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl4_rr3.flac",
+    "sha256": "4271ccfba7f4282f61a407b576032f2dcae89a01fa031530e14967a994fd7db0",
+    "size": 139628
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl1_rr4.flac",
-    "sha256": "4a1daa04b60ecb9b08d830050cc0fc9a7b8c6677ff86459e79a01dcff53f5956",
-    "size": 1352228
+    "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl4_rr4.flac",
+    "sha256": "e487cdb02003b33d704ee303cf533dafcdb3fe46cc0b6e358c415ed2606f2844",
+    "size": 125594
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl2_rr1.flac",
-    "sha256": "7d76342799904599c595b70c356bb044b1fac36fec6e3a4e4aa8158f86f9e6f7",
-    "size": 1390736
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl1_rr1.flac",
+    "sha256": "147f81717c3821008f63b16708a3c97c0935271807868c742f83c14ed9899dec",
+    "size": 103238
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl2_rr2.flac",
-    "sha256": "c602b36d98382332a821c32e6e942db193231d20bde6a8214241ddf9f41c5838",
-    "size": 1379484
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl1_rr2.flac",
+    "sha256": "2a31c5a2394dfd9ded175ab930d53a1614c9638efadf1a79c505d6ff47f164b5",
+    "size": 85389
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl2_rr3.flac",
-    "sha256": "533ef2e8152f053cef266bf56a47483503b44919f94bde92640902cac9283d93",
-    "size": 1461058
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl1_rr3.flac",
+    "sha256": "4e6e9d50a029367a833675d5315f4a31eb19c5a03243fb6d0e4cbf571883c9dc",
+    "size": 86196
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl2_rr4.flac",
-    "sha256": "ce6d85ca922447cb7b5e3286bf3dc84489840738c915fbbca013bc1318d0f6a4",
-    "size": 1365832
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl1_rr4.flac",
+    "sha256": "b54b6d2f7f357a3132a8a9823784477d596e4f2f6cffd4f6f4060817373d1505",
+    "size": 81529
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl3_rr1.flac",
-    "sha256": "b36b1cb6ce21c77685ec952826ec83ad9dfcc66eafd523b362da73bf0f809c40",
-    "size": 1680028
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl2_rr1.flac",
+    "sha256": "5f816bb152f879e09399edb86b8862509360702103a1f9c08ef794a2296c2290",
+    "size": 89460
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl3_rr2.flac",
-    "sha256": "76c885e93173aab0066a4ac8d96bc2d34ac6b92fc758b472bd2341d913fac89c",
-    "size": 1424887
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl2_rr2.flac",
+    "sha256": "c2cbc978e6271f3029ba79a7829dd90ae8404533483e68d611385f5ca358b7d4",
+    "size": 85349
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl3_rr3.flac",
-    "sha256": "18a3d5643ebac6ff4f3913d8256b51085d9411c6d9af08bfc00a7bb09fc93203",
-    "size": 1634303
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl2_rr3.flac",
+    "sha256": "ba50791ce0a632db126be50a15d92ee89bff59e7b5f62b6692267a195cb6add5",
+    "size": 93424
   },
   {
-    "path": "Samples/mid/crash/mid_crash_sizzle_vl3_rr4.flac",
-    "sha256": "5292980974ba38cf34bd6d78168b304a26c037e6dca92b7b1feac8d1c8188025",
-    "size": 1602613
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl2_rr4.flac",
+    "sha256": "ee6312864c5f48348e88817a9993ab4fe400fe4d7f141ad15df6330ff16943bd",
+    "size": 85984
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_crash_vl1.flac",
-    "sha256": "219da0f185b9989bfc2eed5bf34b209fc92747c9fddc7d6302b222e8f6f893b5",
-    "size": 2364184
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl3_rr1.flac",
+    "sha256": "a317688b4a81cb833c579f0004beb4fef46b3c80c858448fe3413b2f9b9410be",
+    "size": 107117
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_crash_vl2.flac",
-    "sha256": "5118f62170d054643234958709678418ce0ae0a3ad4b65ea9196bc5913501d4f",
-    "size": 2315821
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl3_rr2.flac",
+    "sha256": "387835266e8c7b12310ff41956503d0d9af93722bdcb77f683a1a0d4bdaa67eb",
+    "size": 110359
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_crash_vl3.flac",
-    "sha256": "f5c6389c7ed0437902a9d7e62e0080090fa954f46f46f17606e352d0b60de514",
-    "size": 2269876
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl3_rr3.flac",
+    "sha256": "57156a987a5fbff08b19cbfa1b16c106f33b865fc1455c1113d79083cfbe91e2",
+    "size": 111922
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_crash_vl4.flac",
-    "sha256": "219da990d8d6bfbeca7c66c9590d52acf3ef3fc4ed144acd070190dd1dd27e34",
-    "size": 2269077
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl3_rr4.flac",
+    "sha256": "3f91a5b4bced0c971fcd0869c2d679ae28e7ef39bb20805b4cbbd0402c4ee54c",
+    "size": 100784
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl1_rr1.flac",
-    "sha256": "201c9b368ee58d4c7ba87a967bcbc5a9d398c921ca09b46e920e82715533ced9",
-    "size": 1035850
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl4_rr1.flac",
+    "sha256": "3b9026557c757edeccd26467ff420fceb787902dd94f7f9b2b12b2581faa17e5",
+    "size": 112410
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl1_rr2.flac",
-    "sha256": "65745d4e82a5e8a9a7aad8836a2540d13d6f1a35ae7980fdb39dffc1b99e4074",
-    "size": 924313
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl4_rr2.flac",
+    "sha256": "662ac9d76024ecc6390b4c98172fb529c65a8a4e617d7b74096eeded84556856",
+    "size": 117300
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl1_rr3.flac",
-    "sha256": "d2daf729b5104554cbf798d6dfd7d4cf8df3052033f4b47e79103be69e483b18",
-    "size": 1123267
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl4_rr3.flac",
+    "sha256": "c6343a0c3d65fd275515109451731ad896ead3813eb48d907311524739c866b6",
+    "size": 110003
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl1_rr4.flac",
-    "sha256": "283a25b8b0b15a831b8691bcbdcd2f3dfbde70e87bb906e7a19124f33ffc0756",
-    "size": 943980
+    "path": "Samples/kickmic/kick/kickmic_kick_snon_vl4_rr4.flac",
+    "sha256": "56a761ae239e1f0c2899889df6fecabbd8847956ce9a33d3612fd511b54b82b0",
+    "size": 111126
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl2_rr1.flac",
-    "sha256": "b6c026cadf52b703b4870f9d7c8b0921305fe0010b016c9570de5febc2f5661e",
-    "size": 1298176
+    "path": "Samples/oh/crash/oh_crash_crash_vl1_rr1.flac",
+    "sha256": "3307ad060004db51990b81b80badc0d26c90dae87e7b0f9b9ebcf099224fd823",
+    "size": 1264401
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl2_rr2.flac",
-    "sha256": "ac015381f95ce2adf88897900e83fc5410064bbef1d60ecf86eb2c1a3ca1c5f6",
-    "size": 1202980
+    "path": "Samples/oh/crash/oh_crash_crash_vl1_rr2.flac",
+    "sha256": "5867af63074b0f80318e3c26f0164a13bdc59d56fcc2e6c799bbd5b8a8a36557",
+    "size": 1312381
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl2_rr3.flac",
-    "sha256": "3f8a8b246b0f57015fc2414e83af6a4716e5b93bead32566f6c0dbff0280f6ce",
-    "size": 1346041
+    "path": "Samples/oh/crash/oh_crash_crash_vl1_rr3.flac",
+    "sha256": "c13d4c88444d0c86b06b8ed70d94ca44b756fc82baab9a3cc782ad994bbe659f",
+    "size": 1217885
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl2_rr4.flac",
-    "sha256": "6935dc79ba15aeb2d72c0e62bc87db7c6df2f23e5a25258c5cff2806fc25d7d5",
-    "size": 1083207
+    "path": "Samples/oh/crash/oh_crash_crash_vl1_rr4.flac",
+    "sha256": "867cfe3fbea80a5d115a9c5f75777cfa63731e669fa176f6d6d6c74af83ac9c8",
+    "size": 1311159
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl3_rr1.flac",
-    "sha256": "add851e752463b9cdedef8ecbab49767c781bb3279e9814f87860e767fabf6ff",
-    "size": 1540227
+    "path": "Samples/oh/crash/oh_crash_crash_vl2_rr1.flac",
+    "sha256": "2eb8c5bddc510bb56a48f325d9cdcc54ea52d926645df9180b206a820638fce1",
+    "size": 1426940
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl3_rr2.flac",
-    "sha256": "9e56ff83fe2f859ca9068978dcf71d067ab8e54d97a11bbc0fd37e7f6658ce81",
-    "size": 1298143
+    "path": "Samples/oh/crash/oh_crash_crash_vl2_rr2.flac",
+    "sha256": "501b67c566727274f6a9567816dbe94dd66624ee924e82c5fc84df2aa5743980",
+    "size": 1311650
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl3_rr3.flac",
-    "sha256": "144426b4eec9948494a2ca1edd0553a9cfebfb2c6d92058ad5c604624ecb5a27",
-    "size": 1381333
+    "path": "Samples/oh/crash/oh_crash_crash_vl2_rr3.flac",
+    "sha256": "7b13e87ff0f7d5eb925e4d452c90198386963ca4fb52b5b62a3cfa9bc43d22f7",
+    "size": 1253370
   },
   {
-    "path": "Samples/mid/flatride/mid_flatride_ride_vl3_rr4.flac",
-    "sha256": "6b211eeea5e87add08a1be7a4b695e21f17088e29403d55d9d84fbd292bfa89d",
-    "size": 1523031
+    "path": "Samples/oh/crash/oh_crash_crash_vl2_rr4.flac",
+    "sha256": "cb3e3e9cb657da707d1647aaff069d957a5de01f34a62f71361c8c7b20ad67c7",
+    "size": 1456525
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl1_rr1.flac",
-    "sha256": "04f54dc607aeee5ae8b62ba8a8db8b8444759c8dd12da534e4a1d1decb388ce7",
-    "size": 91567
+    "path": "Samples/oh/crash/oh_crash_crash_vl3_rr1.flac",
+    "sha256": "28ac4dc5c130175555ef54009f9186e418a664c544c1f996058b5acd3b85ccb9",
+    "size": 1628049
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl1_rr2.flac",
-    "sha256": "d0cfe14e23ca6c1c61b01438320040abc04349f53528d3c676df116d813ebb44",
-    "size": 69375
+    "path": "Samples/oh/crash/oh_crash_crash_vl3_rr2.flac",
+    "sha256": "a9a13b01c169505ade812614fbd5b929006884ac2fa9fc13be2c72028ba1779f",
+    "size": 1585868
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl1_rr3.flac",
-    "sha256": "dc9ef1aab3f32e672020688672036289d93dbd450b106ec98c0fbc7301fe43ae",
-    "size": 80427
+    "path": "Samples/oh/crash/oh_crash_crash_vl3_rr3.flac",
+    "sha256": "1edb996a8c4bd94407a1f1424945b39167223b11d497411c4026b33e69aa191c",
+    "size": 1511281
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl1_rr4.flac",
-    "sha256": "8cfe23b9a1f6c86071b9545d68c9c2c0f670ee9ed8588380e9186a63411050ab",
-    "size": 76514
+    "path": "Samples/oh/crash/oh_crash_crash_vl3_rr4.flac",
+    "sha256": "fff75b0a705295953581b99d1d4ed59703324117fb1398a8d9b23dd0b6bf687d",
+    "size": 1547110
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl2_rr1.flac",
-    "sha256": "ca9a6b1ce1d274c329a987e21f22d34a9001bb1869d53f5b00cc88c0128199a3",
-    "size": 83468
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl1_rr1.flac",
+    "sha256": "10094bc2b8637cfc2af60b8422eb7f1dee38836a8290baf3283eae9e85b5490b",
+    "size": 1077501
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl2_rr2.flac",
-    "sha256": "8cd1197e7726cc9bcf6b074464c4a42dc00e02a9d402f392bc9d3cb4330d4b96",
-    "size": 78372
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl1_rr2.flac",
+    "sha256": "ab5cde8ddb4c1316999d0a313368103ac330995cfdfc40e7f8d76323ac242a0b",
+    "size": 1213815
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl2_rr3.flac",
-    "sha256": "557b8b65ce48de37741410fd841f9b906af51a516306730ed5804149abefb283",
-    "size": 94272
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl1_rr3.flac",
+    "sha256": "d03531ea41292920af808a6381c86b5b844ee7d933bea94def11f7f18f7bd0fc",
+    "size": 1174068
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl2_rr4.flac",
-    "sha256": "9bda8bd6a57490309067bdfdb3a933debbef8d727e4d100711e4913b02bd0b09",
-    "size": 87960
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl1_rr4.flac",
+    "sha256": "164f3cf5cf07997d1d3142ddc1599383fa2e83ed195fdafc916111a5fb24e75b",
+    "size": 1198917
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl3_rr1.flac",
-    "sha256": "5a747638b0acb5dc42f2e68c61b29085a489af524bdd5da180cb1de542e1bad1",
-    "size": 96320
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl2_rr1.flac",
+    "sha256": "839e9e359b3a14b9d90b95cac5fb370a1b0db82685fda9c69de3df8f7ab21500",
+    "size": 1245947
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl3_rr2.flac",
-    "sha256": "4d4239f3050af8ec5284ee94bd914c1726a41b0c5375552c2c3f67ff5767c228",
-    "size": 96470
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl2_rr2.flac",
+    "sha256": "9035b5f388b5b8369c0de7338e096351311c0a48aef7e16c36f06f446dd9a8af",
+    "size": 1237211
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl3_rr3.flac",
-    "sha256": "a8d635001a3b6af9cbac1cbbf4df18cfc9ff75ade17bc79182d88a4c8a0fca33",
-    "size": 100205
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl2_rr3.flac",
+    "sha256": "3693ca4429ec5b89a9555f9835a13a9d32946df406358daef7e0badcd4c87edd",
+    "size": 1305624
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl3_rr4.flac",
-    "sha256": "9bdf0ed07bf835cd40a8a2f77a5e1e8217f2c4e1512bd71e90552a6c6e4d3e9d",
-    "size": 101244
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl2_rr4.flac",
+    "sha256": "59f3a05550b0e2ccf40f66115350316e429ecfd076b157237daf27e1a8c2cdc2",
+    "size": 1225921
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl4_rr1.flac",
-    "sha256": "f4b91973f55cbfc1e424e494cb4a2e15c779967cfa4b7d28c6440337984bd440",
-    "size": 122698
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl3_rr1.flac",
+    "sha256": "d49368ec3eae95879274f9dac6a1e93f64279f3bcc1c26deb04b3d0bb682bdf1",
+    "size": 1504314
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl4_rr2.flac",
-    "sha256": "ef8cca9e89507fc69738062fcba478fc037e7220c47e040be1298f877e78c402",
-    "size": 120365
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl3_rr2.flac",
+    "sha256": "24f23ae8fc0920046135297c73754e3a722dc0b4b90ac28543fce9bb8a0df2c7",
+    "size": 1286732
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl4_rr3.flac",
-    "sha256": "173798eddfa5853f69e78126d89659d80583683e37ca42683e671b736b79dd81",
-    "size": 115292
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl3_rr3.flac",
+    "sha256": "6046df4af58e503507331f05f6211fbc12c264940fa451295e359f1c961fe7d2",
+    "size": 1464584
   },
   {
-    "path": "Samples/mid/hh/mid_hh_closed_vl4_rr4.flac",
-    "sha256": "40826d62a7c6872cdcabeac553f2174b722994b8e992b1ebebd545479f801f7c",
-    "size": 120050
+    "path": "Samples/oh/crash/oh_crash_sizzle_vl3_rr4.flac",
+    "sha256": "3d4913426e382a2f2fa562ff639b5d57d26446d614358565cf9c9e7fc66dc6c6",
+    "size": 1436929
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl1_rr1.flac",
-    "sha256": "671a2ad3d94ceb48451f3fdf0cab9a1200c75bed456228891f2faa14272d5f9d",
-    "size": 257947
+    "path": "Samples/oh/flatride/oh_flatride_crash_vl1.flac",
+    "sha256": "7db68a06cb836ac6843e6f2d8f062db20fdbc3e3690dcbd338fba3f4766518f9",
+    "size": 2325722
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl1_rr2.flac",
-    "sha256": "e53f5f2363cde8c8807356fac5fd59992af2e15667e925082fab918eb5c2bc2f",
-    "size": 245970
+    "path": "Samples/oh/flatride/oh_flatride_crash_vl2.flac",
+    "sha256": "7d7051561d5ff2af38d7d7647b78fc5205aa161cc00a4e9554b2af2e04235023",
+    "size": 2268046
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl1_rr3.flac",
-    "sha256": "74e0b8af9dcf459963773068fadd91f48d2817c1b8b51d64bc7e22d7eb1a4313",
-    "size": 226588
+    "path": "Samples/oh/flatride/oh_flatride_crash_vl3.flac",
+    "sha256": "b8f48cf2fe68bd8925b9fbee639138b4a72d204fd1e91cf555f98a0a21c26341",
+    "size": 2219200
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl1_rr4.flac",
-    "sha256": "6daa7b7e782026ab21161591f659d7bd8175a8448c952b4211c2e3628ce04e4e",
-    "size": 251005
+    "path": "Samples/oh/flatride/oh_flatride_crash_vl4.flac",
+    "sha256": "c9f473f98ef163a0c25a412438479ccb69e0dce2a13694979eff90c7672fdc3c",
+    "size": 2220157
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl2_rr1.flac",
-    "sha256": "78bcfea3190d1e6f6310e7548eeb62325057fe7f55f1afad8d0f6c020438cee7",
-    "size": 244539
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl1_rr1.flac",
+    "sha256": "5886cdb0cfcbad9ecfec7c2f0bddfc84984812400cd324593bc1a94ff2ee2cf3",
+    "size": 1010348
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl2_rr2.flac",
-    "sha256": "09700b61e761f6fc39304be2380a3525c1fcf80aab72822956b5d01372b4107a",
-    "size": 258015
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl1_rr2.flac",
+    "sha256": "391b5b1e42a0a235b5ad505bfbc83232ece4f2d9316ca4860559fbc698a844c1",
+    "size": 895387
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl2_rr3.flac",
-    "sha256": "cbd04abdfa31d53a2b5d0dacc6ae5b3b195af05c522febad58ca49f026199140",
-    "size": 251783
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl1_rr3.flac",
+    "sha256": "147c2e9235ccfc7e2fa18f225138401a4c1094d31531b17425655ffb4347af4c",
+    "size": 1097646
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl2_rr4.flac",
-    "sha256": "73cd4f7e6a5de1951d15190c6d135264b3026af60b3a249d55f0822f7a39dded",
-    "size": 259253
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl1_rr4.flac",
+    "sha256": "465b5805624866e66ec59d6b321bee58425aa67b2f088483d5a56ef5e9ced725",
+    "size": 887207
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl3_rr1.flac",
-    "sha256": "0c7eb972ce0cb443773c2c13614defb66dbeef9248529b6a2bac4fd0830ec94c",
-    "size": 273358
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl2_rr1.flac",
+    "sha256": "0a0ad68cc4c02410068558e260f68f4e2d64c7c736704a2031e2719312ae88a8",
+    "size": 1269070
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl3_rr2.flac",
-    "sha256": "848c10cdc7e3b3c0b1d28c7403c89279959297460e5300a77e3205ea68313a76",
-    "size": 264567
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl2_rr2.flac",
+    "sha256": "e64397aaeb4f4ac03b9ccdf9f30ac72881c57f8632f9460bc2be04c7e7d8a12f",
+    "size": 1178270
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl3_rr3.flac",
-    "sha256": "54f193a99dc9e4a5e2e4672bac309a92c70f6a256851ab32ebf92097019665aa",
-    "size": 271182
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl2_rr3.flac",
+    "sha256": "a2446a0e1c548778126be05400d72fdb6fa5fc79b3eacc23585c971801dddfaa",
+    "size": 1313574
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl3_rr4.flac",
-    "sha256": "19aadfedcc72557fd837787338921dcb9bfa878f78de274f568853592d4fe2a5",
-    "size": 277689
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl2_rr4.flac",
+    "sha256": "dcedd765e02fdd7559bd53af59973057f8392ff73e151aed7dcd2db9bd683dd7",
+    "size": 1056130
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl4_rr1.flac",
-    "sha256": "f4d342728d9f84cb0046eb428a5b5188970aa9b323ba49fabeb89d164c6bb2b8",
-    "size": 314828
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl3_rr1.flac",
+    "sha256": "63d1cff0d5a87a24311acc2e799e6911d8a0b958b6d98958a689fec7471ab89f",
+    "size": 1507641
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl4_rr2.flac",
-    "sha256": "321956a484a33d523314b3be6dde99b5d8e891a10b177537f52bf7120c19e19c",
-    "size": 325961
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl3_rr2.flac",
+    "sha256": "a76719d4271440d2e9d5a0774302c986ac4cd365d04dc599d683b36e00c42f70",
+    "size": 1249026
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl4_rr3.flac",
-    "sha256": "0243f5c5715292bc624ba2a2011e665d904027129228011f2a7c27883c25c475",
-    "size": 307427
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl3_rr3.flac",
+    "sha256": "fe20df09c7de73ece9ec89de5c1ffdb99fd6a072b04935a081ccae0da77ee0e5",
+    "size": 1338990
   },
   {
-    "path": "Samples/mid/hh/mid_hh_half_vl4_rr4.flac",
-    "sha256": "e045310062968d3e5d99966b8215b6680b5cda014fedacaf8ab967102c40bb8b",
-    "size": 325175
+    "path": "Samples/oh/flatride/oh_flatride_ride_vl3_rr4.flac",
+    "sha256": "efaaf93a8227c9353753d0ca4bf2bf3f16d45145298d7288d7fa68dc42dfd914",
+    "size": 1489693
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl1_rr1.flac",
-    "sha256": "62b6d49fd321dc730ad4b95448e3f129655606e9958c1e30587aa7cca221cd9b",
-    "size": 1036001
+    "path": "Samples/oh/hh/oh_hh_closed_vl1_rr1.flac",
+    "sha256": "8e23666927c51d04c0e70085f746778fbac0f76638bde06ff54d88c70031c0dc",
+    "size": 79433
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl1_rr2.flac",
-    "sha256": "01923636b2865dc88ea796fd0c1c7fc5ee438b4bd2f69ee6ffadee14af717056",
-    "size": 890035
+    "path": "Samples/oh/hh/oh_hh_closed_vl1_rr2.flac",
+    "sha256": "c8a05ec78f11f7ac4bdc00bbbdb6df445e45106f0adb4eb882ac42fdb0606234",
+    "size": 60762
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl1_rr3.flac",
-    "sha256": "2c2cd7766da90c4b458f3a47103300aa994625317c44024d77a77d99500c635b",
-    "size": 913193
+    "path": "Samples/oh/hh/oh_hh_closed_vl1_rr3.flac",
+    "sha256": "bf5bd60af5ce8f90b66994a46fa878dc0b447f66f5f2dd297b950970cd87d7eb",
+    "size": 69966
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl2_rr1.flac",
-    "sha256": "b2ab26c09f890523c054a262993cb4f80f9de0b7272b8eb14e4770ccdb3d053a",
-    "size": 953760
+    "path": "Samples/oh/hh/oh_hh_closed_vl1_rr4.flac",
+    "sha256": "93b1fada5a5f8835022fb7525bcbead74d885758af58daf1113a6c23fb702a27",
+    "size": 66375
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl2_rr2.flac",
-    "sha256": "38ab2fc7e4da6d93d5cbac6e6e5a80b4c660c4d1cb6848dbb7bc4529ed64725c",
-    "size": 881035
+    "path": "Samples/oh/hh/oh_hh_closed_vl2_rr1.flac",
+    "sha256": "466a0dac394ae52abea418ca62c27614986159cd6c7127cb25b4991a9cb614df",
+    "size": 73755
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl2_rr3.flac",
-    "sha256": "885cfd40c19fe64df50ea0da391890368b264e5c4ba2c6f45bfd702661133cdd",
-    "size": 982806
+    "path": "Samples/oh/hh/oh_hh_closed_vl2_rr2.flac",
+    "sha256": "57dff040657690e62a8847919118db5d98ba1ef5bed5230f9510cbf944a40b72",
+    "size": 69306
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl3_rr1.flac",
-    "sha256": "58302f8eabd04050ddb00d0f6ba907edb7996a7d36ce437e98494eec3ae9da69",
-    "size": 1187356
+    "path": "Samples/oh/hh/oh_hh_closed_vl2_rr3.flac",
+    "sha256": "06ceaa4a7375307520ce9dd59c68c5e44c01dc7d3fcb85111213db079123d182",
+    "size": 83231
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl3_rr2.flac",
-    "sha256": "1e0a8a27ca3d93d07285b23eacc271ed720fc63efb980ee06e871ff7ffb4b66c",
-    "size": 1259600
+    "path": "Samples/oh/hh/oh_hh_closed_vl2_rr4.flac",
+    "sha256": "c4d7b235e1cda3830de9d22b80b5a746d636cf949183186e029927bdf5c96591",
+    "size": 77734
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl3_rr3.flac",
-    "sha256": "0f53562496f19753eed2184f8bdc8fd961ef60acafa83d880ab8d7852358b0a5",
-    "size": 1275587
+    "path": "Samples/oh/hh/oh_hh_closed_vl3_rr1.flac",
+    "sha256": "328a4d33daf15c72362db234312eba56eda60c1668f5c39a5527d61279793fef",
+    "size": 85639
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl4_rr1.flac",
-    "sha256": "006556df13c01419b77fc0c734f9b5db79ad2a007610225ff56c9e12b1b5fd70",
-    "size": 1493113
+    "path": "Samples/oh/hh/oh_hh_closed_vl3_rr2.flac",
+    "sha256": "53727d06a33fc153df450657aeeba08dd66fa9059825f92227b1c963fd2136b3",
+    "size": 85482
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl4_rr2.flac",
-    "sha256": "27cad3cbd3aa85a09f01f35c256a01a8fe782485748e682509befd6086aa68ab",
-    "size": 1599469
+    "path": "Samples/oh/hh/oh_hh_closed_vl3_rr3.flac",
+    "sha256": "2183465bbbeacabe792712f4ed5efc78b33517cf5dbc53e34b8e5b6215bc3139",
+    "size": 88975
   },
   {
-    "path": "Samples/mid/hh/mid_hh_open_vl4_rr3.flac",
-    "sha256": "402f656b3007cf7cb8a7bd88ba8abdbfc32af6cf681de331ff05e55973e13a83",
-    "size": 1511470
+    "path": "Samples/oh/hh/oh_hh_closed_vl3_rr4.flac",
+    "sha256": "62e71f489b2b1c81169e16f430f2458aed0b698d6467318deedfd8198c07c34e",
+    "size": 90049
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl1_rr1.flac",
-    "sha256": "c74ef19c1040376a1e06646a072733634747ce98e31c49b523c0fbc3251fb464",
-    "size": 229894
+    "path": "Samples/oh/hh/oh_hh_closed_vl4_rr1.flac",
+    "sha256": "163b306f52ebe55017e46a7b664b8438458bd7becc01553309a2f441c0bd452b",
+    "size": 111711
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl1_rr2.flac",
-    "sha256": "72466d95eca41d7a623bac479b11dc177b3a1d12707b2f6ac9e7eadbedaf71d4",
-    "size": 208714
+    "path": "Samples/oh/hh/oh_hh_closed_vl4_rr2.flac",
+    "sha256": "32aa1fdbf7be06eb31a1665d5b6390fe3c6209d0abe4230351f07c1af9d4d0c2",
+    "size": 109478
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl1_rr3.flac",
-    "sha256": "cf96977f338f41c538898cdc2111f526bec8b5dc653c4e5cbdb7eb2ae3c6b1fa",
-    "size": 213578
+    "path": "Samples/oh/hh/oh_hh_closed_vl4_rr3.flac",
+    "sha256": "00774a044569a3ecf1fb29eccd6e862357aa14e136133fdd5ce55b87c3a24625",
+    "size": 105145
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl1_rr4.flac",
-    "sha256": "b0c03ccd624c80a183e777a68724d171924e4e9dbf1e18705accf25e377ae745",
-    "size": 246556
+    "path": "Samples/oh/hh/oh_hh_closed_vl4_rr4.flac",
+    "sha256": "bee8056c08b292a91121ecc25b9402f4df90602b821ee66a920c05b701e619ef",
+    "size": 109289
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl2_rr1.flac",
-    "sha256": "73515fac4850ffed2c0fa404da2359f5e10b2b7b4f3a6cbc48b0848f65052820",
-    "size": 240694
+    "path": "Samples/oh/hh/oh_hh_half_vl1_rr1.flac",
+    "sha256": "1cd96c1d9f3702d19cb546a5f1fe59640ceb8c147f9665227040e10184b228ee",
+    "size": 237954
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl2_rr2.flac",
-    "sha256": "7b573f11a862980b4f054f749ebe5d7eb2078da4f74a122e806ce2942efacc7b",
-    "size": 223496
+    "path": "Samples/oh/hh/oh_hh_half_vl1_rr2.flac",
+    "sha256": "2cbdf785a991047b01ac8bc65ce646697beb6c06483c81a0d20a81b2fde093be",
+    "size": 227984
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl2_rr3.flac",
-    "sha256": "d0e776d5a19d4c5569ac10a981dfe7afda22f3b8bb17b5624ed10868d915a47e",
-    "size": 236257
+    "path": "Samples/oh/hh/oh_hh_half_vl1_rr3.flac",
+    "sha256": "162fd4204209c3b824d3f4f35a007ce93cd08ec8c6eb717947dc094fd953499b",
+    "size": 211246
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl2_rr4.flac",
-    "sha256": "cb28cbe12f87885667c500f763acabc1e1e4572edab764ba8ee842069a4098d2",
-    "size": 247197
+    "path": "Samples/oh/hh/oh_hh_half_vl1_rr4.flac",
+    "sha256": "abf75c997aac0fd4bb307d8e45b1a677edc6d108aa8b47e0ab3dbd7ac94f6911",
+    "size": 231910
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl3_rr1.flac",
-    "sha256": "7a80fca0c30d1bdf896b2d6d7d1057e4b2b0d6362ca129bc10cfcc5c9b18bbe2",
-    "size": 282743
+    "path": "Samples/oh/hh/oh_hh_half_vl2_rr1.flac",
+    "sha256": "b2d0d4a0a270fe2c94ad56d776e464982b16c1564fc14b3abb750dd03616d833",
+    "size": 230852
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl3_rr2.flac",
-    "sha256": "d7a85061f890611efc1a8887e5c17e5141297584a08773f038e7e95e07872ae1",
-    "size": 293102
+    "path": "Samples/oh/hh/oh_hh_half_vl2_rr2.flac",
+    "sha256": "cca64d3c3afc0e0d75d47d0dbedec3560f9dc9f5eb40f8124cb9e6c3f91a7d15",
+    "size": 241287
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl3_rr3.flac",
-    "sha256": "4fbaa45bcecc119b03072817c2c04f3aee40bc13952970d907d7f5983f8d0069",
-    "size": 298539
+    "path": "Samples/oh/hh/oh_hh_half_vl2_rr3.flac",
+    "sha256": "b3a57f1242257506d174307f0627b8e105c340711b873961547d2ebd4548ed30",
+    "size": 235480
   },
   {
-    "path": "Samples/mid/hh/mid_hh_pedal_vl3_rr4.flac",
-    "sha256": "f3fe5d0fda8b885c3c8d5a158c35b0b259b3bc466e90adb3cddb33cece5400fc",
-    "size": 295789
+    "path": "Samples/oh/hh/oh_hh_half_vl2_rr4.flac",
+    "sha256": "da9d5c24c9784c2ab319bb128b73329ef14afbb0adefb43c5776b8a158caff19",
+    "size": 240118
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl1.flac",
-    "sha256": "e83584589fa8701a1e87838764997490445ad566b6f8fb56b3d4a23ba21bcb27",
-    "size": 233006
+    "path": "Samples/oh/hh/oh_hh_half_vl3_rr1.flac",
+    "sha256": "34de5087e14ef8f9d2acaa907dfa5581c1976c0a7311f89df71b7f7bcc874a7f",
+    "size": 257940
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl10.flac",
-    "sha256": "2c9be5002caa183582fe13bad7dc61fdf08e70e22d4d1cef8d1a050dc5498ead",
-    "size": 246326
+    "path": "Samples/oh/hh/oh_hh_half_vl3_rr2.flac",
+    "sha256": "687b44df66a4799a0035a4a220d0521bed061d8b9509a398af4527ea83a313f9",
+    "size": 249019
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl11.flac",
-    "sha256": "a17949b59fb886ac260d7a89ed50e53884d4e760a243390148b556ff9eda9d99",
-    "size": 236671
+    "path": "Samples/oh/hh/oh_hh_half_vl3_rr3.flac",
+    "sha256": "cd2ec324cb63dd0923ba0ad9454d2e953a665da49af2bac62b6866da41eb92d2",
+    "size": 253928
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl12.flac",
-    "sha256": "adc4d06cd73e10611e6dfc31d238319c80e6c8c3e0c74d75c255820af2d1e196",
-    "size": 222272
+    "path": "Samples/oh/hh/oh_hh_half_vl3_rr4.flac",
+    "sha256": "ccded8bf68e42c40be60a7116b386a142e911a136f4ef1421dd833b5b017941f",
+    "size": 258039
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl13.flac",
-    "sha256": "7479cb4430fca0b055027740be929635e8147802e00b7a758ad7ca7f52742117",
-    "size": 238337
+    "path": "Samples/oh/hh/oh_hh_half_vl4_rr1.flac",
+    "sha256": "8fcf0a7e727f374bb838a7490e18fa45eb7549eba526a3cc7911f11b4376a45d",
+    "size": 298891
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl14.flac",
-    "sha256": "601e9e952fc42b84d584927bc2b5b1cac0352b53108becad556167f18765c195",
-    "size": 257444
+    "path": "Samples/oh/hh/oh_hh_half_vl4_rr2.flac",
+    "sha256": "422d68769631c44241069569da946d7818c5366374ab4578de3829300298d32d",
+    "size": 309362
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl15.flac",
-    "sha256": "1b3a76d5ec7d64bc50576ca64ee71a2008ef404a2b1a4d34e6ee7320958e7698",
-    "size": 267485
+    "path": "Samples/oh/hh/oh_hh_half_vl4_rr3.flac",
+    "sha256": "736d7f3f6c0c25611de775bf44e651ed827e4a884e474b5e96bc83e793da341d",
+    "size": 292528
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl16.flac",
-    "sha256": "230a9e6c6b427c969834c6cb50e730b44487ae5a27f86bf87680359daa6caad9",
-    "size": 278571
+    "path": "Samples/oh/hh/oh_hh_half_vl4_rr4.flac",
+    "sha256": "589a392840c40ef559c8dbad24f2791bcb087e1fb12306df6defeaec14882492",
+    "size": 308685
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl2.flac",
-    "sha256": "a1af567b055fa1a4788360bf96fa178df55f3c8dadbe068abfd9afacc2a1d0e7",
-    "size": 201801
+    "path": "Samples/oh/hh/oh_hh_open_vl1_rr1.flac",
+    "sha256": "bce174c48b9ab905bb48e36ecd5023f6f507d5210d220c7f2a00c21dca670121",
+    "size": 911893
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl3.flac",
-    "sha256": "e65b70243e4a96c420cd97f0fa72ad0ea0780a347fc8434236b68b9b6add9d71",
-    "size": 258892
+    "path": "Samples/oh/hh/oh_hh_open_vl1_rr2.flac",
+    "sha256": "15bef7db238fddb5675c1d294613970a739da9fe2346c53d0732ad4a6889cfa7",
+    "size": 786585
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl4.flac",
-    "sha256": "665ae1ff419cdfc0cb3b827b31b2ceacf23dabda91335df8f8520b2fb15f45fc",
-    "size": 217562
+    "path": "Samples/oh/hh/oh_hh_open_vl1_rr3.flac",
+    "sha256": "4d7b560847125a530a4dc37be7922c10ef44e7ce519b37a4f379159b1db57d57",
+    "size": 808310
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl5.flac",
-    "sha256": "eee1325989cfbc51837ccafea34e1d31bb3eb23dd4a421b8f98b7a5eb45ea2f0",
-    "size": 238478
+    "path": "Samples/oh/hh/oh_hh_open_vl2_rr1.flac",
+    "sha256": "70974258a4b6b702b4d9ce3ef0f6668d0b0d211e0481253d4408d9acf848d012",
+    "size": 851427
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl6.flac",
-    "sha256": "0d1a53f95723212f7ac67d2d35ee41d5e0c5eb7512250d00daac13b8573b4840",
-    "size": 263659
+    "path": "Samples/oh/hh/oh_hh_open_vl2_rr2.flac",
+    "sha256": "73cb8823ceb31e7ddbab0a8830b58a02af9e11ad78087712f8ac3b7578cfac45",
+    "size": 787826
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl7.flac",
-    "sha256": "8038cf152db4ea147ca05d3f0c99b9bd7ea91f0eb5b3d3bdc2efc31c399f584c",
-    "size": 266731
+    "path": "Samples/oh/hh/oh_hh_open_vl2_rr3.flac",
+    "sha256": "ae63abe552d268e45d2ffa6b1081c18a7f0dfca9c068d3a2c1ff083a80cf4966",
+    "size": 876441
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl8.flac",
-    "sha256": "8051743b60f4d8db88bda99b5af8be7d784d463975df41f54c76082864a5b247",
-    "size": 238187
+    "path": "Samples/oh/hh/oh_hh_open_vl3_rr1.flac",
+    "sha256": "046d72bfece4891ba114e090961cde55c7a42e9805a5a2a1b8f5f57e76a190fc",
+    "size": 1050271
   },
   {
-    "path": "Samples/mid/htom/mid_htom_center_vl9.flac",
-    "sha256": "f32670303ac3201fcb9f7a5239804cf34d40dcd26af2b5999baf1739b3764fbf",
-    "size": 198032
+    "path": "Samples/oh/hh/oh_hh_open_vl3_rr2.flac",
+    "sha256": "35135cc9079b7810c95cd490208a6fdbfb540784e28dc270e7a90d16b3271f75",
+    "size": 1124639
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl1_rr1.flac",
-    "sha256": "179252e745fe20577dc34e46e869405a9381dd1039f8269cfa0db1f7e601f93f",
-    "size": 228531
+    "path": "Samples/oh/hh/oh_hh_open_vl3_rr3.flac",
+    "sha256": "506d4778172e857a3c410fbd86be790205d2cf209c3fe85b7f29fdb2c4f01122",
+    "size": 1130101
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl1_rr2.flac",
-    "sha256": "e9bdeb7a2ed0fcbbcce1499c8e0d6972a3f7e94d51153c44c04bf1e33c96ad90",
-    "size": 215063
+    "path": "Samples/oh/hh/oh_hh_open_vl4_rr1.flac",
+    "sha256": "784687e70ed0adf17229a38f4347674ac4283a0dd85def26c556a5e9be3b1ffc",
+    "size": 1350021
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl1_rr3.flac",
-    "sha256": "cc0b6dbd66d0dac019401e305af813ffbb29d8d99e945097eb5efe540b966d41",
-    "size": 190396
+    "path": "Samples/oh/hh/oh_hh_open_vl4_rr2.flac",
+    "sha256": "29613222ea16060da00e33dc20624974e6a2812a397da316986d89b5b750d8d3",
+    "size": 1446299
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl1_rr4.flac",
-    "sha256": "c3495b99c9ccbf1d302bd042e682b88f3110b2634e20d0f41a700564ced7baca",
-    "size": 226924
+    "path": "Samples/oh/hh/oh_hh_open_vl4_rr3.flac",
+    "sha256": "292b45749113f9e7db301aa239f09c4a9d6e1792cbd0ff38e218141cce69293a",
+    "size": 1371912
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl2_rr1.flac",
-    "sha256": "6a38708a84957fe83116aaed6e5bcb38cb5b7c63e198dd55e10ae74600b49467",
-    "size": 233370
+    "path": "Samples/oh/hh/oh_hh_pedal_vl1_rr1.flac",
+    "sha256": "914fdab7847eacf82f016d48959ddd286c8dff9626ba9a4873a600b3d5d8f6d0",
+    "size": 198789
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl2_rr2.flac",
-    "sha256": "b3037b3db6de0e70f0c23523fe25b9185326b68ed00f3aebd997819bd3ac6f4f",
-    "size": 227871
+    "path": "Samples/oh/hh/oh_hh_pedal_vl1_rr2.flac",
+    "sha256": "f8f93f771893a14f292d12f7bebbcb421200d6d45e899f286517c9ce0dfc6ad0",
+    "size": 181345
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl2_rr3.flac",
-    "sha256": "efe079b3d80170177b2501c15a546d5309127e40369c56bd939e337324f57ce0",
-    "size": 214744
+    "path": "Samples/oh/hh/oh_hh_pedal_vl1_rr3.flac",
+    "sha256": "74d825486860e570f3a636bbd513dabd6939e42e63c1c94e20a06dcf7396be80",
+    "size": 185905
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl2_rr4.flac",
-    "sha256": "1eb78b22109aea661f875657aa478da61562fea398c651145a7ec4f27db90d25",
-    "size": 195387
+    "path": "Samples/oh/hh/oh_hh_pedal_vl1_rr4.flac",
+    "sha256": "7ec2460a36a4ffd212c05141325debb6d9083befcfc83624a505dfbd47605fa7",
+    "size": 213849
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl3_rr1.flac",
-    "sha256": "f25318f16ca4e74f5575c275a24f92a7579acb8d69a078ed7db325ef483dd5ca",
-    "size": 247412
+    "path": "Samples/oh/hh/oh_hh_pedal_vl2_rr1.flac",
+    "sha256": "8e7cf653e07bb6773e835e3fa7502bc199c23ee6e94d44cf3b6fda783ac309b0",
+    "size": 210256
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl3_rr2.flac",
-    "sha256": "2680b851c9025a0a7c430ce6f7c444d0eb630c8f07255e250a57fc82d3d4f49a",
-    "size": 243582
+    "path": "Samples/oh/hh/oh_hh_pedal_vl2_rr2.flac",
+    "sha256": "78cc168c52d8b81caa447078dd3976476794fbf6b1073b9ab0aacfe0c55299e6",
+    "size": 195030
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl3_rr3.flac",
-    "sha256": "17b2c45a271596c16d05161bbe3c8afb47e8734e22f87babc147638e5ee22999",
-    "size": 252615
+    "path": "Samples/oh/hh/oh_hh_pedal_vl2_rr3.flac",
+    "sha256": "e853d62b7fac1fcbf0581c76a2dc5c4ddefb84ebb9f3725d6b6efe64d5f27705",
+    "size": 205504
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl3_rr4.flac",
-    "sha256": "f05636adc5770badc13c68188bee91b762f28d44a786a62f07b8ce65f28c6b67",
-    "size": 272222
+    "path": "Samples/oh/hh/oh_hh_pedal_vl2_rr4.flac",
+    "sha256": "20f59de0a961c07f85267b318e1433f080e08254d4134c1a24f36296e2b274f2",
+    "size": 215852
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl4_rr1.flac",
-    "sha256": "44cbf44b9d6757d37f37f47d98688180f6f46bafe5cc38fa617f12268d5f4de1",
-    "size": 363384
+    "path": "Samples/oh/hh/oh_hh_pedal_vl3_rr1.flac",
+    "sha256": "5311c752a8852e48a05be2d5841bbccb5dedce5b606f49ad8168cc8c52b22235",
+    "size": 245386
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl4_rr2.flac",
-    "sha256": "bc2227318eca96c89e402885c7257b7a57dcbfaa84c93e119cbd2ab5659cb56b",
-    "size": 346875
+    "path": "Samples/oh/hh/oh_hh_pedal_vl3_rr2.flac",
+    "sha256": "ef8cb0f9ff9e9f6368a138c95a2e59a9b85e4a2eae661ae73c9500f61ca6a43b",
+    "size": 254347
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl4_rr3.flac",
-    "sha256": "bcdfa117f1e9084cc65011c463e0cd15f2f8b98e77aca882c5a70ff80b3712f9",
-    "size": 361079
+    "path": "Samples/oh/hh/oh_hh_pedal_vl3_rr3.flac",
+    "sha256": "55ff139b9bbeecdb7ed98fa65762ab6c10944db57a79065d5d4ccb30525f6815",
+    "size": 259018
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snoff_vl4_rr4.flac",
-    "sha256": "2e5f79e98125ccc950c5f2c076372c5441fe94eec0f9aa43d74eb25d0cf044d1",
-    "size": 320896
+    "path": "Samples/oh/hh/oh_hh_pedal_vl3_rr4.flac",
+    "sha256": "e2d8c97bb4b41c9aa96a4f86db2cc33600687f22f3a906677c96ea955a6b5cfe",
+    "size": 257397
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl1_rr1.flac",
-    "sha256": "c077a384ddf42eeba8430fa3bf7a46d4153960a497c5f57a832b4f0c18e1f6b5",
-    "size": 274991
+    "path": "Samples/oh/ride/oh_ride_bell_vl1_rr1.flac",
+    "sha256": "c1d4a6d958fe778cda3c534c3343e1072da5a69b2853a2ae0b1805e6643080e0",
+    "size": 600750
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl1_rr2.flac",
-    "sha256": "053a7b4d0746d76003b99c81b150ab7a72c557a8c2ecdebc64740ef63f6f694f",
-    "size": 229175
+    "path": "Samples/oh/ride/oh_ride_bell_vl1_rr2.flac",
+    "sha256": "0995af72e6736f11caa8b6a341b8dcd4e4a0d9b5bfa57b2ca20e4e880e0a9577",
+    "size": 508042
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl1_rr3.flac",
-    "sha256": "707cf2ad5650d2bb3019d6424b1c0a3f0a0d4985363d1bc7fd8e6ad938cbaa3e",
-    "size": 229236
+    "path": "Samples/oh/ride/oh_ride_bell_vl1_rr3.flac",
+    "sha256": "d0f1e24bd906ee78a52a99fcf36047656cab2104ed2cbaba790e16b075e9704c",
+    "size": 575149
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl1_rr4.flac",
-    "sha256": "6aed6fa70732430875571eb551ce1a1378d4fa961f44dcdf58f7da5a7136b900",
-    "size": 215064
+    "path": "Samples/oh/ride/oh_ride_bell_vl2_rr1.flac",
+    "sha256": "36930c1702ff868d84e1bf58fad899c9559b0312b6393bb1b7a4c5d5e91e28aa",
+    "size": 659602
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl2_rr1.flac",
-    "sha256": "fb2da719f0ae30f668ada98df7503e6def1ee26c53a5e183de50075e43fa597a",
-    "size": 234232
+    "path": "Samples/oh/ride/oh_ride_bell_vl2_rr2.flac",
+    "sha256": "fcd4127cef7484c9f6a647013989844cb622b689795de16ad4777bf76f152cd0",
+    "size": 690283
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl2_rr2.flac",
-    "sha256": "30da88d84b4e37df87510b40ad115943056a3b5ed9b2dbcbe1266a267848c6f4",
-    "size": 221792
+    "path": "Samples/oh/ride/oh_ride_bell_vl2_rr3.flac",
+    "sha256": "591aa4be5bd0f753c70d7b537d5d21b3c4c445c3f6c9086dbc50f17b7acabd54",
+    "size": 686494
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl2_rr3.flac",
-    "sha256": "299f699a43b8433d742c17a96dcc64e9ae2b328ab2813e7a28737d705ef701c4",
-    "size": 244438
+    "path": "Samples/oh/ride/oh_ride_bell_vl3_rr1.flac",
+    "sha256": "e9d367cb70b15377fcec2299a15b6590a93e2b8b0d789511616bcb7b8345281d",
+    "size": 938303
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl2_rr4.flac",
-    "sha256": "5acb1dffc5e1ca23e8085549dd39bc639d61b9757405a78c4a419a9f6d1ee371",
-    "size": 224265
+    "path": "Samples/oh/ride/oh_ride_bell_vl3_rr2.flac",
+    "sha256": "89f73fcf2c149f89c4cee3d904ad37d4e2d47aad6a5693f8386977009584e4dd",
+    "size": 969328
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl3_rr1.flac",
-    "sha256": "f3f6dac8ff6dae56a4c1f238e05d563a1be1ee38db60e5e97ac9081cf33d025c",
-    "size": 275974
+    "path": "Samples/oh/ride/oh_ride_bell_vl3_rr3.flac",
+    "sha256": "edd9e99771d5dbfdfd49ceacb0c922d2a3575deeda7956328260ef5ad6dfd202",
+    "size": 1029946
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl3_rr2.flac",
-    "sha256": "672384c968cea5ff84b8ebe4f3d86c75d152b4365f2f944d4afae9a4762c2dac",
-    "size": 282943
+    "path": "Samples/oh/ride/oh_ride_ride_vl1_rr1.flac",
+    "sha256": "df47cd9bee89a98afa6626e38a7363c36ac6091e9964f113693807d0675fd0ab",
+    "size": 1107361
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl3_rr3.flac",
-    "sha256": "fa75918ef535e0323bf27b37d4b88b18bba2f642c5a42c8fb28decc4bc25d7cf",
-    "size": 285870
+    "path": "Samples/oh/ride/oh_ride_ride_vl1_rr2.flac",
+    "sha256": "b94e95308c3c2c88001426dc57a4f92745a3bad9021171fe6bc0c0f8992c6d7c",
+    "size": 862504
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl3_rr4.flac",
-    "sha256": "023d4fed5e47d8d733f08320d1e3e40061260d0c1f1e20e405cf0e88cfc32d06",
-    "size": 256933
+    "path": "Samples/oh/ride/oh_ride_ride_vl1_rr3.flac",
+    "sha256": "0782c66ad47fa8ae88bdb8e451894a6aac329b993c529832deb937fa49195f64",
+    "size": 926629
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl4_rr1.flac",
-    "sha256": "14b76405040ba7e6b9fca95c4f73cf99a27f36e3ec6f071050c26a46cdd3350c",
-    "size": 285149
+    "path": "Samples/oh/ride/oh_ride_ride_vl1_rr4.flac",
+    "sha256": "8e83e55dce3532a6ea45db8edc402c36350207745266f81bc8fd75d80d8095ce",
+    "size": 808421
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl4_rr2.flac",
-    "sha256": "1fde8aeb9ed8af4e90c2df124376c88a28c218de76e4db6500f3cb8f791186d7",
-    "size": 299216
+    "path": "Samples/oh/ride/oh_ride_ride_vl2_rr1.flac",
+    "sha256": "56481c1109ac7baba9ab4b049cacfbc5050cf29d59951c654e7316595385eeaa",
+    "size": 961942
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl4_rr3.flac",
-    "sha256": "5da7c40bc8a75426d50c6ee66daf47378a3c536cc716fd0a6b0875978ea298ba",
-    "size": 281417
+    "path": "Samples/oh/ride/oh_ride_ride_vl2_rr2.flac",
+    "sha256": "5cec02ecdc875cfc5fde8d2cd7f5be23cc8e0b1ad35e4bcdef222328f6fbb6ab",
+    "size": 967228
   },
   {
-    "path": "Samples/mid/kick/mid_kick_snon_vl4_rr4.flac",
-    "sha256": "63e2730bc745ae94c4bdb0d42d6055ba6aff7765ac29358cc48c53eb44f2c6f2",
-    "size": 283260
+    "path": "Samples/oh/ride/oh_ride_ride_vl2_rr3.flac",
+    "sha256": "266eeb7eb4de6f0a3eba2c038d7d6d8422e995a293de342cfb9f8b72d879b44b",
+    "size": 934994
   },
   {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl1.flac",
-    "sha256": "565e8beeeab12f013fc01a347c136f85c3eed3dadd270a7bdc3ec82f7f24a7b6",
-    "size": 351972
+    "path": "Samples/oh/ride/oh_ride_ride_vl2_rr4.flac",
+    "sha256": "5e3bd343cb961508b11117fa115644ea107c31049c44c27770b804eedb44ac1f",
+    "size": 882832
   },
   {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl10.flac",
-    "sha256": "1ff32c7954cae8c4842fca6b1f229924d3aec1b8261d5f007a15a87588a59472",
-    "size": 456263
+    "path": "Samples/oh/ride/oh_ride_ride_vl3_rr1.flac",
+    "sha256": "855f22d2408439f7944c056dab306003b8fc172310c92b37b63a6aef21aa4f5c",
+    "size": 945050
   },
   {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl11.flac",
-    "sha256": "afc6dcf018a19fd9c71050a1da87151fd69f15febfa7604b56652abb27115b24",
-    "size": 512794
+    "path": "Samples/oh/ride/oh_ride_ride_vl3_rr2.flac",
+    "sha256": "dc2abfafd76352382f94fe3e011315381ec324837ea2e08117f947bd2bdde694",
+    "size": 803470
   },
   {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl12.flac",
-    "sha256": "42b71234a4b414858346fa4d1deb6a47d9c4b30074f2eb612b92732964229835",
-    "size": 561706
+    "path": "Samples/oh/ride/oh_ride_ride_vl3_rr3.flac",
+    "sha256": "cec238d203f9f6b6e6204d56a424ea3fec51f353094984efebb361286135da79",
+    "size": 924938
   },
   {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl13.flac",
-    "sha256": "541450a5997a30b4482206c65d520817ff6a66f431de496a273916b9dc729fff",
-    "size": 519230
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl14.flac",
-    "sha256": "2ab8978ecfa614f6daba09d55e259375f60f0716f5827f4e40c9cc23a95c40a3",
-    "size": 577393
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl15.flac",
-    "sha256": "21aec9fc152a3a44022852a15d95a4cf6f94bf5a6c64bd412a0c882d63c166c3",
-    "size": 556866
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl16.flac",
-    "sha256": "924cf94d67c95ad6ee214a0b16febb89a53d21d49f5c14e3ec8622ff9da976f5",
-    "size": 502824
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl2.flac",
-    "sha256": "6ff4c4aa546bc1c8e4e1d9f2aee84ca04ca88d93a93453375cbe6fbcbbabb036",
-    "size": 328457
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl3.flac",
-    "sha256": "6419289391b4c8a9dba08884723ab59bad15daaf707b17054ee40ee28a793b1d",
-    "size": 337934
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl4.flac",
-    "sha256": "c4ca45a333ad94fa810d9f7dea3b1ae9c384208d4f51ca30573bd657947ce98f",
-    "size": 277591
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl5.flac",
-    "sha256": "60f04f2b36043099feb9845be153d745646bb08516b110f252495d8c5031823c",
-    "size": 405590
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl6.flac",
-    "sha256": "c793f3cb25d1f2b5f5161bf215445777e71d3a51dcdca5a9acab09eee534ea01",
-    "size": 502209
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl7.flac",
-    "sha256": "53eb966a99eef700dd5e55c00eeccf1c0fc19fbc4c75dd535ac5912ba6023b7e",
-    "size": 489473
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl8.flac",
-    "sha256": "9dcfc54b0da2a34b8cdfac1ffaf4b8fcc7055baa79d5cc7aaac78ff371382ac0",
-    "size": 568236
-  },
-  {
-    "path": "Samples/mid/ltom/mid_ltom_center_vl9.flac",
-    "sha256": "6e45180be68706530335d41aeb2bd44cf7e9854a95204c043ae1fcd4867a4967",
-    "size": 406760
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl1_rr1.flac",
-    "sha256": "5399f1ae66c38c049ff3e94a5001f1bf23e940ea04086cea271312bff63de292",
-    "size": 690253
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl1_rr2.flac",
-    "sha256": "a12c6d651f0db7cfd643b9eb21c89420125ed98e77dc559bd9207bcd768ed2a3",
-    "size": 579849
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl1_rr3.flac",
-    "sha256": "da9033221d7432b56cfe33d5012a565eb20d63413f0db27cba22ace875a051af",
-    "size": 661332
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl2_rr1.flac",
-    "sha256": "0adb696d626516bb85a9da6e136dd22084c5e78fb0db9f29b84ca772322c1f7a",
-    "size": 744941
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl2_rr2.flac",
-    "sha256": "35f9323ecf180d0ef68180252c8e850b5dfa341de14f7b47fb781169eb67c02b",
-    "size": 769094
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl2_rr3.flac",
-    "sha256": "8d9b14c7f02b3a15031b29984aceb5b977984bebd698bec41102d8dd4717cd03",
-    "size": 771663
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl3_rr1.flac",
-    "sha256": "6311a95441142bca55a2e97c0670e72ebf16a25e4b17706362ea4f00de33aac1",
-    "size": 1037002
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl3_rr2.flac",
-    "sha256": "ff94034e26383d14290f7a0855c63ac720ca680bc43f01c28801ff6a921fb3e1",
-    "size": 1073640
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_bell_vl3_rr3.flac",
-    "sha256": "6c990d0788ca4d5666c25d25c6b4d22bc7d82ee1157d66538f4d14df211ba5eb",
-    "size": 1145085
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl1_rr1.flac",
-    "sha256": "465995b9f2ee979a0f2f26d0065c06cd11b57fd8b03a978e396abbb8ebe4284d",
-    "size": 1280792
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl1_rr2.flac",
-    "sha256": "424828e598a8e2bbb396f1b0606497d914b5f769af773f12a78f8ae9ca99135e",
-    "size": 982174
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl1_rr3.flac",
-    "sha256": "b54349a05a81a53bccd05731c9391caa3385944cb4ea9288bc0492e0f6a518d6",
-    "size": 1062630
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl1_rr4.flac",
-    "sha256": "04e3985f0200a9066e3f12ab839d2dc45cb7f451a5af3f9344dc0c23cfb559f9",
-    "size": 920505
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl2_rr1.flac",
-    "sha256": "b1b52f2f7143917cb9f38dbcab37da645d4109d0795d8cd8563a6a957ab30727",
-    "size": 1085707
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl2_rr2.flac",
-    "sha256": "878a96721a1a50b4c0f798bb681804ce2c1e84e3675606a75aa241e132e05139",
-    "size": 1089137
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl2_rr3.flac",
-    "sha256": "339363a26ac4ae81069f7044f76a11ac3aa39db678c01d09e9f1787825e5f421",
-    "size": 1051790
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl2_rr4.flac",
-    "sha256": "b1e755bde86a9e66584841e2286b3aae6a0b5084142e33aa295582f9472cbef0",
-    "size": 992575
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl3_rr1.flac",
-    "sha256": "3ba4ca0d97b7a4298d345af6855d4713db73ec4b748209e3857b77dc69fa641a",
-    "size": 1058738
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl3_rr2.flac",
-    "sha256": "21c96c6ff845378d60ab6ffa7b6d158004a1de49d2f55bbc048479956b20a5b9",
-    "size": 888753
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl3_rr3.flac",
-    "sha256": "792d0eb7266d4e76ba87d2e9e7ebb0dbfc5b267a86e95dd6233ecd7c29cacd4f",
-    "size": 1030050
-  },
-  {
-    "path": "Samples/mid/ride/mid_ride_ride_vl3_rr4.flac",
-    "sha256": "9c11127102e232af521e94eddc44d0c1c76c457d820eb1ab30dda02a470d5493",
-    "size": 1098415
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl1.flac",
-    "sha256": "fb7368a000e278a0eb98cd6e7be952cc6c3de4890b398564af28b0aa17421013",
-    "size": 224463
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl10.flac",
-    "sha256": "6cc5a666fb7a72817fb8abb6dd0ce19fe7b83f560eb4b8f1db6ba75f05357fc9",
-    "size": 229554
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl11.flac",
-    "sha256": "c0cf2badfb4754b1a6ec319f25e0bd163966f8d22e1f46b6b3615d667163cd0d",
-    "size": 211322
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl12.flac",
-    "sha256": "fb0ac55618a3dcd2317c74dc53c9607b0e0fe2957161d55de077794b976636a7",
-    "size": 194948
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl13.flac",
-    "sha256": "dc38d9a5fb82334cc4e355abb6637ebc647a8d0e200a40a1fe55a108ea1c97ff",
-    "size": 203246
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl14.flac",
-    "sha256": "939edc3f6391275bb5c6347999d44a7f192f56ba5c8548a771ea5d4cd19b7f9f",
-    "size": 235094
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl15.flac",
-    "sha256": "a4edeed14ddd7859be556e4de9cedc0e96b516a628dc5778cece626281a513fd",
-    "size": 206764
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl16.flac",
-    "sha256": "dd4e1de6e84465f94b26e8dbdfdf0f4e72999a7d5ed348a76ab9c8a73d74da79",
-    "size": 205928
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl17.flac",
-    "sha256": "276e357d2532f0fbb62e1ba179085450c9f70cd328b794ffeab499af66608444",
-    "size": 201211
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl18.flac",
-    "sha256": "482fe977e0d07dd85bffe94b3cecad6916ba9b7e51db24e8fcb0051171bb75b6",
-    "size": 211866
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl19.flac",
-    "sha256": "a1087c8676b6949a13b26e8856bc26da846f153c5f552276560bcc2953cf93bf",
-    "size": 204973
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl2.flac",
-    "sha256": "cd53336ce2661de9fdbdc9bf4299b0308f58650be494fad13ad042955e84debd",
-    "size": 187646
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl20.flac",
-    "sha256": "7359d9dfb4f18a05e318d4d8aff59d0f77112e973056854b478d2023b3b59af4",
-    "size": 230368
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl21.flac",
-    "sha256": "284e440372d5d654aa8b257d4616a8f07b98c601d13b5ec22f6df45f811152b5",
-    "size": 191258
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl22.flac",
-    "sha256": "7c01f6d0a6243aad309fb13e3eff881fa518ddf99fc9923e0c5a6c297fbe05e6",
-    "size": 221274
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl23.flac",
-    "sha256": "ae24195a251b7ac3616f7fd63958ed387ef8258ead28df818b4852f604d17b14",
-    "size": 242671
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl24.flac",
-    "sha256": "ecb864c8354eadb761c9b77bdbdc1b35294dc73f95e83e4ee50eb4f2b8bda21d",
-    "size": 211972
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl25.flac",
-    "sha256": "d88f0b22c50d368bf54ad0c1416a96e11933d5b69b79fd2d2ecf4e9f40689033",
-    "size": 247429
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl26.flac",
-    "sha256": "8d1d69d9f219539c395e3e0b7f5bf1966460a7b5e44268c554c98fb374b98282",
-    "size": 222679
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl27.flac",
-    "sha256": "ad8f6b22ce3c7cdc05189546a05a9de0cf26f637f5fd31251b72d131307c16ae",
-    "size": 201388
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl28.flac",
-    "sha256": "f8df18766689f44fa92ca17980555fac7e462b2f9c7afd56ef703b24bef36e03",
-    "size": 241162
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl29.flac",
-    "sha256": "e1755d79b9f06131283b09a96a7b318ad97a646e7bf8bc49dca5e7a72db1a0c6",
-    "size": 248025
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl3.flac",
-    "sha256": "14ddb03b5f58350592cb019aea6d5eeefd25a6d58b8dfeed5311981d400e678e",
-    "size": 235459
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl30.flac",
-    "sha256": "3b26473469dfdbf7de685ede8eaea791fa28d6bccb745ad72d40e20f62913e5e",
-    "size": 257525
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl31.flac",
-    "sha256": "8829bb069e3b501d583c3adb15b52b6cf04c02de4ce6b333ce94a92b65c966b4",
-    "size": 248155
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl32.flac",
-    "sha256": "eaf9025d6b879877add05f2314022f2c2b030c334780a0476a97ed1109f2755a",
-    "size": 263283
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl33.flac",
-    "sha256": "846baf072181910762da1a9bbd172b3afc8b2b1a4747658617aafcf39725092e",
-    "size": 265663
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl34.flac",
-    "sha256": "bb619e82bfb6ddd3afc1c0a37c9fd1d4caab6202290aa3eb622516f13b549f64",
-    "size": 254854
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl35.flac",
-    "sha256": "5df491351cd73a73de5919e6ed65882fa41e5ead8750796e4f3d81051fbbc9ff",
-    "size": 244295
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl36.flac",
-    "sha256": "61bfa8b38925b5a39053b30ad5640297e5ed49da3bd275a94691fee8a6f752f5",
-    "size": 249869
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl4.flac",
-    "sha256": "c460c634bd8834bbd213064f2bc2c184047722b101ffe59e7b0430b0481a0786",
-    "size": 179765
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl5.flac",
-    "sha256": "8547b8263e6e25137679ae49fb5300700926dd7596cfb3e7995655c6ddcb7cdf",
-    "size": 187440
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl6.flac",
-    "sha256": "782824f97d12d8b2a309593aebe2fd379c55652d36f480db141d4885cf8638a8",
-    "size": 179663
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl7.flac",
-    "sha256": "631e2cec78d03e4a5fc5038ac4e6f42bd496fd801dafdfa04218ffcce271a65d",
-    "size": 190484
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl8.flac",
-    "sha256": "f65954acb066c296f88e8d496775325c7e1818f97156db53699621e84147896a",
-    "size": 223143
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_center_vl9.flac",
-    "sha256": "7b09f9300b8a6c14fac6dda739b0cba6dfc8cae916aad864082e5b9f39eb1d14",
-    "size": 198833
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl1.flac",
-    "sha256": "54e6ee6fa82aa2a25befe32f427000d452acc72ef28e780b6b3284675aa041ec",
-    "size": 281176
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl10.flac",
-    "sha256": "e3d1d148ebd43b4a7bc19b8679ebca33a7ceebb0c587f25f4cf47d2943239995",
-    "size": 318462
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl11.flac",
-    "sha256": "24a216aeb81dc988a128bbd4fbfb8a6b71f2f127290b1adea3fc8f633bb8256a",
-    "size": 345230
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl12.flac",
-    "sha256": "2b8d7b1c38afe98d339cb3a82a138e1286e5d5b95ac3a71e4a8d1a8c0c2cda14",
-    "size": 341116
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl13.flac",
-    "sha256": "eac55aa7a1edc33148fb316df369acc7ff54c8d990337ae25cf20d0b26955748",
-    "size": 334742
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl14.flac",
-    "sha256": "0430e9be4b201e65f442a91e52a9393753fa889c1ae932b100ca3c2d53e7ba89",
-    "size": 331987
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl15.flac",
-    "sha256": "78761342fccf817f03a0f8abf1cadce1c0ec557e5f66c77ee1b7069dbdcdfc9d",
-    "size": 321124
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl16.flac",
-    "sha256": "b0829554fb7fef382515d78c8aa4cfe68a71f2a3aefea8623568f176b296f2fe",
-    "size": 308115
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl2.flac",
-    "sha256": "51dd6a8ad67cd1b50e995e98e25d34ea9b325f45587f91c27db3b5421abe6aa3",
-    "size": 272729
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl3.flac",
-    "sha256": "3b89eb2bb8e0813fcf6d9aba5bdd472db044d8afe2d790f7508c4a477b2e7549",
-    "size": 284443
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl4.flac",
-    "sha256": "8961385e4415091330e506b5bd52ee9363e6bdec48641efbade5300ae6b2bba4",
-    "size": 331885
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl5.flac",
-    "sha256": "228a944bb293a9dd4a0038cd0875fb3dd10351f0d5a35a643adf3b7b916dafb1",
-    "size": 320635
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl6.flac",
-    "sha256": "100238e86af614ec2ed28b6b100442b6eff11b61daa21cef79a2617d5ad330d3",
-    "size": 283179
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl7.flac",
-    "sha256": "8b5ea36a5f119ce0ffa257160c0ae2361d1fbdb731f3e7cc7c24de2c2dd039a2",
-    "size": 310397
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl8.flac",
-    "sha256": "1e2898046bc50864f7b57dbb82a0a7396f1f85abd8e866a7da35a66bf3450ca7",
-    "size": 321069
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_crossstick_vl9.flac",
-    "sha256": "742efd555b726a38c4e01ce47f5c8d4cfb2b0eebcd5dc87483da7320fe3e6756",
-    "size": 302125
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl1.flac",
-    "sha256": "7968edb18045854be61fd50ca1a43e745dade4c1dca9a78f0178eda67e76c45a",
-    "size": 328447
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl10.flac",
-    "sha256": "18de2922c3433c7f96e8ff520dcd529875d4e05b0bf83faaa87098c3f8a92189",
-    "size": 290162
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl11.flac",
-    "sha256": "b1e9ea8b5206472bc193bfacc808af02f4ee350b57445ce7ac1ee1bd2190b1d0",
-    "size": 287865
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl12.flac",
-    "sha256": "b672eb7023adf4c392f799059454a90f409e5b3cc319bc0b4020a2cf24e66fb4",
-    "size": 260301
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl2.flac",
-    "sha256": "e0c81928b5453466722cac714b5726d28ae963bfd0bee7aa9a2c6c9f05b15b2c",
-    "size": 280100
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl3.flac",
-    "sha256": "a499bf7e31681f5b3ba8f7b99c3c9cdd772824930cd8b33f077c4431916d4230",
-    "size": 352760
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl4.flac",
-    "sha256": "e0514bef67b5f7ee388de61ed87cfc613114c9a3c3bd324217ef59e5b5421613",
-    "size": 267017
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl5.flac",
-    "sha256": "bf8aaf570bd8eeb5bbe943236df907db59590adacb1aff1cbb07767dd8831c8d",
-    "size": 326233
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl6.flac",
-    "sha256": "4d75217473265ebe3b7553191bdea9eb53e5fe14739a411d9db7d7a265efe179",
-    "size": 278257
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl7.flac",
-    "sha256": "e77d8b652a7efd23f7ff2d7887f933b7db231ea3571d1a3b16103fc73116f6ec",
-    "size": 304273
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl8.flac",
-    "sha256": "849e6959bc6e1fd40eb9af547998380c922f2118434acf25a331e62627ecb721",
-    "size": 300066
-  },
-  {
-    "path": "Samples/mid/snare/mid_snare_rimshot_vl9.flac",
-    "sha256": "fdc42cf4e15205ed0c5e9f9ef9d5d9695694b4c04b8737dd9d6716a764ae4051",
-    "size": 260942
+    "path": "Samples/oh/ride/oh_ride_ride_vl3_rr4.flac",
+    "sha256": "6dd72064557509bec247fc3b448eefcedfce097abab6154f34d3bb06e0e72f12",
+    "size": 987388
   },
   {
     "path": "Samples/perc/close/whistle/Close_BallWhistle_Long-001.wav",
@@ -3068,5 +2558,485 @@
     "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr8_Mid.wav",
     "sha256": "178b598dce5fb91e1c7d365ab28ea84d635f1219e09ab68c2c775119e5b9eda0",
     "size": 345936
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl1.flac",
+    "sha256": "ea6d7e08119dd37d0024c43a625c32e598949497b20c2570c581888ebf9449c1",
+    "size": 85549
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl10.flac",
+    "sha256": "3de84a2335a83c242a1d7618f717f2868443042c959360c33eb15321280df944",
+    "size": 93912
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl11.flac",
+    "sha256": "be6225a9c5690cce896054a354897cb415980c5faa92d3a10ab40a4e0c4c8b3b",
+    "size": 90111
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl12.flac",
+    "sha256": "5711d60de5d6c6399aabefb1ec9668586f572061b4595602650305a4dde6d1b6",
+    "size": 85423
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl13.flac",
+    "sha256": "0db3f23c76f8a18e58f9ef038e17dfd3292aba8dd7a6beb1be0c34d5c2388382",
+    "size": 90972
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl14.flac",
+    "sha256": "b4ed7bb47e5f8b65e50a84b2a77e9fa038d6710402901a0bceb40e3d86bd1e30",
+    "size": 98169
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl15.flac",
+    "sha256": "f168aba307abed9fc718a13166faa1ec5677f74084601284741c3c04a414b5f7",
+    "size": 102416
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl16.flac",
+    "sha256": "4d633d4736fa4b6e4202859314acbdfb665d24a8f7b9cab1af661b296e66d42f",
+    "size": 106547
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl2.flac",
+    "sha256": "cab00791f86bad404e1fc2cf98dbde9525b3a41cd5b1525061aafeae6b0861a8",
+    "size": 74750
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl3.flac",
+    "sha256": "5b4f431477c3d24bae5974e2f8f820251177df44b88651f6d747e6f593d2e3ed",
+    "size": 95360
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl4.flac",
+    "sha256": "4ef0361bb056fc328792fc66b81dabb6512afc23c75c27c0195a48f937141cc4",
+    "size": 81127
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl5.flac",
+    "sha256": "eb23398e955c735dc1932db36ed5b7c4a882307048a7c05f45093c01e2ae0d3e",
+    "size": 89138
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl6.flac",
+    "sha256": "af1a8405a3573aa9d6fe8217e4ee395ee1d1d8965f577c9bbc2ff71e19e5dc4d",
+    "size": 97977
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl7.flac",
+    "sha256": "4b23de9cb5b1a5a5c1a0a82ec1360c5d7f1323090696107b6cdcff6d42bfaba1",
+    "size": 100180
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl8.flac",
+    "sha256": "8e959266334b5bb13c7a07949833ed4167c71d67b3112b19836c6ea6a3626505",
+    "size": 90290
+  },
+  {
+    "path": "Samples/snaremic/htom/snaremic_htom_center_vl9.flac",
+    "sha256": "75939808c22b70a2af3a36408d24c9b51a0b555d7c4bf763b4c8c1bb7728f60c",
+    "size": 75780
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl1.flac",
+    "sha256": "f596adcea11c206d10935ba71832f3171c1b66b044f2006bd5325ad72356e91d",
+    "size": 127759
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl10.flac",
+    "sha256": "fc0c3d8efb8040a74f31482574ce1177bf5c8a9e7f846b20d2fa932a9ef7a3a6",
+    "size": 166780
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl11.flac",
+    "sha256": "8405983b8e13c969a22ac59775520bb3417653abdfd948bb4c796c3902f84349",
+    "size": 187387
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl12.flac",
+    "sha256": "eb4e4b70fa2229becbbca31c52d259b4af14cd6624df489f877bcccddc57e06f",
+    "size": 207534
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl13.flac",
+    "sha256": "6487e739215d168a9a356d5cf295b6800e3afd6b677bd0af9d5668aa759c8d11",
+    "size": 192400
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl14.flac",
+    "sha256": "ecddc2e6e4fe6266e08125839c2ba6aa2c9e59809ae115a793a2ecca61e02f56",
+    "size": 212580
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl15.flac",
+    "sha256": "33511cac4129de8c05dad0939ab75a01967b7a98749659cc1f19134ba2fd7ddb",
+    "size": 205126
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl16.flac",
+    "sha256": "559339084e179ae0d598e651f2571c35b87376773eda69dc3a9709c6250f93c0",
+    "size": 185327
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl2.flac",
+    "sha256": "7ae84c74a88de6cd8921f32a0cbc937559633f385cba6f4a24aa70367f529838",
+    "size": 119417
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl3.flac",
+    "sha256": "fe75a76139ea90862038d6ab8889cc743acdc8c02d61e9ed4f7c710745e02935",
+    "size": 123164
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl4.flac",
+    "sha256": "67bb12197f599491cce8b4ade249fc37469c76ed4d82d16343369503c8cd1753",
+    "size": 101435
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl5.flac",
+    "sha256": "31cf9a0babd17851ab7b2588b61182ea93d197fe5677c087471835e2c8a96a93",
+    "size": 148172
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl6.flac",
+    "sha256": "7338e0cabee183b410daf865389805099a4a348dfb6777e4d3a96edaa3d48b3a",
+    "size": 183077
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl7.flac",
+    "sha256": "2e3cbfec88f3fda366f3294a197bb22343804e7bbcc63a3cf84232e2f18a1d38",
+    "size": 179333
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl8.flac",
+    "sha256": "5d9876c21ad05a7e00b362c10cc0b6ce1ada2a508497284edbe7f8c1d55328fa",
+    "size": 207707
+  },
+  {
+    "path": "Samples/snaremic/ltom/snaremic_ltom_center_vl9.flac",
+    "sha256": "7a3e50812c3d36e6b7dea62668d06646afc4c2d31e9729fec75fd1054c212d74",
+    "size": 150088
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl1.flac",
+    "sha256": "9d571e2195ed56572ed36698123566bf3f8d7913b54df5ab6d73c3851e496d2c",
+    "size": 83559
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl10.flac",
+    "sha256": "a598988d1331050c16332290826538951893f2261a5f73b6c4e15e372d48856a",
+    "size": 88281
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl11.flac",
+    "sha256": "b6a3802b838c0c779e03066e0b6448c3cf7b6c490db1fa03a0878543878db848",
+    "size": 81429
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl12.flac",
+    "sha256": "7b31072ff17b74785fadf3039c990da577b988f183d7bb8da50ee4e3f074a764",
+    "size": 75327
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl13.flac",
+    "sha256": "c114876e77aebb86e38898b7dc55b8a670d4f60943c15e44ac41d979ba21124b",
+    "size": 78489
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl14.flac",
+    "sha256": "a9918e1387646ce3669af61d64ad47b8d62c033ed2ed7718c14838fd0ac8ca79",
+    "size": 90312
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl15.flac",
+    "sha256": "e9cb0a3088373993c6cfa8dc75e198714ed849ffa41a152cef92e52269dd781d",
+    "size": 80270
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl16.flac",
+    "sha256": "d401a7cf2ff0c5b0a4fe7aab05b7a0c7dc5a2539e848bc5e5ea0f4faffcfa056",
+    "size": 80031
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl17.flac",
+    "sha256": "7d49bfaaee791c42da605cb6f037fa744836228fc7de3730bf12fe2c47812208",
+    "size": 78521
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl18.flac",
+    "sha256": "faea7e6bc82a4f71d769329edc780023f19bd90905427c787bc623b271f13f4d",
+    "size": 82576
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl19.flac",
+    "sha256": "c7241527a8fcaf6ce296c370ca056309a3d3ae353230844321e62be09cc26047",
+    "size": 82969
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl2.flac",
+    "sha256": "c600eebab98b99012c4dad5ac806a6abe708d0051cce4d5b38d8542a61249330",
+    "size": 70833
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl20.flac",
+    "sha256": "5b490c1ab2bdbe8270199d6a21140dee5b359a67f2fcb6da66fd4f4962c6252d",
+    "size": 89847
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl21.flac",
+    "sha256": "bacedc413df03469251a186d1eed661cfb77d5515d61b2b1c3c8c9d03ac9a77c",
+    "size": 75742
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl22.flac",
+    "sha256": "f7232a78d57f03a603f219518ba7a5921fb3f15fa2eb2f0a4048b4e98396ec37",
+    "size": 86829
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl23.flac",
+    "sha256": "0e8c628f52289036ddc1018497bd6f0792c8f6e9e7d5c27adf04c758071c0c2d",
+    "size": 95092
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl24.flac",
+    "sha256": "dba6bb99b96907a681bdc85e86d2d3651c4294d8a22700cfdaa4832937428c2f",
+    "size": 84754
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl25.flac",
+    "sha256": "bbd59354099ec4a6b39b09ca2f2798333d1f21780ab72b0a0865c188e86e41b8",
+    "size": 97320
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl26.flac",
+    "sha256": "0502bc52223f14b111be0f741325faa892f745bd8fc173ec9e960b5c7533c289",
+    "size": 88025
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl27.flac",
+    "sha256": "dc9fa9828aab79372f7b6c3405fc7acd2bef5024cf9189284fbeb329b037d862",
+    "size": 80992
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl28.flac",
+    "sha256": "f4a29c85cc19af4e18ff55f0e5e1e758e2dd78ed780dbd745c351937a42cec65",
+    "size": 96707
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl29.flac",
+    "sha256": "72c3099d9079f2c258eeaa94c942a95f2239256ac4e47eee1c3316a24f8ddf66",
+    "size": 99496
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl3.flac",
+    "sha256": "54216f08de419b5ba466d5755ead8712a7dd77fc08710b0cc525e9a1fecdab52",
+    "size": 88351
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl30.flac",
+    "sha256": "1cce17dabeb1654657ef3426686e8445967285689de32aec803eceda2bbb455a",
+    "size": 103494
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl31.flac",
+    "sha256": "047cfaff61ca9268aca82abcd5a5c8a9733003720fef41744a9e5dbc4dfdc92c",
+    "size": 100793
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl32.flac",
+    "sha256": "f33ca11f2dda160abb341af53de01633f5221491ab075ffa663aca3e924e915a",
+    "size": 106059
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl33.flac",
+    "sha256": "ae7a11680bdd83abe3470ff67004c14f95c7ad03eca465113f10ef1495e5f89a",
+    "size": 106992
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl34.flac",
+    "sha256": "4961361d422d72355281762bb8bc5504dec346de7809e19f12945f49832b5e48",
+    "size": 103141
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl35.flac",
+    "sha256": "154de8388fbf0e07aec6080911bcb516325b2386134998e5a622b740cea88fcc",
+    "size": 99216
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl36.flac",
+    "sha256": "81140a7b678b4141b5c4e3e857b6ee18fa7933f6f659db01d8deeb9d36eac729",
+    "size": 101557
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl4.flac",
+    "sha256": "615a9805ec8c36c574503a3d6e91a6f00497f3ea163064999719ed1986030e40",
+    "size": 68180
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl5.flac",
+    "sha256": "fdfc8bd33af4a5e37dcc77c698fc9f6cb2fb1208ba67d8cda7e11c90df52d473",
+    "size": 71089
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl6.flac",
+    "sha256": "bc67e86781c1c0d3e8560e441ad471ab7d3a4c80513906778cda709d0c92f9c0",
+    "size": 68923
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl7.flac",
+    "sha256": "650d50f6aa04aafc588d64b8b03109b44e267cdde05abd6d75e22fa49b5e7090",
+    "size": 72841
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl8.flac",
+    "sha256": "ef9e2982b76a289ca91e1b74f8d9acb212a941bc78bc4b718f783a57be7f8e93",
+    "size": 84713
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_center_vl9.flac",
+    "sha256": "5c694b953d917065ed34a3a7eaebc024875f4d70b23ba2c6d8551f20d7a78d8a",
+    "size": 76605
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl1.flac",
+    "sha256": "e3cb6db89d9a3b4abb290008038c7bbdbfa1db1d08babf40cc554457821e1a2e",
+    "size": 102519
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl10.flac",
+    "sha256": "f0278ade075915864d793a5a9ce790ec4f0d5f39806d0d1a0d0fba1e7973032f",
+    "size": 118184
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl11.flac",
+    "sha256": "413e13a8b1d8e03db539a04d2828082a8efeb0630b83521b7e55830204926b0a",
+    "size": 128072
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl12.flac",
+    "sha256": "dbc095af2eb7b58d2fd93cbbdc1e5e7cffc3eadd95bacde213e9f1d2035bfdb3",
+    "size": 126901
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl13.flac",
+    "sha256": "563a3478501c1c601f4b85a8fd4429b70d8d9cb3c74e5bb85bfe7a3bbe60252f",
+    "size": 125780
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl14.flac",
+    "sha256": "e12c2d9e137229810c1749ce2502415acc4c203ea05d7ab1a79876d6513da014",
+    "size": 124416
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl15.flac",
+    "sha256": "55a508bf8005774f20e386efb9e00437e56982c2be9ee8bae61770991b16360a",
+    "size": 121359
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl16.flac",
+    "sha256": "2211228b897b87dd133e3bc88295b1ea7b31ba03b9a7db3a66a477d999775e2d",
+    "size": 116223
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl2.flac",
+    "sha256": "ee29b435d74112fe9cbec203aaffcc6deda3b94ba007359e45fe4be7390dfd59",
+    "size": 98875
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl3.flac",
+    "sha256": "4744d1942c52a468bb97006ce58e4fe1b6348e7a94339fe386a914628ec7f171",
+    "size": 103541
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl4.flac",
+    "sha256": "5723f21370a6784b4f52fef43bc0c31751ffe45355cc0602cd7b595e80cf33e3",
+    "size": 122022
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl5.flac",
+    "sha256": "8f13e72476de993e99222110920bb4ed3d161a568c341613002c5eb02c4f8639",
+    "size": 117749
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl6.flac",
+    "sha256": "6e29ca21f980b69847b41083500e6f3a501c7068b56a9556c1b8005d96b0e8bf",
+    "size": 105399
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl7.flac",
+    "sha256": "8c35f440f37b0b434564526b0259956bed6e2e9f593c24b2496ac152e950683b",
+    "size": 114290
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl8.flac",
+    "sha256": "72213f5ffaadf7641e06de28ac9d8d7bfc1d0b2c9e2a1d4e68db219b5fb26359",
+    "size": 117773
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_crossstick_vl9.flac",
+    "sha256": "ec99989552829a11054a6f9c1cae3a70fe9139d9244e660621b5786f0ce4145f",
+    "size": 111813
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl1.flac",
+    "sha256": "c0142fc6c98e285737d1d8c9eb9af5060c963af389201c5e319e3b5a613e10af",
+    "size": 132822
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl10.flac",
+    "sha256": "78c0eb68dd74b9efdcc222099af458928eb0db677b9c18c9bf702baf764d75db",
+    "size": 118914
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl11.flac",
+    "sha256": "e996ebbcf7e375437a01dfdef6dee544b94a5344c1adcd920ab0c1d04ce682e9",
+    "size": 119596
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl12.flac",
+    "sha256": "08fed6a7ff433fd807dc7b9a948d94165495e8e9f4b8b815a4f3b013d3acc8c9",
+    "size": 108902
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl2.flac",
+    "sha256": "5cd24244d611f794e50534f403011117b52e4d05f5ea770c876183875e435dbb",
+    "size": 116004
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl3.flac",
+    "sha256": "7d54adf75e3ed30eda54ed0ca90c1f0ad671c3aacf6ace276f58feb89c7a1f4f",
+    "size": 148260
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl4.flac",
+    "sha256": "cc045d91a90c111c2dfbb09626addc99b0911de715e11693399504b2c5d70acf",
+    "size": 117758
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl5.flac",
+    "sha256": "8dbc8b96a69b15e072b45661094017a5bc6cc81d20927a0ec0d6d6bcf27b2025",
+    "size": 143005
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl6.flac",
+    "sha256": "d9df20f9a93de2637c70ac087687bf49762e404702c93e1ef36564b6fdef59ae",
+    "size": 119190
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl7.flac",
+    "sha256": "4f6b2bb32a8769402744ce473cca60b139f0451152443632e71fbf41d8dff194",
+    "size": 127034
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl8.flac",
+    "sha256": "8bccd2092a2108f2af89a993af8555ac35d8de5cf39cc2f1803e42220eb44eab",
+    "size": 130817
+  },
+  {
+    "path": "Samples/snaremic/snare/snaremic_snare_rimshot_vl9.flac",
+    "sha256": "10ffb00574b8d65a13fa8de5cd97f2d15c8f5aea7375f732de85b2f8f914a83f",
+    "size": 118668
   }
 ]

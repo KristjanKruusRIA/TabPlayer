@@ -141,6 +141,7 @@ fn selected_requests_keep_all_variants_and_closest_key_fallback() {
         name: "Fixture".into(),
         source_id: "fixture".into(),
         regions,
+        ..Instrument::default()
     };
     let selected = eligible_regions(&instrument, 40, 50, "muted", "attack");
     assert_eq!(selected.len(), 2);
@@ -330,6 +331,7 @@ fn slap_and_pop_use_their_recordings_and_fall_back_to_the_ordinary_voice() {
             region("slap-d", "slap", 38),
             region("pop-a", "pop", 45),
         ],
+        ..Instrument::default()
     };
     let ids = |key, articulation| {
         eligible_regions(&bass, key, 100, articulation, "attack")
@@ -447,4 +449,243 @@ fn bundled_slap_and_pop_recordings_sound_at_their_root_keys() {
             }
         }
     }
+}
+// The recorded kit's processing: baked once when the recordings are loaded, from a table in the manifest that is not trusted.
+
+/// A mono thump (70 Hz under a decay) of `seconds`, starting `start` seconds in, as a 48 kHz float WAV.
+fn thump_wav(start: f64, seconds: f64, sign: f32) -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    {
+        let mut wave = hound::WavWriter::new(
+            &mut bytes,
+            hound::WavSpec {
+                channels: 1,
+                sample_rate: 48000,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            },
+        )
+        .unwrap();
+        for n in 0..(seconds * 48000.0) as usize {
+            let t = n as f64 / 48000.0 - start;
+            let x = if t < 0.0 {
+                0.0
+            } else {
+                (std::f64::consts::TAU * 70.0 * t).sin() * (-t * 12.0).exp() * 0.5
+            };
+            wave.write_sample(x as f32 * sign).unwrap();
+        }
+        wave.finalize().unwrap();
+    }
+    bytes.into_inner()
+}
+
+/// A resources folder with a one-key kit: key 36 plays "main" with "second" (the same hit on a second microphone, 3.2 ms later and
+/// inverted) as its companion, through `table`; key 38 plays "snare" through whatever `sounds` says.
+fn kit_root(table: serde_json::Value, companion_of_kick: bool) -> tempfile::TempDir {
+    let root = tempfile::tempdir().unwrap();
+    let font = fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../node_modules/@coderline/alphatab/dist/soundfont/sonivox.sf2"
+    ))
+    .unwrap();
+    let hash = |bytes: &[u8]| format!("{:x}", Sha256::digest(bytes));
+    let license = b"CC0 fixture\n";
+    let mut files = vec![
+        ("main.wav", thump_wav(0.004, 1.5, 1.0)),
+        ("second.wav", thump_wav(0.0072, 1.5, -1.0)),
+        ("snare.wav", thump_wav(0.004, 1.5, 1.0)),
+    ];
+    files.push(("license.txt", license.to_vec()));
+    files.push(("sf.sf2", font.clone()));
+    for (name, bytes) in &files {
+        fs::write(root.path().join(name), bytes).unwrap();
+    }
+    let region = |sample: &str, key: u8, companion: Option<&str>| {
+        serde_json::to_value(Region {
+            sample_id: sample.into(),
+            root_key: key,
+            key_low: key,
+            key_high: key,
+            velocity_low: 1,
+            velocity_high: 127,
+            articulation: "picked".into(),
+            variant: 1,
+            sequence_length: 1,
+            trigger: "attack".into(),
+            velocity_gain_high: 127,
+            companion_id: companion.map(String::from),
+            ..Region::default()
+        })
+        .unwrap()
+    };
+    let asset = |id: &str, path: &str| {
+        let bytes = files.iter().find(|(n, _)| *n == path).unwrap().1.clone();
+        serde_json::json!({"id":id,"path":path,"sha256":hash(&bytes),"size":bytes.len()})
+    };
+    let manifest = serde_json::json!({
+        "schemaVersion": 1,
+        "preparationId": "fixture",
+        "sources": [{"id":"k","repository":"a/b","revision":"0".repeat(40),"license":"CC0-1.0","licensePath":"license.txt","licenseSha256":hash(license)}],
+        "instruments": [{
+            "id": "kit", "name": "Kit", "sourceId": "k",
+            "regions": [region("main", 36, companion_of_kick.then_some("second")), region("snare", 38, None)],
+            "processing": table
+        }],
+        "samples": [asset("main", "main.wav"), asset("second", "second.wav"), asset("snare", "snare.wav")],
+        "soundFont": {"path":"sf.sf2","sha256":hash(&font),"size":font.len()}
+    });
+    fs::write(
+        root.path().join("manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    root
+}
+
+fn kit_table() -> serde_json::Value {
+    serde_json::json!({
+        "profiles": {
+            "kick": {
+                "companion": {"gainDb": 0, "maxOffsetMs": 8, "minCorrelation": 0.5},
+                "eq": [{"kind": "highpass", "hz": 30, "db": 0, "q": 0.707}],
+                "envelope": {"holdMs": 50, "decayDbPerSecond": 200, "endMs": 400}
+            },
+            "snare": {"envelope": {"holdMs": 20, "decayDbPerSecond": 100, "endMs": 250}}
+        },
+        "sounds": {"36": "kick", "38": "snare"}
+    })
+}
+
+fn kick_request() -> Vec<SampleRequest> {
+    vec![SampleRequest {
+        instrument_id: "kit".into(),
+        key: 36,
+        velocity: 100,
+        articulation: "picked".into(),
+    }]
+}
+
+#[test]
+fn a_kits_recordings_are_shaped_once_at_load_and_its_second_microphone_is_not_kept() {
+    let root = kit_root(kit_table(), true);
+    let raw = decode_audio(
+        &fs::read(root.path().join("main.wav")).unwrap(),
+        Some("wav"),
+    )
+    .unwrap();
+    let loaded = AudioResources::load(root.path()).unwrap();
+    let kick = &loaded.samples["main"];
+    // The envelope ends it at 400 ms and the snare's at 250 ms; the companion is gone, the raw recording is not what plays.
+    assert_eq!(kick.frames.len(), 400 * 48);
+    assert_eq!(loaded.samples["snare"].frames.len(), 250 * 48);
+    assert!(!loaded.samples.contains_key("second"));
+    assert_ne!(kick.frames[..400 * 48], raw.frames[..400 * 48]);
+    // The two microphones were aligned (it arrives 3.2 ms later, inverted) and so added, not cancelled: the mix peaks near twice
+    // the main one alone.
+    let peak = |a: &[[f32; 2]]| a.iter().map(|f| f[0].abs()).fold(0.0, f32::max);
+    assert!(
+        peak(&kick.frames) > 1.6 * peak(&raw.frames[..400 * 48]),
+        "{} against {}",
+        peak(&kick.frames),
+        peak(&raw.frames)
+    );
+    // A request for the kick loads the companion it needs and shapes the same way, and the unrequested snare is not loaded.
+    let requested = AudioResources::load_for_requests(root.path(), &kick_request()).unwrap();
+    assert_eq!(requested.samples["main"].frames, kick.frames);
+    assert!(!requested.samples.contains_key("snare"));
+    assert!(!requested.samples.contains_key("second"));
+}
+
+#[test]
+fn a_kit_table_that_is_out_of_range_or_inconsistent_stops_the_load() {
+    let with = |change: &dyn Fn(&mut serde_json::Value)| {
+        let mut table = kit_table();
+        change(&mut table);
+        kit_root(table, true)
+    };
+    let rejected = [
+        // out of range, an unknown profile, an unknown field
+        (
+            with(&|t| t["profiles"]["kick"]["envelope"]["endMs"] = 1.0e9.into()),
+            "envelope out of range",
+        ),
+        (
+            with(&|t| t["profiles"]["kick"]["eq"][0]["hz"] = 5.0.into()),
+            "equaliser band out of range",
+        ),
+        (
+            with(&|t| t["sounds"]["36"] = "missing".into()),
+            "Invalid kit processing sound",
+        ),
+        (
+            with(&|t| t["profiles"]["kick"]["extra"] = 1.into()),
+            "Invalid audio manifest",
+        ),
+        // a companion microphone that arrives farther from the first than the alignment looks
+        (
+            with(&|t| t["profiles"]["kick"]["companion"]["maxOffsetMs"] = 0.5.into()),
+            "do not match",
+        ),
+        // a profile that wants a companion for a sound that has none, and the reverse
+        (with(&|t| t["sounds"]["36"] = "snare".into()), "disagree"),
+        (with(&|t| t["sounds"]["38"] = "kick".into()), "disagree"),
+    ];
+    for (root, reason) in rejected {
+        let error = AudioResources::load(root.path()).err().unwrap();
+        assert!(error.contains(reason), "{error} lacks {reason}");
+    }
+    // A companion in a kit that has no processing table is refused, not ignored.
+    let no_table = kit_root(kit_table(), true);
+    let path = no_table.path().join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    manifest["instruments"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("processing");
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(
+        AudioResources::load(no_table.path())
+            .err()
+            .unwrap()
+            .contains("no kit processing")
+    );
+    // Two sounds that would shape one recording differently are refused.
+    let shared = kit_root(kit_table(), false);
+    let path = shared.path().join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    manifest["instruments"][0]["regions"][1]["sampleId"] = "main".into();
+    manifest["instruments"][0]["processing"]["profiles"]["kick"]
+        .as_object_mut()
+        .unwrap()
+        .remove("companion");
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    assert!(
+        AudioResources::load(shared.path())
+            .err()
+            .unwrap()
+            .contains("shaped differently")
+    );
+}
+
+#[test]
+fn a_kit_without_a_table_plays_as_recorded() {
+    let root = kit_root(kit_table(), false);
+    let path = root.path().join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    manifest["instruments"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("processing");
+    fs::write(&path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let raw = decode_audio(
+        &fs::read(root.path().join("main.wav")).unwrap(),
+        Some("wav"),
+    )
+    .unwrap();
+    let loaded = AudioResources::load(root.path()).unwrap();
+    assert_eq!(loaded.samples["main"].frames, raw.frames);
 }

@@ -1,4 +1,5 @@
 use super::decode::{DecodedAudio, decode_audio};
+use super::kit_processing::{KitProcessing, process_hit};
 use rustysynth::SoundFont;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -36,6 +37,10 @@ pub struct Region {
     pub group: u32,
     #[serde(default)]
     pub off_by: u32,
+    /// The sample id of a second microphone's recording of the same performance, which the instrument's kit processing mixes into
+    /// this one once at load. It is a recording of the manifest, not a region of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub companion_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -45,6 +50,9 @@ pub struct Instrument {
     pub name: String,
     pub source_id: String,
     pub regions: Vec<Region>,
+    /// How the instrument's recorded hits are shaped when they are loaded (see `kit_processing`); None plays them as recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processing: Option<KitProcessing>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -245,7 +253,10 @@ impl AudioResources {
                 if attacks.is_empty() {
                     return Err(format!("No recorded attacks for {}", instrument.id));
                 }
-                selected.extend(attacks.into_iter().map(|r| r.sample_id.clone()));
+                for region in attacks {
+                    selected.insert(region.sample_id.clone());
+                    selected.extend(region.companion_id.clone());
+                }
                 selected.extend(
                     eligible_regions(
                         instrument,
@@ -367,6 +378,7 @@ impl AudioResources {
                 }
             }
         }
+        process_kits(&manifest, &mut samples)?;
         let font = &manifest.sound_font;
         let bytes = verified(root, &font.path, &font.sha256, Some(font.size))?;
         let sound_font = Arc::new(
@@ -379,4 +391,101 @@ impl AudioResources {
             sound_font,
         })
     }
+}
+
+/// Shapes each recorded hit of an instrument that has a processing table, once, on the thread that loads it: the sample of each
+/// processed region is replaced by its processed version, and a companion recording used only for mixing is dropped. A table or a
+/// profile that is out of range, a sample two kit sounds would shape differently, and a companion without a profile (or the reverse)
+/// are errors, so a bad kit file stops the load instead of being played.
+fn process_kits(
+    manifest: &InstrumentManifest,
+    samples: &mut HashMap<String, Arc<DecodedAudio>>,
+) -> Result<(), String> {
+    for instrument in &manifest.instruments {
+        let Some(table) = &instrument.processing else {
+            if instrument.regions.iter().any(|r| r.companion_id.is_some()) {
+                return Err(format!(
+                    "{} names a companion recording but has no kit processing",
+                    instrument.id
+                ));
+            }
+            continue;
+        };
+        table.validate()?;
+        // The profile of each region's sample, None for a sample played as recorded.
+        let mut profiles: HashMap<&str, Option<&str>> = HashMap::new();
+        let mut companions: HashSet<&str> = HashSet::new();
+        for region in &instrument.regions {
+            let profile = (region.key_low == region.key_high)
+                .then(|| table.sounds.get(&region.key_low.to_string()))
+                .flatten()
+                .map(String::as_str);
+            let wants = profile.is_some_and(|p| table.profiles[p].companion.is_some());
+            if wants != region.companion_id.is_some() {
+                return Err(format!(
+                    "{}: a kit sound's companion recording and its profile disagree",
+                    instrument.id
+                ));
+            }
+            companions.extend(region.companion_id.as_deref());
+            if profiles
+                .insert(region.sample_id.as_str(), profile)
+                .is_some_and(|earlier| earlier != profile)
+            {
+                return Err(format!(
+                    "{}: kit sounds shaped differently share the recording {}",
+                    instrument.id, region.sample_id
+                ));
+            }
+        }
+        // One companion may serve one recording only, or the mix would depend on the order of the regions.
+        let mut served: HashMap<&str, &str> = HashMap::new();
+        for region in &instrument.regions {
+            if let Some(companion) = &region.companion_id {
+                if served
+                    .insert(companion.as_str(), region.sample_id.as_str())
+                    .is_some_and(|other| other != region.sample_id)
+                {
+                    return Err(format!(
+                        "{}: a companion recording serves two hits",
+                        instrument.id
+                    ));
+                }
+            }
+        }
+        let mut shaped: HashMap<String, Arc<DecodedAudio>> = HashMap::new();
+        for region in &instrument.regions {
+            let Some(name) = profiles[region.sample_id.as_str()] else {
+                continue;
+            };
+            if shaped.contains_key(&region.sample_id) {
+                continue;
+            }
+            let main = samples
+                .get(&region.sample_id)
+                .ok_or_else(|| format!("Missing region sample {}", region.sample_id))?;
+            let companion = region
+                .companion_id
+                .as_ref()
+                .map(|id| {
+                    samples
+                        .get(id)
+                        .ok_or_else(|| format!("Missing companion recording {id}"))
+                })
+                .transpose()?;
+            let result = process_hit(&table.profiles[name], main, companion.map(|c| &**c))
+                .map_err(|e| format!("{}: {e}", region.sample_id))?;
+            shaped.insert(region.sample_id.clone(), Arc::new(result));
+        }
+        samples.extend(shaped);
+        let own: HashSet<&str> = instrument
+            .regions
+            .iter()
+            .map(|r| r.sample_id.as_str())
+            .collect();
+        for id in companions.difference(&own) {
+            samples.remove(*id);
+        }
+    }
+    Ok(())
 }

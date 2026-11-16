@@ -26,7 +26,7 @@ export interface DialogProps {
 const focusable='button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary,[href],[tabindex]:not([tabindex="-1"])';
 /** The frame every modal shares: a titled panel over a dimmed backdrop that holds focus, closes on Escape and puts focus back where it was. */
 export function Dialog({title,onClose,children,actions,className,backdropClassName,dismissOnBackdrop=false,closeDisabled=false,closeLabel,ariaDescribedBy,busy=false,onMouseDown,onSubmit,ref}:DialogProps) {
-  const { t } = useI18n(); const effectiveCloseLabel = closeLabel ?? t('dialog.close'); const titleId=useId(),backdrop=useRef<HTMLDivElement>(null),panel=useRef<HTMLDivElement>(null),close=useRef(onClose),locked=useRef(closeDisabled);close.current=onClose;locked.current=closeDisabled;
+  const { t, lang } = useI18n(); const effectiveCloseLabel = closeLabel ?? t('dialog.close'); const titleId=useId(),backdrop=useRef<HTMLDivElement>(null),panel=useRef<HTMLDivElement>(null),close=useRef(onClose),locked=useRef(closeDisabled);close.current=onClose;locked.current=closeDisabled;
   useEffect(()=>{
     const before=document.activeElement instanceof HTMLElement?document.activeElement:null;
     const target=panel.current?.querySelector<HTMLElement>('[data-autofocus]')??panel.current?.querySelector<HTMLElement>(focusable);
@@ -93,7 +93,8 @@ export function Dialog({title,onClose,children,actions,className,backdropClassNa
       if(before?.isConnected)before.focus({preventScroll:true});
     };
   },[]);
-  return <div ref={backdrop} className={`tp-dialog-backdrop ${backdropClassName??''}`} onMouseDown={event=>{if(dismissOnBackdrop&&!locked.current&&event.target===event.currentTarget)close.current();}}>
+  // `lang` is set here because a dialog drawn on the document body is outside the app shell, which carries it.
+  return <div ref={backdrop} lang={lang} className={`tp-dialog-backdrop ${backdropClassName??''}`} onMouseDown={event=>{if(dismissOnBackdrop&&!locked.current&&event.target===event.currentTarget)close.current();}}>
     <div ref={node=>{panel.current=node;if(typeof ref==='function')ref(node);else if(ref)(ref as React.MutableRefObject<HTMLDivElement|null>).current=node;}} className={`tp-dialog ${className??''}`} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={ariaDescribedBy} aria-busy={busy||undefined} tabIndex={-1} onMouseDown={onMouseDown}>
       <header className="tp-dialog-head"><h2 id={titleId}>{title}</h2><button type="button" aria-label={effectiveCloseLabel} {...busyGuard({busy:closeDisabled,className:'tp-dialog-close',onClick:()=>close.current()})}>×</button></header>
       {onSubmit?<form className="tp-dialog-form" onSubmit={onSubmit}>

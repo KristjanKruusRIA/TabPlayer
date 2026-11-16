@@ -10,15 +10,18 @@ import { ProtectionDialog,UnlockEditingDialog } from './protection/PasswordDialo
 import { busyGuard,onRefusedSpace,type RefusedSpace } from './ui/useBusyGuard';
 import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
-import { EditorPanel, type InspectorContextScope } from './EditorPanel';
-import { MasterPanel } from './audio/MasterPanel';
-type InspectorTab='song'|'track'|'selection';
+import { EditorPanel } from './EditorPanel';
+import type { PropertiesRequest, PropertiesTab } from './editor/PropertiesDialog';
+import { readInspectorTab, writeInspectorTab, type InspectorTab } from './workstation/inspector-tab';
+import { BusyFieldset } from './ui/BusyFieldset';
+import { StatusReadout } from './shell/StatusReadout';
+import { SoundSummary } from './audio/SoundSummary';
+import { SongInspector } from './workstation/SongInspector';
 import { TrackPanel } from './TrackPanel';
 import { trackColorHex } from './track-color';
 import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { useLoopPassage } from './audio/useLoopPassage';
-import { SoundPanel } from './audio/SoundPanel';
 import { MixerView } from './mixer/MixerView';
 import { SoundRig } from './rig/SoundRig';
 import { CabinetResponse } from './audio/CabinetResponse';
@@ -203,7 +206,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   }, [state.documentId, controller]);
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
-  const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[contextScope,setContextScope]=useState<InspectorContextScope>('all'),[measureRequest,setMeasureRequest]=useState(0),[lyricsRequest,setLyricsRequest]=useState(0);
+  const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[properties,setProperties]=useState<PropertiesRequest|null>(null);
   const [inputPrefs,setInputPrefs]=useInputPreferences(),entryDuration=useRef<EntryDuration|null>(null),[inputNotice,setInputNotice]=useState<{text:string;at:string}|null>(null);
   // Note entry on the score: a viewer mode, off at start. `entryNear` is the written pitch letters are entered near.
   const [noteEntryOn,setNoteEntryOn]=useState(false),entryNear=useRef(64);
@@ -231,7 +234,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]),sections=useMemo(()=>listSections(state.score),[state.score]);
-  const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
+  const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]);
   useEffect(()=>{setMusicSelection(null);rangeAnchor.current=null;},[state.documentEpoch]);
   const editorSelection=(value:MusicSelection|null)=>{rangeAnchor.current=null;setMusicSelection(value);};
   const [selectedString,setString]=useState(documentView.selectedString); const [fret,setFret]=useState(0);
@@ -258,9 +261,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [keyboardVisible,setKeyboardVisible]=useState(documentView.keyboardVisible===true);
   const dockPanelVisible=instrumentVisible||keyboardVisible;
   const [paletteVisible,setPaletteVisible]=useState(true),[paletteHost,setPaletteHost]=useState<HTMLElement|null>(null);
-  const [songHost,setSongHost]=useState<HTMLElement|null>(null),[practiceHost,setPracticeHost]=useState<HTMLElement|null>(null);
+  const [practiceHost,setPracticeHost]=useState<HTMLElement|null>(null);
   /** The inspector shows the whole song, the current track, or the editors for the selection, as GP's Song and Track tabs do. */
-  const [inspectorTab,setInspectorTab]=useState<InspectorTab>('selection');
+  const [inspectorTab,setInspectorTab]=useState<InspectorTab>(()=>readInspectorTab());
+  useEffect(()=>{writeInspectorTab(inspectorTab);},[inspectorTab]);
   /** The centre region shows the score or the Sound rig; the transport and the rest of the shell stay as they are. */
   const [view,setView]=useState<'score'|'sound'|'mixer'>('score');
   const [viewport,setViewport]=useState(()=>({width:window.innerWidth,height:window.innerHeight}));
@@ -271,7 +275,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   // The MIDI output delay is kept with the app; the native side starts at none until it is told.
   useEffect(()=>{void nativeMidiOut.setDelay(readMidiOutDelay()).catch(()=>{});},[]);
   const paneFocusIntent=useRef<InspectorTab|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
-  const [workspaceHeight,setWorkspaceHeight]=useState(Infinity),[workspaceWidth,setWorkspaceWidth]=useState(Infinity),[clipboardFocus,setClipboardFocus]=useState(0);
+  const [workspaceHeight,setWorkspaceHeight]=useState(Infinity),[workspaceWidth,setWorkspaceWidth]=useState(Infinity);
   const narrow=viewport.width<1180;
   const autoDockHeight=dockPanelVisible?(viewport.height<800?160:184):(viewport.height<800?dockMode==='backing'?176:144:viewport.width>=1440?192:176);
   // A height the user dragged to stays within reach of the score: it never grows into the collapse threshold below.
@@ -300,9 +304,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const commandToggle=(current:HTMLDetailsElement)=>{if(current.open)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==current&&!other.contains(current)&&!current.contains(other))other.open=false;});};
   useEffect(()=>{const outside=(event:PointerEvent)=>{if(event.target instanceof Node&&!commandBar.current?.contains(event.target))closeCommands(true);};document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);},[]);
   useLayoutEffect(()=>{const tab=paneFocusIntent.current;if(!tab)return;paneFocusIntent.current=null;if(document.activeElement instanceof Element&&document.activeElement.closest('[role="dialog"]'))return;inspectorPane.current?.querySelector<HTMLElement>(`[data-inspector-tab="${tab}"]`)?.focus();},[paneFocusTick,inspectorShown,inspectorTab]);
-  useLayoutEffect(()=>{if(!clipboardFocus)return;const section=clipboardSection.current?.querySelector('details');if(section){for(let parent=section.parentElement;parent;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)parent.open=true;section.open=true;section.querySelector('summary')?.focus();section.scrollIntoView?.({block:'nearest'});}},[clipboardFocus]);
   /** Shows the inspector on a tab and moves focus to that tab, as a menu command or toolbar button does. */
-  const openInspector=(tab:InspectorTab=inspectorTab,scope?:InspectorContextScope)=>{closeCommands();setInspectorVisible(true);setInspectorTab(tab);if(scope)setContextScope(scope);requestPaneFocus(tab);};
+  const openInspector=(tab:InspectorTab=inspectorTab)=>{closeCommands();setInspectorVisible(true);setInspectorTab(tab);requestPaneFocus(tab);};
+  /** Opens the Properties dialog (what the inspector's Selection tab held) on a tab, optionally opening one of its disclosures. */
+  const openProperties=(tab:PropertiesTab,focus?:PropertiesRequest['focus'])=>{closeCommands();setProperties(current=>({tab,focus,nonce:(current?.nonce??0)+1}));};
   // The dock's + opens the Track tab with Add instrument unfolded and its name field focused.
   const startAddTrack=()=>{openInspector('track');setTimeout(()=>{const details=document.querySelector<HTMLDetailsElement>('.workstation-inspector details.track-add');if(!details)return;details.open=true;details.scrollIntoView?.({block:'nearest'});details.querySelector<HTMLInputElement>('input')?.focus();},0);};
   const showInspector=()=>openInspector();
@@ -444,7 +449,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       edit({type:'pasteMusic',clip,options:options??{target:{...target},destinations:source!.tracks.map((track,index)=>{const created=creates&&!state.score.tracks[target.track+index];return {sourceTrack:index,track:created?appended++:target.track+index,staffMap:track.staves.map((_,staff)=>clip.kind==='phrase'?target.staff:staff)};}),count:1,placement:clip.kind==='phrase'?'currentBar':'beforeBar',filters:{diagrams:inputPrefs.pasteDiagrams,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi}}});
     }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
   };
-  const showClipboard=()=>{setContextScope('all');setInspectorVisible(true);setInspectorTab('selection');setClipboardFocus(value=>value+1);};
+  const showClipboard=()=>openProperties('selection','clipboard');
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [paletteOpen,setPaletteOpen]=useState(false),paletteReturn=useRef<HTMLElement|null>(null);
   const [protectionDialog,setProtectionDialog]=useState<'manage'|'unlock'|null>(null),protectionReturn=useRef<HTMLElement|null>(null);
@@ -529,7 +534,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const displayActions=useRef({select:(_:BeatTarget)=>{},measure:(_:number)=>{}});
   displayActions.current={
     select:next=>runPalette({kind:'select',target:next}),
-    measure:bar=>{runPalette({kind:'select',target:{...target,bar,beat:0}});setContextScope('measure');setInspectorVisible(true);setInspectorTab('selection');setMeasureRequest(tick=>tick+1);},
+    measure:bar=>{runPalette({kind:'select',target:{...target,bar,beat:0}});openProperties('bar','measure');},
   };
   const displayTarget=target;
   const transportDisplay=useMemo<TransportDisplay>(()=>({track:transportTrack,color:transportColor,tracks:transportTracks,trackIndex:displayTarget.track,
@@ -1287,15 +1292,15 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <button type="button" onClick={()=>{displayActions.current.measure(target.bar);}}>{t('menu.bar_properties')}</button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.note')}</summary><section aria-label={t('menu.note')}>
-        <button type="button" onClick={()=>{openInspector('selection','note');}}>{t('menu.note_properties')}</button>
-        <button type="button" onClick={()=>{openInspector('selection','beat');}}>{t('menu.beat_properties')}</button>
+        <button type="button" onClick={()=>{openProperties('note');}}>{t('menu.note_properties')}</button>
+        <button type="button" onClick={()=>{openProperties('beat');}}>{t('menu.beat_properties')}</button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.effects')}</summary><section aria-label={t('menu.effects')}>
         <button type="button" onClick={()=>{setPaletteVisible(true);setView('score');}}>{t('menu.palette_effects')}</button>
         <button type="button" {...busyGuard({busy:controlsBusy,unavailable:!location.beat,onClick:()=>{openModal('harmony');}})}>{t('menu.chord')}</button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.section')}</summary><section aria-label={t('menu.section')}>
-        <button type="button" onClick={()=>{openInspector('selection','all');}}>{t('menu.sections')}</button>
+        <button type="button" onClick={()=>{openProperties('score');}}>{t('menu.sections')}</button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.tools')}</summary><section aria-label={t('menu.tools')}>
         <button type="button" onClick={()=>{closeCommands();if(practiceMenu.current){practiceMenu.current.open=true;practiceMenu.current.querySelector('summary')?.focus();}}}>{t('menu.practice')}</button>
@@ -1374,30 +1379,28 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         {droppedNotice&&<div className="score-hint score-hint-dropped" role="status">{t(`editor.entry_queue_stale_${droppedNotice.count===1?'one':'other'}` as MessageKey,{count:droppedNotice.count})}</div>}
         {pendingFret!==null?<div className="score-hint score-hint-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</div>:inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}
       </section>
+      {<EditorPanel documentEpoch={state.documentEpoch} practiceHost={practiceHost} paletteHost={paletteVisible&&view==='score'?paletteHost:null} onOpenLyrics={()=>openProperties('staff','lyrics')} onOpenMeasure={bar=>displayActions.current.measure(bar)} properties={properties} onProperties={tab=>setProperties(current=>current&&{...current,tab,focus:undefined})} onCloseProperties={()=>setProperties(null)} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')}
+        practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} authored={player.authoredTempos?.()??null} onChange={settings=>player.setPractice(settings)}/>} tunerTool={<><TunerPanel tuning={tunerTuning}/><LineInPanel/></>}
+        entryTools={<NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} preview={command=>previewEdit(controller.getState().snapshot.project,command).score}/>}
+        selectionTools={<><div><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={controlsBusy} locked={editLocked} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic} diagramsDefault={inputPrefs.pasteDiagrams}/></div><HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={editBusy} onEdit={edit}/></>}
+        scoreTools={<><SectionsPanel sections={sections} bar={target.bar} onGo={bar=>{editorSelection(null);select({...target,bar,beat:0});if(player?.getState().playing)try{player.seekToMeasure(bar);}catch{/* The transport shows its own error; the selection has moved. */}}}/><ScoreErrorsPanel errors={scoreErrors} mark={markErrors} onMark={mark=>{setMarkErrors(mark);writeScoreErrorDisplay(mark);}} onSelect={next=>select(next)} onFit={editLocked?undefined:error=>edit({type:'fitVoice',track:error.track,staff:error.staff,bar:error.bar,voice:error.voice})} busy={controlsBusy} shownTracks={visibleTracks}/></>}/>}
       {inspectorShown&&<InspectorResizeHandle width={inspectorWidth} min={inspectorMin} max={inspectorMax} onWidth={setInspectorSize} onReset={()=>setInspectorSize(null)}/>}
       <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>
-      <div className="inspector-tabs" role="tablist" aria-label={t('inspector.tabs')} onKeyDown={event=>{const order:InspectorTab[]=['song','track','selection'];const step=event.key==='ArrowRight'?1:event.key==='ArrowLeft'?-1:0;if(!step)return;event.preventDefault();const next=order[(order.indexOf(inspectorTab)+step+order.length)%order.length];setInspectorTab(next);requestPaneFocus(next);}}><button type="button" role="tab" id={`inspector-tab-song`} aria-controls={`inspector-panel-song`} data-inspector-tab="song" aria-selected={inspectorTab==='song'} tabIndex={inspectorTab==='song'?0:-1} onClick={()=>setInspectorTab('song')}>{t('inspector.song')}</button><button type="button" role="tab" id={`inspector-tab-track`} aria-controls={`inspector-panel-track`} data-inspector-tab="track" aria-selected={inspectorTab==='track'} tabIndex={inspectorTab==='track'?0:-1} onClick={()=>setInspectorTab('track')}>{t('inspector.track')}</button><button type="button" role="tab" id={`inspector-tab-selection`} aria-controls={`inspector-panel-selection`} data-inspector-tab="selection" aria-selected={inspectorTab==='selection'} tabIndex={inspectorTab==='selection'?0:-1} onClick={()=>setInspectorTab('selection')}>{t('inspector.selection')}</button></div>
+      <div className="inspector-tabs" role="tablist" aria-label={t('inspector.tabs')} onKeyDown={event=>{const order:InspectorTab[]=['song','track'];const step=event.key==='ArrowRight'?1:event.key==='ArrowLeft'?-1:0;if(!step)return;event.preventDefault();const next=order[(order.indexOf(inspectorTab)+step+order.length)%order.length];setInspectorTab(next);requestPaneFocus(next);}}><button type="button" role="tab" id={`inspector-tab-song`} aria-controls={`inspector-panel-song`} data-inspector-tab="song" aria-selected={inspectorTab==='song'} tabIndex={inspectorTab==='song'?0:-1} onClick={()=>setInspectorTab('song')}>{t('inspector.song')}</button><button type="button" role="tab" id={`inspector-tab-track`} aria-controls={`inspector-panel-track`} data-inspector-tab="track" aria-selected={inspectorTab==='track'} tabIndex={inspectorTab==='track'?0:-1} onClick={()=>setInspectorTab('track')}>{t('inspector.track')}</button></div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-song" aria-labelledby="inspector-tab-song" hidden={inspectorTab!=='song'}>
-        <div ref={setSongHost} className="inspector-song-host"/>
-        <section className="inspector-section" aria-labelledby="inspector-sound-mastering"><h3 id="inspector-sound-mastering">{t('inspector.sound_mastering')}</h3><MasterPanel master={player?.master?.()} disabled={controlsBusy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/></section>
+        <SongInspector key={`${state.documentId}:${state.documentEpoch}`} score={state.score} busy={controlsBusy} locked={editLocked} onEdit={edit} master={player?.master?.()} masterDisabled={controlsBusy||!player?.setMaster} onMaster={next=>player!.setMaster!(next)}
+          styleGroups={{style:<BusyFieldset busy={controlsBusy} disabled={editLocked} className="style-group"><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit} fontStatus={fontStatus} headerFooter={page.headerFooter}/></BusyFieldset>,
+            layout:<BusyFieldset busy={controlsBusy} disabled={editLocked} className="style-group"><BarWidthsPanel value={state.settings.engraving} design={barDesign} onDesign={setBarDesign} busy={editBusy} honoured={barWidthsHonoured} onEdit={edit}/><SystemGapsPanel value={state.settings.engraving} systems={renderedSystems} pageLayout={systemGapsLayout} bar={gapBar} busy={editBusy} locked={editLocked} pageError={!!displayStatus?.pageError} onEdit={edit}/><StaffGroupsPanel key={`staff-groups/${state.documentEpoch}`} value={state.settings.engraving} score={state.score} trackIds={trackIds} rendered={visibleTracks} pageLayout={systemGapsLayout} busy={editBusy} locked={editLocked} onEdit={edit}/></BusyFieldset>,
+            page:<><BusyFieldset busy={controlsBusy} disabled={editLocked} className="style-group"><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></BusyFieldset><BusyFieldset busy={controlsBusy} className="style-group"><ViewDefaultsPanel current={{zoom,trackView,scoreDisplay:shownDisplay}} load={currentViewDefaults} onSave={saveViewDefaults}/></BusyFieldset></>}}/>
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
-        <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3><TrackSettingsPanel key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} refusal={state.error} onEdit={edit} onAudition={auditionTuning}/></section>
-        <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}</section>
-        <section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
-        <section className="inspector-section" aria-labelledby="inspector-track-midi-out"><h3 id="inspector-track-midi-out">{t('inspector.midi_out')}</h3><MidiOutPanel key={trackId} keyShift={playbackState?.practice.settings.tonality??0} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
+        <TrackSettingsPanel staff={target.staff} bar={target.bar} key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} refusal={state.error} onEdit={edit} onAudition={auditionTuning} onSelectStaff={staff=>{const bar=state.score.tracks[target.track].staves[staff]?.bars[target.bar],voice=bar?.voices[target.voice]?target.voice:0,beat=bar?.voices[voice]?.beats[target.beat]?target.beat:0;select({...target,staff,voice,beat});}}
+          sounds={view==='score'&&<SoundSummary trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}
+          interpretation={selectedTrack.staves.some(staff=>staff.isStringed)&&<section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>}
+          midi={<section className="inspector-section"><details className="inspector-more midi-out-more"><summary>{t('inspector.midi_out')}</summary><MidiOutPanel key={trackId} keyShift={playbackState?.practice.settings.tonality??0} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></details></section>}/>
       </div>
-      <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-selection" aria-labelledby="inspector-tab-selection" hidden={inspectorTab!=='selection'}>
-      <EditorPanel documentEpoch={state.documentEpoch} songHost={songHost} practiceHost={practiceHost} paletteHost={paletteVisible&&view==='score'?paletteHost:null} measureRequest={measureRequest} lyricsRequest={lyricsRequest} onOpenLyrics={()=>{setContextScope('staff');setInspectorVisible(true);setInspectorTab('selection');setLyricsRequest(tick=>tick+1);}} onOpenMeasure={bar=>displayActions.current.measure(bar)} contextScope={contextScope} onContextScopeChange={setContextScope} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
-        practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} authored={player.authoredTempos?.()??null} onChange={settings=>player.setPractice(settings)}/>} tunerTool={<><TunerPanel tuning={tunerTuning}/><LineInPanel/></>}
-        presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit} fontStatus={fontStatus} headerFooter={page.headerFooter}/><BarWidthsPanel value={state.settings.engraving} design={barDesign} onDesign={setBarDesign} busy={editBusy} honoured={barWidthsHonoured} onEdit={edit}/><SystemGapsPanel value={state.settings.engraving} systems={renderedSystems} pageLayout={systemGapsLayout} bar={gapBar} busy={editBusy} locked={editLocked} pageError={!!displayStatus?.pageError} onEdit={edit}/><StaffGroupsPanel key={`staff-groups/${state.documentEpoch}`} value={state.settings.engraving} score={state.score} trackIds={trackIds} rendered={visibleTracks} pageLayout={systemGapsLayout} busy={editBusy} locked={editLocked} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>} presentationViewTools={<ViewDefaultsPanel current={{zoom,trackView,scoreDisplay:shownDisplay}} load={currentViewDefaults} onSave={saveViewDefaults}/>}>
-        <NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} preview={command=>previewEdit(controller.getState().snapshot.project,command).score}/>
-        <div ref={clipboardSection}><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={controlsBusy} locked={editLocked} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic} diagramsDefault={inputPrefs.pasteDiagrams}/></div>
-        <SectionsPanel sections={sections} bar={target.bar} onGo={bar=>{editorSelection(null);select({...target,bar,beat:0});if(player?.getState().playing)try{player.seekToMeasure(bar);}catch{/* The transport shows its own error; the selection has moved. */}}}/>
-        <ScoreErrorsPanel errors={scoreErrors} mark={markErrors} onMark={mark=>{setMarkErrors(mark);writeScoreErrorDisplay(mark);}} onSelect={next=>select(next)} onFit={editLocked?undefined:error=>edit({type:'fitVoice',track:error.track,staff:error.staff,bar:error.bar,voice:error.voice})} busy={controlsBusy} shownTracks={visibleTracks}/>
-        <HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={editBusy} onEdit={edit}/>
-      </EditorPanel>
-      </div>
+      
+      
       </div>
       {view==='sound'&&<SoundRig trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy}
         tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||t('track_display.track_fallback',{index:index+1}),program:track.playbackInfo.program,percussion:track.staves.some(staff=>staff.isPercussion)}))}
@@ -1430,6 +1433,6 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound',key:{shift:playbackState?.keyTarget??playbackState?.practice.settings.tonality??0,ready:playbackState?.ready??false}}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onNote={editLocked?undefined:instrumentEdit} onClose={closeModal}/>}
-    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? t('status.save_hint')}</span>}{state.repaired&&<span className="statusbar-note" role="status">{t('status.document_rebuilt')}</span>}{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?t('status.hint_note'):t('status.hint_score')}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
+    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? t('status.save_hint')}</span>}{state.repaired&&<span className="statusbar-note" role="status">{t('status.document_rebuilt')}</span>}{recoveryStatus}<StatusReadout score={state.score} target={target} string={string} noteIndex={noteIndex} selection={musicSelection} indexed={indexed}/></footer>
   </div>;
 }

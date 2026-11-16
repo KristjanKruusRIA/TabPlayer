@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,closeWelcomeLibrary,revealInspectorControl} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,closeWelcomeLibrary,moveCursor,setFret,editionPalette} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -9,7 +9,7 @@ const browser=await connect(),page=browser.contexts()[0].pages()[0];
 let stage='startup';const errors=[];page.on('pageerror',error=>errors.push({stage,message:error.message,stack:error.stack}));
 const idle=()=>waitForWorkspaceIdle(page);
 const click=async name=>{stage=name;await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-const fill=async(name,value)=>{const field=page.getByLabel(name,{exact:true});await revealInspectorControl(page,field);await field.fill(String(value));};
+// Cursor moves and notes: the score's keys and the palette's commands (the Selection tab's Measure, Beat, Fret, Dots fields and buttons are gone).
 const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
 const waitStatus=async predicate=>{const deadline=Date.now()+10000;let last;while(Date.now()<deadline){last=await status();if(predicate(last))return last;await page.waitForTimeout(25);}throw new Error(`Native status timed out at ${stage}: ${JSON.stringify(last)}`);};
 const ready=async()=>{await waitStatus(s=>s.ready&&!s.error&&s.generation===s.desiredGeneration);await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Play'&&!b.disabled));};
@@ -23,20 +23,22 @@ try {
     const {AlphaTabApi}=await import('/alphatab/alphaTab.mjs'),original=AlphaTabApi.prototype.renderScore;
     AlphaTabApi.prototype.renderScore=function(score,...args){window.__reviewScore=score;return original.call(this,score,...args);};
   });
-  await fill('Measure',2);for(let i=0;i<4;i++)await click('Delete beat');
-  assert.equal(await (await revealInspectorControl(page,page.getByRole('button',{name:'Set note',exact:true}))).isDisabled(),true);
+  await moveCursor(page,{bar:2});for(let i=0;i<4;i++)await click('Delete beat');
+  // With no beat under the cursor the palette's Chords button is unavailable (it was Set note).
+  assert.equal(await editionPalette(page).getByRole('button',{name:'Chords',exact:true}).isDisabled(),true);
   await page.waitForFunction(()=>window.__reviewScore.tracks[0].staves[0].bars[1].voices[0].beats[0].isEmpty);
-  await click('Insert beat');await fill('Measure',1);
-  await fill('Beat',4);for(let i=0;i<3;i++)await click('Delete beat');
-  await click('Insert beat');await fill('Beat',1);await fill('Dots',3);await click('Apply rhythm');
-  await fill('Fret',7);await click('Set note');await fill('Beat',2);await fill('Fret',9);await click('Set note');
-  await page.waitForFunction(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[0].playbackDuration===1800);
-  assert.equal(await page.evaluate(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[1].absolutePlaybackStart),1800);
-  await ready();await audible('authored triple dots');
+  await click('Insert beat');await moveCursor(page,{bar:1});
+  await moveCursor(page,{beat:4});for(let i=0;i<3;i++)await click('Delete beat');
+  // The old Dots field went to 3; the palette goes to two dots (Double dotted), so this checks double dots (a quarter lasts 960 * 1.75 = 1680 ticks) where it checked triple dots (1800).
+  await click('Insert beat');await moveCursor(page,{beat:1});await editionPalette(page).getByRole('button',{name:'Double dotted',exact:true}).click();await idle();
+  await setFret(page,7);await moveCursor(page,{beat:2});await setFret(page,9);
+  await page.waitForFunction(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[0].playbackDuration===1680);
+  assert.equal(await page.evaluate(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[1].absolutePlaybackStart),1680);
+  await ready();await audible('authored double dots');
   await click('Save');await click('Export GP');await click('Open');await ready();
-  assert.equal(await page.evaluate(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[0].dots),3);
-  assert.equal(await page.evaluate(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[0].playbackDuration),1800);
-  await audible('reimported triple dots');
+  assert.equal(await page.evaluate(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[0].dots),2);
+  assert.equal(await page.evaluate(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[0].playbackDuration),1680);
+  await audible('reimported double dots');
   await click('Add track');await ready();await check('Mute',1,true);
   await click('Remove track');await click('Undo');await ready();
   assert.equal(await page.getByLabel('Mute',{exact:true}).nth(0).isChecked(),false);
@@ -48,7 +50,7 @@ try {
   await audible('deleted solo track');
   await check('Mute',0,true);await click('Save');await click('New');await ready();
   assert.equal(await page.getByLabel('Mute',{exact:true}).isChecked(),false);
-  await fill('Fret',7);await click('Set note');await ready();
+  await setFret(page,7);await ready();
   await audible('New after mute');
   assert.deepEqual(errors,[]);
   writeFileSync(resolve(directory,'review-regressions-result.json'),JSON.stringify({emptyFollowingMeasure:true,tripleDotTimingExportReimport:true,persistedMixerUndoRedo:true,deletedSoloRecovery:true,newClearsMix:true,nativeSignals:signals,externalRequestsBlocked:true},null,2));

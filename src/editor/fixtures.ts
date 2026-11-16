@@ -15,3 +15,5 @@ export function music() {
 }
 export const noteAt=(score:model.Score,bar=0,beat=0,voice=0)=>score.tracks[0].staves[0].bars[bar].voices[voice].beats[beat].notes[0];
 export const reopened=(score:model.Score)=>model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(score),new Settings());
+/** A control refuses to act: natively disabled, aria-disabled itself, or inside a region (a busy fieldset) that is. A control that must keep focus is refused this way, never with the `disabled` attribute. */
+export const refused=(element:Element|null)=>!!element&&((element as HTMLButtonElement).disabled===true||element.getAttribute('aria-disabled')==='true'||!!element.closest('[aria-disabled="true"],fieldset[disabled]'));

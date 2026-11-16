@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkspaceCommand,clickWorkstationButton,revealInspector,setPlaybackSpeed} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkspaceCommand,clickWorkstationButton,revealInspector,setFret,setPlaybackSpeed} from './workstation-commands.mjs';
 import { readDocumentRecord } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFile,readdir,mkdir,stat } from 'node:fs/promises';
@@ -15,8 +15,8 @@ for(const {format,current=false,named=false} of [{format:'pdf',named:true},{form
   try {
     browser=await connect();const page=browser.contexts()[0].pages()[0];
     const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
-    await revealInspector(page);await clickWorkstationButton(page,'Edit',{waitForIdle:false});await waitForWorkspaceIdle(page);
-    await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();
+    await revealInspector(page);await waitForWorkspaceIdle(page);
+    await setFret(page,7);
     await waitForWorkspaceIdle(page);
     const {documentId}=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
     const origin=await readDocumentRecord(page,documentId),before=origin.snapshot;assert.equal(before.dirty,true);

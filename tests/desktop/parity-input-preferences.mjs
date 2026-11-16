@@ -72,8 +72,8 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     const box=async name=>(await viewMenu()).getByRole('checkbox',{name:labels[name],exact:true});
     // Real key events carry the key a keyboard sends: Playwright's keyboard.press('Numpad2') reports ArrowDown, the NumLock-off shape.
     const press=(key,code)=>workspace$().dispatchEvent('keydown',{key,code,bubbles:true,cancelable:true});
-    const field=async name=>{await ui.revealInspector(page);return page.getByLabel(name,{exact:true});};
-    const fret=async()=>(await field('Fret')).inputValue();
+    // NOT UPDATED FOR THE-213: the Fret field is gone; the fret under the cursor is read from the status bar ('Fret 2 · B3'). A typed digit now writes at once, so the check below that a keypad key makes no edit needs the owner's decision.
+    const fret=async()=>/^Fret (\d+)/.exec(await page.getByTestId('status-value').innerText())?.[1]??'';
 
     // With the preference off a keypad key types a fret and makes no edit.
     assert.notEqual(await fret(),'2');
@@ -109,8 +109,9 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     step('Preferences are saved, reloaded and drive the clipboard filter',{prefs:await prefs()});
 
     // NumLock off: the keypad reports navigation keys, which keep navigating and never edit.
-    const stringSelect=async()=>{await ui.revealInspector(page);return page.getByRole('combobox',{name:/^String/}).first();};const stringBefore=await (await stringSelect()).inputValue();
-    await press('ArrowDown','Numpad2');await poll(async()=>(await stringSelect()).inputValue(),value=>value!==stringBefore,'ArrowDown moved the string');
+    // The cursor string is read from the status bar (the Selection tab's String selector is gone).
+    const stringNow=async()=>String((await ui.cursorPosition(page)).string);const stringBefore=await stringNow();
+    await press('ArrowDown','Numpad2');await poll(stringNow,value=>value!==stringBefore,'ArrowDown moved the string');
     assert.deepEqual(await record(),initial);
     // A keypad duration that changes nothing (keypad 1 on a whole note) adds no edit.
     await press('1','Numpad1');await idle();assert.deepEqual(await record(),initial,'No-op keypad key makes no edit');

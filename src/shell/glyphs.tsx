@@ -55,3 +55,5 @@ export const DuplicateGlyph:Glyph=p=><svg {...base} {...p}><path d="M5.5 5.5h8v8
 export const TrashGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 4.5h11M6 4.5v-2h4v2M4 4.5l.8 9h6.4l.8-9M7 7v4M9 7v4"/></svg>;
 /** Settings for one thing: a cog. */
 export const CogGlyph:Glyph=p=><svg {...base} {...p}><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2.3M8 12.2v2.3M1.5 8h2.3M12.2 8h2.3M3.4 3.4L5 5M11 11l1.6 1.6M12.6 3.4L11 5M5 11l-1.6 1.6"/></svg>;
+/** Edit an effect: two sliders. */
+export const SlidersGlyph:Glyph=p=><svg {...base} {...p}><path d="M2 5h12M2 11h12"/><path d="M5 3v4M11 9v4" strokeWidth={2.2}/></svg>;

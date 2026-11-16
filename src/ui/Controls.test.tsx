@@ -282,3 +282,9 @@ it('does not mark a busy region as a drop target',()=>{
   expect(fireEvent.dragOver(screen.getByText('Item'),{dataTransfer})).toBe(true);
   expect(dataTransfer.dropEffect).toBe('none');
 });
+
+it('a dialog carries the language of the app, so one drawn on the document body is not left without it', async () => {
+  const { Dialog } = await import('./Dialog');
+  render(<Dialog title="Any" onClose={() => {}}><p>Body</p></Dialog>);
+  expect(screen.getByRole('dialog').closest('[lang]')).toHaveAttribute('lang', expect.stringMatching(/^[a-z]{2}/));
+});

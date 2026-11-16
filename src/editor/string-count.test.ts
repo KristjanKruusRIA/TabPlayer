@@ -373,3 +373,11 @@ describe('S19: cross-voice collision checks in setStringCount', () => {
     expect(rebuilt.score.tracks[0].staves[0].tuning).toEqual(standard);
   });
 });
+it('says what is wrong when the staves of a track have different string counts and one already has the new count',()=>{
+  const settings={tuning:seven,capo:0,transposition:0,displayTransposition:0,clef:0,showTab:true,showNotation:true,tuningName:''};
+  const mixed=previewEdit(blankProject(),{type:'addStaff',track:0,settings} as EditCommand).score;
+  expect(mixed.tracks[0].staves.map(staff=>staff.tuning.length)).toEqual([6,7]);
+  expect(()=>applyStructureEdit(mixed,command(standard),0)).toThrow('different string counts');
+  const same=previewEdit(blankProject(),{type:'addStaff',track:0,settings:{...settings,tuning:standard}} as EditCommand).score;
+  expect(()=>applyStructureEdit(same,command(standard),0)).toThrow('string count is unchanged');
+});

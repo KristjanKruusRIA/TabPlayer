@@ -2,7 +2,7 @@
 import { afterEach,expect,it,vi } from 'vitest';
 import { cleanup,fireEvent,render,screen,within } from '@testing-library/react';
 import { model } from '@coderline/alphatab';
-import { music,target } from './fixtures';
+import { music,target, refused} from './fixtures';
 import { GesturePanel } from './GesturePanel';
 afterEach(cleanup);
 it('gesture_panel_dispatches_exact_named_choices',()=>{
@@ -26,7 +26,7 @@ it('gesture_panel_dispatches_sustain_pedal_marks_for_the_selected_beat',()=>{
   const onEdit=vi.fn();render(<GesturePanel score={score} target={target} busy={false} onEdit={onEdit}/>);
   const pedal=screen.getByLabelText('Sustain pedal') as HTMLSelectElement;expect(pedal.value).toBe('down');
   expect(within(pedal).getAllByRole('option').map(n=>n.textContent)).toEqual(['No mark','Press (Ped.)','Release (*)']);
-  expect((screen.getByRole('button',{name:'Apply sustain pedal'}) as HTMLButtonElement).disabled).toBe(true);
+  expect(refused(screen.getByRole('button',{name:'Apply sustain pedal'}))).toBe(true);
   fireEvent.change(pedal,{target:{value:'none'}});fireEvent.click(screen.getByRole('button',{name:'Apply sustain pedal'}));
   expect(onEdit).toHaveBeenCalledExactlyOnceWith({type:'setSustainPedal',target,pedal:'none'});
 });
@@ -46,7 +46,7 @@ it('gesture_panel_dispatches_bounded_ranges_and_global_fermata',()=>{
 it('gesture_panel_resets_with_selection_and_disables_busy_edits',()=>{
   const score=music(),onEdit=vi.fn(),view=render(<GesturePanel score={score} target={target} busy={false} onEdit={onEdit}/>);fireEvent.click(screen.getByLabelText('Tap'));
   view.rerender(<GesturePanel score={score} target={{...target,beat:1}} busy={false} onEdit={onEdit}/>);expect((screen.getByLabelText('Tap') as HTMLInputElement).checked).toBe(false);expect((screen.getByLabelText('Range end beat') as HTMLInputElement).value).toBe('2');
-  view.rerender(<GesturePanel score={score} target={{...target,beat:1}} busy={true} onEdit={onEdit}/>);for(const fieldset of view.container.querySelectorAll('fieldset'))expect(fieldset.disabled).toBe(true);
+  view.rerender(<GesturePanel score={score} target={{...target,beat:1}} busy={true} onEdit={onEdit}/>);for(const fieldset of view.container.querySelectorAll('fieldset'))expect(refused(fieldset)).toBe(true);
 });
 it('gesture_panel_clears_barre_without_clearing_omitted_gestures',()=>{
   const score=music(),b=score.tracks[0].staves[0].bars[0].voices[0].beats[0];b.barreFret=7;b.barreShape=2;const onEdit=vi.fn();render(<GesturePanel score={score} target={target} busy={false} onEdit={onEdit}/>);

@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { model, Settings } from '@coderline/alphatab';
 import { formatPitch } from '../tuning';
 import { InstrumentView } from './InstrumentView';
-import { StructurePanel } from '../editor/StructurePanel';
+import { TrackSettingsPanel } from '../workstation/TrackSettingsPanel';
 import { setPartialCapo } from '../editor/partial-capo';
 
 afterEach(()=>{cleanup();localStorage.clear();});
@@ -47,74 +47,64 @@ it('clicking a fret writes the fret on its own string, so the audition and the p
   expect(onEdit).toHaveBeenCalledWith({type:'setNote',target,string:2,fret:7},{string:2,fret:7});
 });
 
-const panel=(score:model.Score,onEdit=vi.fn())=>{render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);return onEdit;};
-// Applying the values a staff already has records nothing, so each press first changes the capo.
-let capoStep=0;
-const applied=(onEdit:ReturnType<typeof vi.fn>)=>{capoStep+=1;fireEvent.change(screen.getByLabelText('Capo'),{target:{value:String(capoStep)}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));return onEdit.mock.calls.at(-1)![0].settings;};
+/** The partial capo lives in the Capo section of the track's Tuning dialog. */
+const panel=(score:model.Score,onEdit=vi.fn(),props:{locked?:boolean;busy?:boolean}={})=>{render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} {...props}/>);if(!props.locked)fireEvent.click(screen.getByRole('button',{name:/^Edit tuning/}));return onEdit;};
+const dialog=()=>within(screen.getByRole('dialog',{name:'Tuning'}));
+const keep=()=>dialog().getByRole('button',{name:'Keep fingering'});
+// Applying the values a staff already has records nothing, so each press first changes the capo; the dialog closes when it lands and is reopened.
+let capoStep=10;
+const applied=(onEdit:ReturnType<typeof vi.fn>)=>{capoStep+=1;fireEvent.change(dialog().getByLabelText('Capo'),{target:{value:String(capoStep)}});fireEvent.click(keep());const settings=onEdit.mock.calls.at(-1)![0].settings;if(!screen.queryByRole('dialog'))fireEvent.click(screen.getByRole('button',{name:/^Edit tuning/}));return settings;};
+const fretField=()=>dialog().getByLabelText('Partial capo fret');
 it('shows the staff partial capo and sends it only once changed',()=>{
   const onEdit=panel(build());
-  expect(screen.getByLabelText('Partial capo fret')).toHaveValue(5);
-  const strings=within(screen.getByRole('group',{name:'Partial capo strings'}));
-  expect(strings.getAllByRole('checkbox').map(box=>(box as HTMLInputElement).checked)).toEqual([false,false,false,true,true,true]);
+  expect(fretField()).toHaveValue(5);
+  const strings=()=>within(dialog().getByRole('group',{name:'Partial capo strings'}));
+  expect(strings().getAllByRole('checkbox').map(box=>(box as HTMLInputElement).checked)).toEqual([false,false,false,true,true,true]);
   // Untouched, the command omits it and so keeps the staff's own.
   expect(applied(onEdit)).not.toHaveProperty('partialCapo');
-  fireEvent.click(strings.getByRole('checkbox',{name:/String 6/}));
+  fireEvent.click(strings().getByRole('checkbox',{name:/String 6/}));
   expect(applied(onEdit).partialCapo).toEqual({fret:5,strings:[1,2,3,6]});
 });
 it('leaves the command unchanged for a staff with no partial capo until one is chosen',()=>{
   const onEdit=panel(build(false));
-  expect(applied(onEdit)).not.toHaveProperty('partialCapo');
-  fireEvent.change(screen.getByLabelText('Partial capo fret'),{target:{value:'7'}});
-  // Typing alone commits nothing; a fret without strings is a draft that holds Apply back.
-  expect(applied(onEdit)).not.toHaveProperty('partialCapo');
-  fireEvent.blur(screen.getByLabelText('Partial capo fret'));
-  expect(screen.getByRole('alert')).toHaveTextContent('Choose the strings the partial capo covers.');
-  expect(screen.getByRole('button',{name:'Apply staff settings'})).toBeDisabled();
-  fireEvent.click(screen.getByRole('checkbox',{name:/String 6/}));fireEvent.click(screen.getByRole('checkbox',{name:/String 5/}));
+  fireEvent.change(fretField(),{target:{value:'7'}});
+  // Typing alone commits nothing, and a fret without strings is a draft that holds the apply buttons back.
+  fireEvent.blur(fretField());
+  expect(dialog().getAllByRole('alert').map(node=>node.textContent).join(' ')).toContain('Choose the strings the partial capo covers.');
+  fireEvent.change(dialog().getByLabelText('Capo'),{target:{value:'3'}});fireEvent.click(keep());
+  expect(onEdit).not.toHaveBeenCalled();expect(screen.getByRole('dialog',{name:'Tuning'})).toBeInTheDocument();
+  fireEvent.click(dialog().getByRole('checkbox',{name:/String 6/}));fireEvent.click(dialog().getByRole('checkbox',{name:/String 5/}));
   expect(applied(onEdit).partialCapo).toEqual({fret:7,strings:[5,6]});
 });
 it('commits the fret with Enter, and clearing it clears the partial capo',()=>{
   const onEdit=panel(build());
-  const fret=screen.getByLabelText('Partial capo fret');
-  fireEvent.change(fret,{target:{value:'9'}});expect(applied(onEdit)).not.toHaveProperty('partialCapo');
-  fireEvent.keyDown(fret,{key:'Enter'});expect(applied(onEdit).partialCapo).toEqual({fret:9,strings:[1,2,3]});
-  for(const string of [1,2,3])fireEvent.click(screen.getByRole('checkbox',{name:new RegExp(`^String ${string} `)}));
-  fireEvent.change(fret,{target:{value:''}});fireEvent.blur(fret);expect(applied(onEdit).partialCapo).toEqual({fret:0,strings:[]});
+  fireEvent.change(fretField(),{target:{value:'9'}});fireEvent.keyDown(fretField(),{key:'Enter'});expect(applied(onEdit).partialCapo).toEqual({fret:9,strings:[1,2,3]});
+  for(const string of [1,2,3])fireEvent.click(dialog().getByRole('checkbox',{name:new RegExp(`^String ${string} `)}));
+  fireEvent.change(fretField(),{target:{value:''}});fireEvent.blur(fretField());expect(applied(onEdit).partialCapo).toEqual({fret:0,strings:[]});
 });
-it('says when the capo already covers the partial capo, and offers no strings on a staff without any',()=>{
+it('says when the capo already covers the partial capo',()=>{
   panel(build());
-  fireEvent.change(screen.getByLabelText('Partial capo fret'),{target:{value:'1'}});
-  expect(screen.getByText(/capo at fret 2 is higher/)).toBeInTheDocument();
+  fireEvent.change(fretField(),{target:{value:'1'}});
+  expect(dialog().getByText(/capo at fret 2 is higher/)).toBeInTheDocument();
 });
-it('is locked with the rest of the staff settings',()=>{
-  const onEdit=vi.fn();render(<StructurePanel score={build()} target={target} string={6} busy={false} locked onEdit={onEdit} onSelect={vi.fn()}/>);
-  fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).not.toHaveBeenCalled();
+it('is locked with the rest of the staff settings: a finalized score cannot open the dialog',()=>{
+  const onEdit=panel(build(),vi.fn(),{locked:true});
+  expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeDisabled();expect(onEdit).not.toHaveBeenCalled();
 });
-
 it('sends nothing when the fret is only tabbed through on an untouched staff',()=>{
-  const onEdit=panel(build());const fret=screen.getByLabelText('Partial capo fret');
-  fireEvent.focus(fret);fireEvent.blur(fret);
+  const onEdit=panel(build());
+  fireEvent.focus(fretField());fireEvent.blur(fretField());
   expect(applied(onEdit)).not.toHaveProperty('partialCapo');
 });
-it('keeps the last valid partial capo and blocks Apply while the fret on screen is out of range',()=>{
-  const onEdit=panel(build());const fret=screen.getByLabelText('Partial capo fret');
-  fireEvent.change(fret,{target:{value:'9'}});fireEvent.blur(fret);expect(applied(onEdit).partialCapo).toEqual({fret:9,strings:[1,2,3]});
+it('keeps the last valid partial capo and holds the apply buttons back while the fret on screen is out of range',()=>{
+  const onEdit=panel(build());
+  fireEvent.change(fretField(),{target:{value:'9'}});fireEvent.blur(fretField());expect(applied(onEdit).partialCapo).toEqual({fret:9,strings:[1,2,3]});
   const calls=onEdit.mock.calls.length;
-  fireEvent.change(fret,{target:{value:'200'}});fireEvent.blur(fret);
-  expect(screen.getByRole('alert')).toHaveTextContent('1 to 127');
-  const apply=screen.getByRole('button',{name:'Apply staff settings'});expect(apply).toBeDisabled();fireEvent.click(apply);
-  expect(screen.getByRole('button',{name:'Add staff'})).toBeDisabled();expect(onEdit.mock.calls.length).toBe(calls);
-  fireEvent.change(fret,{target:{value:'11'}});fireEvent.blur(fret);expect(applied(onEdit).partialCapo).toEqual({fret:11,strings:[1,2,3]});
-});
-it('resets the controls with the settings when another bar is selected',()=>{
-  const score=build(),staff=score.tracks[0].staves[0];
-  score.addMasterBar(new model.MasterBar());const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);bar.addVoice(voice);staff.addBar(bar);score.finish(new Settings());
-  const props={score,string:6,busy:false,onEdit:vi.fn(),onSelect:vi.fn()},view=render(<StructurePanel {...props} target={target}/>);
-  fireEvent.change(screen.getByLabelText('Partial capo fret'),{target:{value:'9'}});fireEvent.blur(screen.getByLabelText('Partial capo fret'));
-  expect(screen.getByLabelText('Partial capo fret')).toHaveValue(9);
-  view.rerender(<StructurePanel {...props} target={{...target,bar:1}}/>);
-  expect(screen.getByLabelText('Partial capo fret')).toHaveValue(5);
-  fireEvent.change(screen.getByLabelText('Capo'),{target:{value:'1'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(props.onEdit.mock.calls.at(-1)![0].settings).not.toHaveProperty('partialCapo');
+  fireEvent.change(fretField(),{target:{value:'200'}});fireEvent.blur(fretField());
+  expect(dialog().getAllByRole('alert').map(node=>node.textContent).join(' ')).toContain('1 to 127');
+  fireEvent.submit(keep().closest('form')!);
+  expect(onEdit.mock.calls.length).toBe(calls);expect(screen.getByRole('dialog',{name:'Tuning'})).toBeInTheDocument();
+  fireEvent.change(fretField(),{target:{value:'11'}});fireEvent.blur(fretField());expect(applied(onEdit).partialCapo).toEqual({fret:11,strings:[1,2,3]});
 });
 
 it('names the partial capo and sounds the covered strings of a chord diagram by it',async()=>{

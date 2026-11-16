@@ -23,14 +23,16 @@ try{
   const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const details=async name=>{await revealInspectorTab(page,'Song');return page.locator('summary').filter({hasText:name}).first().evaluate(node=>{for(let item=node.parentElement;item;item=item.parentElement)if(item.tagName==='DETAILS')item.open=true;});};
+  // The Song tab keeps the metadata fields under More; 'New score defaults…' (also under More) opens the author defaults in a dialog.
+  const defaultsDialog=page.locator('.defaults-dialog');
+  const details=async name=>{await revealInspectorTab(page,'Song');const more=page.locator('.song-information .inspector-more');if(!await more.evaluate(node=>node.open))await more.locator('summary').click();if(name==='New score defaults'){await page.getByRole('button',{name:'New score defaults…',exact:true}).click();await defaultsDialog.waitFor();}};
   const value=label=>page.getByLabel(label,{exact:true}).inputValue();
   await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();
 
   await details('New score defaults');
-  for(const [label,text] of Object.entries(defaults))await page.getByLabel(label,{exact:true}).fill(text);
-  await page.getByRole('button',{name:'Save defaults',exact:true}).click();
-  await page.getByText('Saved. Scores you create with New start with these details.',{exact:true}).waitFor();
+  for(const [label,text] of Object.entries(defaults))await defaultsDialog.getByLabel(label,{exact:true}).fill(text);
+  await defaultsDialog.getByRole('button',{name:'Save defaults',exact:true}).click();
+  await defaultsDialog.getByText('Saved. Scores you create with New start with these details.',{exact:true}).waitFor();await page.keyboard.press('Escape');await defaultsDialog.waitFor({state:'hidden'});
   assert.deepEqual(JSON.parse(await page.evaluate(()=>localStorage.getItem('tabplayer.authorDefaults'))),{artist:'The Band',words:'Ann Lyric',music:'Ben Tune',tab:'Cy Transcriber',copyright:'© 2026 The Band'});
   await details('Song metadata');
   assert.equal(await value('Transcriber'),'Fixture Tab','Saving defaults leaves the open score alone.');assert.equal(await value('Artist'),'Fixture Artist');

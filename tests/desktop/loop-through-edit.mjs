@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { launch,connect,stop } from './harness.mjs';
-import { closeWelcomeLibrary,clickWorkstationButton,revealInspectorTab,waitForWorkspaceIdle } from './workstation-commands.mjs';
+import { closeWelcomeLibrary,clickWorkstationButton,setFret,waitForWorkspaceIdle } from './workstation-commands.mjs';
 
 // THE-194: an edit rebuilds the native playback plan; a loop that was running must be armed again on the new plan.
 const BAR=3840;
@@ -12,7 +12,7 @@ try {
   const waitStatus=async(predicate,label,timeout=15000)=>{const deadline=Date.now()+timeout;let last;while(Date.now()<deadline){last=await status();if(predicate(last))return last;await page.waitForTimeout(40);}throw new Error(`${label}: ${JSON.stringify(last)}`);};
   const loopButton=page.getByRole('button',{name:/^(Loop|Clear loop)$/});
   const message=()=>page.locator('.transport-messages').allTextContents();
-  const edit=async fret=>{await revealInspectorTab(page,'Selection');await page.getByLabel('Fret',{exact:true}).fill(String(fret));await page.getByRole('button',{name:'Set note',exact:true}).click();await waitForWorkspaceIdle(page);};
+  const edit=async fret=>{await setFret(page,fret);await waitForWorkspaceIdle(page);};
   await waitStatus(value=>value.ready&&!value.error,'ready');
   const result={};
 

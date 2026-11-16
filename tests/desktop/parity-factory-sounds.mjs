@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,openSoundDialog,closeSoundDialog} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { mkdir,readdir,readFile,writeFile } from 'node:fs/promises';
@@ -67,7 +67,8 @@ try{
     assert.ok(file,`${name}.wav was written`);await dialog.waitFor({state:'detached',timeout:30000}).catch(()=>{});await waitForWorkspaceIdle(page);
     await new Promise(r=>setTimeout(r,300));return channels(await readFile(join(folder,file)));
   };
-  await revealLeftTask(page,'Sound');const panel=page.getByRole('region',{name:'Track sound'});
+  // The factory sounds, preview and pedals live in the Sound and pedalboard dialog (Track tab). It is modal, so each step opens it and closes it before exporting or playing.
+  let panel;const withSound=async action=>{panel=await openSoundDialog(page);try{return await action();}finally{await closeSoundDialog(page);}};
   const soundEdits=async()=>(await readActiveDocument(page)).project.edits.filter(edit=>edit.type==='setTrackSound');
   const lastSound=async()=>(await soundEdits()).at(-1)?.sound;
   const entry=id=>catalog.find(item=>item.id===id);
@@ -89,9 +90,10 @@ try{
     }
   }};
   const apply=async(id,name)=>{
+    await withSound(async()=>{
     await panel.getByLabel('Factory sound',{exact:true}).selectOption(id);
     await panel.getByRole('button',{name:'Apply factory sound',exact:true}).click();await waitForWorkspaceIdle(page);
-    await panel.getByRole('status').filter({hasText:`Applied “${name}”.`}).waitFor();
+    await panel.getByRole('status').filter({hasText:`Applied “${name}”.`}).waitFor();});
     const sound=await lastSound();plays(sound.effects,id);assert.equal(sound.presetId,entry(id).presetId);
   };
   await apply('jazz-clean','Warm jazz clean');const jazz=await exportWav('jazz-clean');
@@ -108,11 +110,12 @@ try{
   assert.ok(results.metal.upperShareDb-results.jazz.upperShareDb>10,`metal is far brighter: ${text}`);
   // Previewing a factory sound records nothing until it is kept.
   const before=(await soundEdits()).length;
+  await withSound(async()=>{
   await panel.getByLabel('Preview sound',{exact:true}).selectOption('factory:shimmer');
   await panel.getByRole('status').filter({hasText:'Previewing “Octave shimmer”.'}).waitFor();
   assert.equal((await soundEdits()).length,before);
   await panel.getByRole('button',{name:'Keep previewed sound',exact:true}).click();await waitForWorkspaceIdle(page);
-  await panel.getByRole('status').filter({hasText:'Kept “Octave shimmer”.'}).waitFor();
+  await panel.getByRole('status').filter({hasText:'Kept “Octave shimmer”.'}).waitFor();});
   assert.equal((await soundEdits()).length,before+1);plays((await lastSound()).effects,'shimmer');
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001&&!s.error);await button('Stop');
   await button('Undo');plays((await lastSound()).effects,'metal-rhythm');

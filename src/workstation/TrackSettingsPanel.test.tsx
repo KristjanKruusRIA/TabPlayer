@@ -12,18 +12,25 @@ import { trackColorHex } from '../track-color';
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-tuning-library',version:1,entries:[]}))}));
 afterEach(cleanup);
 const standard=[64,59,55,50,45,40];
-it('all 128 programs are selectable and existing track settings dispatch exact payload',()=>{
+it('all 128 programs are selectable, and name, short name and instrument each record one edit when left, none when unchanged',()=>{
   const score=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}).score,onEdit=vi.fn();
   render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
-  const select=screen.getByLabelText('Track MIDI instrument');expect(select.querySelectorAll('option')).toHaveLength(128);
-  fireEvent.change(screen.getByLabelText('Track name'),{target:{value:'Lead'}});fireEvent.change(screen.getByLabelText('Track short name'),{target:{value:'Ld'}});fireEvent.change(select,{target:{value:'127'}});fireEvent.click(screen.getByRole('button',{name:'Apply instrument settings'}));
-  expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackInfo',track:0,name:'Lead',shortName:'Ld',program:127});
+  const track=score.tracks[0],select=screen.getByLabelText('Track MIDI instrument');expect(select.querySelectorAll('option')).toHaveLength(128);
+  const name=screen.getByLabelText('Track name'),short=screen.getByLabelText('Track short name');
+  fireEvent.focus(name);fireEvent.blur(name);fireEvent.blur(short);expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.change(name,{target:{value:'Lead'}});expect(onEdit).not.toHaveBeenCalled();fireEvent.blur(name);
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackInfo',track:0,name:'Lead',shortName:track.shortName,program:track.playbackInfo.program});
+  fireEvent.change(short,{target:{value:'Ld'}});fireEvent.keyDown(short,{key:'Enter'});
+  expect(onEdit).toHaveBeenCalledTimes(2);expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackInfo',track:0,name:track.name,shortName:'Ld',program:track.playbackInfo.program});
+  fireEvent.change(select,{target:{value:'127'}});
+  expect(onEdit).toHaveBeenCalledTimes(3);expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackInfo',track:0,name:track.name,shortName:track.shortName,program:127});
+  fireEvent.change(select,{target:{value:String(track.playbackInfo.program)}});expect(onEdit).toHaveBeenCalledTimes(3);
 });
 it('keeps full long track names accessible and selected/remove/notation command payloads intact',()=>{
   const name='Lead guitar with a deliberately long descriptive name for the live arrangement';
   const added=previewEdit(blankProject(),{type:'addTrack',name,tuning:[64,59,55,50,45,40],program:24}),onEdit=vi.fn();
   render(<TrackSettingsPanel score={added.score} selected={1} busy={false} onEdit={onEdit}/>);
-  expect(screen.getByRole('heading',{name})).toHaveAttribute('title',name);expect(screen.getByLabelText('Track name')).toHaveValue(name);
+  expect(screen.getByLabelText('Track name')).toHaveValue(name);
   fireEvent.click(screen.getByRole('button',{name:'Remove track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'removeTrack',track:1});
   // The last of two tracks can move up only.
   expect(screen.getByRole('button',{name:'Move track down'})).toBeDisabled();
@@ -33,11 +40,12 @@ it('keeps full long track names accessible and selected/remove/notation command 
   fireEvent.click(screen.getByRole('button',{name:'Move track down'}));expect(onEdit).toHaveBeenLastCalledWith({type:'moveTrack',track:0,to:1});
   fireEvent.click(screen.getByRole('button',{name:'Duplicate track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'duplicateTrack',track:0});
   const color=screen.getByLabelText('Track color');expect(color).toHaveValue(trackColorHex(added.score.tracks[0].color));
-  fireEvent.change(color,{target:{value:'#ff8800'}});fireEvent.click(screen.getByRole('button',{name:'Apply track color'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackColor',track:0,color:'#ff8800'});
+  const before=onEdit.mock.calls.length;fireEvent.change(color,{target:{value:trackColorHex(added.score.tracks[0].color)}});expect(onEdit).toHaveBeenCalledTimes(before);
+  fireEvent.change(color,{target:{value:'#ff8800'}});expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackColor',track:0,color:'#ff8800'});
   // Another track shows its own color, and an unchanged color can't be applied as an empty Undo step.
   const recolored=previewEdit(added.project,{type:'setTrackColor',track:1,color:'#00ff00'}).score;cleanup();render(<TrackSettingsPanel score={recolored} selected={1} busy={false} onEdit={onEdit}/>);
-  expect(screen.getByLabelText('Track color')).toHaveValue('#00ff00');expect(screen.getByRole('button',{name:'Apply track color'})).toBeDisabled();
-  fireEvent.change(screen.getByLabelText('New notation track name'),{target:{value:'Piano'}});fireEvent.change(screen.getByLabelText('New notation track program'),{target:{value:'5'}});
+  expect(screen.getByLabelText('Track color')).toHaveValue('#00ff00');const calls=onEdit.mock.calls.length;fireEvent.change(screen.getByLabelText('Track color'),{target:{value:'#00ff00'}});expect(onEdit).toHaveBeenCalledTimes(calls);
+  fireEvent.click(screen.getByText('Add instrument'));fireEvent.change(screen.getByLabelText('New notation track name'),{target:{value:'Piano'}});fireEvent.change(screen.getByLabelText('New notation track program'),{target:{value:'5'}});
   fireEvent.click(screen.getByRole('button',{name:'Add pitched track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPitchedTrack',name:'Piano',program:5});
   fireEvent.click(screen.getByRole('button',{name:'Add percussion track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionTrack',name:'Piano',program:5});
 });
@@ -189,7 +197,8 @@ it('disables removal for the sole track, and the actions keep focus and refuse p
   expect(screen.getByRole('button',{name:'Remove track'})).toBeDisabled();
   const dup=screen.getByRole('button',{name:'Duplicate track'});dup.focus();view.rerender(<TrackSettingsPanel score={score} selected={0} busy onEdit={onEdit}/>);
   expect(dup).toHaveFocus();expect(dup).not.toBeDisabled();expect(dup).toHaveAttribute('aria-disabled','true');fireEvent.click(dup);expect(onEdit).not.toHaveBeenCalled();
-  for(const name of ['Apply instrument settings','Add track','Add pitched track','Add percussion track'])expect(screen.getByRole('button',{name})).toBeDisabled();
+  fireEvent.click(screen.getByText('Add instrument'));for(const name of ['Add track','Add pitched track','Add percussion track']){fireEvent.click(screen.getByRole('button',{name}));expect(screen.getByRole('button',{name}).closest('[aria-disabled="true"],fieldset:disabled')).not.toBeNull();}
+  expect(onEdit).not.toHaveBeenCalled();
 });
 it('Add instrument uses the same row and dialog: Use tuning fills only the new track draft, and Cancel leaves it',()=>{
   const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
@@ -271,4 +280,98 @@ it('a refused edit keeps the dialog and its draft, says why in the dialog itself
 it('says the tuning was not applied when a refused edit gave no message',async()=>{
   render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={()=>Promise.resolve(false)}/>);fireEvent.click(edit());fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(inDialog('Keep fingering'));
   await waitFor(()=>expect(within(dialog()).getByRole('alert')).toHaveTextContent('The tuning was not applied.'));
+});
+
+// ---- Musical notation: what the old Selection tab's Staff panel did, from the Track tab and the Tuning dialog ----
+const saved=()=>({tuning:standard,capo:0,transposition:0,displayTransposition:0,clef:0,showTab:true,showNotation:true,tuningName:'Standard E'});
+const lastSettings=(onEdit:ReturnType<typeof vi.fn>)=>onEdit.mock.calls.at(-1)![0];
+it('two notation toggles record the staff settings with the other fields as they are, and are pressed to show what is on',()=>{
+  const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  const tab=screen.getByRole('button',{name:'Show tablature'}),notation=screen.getByRole('button',{name:'Show notation'});
+  expect(tab).toHaveAttribute('aria-pressed','true');expect(notation).toHaveAttribute('aria-pressed','true');
+  fireEvent.click(tab);
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(lastSettings(onEdit)).toEqual({type:'setStaffSettings',track:0,staff:0,settings:expect.objectContaining({tuning:standard,capo:0,transposition:0,displayTransposition:0,showTab:false,showNotation:true,tuningName:expect.any(String)})});
+  fireEvent.click(notation);expect(lastSettings(onEdit).settings).toMatchObject({showTab:true,showNotation:false});
+});
+it('sounding and display transposition and the clef apply when left or chosen, and the values the staff has record nothing',()=>{
+  const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  const sounding=screen.getByLabelText('Sounding transposition'),display=screen.getByLabelText('Display transposition');
+  fireEvent.blur(sounding);fireEvent.blur(display);expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.change(sounding,{target:{value:'12'}});expect(onEdit).not.toHaveBeenCalled();fireEvent.blur(sounding);
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(lastSettings(onEdit).settings).toMatchObject({transposition:12,displayTransposition:0});
+  fireEvent.change(display,{target:{value:'-12'}});fireEvent.keyDown(display,{key:'Enter'});expect(lastSettings(onEdit).settings).toMatchObject({displayTransposition:-12});
+  const clef=screen.getByLabelText('Staff clef') as HTMLSelectElement,current=clef.value;fireEvent.change(clef,{target:{value:'3'}});expect(lastSettings(onEdit).settings).toMatchObject({clef:3});
+  const calls=onEdit.mock.calls.length;fireEvent.change(clef,{target:{value:current}});expect(onEdit.mock.calls.length).toBeLessThanOrEqual(calls+1);
+});
+it('a pitched staff has no tab toggle, and its transposition applies without a tuning',()=>{
+  const score=previewEdit(blankProject(),{type:'addPitchedTrack',name:'Piano',program:0}).score,onEdit=vi.fn();
+  render(<TrackSettingsPanel score={score} selected={1} busy={false} onEdit={onEdit}/>);
+  expect(screen.getByRole('button',{name:'Show tablature'})).toBeDisabled();expect(screen.getByRole('button',{name:'Show notation'})).toHaveAttribute('aria-pressed','true');
+  fireEvent.change(screen.getByLabelText('Sounding transposition'),{target:{value:'12'}});fireEvent.blur(screen.getByLabelText('Sounding transposition'));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',track:1,settings:expect.objectContaining({tuning:[],transposition:12,showTab:false,showNotation:true})}));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'No tuning'})).toBeDisabled();
+});
+it('Add staff records addStaff with the staff present settings and Remove staff records removeStaff for the staff under the cursor',()=>{
+  const onEdit=vi.fn();const view=render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  expect(screen.getByRole('button',{name:'Remove staff'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'Add staff'}));expect(lastSettings(onEdit)).toEqual({type:'addStaff',track:0,settings:expect.objectContaining({tuning:standard,capo:0,showTab:true})});expect(lastSettings(onEdit).settings).not.toHaveProperty('keepPitch');
+  const two=previewEdit(blankProject(),{type:'addStaff',track:0,settings:saved()}).score;
+  view.rerender(<TrackSettingsPanel score={two} selected={0} staff={1} busy={false} onEdit={onEdit}/>);
+  expect(screen.getByText('Staff 2')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Remove staff'}));expect(lastSettings(onEdit)).toEqual({type:'removeStaff',track:0,staff:1});
+});
+it('the Tuning dialog Capo section: a capo alone is one setStaffSettings with the tuning name kept, and the current capo records nothing',()=>{
+  const score=rest(),onEdit=vi.fn();score.tracks[0].staves[0].stringTuning.name='Imported';
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());expect(within(dialog()).getByLabelText('Capo')).toHaveValue(0);
+  fireEvent.click(inDialog('Keep fingering'));expect(onEdit).not.toHaveBeenCalled();expect(screen.queryByRole('dialog')).toBeNull();
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'2'}});expect(onEdit).not.toHaveBeenCalled();fireEvent.click(inDialog('Keep fingering'));
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(lastSettings(onEdit)).toEqual({type:'setStaffSettings',track:0,staff:0,settings:expect.objectContaining({capo:2,tuning:standard,tuningName:'Imported'})});
+  expect(lastSettings(onEdit).settings).not.toHaveProperty('partialCapo');expect(lastSettings(onEdit).settings).not.toHaveProperty('droneFret');expect(lastSettings(onEdit).settings).not.toHaveProperty('keepPitch');
+});
+it('Enter in a partial capo or drone field settles that field and does not submit the Tuning dialog',()=>{
+  const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());const fret=within(dialog()).getByLabelText('Partial capo fret');
+  fireEvent.change(fret,{target:{value:'3'}});expect(fireEvent.keyDown(fret,{key:'Enter'})).toBe(false);
+  expect(onEdit).not.toHaveBeenCalled();expect(dialog()).toBeInTheDocument();
+});
+it('Cancel discards a capo draft',()=>{
+  const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'5'}});fireEvent.click(inDialog('Cancel'));
+  expect(onEdit).not.toHaveBeenCalled();fireEvent.click(edit());expect(within(dialog()).getByLabelText('Capo')).toHaveValue(0);
+});
+it('a capo and a new tuning are one edit on a one-staff track, with Keep pitch carried, and the draft tuning name sent',()=>{
+  const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'3'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(inDialog('Keep pitch'));
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(lastSettings(onEdit)).toEqual({type:'setStaffSettings',track:0,staff:0,settings:expect.objectContaining({capo:3,tuning:[64,59,55,50,45,38],tuningName:'',keepPitch:true})});
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'4'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(inDialog('Keep fingering'));
+  expect(lastSettings(onEdit).settings).toMatchObject({capo:4,tuning:[64,59,55,50,45,38]});expect(lastSettings(onEdit).settings).not.toHaveProperty('keepPitch');
+});
+it('a capo with a string count change is refused in the dialog with its reason and no edit; with several staves a capo and a retune of the same count are one edit on the staff',async()=>{
+  const onEdit=vi.fn();const view=render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'3'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});fireEvent.click(inDialog('Change string count'));
+  expect(onEdit).not.toHaveBeenCalled();expect(await within(dialog()).findByRole('alert')).toHaveTextContent('one at a time');
+  fireEvent.click(inDialog('Cancel'));
+  const two=previewEdit(blankProject(),{type:'addStaff',track:0,settings:saved()}).score;
+  view.rerender(<TrackSettingsPanel score={two} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'3'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(inDialog('Keep fingering'));
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(lastSettings(onEdit)).toEqual({type:'setStaffSettings',track:0,staff:0,settings:expect.objectContaining({capo:3,tuning:[64,59,55,50,45,38]})});
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'3'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});fireEvent.click(inDialog('Change string count'));
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(await within(dialog()).findByRole('alert')).toHaveTextContent('one at a time');
+});
+it('the capo goes on the staff under the cursor of a track with two staves',()=>{
+  const onEdit=vi.fn(),two=previewEdit(blankProject(),{type:'addStaff',track:0,settings:saved()}).score;
+  render(<TrackSettingsPanel score={two} selected={0} staff={1} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'2'}});fireEvent.click(inDialog('Keep fingering'));
+  expect(lastSettings(onEdit)).toEqual({type:'setStaffSettings',track:0,staff:1,settings:expect.objectContaining({capo:2})});
+});
+it('an invalid capo is refused in the dialog, which stays open',()=>{
+  const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'1.5'}});fireEvent.submit(notes().closest('form')!);
+  expect(onEdit).not.toHaveBeenCalled();expect(within(dialog()).getByRole('alert')).toHaveTextContent('whole fret');
+});
+it('the notation toggles and More fields keep focus and refuse the change while busy',()=>{
+  const onEdit=vi.fn(),score=rest();const view=render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
+  const tab=screen.getByRole('button',{name:'Show tablature'});tab.focus();view.rerender(<TrackSettingsPanel score={score} selected={0} busy onEdit={onEdit}/>);
+  expect(tab).toHaveFocus();expect(tab).not.toBeDisabled();expect(tab).toHaveAttribute('aria-disabled','true');fireEvent.click(tab);expect(onEdit).not.toHaveBeenCalled();
+  const sounding=screen.getByLabelText('Sounding transposition');fireEvent.change(sounding,{target:{value:'5'}});fireEvent.blur(sounding);expect(onEdit).not.toHaveBeenCalled();
 });

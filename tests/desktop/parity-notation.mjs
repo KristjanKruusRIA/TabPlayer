@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,propertiesSection,moveCursor,setFret} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -17,19 +17,20 @@ try {
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.equal(await page.getByRole('alert').count(),0,await page.getByRole('alert').allTextContents());};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const change=(label,value)=>page.getByLabel(label,{exact:true}).fill(String(value));
-  const details=label=>page.locator('summary').filter({hasText:label}).first().evaluate(node=>{node.parentElement.open=true;});
-  for(let beat=1;beat<=4;beat++){await change('Beat',beat);await change('Fret',beat);await button('Set note');}
-  await change('Beat',1);await details('Lyrics');await button('Add line');await change('Line 1 text',raw);await button('Apply lyrics');
+  // The Selection tab's sections are in the Properties dialog; a button clicked in it closes it, so each group of controls reopens its section first.
+  const details=label=>propertiesSection(page,label);
+  for(let beat=1;beat<=4;beat++){await moveCursor(page,{beat});await setFret(page,beat);await idle();}
+  await moveCursor(page,{beat:1});await details('Lyrics');await page.getByRole('dialog',{name:'Properties',exact:true}).getByRole('button',{name:'Add line',exact:true}).click();await change('Line 1 text',raw);await button('Apply lyrics');
   await details('Beat notation');await page.getByRole('combobox',{name:/^Stem direction/}).selectOption('inverted');await page.getByRole('checkbox',{name:'Show timer',exact:true}).check();await button('Apply beat gestures');
-  await page.getByLabel('Range end beat',{exact:true}).fill('4');await page.getByRole('combobox',{name:/^Octave region/}).selectOption('1');await button('Apply octave region');
-  await page.getByLabel('Range end beat',{exact:true}).fill('4');await page.getByRole('combobox',{name:/^Hairpin/}).selectOption('1');await page.getByRole('combobox',{name:/^Target dynamics/}).selectOption('7');await button('Apply hairpin');
-  await page.getByRole('combobox',{name:/^Global fermata/}).selectOption('2');await change('Stored length','1.5');await button('Apply global fermata');
+  await details('Beat notation');await page.getByLabel('Range end beat',{exact:true}).fill('4');await page.getByRole('combobox',{name:/^Octave region/}).selectOption('1');await button('Apply octave region');
+  await details('Beat notation');await page.getByLabel('Range end beat',{exact:true}).fill('4');await page.getByRole('combobox',{name:/^Hairpin/}).selectOption('1');await page.getByRole('combobox',{name:/^Target dynamics/}).selectOption('7');await button('Apply hairpin');
+  await details('Beat notation');await page.getByRole('combobox',{name:/^Global fermata/}).selectOption('2');await change('Stored length','1.5');await button('Apply global fermata');
   await details('Bar gestures');await page.getByRole('combobox',{name:/^Clef octave/}).selectOption('1');await button('Apply clef octave');
-  await page.getByLabel('Common / cut time',{exact:true}).check();await page.getByLabel('Double bar',{exact:true}).check();await button('Apply measure gestures');
+  await details('Bar gestures');await page.getByLabel('Common / cut time',{exact:true}).check();await page.getByLabel('Double bar',{exact:true}).check();await button('Apply measure gestures');
   // GP keeps common/cut time as one score-wide style, so a mix of the two is written as the choice most bars make and warned about: give the other bars the same choice so every bar stays common.
-  for(const measure of [2,3,4]){await change('Measure',measure);await page.getByLabel('Common / cut time',{exact:true}).check();await button('Apply measure gestures');}
-  await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-notation.png')});
-  await change('Measure',2);await details('Bar gestures');await page.getByRole('combobox',{name:/^Simile/}).selectOption('single');await button('Apply simile');
+  for(const measure of [2,3,4]){await moveCursor(page,{bar:measure});await details('Bar gestures');await page.getByLabel('Common / cut time',{exact:true}).check();await button('Apply measure gestures');}
+  await page.locator('.workstation-inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-notation.png')});
+  await moveCursor(page,{bar:2});await details('Bar gestures');await page.getByRole('combobox',{name:/^Simile/}).selectOption('single');await button('Apply simile');
   await button('Save');await button('Export GP');
   const xml=strFromU8(unzipSync(readFileSync(exported))['Content/score.gpif']);
   const exportedFields=await page.evaluate(xml=>{

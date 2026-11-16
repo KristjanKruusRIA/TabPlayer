@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,revealInspectorTab,revealPlaybackControls,hidePlaybackControls} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,revealInspectorTab,revealPlaybackControls,hidePlaybackControls,openScoreStyle,closeScoreStyle,moveCursor} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
@@ -103,7 +103,8 @@ try{
   await closeLibrary();
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const details=name=>page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});
+  // Engraving, page layout and the design sections are in the Score style dialog (Song tab); it opens at the group that holds the section and stays open until a button or another pane is used.
+  const details=async name=>{await openScoreStyle(page,/^Design/.test(name)?'layout':/^(Page layout|Default view)$/.test(name)?'page':'style');await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
   const field=name=>page.getByLabel(name,{exact:true});
   const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
@@ -156,6 +157,7 @@ try{
   await details('Engraving');await details('Page layout');
   const spacingText=await field('System spacing (%)').inputValue(),systemSpacing=spacingText===''?1:Number(spacingText)/100,pageScale=Number(await field('Scale (%)').inputValue())/100;
   assert.ok(Number.isFinite(systemSpacing)&&systemSpacing>0&&Number.isFinite(pageScale)&&pageScale>0,'system spacing and page scale are readable');
+  await closeScoreStyle(page);
   const exportUnit=STANDARD_GAP*systemSpacing*pageScale;
   const baseScreen=await settle('screen','baseline',m=>m.systems.every(system=>!system.composed));
   const baseExport=await exportPdf('baseline');
@@ -269,7 +271,7 @@ try{
     return `music font ${screenMark.basePx}px on screen and ${exportMark.basePx}px in the export pages; export brace ${round(braceHeight(exportMark))} px against ${round(braceHeight(screenMark))} px on screen`;
   });
   await check('choosing the current group kind records nothing',async()=>{
-    const before=await edits();await groupKind().selectOption('brace');await idle();assert.equal(await edits(),before);
+    await open();const before=await edits();await groupKind().selectOption('brace');await idle();assert.equal(await edits(),before);
   });
   record('brace',afterBrace.project,screenBrace,exportBrace);
 
@@ -302,7 +304,7 @@ try{
     return `smallest clearance ${round(Math.min(...gaps))} px, largest ${round(Math.max(...gaps))} px`;
   });
   await check('pressing the names button again records nothing',async()=>{
-    const before=await edits();assert.equal(await namesButton().getAttribute('aria-disabled'),'true');assert.equal(await namesButton().getAttribute('disabled'),null);
+    await open();const before=await edits();assert.equal(await namesButton().getAttribute('aria-disabled'),'true');assert.equal(await namesButton().getAttribute('disabled'),null);
     await namesButton().evaluate(node=>node.click());await idle();assert.equal(await edits(),before);
   });
   record('names',afterNames.project,screenNames,exportNames);
@@ -377,7 +379,8 @@ try{
   record('staff gap 200 again',afterGapBack.project,screenGapBack,null);
 
   // ---- clicks on the moved staves ----
-  const documentTrack=async()=>(await page.locator('[aria-label="Editing location"]').innerText()).trim().replace(/\s+/g,' ');
+  // The cursor's track (and staff), then its bar, beat, string and voice, from the status bar (the Selection tab's 'Editing location' card is gone).
+  const documentTrack=async()=>`${await page.locator('.statusbar-track').innerText()} ${await page.locator('.statusbar-position').innerText()}`.trim().replace(/\s+/g,' ');
   // Clicks the point (x, y) of system `system`, in that system's own SVG units (displayed y), after scrolling the score so the point is inside the visible host.
   const clickScore=async(system,x,y)=>{
     for(let attempt=0;attempt<4;attempt++){
@@ -455,7 +458,7 @@ try{
 
   // ---- E5: a 200% system gap on the third system composes with the staff gap ----
   const selectBar=async bar=>{
-    await button('Edit');await field('Measure').fill(String(bar));await field('Measure').press('Tab');await idle();
+    await moveCursor(page,{bar});await idle();
     await button('Presentation');await details('Design: system gaps');
     const system=SYSTEMS.find(([first,last])=>bar>=first&&bar<=last);
     await page.getByRole('status').filter({hasText:'Selected system:'}).filter({hasText:`bars ${system[0]} to ${system[1]}.`}).waitFor({timeout:10000});

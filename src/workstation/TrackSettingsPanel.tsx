@@ -1,61 +1,222 @@
 import { useI18n } from '../i18n';
-import { useEffect, useState } from 'react';
-import type { model } from '@coderline/alphatab';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { model } from '@coderline/alphatab';
 import type { EditCommand } from '../project';
 import { midiPrograms } from '../midi-programs';
 import { formatTuning, parseTuning } from '../tuning';
 import { TuningRow } from '../tuning/TuningRow';
 import { TuningDialog, type TuningChoice } from '../tuning/TuningDialog';
-import { busyGuard } from '../ui/useBusyGuard';
-import { ArrowDownGlyph, ArrowUpGlyph, DuplicateGlyph, TrashGlyph } from '../shell/glyphs';
+import { busyGuard, busySelect } from '../ui/useBusyGuard';
+import { BusyFieldset } from '../ui/BusyFieldset';
+import { CommitField } from '../ui/CommitField';
+import { CommitSelect } from '../ui/CommitSelect';
+import { ArrowDownGlyph, ArrowUpGlyph, DuplicateGlyph, ScoreGlyph, TrashGlyph } from '../shell/glyphs';
 import { trackIdentity } from '../engine';
 import type { TuningAudition } from '../audio/audition';
 import { NotationTrackControls } from '../editor/NonTabPanel';
+import { readStaffSettings, staffSettingsUnchanged } from '../editor/staff-settings';
+import { getBanjoDrone } from '../editor/banjo-drone';
+import { getPartialCapo, noPartialCapo } from '../editor/partial-capo';
 import { trackColorHex } from '../track-color';
 import './track-panels.css';
+import './inspector-compact.css';
 
-export function TrackSettingsPanel({score,selected,busy,locked=false,refusal=null,onEdit,onAudition}: {
-  score:model.Score;selected:number;busy:boolean;/** Finalized: edits are disabled, but tuning audition is not. */locked?:boolean;/** The app's message for the edit it last refused, shown in the Tuning dialog. */refusal?:string|null;onEdit:(command:EditCommand)=>unknown;onAudition?:TuningAudition;
-}):React.JSX.Element {
+/** The track's colour as a swatch. One change is recorded when the picker settles (the browser's own `change`), not for every colour it passes through. */
+function ColorSwatch({ label, value, busy, locked, onCommit }: { label: string; value: string; busy: boolean; locked: boolean; onCommit: (color: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  const latest = useRef({ value, busy, locked, onCommit });
+  latest.current = { value, busy, locked, onCommit };
+  // React's onChange follows every `input` event of the colour picker; the native `change` is the settled choice.
+  useEffect(() => {
+    const node = input.current;
+    if (!node) return;
+    const settle = () => {
+      const { value: saved, busy: working, locked: finalized, onCommit: commit } = latest.current;
+      if (working || finalized) { node.value = saved; return; }
+      if (node.value.toLowerCase() !== saved.toLowerCase()) commit(node.value);
+    };
+    node.addEventListener('change', settle);
+    return () => node.removeEventListener('change', settle);
+  }, []);
+  useEffect(() => { if (input.current) input.current.value = value; }, [value]);
+  return <input ref={input} className="track-color-input" type="color" defaultValue={value} aria-label={label} title={label} disabled={locked} />;
+}
+
+/** Colour, name and short name in one row; the MIDI instrument behind More. Each field records one change when it is left. */
+function TrackInfoRow({ score, selected, busy, locked, onEdit }: { score: model.Score; selected: number; busy: boolean; locked: boolean; onEdit: (command: EditCommand) => unknown }) {
   const { t } = useI18n();
-  const current=score.tracks[selected];const pitches=formatTuning(current.staves[0].tuning);
-  const savedName=current.staves[0].stringTuning.name;
-  // The dialog belongs to the track it was opened for, by identity: moving or removing tracks while it is open must not retarget it.
-  const [tuningFor,setTuningFor]=useState<string|null>(null);
-  const dialogIndex=tuningFor===null?-1:score.tracks.findIndex(track=>trackIdentity(track)===tuningFor),dialogTrack=dialogIndex>=0?score.tracks[dialogIndex]:null;
-  useEffect(()=>{if(tuningFor!==null&&dialogIndex<0)setTuningFor(null);},[tuningFor,dialogIndex]);
-  const [trackName,setTrackName]=useState(current.name),[shortName,setShortName]=useState(current.shortName),[program,setProgram]=useState(current.playbackInfo.program);
-  const [color,setColor]=useState(trackColorHex(current.color));
-  const strings=current.staves[0].tuning.length;
-  useEffect(()=>{setTrackName(current.name);setShortName(current.shortName);setProgram(current.playbackInfo.program);setColor(trackColorHex(current.color));},[score,current]);
-  const [name,setName]=useState('Bass');const [instrument,setInstrument]=useState(33);const [newTuning,setNewTuning]=useState('G2 D2 A1 E1');
-  const [newTuningName,setNewTuningName]=useState(''),[newTuningOpen,setNewTuningOpen]=useState(false);
-  const applyNewTrack=()=>{if(locked)return;onEdit({type:'addTrack',name,tuning:parseTuning(newTuning),program:instrument,tuningName:newTuningName});};
-  /** Records nothing when the tuning, its name and the string count are the ones the track already has. Targets the track the dialog was opened for, and does nothing if that track is gone. */
-  const applyTuning=({pitches:notes,name:tuningName,keepPitch,keep}:TuningChoice)=>{if(locked||!dialogTrack||dialogIndex<0)return;const count=dialogTrack.staves[0].tuning.length;if(notes.length===count&&dialogTrack.staves.every(staff=>staff.tuning.every((pitch,index)=>pitch===notes[index])&&staff.stringTuning.name===tuningName))return;return onEdit(notes.length!==count?{type:'setStringCount',track:dialogIndex,tuning:notes,keep,tuningName,crossVoice:true}:{type:'setTuning',track:dialogIndex,tuning:notes,tuningName,...(keepPitch?{keepPitch:true}:{})});};
-  const tuningUnavailable=current.isPercussion||!strings;
-  const audition=(list:number[],strum:boolean)=>onAudition?.({trackId:trackIdentity(current)},list,strum);
-  const action=(label:string,glyph:React.JSX.Element,disabled:boolean,onClick:()=>void,className?:string)=><button type="button" title={label} aria-label={label} {...busyGuard({busy,disabled,className,onClick})}>{glyph}</button>;
-  return <aside className="track-settings" aria-label={t('track_settings.aria_label')}><h2 title={current.name}>{current.name || `Track ${selected+1}`}</h2>
-    <div className="track-actions" role="group" aria-label={t('track_settings.track_actions')}>
-      {action(t('track_settings.move_track_up'),<ArrowUpGlyph/>,locked||selected===0,()=>onEdit({type:'moveTrack',track:selected,to:selected-1}))}
-      {action(t('track_settings.move_track_down'),<ArrowDownGlyph/>,locked||selected===score.tracks.length-1,()=>onEdit({type:'moveTrack',track:selected,to:selected+1}))}
-      {action(t('track_settings.duplicate_track'),<DuplicateGlyph/>,locked,()=>onEdit({type:'duplicateTrack',track:selected}))}
-      <span className="track-actions-gap" aria-hidden="true"/>
-      {action(t('track_settings.remove_track'),<TrashGlyph/>,locked||score.tracks.length===1,()=>onEdit({type:'removeTrack',track:selected}),'track-remove')}
+  const current = score.tracks[selected];
+  const program = current.playbackInfo.program;
+  const id = trackIdentity(current);
+  /** Records the change for the track with identity `owner`: a name typed for one track is still that track's when the selection has moved on. */
+  const info = (change: { name?: string; shortName?: string; program?: number }, owner = id) => {
+    const index = score.tracks.findIndex(track => trackIdentity(track) === owner);
+    if (locked || index < 0) return false;
+    const track = score.tracks[index], saved = track.playbackInfo.program;
+    if ((change.name ?? track.name) === track.name && (change.shortName ?? track.shortName) === track.shortName && (change.program ?? saved) === saved) return false;
+    return onEdit({ type: 'setTrackInfo', track: index, name: change.name ?? track.name, shortName: change.shortName ?? track.shortName, program: change.program ?? saved });
+  };
+  return <BusyFieldset busy={busy} className="track-info">
+    <div className="track-info-row">
+      <ColorSwatch label={t('track_settings.track_color')} value={trackColorHex(current.color)} busy={busy} locked={locked} onCommit={color => { if (!locked) void onEdit({ type: 'setTrackColor', track: selected, color }); }} />
+      <CommitField hideLabel label={t('track_settings.track_name')} value={current.name} target={id} busy={busy} disabled={locked} onCommit={(name, owner) => info({ name }, owner)} />
+      <CommitField hideLabel className="track-short-name" label={t('track_settings.track_short_name')} value={current.shortName} target={id} busy={busy} disabled={locked} onCommit={(shortName, owner) => info({ shortName }, owner)} />
     </div>
-    <fieldset disabled={busy}>
-      <details><summary>{t('track_settings.selected_instrument')}</summary><label>{t('track_settings.track_name')}<input value={trackName} onChange={e=>setTrackName(e.target.value)}/></label><label>{t('track_settings.track_short_name')}<input value={shortName} onChange={e=>setShortName(e.target.value)}/></label>{!current.isPercussion&&<label>{t('track_settings.track_midi_instrument')}<select value={program} onChange={e=>setProgram(Number(e.target.value))}>{midiPrograms.map((name,index)=><option key={index} value={index}>{index+1}. {name}</option>)}</select></label>}<button disabled={locked} onClick={()=>onEdit({type:'setTrackInfo',track:selected,name:trackName,shortName,program})}>{t('track_settings.apply_instrument_settings')}</button><label>{t('track_settings.track_color')}<input type="color" value={color} onChange={e=>setColor(e.target.value)}/></label><button disabled={locked||color===trackColorHex(current.color)} onClick={()=>onEdit({type:'setTrackColor',track:selected,color})}>{t('track_settings.apply_track_color')}</button></details>
-    </fieldset>
-    <TuningRow label={t('track_settings.tuning_row')} notes={pitches} title={savedName?`${savedName}: ${pitches}`:pitches} unavailable={tuningUnavailable} busy={busy} locked={locked} onOpen={()=>setTuningFor(trackIdentity(current))} onPlay={onAudition&&(()=>audition([...current.staves[0].tuning],true))} playDisabled={strings>12}/>
-    {dialogTrack&&<TuningDialog pitches={dialogTrack.staves[0].tuning} name={dialogTrack.staves[0].stringTuning.name} busy={busy} locked={locked} refusal={refusal} onApply={applyTuning} onClose={()=>setTuningFor(null)} onAudition={onAudition&&((list,strum)=>onAudition({trackId:trackIdentity(dialogTrack)},list,strum))}/>}
-    <fieldset disabled={busy}>
-      <details className="track-add"><summary>{t('track_settings.add_instrument')}</summary><label>{t('track_settings.new_track_name')}<input value={name} onChange={e=>setName(e.target.value)}/></label>
-        <label>{t('track_settings.midi_instrument')}<select value={instrument} onChange={e=>setInstrument(Number(e.target.value))}>{midiPrograms.map((label,value)=><option key={value} value={value}>{value+1}. {label}</option>)}</select></label>
-        <TuningRow label={t('track_settings.tuning_row')} editKey="track_settings.new_track_tuning_edit" notes={newTuning} unavailable={false} busy={busy} onOpen={()=>setNewTuningOpen(true)} onPlay={onAudition&&(()=>onAudition({program:instrument},parseTuning(newTuning),true))}/>
-        {newTuningOpen&&<TuningDialog mode="draft" pitches={parseTuning(newTuning)} name={newTuningName} onApply={choice=>{setNewTuning(formatTuning(choice.pitches));setNewTuningName(choice.name);}} onClose={()=>setNewTuningOpen(false)} onAudition={onAudition&&((list,strum)=>onAudition({program:instrument},list,strum))}/>}
-        <button disabled={locked} onClick={applyNewTrack}>{t('track_settings.add_track')}</button>
+    {!current.isPercussion && <details className="inspector-more">
+      <summary>{t('inspector.more')}</summary>
+      <label>{t('track_settings.track_midi_instrument')}<CommitSelect value={program} target={id} busy={busy} disabled={locked} {...busySelect(busy)} onCommit={chosen => (busy ? false : info({ program: Number(chosen) }))}>{midiPrograms.map((name, index) => <option key={index} value={index}>{index + 1}. {name}</option>)}</CommitSelect></label>
+    </details>}
+  </BusyFieldset>;
+}
+
+/** Tab and standard notation as two toggles, the tuning as one row that opens the Tuning dialog (with its Capo section), and the rest of the staff's settings behind More. */
+function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, refusal, onEdit, onAudition, onSelectStaff }: {
+  score: model.Score; selected: number; staffIndex: number; barIndex: number; busy: boolean; locked: boolean; refusal: string | null; onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition; onSelectStaff?: (staff: number) => void;
+}) {
+  const { t } = useI18n();
+  const current = score.tracks[selected];
+  const staffAt = Math.min(staffIndex, current.staves.length - 1), staff = current.staves[staffAt];
+  const clef = staff.bars[barIndex]?.clef ?? staff.bars[0]?.clef ?? model.Clef.G2;
+  // A track with several staves is tuned one staff at a time (the selected one); a track with one staff is tuned as a whole, as before.
+  const several = current.staves.length > 1, tuned = several ? staff : current.staves[0];
+  const pitches = formatTuning(tuned.tuning), savedName = tuned.stringTuning.name;
+  const strings = tuned.tuning.length, tuningUnavailable = current.isPercussion || !strings;
+  const editable = !staff.isPercussion && !!staff.tuning.length;
+  // The dialog belongs to the track it was opened for, by identity: moving or removing tracks while it is open must not retarget it.
+  const [tuningFor, setTuningFor] = useState<string | null>(null);
+  const [capoRefusal, setCapoRefusal] = useState<string | null>(null);
+  const dialogIndex = tuningFor === null ? -1 : score.tracks.findIndex(track => trackIdentity(track) === tuningFor), dialogTrack = dialogIndex >= 0 ? score.tracks[dialogIndex] : null;
+  useEffect(() => { if (tuningFor !== null && dialogIndex < 0) setTuningFor(null); }, [tuningFor, dialogIndex]);
+  const dialogStaffIndex = Math.min(staffIndex, (dialogTrack?.staves.length ?? 1) - 1), dialogSeveral = (dialogTrack?.staves.length ?? 1) > 1;
+  const dialogBase = dialogTrack ? dialogTrack.staves[dialogSeveral ? dialogStaffIndex : 0] : null;
+  /** The staff's settings as they are now, plus the changes; the same payload the old Apply staff settings button sent. */
+  const settingsFor = (target: model.Staff, targetClef: number, change: Partial<ReturnType<typeof readStaffSettings>> & { tuningName?: string; keepPitch?: boolean } = {}) => ({ ...readStaffSettings(target, targetClef), ...(!target.isPercussion && target.tuning.length ? { tuningName: target.stringTuning.name } : {}), ...change });
+  const staffKey = `${trackIdentity(current)}\u001f${staffAt}\u001f${current.staves.length}`;
+  /** The track and staff a key made by `staffKey` names, in the score as it is now. Null when the track is gone, the staff is gone, or the track's staves were added or removed since (the index may then name another staff). */
+  const resolve = (key: string) => {
+    const [owner, at, count] = key.split('\u001f'), track = score.tracks.findIndex(candidate => trackIdentity(candidate) === owner);
+    if (track < 0) return null;
+    const staves = score.tracks[track].staves, index = Number(at);
+    if (staves.length !== Number(count) || !(index < staves.length)) return null;
+    const found = staves[index];
+    return { track, index, staff: found, clef: found.bars[barIndex]?.clef ?? found.bars[0]?.clef ?? model.Clef.G2 };
+  };
+  /** Records the change on the staff `key` names, which a field that was typed in earlier passes back so the change reaches that staff even when the cursor has moved. */
+  const applySettings = (change: Partial<ReturnType<typeof readStaffSettings>>, key = staffKey) => {
+    if (locked || busy) return false;
+    const at = resolve(key);
+    if (!at) return false;
+    const next = settingsFor(at.staff, at.clef, change);
+    if (staffSettingsUnchanged(at.staff, at.clef, next)) return false;
+    return onEdit({ type: 'setStaffSettings', track: at.track, staff: at.index, settings: next });
+  };
+  /** Records nothing when the tuning, its name, the string count and the capo section are the ones the track already has. Targets the track the dialog was opened for, and does nothing if that track is gone. */
+  const applyTuning = ({ pitches: notes, name: tuningName, keepPitch, keep, capo }: TuningChoice) => {
+    if (locked || !dialogTrack || dialogIndex < 0) return;
+    setCapoRefusal(null);
+    const base = dialogBase!, count = base.tuning.length;
+    const sameTuning = notes.length === count && (dialogSeveral ? [base] : dialogTrack.staves).every(target => target.tuning.every((pitch, index) => pitch === notes[index]) && target.stringTuning.name === tuningName);
+    if (capo?.changed) {
+      // What the dialog opened with is the tuning and name of the staff it was opened for; a draft equal to that is no retune.
+      const retuned = notes.length !== count || notes.some((pitch, index) => pitch !== base.tuning[index]) || tuningName !== base.stringTuning.name;
+      const target = dialogTrack.staves[dialogStaffIndex], targetClef = target.bars[barIndex]?.clef ?? target.bars[0]?.clef ?? model.Clef.G2;
+      const settings = { ...settingsFor(target, targetClef, { capo: capo.capo }), ...(JSON.stringify(capo.partialCapo) !== JSON.stringify(getPartialCapo(target) ?? noPartialCapo) ? { partialCapo: capo.partialCapo } : {}), ...(capo.droneFret !== getBanjoDrone(target) ? { droneFret: capo.droneFret } : {}) };
+      if (retuned) {
+        // One gesture is one edit: a new string count is a change of the whole track, so it does not share an edit with a capo on one staff.
+        if (notes.length !== count) { setCapoRefusal(t('tuning_dialog.capo_separately')); return Promise.resolve(false); }
+        Object.assign(settings, { tuning: notes, tuningName, ...(keepPitch ? { keepPitch: true } : {}) });
+      }
+      return onEdit({ type: 'setStaffSettings', track: dialogIndex, staff: dialogStaffIndex, settings });
+    }
+    if (sameTuning) return;
+    if (notes.length !== count) return onEdit({ type: 'setStringCount', track: dialogIndex, tuning: notes, keep, tuningName, crossVoice: true });
+    // One staff of several: the same edit the old Staff tuning field recorded (the staff's settings with the new tuning, and Keep pitch when chosen).
+    if (dialogSeveral) {
+      const target = dialogTrack.staves[dialogStaffIndex], targetClef = target.bars[barIndex]?.clef ?? target.bars[0]?.clef ?? model.Clef.G2;
+      return onEdit({ type: 'setStaffSettings', track: dialogIndex, staff: dialogStaffIndex, settings: settingsFor(target, targetClef, { tuning: notes, tuningName, ...(keepPitch ? { keepPitch: true } : {}) }) });
+    }
+    return onEdit({ type: 'setTuning', track: dialogIndex, tuning: notes, tuningName, ...(keepPitch ? { keepPitch: true } : {}) });
+  };
+  const audition = (list: number[], strum: boolean) => onAudition?.({ trackId: trackIdentity(current) }, list, strum);
+  const toggle = (label: string, pressed: boolean, disabled: boolean, onClick: () => void, content: ReactNode) =>
+    <button type="button" aria-pressed={pressed} title={label} aria-label={label} {...busyGuard({ busy, disabled: disabled || locked, className: 'notation-toggle', onClick })}>{content}</button>;
+  return <div className="track-notation">
+    <div className="notation-toggles" role="group" aria-label={t('track_settings.notation_toggles')}>
+      <span className="notation-toggles-label">{t('track_settings.notation')}</span>
+      {toggle(t('editor.show_tablature'), staff.showTablature, !editable && !staff.isPercussion, () => applySettings({ showTab: !staff.showTablature }), <span className="notation-toggle-tab" aria-hidden="true">TAB</span>)}
+      {toggle(t('editor.show_notation'), staff.showStandardNotation, false, () => applySettings({ showNotation: !staff.showStandardNotation }), <ScoreGlyph />)}
+      {several && (onSelectStaff
+        ? <label className="notation-staff">{t('track_settings.staff_select')}<select value={staffAt} onChange={event => onSelectStaff(Number(event.target.value))}>{current.staves.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}</select></label>
+        : <span className="notation-staff">{t('editor.staff_n', { staff: staffAt + 1 })}</span>)}
+    </div>
+    <TuningRow label={t('track_settings.tuning_row')} notes={pitches} title={savedName ? `${savedName}: ${pitches}` : pitches} unavailable={tuningUnavailable} busy={busy} locked={locked} onOpen={() => { setCapoRefusal(null); setTuningFor(trackIdentity(current)); }} onPlay={onAudition && (() => audition([...tuned.tuning], true))} playDisabled={strings > 12} />
+    {dialogTrack && <TuningDialog pitches={dialogBase!.tuning} name={dialogBase!.stringTuning.name} staff={dialogTrack.staves[dialogStaffIndex]} staffCount={dialogTrack.staves.length} busy={busy} locked={locked} refusal={capoRefusal ?? refusal} onApply={applyTuning} onClose={() => setTuningFor(null)} onAudition={onAudition && ((list, strum) => onAudition({ trackId: trackIdentity(dialogTrack) }, list, strum))} />}
+    <BusyFieldset busy={busy} className="track-notation-more">
+      <details className="inspector-more">
+        <summary>{t('inspector.more')}</summary>
+        <label>{t('editor.staff_clef')}<CommitSelect value={clef} target={staffKey} busy={busy} disabled={locked} {...busySelect(busy)} onCommit={chosen => applySettings({ clef: Number(chosen) })}>{Object.entries(model.Clef).filter(([, value]) => typeof value === 'number').map(([name, value]) => <option key={name} value={value as number}>{name.replace(/([a-z])([A-Z])/g, '$1 $2')}</option>)}</CommitSelect></label>
+        <CommitField type="number" label={t('editor.sounding_transposition')} value={String(staff.transpositionPitch)} target={staffKey} busy={busy} disabled={locked} onCommit={(value, key) => applySettings({ transposition: Number(value) }, key)} />
+        <CommitField type="number" label={t('editor.display_transposition')} value={String(staff.displayTranspositionPitch)} target={staffKey} busy={busy} disabled={locked} onCommit={(value, key) => applySettings({ displayTransposition: Number(value) }, key)} />
+        <div className="track-staff-actions">
+          <button type="button" {...busyGuard({ busy, disabled: locked || staff.isPercussion, onClick: () => onEdit({ type: 'addStaff', track: selected, settings: settingsFor(staff, clef) }) })}>{t('editor.add_staff')}</button>
+          <button type="button" {...busyGuard({ busy, disabled: locked || current.staves.length === 1, onClick: () => onEdit({ type: 'removeStaff', track: selected, staff: staffAt }) })}>{t('editor.remove_staff')}</button>
+        </div>
       </details>
-    </fieldset>
-    <NotationTrackControls busy={busy||locked} onEdit={onEdit}/></aside>;
+    </BusyFieldset>
+  </div>;
+}
+
+/** The new-track form: name, instrument and tuning, then Add track; and the notation tracks (pitched, percussion). Folded away until asked for. */
+function AddInstrument({ busy, locked, onEdit, onAudition }: { busy: boolean; locked: boolean; onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition }) {
+  const { t } = useI18n();
+  const [name, setName] = useState('Bass'), [instrument, setInstrument] = useState(33), [newTuning, setNewTuning] = useState('G2 D2 A1 E1');
+  const [newTuningName, setNewTuningName] = useState(''), [newTuningOpen, setNewTuningOpen] = useState(false);
+  const applyNewTrack = () => { if (locked) return; onEdit({ type: 'addTrack', name, tuning: parseTuning(newTuning), program: instrument, tuningName: newTuningName }); };
+  return <BusyFieldset busy={busy}>
+    <details className="track-add"><summary>{t('track_settings.add_instrument')}</summary><label>{t('track_settings.new_track_name')}<input value={name} onChange={e => setName(e.target.value)} /></label>
+      <label>{t('track_settings.midi_instrument')}<select value={instrument} onChange={e => setInstrument(Number(e.target.value))}>{midiPrograms.map((label, value) => <option key={value} value={value}>{value + 1}. {label}</option>)}</select></label>
+      <TuningRow label={t('track_settings.tuning_row')} editKey="track_settings.new_track_tuning_edit" notes={newTuning} unavailable={false} busy={busy} onOpen={() => setNewTuningOpen(true)} onPlay={onAudition && (() => onAudition({ program: instrument }, parseTuning(newTuning), true))} />
+      {newTuningOpen && <TuningDialog mode="draft" pitches={parseTuning(newTuning)} name={newTuningName} onApply={choice => { setNewTuning(formatTuning(choice.pitches)); setNewTuningName(choice.name); }} onClose={() => setNewTuningOpen(false)} onAudition={onAudition && ((list, strum) => onAudition({ program: instrument }, list, strum))} />}
+      <button disabled={locked} onClick={applyNewTrack}>{t('track_settings.add_track')}</button>
+      <NotationTrackControls busy={busy || locked} onEdit={onEdit} />
+    </details>
+  </BusyFieldset>;
+}
+
+/**
+ * The Track tab in the manner of Guitar Pro's track inspector: the track actions and one Information row, Musical notation
+ * (two toggles, the tuning row, More), then whatever the app puts under Sounds, Interpretation and MIDI output, and Add instrument.
+ */
+export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, locked = false, refusal = null, onEdit, onAudition, onSelectStaff, sounds, interpretation, midi }: {
+  score: model.Score; selected: number;
+  /** The staff and bar under the cursor: the toggles, clef and transposition act on that staff. */
+  staff?: number; bar?: number;
+  busy: boolean; /** Finalized: edits are disabled, but tuning audition is not. */ locked?: boolean; /** The app's message for the edit it last refused, shown in the Tuning dialog. */ refusal?: string | null;
+  onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition;
+  /** Moves the cursor to another staff of the selected track; the staff selector (shown for a track with several staves) uses it. */
+  onSelectStaff?: (staff: number) => void;
+  sounds?: ReactNode; interpretation?: ReactNode; midi?: ReactNode;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const current = score.tracks[selected];
+  const action = (label: string, glyph: React.JSX.Element, disabled: boolean, onClick: () => void, className?: string) => <button type="button" title={label} aria-label={label} {...busyGuard({ busy, disabled, className, onClick })}>{glyph}</button>;
+  return <aside className="track-settings" aria-label={t('track_settings.aria_label')}>
+    <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3>
+      <div className="track-actions" role="group" aria-label={t('track_settings.track_actions')}>
+        {action(t('track_settings.move_track_up'), <ArrowUpGlyph />, locked || selected === 0, () => onEdit({ type: 'moveTrack', track: selected, to: selected - 1 }))}
+        {action(t('track_settings.move_track_down'), <ArrowDownGlyph />, locked || selected === score.tracks.length - 1, () => onEdit({ type: 'moveTrack', track: selected, to: selected + 1 }))}
+        {action(t('track_settings.duplicate_track'), <DuplicateGlyph />, locked, () => onEdit({ type: 'duplicateTrack', track: selected }))}
+        <span className="track-actions-gap" aria-hidden="true" />
+        {action(t('track_settings.remove_track'), <TrashGlyph />, locked || score.tracks.length === 1, () => onEdit({ type: 'removeTrack', track: selected }), 'track-remove')}
+      </div>
+      <TrackInfoRow score={score} selected={selected} busy={busy} locked={locked} onEdit={onEdit} />
+    </section>
+    <section className="inspector-section" aria-labelledby="inspector-track-notation"><h3 id="inspector-track-notation">{t('inspector.musical_notation')}</h3>
+      <NotationSection score={score} selected={selected} staffIndex={staff} barIndex={bar} busy={busy} locked={locked} refusal={refusal} onEdit={onEdit} onAudition={onAudition} onSelectStaff={onSelectStaff} />
+    </section>
+    {sounds && <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{sounds}</section>}
+    {interpretation}
+    {midi}
+    <section className="inspector-section inspector-add-section"><AddInstrument busy={busy} locked={locked} onEdit={onEdit} onAudition={onAudition} /></section>
+  </aside>;
 }

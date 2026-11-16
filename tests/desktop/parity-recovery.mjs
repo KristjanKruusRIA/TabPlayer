@@ -11,7 +11,7 @@ import {connect,directory,launch} from './harness.mjs';
 import {readDocumentRecord} from './document-context.mjs';
 import {sha256,backingSettings} from './document-tabs-fixture.mjs';
 import {buildRecoveryFixtures,buildRecoveryPerformanceFixture,writeRecoveryFixtures,assertRecoveryFixtureHashes,assertRecoveryNoteEvents} from './recovery-fixture.mjs';
-import {clickWorkspaceCommand,clickWorkstationButton,revealInspector,revealDock,waitForWorkspaceIdle} from './workstation-commands.mjs';
+import {clickWorkspaceCommand,clickWorkstationButton,revealInspector,revealDock,waitForWorkspaceIdle,moveCursor,setFret,cursorPosition} from './workstation-commands.mjs';
 
 // Importing is inert: no files, fixture allocations, native app, CDP connection,
 // process helper or acceptance group is created until explicitly requested.
@@ -197,8 +197,9 @@ class AcceptanceContext{
     const path=resolve(this.nativeDirectory,'session-preferences.json');if(existsSync(path))assert.equal(json(path).restorePreviousSession,checked);else assert.equal(checked,true,'A missing preference file means the default true');await file.press('Escape');
   }
   async editNote(fret,{bar=0,beat=0,string=6}={}){
-    await revealInspector(this.page);await this.button('Edit');await this.page.getByLabel('Measure',{exact:true}).fill(String(bar+1));await this.page.getByLabel('Beat',{exact:true}).fill(String(beat+1));await this.page.getByRole('combobox',{name:'String',exact:true}).selectOption(String(string));await this.page.getByLabel('Fret',{exact:true}).fill(String(fret));
-    const before=await this.active();await this.button('Set note');const after=await this.active();assert.ok(after.revision>before.revision);assert.deepEqual(after.snapshot.project.edits.at(-1),{type:'setNote',target:{track:0,staff:0,bar,voice:0,beat},string,fret});return after;
+    // The cursor goes to the bar, beat and string in the score and the palette's 'fret N' writes the note (the Selection tab's fields and Set note are gone).
+    await moveCursor(this.page,{bar:bar+1,beat:beat+1,string});
+    const before=await this.active();await setFret(this.page,fret);const after=await this.active();assert.ok(after.revision>before.revision);assert.deepEqual(after.snapshot.project.edits.at(-1),{type:'setNote',target:{track:0,staff:0,bar,voice:0,beat},string,fret});return after;
   }
   async pickerCancel(){
     this.owned();const child=spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','tests/desktop/cancel-dialog.ps1','-AppProcessId',String(this.pid),'-AppExecutable',this.executable,'-AppStartTicks',this.identity.start],{windowsHide:true,timeout:15000,killSignal:'SIGKILL'});this.helpers.add(child);let output='';
@@ -241,14 +242,16 @@ async function prepare(context){
   context.result.prepared={ids,workspace:before,checkpoint:checkpoint.receipt};return {ids,before,checkpoint};
 }
 async function assertView(context,expected){
-  const {page}=context;await revealInspector(page);await context.button('Edit');
-  assert.equal(await page.getByLabel('Measure',{exact:true}).inputValue(),String(expected.target.bar+1));assert.equal(await page.getByLabel('Beat',{exact:true}).inputValue(),String(expected.target.beat+1));
-  assert.equal(await page.getByRole('combobox',{name:'Staff',exact:true}).inputValue(),String(expected.target.staff));assert.equal(await page.getByRole('combobox',{name:'Voice',exact:true}).inputValue(),String(expected.target.voice));
-  assert.equal(await page.getByRole('combobox',{name:'String',exact:true}).inputValue(),String(expected.selectedString));assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),String(expected.zoom));assert.equal(await page.getByRole('combobox',{name:/^Displayed tracks/}).inputValue(),expected.trackView.kind);
+  const {page}=context;
+  // The cursor is read from the status bar: bar, beat, string and voice in its position text, the staff in its track text when the track has several.
+  const at=await cursorPosition(page);assert.equal(at.bar,expected.target.bar+1);assert.equal(at.beat,expected.target.beat+1);assert.equal(at.voice,expected.target.voice+1);
+  if(expected.target.staff>0)assert.match(await page.locator('.statusbar-track').innerText(),new RegExp(`Staff ${expected.target.staff+1}$`));
+  if(Number.isFinite(at.string))assert.equal(at.string,expected.selectedString);
+  assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),String(expected.zoom));assert.equal(await page.getByRole('combobox',{name:/^Displayed tracks/}).inputValue(),expected.trackView.kind);
   const instrument=page.getByRole('navigation',{name:'Dock views',exact:true,includeHidden:true}).getByRole('button',{name:'Instrument',exact:true,includeHidden:true});assert.equal(await instrument.getAttribute('aria-pressed'),String(expected.instrumentVisible));
   const announcement=await page.locator('.score-edit-announcement').innerText();assert.match(announcement,new RegExp(`measure ${expected.target.bar+1}, beat ${expected.target.beat+1}, voice ${expected.target.voice+1}`));
   if(expected.selectedNoteIndex!==null)assert.match(announcement,new RegExp(`, note ${expected.selectedNoteIndex+1}$`));
-  const trackName=expected.target.track===1?'Literal low guitar':null;if(trackName)assert.match(await page.getByLabel('Editing location',{exact:true}).innerText(),new RegExp(`^${trackName}`));
+  const trackName=expected.target.track===1?'Literal low guitar':null;if(trackName)assert.match(await page.locator('.statusbar-track').innerText(),new RegExp(`^${trackName}`));
 }
 async function restored(context,prepared,{paths}={}){
   await context.prompt();const promptText=await context.page.getByRole('dialog').innerText();await context.choice('Restore');

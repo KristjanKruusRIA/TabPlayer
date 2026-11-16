@@ -67,9 +67,12 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
   // What the score draws, by family and size: tile SVGs are virtualised, so their bytes vary with scrolling.
   const rendered=async()=>{const {families,largest,digitSize,annotationSize,chordSize}=await drawn();return JSON.stringify({families:[...families].sort(),largest,digitSize,annotationSize,chordSize});};
   const shot=async name=>{const path=resolve(results,`${String(result.screenshots.length+1).padStart(2,'0')}-${name}.png`);await page.screenshot({path});result.screenshots.push(path);};
-  const details=async name=>{await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
-  const choose=(name,value)=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)}).selectOption(value);
-  const percent=async(label,value)=>{const field=page.getByLabel(label,{exact:true});await field.fill(String(value));await field.press('Enter');};
+  // Engraving, typography, saved styles, the design sections and page layout are in the Score style dialog (Song tab); the dialog closes when a button in it is used, so each section is reopened before its next control.
+  const details=async name=>{await ui.styleSection(page,name);};
+  // A button used in the dialog closes it; reopen it before the next control.
+  const panels=async()=>{if(!await page.locator('.score-style-dialog').isVisible())await openPanels();};
+  const choose=async(name,value)=>{await panels();await page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)}).selectOption(value);};
+  const percent=async(label,value)=>{await panels();const field=page.getByLabel(label,{exact:true});await field.fill(String(value));await field.press('Enter');};
   const openPanels=async()=>{await button('Presentation');for(const name of ['Engraving','Typography','Notation style presets','Saved styles'])await details(name);};
   // Notes of the exported score: typography may change how the score is drawn, never what it holds.
   const notesOf=bytes=>JSON.stringify(load(bytes).tracks.map(track=>track.staves.map(staff=>staff.bars.map(bar=>bar.voices.map(voice=>voice.beats.map(beat=>[beat.duration,beat.text??null,beat.notes.map(note=>[note.string,note.fret,note.realValue])]))))));
@@ -123,7 +126,7 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
   const edits=async()=>(await record()).snapshot.project.edits;
   // A preset fills the form (no edit), then Apply is exactly one more edit holding the preset's choices.
   const preset=async(name,typography,stylesheet,notation,family)=>{
-    const count=(await edits()).length;await page.getByRole('button',{name:`Load ${name} preset`,exact:true}).click();await idle();
+    const count=(await edits()).length;await panels();await page.getByRole('button',{name:`Load ${name} preset`,exact:true}).click();await idle();
     assert.equal((await edits()).length,count,`${name}: loading never edits`);await button('Apply engraving');
     const after=await record(),edit=after.snapshot.project.edits.at(-1);assert.equal(after.snapshot.project.edits.length,count+1,`${name}: one edit`);
     assert.equal(edit.type,'setEngraving');assert.deepEqual(typography?edit.engraving.typography:Object.hasOwn(edit.engraving,'typography'),typography??false,`${name}: typography`);
@@ -187,7 +190,7 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
     step('Classic, Jazz and Rock each apply as one undoable edit, are drawn in their family and leave the music unchanged',{classic:classic.edit.engraving,jazz:jazz.edit.engraving,rock:rock.edit.engraving});
 
     // A saved style carries its typography into the personal library. Plain styles keep the file at version 1.
-    await page.getByLabel('Style name',{exact:true}).fill('Rock house');await page.getByRole('button',{name:'Save current style',exact:true}).click();
+    await panels();await page.getByLabel('Style name',{exact:true}).fill('Rock house');await page.getByRole('button',{name:'Save current style',exact:true}).click();
     await poll(()=>existsSync(libraryPath),Boolean,'library file written');await page.getByRole('status').filter({hasText:'Saved Rock house.'}).waitFor();
     const library=json(libraryPath);assert.equal(library.version,2);assert.equal(library.entries.length,1);assert.deepEqual(library.entries[0].engraving.typography,rock.edit.engraving.typography);assert.deepEqual(library.entries[0].engraving.profiles,[]);
     const rockRecord=await record();
@@ -207,10 +210,10 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
     assert.equal(hashFile(libraryPath),oldHash,'Reading a version 1 library never rewrites it');assert.equal(await page.getByRole('alert').filter({hasText:'Could not read saved styles'}).count(),0,'A version 1 library is not damaged');
     await page.getByRole('button',{name:'Apply saved style',exact:true}).click();await idle();
     const oldApplied=await record();assert.equal(oldApplied.snapshot.project.edits.length,1);assert.equal(oldApplied.snapshot.project.edits[0].engraving.stylesheet.barNumbers,'hidden');assert.equal(Object.hasOwn(oldApplied.snapshot.project.edits[0].engraving,'typography'),false);
-    await page.getByLabel('Style name',{exact:true}).fill('Newer style');await page.getByRole('button',{name:'Save current style',exact:true}).click();await page.getByRole('status').filter({hasText:'Saved Newer style.'}).waitFor();
+    await panels();await page.getByLabel('Style name',{exact:true}).fill('Newer style');await page.getByRole('button',{name:'Save current style',exact:true}).click();await page.getByRole('status').filter({hasText:'Saved Newer style.'}).waitFor();
     const kept=json(libraryPath);assert.equal(kept.version,1,'No style uses typography, so an older build can still read the file');assert.deepEqual(kept.entries.map(entry=>entry.name),['Older style','Newer style']);assert.deepEqual(kept.entries[0].engraving,oldEngraving,'The older style is kept as it was');
     // Typography in the next saved style makes the file version 2, keeping the older styles.
-    await percent('Text size (%)',120);await button('Apply engraving');await page.getByLabel('Style name',{exact:true}).fill('Larger text');await page.getByRole('button',{name:'Save current style',exact:true}).click();await page.getByRole('status').filter({hasText:'Saved Larger text.'}).waitFor();
+    await percent('Text size (%)',120);await button('Apply engraving');await panels();await page.getByLabel('Style name',{exact:true}).fill('Larger text');await page.getByRole('button',{name:'Save current style',exact:true}).click();await page.getByRole('status').filter({hasText:'Saved Larger text.'}).waitFor();
     const upgraded=json(libraryPath);assert.equal(upgraded.version,2);assert.deepEqual(upgraded.entries.map(entry=>entry.name),['Older style','Newer style','Larger text']);assert.equal(upgraded.entries[2].engraving.typography.textScale,1.2);assert.deepEqual(upgraded.entries[0].engraving,oldEngraving);
     await shot('old-library-upgraded');step('A version 1 style library stays readable, stays version 1 until a style uses typography, then becomes version 2',{oldHash,kept,upgraded});
     assert.equal(realHash(),realBefore,'Real user library untouched');healthy();

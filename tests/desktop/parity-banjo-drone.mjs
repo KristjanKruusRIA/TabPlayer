@@ -93,12 +93,14 @@ export async function runBanjoDroneAcceptance({buildPath}={}){
     step('The imported banjo sounds as a plain 5-string staff',{keys:plain});
 
     // Set the drone from the Staff panel: one edit, nothing before Apply.
-    await ui.revealInspector(page);
-    await page.locator('summary').filter({hasText:'Staff, voices'}).first().evaluate(node=>{node.parentElement.open=true;});
-    const droneBox=page.getByRole('checkbox',{name:/^Short drone string/});assert.equal(await droneBox.isChecked(),false);
-    await droneBox.check();assert.equal(await page.getByLabel('Drone string starts at fret',{exact:true}).inputValue(),'5','The usual banjo drone fret is the default');
+    // The drone is in the Tuning dialog's Capo section (Track tab, the tuning row); Keep fingering applies it as one setStaffSettings.
+    await ui.revealInspectorTab(page,'Track');await page.getByRole('button',{name:/^Edit tuning/}).click();
+    const tuning=page.getByRole('dialog',{name:'Tuning',exact:true});await tuning.waitFor();
+    await ui.openSection(tuning,/^Partial capo and banjo drone$/);
+    const droneBox=tuning.getByRole('checkbox',{name:/^Short drone string/});assert.equal(await droneBox.isChecked(),false);
+    await droneBox.check();assert.equal(await tuning.getByLabel('Drone string starts at fret',{exact:true}).inputValue(),'5','The usual banjo drone fret is the default');
     assert.deepEqual(await edits(),[],'Choosing the drone changes nothing until it is applied');
-    await button('Apply staff settings');
+    await tuning.getByRole('button',{name:'Keep fingering',exact:true}).click();await tuning.waitFor({state:'hidden'});await idle();
     const set=await poll(record,value=>value.snapshot.project.edits.length===1,'one staff settings edit');
     assert.equal(set.snapshot.project.edits[0].type,'setStaffSettings');assert.equal(set.snapshot.project.edits[0].settings.droneFret,5,'The command carries the drone fret');
     assert.equal(set.snapshot.project.partialCapo,undefined,'A drone is not a partial capo marker');

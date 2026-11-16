@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkspaceCommand,closeWelcomeLibrary,revealInspectorTab} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkspaceCommand,closeWelcomeLibrary,setFret} from './workstation-commands.mjs';
 import {launch,connect,stop,directory} from './harness.mjs';
 import {resolve} from 'node:path';
 import {writeFileSync} from 'node:fs';
@@ -10,8 +10,8 @@ try {
   await waitForWorkspaceIdle(page);await page.waitForFunction(()=>document.querySelector('.score-tools').textContent.includes('100 measures'));
   await page.locator('svg text').filter({hasText:/^Performance study$/}).first().waitFor();
   const openRenderMs=performance.now()-start;
-  await revealInspectorTab(page,'Selection');
-  const before=performance.now();await page.getByLabel('Fret',{exact:true}).fill('13');await page.getByRole('button',{name:'Set note',exact:true}).click();
+  // The edit is the palette's 'fret 13' (the Fret field and Set note are gone), so the time includes opening and running the command.
+  const before=performance.now();await setFret(page,13);
   await waitForWorkspaceIdle(page);
   await page.locator('svg text').filter({hasText:/^13$/}).first().waitFor();
   const editRenderMs=performance.now()-before;

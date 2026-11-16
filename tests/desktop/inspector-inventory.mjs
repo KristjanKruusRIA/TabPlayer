@@ -1,4 +1,4 @@
-// THE-215: lists every control in the Song, Track and Selection tabs of the inspector as the app shows them at its default
+// THE-215: lists every control in the Song and Track tabs of the inspector as the app shows them at its default
 // window size (collapsed sections closed), with each tab's content height. Reads only; changes nothing in the score.
 // usage (from the checkout root, after scripts/build-desktop-test.ps1): node tests/desktop/inspector-inventory.mjs [out.json] [screenshot-directory]
 import { mkdirSync,writeFileSync } from 'node:fs';
@@ -32,11 +32,15 @@ const collect=tab=>page.evaluate(tab=>{
 },tab);
 try{
   report.viewport=await page.evaluate(()=>({w:innerWidth,h:innerHeight}));
-  for(const tab of ['Song','Track','Selection']){
+  for(const tab of ['Song','Track']){
     await revealInspectorTab(page,tab);await settle(page,500);
     const result=await collect(tab.toLowerCase());report.tabs[tab]={...result,shown:result.controls.filter(c=>c.shown).length,all:result.controls.length};
     if(shots)await page.screenshot({path:resolve(shots,`inventory-${tab.toLowerCase()}.png`)});
   }
   writeFileSync(out,JSON.stringify(report,null,1));
   for(const [tab,data] of Object.entries(report.tabs))console.log(`${tab}: content ${data.scrollHeight}px, pane ${data.clientHeight}px, width ${data.width}px, ${data.shown} visible controls of ${data.all}`);
+  // THE-215 part 2 targets at the default window (1440 x 900, inspector 304 px wide): Song about 380 px, Track about 800 px. Collapsed sections stay closed.
+  const targets={Song:380,Track:800},tolerance=1.1,over=Object.entries(targets).filter(([tab,target])=>report.tabs[tab].scrollHeight>target*tolerance);
+  if(over.length)throw new Error(`Over budget (target +10%): ${over.map(([tab,target])=>`${tab} ${report.tabs[tab].scrollHeight}px > ${Math.round(target*tolerance)}px`).join(', ')}`);
+  console.log(`within the targets: ${Object.entries(targets).map(([tab,target])=>`${tab} ${report.tabs[tab].scrollHeight}px (target ${target}px)`).join(', ')}`);
 }finally{await session.close();}

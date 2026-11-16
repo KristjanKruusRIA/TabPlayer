@@ -326,9 +326,10 @@ async function ordinary(c,note){
   await c.action('Ordinary pointer → exact native target',async()=>{
     await c.viewWrite('ordinary actual note/beat click',async()=>{point=await c.click(note);},expected);
     await inspector(c);
-    assert.equal(await c.page.getByLabel('Measure',{exact:true}).inputValue(),String(note.target.bar+1));assert.equal(await c.page.getByLabel('Beat',{exact:true}).inputValue(),String(note.target.beat+1));assert.equal(await c.page.getByRole('combobox',{name:'Staff',exact:true}).inputValue(),String(note.target.staff));assert.equal(await c.page.getByRole('combobox',{name:'Voice',exact:true}).inputValue(),String(note.target.voice));
+    // The cursor is read from the status bar (bar, beat and voice in the position text, the staff in the track text when the track has several).
+    {const at=await c.deps.ui.cursorPosition(c.page);assert.equal(at.bar,note.target.bar+1);assert.equal(at.beat,note.target.beat+1);assert.equal(at.voice,note.target.voice+1);}
     const announcement=await c.page.locator('.score-edit-announcement').innerText();assert.ok(announcement.includes(`measure ${note.target.bar+1}, beat ${note.target.beat+1}, voice ${note.target.voice+1}`));
-    const location=await c.page.getByLabel('Editing location',{exact:true}).innerText();assert.ok(location.includes(`Staff ${note.target.staff+1} · Voice ${note.target.voice+1}`));
+    {const track=await c.page.locator('.statusbar-track').innerText(),position=await c.page.locator('.statusbar-position').innerText();assert.ok(position.includes(`Voice ${note.target.voice+1}`));if(note.target.staff>0)assert.ok(track.includes(`Staff ${note.target.staff+1}`));}
   },{viewKeys:['target','selectedString','selectedNoteIndex']});c.step('Independent pointer receipt',{...point,expectedNativeView:expected});
 }
 async function preflight(c){
@@ -361,7 +362,7 @@ async function pointerGroup(c){
   const samples=c.oracle.notes.filter(note=>[2,3,8,9,23].includes(note.target.bar)&&note.target.beat===0&&!(note.target.bar===2&&note.target.voice===1));
   for(const layout of modes){await c.setMode(layout);await c.manual(100);await inspector(c);
     for(const note of samples)await ordinary(c,note);
-    for(const voice of [0,1]){const note=c.oracle.notes.find(row=>row.target.track===0&&row.target.bar===2&&row.target.beat===0&&row.target.voice===voice);await c.page.getByRole('combobox',{name:'Voice',exact:true}).selectOption(String(voice));await c.stable();await ordinary(c,note);}
+    for(const voice of [0,1]){const note=c.oracle.notes.find(row=>row.target.track===0&&row.target.bar===2&&row.target.beat===0&&row.target.voice===voice);await c.deps.ui.moveCursor(c.page,{voice:voice+1});await c.stable();await ordinary(c,note);}
     // Seed another staff: the coincident guitar note has no matching current lane,
     // so the independently authored lowest voice is the deterministic fallback.
     await ordinary(c,c.oracle.notes.find(row=>row.target.track===1&&row.target.staff===1&&row.target.bar===1&&row.target.voice===1));await ordinary(c,c.oracle.notes.find(row=>row.target.track===0&&row.target.bar===2&&row.target.beat===0&&row.target.voice===0));
@@ -515,7 +516,7 @@ async function variantGroup(c){
   const described=await c.page.getByRole('button',{name:'Fit page',exact:true}).getAttribute('aria-describedby');assert.ok(described);assert.ok((await c.page.locator(`[id=${JSON.stringify(described)}]`).innerText()).length>0);
   // Root-authorized disposable settings proof. Main 297mm/all-tracks has already
   // passed physical preflight; print edits are excluded from view-only windows.
-  const editOffset=(await c.evidence()).calls.length;await inspector(c);await c.button('Presentation');const summary=c.page.locator('summary').filter({hasText:/^Page layout$/});if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();
+  const editOffset=(await c.evidence()).calls.length;await inspector(c);await c.deps.ui.styleSection(c.page,'Page layout');
   assert.equal(await c.page.getByLabel('Height (mm)',{exact:true}).inputValue(),'50');await c.page.getByLabel('Height (mm)',{exact:true}).fill('297');await c.button('Apply page layout');await c.published();await c.nativeReady();
   const edit=await c.poll(async()=>{await c.stable();return (await c.evidence()).calls.slice(editOffset).find(row=>row.command==='apply_edit'&&row.settled&&row.ok);},Boolean,'acknowledged UI paper retry');
   assert.deepEqual(edit.payload.command,{type:'setPageLayout',layout:{...c.oracle.oversizePage,heightMm:297}});assert.deepEqual(edit.result,await c.record());assert.equal(await error.count(),0,'Previously feasible paper height must restore physical presentation');assert.ok(await c.page.locator('.score-sheet').count()>0);assert.equal(await c.page.getByRole('button',{name:'Fit page',exact:true}).isEnabled(),true);assert.equal((await c.currentView()).scoreDisplay.layout,'verticalPage');assertNotes(await c.page.evaluate(readPublicNotes),c.oracle.notes);

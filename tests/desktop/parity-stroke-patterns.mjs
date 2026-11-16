@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,propertiesSection} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -23,7 +23,8 @@ try{
   const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const panel=()=>page.locator('summary').filter({hasText:'Music selection'}).first().evaluate(node=>{node.parentElement.open=true;});
+  // Music selection and the stroke pattern are in the Properties dialog (Selection tab); a button used through the helpers closes it, so it is opened again where needed.
+  const panel=()=>propertiesSection(page,'Music selection');
   const click=async name=>{await panel();await page.getByRole('button',{name,exact:true}).click();await idle();};
   const exportGp=async()=>{await button('Export GP');return load(readFileSync(gp));};
   await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();
@@ -32,7 +33,7 @@ try{
   const picked=await exportGp(),expected=['D','U'];
   for(const lane of lanes(picked))lane.forEach((beat,index)=>assert.equal(beat.pickStroke,expected[index%2]==='D'?model.PickStroke.Down:model.PickStroke.Up,`beat ${index} of a Guitar9 voice`));
   assert.equal(pitches(picked),pitches(source),'Patterns never change notes.');
-  await page.getByRole('combobox',{name:/^Pattern technique/}).selectOption('brush');await page.getByLabel('Stroke pattern',{exact:true}).fill('D D U -');await click('Apply stroke pattern');
+  await panel();await page.getByRole('combobox',{name:/^Pattern technique/}).selectOption('brush');await page.getByLabel('Stroke pattern',{exact:true}).fill('D D U -');await page.getByRole('dialog',{name:'Properties',exact:true}).getByRole('button',{name:'Apply stroke pattern',exact:true}).click();await waitForWorkspaceIdle(page);
   const brushed=await exportGp(),brushes=[model.BrushType.BrushDown,model.BrushType.BrushDown,model.BrushType.BrushUp,model.BrushType.None];
   for(const lane of lanes(brushed))lane.forEach((beat,index)=>{assert.equal(beat.brushType,brushes[index%4]);assert.ok(beat.pickStroke!==model.PickStroke.None,'brushes keep the pick strokes');assert.equal(beat.brushDuration>0,brushes[index%4]!==model.BrushType.None,'brushes stay audible after GP export');});
   const edits=(await readActiveDocument(page)).project.edits.slice(-2);

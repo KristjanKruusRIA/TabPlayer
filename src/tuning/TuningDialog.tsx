@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { model } from '@coderline/alphatab';
 import { createPortal } from 'react-dom';
 import { formatPitch, formatTuning, parseTuning } from '../tuning';
 import { instrumentTitle, tuningPresetName, tuningPresets, type PresetInstrument } from '../tuning-presets';
@@ -8,6 +9,10 @@ import { busyGuard } from '../ui/useBusyGuard';
 import { useI18n } from '../i18n';
 import { PlayGlyph } from '../shell/glyphs';
 import { SavedTuningsDialog } from './SavedTuningsDialog';
+import { PartialCapoControls, type SettledDraft } from '../editor/PartialCapoControls';
+import { BanjoDroneControls } from '../editor/BanjoDroneControls';
+import { getPartialCapo, noPartialCapo, type PartialCapo } from '../editor/partial-capo';
+import { getBanjoDrone } from '../editor/banjo-drone';
 import './tuning-dialog.css';
 
 export interface TuningChoice {
@@ -17,6 +22,8 @@ export interface TuningChoice {
   keepPitch: boolean;
   /** Which side stays in place when the string count changes. */
   keep: StringCountKeep;
+  /** The capo section's values; only when the dialog was given a staff. `changed` is whether any of them differs from the staff's. */
+  capo?: { capo: number; partialCapo: PartialCapo; droneFret: number; changed: boolean };
 }
 
 const instruments = [...new Set(tuningPresets.map(preset => preset.instrument))];
@@ -90,11 +97,15 @@ function StringRow({ index, pitch, revision, onPitch, onInvalid, onPlay, playabl
 }
 
 /** The tuning editor. Mounted only while open, so Cancel and Escape discard every change; nothing is recorded until Keep fingering or Keep pitch. */
-export function TuningDialog({ pitches, name, mode = 'track', busy = false, locked = false, refusal = null, onApply, onClose, onAudition }: {
+export function TuningDialog({ pitches, name, mode = 'track', staff, staffCount = 1, busy = false, locked = false, refusal = null, onApply, onClose, onAudition }: {
   pitches: readonly number[];
   name: string;
   /** `track` retunes a track that has notes (Keep fingering, Keep pitch, string count). `draft` fills in a tuning for something not made yet: one Use tuning button, any string count. */
   mode?: 'track' | 'draft';
+  /** The staff whose capo, partial capo and banjo drone the Capo section edits with the tuning. Without it there is no Capo section. */
+  staff?: model.Staff;
+  /** How many staves the track has; a string count change applies to all of them, and the dialog says so before it is applied. */
+  staffCount?: number;
   busy?: boolean;
   locked?: boolean;
   /** The app's reason for refusing the last edit. It is shown in the dialog, beside the draft it refused, once an apply comes back refused. */
@@ -115,6 +126,17 @@ export function TuningDialog({ pitches, name, mode = 'track', busy = false, lock
   const [library, setLibrary] = useState(false);
   const notesInput = useRef<HTMLInputElement>(null);
   const pending = useRef(false);
+  // The Capo section: drafts like the notes, discarded with them. Nothing is recorded until an apply button.
+  const savedPartial = staff ? getPartialCapo(staff) ?? noPartialCapo : noPartialCapo, savedDrone = staff ? getBanjoDrone(staff) : 0;
+  const [capoText, setCapoText] = useState(String(staff?.capo ?? 0));
+  const [partial, setPartial] = useState<PartialCapo>(savedPartial);
+  const [drone, setDrone] = useState(savedDrone);
+  const [partialInvalid, setPartialInvalid] = useState(false), [droneInvalid, setDroneInvalid] = useState(false);
+  const capoNumber = capoText.trim() === '' ? NaN : Number(capoText), capoValid = Number.isInteger(capoNumber) && capoNumber >= 0 && capoNumber <= 127;
+  /** The partial capo and drone fret fields settle when they are left; at an apply they are asked for what they hold now, so a fret typed but not left is not dropped. */
+  const partialSettle = useRef<(() => SettledDraft<PartialCapo>) | null>(null), droneSettle = useRef<(() => SettledDraft<number>) | null>(null);
+  const capoChoiceFor = (partialNow: PartialCapo, droneNow: number) => staff ? { capo: capoValid ? capoNumber : staff.capo, partialCapo: partialNow, droneFret: droneNow, changed: (capoValid && capoNumber !== staff.capo) || JSON.stringify(partialNow) !== JSON.stringify(savedPartial) || droneNow !== savedDrone } : undefined;
+  const capoChoice = capoChoiceFor(partial, drone);
 
   const parsed = useMemo(() => { try { return parseTuning(notes); } catch { return null; } }, [notes]);
   const draft = parsed ?? [];
@@ -158,6 +180,14 @@ export function TuningDialog({ pitches, name, mode = 'track', busy = false, lock
   const apply = (keepPitch: boolean) => {
     if ((mode === 'track' && (busy || locked)) || pending.current) return;
     if (rowError) return;
+    let choice = capoChoice, held = partialInvalid || droneInvalid;
+    if (staff) {
+      // A field typed in but not left answers for itself; the others keep what they last reported.
+      const typedPartial = partialSettle.current?.() ?? null, typedDrone = droneSettle.current?.() ?? null;
+      held = (typedPartial ? 'invalid' in typedPartial : partialInvalid) || (typedDrone ? 'invalid' in typedDrone : droneInvalid);
+      choice = capoChoiceFor(typedPartial && 'value' in typedPartial ? typedPartial.value : partial, typedDrone && 'value' in typedDrone ? typedDrone.value : drone);
+    }
+    if (staff && (!capoValid || held)) { setError(!capoValid ? t('tuning_dialog.capo_invalid') : t('tuning_dialog.capo_fix_first')); return; }
     let chosen: number[];
     try {
       chosen = parseTuning(notes);
@@ -167,7 +197,7 @@ export function TuningDialog({ pitches, name, mode = 'track', busy = false, lock
       return;
     }
     setError(null);
-    const result = onApply({ pitches: chosen, name: draftName, keepPitch: mode === 'track' && keepPitch && chosen.length === pitches.length, keep });
+    const result = onApply({ pitches: chosen, name: draftName, keepPitch: mode === 'track' && keepPitch && chosen.length === pitches.length, keep, ...(choice ? { capo: choice } : {}) });
     if (result && typeof (result as Promise<unknown>).then === 'function') {
       pending.current = true;
       setRefused(false);
@@ -235,10 +265,24 @@ export function TuningDialog({ pitches, name, mode = 'track', busy = false, lock
         {parsed && parsed.length > 0 && <ul className="tuning-strings" aria-label={t('tuning_dialog.strings')}>
           {parsed.map((pitch, index) => <StringRow key={index} index={index} pitch={pitch} revision={revision} playable={!!onAudition} onPitch={next => setPitch(index, next)} onInvalid={message => setRowError(message ? { index, message } : current => (current?.index === index ? null : current))} onPlay={() => play([pitch], false)} />)}
         </ul>}
+        {staff && mode === 'track' && <fieldset className="tuning-capo">
+          <legend>{t('tuning_dialog.capo_section')}</legend>
+          <div className="tuning-capo-row">
+            <label htmlFor="tuning-dialog-capo" className="tp-sr">{t('editor.capo')}</label>
+            <input id="tuning-dialog-capo" type="number" min={0} max={127} value={capoText} aria-invalid={!capoValid || undefined} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} onChange={event => { setCapoText(event.target.value); setError(null); setRefused(false); }} />
+            <span className="tuning-hint">{t('tuning_dialog.capo_fret')}</span>
+          </div>
+          <details className="tuning-capo-more" onKeyDown={event => { if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.preventDefault(); }}>
+            <summary>{t('tuning_dialog.capo_more')}</summary>
+            <PartialCapoControls key={`partial/${staff.tuning.join()}`} staff={staff} value={partial} onChange={setPartial} onInvalid={setPartialInvalid} settleRef={partialSettle} />
+            <BanjoDroneControls key={`drone/${staff.tuning.length}`} staff={staff} value={drone} onChange={setDrone} onInvalid={setDroneInvalid} settleRef={droneSettle} />
+          </details>
+        </fieldset>}
         {recount && <fieldset className="string-count">
           <legend>{t('track_settings.recount_legend', { from: pitches.length, to: draft.length })}</legend>
           <label>{t('track_settings.strings_kept')}<select value={keep} aria-describedby="string-count-help" onChange={event => setKeep(event.target.value as StringCountKeep)}><option value="high">{t('track_settings.high_strings_option')}</option><option value="low">{t('track_settings.low_strings_option')}</option></select></label>
           <p className="tuning-hint" id="string-count-help">{t('track_settings.string_count_help')}</p>
+          {staffCount > 1 && <p className="tuning-hint" role="note">{t('track_settings.string_count_all_staves', { count: staffCount })}</p>}
         </fieldset>}
         {mode === 'track' && !recount && <p className="tuning-hint">{t('tuning_dialog.apply_hint')}</p>}
       </div>

@@ -68,7 +68,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     // The app reports busy for as long as the modal is open, so nothing inside it may wait for the shell to go idle.
     const browse=async()=>{owned();await ui.clickWorkstationButton(page,'Browse scales',{waitForIdle:false});await scales().waitFor();};
     const inModal=async name=>{const before=await record();await scales().getByRole('button',{name,exact:true}).click();await poll(record,current=>current.revision!==before.revision,name);};
-    const select=async(measure,beat)=>{await ui.revealInspector(page);await page.getByLabel('Measure',{exact:true}).fill(String(measure));await page.getByLabel('Beat',{exact:true}).fill(String(beat));await idle();};
+    const select=async(measure,beat)=>{await ui.moveCursor(page,{bar:measure,beat});await idle();};
     const scales=()=>page.getByRole('dialog',{name:'Scale browser',exact:true});
     const diagramSection=()=>scales().getByRole('region',{name:'Scale diagram',exact:true});
     const inScore=()=>page.locator('.score-scale-diagram');
@@ -77,9 +77,11 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     const assertDrawn=async label=>{
       await inScore().waitFor();assert.equal(await inScore().count(),1,`${label}: one diagram chip in the score`);
       // The chip opens the diagram on hover or focus, so no mark is hidden by a neighbour.
+      // The pointer may rest on the chip after a dialog click; move it off first so entering it again raises the mouseenter that opens the diagram.
+      await page.mouse.move(1,1);
       await inScore().getByRole('button',{name:'Show scale diagram Open position',exact:true}).hover();
       await inScore().getByRole('group',{name:'Scale diagram Open position',exact:true}).waitFor();
-      const high=await centre(inScore().getByLabel('String 9, open',{exact:false})),lower=await centre(inScore().getByLabel('String 5, fret 3',{exact:false}));
+      const high=await centre(inScore().getByLabel(/^String 9, open/)),lower=await centre(inScore().getByLabel(/^String 5, fret 3/));
       assert.ok(high.y<lower.y,`${label}: the highest string is drawn above a lower string`);
     };
     const t={track:0,staff:0,bar:1,voice:0,beat:1};
@@ -109,7 +111,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     assert.equal(await scales().getByLabel(/String 5, fret 7: /).count(),0,'Double-click removes a mark');
     assert.deepEqual(await record(),initial,'Drafting never edits');
     // In the dialog the highest string is the top row, as in the score.
-    const topRow=await centre(scales().getByLabel('String 9, open',{exact:false})),lowerRow=await centre(scales().getByLabel('String 5, fret 3',{exact:false}));
+    const topRow=await centre(scales().getByLabel(/^String 9, open/)),lowerRow=await centre(scales().getByLabel(/^String 5, fret 3/));
     assert.ok(topRow.y<lowerRow.y,'The highest string is the top row');
     await page.screenshot({path:resolve(paths.results,'01-draft.png')});result.screenshots.push('01-draft.png');
     const expected={type:'setScaleDiagram',target:t,diagram:{

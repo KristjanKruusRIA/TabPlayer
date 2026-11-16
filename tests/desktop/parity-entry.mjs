@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealLeftTask,revealInspector,revealInspectorTab} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,openAddInstrument,openProperties,openSection,closeProperties,setSongField,setTrackField} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -26,23 +26,24 @@ try {
   };
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const change=(label,value)=>page.getByLabel(label,{exact:true}).fill(String(value));
-  const details=label=>page.locator('summary').filter({hasText:label}).first().evaluate(node=>{node.parentElement.open=true;});
-  await revealLeftTask(page,'Track');await change('New notation track name','Piano');await button('Add pitched track');await button('Track 2: Piano');await revealInspectorTab(page,'Selection');
-  await change('Written pitch','C4');await button('Add pitched note');await change('Written pitch','E4');await button('Add pitched note');
-  await page.getByRole('combobox',{name:/^Chord note/}).selectOption('1');await change('Written pitch','F4');await button('Update pitched note');
+  // The Selection tab is gone: pitched and percussion entry are in Properties > Note, directions in Properties > Bar; its dialog stays open until a button inside it is clicked (the helper closes it).
+  const note=()=>openProperties(page,'note'),bar=()=>openProperties(page,'bar');
+  await openAddInstrument(page);await change('New notation track name','Piano');await button('Add pitched track');await button('Track 2: Piano');
+  await note();await change('Written pitch','C4');await button('Add pitched note');await note();await change('Written pitch','E4');await button('Add pitched note');
+  await note();await page.getByRole('combobox',{name:/^Chord note/}).selectOption('1');await change('Written pitch','F4');await button('Update pitched note');
   assert.equal((await snapshot()).project.edits.at(-1).pitch,65);
   await button('Undo');assert.equal((await snapshot()).redoEdit.pitch,65);await button('Redo');
-  await details('Staff, voices');await change('Sounding transposition',12);await button('Apply staff settings');
-  await details('Notes & techniques');await page.getByRole('combobox',{name:/^Dynamics/}).selectOption('3');await idle();
+  await setTrackField(page,'Sounding transposition',12);await idle();
+  {const dialog=await note();await openSection(dialog,/^Notes & techniques$/);await dialog.getByRole('combobox',{name:/^Dynamics/}).selectOption('3');await idle();await closeProperties(page);}
   assert.equal((await snapshot()).project.edits.at(-1).patch.dynamics,3);
-  await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-piano.png')});
-  await revealLeftTask(page,'Track');await change('New notation track name','Kit');await button('Add percussion track');await button('Track 3: Kit');await revealInspectorTab(page,'Selection');
-  await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('91');await button('Add percussion note');
-  await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('92');await button('Add percussion note');
-  await button('Presentation');await details('Song metadata');await change('Album','Parity session');await button('Apply song metadata');await button('Edit');
-  await details('Directions');await page.getByLabel('Segno',{exact:true}).check();await button('Apply directions');
+  await page.locator('.workstation-inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-piano.png')});
+  await openAddInstrument(page);await change('New notation track name','Kit');await button('Add percussion track');await button('Track 3: Kit');
+  await note();await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('91');await button('Add percussion note');
+  await note();await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('92');await button('Add percussion note');
+  await setSongField(page,'Album','Parity session');
+  {const dialog=await bar();await openSection(dialog,/^Directions$/);await dialog.getByLabel('Segno',{exact:true}).check();await button('Apply directions');}
   await button('Append measure');await button('Show instrument');
-  await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-drums.png')});
+  await page.locator('.workstation-inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-drums.png')});
   await page.waitForFunction(()=>{const play=[...document.querySelectorAll('button')].find(node=>node.textContent==='Play');return play&&!play.disabled;},{},{timeout:20000});
   await button('Play');
   const deadline=Date.now()+10000;let last;
@@ -77,7 +78,7 @@ try {
   writeFileSync(backed,Uint8Array.from(backedBytes));const hash=createHash('sha256').update(readFileSync(backed)).digest('hex');
   await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:backed,TABPLAYER_TEST_EXPORT:backedExport});
   browser=await connect();page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);await button('Open');
-  await button('Presentation');await details('Song metadata');await change('Album','Backed study');await button('Apply song metadata');
+  await setSongField(page,'Album','Backed study');
   const readyDeadline=Date.now()+15000;let prepared;
   do{prepared=await status();if(prepared.ready&&Math.abs(prepared.backingDurationSeconds-1)<.001)break;await page.waitForTimeout(50);}while(Date.now()<readyDeadline);
   assert.ok(prepared.ready&&Math.abs(prepared.backingDurationSeconds-1)<.001,JSON.stringify(prepared));
@@ -87,5 +88,5 @@ try {
   },[...readFileSync(backedExport)]);
   assert.deepEqual(Uint8Array.from(reopenedAudio),wave);assert.equal(createHash('sha256').update(readFileSync(backed)).digest('hex'),hash);result.embeddedBacking={bytes:wave.length,durationSeconds:prepared.backingDurationSeconds,sourceUnchanged:true};
   writeFileSync(resolve('.analysis/parity/native-entry-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
-}catch(error){if(page){await page.screenshot({path:resolve('.analysis/parity/native-entry-failure.png')});console.error('Inspector:',(await page.locator('.inspector').innerText()).slice(0,1800));}throw error;}
+}catch(error){if(page){await page.screenshot({path:resolve('.analysis/parity/native-entry-failure.png')});console.error('Inspector:',(await page.locator('.workstation-inspector').innerText()).slice(0,1800));}throw error;}
 finally{if(browser)await browser.close();stop(id);}

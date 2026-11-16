@@ -14,14 +14,6 @@ import { exportAsciiTab } from '../export/ascii-tab';
 import type { PitchCurve } from '../edit-types';
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-tuning-library',version:1,entries:[]}))}));
 afterEach(cleanup);
-it('applies pitched staff transposition without requiring a string tuning',()=>{
-  const score=previewEdit(blankProject(),{type:'addPitchedTrack',name:'Piano',program:0}).score,onEdit=vi.fn();
-  render(<StructurePanel score={score} target={{...target,track:1}} string={1} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);
-  fireEvent.change(screen.getByLabelText('Sounding transposition'),{target:{value:'12'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',track:1,settings:expect.objectContaining({tuning:[],transposition:12,showTab:false,showNotation:true})}));
-  expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toBeDisabled();
-  expect(screen.getByLabelText('Capo')).toBeDisabled();expect(screen.getByLabelText('Show tablature')).toBeDisabled();
-});
 it('all technique families dispatch finite selected-string commands and refresh readback',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit};const view=render(<TechniquePanel {...props}/>);
   fireEvent.click(screen.getByLabelText('Palm mute'));expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniques',target,string:6,patch:{palmMute:true}});
@@ -348,72 +340,8 @@ it('bend preset re-click and arrow down-up record nothing through previewEdit', 
 it('voice staff and layout controls dispatch exact commands',()=>{
   const onEdit=vi.fn();render(<StructurePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);
   fireEvent.click(screen.getByRole('button',{name:'Add voice'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addVoice',track:0,staff:0});
-  fireEvent.click(screen.getByRole('button',{name:'Add staff'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'addStaff',track:0}));
-});
-it('peg step does not commit staged unapplied settings and focusing dial preserves tuning name',()=>{
-  const score=music(),onEdit=vi.fn();
-  score.tracks[0].staves[0].stringTuning.name='Drop D';
-  score.tracks[0].staves[0].stringTuning.tunings=[64,59,55,50,45,38];
-  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);
-
-  // Focus / click dial with no movement does not erase Drop D (Finding 2)
-  const dial=screen.getByRole('slider',{name:'Staff tuning (notes, high to low) string 6 peg'});
-  fireEvent.pointerDown(dial,{pointerId:1,clientY:100});
-  fireEvent.pointerUp(dial,{pointerId:1,clientY:100});
-  expect(onEdit).not.toHaveBeenCalled();
-
-  // Change capo in form input without applying it (staged unapplied setting)
-  fireEvent.change(screen.getByLabelText('Capo'),{target:{value:'3'}});
-
-  // Turn peg 6 down (Finding 6)
-  fireEvent.keyDown(dial,{key:'ArrowDown'});
-  expect(onEdit).toHaveBeenCalledTimes(1);
-  // Must commit saved capo:0 from score, NOT staged capo:3!
-  expect(onEdit).toHaveBeenLastCalledWith({
-    type:'setStaffSettings',
-    track:0,
-    staff:0,
-    settings:expect.objectContaining({
-      capo:0,
-      tuning:[64,59,55,50,45,37],
-      tuningName:'',
-    }),
-  });
 });
 
-it('lost pointer or dragging out and back preserves tuning name in StructurePanel', () => {
-  const score = music();
-  score.tracks[0].staves[0].stringTuning.name = 'Standard';
-  const onEdit = vi.fn();
-  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()} />);
-
-  const dial = screen.getByRole('slider', { name: 'Staff tuning (notes, high to low) string 6 peg' });
-
-  // 1. Lost pointer during drag
-  fireEvent.pointerDown(dial, { pointerId: 1, clientY: 100, button: 0 });
-  fireEvent.pointerMove(dial, { pointerId: 1, clientY: 80 });
-  fireEvent.pointerCancel(dial, { pointerId: 1 });
-  fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '1' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
-    type: 'setStaffSettings',
-    settings: expect.objectContaining({ tuningName: 'Standard' }),
-  }));
-
-  onEdit.mockClear();
-
-  // 2. Dragging out and back
-  fireEvent.pointerDown(dial, { pointerId: 2, clientY: 100, button: 0 });
-  fireEvent.pointerMove(dial, { pointerId: 2, clientY: 80 });
-  fireEvent.pointerMove(dial, { pointerId: 2, clientY: 100 });
-  fireEvent.pointerUp(dial, { pointerId: 2, clientY: 100 });
-  fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '2' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
-    type: 'setStaffSettings',
-    settings: expect.objectContaining({ tuningName: 'Standard' }),
-  }));
-});
 
 it('bend preset buttons preserve focus through an edit when disabled becomes true', () => {
   const initialCurve = { type: model.BendType.Bend, style: 0, points: [{ offset: 0, value: 0 }, { offset: 60, value: 4 }] };
@@ -427,68 +355,8 @@ it('bend preset buttons preserve focus through an edit when disabled becomes tru
   expect(presetBtn).toHaveAttribute('aria-disabled', 'true');
 });
 
-it('invalid partial capo or drone shows reason and reverts peg on step in StructurePanel', () => {
-  const score = music();
-  const onEdit = vi.fn();
-  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()} />);
 
-  // Check a string in partial capo without a fret to make partial capo invalid
-  const stringCheck = screen.getByRole('checkbox', { name: /String 6/ });
-  fireEvent.click(stringCheck);
 
-  // Click peg 6 down
-  const downBtn = screen.getByRole('button', { name: 'Tune Staff tuning (notes, high to low) string 6 down' });
-  fireEvent.click(downBtn);
-
-  // Must NOT dispatch edit, must show reason in alert, and must revert tuning input
-  expect(onEdit).not.toHaveBeenCalled();
-  expect(screen.getByText('Fix the partial capo before tuning strings.')).toBeInTheDocument();
-  expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 E2');
-});
-
-it('invalid banjo drone shows reason and reverts peg on step in StructurePanel', () => {
-  const score = music();
-  const onEdit = vi.fn();
-  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()} />);
-
-  // Turn on banjo drone and type invalid fret 40
-  fireEvent.click(screen.getByRole('checkbox', { name: /Short drone string/ }));
-  const fretInput = screen.getByLabelText('Drone string starts at fret');
-  fireEvent.change(fretInput, { target: { value: '40' } });
-  fireEvent.blur(fretInput);
-
-  // Click peg 6 down
-  const downBtn = screen.getByRole('button', { name: 'Tune Staff tuning (notes, high to low) string 6 down' });
-  fireEvent.click(downBtn);
-
-  // Must NOT dispatch edit, must show reason in alert, and must revert tuning input
-  expect(onEdit).not.toHaveBeenCalled();
-  expect(screen.getByText('Fix the banjo drone before tuning strings.')).toBeInTheDocument();
-  expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 E2');
-});
-
-it('busy StructurePanel disables capo and prevents dispatch on Apply staff settings, Add staff, and Add voice', () => {
-  const score = music();
-  const onEdit = vi.fn();
-  render(<StructurePanel score={score} target={target} string={6} busy={true} onEdit={onEdit} onSelect={vi.fn()} />);
-
-  expect(screen.getByLabelText('Capo')).toBeDisabled();
-
-  const applyBtn = screen.getByRole('button', { name: 'Apply staff settings' });
-  expect(applyBtn).toBeDisabled();
-  fireEvent.click(applyBtn);
-  expect(onEdit).not.toHaveBeenCalled();
-
-  const addStaffBtn = screen.getByRole('button', { name: 'Add staff' });
-  expect(addStaffBtn).toBeDisabled();
-  fireEvent.click(addStaffBtn);
-  expect(onEdit).not.toHaveBeenCalled();
-
-  const addVoiceBtn = screen.getByRole('button', { name: 'Add voice' });
-  expect(addVoiceBtn).toBeDisabled();
-  fireEvent.click(addVoiceBtn);
-  expect(onEdit).not.toHaveBeenCalled();
-});
 
 it('disabled curve editor prevents Apply from firing onChange, and on a piano note Apply Bend and Apply Whammy record no edit', () => {
   const onChange = vi.fn();
@@ -530,66 +398,16 @@ it('with busy=true a bend preset button has no disabled attribute and a click re
   expect(presetBtn.closest('fieldset[disabled]')).toBeNull();
   expect(presetBtn).not.toHaveAttribute('disabled');
   expect(presetBtn).not.toBeDisabled();
-  expect(presetBtn).toHaveAttribute('aria-disabled', 'true');
+  expect(presetBtn.closest('[aria-disabled="true"]')).not.toBeNull();
   fireEvent.click(presetBtn);
   expect(onEdit).not.toHaveBeenCalled();
 });
 
-it('with string 1 edited in the text box and not applied, peg 6 step commits saved string 1 in StructurePanel, and peg 7 is disabled when 7 notes typed', () => {
-  const score = music();
-  const onEdit = vi.fn();
-  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()} />);
-
-  const input = screen.getByLabelText('Staff tuning (notes, high to low)');
-  fireEvent.change(input, { target: { value: 'F4 B3 G3 D3 A2 E2' } });
-
-  const peg6Up = screen.getByRole('button', { name: 'Tune Staff tuning (notes, high to low) string 6 up' });
-  fireEvent.click(peg6Up);
-
-  expect(onEdit).toHaveBeenCalledTimes(1);
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
-    type: 'setStaffSettings',
-    settings: expect.objectContaining({
-      tuning: [64, 59, 55, 50, 45, 41],
-    }),
-  }));
-
-  fireEvent.change(input, { target: { value: 'E4 B3 G3 D3 A2 E2 B1' } });
-  const peg7Up = screen.getByRole('button', { name: 'Tune Staff tuning (notes, high to low) string 7 up' });
-  expect(peg7Up).toBeDisabled();
-  const peg7Dial = screen.getByRole('slider', { name: 'Staff tuning (notes, high to low) string 7 peg' });
-  expect(peg7Dial).toHaveAttribute('aria-disabled', 'true');
-});
-it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
-  const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
-  fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();
-  fireEvent.change(input,{target:{value:'E4 bad'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent(/note|octave/i);
-  view.rerender(<StructurePanel {...props} score={music()}/>);expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
-});
-it('staff preset readback resets Custom on staff selection and percussion disables tuning',()=>{
-  const score=music(),staff=score.tracks[0].staves[0],second=new model.Staff();second.stringTuning.tunings=[...staff.tuning];score.tracks[0].addStaff(second);const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);bar.addVoice(voice);second.addBar(bar);
-  const props={score,target,string:6,busy:false,onEdit:vi.fn(),onSelect:vi.fn()},view=render(<StructurePanel {...props}/>);fireEvent.change(screen.getByLabelText('Staff tuning preset'),{target:{value:'custom'}});expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('custom');view.rerender(<StructurePanel {...props} target={{...target,staff:1}}/>);expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('guitar-6-standard-e');second.isPercussion=true;view.rerender(<StructurePanel {...props} target={{...target,staff:1}}/>);expect(screen.getByLabelText('Staff tuning preset')).toBeDisabled();expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toBeDisabled();
-});
 it('measure meter and tempo controls dispatch current musical values',()=>{
   const onEdit=vi.fn();render(<MeasurePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit}/>);
   fireEvent.change(screen.getByLabelText('Time numerator'),{target:{value:'3'}});fireEvent.click(screen.getByRole('button',{name:'Apply measure settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setMeasureSettings',bar:0,numerator:3,denominator:4}));
 });
 
-it('staff settings keep the staff tuning name through capo edits and send the draft name after tuning changes',()=>{
-  const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};score.tracks[0].staves[0].stringTuning.name='Imported';
-  const view=render(<StructurePanel {...props}/>);
-  fireEvent.change(screen.getByLabelText('Capo'),{target:{value:'2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({capo:2,tuning:[64,59,55,50,45,40],tuningName:'Imported'})}));
-  fireEvent.change(screen.getByLabelText('Staff tuning (notes, high to low)'),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[64,59,55,50,45,38],tuningName:''})}));
-  fireEvent.click(screen.getByRole('button',{name:'Saved tunings for Staff tuning (notes, high to low)'}));
-  fireEvent.click(within(within(screen.getByRole('dialog')).getByRole('group',{name:'Guitar · 6 strings'})).getByRole('button',{name:/^Open D/}));fireEvent.click(screen.getByRole('button',{name:'Use tuning'}));
-  fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[62,57,54,50,45,38],tuningName:'Open D'})}));
-  const next=music();next.tracks[0].staves[0].stringTuning.name='Fresh';
-  view.rerender(<StructurePanel {...props} score={next}/>);fireEvent.change(screen.getByLabelText('Capo'),{target:{value:'3'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[64,59,55,50,45,40],tuningName:'Fresh'})}));
-});
 
 const flat: PitchCurve = { type: model.BendType.Bend, style: 0, points: [{ offset: 0, value: 0 }, { offset: 60, value: 4 }] };
 it('Apply keeps focus and the focus ring when busy flips on, and a press while busy records nothing', () => {
@@ -670,65 +488,6 @@ it('the Hold preset button sends Custom with flat points so the engine classifie
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ type: model.WhammyType.Custom, points: [{ offset: 0, value: -4 }, { offset: 60, value: -4 }] }));
 });
 
-it('StructurePanel keep pitch checkbox passes keepPitch: true to setStaffSettings', () => {
-  const score = music(), onEdit = vi.fn(), props = { score, target, string: 6, busy: false, onEdit, onSelect: vi.fn() };
-  render(<StructurePanel {...props} />);
-  const keepPitch = screen.getByLabelText('Keep pitch');
-  expect(keepPitch).not.toBeChecked();
-  fireEvent.click(keepPitch);
-  expect(keepPitch).toBeChecked();
-  fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '2' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
-  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
-    type: 'setStaffSettings',
-    track: 0,
-    staff: 0,
-    settings: expect.objectContaining({ keepPitch: true }),
-  }));
-});
 
-it('keep pitch starts unticked on another staff and never goes into Add staff', () => {
-  const score = previewEdit(blankProject(), { type: 'addTrack', name: 'Bass', tuning: [43, 38, 33, 28], program: 33, tuningName: '' }).score, onEdit = vi.fn();
-  const props = { score, string: 1, busy: false, onEdit, onSelect: vi.fn() };
-  const view = render(<StructurePanel {...props} target={target} />);
-  fireEvent.click(screen.getByLabelText('Keep pitch'));
-  expect(screen.getByLabelText('Keep pitch')).toBeChecked();
-  fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
-  expect(onEdit.mock.calls.at(-1)![0].type).toBe('addStaff');
-  expect(onEdit.mock.calls.at(-1)![0].settings).not.toHaveProperty('keepPitch');
-  view.rerender(<StructurePanel {...props} target={{ ...target, track: 1 }} />);
-  expect(screen.getByLabelText('Keep pitch')).not.toBeChecked();
-  onEdit.mockClear();
-  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
-  expect(onEdit.mock.calls.at(-1)?.[0].settings ?? {}).not.toHaveProperty('keepPitch');
-});
 
-it('the Keep pitch box in the staff panel keeps focus and its value while busy', async () => {
-  const onEdit = vi.fn(), props = { score: music(), target, string: 6, onEdit, onSelect: vi.fn() };
-  const view = render(<StructurePanel {...props} busy={false} />);
-  const box = screen.getByLabelText('Keep pitch') as HTMLInputElement;
-  box.focus();
-  fireEvent.click(box);
-  expect(box).toBeChecked();
-  view.rerender(<StructurePanel {...props} busy />);
-  expect(screen.getByLabelText('Keep pitch')).toBe(box);
-  expect(box).not.toBeDisabled();
-  expect(box).toHaveAttribute('aria-disabled', 'true');
-  expect(box).toHaveFocus();
-  fireEvent.click(box);
-  await waitFor(() => expect(box).toBeChecked());
-  expect(box.closest('label')).toHaveClass('check');
-});
 
-it('Apply staff settings records nothing when every value is the current one, with or without Keep pitch', () => {
-  const onEdit = vi.fn(), props = { score: music(), target, string: 6, busy: false, onEdit, onSelect: vi.fn() };
-  render(<StructurePanel {...props} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
-  fireEvent.click(screen.getByLabelText('Keep pitch'));
-  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
-  expect(onEdit).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '2' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
-  expect(onEdit).toHaveBeenCalledTimes(1);
-  expect(onEdit.mock.calls[0][0].settings).toMatchObject({ capo: 2, keepPitch: true });
-});

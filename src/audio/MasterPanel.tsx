@@ -45,7 +45,7 @@ function useBalanceText() {
 /** A change is built on the master as it stands now, not as it was drawn: a second control touched while the first
  * one's edit is still on its way would otherwise be built from the old master and put the first back. `latest` holds
  * the master with every change sent so far; it follows the prop again once nothing is in flight. */
-function useMasterChange(master: MasterSettings | undefined, onChange: Commit) {
+export function useMasterChange(master: MasterSettings | undefined, onChange: Commit) {
   const current = master ?? defaultMaster();
   const latest = useRef(current);
   const inFlight = useRef(0);
@@ -87,8 +87,10 @@ export function DockMasterControls({ master, disabled, onChange }: {
 /** The master strip of the mixer: overall level and balance, then the compressor, EQ, reverb and limiter that every
  * track and the backing pass through. The playback click joins at the limiter and the count-in click stays outside. Like the track faders it works on a finalized document, since it is
  * how a player balances playback. */
-export function MasterPanel({ master, disabled, onChange }: {
+export function MasterPanel({ master, disabled, onChange, open }: {
   master: MasterSettings | undefined; disabled: boolean; onChange: Commit;
+  /** The effect whose controls start unfolded, as when its slot's edit button opened this. */
+  open?: 'compressor' | 'eq' | 'reverb' | 'limiter';
 }): React.JSX.Element {
   const { t } = useI18n();
   const neutral = masterIsNeutral(master);
@@ -104,7 +106,7 @@ export function MasterPanel({ master, disabled, onChange }: {
     <div className="track-channel-heading"><span>{t('audio.master')}</span><span className="track-channel-status">{neutral ? t('audio.untouched') : t('audio.changed')}</span></div>
     <Slider label={t('audio.master_level')} value={current.gainDb} min={-24} max={12} step={.5} format={db} disabled={disabled} commit={value => change({ gainDb: value })} />
     <Slider label={t('audio.master_balance')} value={current.balance} min={-1} max={1} step={.05} format={balance} disabled={disabled} commit={value => change({ balance: value })} />
-    <details>
+    <details open={open === 'compressor' || undefined}>
       <summary>{t('audio.compressor')}{current.compressor.enabled ? t('audio.effect_on_suffix') : ''}</summary>
       {on('compressor', t('audio.compressor'))}
       <Slider label={t('audio.master_comp_threshold')} value={current.compressor.thresholdDb} min={-60} max={0} step={1} format={db} disabled={disabled} commit={value => block('compressor', { thresholdDb: value })} />
@@ -113,7 +115,7 @@ export function MasterPanel({ master, disabled, onChange }: {
       <Slider label={t('audio.master_comp_release')} value={current.compressor.releaseMs} min={1} max={2000} step={1} format={value => `${value.toFixed(0)} ms`} disabled={disabled} commit={value => block('compressor', { releaseMs: value })} />
       <Slider label={t('audio.master_comp_makeup')} value={current.compressor.makeupDb} min={0} max={24} step={.1} format={db} disabled={disabled} commit={value => block('compressor', { makeupDb: value })} />
     </details>
-    <details>
+    <details open={open === 'eq' || undefined}>
       <summary>{t('audio.eq')}{current.eq.enabled ? t('audio.effect_on_suffix') : ''}</summary>
       {on('eq', t('audio.eq'))}
       <Slider label={t('audio.master_eq_low')} value={current.eq.lowDb} min={-24} max={24} step={.5} format={db} disabled={disabled} commit={value => block('eq', { lowDb: value })} />
@@ -121,7 +123,7 @@ export function MasterPanel({ master, disabled, onChange }: {
       <Slider label={t('audio.master_eq_mid_freq')} value={current.eq.midHz} min={200} max={5000} step={50} format={value => `${value.toFixed(0)} Hz`} disabled={disabled} commit={value => block('eq', { midHz: value })} />
       <Slider label={t('audio.master_eq_high')} value={current.eq.highDb} min={-24} max={24} step={.5} format={db} disabled={disabled} commit={value => block('eq', { highDb: value })} />
     </details>
-    <details>
+    <details open={open === 'reverb' || undefined}>
       <summary>{t('audio.reverb')}{current.reverb.enabled ? t('audio.effect_on_suffix') : ''}</summary>
       {on('reverb', t('audio.reverb'))}
       <label className="master-select">{t('audio.master_reverb_model')}<select aria-label={t('audio.master_reverb_model')} value={current.reverb.model} aria-disabled={disabled || undefined} onChange={event => { if (!disabled) void block('reverb', { model: event.target.value as MasterSettings['reverb']['model'] }); }}>
@@ -131,7 +133,7 @@ export function MasterPanel({ master, disabled, onChange }: {
       <Slider label={t('audio.master_reverb_room')} value={current.reverb.room} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { room: value })} />
       <Slider label={t('audio.master_reverb_damping')} value={current.reverb.damping} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { damping: value })} />
     </details>
-    <details>
+    <details open={open === 'limiter' || undefined}>
       <summary>{t('audio.limiter')}{current.limiter.enabled ? t('audio.effect_on_suffix') : ''}</summary>
       {on('limiter', t('audio.limiter'))}
       <Slider label={t('audio.master_limiter_ceiling')} value={current.limiter.ceilingDb} min={-12} max={0} step={.5} format={db} disabled={disabled} commit={value => block('limiter', { ceilingDb: value })} />

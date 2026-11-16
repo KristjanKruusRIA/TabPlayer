@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,styleSection,moveCursor} from './workstation-commands.mjs';
 import {readActiveDocument} from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -73,7 +73,8 @@ try{
   };
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const details=name=>page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});
+  // Engraving, typography, saved styles, the design sections and page layout are in the Score style dialog (Song tab); the dialog closes when a button in it is used, so each section is reopened before its next control.
+  const details=name=>styleSection(page,name);
   const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const waitStatus=async predicate=>{const deadline=Date.now()+15000;while(Date.now()<deadline){const value=await status();if(predicate(value))return value;await sleep(25);}throw new Error(`Audio status timeout: ${JSON.stringify(await status())}`);};
@@ -187,9 +188,10 @@ try{
     assert.equal(applied.project.edits.length,historyBefore+1);assert.equal(applied.project.edits.at(-1).type,'setEngraving');
     assert.deepEqual(lastFonts(applied.project),{music:'petaluma',roles:{lyrics:{font:'notoSerif',italic:true},markers:{font:'notoSansMono',bold:true},pageHeader:{font:'notoSerif',size:1.5}}});
   });
-  await check('Apply engraving again with nothing changed records nothing',async()=>{await button('Apply engraving');assert.equal((await edits()).length,applied.project.edits.length);});
+  await check('Apply engraving again with nothing changed records nothing',async()=>{await openPanels();await button('Apply engraving');assert.equal((await edits()).length,applied.project.edits.length);});
   const typed=await poll(drawn,value=>value.glyph&&/Petaluma/.test(value.glyph.family)&&value.lyric&&alias(value.lyric.family,'TabPlayer Serif')&&value.marker&&value.header&&value.visible.glyph&&/Petaluma/.test(value.visible.glyph.family)&&alias(value.visible.lyric?.family,'TabPlayer Serif'),'the chosen fonts are drawn');
   // Screenshots for a look by eye (not asserted): the page, and the fonts panel scrolled into view.
+  await openPanels();
   await page.screenshot({path:resolve(evidenceDirectory,'font-roles-page.png')});await page.getByRole('combobox',{name:/^Music font/}).scrollIntoViewIfNeeded();await page.screenshot({path:resolve(evidenceDirectory,'font-roles-panel.png')});await page.getByRole('combobox',{name:/^Markers italic/}).scrollIntoViewIfNeeded();await page.screenshot({path:resolve(evidenceDirectory,'font-roles-roles.png')});
   await check('screen: lyrics use the Serif alias in italic, markers the Mono alias in bold, the header the Serif alias at 150%',async()=>{
     assert.ok(alias(typed.lyric.family,'TabPlayer Serif'),typed.lyric.family);assert.equal(typed.lyric.style,'italic');
@@ -231,6 +233,7 @@ try{
   });
 
   // ---- A saved style with fonts makes the library version 3; deleting it brings version 1 back ----
+  await openPanels();
   await page.getByLabel('Style name',{exact:true}).fill('Fonts house');await page.getByRole('button',{name:'Save current style',exact:true}).click();await page.getByRole('status').filter({hasText:'Saved Fonts house.'}).waitFor();
   await check('a saved style with fonts makes the library version 3 and carries the fonts',async()=>{
     const library=savedStyles();assert.equal(library.version,3);assert.deepEqual(library.entries.map(entry=>entry.name),['Plain house','Fonts house']);
@@ -271,7 +274,7 @@ try{
     const pages=await exportedPages();for(const sheet of pages){assert.equal(sheet.musicCss,'.at{font-family:Leland,Bravura;font-size:36px}');assert.deepEqual(sheet.spill,[]);}
     return JSON.stringify(fonts);
   });
-  await choose('Music font','bravura');await button('Apply engraving');
+  await openPanels();await choose('Music font','bravura');await button('Apply engraving');
   await check('switching back to Bravura omits music from the fonts, draws Bravura and no D12 music face is embedded',async()=>{
     const after=await snapshot();assert.deepEqual(lastFonts(after.project),{roles:lastFonts(stored.project).roles},'music is omitted at its default');
     const now=await poll(drawn,value=>value.glyph&&!/Petaluma|Leland/.test(value.glyph.family),'Bravura glyphs are drawn');assert.ok(now.glyphFamilies.every(family=>!/Petaluma|Leland/.test(family)),JSON.stringify(now.glyphFamilies));assert.ok(now.visible.glyphCount>0&&now.visible.glyphFamilies.every(family=>!/Petaluma|Leland/.test(family)),`visible page: ${JSON.stringify(now.visible.glyphFamilies)}`);

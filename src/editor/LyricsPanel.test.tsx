@@ -6,7 +6,7 @@ import { model,Settings } from '@coderline/alphatab';
 import { LyricsPanel } from './LyricsPanel';
 import { applyLyricsEdit,getTrackLyrics } from './lyrics';
 import type { LyricsCommand } from './lyrics-types';
-import { music } from './fixtures';
+import { music, refused} from './fixtures';
 import { scoreFromJson } from '../model-clone';
 
 afterEach(cleanup);
@@ -19,7 +19,7 @@ it('panel_dispatches_one_complete_five_line_command',()=>{
     fireEvent.change(screen.getByLabelText(`Line ${line} text`),{target:{value:`verse ${line}\nraw+words`}});
     fireEvent.change(screen.getByLabelText(`Line ${line} start measure`),{target:{value:String((line-1)%4+1)}});
   }
-  expect(screen.getByRole('button',{name:'Add line'})).toBeDisabled();expect(screen.queryByLabelText('Line 6 text')).not.toBeInTheDocument();
+  expect(refused(screen.getByRole('button',{name:'Add line'}))).toBe(true);expect(screen.queryByLabelText('Line 6 text')).not.toBeInTheDocument();
   fireEvent.click(screen.getByLabelText('Visible'));expect(commands).toEqual([]);
   fireEvent.click(screen.getByRole('button',{name:'Apply lyrics'}));
   expect(commands).toEqual([{type:'setTrackLyrics',track:0,visible:false,lines:[
@@ -32,7 +32,7 @@ it('panel_removes_lines_resets_drafts_and_disables_while_busy',()=>{
   applyLyricsEdit(score,{type:'setTrackLyrics',track:0,visible:true,lines:[{startBar:1,text:'First'},{startBar:2,text:'Second'}]});
   const props={score,track:0,busy:false,onEdit:(edit:LyricsCommand)=>commands.push(edit)},view=render(<LyricsPanel {...props}/>);
   fireEvent.click(screen.getByRole('button',{name:'Remove line 1'}));expect(screen.getByLabelText('Line 1 text')).toHaveValue('Second');expect(screen.getByLabelText('Line 1 start measure')).toHaveValue(3);
-  view.rerender(<LyricsPanel {...props} busy/>);expect(screen.getByLabelText('Visible')).toBeDisabled();expect(screen.getByLabelText('Line 1 text')).toBeDisabled();expect(screen.getByRole('button',{name:'Apply lyrics'})).toBeDisabled();
+  view.rerender(<LyricsPanel {...props} busy/>);expect(refused(screen.getByLabelText('Visible'))).toBe(true);expect(refused(screen.getByLabelText('Line 1 text'))).toBe(true);expect(refused(screen.getByRole('button',{name:'Apply lyrics'}))).toBe(true);
   view.rerender(<LyricsPanel {...props} track={1}/>);expect(screen.queryByLabelText('Line 1 text')).not.toBeInTheDocument();expect(screen.getByText('Other guitar')).toBeInTheDocument();
   const restored=music();applyLyricsEdit(restored,{type:'setTrackLyrics',track:0,visible:false,lines:[{startBar:3,text:'Restored'}]});
   view.rerender(<LyricsPanel {...props} score={restored}/>);expect(screen.getByLabelText('Line 1 text')).toHaveValue('Restored');expect(screen.getByLabelText('Line 1 start measure')).toHaveValue(4);expect(screen.getByLabelText('Visible')).not.toBeChecked();expect(commands).toEqual([]);

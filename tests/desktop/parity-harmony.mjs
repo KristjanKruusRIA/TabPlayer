@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealInspector} from './workstation-commands.mjs';
+import {closeProperties,waitForWorkspaceIdle,clickWorkstationButton,revealInspector,propertiesSection,setBeatText} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -20,17 +20,19 @@ try{
   // An open chord or scale dialog holds the workspace operation lease, so the shell stays busy until it closes.
   const dialogs=()=>page.locator('[role="dialog"]'),openers=new Set(['Edit chord diagram','Browse scales']),closers=new Set(['Apply chord','Cancel','Close scales']);
   const dialogReady=()=>page.waitForFunction(()=>{const d=document.querySelector('[role="dialog"]');return !!d&&d.querySelector('fieldset')?.getAttribute('aria-disabled')!=='true';});
-  const button=async name=>{const inDialog=await dialogs().count()>0;await clickWorkstationButton(page,name,{waitForIdle:false});
+  const paletteIds={'Edit chord diagram':'chord-diagram','Browse scales':'scale-diagram'};
+  const button=async name=>{const inDialog=await page.evaluate(()=>[...document.querySelectorAll('[role="dialog"]')].some(d=>d.querySelector('h2')?.textContent!=='Properties'));if(paletteIds[name])await page.locator(`[data-palette-id="${paletteIds[name]}"]`).click();else await clickWorkstationButton(page,name,{waitForIdle:false});
     if(openers.has(name)){await dialogs().first().waitFor({state:'visible'});await dialogReady();}
     else if(closers.has(name)){await dialogs().first().waitFor({state:'hidden'});await idle();}
     else if(inDialog){await dialogReady();assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);}
     else await idle();};
-  const details=name=>page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});
+  // 'Music selection' and 'Musical clipboard' are sections of the Properties dialog (Selection tab); the chord dialog's own sections open in place.
+  const details=name=>['Music selection','Musical clipboard'].includes(name)?propertiesSection(page,name):page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});
   const fill=(name,value)=>page.getByLabel(name,{exact:true}).fill(String(value));
   const nameMode=async()=>(await page.getByRole('radiogroup',{name:'Name mode',exact:true}).getByRole('radio',{checked:true}).innerText()).toLowerCase();
   const combo=name=>page.getByRole('combobox',{name:new RegExp(`^${name}(?:\\s|$)`)});
   const chord=()=>page.getByRole('dialog',{name:'Harmony chord',exact:true});
-  const openChord=async()=>{await revealInspector(page);await button('Edit chord diagram');await chord().getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('[role="dialog"] fieldset')?.getAttribute('aria-disabled')!=='true');};
+  const openChord=async()=>{await revealInspector(page);await closeProperties(page);await button('Edit chord diagram');await chord().getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('[role="dialog"] fieldset')?.getAttribute('aria-disabled')!=='true');};
   const exportPitches=async()=>{await button('Export GP');const score=importer.ScoreLoader.loadScoreFromBytes(readFileSync(exported),new Settings()),file=new midi.MidiFile();new midi.MidiFileGenerator(score,new Settings(),new midi.AlphaSynthMidiFileHandler(file)).generate();return {score,pitches:file.tracks.flatMap(track=>track.events).filter(event=>event instanceof midi.NoteOnEvent).map(event=>event.noteKey)};};
   const restart=async()=>{await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await closeWelcome(page);await button('Open');};
 
@@ -40,8 +42,8 @@ try{
   await page.getByLabel('Fill empty beat with diagram notes',{exact:true}).check();await button('Apply chord');await chord().waitFor({state:'hidden'});
   let native=await snapshot();assert.equal(native.project.edits.length,1);const original=structuredClone(native.project.edits[0].chord);assert.deepEqual(original,entry.chord);
   const expected=original.frets.flatMap((fret,index)=>fret<0?[]:[[64,59,55,50,45,40][index]+fret]);assert.deepEqual([...new Set(expected.map(pitch=>pitch%12))].sort((a,b)=>a-b),[0,4,7]);
-  await details('Beat text');await fill('Beat text','Native harmony text');await button('Apply beat text');await openChord();assert.equal(await page.getByLabel('Chord name',{exact:true}).inputValue(),'C');await button('Cancel');
-  await details('Music selection');await button('Select bar');await combo('Transposition mode').selectOption('chromatic');await combo('Interval number').selectOption('2');await combo('Interval quality').selectOption('major');await page.getByLabel('Transpose theory chords',{exact:true}).check();
+  await setBeatText(page,'Native harmony text');await openChord();assert.equal(await page.getByLabel('Chord name',{exact:true}).inputValue(),'C');await button('Cancel');
+  {const dialog=await details('Music selection');await dialog.getByRole('button',{name:'Select bar',exact:true}).click();await idle();}await combo('Transposition mode').selectOption('chromatic');await combo('Interval number').selectOption('2');await combo('Interval quality').selectOption('major');await page.getByLabel('Transpose theory chords',{exact:true}).check();
   const beforeTranspose=await snapshot();await button('Transpose harmony');native=await snapshot();assert.equal(native.project.edits.length,beforeTranspose.project.edits.length+1);assert.equal(native.project.edits.at(-1).type,'transposeHarmony');
   await openChord();assert.equal(await page.getByLabel('Chord name',{exact:true}).inputValue(),'D');await details('Shape and display');for(let index=0;index<6;index++)assert.equal(await page.getByLabel(`String ${index+1} fret`,{exact:true}).inputValue(),String(original.frets[index]<0?-1:original.frets[index]+2));await page.screenshot({path:resolve('.analysis/parity/native-harmony-chord.png')});await button('Cancel');
   await button('Undo');await openChord();assert.equal(await page.getByLabel('Chord name',{exact:true}).inputValue(),'C');await button('Cancel');await button('Redo');assert.deepEqual((await snapshot()).project,native.project);

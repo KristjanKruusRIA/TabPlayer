@@ -59,7 +59,7 @@ it('describes the inspector tabs and the Track tab, not the old Track task',()=>
   expect(tracks).toHaveTextContent('The Track tab of the inspector');expect(tracks).toHaveTextContent('Keep pitch');expect(tracks).not.toHaveTextContent('Track task');
   unmount();render(<HelpDialog initial="inspector" onClose={vi.fn()}/>);
   const inspector=screen.getByRole('article',{name:'The inspector'});
-  expect(inspector).toHaveTextContent('three tabs');expect(inspector).toHaveTextContent('Song holds');expect(inspector).toHaveTextContent('Track holds');expect(inspector).toHaveTextContent('Selection holds');expect(inspector).toHaveTextContent('Practice settings on the toolbar');
+  expect(inspector).toHaveTextContent('two tabs');expect(inspector).not.toHaveTextContent('three tabs');expect(inspector).toHaveTextContent('Song holds');expect(inspector).toHaveTextContent('Track holds');expect(inspector).not.toHaveTextContent('Selection holds');expect(inspector).toHaveTextContent('Properties dialog');expect(inspector).toHaveTextContent('Practice settings on the toolbar');
 });
 
 it('documents the Shift+L, [ and ] practice shortcuts in the shortcuts topic in every language',()=>{

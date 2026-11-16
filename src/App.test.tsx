@@ -157,12 +157,72 @@ function exposeFunctionalControl(element:HTMLElement){
   for(const details of ancestors)if(!details.open)fireEvent.click(details.querySelector('summary')!);
   return element;
 }
-function functionalButton(name:string|RegExp){return exposeFunctionalControl(screen.queryByRole('button',{name})??screen.getByRole('button',{name,hidden:true}));}
-const change=(label:string,value:string)=>fireEvent.change(exposeFunctionalControl(screen.getByLabelText(label)),{target:{value}});
+/** The dialogs that now hold what the inspector's Selection tab and its long Song and Track sections held: Properties (from the Note menu), Score style, Sound and pedalboard and Sound mastering (from their buttons). A control not found in the page is looked for in them, tab by tab, as a person would open them. `done` closes the one this call opened. */
+const propertyTabs=['Note','Beat','Bar','Selection','Staff and voices','Pitch entry','Score'];
+const dialogOpeners:{title:string;tabs:(string|null)[];open:()=>void}[]=[
+  {title:'Properties',tabs:propertyTabs,open:()=>{const menu=openCommand('Note');fireEvent.click(within(menu).getByRole('button',{name:'Note properties…'}));}},
+  {title:'Score style',tabs:['Engraving and fonts','Spacing and grouping','Page and view'],open:()=>{fireEvent.click(document.getElementById('inspector-tab-song')!);fireEvent.click(screen.getByRole('button',{name:'Score style…',hidden:true}));}},
+  {title:'Sound and pedalboard',tabs:[null],open:()=>{fireEvent.click(document.getElementById('inspector-tab-track')!);fireEvent.click(screen.getByRole('button',{name:'Sound and pedalboard…',hidden:true}));}},
+  {title:'Sound mastering',tabs:[null],open:()=>{fireEvent.click(document.getElementById('inspector-tab-song')!);fireEvent.click(screen.getByRole('button',{name:'Show all mastering controls…',hidden:true}));}},
+];
+function inProperties<T>(find:()=>T):{found:T;done:()=>void} {
+  try{return {found:find(),done:()=>{}};}catch(error){
+    for(const opener of dialogOpeners){
+      if(screen.queryByRole('dialog',{name:opener.title}))continue;
+      try{opener.open();}catch{continue;}
+      const dialog=()=>screen.getByRole('dialog',{name:opener.title});
+      const done=()=>{if(screen.queryByRole('dialog',{name:opener.title}))fireEvent.click(within(dialog()).getByRole('button',{name:'Close'}));};
+      for(const tab of opener.tabs){if(tab)fireEvent.click(within(dialog()).getByRole('tab',{name:tab}));try{return {found:find(),done};}catch{/* try the next tab */}}
+      done();
+    }
+    throw error;
+  }
+}
+/** Writes a note at the cursor on its string, as a person does now that the inspector's Fret form is gone: digits typed on the score. */
+const settle=(ms=40)=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,ms));});
+const typeFret=async(fret:number)=>{const region=screen.getByRole('region',{name:'Score workspace'});for(const digit of String(fret))fireEvent.keyDown(region,{key:digit});
+  // Let the write land, then close the window for a second digit (a digit within a second would join this one into a two-digit fret), as Escape does for a person.
+  await settle();if(document.querySelector('.score-hint-pending-fret'))fireEvent.keyDown(region,{key:'Escape'});};
+/** The cursor's key edits on the score: Backspace removes the note, Ctrl+Insert inserts a beat, Shift+Delete deletes it. They wait for the previous entry to settle, as a person's next key does. */
+const workspaceKey=(init:KeyboardEventInit)=>fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),init);
+const cursorEdit=async(init:KeyboardEventInit)=>{await settle();workspaceKey(init);};
+const removeNote=()=>cursorEdit({key:'Backspace'}),insertBeat=()=>cursorEdit({key:'Insert',ctrlKey:true}),deleteBeat=()=>cursorEdit({key:'Delete',shiftKey:true});
+/** Runs a command of the palette (Ctrl+Shift+P, the typed text, Enter): measure N, rest, append measure, remove measure... */
+const paletteCommand=(text:string)=>{
+  workspaceKey({key:'P',code:'KeyP',ctrlKey:true,shiftKey:true});
+  const input=within(screen.getByRole('dialog',{name:'Commands'})).getByRole('combobox',{name:'Command'});
+  fireEvent.change(input,{target:{value:text}});fireEvent.keyDown(input,{key:'Enter'});
+};
+/** The edition palette's buttons (the toolbar beside the score). */
+const paletteButton=(name:string|RegExp)=>within(screen.getByRole('toolbar',{name:'Editing toolbar'})).getByRole('button',{name});
+/** Opens the Properties dialog from the Note menu and stays in it (the `change` and `click` helpers find their controls in an open dialog); `closeDialog` leaves it. */
+const openProperties=(tab?:string)=>{const menu=openCommand('Note');fireEvent.click(within(menu).getByRole('button',{name:'Note properties…'}));const dialog=screen.getByRole('dialog',{name:'Properties'});if(tab)fireEvent.click(within(dialog).getByRole('tab',{name:tab}));return within(dialog);};
+const closeDialog=(name='Properties')=>fireEvent.keyDown(screen.getByRole('dialog',{name}),{key:'Escape'});
+/** Opens the Score style dialog from the Song tab and stays in it; `closeDialog('Score style')` leaves it. */
+const openScoreStyle=(tab='Engraving and fonts')=>{fireEvent.click(document.getElementById('inspector-tab-song')!);fireEvent.click(screen.getByRole('button',{name:'Score style…',hidden:true}));const dialog=screen.getByRole('dialog',{name:'Score style'});fireEvent.click(within(dialog).getByRole('tab',{name:tab}));return within(dialog);};
+/** What the Properties dialog's Selection tab says the selection holds, such as "1 note · 16 beats": the dialog is opened to read it and closed again. */
+const selectionSummary=()=>{const dialog=openProperties('Selection'),text=dialog.getByText(/^\d+ notes? · \d+ beats?$/).textContent;closeDialog();return text;};
+/** The chord editor and the scale browser open from the palette now that the inspector's Edit chord diagram and Browse scales buttons are gone. */
+const openChordEditor=()=>fireEvent.click(paletteButton('Chords')),openScales=()=>fireEvent.click(paletteButton('Scale diagram'));
+/** The beat text, written through the palette's Text prompt, as the inspector's Beat text field and Apply beat text button were. */
+const writeBeatText=(text:string)=>{fireEvent.click(paletteButton('Text'));const prompt=screen.getByRole('dialog',{name:'Text'});fireEvent.change(within(prompt).getByLabelText('Text'),{target:{value:text}});fireEvent.click(within(prompt).getByRole('button',{name:'Apply'}));};
+/** Types into a Song or Track field and leaves it: those fields now record their change when they are left. */
+const commitField=(label:string,value:string)=>{const field=screen.getByLabelText(label);fireEvent.change(field,{target:{value}});fireEvent.blur(field);};
+/** The status bar's reading of the cursor, such as "Bar 1 · Beat 2 · String 5 · Voice 1". */
+const cursorReading=()=>document.querySelector('.statusbar-position')?.textContent??'';
+/** Moves the cursor to a string with the arrow keys, as the status bar reports it. */
+const selectString=(string:number)=>{
+  const region=screen.getByRole('region',{name:'Score workspace'}),current=()=>Number(/String (\d+)/.exec(document.querySelector('.statusbar-position')?.textContent??'')?.[1]);
+  for(let guard=0;guard<14&&current()!==string;guard++)fireEvent.keyDown(region,{key:current()<string?'ArrowUp':'ArrowDown'});
+  expect(current()).toBe(string);
+};
+function functionalButton(name:string|RegExp){return exposeFunctionalControl(screen.queryByRole('button',{name})??inProperties(()=>screen.getByRole('button',{name,hidden:true})).found);}
+const change=(label:string,value:string)=>{const {found,done}=inProperties(()=>screen.getByLabelText(label));fireEvent.change(exposeFunctionalControl(found),{target:{value}});done();};
 const click=(name:string)=>{
   // Selecting a track is now reached through Mixer; return to the viewer when that was the active task.
   const restoreInstrument=/^Track \d+:/.test(name)&&screen.queryByRole('button',{name:'Instrument'})?.getAttribute('aria-pressed')==='true';
-  fireEvent.click(functionalButton(name));if(restoreInstrument)fireEvent.click(screen.getByRole('button',{name:'Instrument'}));
+  const {found,done}=inProperties(()=>screen.queryByRole('button',{name})??screen.getByRole('button',{name,hidden:true}));
+  fireEvent.click(exposeFunctionalControl(found));done();if(restoreInstrument)fireEvent.click(screen.getByRole('button',{name:'Instrument'}));
 };
 const currentBeat=(controller:DocumentController,index=0)=>controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[index];
 
@@ -184,7 +244,11 @@ it('passes canonical paper targets and musical selections to transport only on e
 it('places practice and page controls inside their inspector task landmarks',async()=>{
   await setup();
   expect(screen.getByLabelText('Tempo mode').closest('[aria-label="Practice tools"]')).not.toBeNull();
-  expect(screen.getByLabelText('Width (mm)').closest('#inspector-panel-song')).not.toBeNull();
+  // The page settings left the Song tab for the Score style dialog, which the Song tab opens; the dialog is modal, so it sits outside the tab.
+  fireEvent.click(document.getElementById('inspector-tab-song')!);
+  const open=within(document.getElementById('inspector-panel-song')!).getByRole('button',{name:'Score style…'});fireEvent.click(open);
+  const dialog=screen.getByRole('dialog',{name:'Score style'});fireEvent.click(within(dialog).getByRole('tab',{name:'Page and view'}));
+  expect(within(dialog).getByLabelText('Width (mm)')).toBeInTheDocument();
 });
 
 it('offers discoverable editing help that closes with Escape without changing music',async()=>{
@@ -201,11 +265,11 @@ it('routes save history and playback shortcuts through existing actions outside 
   const workspace=screen.getByRole('region',{name:'Score workspace'});
   fireEvent.keyDown(workspace,{key:'s',ctrlKey:true});await waitFor(()=>expect(save).toHaveBeenCalledWith(false));
   fireEvent.keyDown(workspace,{key:'S',metaKey:true,shiftKey:true});await waitFor(()=>expect(save).toHaveBeenCalledWith(true));
-  click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  await typeFret(1);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
   fireEvent.keyDown(workspace,{key:'z',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   fireEvent.keyDown(workspace,{key:' '});expect(integration.play).toHaveBeenCalledTimes(1);
-  save.mockClear();fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'s',ctrlKey:true});
+  save.mockClear();fireEvent.keyDown(screen.getByLabelText('Title'),{key:'s',ctrlKey:true});
   click('Export score');fireEvent.keyDown(screen.getByLabelText('Export format'),{key:'s',ctrlKey:true});
   expect(save).not.toHaveBeenCalled();expect(integration.play).toHaveBeenCalledTimes(1);
 });
@@ -251,7 +315,7 @@ it('routes Shift+L, [ and ] through transport controls outside fields and dialog
   for(const mock of mocks)expect(mock).not.toHaveBeenCalled();
 
   // Not inside a text field, nor while a dialog is open.
-  const field=screen.getByLabelText('Fret');
+  const field=screen.getByLabelText('Title');
   fireEvent.keyDown(field,{key:'[',code:'BracketLeft'});fireEvent.keyDown(field,{key:'L',code:'KeyL',shiftKey:true});
   for(const mock of mocks)expect(mock).not.toHaveBeenCalled();
   fireEvent.keyDown(workspace,{key:'P',code:'KeyP',ctrlKey:true,shiftKey:true});
@@ -292,25 +356,28 @@ it('Shift+L falls back to the Loop button while Loop selection is unavailable, a
   player.playbackOccurrences=original;
 });
 
-it('reveals paste options through a collapsed Edit task without changing history',async()=>{
+it('opens the Properties dialog at the Musical clipboard from Ctrl+Shift+V without changing history',async()=>{
+  // Rewritten: the collapsed Edit task and the context card are gone with the Selection tab; the paste options live in the Properties dialog's Selection tab.
   const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});click('Select bar');
-  fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
-  const editTask=document.querySelector<HTMLDetailsElement>('.inspector-task[id$="-edit"]')!;editTask.open=false;
-  const clipboardSummary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();clipboardSummary.parentElement!.scrollIntoView=scroll;
+  fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
   const before=c.getState().snapshot;fireEvent.keyDown(workspace,{key:'v',ctrlKey:true,shiftKey:true});
-  expect(editTask.open).toBe(true);expect(clipboardSummary).toHaveFocus();expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(c.getState().snapshot).toBe(before);
-
-  const contextCard=within(screen.getByRole('region',{name:'Selection context'}));
-  fireEvent.click(contextCard.getByRole('button',{name:'Note'}));
-  expect(clipboardSummary).not.toBeVisible();
-  fireEvent.keyDown(workspace,{key:'v',ctrlKey:true,shiftKey:true});
-  expect(clipboardSummary).toBeVisible();
-  expect(clipboardSummary).toHaveFocus();
+  let dialog=await screen.findByRole('dialog',{name:'Properties'});
+  expect(within(dialog).getByRole('tab',{name:'Selection'})).toHaveAttribute('aria-selected','true');
+  const clipboardSummary=within(dialog).getByText('Musical clipboard',{selector:'summary'});
+  await waitFor(()=>expect(clipboardSummary).toHaveFocus());
+  expect(clipboardSummary.closest('details')).toHaveAttribute('open');expect(within(dialog).getByLabelText('Paste repetitions')).toBeVisible();
+  expect(c.getState().snapshot).toBe(before);
+  fireEvent.keyDown(dialog,{key:'Escape'});await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Properties'})).not.toBeInTheDocument());
+  // Asking again opens it again at the same place.
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'v',ctrlKey:true,shiftKey:true});
+  dialog=await screen.findByRole('dialog',{name:'Properties'});
+  await waitFor(()=>expect(within(dialog).getByText('Musical clipboard',{selector:'summary'})).toHaveFocus());
+  expect(c.getState().snapshot).toBe(before);
 });
 
 it('leaves the score alone from the Sound view: no cut, paste or select-all, while undo, palette and play still work',async()=>{
   const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
-  click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  await typeFret(1);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   click('Select bar');fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
   const edits=()=>c.getState().snapshot.project.edits.length,view=screen.getByRole('radiogroup',{name:'View'});
   fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
@@ -374,7 +441,7 @@ it('opens the chord editor on the beat of the chord picked on the score',async()
 });
 it('starts Harmony at its heading during initial library loading and focuses name when ready',async()=>{
   let finish!:(library:HarmonyLibrary)=>void;personalLibrary.read.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));
-  await setup();click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Harmony chord'});
+  await setup();openChordEditor();const dialog=screen.getByRole('dialog',{name:'Harmony chord'});
   const initialFocus=document.activeElement;await act(async()=>finish({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}));
   await waitFor(()=>expect(within(dialog).getByLabelText('Chord name').closest('fieldset')).not.toHaveAttribute('aria-disabled'));
   expect(initialFocus).toBe(dialog);expect(within(dialog).getByLabelText('Chord name')).toHaveFocus();
@@ -388,41 +455,44 @@ it('distinguishes a clean imported score from a new or saved native project',asy
 it('opens the rich chord editor and keeps text edits from replacing its metadata',async()=>{
   const chord={name:'Legacy',nameMode:'manual' as const,recipe:null,firstFret:0,frets:[0,19,-1,2,30,0],fingers:[-2,1,-1,0,4,-2],barreFrets:[0,19,19],showName:false,showDiagram:false,showFingering:false};
   const c=await setup({...blankProject(),edits:[{type:'setHarmonyChord',target:{track:0,staff:0,bar:0,voice:0,beat:0},chord,fillEmptyBeat:false}]});
-  click('Edit chord diagram');const dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Apply chord'})).toBeEnabled());
+  openChordEditor();const dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Apply chord'})).toBeEnabled());
   expect(dialog.getByLabelText('Chord name')).toHaveValue('Legacy');fireEvent.click(dialog.getByRole('button',{name:'Apply chord'}));await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
-  expect(getHarmonyChord(currentBeat(c).chord!)).toEqual(chord);change('Beat text','Exact text');click('Apply beat text');await waitFor(()=>expect(currentBeat(c).text).toBe('Exact text'));
+  expect(getHarmonyChord(currentBeat(c).chord!)).toEqual(chord);writeBeatText('Exact text');await waitFor(()=>expect(currentBeat(c).text).toBe('Exact text'));
   expect(c.getState().snapshot.project.edits.at(-1)?.type).toBe('setBeatText');expect(getHarmonyChord(currentBeat(c).chord!)).toEqual(chord);
-  const history=c.getState().snapshot;click('Browse scales');expect(await screen.findByRole('dialog',{name:'Scale browser'})).toBeInTheDocument();click('Close scales');expect(c.getState().snapshot).toBe(history);
+  const history=c.getState().snapshot;openScales();expect(await screen.findByRole('dialog',{name:'Scale browser'})).toBeInTheDocument();click('Close scales');expect(c.getState().snapshot).toBe(history);
 });
 it('keeps personal library management independent of project history and reloads it when opened',async()=>{
-  const c=await setup(),before=c.getState().snapshot;click('Edit chord diagram');let dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());
+  const c=await setup(),before=c.getState().snapshot;openChordEditor();let dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());
   fireEvent.change(dialog.getByLabelText('Chord name'),{target:{value:'Personal shape'}});fireEvent.change(dialog.getByLabelText('Library label'),{target:{value:'My chord'}});fireEvent.click(dialog.getByRole('button',{name:'Save to library'}));
   await waitFor(()=>expect(dialog.getByRole('status')).toHaveTextContent('Saved to library.'));expect(personalLibrary.put).toHaveBeenCalledWith(expect.objectContaining({label:'My chord',chord:expect.objectContaining({name:'Personal shape'})}));expect(c.getState().snapshot).toBe(before);
-  fireEvent.click(dialog.getByRole('button',{name:'Cancel'}));click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);click('Edit chord diagram');dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Apply chord'})).toBeEnabled());expect(personalLibrary.read).toHaveBeenCalledTimes(2);expect(activeController().getState().snapshot.project.edits).toHaveLength(0);expect(testWorkspace.getState().documents[0].controller).toBe(c);
+  fireEvent.click(dialog.getByRole('button',{name:'Cancel'}));click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);openChordEditor();dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Apply chord'})).toBeEnabled());expect(personalLibrary.read).toHaveBeenCalledTimes(2);expect(activeController().getState().snapshot.project.edits).toHaveLength(0);expect(testWorkspace.getState().documents[0].controller).toBe(c);
 });
 it('applies a named harmony interval through one native history command',async()=>{
-  const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.realValue).toBe(69));click('Select bar');
-  change('Transposition mode','chromatic');change('Interval quality','minor');change('Interval direction','down');click('Transpose harmony');await waitFor(()=>expect(currentBeat(c).notes[0].realValue).toBe(66));
+  const c=await setup();await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes[0]?.realValue).toBe(69));openProperties('Selection');click('Select bar');
+  // The drafts are in the dialog, so it stays open for the three fields and the button.
+  change('Transposition mode','chromatic');change('Interval quality','minor');change('Interval direction','down');click('Transpose harmony');await waitFor(()=>expect(currentBeat(c).notes[0].realValue).toBe(66));closeDialog();
   expect(c.getState().snapshot.project.edits).toHaveLength(2);expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'transposeHarmony',interval:{kind:'chromatic',number:3,quality:'minor',direction:'down',octaves:0}});
   click('Undo');await waitFor(()=>expect(currentBeat(c).notes[0].realValue).toBe(69));
 });
 it('uses the selected staff for scale preview without inventing a passage selection',async()=>{
-  const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28]}]});click('Track 2: Bass');const before=c.getState().snapshot;click('Browse scales');
+  const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28]}]});click('Track 2: Bass');const before=c.getState().snapshot;openScales();
   const svg=await screen.findByRole('group',{name:'Scale fretboard'}),labels=Array.from(svg.querySelectorAll('text')).filter(node=>node.getAttribute('x')==='3').map(node=>node.textContent);
   expect(labels).toEqual(['G2','D2','A1','E1']);expect(screen.getByText('Select melodic notes to match scales.')).toBeInTheDocument();expect(c.getState().snapshot).toBe(before);
 });
 it('keeps a late previous-dialog library response from replacing newer records',async()=>{
   let first!:HarmonyLibraryEntry,resolveFirst!:(value:HarmonyLibrary)=>void;
   personalLibrary.put.mockImplementationOnce(entry=>{first=entry;return new Promise(resolve=>{resolveFirst=resolve;});});
-  const c=await setup(),before=c.getState().snapshot;click('Edit chord diagram');let dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());
+  const c=await setup(),before=c.getState().snapshot;openChordEditor();let dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());
   fireEvent.change(dialog.getByLabelText('Library label'),{target:{value:'First'}});fireEvent.click(dialog.getByRole('button',{name:'Save to library'}));await waitFor(()=>expect(personalLibrary.put).toHaveBeenCalledTimes(1));fireEvent.click(dialog.getByRole('button',{name:'Cancel'}));
   personalLibrary.read.mockResolvedValueOnce({format:'TabPlayerHarmonyLibrary',version:1,entries:[first]});personalLibrary.put.mockImplementationOnce(async entry=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[first,entry]}));
-  click('Edit chord diagram');dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());fireEvent.change(dialog.getByLabelText('Library label'),{target:{value:'Second'}});fireEvent.click(dialog.getByRole('button',{name:'Save to library'}));await waitFor(()=>expect(dialog.getByRole('option',{name:'Second'})).toBeInTheDocument());
+  openChordEditor();dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());fireEvent.change(dialog.getByLabelText('Library label'),{target:{value:'Second'}});fireEvent.click(dialog.getByRole('button',{name:'Save to library'}));await waitFor(()=>expect(dialog.getByRole('option',{name:'Second'})).toBeInTheDocument());
   await act(async()=>{resolveFirst({format:'TabPlayerHarmonyLibrary',version:1,entries:[first]});});expect(dialog.getByRole('option',{name:'Second'})).toBeInTheDocument();expect(c.getState().snapshot).toBe(before);
 });
 
 it.each([{scale:.1,marginMm:15},{scale:1,marginMm:100}])('keeps old print geometry editable with a recoverable page notice: %j',async invalid=>{
   const project={...blankProject(),edits:[{type:'setPrintLayout' as const,layout:{paper:'A4' as const,orientation:'portrait' as const,profile:'ScoreTab' as const,...invalid}}]},c=await setup(project);
+  // The page settings are in the Score style dialog now, so the notice and the form are looked at there.
+  openScoreStyle('Page and view');
   expect(screen.getByRole('alert')).toHaveTextContent(/saved print layout/i);expect(c.getState().settings.print).toEqual(project.edits[0].layout);
   expect(screen.getByLabelText('Width (mm)')).toHaveValue(210);click('Apply page layout');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(210));
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(c.getState().snapshot.project.edits[0]).toEqual(project.edits[0]);
@@ -481,7 +551,7 @@ it('keeps the projected score for a gap-only engraving edit but not for another 
 it('wires Design mode bar widths: handles only while on, one edit per width, imported weights as the base, restore clears, busy refuses',async()=>{
   const c=await setup(),original=c.getState().score,last=()=>engravingView.mock.lastCall![0] as {barDesign:BarDesign|null};
   expect(last().barDesign).toBeNull();c.getState().score.tracks[0].staves[0].bars[2].displayScale=2;c.getState().score.masterBars[1].displayScale=3;
-  fireEvent.click(screen.getByRole('tab',{name:'Song'}));fireEvent.click(screen.getByRole('checkbox',{name:/Design mode/}));
+  fireEvent.click(openScoreStyle('Spacing and grouping').getByRole('checkbox',{name:/Design mode/}));closeDialog('Score style');
   const design=()=>last().barDesign!;expect(design()).not.toBeNull();
   expect(design().scaleOf(1)).toBe(1);expect(design().defaultOf(1)).toBe(1);expect(design().defaultOf(2)).toBe(2);expect(design().scaleOf(2)).toBe(2);expect(design().defaultOf(1)).toBe(1);
   act(()=>design().onScale(1,1.5));await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toEqual([{bar:1,scale:1.5}]));
@@ -491,20 +561,22 @@ it('wires Design mode bar widths: handles only while on, one edit per width, imp
   act(()=>design().onScale(1,1));await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toBeUndefined());expect(c.getState().snapshot.project.edits).toHaveLength(2);
   act(()=>design().onScale(0,2));await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toHaveLength(1));
   click('Restore default widths');await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toBeUndefined());expect(c.getState().snapshot.project.edits).toHaveLength(4);
-  fireEvent.click(screen.getByRole('checkbox',{name:/Design mode/}));expect(last().barDesign).toBeNull();
+  fireEvent.click(openScoreStyle('Spacing and grouping').getByRole('checkbox',{name:/Design mode/}));closeDialog('Score style');expect(last().barDesign).toBeNull();
 });
 it('applies engraving and custom page edits once while keeping canonical music through history',async()=>{
   const c=await setup(),original=c.getState().score;
+  // The drafts live in the Score style dialog, so it stays open for both applies.
+  openScoreStyle();
   change('Hide dynamics','true');click('Apply engraving');await waitFor(()=>expect(c.getState().settings.engraving.stylesheet.hideDynamics).toBe(true));
   expect(c.getState().score).toBe(original);expect(c.getState().snapshot.project.edits).toHaveLength(1);
   change('Width (mm)','250');click('Apply page layout');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));
-  expect(c.getState().snapshot.project.edits).toHaveLength(2);expect(c.getState().score).toBe(original);
+  expect(c.getState().snapshot.project.edits).toHaveLength(2);expect(c.getState().score).toBe(original);closeDialog('Score style');
   click('Undo');await waitFor(()=>expect(c.getState().settings.page).toBeNull());expect(c.getState().score).toBe(original);
   click('Redo');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));expect(c.getState().score).toBe(original);
 });
 
 it('applies font roles as one edit, shows the font status from the score view, and follows undo and redo',async()=>{
-  const c=await setup();
+  const c=await setup();openScoreStyle();
   change('Lyrics font','notoSerif');change('Music font','leland');click('Apply engraving');
   await waitFor(()=>expect(c.getState().settings.engraving.fonts).toEqual({music:'leland',roles:{lyrics:{font:'notoSerif'}}}));
   expect(c.getState().snapshot.project.edits).toHaveLength(1);
@@ -518,22 +590,25 @@ it('applies font roles as one edit, shows the font status from the score view, a
   const edits=c.getState().snapshot.project.edits.length;click('Apply engraving');await new Promise(resolve=>setTimeout(resolve,20));expect(c.getState().snapshot.project.edits).toHaveLength(edits);
 });
 
-it('keeps copied music and paste drafts across unrelated renders and New, with one repeated paste command',async()=>{
-  const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));click('Select bar');
+it('keeps copied music across New, with one repeated paste command',async()=>{
+  // The clipboard panel lives in the Properties dialog's Selection tab now and is mounted only while the dialog is open, so its drafts (Paste repetitions) are not kept across closing it; the copied music is.
+  const c=await setup();await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));click('Select bar');
   const workspace=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
+  openProperties('Selection');
   await waitFor(()=>expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument());
   await waitFor(()=>{expect(screen.getByLabelText('Destination track for copied track 1')).toHaveValue('0');expect(screen.getByLabelText('Paste repetitions')).toBeEnabled();});
-  const clipboard=screen.getByText('Musical clipboard').closest('details')!;clipboard.open=true;change('Paste repetitions','2');change('Fret','6');
-  expect(screen.getByLabelText('Paste repetitions')).toHaveValue(2);expect(c.getState().snapshot.project.edits).toHaveLength(1);
-  click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument();
+  const clipboard=screen.getByText('Musical clipboard').closest('details')!;clipboard.open=true;change('Paste repetitions','2');
+  expect(screen.getByLabelText('Paste repetitions')).toHaveValue(2);expect(c.getState().snapshot.project.edits).toHaveLength(1);closeDialog();
+  click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);
+  openProperties('Selection');expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument();
   const destination=activeController();expect(c.getState().snapshot.project.edits).toHaveLength(1);change('Paste repetitions','2');click('Paste music');await waitFor(()=>expect(destination.getState().score.masterBars).toHaveLength(6));
   expect(destination.getState().snapshot.project.edits).toHaveLength(1);expect(destination.getState().snapshot.project.edits[0]).toMatchObject({type:'pasteMusic',options:{count:2}});
-  expect(currentBeat(destination).notes[0].fret).toBe(5);click('Undo');await waitFor(()=>expect(destination.getState().score.masterBars).toHaveLength(4));
+  closeDialog();expect(currentBeat(destination).notes[0].fret).toBe(5);click('Undo');await waitFor(()=>expect(destination.getState().score.masterBars).toHaveLength(4));
 });
 it('routes music clipboard shortcuts while preserving text input shortcuts and practice independence',async()=>{
-  const c=await setup();change('Fret','3');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));click('Select bar');
+  const c=await setup();await typeFret(3);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));click('Select bar');
   const workspace=screen.getByRole('region',{name:'Score workspace'}),history=c.getState().snapshot.project.edits.length;
-  fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'x',ctrlKey:true});expect(c.getState().snapshot.project.edits).toHaveLength(history);
+  fireEvent.keyDown(screen.getByLabelText('Title'),{key:'x',ctrlKey:true});expect(c.getState().snapshot.project.edits).toHaveLength(history);
   fireEvent.keyDown(workspace,{key:'x',ctrlKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
   fireEvent.keyDown(workspace,{key:'v',ctrlKey:true});await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(5));expect(currentBeat(c).notes[0].fret).toBe(3);
   const before=c.getState().snapshot;const details=screen.getByText('Practice settings').closest('details')!;details.open=true;change('Relative speed (%)','123');click('Apply practice settings');
@@ -545,28 +620,28 @@ it('passes fixed-mode export unavailability without claiming a constant practice
 });
 
 it('selects editable music with keyboard shortcuts without changing history or text editing',async()=>{
-  const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));
+  const c=await setup();await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));
   const history=c.getState().snapshot.project.edits.length,workspace=screen.getByRole('region',{name:'Score workspace'});
-  fireEvent.keyDown(workspace,{key:'a',ctrlKey:true});expect(screen.getByText('1 note · 16 beats')).toBeInTheDocument();
+  fireEvent.keyDown(workspace,{key:'a',ctrlKey:true});expect(selectionSummary()).toBe('1 note · 16 beats');
   expect(c.getState().snapshot.project.edits).toHaveLength(history);
   click('Up semitone');await waitFor(()=>expect(currentBeat(c).notes[0].fret).toBe(6));
   expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'transposeSelection',semitones:1});
-  fireEvent.keyDown(workspace,{key:'Escape'});expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();
-  fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'a',ctrlKey:true});expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();
-  fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});expect(screen.getByText('1 note · 2 beats')).toBeInTheDocument();
+  fireEvent.keyDown(workspace,{key:'Escape'});expect(selectionSummary()).toBe('0 notes · 0 beats');
+  fireEvent.keyDown(screen.getByLabelText('Title'),{key:'a',ctrlKey:true});expect(selectionSummary()).toBe('0 notes · 0 beats');
+  fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});expect(selectionSummary()).toBe('1 note · 2 beats');
   const selectedHistory=c.getState().snapshot.project.edits.length;click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);
-  expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();expect(selectedHistory).toBe(history+1);
+  expect(selectionSummary()).toBe('0 notes · 0 beats');expect(selectedHistory).toBe(history+1);
 });
 it('Alt+Shift+period and comma move the range end by the entry duration and never past its start',async()=>{
-  const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));
+  const c=await setup();await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));
   const history=c.getState().snapshot.project.edits.length,workspace=screen.getByRole('region',{name:'Score workspace'}),move=(code:'Comma'|'Period')=>fireEvent.keyDown(workspace,{key:code==='Comma'?'<':'>',code,altKey:true,shiftKey:true});
-  fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});expect(screen.getByText('1 note · 2 beats')).toBeInTheDocument();
-  move('Period');expect(screen.getByText('1 note · 3 beats')).toBeInTheDocument();
-  move('Comma');move('Comma');expect(screen.getByText('1 note · 1 beat')).toBeInTheDocument();
-  move('Comma');expect(screen.getByText('1 note · 1 beat')).toBeInTheDocument();
+  fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});expect(selectionSummary()).toBe('1 note · 2 beats');
+  move('Period');expect(selectionSummary()).toBe('1 note · 3 beats');
+  move('Comma');move('Comma');expect(selectionSummary()).toBe('1 note · 1 beat');
+  move('Comma');expect(selectionSummary()).toBe('1 note · 1 beat');
   expect(c.getState().snapshot.project.edits).toHaveLength(history);
   // Alt+Shift+Arrow is still the measure extension, not this.
-  fireEvent.keyDown(workspace,{key:'ArrowRight',altKey:true,shiftKey:true});expect(screen.queryByText('1 note · 1 beat')).not.toBeInTheDocument();
+  fireEvent.keyDown(workspace,{key:'ArrowRight',altKey:true,shiftKey:true});expect(selectionSummary()).not.toBe('1 note · 1 beat');
 });
 /** Bar 1 is a quarter, a quarter and a half note, each with a word. */
 const wordsProject=(words:boolean):Project=>({...blankProject(),edits:[
@@ -595,17 +670,19 @@ it('a cut that takes no lyric word away shows no lyrics notice',async()=>{
   await new Promise(resolve=>setTimeout(resolve,30));expect(screen.queryByText(/lyric words? (was|were) removed/)).toBeNull();
 });
 it('keeps the beat cursor on its original music across insert and remove measure ranges',async()=>{
-  const c=await setup();change('Measure','3');change('Measures to insert','2');click('Insert before');
-  await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(6));await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(5));
+  const c=await setup();paletteCommand('measure 3');await waitFor(()=>expect(cursorReading()).toMatch(/^Bar 3 /));
+  openProperties('Bar');change('Measures to insert','2');click('Insert before');
+  await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(6));await waitFor(()=>expect(cursorReading()).toMatch(/^Bar 5 /));
   change('First measure to remove','1');change('Last measure to remove','2');click('Remove measure range');
-  await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(4));await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(3));
+  await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(4));await waitFor(()=>expect(cursorReading()).toMatch(/^Bar 3 /));
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['insertMeasures','removeMeasures']);
 });
 
 it('creates piano chords, edits the clicked member and replays its history',async()=>{
   const c=await setup();change('New notation track name','Piano');click('Add pitched track');
   await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));click('Track 2: Piano');
-  change('Written pitch','C4');click('Add pitched note');
+  // The pitch fields are in the Properties dialog's Note tab for a staff without strings; their drafts need it open throughout.
+  openProperties('Note');change('Written pitch','C4');click('Add pitched note');
   const notes=()=>c.getState().score.tracks[1].staves[0].bars[0].voices[0].beats[0].notes;
   await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60]));
   change('Written pitch','E4');click('Add pitched note');await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60,64]));
@@ -618,25 +695,29 @@ it('creates piano chords, edits the clicked member and replays its history',asyn
 it('clears the indexed chord member after successful clipboard paste',async()=>{
   const target={track:1,staff:0,bar:0,voice:0,beat:0};
   const c=await setup({...blankProject(),edits:[{type:'addPitchedTrack',name:'Piano',program:0},{type:'addPitchedNote',target,pitch:60},{type:'addPitchedNote',target,pitch:64}]});
-  click('Track 2: Piano');click('Select rendered chord note');expect(screen.getByLabelText('Chord note')).toHaveValue('1');click('Select bar');
-  const workspace=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
-  fireEvent.keyDown(workspace,{key:'v',ctrlKey:true});await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(5));expect(screen.getByLabelText('Chord note')).toHaveValue('-1');
+  click('Track 2: Piano');click('Select rendered chord note');const note=openProperties('Note');expect(note.getByLabelText('Chord note')).toHaveValue('1');
+  fireEvent.click(note.getByRole('tab',{name:'Selection'}));click('Select bar');closeDialog();
+  const workspace=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
+  openProperties('Selection');await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());closeDialog();
+  fireEvent.keyDown(workspace,{key:'v',ctrlKey:true});await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(5));expect(openProperties('Note').getByLabelText('Chord note')).toHaveValue('-1');
 });
 
 it('keeps clipboard shortcuts inside the chord modal from editing the score',async()=>{
   const c=await setup({...blankProject(),edits:[{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}]});click('Select bar');
-  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
-  click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Harmony chord'}),before=c.getState().snapshot;
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'c',ctrlKey:true});
+  openProperties('Selection');await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());closeDialog();
+  openChordEditor();const dialog=screen.getByRole('dialog',{name:'Harmony chord'}),before=c.getState().snapshot;
   const cancel=within(dialog).getByRole('button',{name:'Cancel'});cancel.focus();
   for(const key of ['c','x','v'])fireEvent.keyDown(cancel,{key,ctrlKey:true});
   await waitFor(()=>expect(c.getState().busy).toBe(false));expect(c.getState().snapshot).toBe(before);expect(dialog).toBeInTheDocument();
 });
 
 it('edits song metadata and measure directions through the integrated inspector',async()=>{
-  const c=await setup();change('Album','New album');click('Apply song metadata');
+  // Rewritten: Apply song metadata is gone; Album is under the Song tab's More and records its change when the field is left.
+  const c=await setup();commitField('Album','New album');
   await waitFor(()=>expect(c.getState().score.album).toBe('New album'));
   expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setScoreMetadata',fields:{album:'New album'}});
-  fireEvent.click(screen.getByLabelText('Fine'));click('Apply directions');
+  openProperties('Bar');fireEvent.click(screen.getByLabelText('Fine'));click('Apply directions');
   await waitFor(()=>expect(c.getState().score.masterBars[0].directions?.has(0)).toBe(true));
 });
 
@@ -658,13 +739,13 @@ it('typing a practice speed in transport updates speed without adding undo histo
 });
 
 it('selects rendered notes and enters frets on empty strings to form chords',async()=>{
-  const c=await setup(); click('Select rendered note'); expect(screen.getByLabelText('Beat')).toHaveValue(2);
-  expect(screen.getByLabelText('String')).toHaveValue('5'); change('Fret','7'); click('Set note');
+  const c=await setup(); click('Select rendered note'); expect(cursorReading()).toMatch(/Beat 2 · String 5 /);
+  await typeFret(7);
   await waitFor(()=>expect(currentBeat(c,1).notes[0]?.fret).toBe(7));
-  change('String','6');change('Fret','3');click('Set note');
+  selectString(6);await typeFret(3);
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(2));
-  click('Remove note');await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
-  click('Make rest');await waitFor(()=>expect(currentBeat(c,1).isRest).toBe(true));
+  await removeNote();await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+  paletteCommand('make rest');await waitFor(()=>expect(currentBeat(c,1).isRest).toBe(true));
 });
 it('persists selected track sound and mixer without replacing the score identity',async()=>{
   const c=await setup(),score=c.getState().score;change('Sound source','green-guitar');await waitFor(()=>expect(c.getState().settings.sounds['base/0'].voiceId).toBe('green-guitar'));expect(c.getState().score).toBe(score);
@@ -799,7 +880,7 @@ it('default print export leaves exact history unchanged',async()=>{
 });
 it('cancels an active export through the coordinator and closes the dialog',async()=>{
   let finish:(value:boolean)=>void=()=>{};integration.exportRun.mockImplementationOnce(()=>new Promise<boolean>(resolve=>{finish=resolve;}));const c=await setup();click('Export score');click('Export');await waitFor(()=>expect(integration.exportRun).toHaveBeenCalled());integration.exportBusy=true;
-  expect(functionalButton('Apply score info')).toBeDisabled();change('Zoom (%)','125');click('Cancel export');await waitFor(()=>expect(integration.exportCancel).toHaveBeenCalled());expect(testWorkspace.getState().busy).toBe(true);await act(async()=>{finish(false);});await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
+  expect(screen.getByLabelText('Title').closest('fieldset')).toHaveAttribute('aria-disabled','true');change('Zoom (%)','125');click('Cancel export');await waitFor(()=>expect(integration.exportCancel).toHaveBeenCalled());expect(testWorkspace.getState().busy).toBe(true);await act(async()=>{finish(false);});await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
 });
 it('shows native export failure inside the open modal without a duplicate background alert',async()=>{
   integration.exportRun.mockRejectedValueOnce(new Error('Native export failed.'));await setup();click('Export score');click('Export');const dialog=screen.getByRole('dialog',{name:'Export score'});
@@ -809,93 +890,92 @@ it('focuses export options and Escape restores the toolbar opener',async()=>{
   await setup();const opener=functionalButton('Export score');opener.focus();fireEvent.click(opener);const format=screen.getByLabelText('Export format');expect(format).toHaveFocus();fireEvent.keyDown(format,{key:'Escape'});await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());const trigger=screen.getByText('File',{selector:'summary'});expect(trigger).toBeVisible();expect(trigger).toHaveFocus();
 });
 it('edits rhythm, reports overflow, and supports undo and redo',async()=>{
-  const c=await setup();change('Duration','2');click('Apply rhythm');
+  // Rewritten: the Duration field and Apply rhythm are gone; the palette's duration command writes the same setBeatRhythm edit.
+  const c=await setup();paletteCommand('duration 2');
   await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('overfill'));
   expect(c.getState().snapshot.project.edits).toHaveLength(0);
-  change('Duration','8');click('Apply rhythm');await waitFor(()=>expect(currentBeat(c).duration).toBe(8));
+  paletteCommand('duration 8');await waitFor(()=>expect(currentBeat(c).duration).toBe(8));expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setBeatRhythm',duration:8});
   click('Undo');await waitFor(()=>expect(currentBeat(c).duration).toBe(4));
   click('Redo');await waitFor(()=>expect(currentBeat(c).duration).toBe(8));
 });
 it('navigates beats and strings and accepts fret keys when the score has focus',async()=>{
   const c=await setup();const workspace=screen.getByRole('region',{name:'Score workspace'});
   fireEvent.keyDown(workspace,{key:'ArrowRight'});fireEvent.keyDown(workspace,{key:'ArrowDown'});
-  expect(screen.getByLabelText('Beat')).toHaveValue(2);expect(screen.getByLabelText('String')).toHaveValue('5');
+  expect(cursorReading()).toMatch(/Beat 2 · String 5 /);
   fireEvent.keyDown(workspace,{key:'7'});fireEvent.keyDown(workspace,{key:'Enter'});
   await waitFor(()=>expect(currentBeat(c,1).notes[0]?.fret).toBe(7));
 });
 it('repairs selection after deleting the last beat, measure, and track',async()=>{
-  const c=await setup();change('Beat','4');click('Delete beat');
-  await waitFor(()=>expect(screen.getByLabelText('Beat')).toHaveValue(3));
-  change('Measure','4');click('Remove measure');await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(3));
-  click('Append measure');await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(4));
-  expect(screen.getByLabelText('Measure')).toHaveValue(3);
+  const c=await setup();for(let i=0;i<3;i++)workspaceKey({key:'ArrowRight'});expect(cursorReading()).toMatch(/Beat 4 /);await deleteBeat();
+  await waitFor(()=>expect(cursorReading()).toMatch(/Beat 3 /));
+  paletteCommand('measure 4');paletteCommand('remove measure');await waitFor(()=>expect(cursorReading()).toMatch(/^Bar 3 /));
+  paletteCommand('append measure');await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(4));
+  expect(cursorReading()).toMatch(/^Bar 3 /);
   click('Add track');await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));
   click('Track 2: Bass');click('Remove track');await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(1));
   expect(functionalButton('Track 1: Guitar')).toHaveAttribute('aria-pressed','true');
-  expect(Number((screen.getByLabelText('String') as HTMLSelectElement).value)).toBeLessThanOrEqual(6);
+  expect(Number(/String (\d+)/.exec(cursorReading())?.[1])).toBeLessThanOrEqual(6);
 });
 it('inserts a beat into an empty voice and changes score information and tuning',async()=>{
-  const c=await setup();for(let i=0;i<4;i++){click('Delete beat');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(i+1));}
-  expect(screen.getByRole('button',{name:'Set note'})).toBeDisabled();
-  click('Insert beat');await waitFor(()=>expect(currentBeat(c)).toBeDefined());
-  change('Title','My study');change('Artist','Band');change('Initial tempo','90');click('Apply score info');
-  await waitFor(()=>expect(c.getState().score.title).toBe('My study'));
+  const c=await setup();for(let i=0;i<4;i++){await deleteBeat();await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(i+1));}
+  // A digit cannot write a note into a voice with no beat (the Set note button was disabled), and says why.
+  await typeFret(3);expect(await screen.findByText('Select a beat with room for a note.')).toBeInTheDocument();expect(c.getState().snapshot.project.edits).toHaveLength(4);
+  await insertBeat();await waitFor(()=>expect(currentBeat(c)).toBeDefined());
+  // Title, Artist and Initial tempo each record their own edit when left; Apply score info is gone.
+  commitField('Title','My study');await waitFor(()=>expect(c.getState().score.title).toBe('My study'));commitField('Artist','Band');await waitFor(()=>expect(c.getState().score.artist).toBe('Band'));commitField('Initial tempo','90');await waitFor(()=>expect(c.getState().score.tempo).toBe(90));
   click('Edit tuning (E4 B3 G3 D3 A2 E2)');const tuningDialog=within(screen.getByRole('dialog',{name:'Tuning'}));fireEvent.change(tuningDialog.getByLabelText('Notes, high to low'),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(tuningDialog.getByRole('button',{name:'Keep fingering'}));
   await waitFor(()=>expect(c.getState().score.tracks[0].staves[0].tuning.at(-1)).toBe(38));
 });
 
 it('renaming from the inspector keeps the opening tempo mark, and changing the tempo field sets it',async()=>{
   const c=await setup();
-  change('Title','Renamed only');click('Apply score info');
+  commitField('Title','Renamed only');
   await waitFor(()=>expect(c.getState().score.title).toBe('Renamed only'));
   expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setScoreInfo',title:'Renamed only',preserveOpeningMark:true});
-  change('Initial tempo','77');click('Apply score info');
+  commitField('Initial tempo','77');
   await waitFor(()=>expect(c.getState().score.tempo).toBe(77));
   expect(c.getState().snapshot.project.edits.at(-1)).not.toHaveProperty('preserveOpeningMark');
 });
 
 it('refreshes_fret_after_undo_with_same_indices',async()=>{
-  const c=await setup();change('Fret','3');click('Set note');
+  const c=await setup();await typeFret(3);
   await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(3));
-  change('Fret','7');click('Set note');
+  await typeFret(7);
   await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(7));
   click('Undo');
   await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(3));
-  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(3));
-  expect(screen.getByLabelText('Measure')).toHaveValue(1);
-  expect(screen.getByLabelText('Beat')).toHaveValue(1);
+  await waitFor(()=>expect(screen.getByTestId('status-value')).toHaveTextContent(/Fret 3 /));
+  expect(cursorReading()).toMatch(/^Bar 1 · Beat 1 /);
   click('Redo');
-  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(7));
+  await waitFor(()=>expect(screen.getByTestId('status-value')).toHaveTextContent(/Fret 7 /));
 });
 
 it('refreshes fret after adding a document at the same indices',async()=>{
-  const c=await setup();change('Fret','9');click('Set note');
+  const c=await setup();await typeFret(9);
   await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(9));
   const history=c.getState();click('New');
   await waitFor(()=>expect(activeController()).not.toBe(c));expect(currentBeat(activeController()).notes).toHaveLength(0);expect(c.getState()).toBe(history);
-  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(0));
+  await waitFor(()=>expect(screen.getByTestId('status-value')).toHaveTextContent('Rest · 1/4'));
 });
 
 it('preserves selection when a rendered selection contains invalid indices',async()=>{
   await setup();click('Select rendered note');
   for (const label of ['fractional beat','negative staff','non-finite measure','non-finite voice','fractional string']) {
     click(`Select ${label}`);
-    expect(screen.getByLabelText('Measure')).toHaveValue(1);
-    expect(screen.getByLabelText('Beat')).toHaveValue(2);
-    expect(screen.getByLabelText('String')).toHaveValue('5');
+    expect(cursorReading()).toMatch(/^Bar 1 · Beat 2 · String 5 /);
   }
 });
 
 it('navigates backwards into the insertion location of an empty voice',async()=>{
   const c=await setup();
-  for(let i=0;i<4;i++){click('Delete beat');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(i+1));}
+  for(let i=0;i<4;i++){await deleteBeat();await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(i+1));}
   const workspace=screen.getByRole('region',{name:'Score workspace'});
   fireEvent.keyDown(workspace,{key:'ArrowRight'});
-  expect(screen.getByLabelText('Measure')).toHaveValue(2);
+  expect(cursorReading()).toMatch(/^Bar 2 /);
   fireEvent.keyDown(workspace,{key:'ArrowLeft'});
-  expect(screen.getByLabelText('Measure')).toHaveValue(1);
-  expect(screen.getByLabelText('Beat')).toHaveValue(1);
-  expect(screen.getByRole('button',{name:'Insert beat'})).toBeEnabled();
+  expect(cursorReading()).toMatch(/^Bar 1 · Beat 1 /);
+  // The Insert beat button was enabled here; Ctrl+Insert writes the beat.
+  await insertBeat();await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(5));expect(c.getState().snapshot.project.edits.at(-1)?.type).toBe('insertBeat');expect(currentBeat(c)).toBeDefined();
 });
 
 it('toggles the selected-track instrument view without editing the document',async()=>{
@@ -924,29 +1004,29 @@ it('follows a newly selected bass track and repairs the viewer after New',async(
 });
 
 it('switching restores per-tab views, resets musical selection and drafts, and retires one bound player',async()=>{
-  const a=await setup();change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(a).notes[0]?.fret).toBe(7));click('Select bar');change('Zoom (%)','137.5');change('Displayed tracks','all');click('Show instrument');change('Measure','3');change('Fret','19');const before=a.getState(),first=testWorkspace.getState().active;
+  const a=await setup();await typeFret(7);await waitFor(()=>expect(currentBeat(a).notes[0]?.fret).toBe(7));click('Select bar');change('Zoom (%)','137.5');change('Displayed tracks','all');click('Show instrument');paletteCommand('measure 3');const before=a.getState(),first=testWorkspace.getState().active;
   expect(screen.getAllByRole('region',{name:'Score workspace'})).toHaveLength(1);expect(integration.playerOptions).toHaveBeenCalledTimes(1);
-  click('New');await waitFor(()=>expect(activeController()).not.toBe(a));const b=activeController();expect(screen.getByLabelText('Zoom (%)')).toHaveValue(100);expect(screen.getByLabelText('Measure')).toHaveValue(1);expect(screen.getByLabelText('Fret')).toHaveValue(0);expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();expect(screen.getByText(/0 notes.*0 beats/)).toBeInTheDocument();
+  click('New');await waitFor(()=>expect(activeController()).not.toBe(a));const b=activeController();expect(screen.getByLabelText('Zoom (%)')).toHaveValue(100);expect(cursorReading()).toMatch(/^Bar 1 /);expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();expect(selectionSummary()).toBe('0 notes · 0 beats');
   change('Zoom (%)','75');const bHistory=b.getState();fireEvent.click(scoreTabs().getAllByRole('tab')[0]);await waitFor(()=>expect(activeController()).toBe(a));expect(testWorkspace.getState().active.activationId).not.toBe(first.activationId);
-  expect(screen.getByLabelText('Zoom (%)')).toHaveValue(137.5);expect(screen.getByLabelText('Displayed tracks')).toHaveValue('all');expect(screen.getByLabelText('Measure')).toHaveValue(3);expect(screen.getByLabelText('Fret')).toHaveValue(0);expect(screen.getByRole('region',{name:'Instrument view'})).toBeInTheDocument();expect(screen.getByText(/0 notes.*0 beats/)).toBeInTheDocument();
+  expect(screen.getByLabelText('Zoom (%)')).toHaveValue(137.5);expect(screen.getByLabelText('Displayed tracks')).toHaveValue('all');expect(cursorReading()).toMatch(/^Bar 3 /);expect(screen.getByRole('region',{name:'Instrument view'})).toBeInTheDocument();expect(selectionSummary()).toBe('0 notes · 0 beats');
   expect(a.getState()).toBe(before);expect(b.getState()).toBe(bHistory);expect(integration.playerOptions).toHaveBeenCalledTimes(3);expect(integration.destroy).toHaveBeenCalledTimes(2);expect(screen.getAllByRole('region',{name:'Score workspace'})).toHaveLength(1);expect(integration.play).not.toHaveBeenCalled();expect(integration.playSelection).not.toHaveBeenCalled();expect(integration.playFromCursor).not.toHaveBeenCalled();
 });
 it.each([{ctrlKey:true},{metaKey:true}])('routes workspace New, Open, cycle and close shortcuts outside fields and dialogs: %j',async modifier=>{
   const a=await setup(blankProject(),blankProject()),id=a.getState().documentId;
   // Edits keep both blank scores from being replaced when a score opens (THE-198), so Open adds a third tab.
-  change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(a).notes[0]?.fret).toBe(7));let score=screen.getByRole('region',{name:'Score workspace'});
+  await typeFret(7);await waitFor(()=>expect(currentBeat(a).notes[0]?.fret).toBe(7));let score=screen.getByRole('region',{name:'Score workspace'});
   fireEvent.keyDown(score,{key:'n',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(2));const b=activeController();
-  change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(b).notes[0]?.fret).toBe(7));score=screen.getByRole('region',{name:'Score workspace'});
+  await typeFret(7);await waitFor(()=>expect(currentBeat(b).notes[0]?.fret).toBe(7));score=screen.getByRole('region',{name:'Score workspace'});
   fireEvent.keyDown(score,{key:'o',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(3));const c=activeController();
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Tab',...modifier});await waitFor(()=>expect(activeController()).toBe(a));
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Tab',shiftKey:true,...modifier});await waitFor(()=>expect(activeController()).toBe(c));
-  for(const key of ['w','Tab','n','o'])fireEvent.keyDown(screen.getByLabelText('Fret'),{key,...modifier});expect(testWorkspace.getState().documents).toHaveLength(3);expect(activeController()).toBe(c);
-  click('Browse scales');const dialog=screen.getByRole('dialog',{name:'Scale browser'});for(const key of ['w','Tab','n','o'])fireEvent.keyDown(dialog,{key,...modifier});expect(testWorkspace.getState().documents).toHaveLength(3);expect(activeController()).toBe(c);click('Close scales');
+  for(const key of ['w','Tab','n','o'])fireEvent.keyDown(screen.getByLabelText('Title'),{key,...modifier});expect(testWorkspace.getState().documents).toHaveLength(3);expect(activeController()).toBe(c);
+  openScales();const dialog=screen.getByRole('dialog',{name:'Scale browser'});for(const key of ['w','Tab','n','o'])fireEvent.keyDown(dialog,{key,...modifier});expect(testWorkspace.getState().documents).toHaveLength(3);expect(activeController()).toBe(c);click('Close scales');
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'w',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(2));expect(activeController()).toBe(b);expect(testWorkspace.getState().documents[0].id).toBe(id);
 });
-it.each([{open:'Edit chord diagram',dialog:'Harmony chord',close:'Cancel'},{open:'Browse scales',dialog:'Scale browser',close:'Close scales'},{open:'Export score',dialog:'Export score',close:'Cancel'}])('holds exactly one editor lease for $dialog and releases it when dismissed',async({open,dialog,close})=>{
-  await setup();const begin=vi.spyOn(testWorkspace,'beginEditorOperation');click(open);expect(screen.getByRole('dialog',{name:dialog})).toBeInTheDocument();expect(begin).toHaveBeenCalledTimes(1);expect(testWorkspace.getState().busy).toBe(true);expect(scoreTabs().getByRole('tab')).toBeDisabled();expect(functionalButton('New')).toBeDisabled();expect(functionalButton('Apply score info')).toBeDisabled();expect(screen.getByRole('button',{name:'Stop'})).toBeEnabled();
-  click(close);await waitFor(()=>expect(testWorkspace.getState().busy).toBe(false));expect(begin).toHaveBeenCalledTimes(1);expect(scoreTabs().getByRole('tab')).toBeEnabled();expect(functionalButton('Apply score info')).toBeEnabled();
+it.each([{open:()=>openChordEditor(),dialog:'Harmony chord',close:'Cancel'},{open:()=>openScales(),dialog:'Scale browser',close:'Close scales'},{open:()=>click('Export score'),dialog:'Export score',close:'Cancel'}])('holds exactly one editor lease for $dialog and releases it when dismissed',async({open,dialog,close})=>{
+  await setup();const begin=vi.spyOn(testWorkspace,'beginEditorOperation');open();expect(screen.getByRole('dialog',{name:dialog})).toBeInTheDocument();expect(begin).toHaveBeenCalledTimes(1);expect(testWorkspace.getState().busy).toBe(true);expect(scoreTabs().getByRole('tab')).toBeDisabled();expect(functionalButton('New')).toBeDisabled();expect(screen.getByLabelText('Title').closest('fieldset')).toHaveAttribute('aria-disabled','true');expect(screen.getByRole('button',{name:'Stop'})).toBeEnabled();
+  click(close);await waitFor(()=>expect(testWorkspace.getState().busy).toBe(false));expect(begin).toHaveBeenCalledTimes(1);expect(scoreTabs().getByRole('tab')).toBeEnabled();expect(screen.getByLabelText('Title').closest('fieldset')).not.toHaveAttribute('aria-disabled');
 });
 it('uses its existing export dialog lease through page commit, frozen revision and late cancellation',async()=>{
   let finishRun!:(value:boolean)=>void,finishCancel!:()=>void;integration.exportRun.mockImplementationOnce(()=>new Promise<boolean>(resolve=>{finishRun=resolve;}));integration.exportCancel.mockImplementationOnce(()=>new Promise<void>(resolve=>{finishCancel=resolve;}));const c=await setup(),begin=vi.spyOn(testWorkspace,'beginEditorOperation');
@@ -977,14 +1057,14 @@ it('cycles twice with Ctrl Tab dispatched through the actual focused element',as
   fireEvent.keyDown(document.activeElement!,{key:'Tab',ctrlKey:true});await waitFor(()=>expect(activeController()).toBe(b));expect(document.activeElement).not.toBe(document.body);expect(document.activeElement?.isConnected).toBe(true);expect(scoreTabs().getByRole('tab',{selected:true})).toHaveFocus();
 });
 it('canceled toolbar close retains focus on its connected originating action',async()=>{
-  const c=await setup();change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(7));const bridge=documentBridges.get(c.getState().documentId)!;vi.mocked(bridge.askUnsaved).mockResolvedValueOnce('cancel');const origin=functionalButton('Close score');origin.focus();fireEvent.click(origin);
+  const c=await setup();await typeFret(7);await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(7));const bridge=documentBridges.get(c.getState().documentId)!;vi.mocked(bridge.askUnsaved).mockResolvedValueOnce('cancel');const origin=functionalButton('Close score');origin.focus();fireEvent.click(origin);
   await waitFor(()=>expect(bridge.askUnsaved).toHaveBeenCalledTimes(1));await waitFor(()=>expect(testWorkspace.getState().busy).toBe(false));expect(activeController()).toBe(c);expect(origin.isConnected).toBe(true);const trigger=screen.getByText('File',{selector:'summary'});expect(trigger).toBeVisible();expect(trigger).toHaveFocus();
 });
 
 
 // Workstation regressions use the real mounted workspace and panel composition.
 const commandDisclosure=(label:string)=>screen.getByText(label,{selector:'summary'}).closest('details')!;
-const paneButton=(name:string)=>name==='Backing'?dockButton('Backing'):screen.getByRole('tab',{name:name==='Inspector'?'Selection':name==='Song'?'Song':'Track',hidden:true});
+const paneButton=(name:string)=>name==='Backing'?dockButton('Backing'):screen.getByRole('tab',{name:name==='Song'?'Song':'Track',hidden:true});
 function openCommand(label:string){const disclosure=commandDisclosure(label);if(!disclosure.open)fireEvent.click(disclosure.querySelector('summary')!);return disclosure;}
 function viewToggle(label:string){const menu=openCommand('View');fireEvent.click(within(menu).getByRole('checkbox',{name:label}));fireEvent.keyDown(menu,{key:'Escape'});}
 function revealDetails(element:HTMLElement){for(let ancestor=element.parentElement;ancestor;ancestor=ancestor.parentElement)if(ancestor instanceof HTMLDetailsElement)ancestor.open=true;}
@@ -1184,22 +1264,27 @@ it('top-bar panel toggles show and hide the palette, inspector and global view, 
   }
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
-it('workstation hidden panes retain their mounted tuning rhythm and text drafts without score changes',async()=>{
-  const c=await setup(),before=c.getState();fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);fireEvent.change(tuning,{target:{value:'Draft lead'}});
-  fireEvent.click(paneButton('Inspector'));expect(tuning).not.toBeVisible();const duration=screen.getByLabelText('Duration'),text=screen.getByLabelText('Beat text');revealDetails(text);fireEvent.change(duration,{target:{value:'8'}});fireEvent.change(text,{target:{value:'Unapplied passage note'}});
-  viewToggle('Inspector');expect(duration).not.toBeVisible();viewToggle('Inspector');fireEvent.click(paneButton('Track'));
-  expect(screen.getByLabelText('Track name')).toBe(tuning);expect(tuning).toHaveValue('Draft lead');expect(screen.getByLabelText('Duration')).toBe(duration);expect(duration).toHaveValue('8');expect(screen.getByLabelText('Beat text')).toBe(text);expect(text).toHaveValue('Unapplied passage note');expect(c.getState()).toBe(before);expectSilentNavigation();
+it('workstation hidden panes retain their mounted Song and Track drafts without score changes',async()=>{
+  // Rewritten: the Duration and Beat text drafts left with the Selection tab; the Song title and the Track name are the drafts the two tabs hold now.
+  const c=await setup(),before=c.getState();fireEvent.click(paneButton('Track'));const name=screen.getByLabelText('Track name');fireEvent.change(name,{target:{value:'Draft lead'}});
+  fireEvent.click(paneButton('Song'));expect(name).not.toBeVisible();const title=screen.getByLabelText('Title');expect(title).toBeVisible();fireEvent.change(title,{target:{value:'Unapplied song title'}});
+  viewToggle('Inspector');expect(title).not.toBeVisible();viewToggle('Inspector');fireEvent.click(paneButton('Track'));
+  expect(screen.getByLabelText('Track name')).toBe(name);expect(name).toHaveValue('Draft lead');expect(screen.getByLabelText('Title')).toBe(title);expect(title).not.toBeVisible();expect(title).toHaveValue('Unapplied song title');expect(c.getState()).toBe(before);expectSilentNavigation();
 });
-it.each(['hidden-inspector','track-tab'] as const)('workstation paste-options shortcut reveals and focuses the existing Inspector from %s',async mode=>{
-  const c=await setup(blankProject(),undefined,{width:1280});fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);fireEvent.change(tuning,{target:{value:'Draft lead'}});
-  fireEvent.click(paneButton('Inspector'));const duration=screen.getByLabelText('Duration'),text=screen.getByLabelText('Beat text');revealDetails(text);fireEvent.change(duration,{target:{value:'8'}});fireEvent.change(text,{target:{value:'Draft survives reveal'}});click('Select bar');const score=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(score,{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
-  const editTask=document.querySelector<HTMLDetailsElement>('.inspector-task[id$="-edit"]')!;editTask.open=false;const summary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();summary.parentElement!.scrollIntoView=scroll;const selection=engravingView.mock.lastCall?.[0].editorSelection,before=c.getState();
-  if(mode==='hidden-inspector')viewToggle('Inspector');else fireEvent.click(paneButton('Track'));expect(duration).not.toBeVisible();
-  fireEvent.keyDown(score,{key:'v',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(summary).toHaveFocus());expect(summary).toBeVisible();expect(editTask.open).toBe(true);expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(duration).toBeVisible();expect(duration).toHaveValue('8');expect(text).toHaveValue('Draft survives reveal');expect(tuning).toHaveValue('Draft lead');expect(c.getState()).toBe(before);expect(engravingView.mock.lastCall?.[0].editorSelection).toBe(selection);expectSilentNavigation();
+it.each(['hidden-inspector','track-tab'] as const)('workstation paste-options shortcut opens the Properties dialog at the Musical clipboard from %s and keeps the inspector drafts',async mode=>{
+  // Rewritten: the shortcut used to reveal and focus the Edit task in the inspector; it now opens the Properties dialog at the Musical clipboard.
+  const c=await setup(blankProject(),undefined,{width:1280});fireEvent.click(paneButton('Track'));const name=screen.getByLabelText('Track name');fireEvent.change(name,{target:{value:'Draft lead'}});
+  fireEvent.click(paneButton('Song'));const title=screen.getByLabelText('Title');fireEvent.change(title,{target:{value:'Draft survives reveal'}});click('Select bar');const score=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(score,{key:'c',ctrlKey:true});
+  const selection=engravingView.mock.lastCall?.[0].editorSelection,before=c.getState();
+  if(mode==='hidden-inspector')viewToggle('Inspector');else fireEvent.click(paneButton('Track'));expect(title).not.toBeVisible();
+  fireEvent.keyDown(score,{key:'v',ctrlKey:true,shiftKey:true});const dialog=await screen.findByRole('dialog',{name:'Properties'}),summary=within(dialog).getByText('Musical clipboard',{selector:'summary'});
+  await waitFor(()=>expect(summary).toHaveFocus());expect(summary).toBeVisible();expect(summary.closest('details')).toHaveAttribute('open');expect(within(dialog).getByRole('tab',{name:'Selection'})).toHaveAttribute('aria-selected','true');
+  expect(title).toHaveValue('Draft survives reveal');expect(name).toHaveValue('Draft lead');expect(c.getState().snapshot).toBe(before.snapshot);expect(c.getState().score).toBe(before.score);expect(c.getState().settings).toBe(before.settings);expect(engravingView.mock.lastCall?.[0].editorSelection).toBe(selection);expectSilentNavigation();
 });
-it('workstation 960px task pane replaces Inspector and resize restores simultaneous wide panes',async()=>{
-  await setup(blankProject(),undefined,{width:960});const shell=document.querySelector('.app-shell')!;expect(shell).toHaveAttribute('data-narrow','true');const location=screen.getByLabelText('Editing location');expect(location).toBeVisible();fireEvent.click(paneButton('Sound'));expect(location).not.toBeVisible();expect(screen.getByLabelText('Sound source')).toBeVisible();fireEvent.click(paneButton('Inspector'));expect(location).toBeVisible();expect(screen.getByLabelText('Sound source')).not.toBeVisible();
-  Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:1280});fireEvent(window,new Event('resize'));await waitFor(()=>expect(shell).toHaveAttribute('data-narrow','false'));expect(location).toBeVisible();expect(integration.playerOptions).toHaveBeenCalledOnce();expect(integration.destroy).not.toHaveBeenCalled();
+it('workstation 960px shows one inspector tab at a time and resize restores simultaneous wide panes',async()=>{
+  // Rewritten: there is no Selection tab or Editing location card to give way to the task pane; Song and Track take turns, and the wide layout keeps the same player.
+  await setup(blankProject(),undefined,{width:960});const shell=document.querySelector('.app-shell')!;expect(shell).toHaveAttribute('data-narrow','true');const sound=screen.getByLabelText('Sound source');expect(sound).toBeVisible();fireEvent.click(paneButton('Song'));expect(screen.getByLabelText('Title')).toBeVisible();expect(sound).not.toBeVisible();fireEvent.click(paneButton('Track'));expect(sound).toBeVisible();expect(screen.getByLabelText('Title')).not.toBeVisible();
+  Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:1280});fireEvent(window,new Event('resize'));await waitFor(()=>expect(shell).toHaveAttribute('data-narrow','false'));expect(sound).toBeVisible();expect(integration.playerOptions).toHaveBeenCalledOnce();expect(integration.destroy).not.toHaveBeenCalled();
 });
 it('workstation dock Instrument follows per-document visibility while Overview and Mixer stay view-only',async()=>{
   const a=await setup(),first=a.getState().documentId,before=a.getState();fireEvent.click(screen.getByRole('button',{name:'Instrument'}));expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(true);viewToggle('Bottom dock');expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();viewToggle('Bottom dock');expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();
@@ -1394,8 +1479,8 @@ it.each(['percussion','empty-voice'] as const)('workstation Overview selects and
   const edits:EditCommand[]=kind==='percussion'?[{type:'addPercussionTrack',name:'Drums',program:0}]:[0,1,2,3].map(()=>({type:'deleteBeat',target:{track:0,staff:0,bar:0,voice:0,beat:0}}));const c=await setup({...blankProject(),edits}),before=c.getState(),grid=screen.getByRole('grid',{name:'Written measure overview'});const cell=within(grid).getByRole('gridcell',{name:kind==='percussion'?'Drums, measure 1, rest':'Guitar, measure 1, empty'});fireEvent.click(cell);expect(engravingView.mock.lastCall?.[0].editTarget).toEqual({track:kind==='percussion'?1:0,staff:0,bar:0,voice:0,beat:0});if(kind==='percussion')expect(engravingView.mock.lastCall?.[0].editString).toBeUndefined();expect(cell).toHaveFocus();expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('workstation paste-options shortcut keeps input and dialog keyboard exclusions',async()=>{
-  const c=await setup(),before=c.getState(),summary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();summary.parentElement!.scrollIntoView=scroll;fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Track name');revealDetails(tuning);tuning.focus();fireEvent.keyDown(tuning,{key:'v',ctrlKey:true,shiftKey:true});expect(tuning).toHaveFocus();expect(screen.getByLabelText('Editing location')).not.toBeVisible();expect(scroll).not.toHaveBeenCalled();
-  click('Browse scales');const dialog=screen.getByRole('dialog',{name:'Scale browser'}),focus=document.activeElement;fireEvent.keyDown(dialog,{key:'v',ctrlKey:true,shiftKey:true});expect(document.activeElement).toBe(focus);expect(summary.closest('details')).not.toHaveAttribute('open');expect(scroll).not.toHaveBeenCalled();expect(c.getState()).toBe(before);expectSilentNavigation();
+  const c=await setup(),before=c.getState();fireEvent.click(paneButton('Track'));const name=screen.getByLabelText('Track name');name.focus();fireEvent.keyDown(name,{key:'v',ctrlKey:true,shiftKey:true});expect(name).toHaveFocus();expect(screen.queryByRole('dialog',{name:'Properties'})).not.toBeInTheDocument();
+  openScales();const dialog=screen.getByRole('dialog',{name:'Scale browser'}),focus=document.activeElement;fireEvent.keyDown(dialog,{key:'v',ctrlKey:true,shiftKey:true});expect(document.activeElement).toBe(focus);expect(screen.queryByRole('dialog',{name:'Properties'})).not.toBeInTheDocument();expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 
 it('workstation single File integrates real session controls and footer notices without replacing the editor player',async()=>{
@@ -1407,21 +1492,21 @@ it('workstation single File integrates real session controls and footer notices 
 
 
 // Independent-review regressions: pane focus ownership and the actual visible instrument dock.
-it('inspector tabs show Song, Track and Selection, follow the arrow keys and keep focus on the chosen tab',async()=>{
+it('inspector tabs show Song and Track, open on Track, follow the arrow keys and keep focus on the chosen tab',async()=>{
   const c=await setup(),before=c.getState(),user=userEvent.setup(),list=screen.getByRole('tablist',{name:'Inspector'});
-  expect(within(list).getAllByRole('tab').map(tab=>tab.textContent)).toEqual(['Song','Track','Selection']);
-  const selection=within(list).getByRole('tab',{name:'Selection'});expect(selection).toHaveAttribute('aria-selected','true');expect(screen.getByLabelText('Editing location')).toBeVisible();
-  selection.focus();await user.keyboard('{ArrowRight}');const song=within(list).getByRole('tab',{name:'Song'});expect(song).toHaveFocus();expect(song).toHaveAttribute('aria-selected','true');
-  expect(screen.getByLabelText('Title')).toBeVisible();expect(screen.getByRole('button',{name:'Apply score info'})).toBeVisible();expect(screen.getByLabelText('Editing location')).not.toBeVisible();
-  await user.keyboard('{ArrowRight}');expect(within(list).getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeVisible();
-  await user.keyboard('{ArrowLeft}{ArrowLeft}');expect(selection).toHaveFocus();expect(screen.getByLabelText('Duration')).toBeVisible();
+  expect(within(list).getAllByRole('tab').map(tab=>tab.textContent)).toEqual(['Song','Track']);
+  const track=within(list).getByRole('tab',{name:'Track'}),song=within(list).getByRole('tab',{name:'Song'});expect(track).toHaveAttribute('aria-selected','true');expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeVisible();
+  track.focus();await user.keyboard('{ArrowRight}');expect(song).toHaveFocus();expect(song).toHaveAttribute('aria-selected','true');
+  expect(screen.getByLabelText('Title')).toBeVisible();expect(screen.queryByRole('button',{name:'Apply score info'})).not.toBeInTheDocument();expect(screen.getByRole('button',{name:/^Edit tuning/,hidden:true})).not.toBeVisible();
+  await user.keyboard('{ArrowRight}');expect(track).toHaveFocus();expect(track).toHaveAttribute('aria-selected','true');expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeVisible();
+  await user.keyboard('{ArrowLeft}');expect(song).toHaveFocus();expect(song).toHaveAttribute('aria-selected','true');
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('menu commands open the inspector tab that holds their settings',async()=>{
   const c=await setup(),before=c.getState();viewToggle('Inspector');expect(document.querySelector('.workstation-inspector')).not.toBeVisible();
   fireEvent.click(within(openCommand('Track')).getByRole('button',{name:'Track properties…'}));expect(screen.getByRole('tab',{name:'Track'})).toHaveAttribute('aria-selected','true');expect(screen.getByRole('tab',{name:'Track'})).toHaveFocus();expect(screen.getByRole('button',{name:/^Edit tuning/})).toBeVisible();
   fireEvent.click(within(openCommand('Sound')).getByRole('button',{name:'Sound mastering…'}));expect(screen.getByRole('tab',{name:'Song'})).toHaveAttribute('aria-selected','true');
-  fireEvent.click(within(openCommand('Note')).getByRole('button',{name:'Note properties…'}));expect(screen.getByRole('tab',{name:'Selection'})).toHaveAttribute('aria-selected','true');
+  fireEvent.click(within(openCommand('Note')).getByRole('button',{name:'Note properties…'}));expect(within(screen.getByRole('dialog',{name:'Properties'})).getByRole('tab',{name:'Note'})).toHaveAttribute('aria-selected','true');
   expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 it('review responsive pane focus leaves an unrelated score focus in place',async()=>{
@@ -1439,30 +1524,30 @@ it('plays an entered note through the addressed track at its sounding key, inclu
   window.localStorage.removeItem(auditionKey);
   const clef=buildScore(blankProject()).tracks[0].staves[0].bars[0].clef;
   const c=await setup({...blankProject(),edits:[{type:'setStaffSettings',track:0,staff:0,settings:{tuning:[64,59,55,50,45,40],capo:2,transposition:3,displayTransposition:0,clef,showTab:true,showNotation:true}}]});
-  change('String','6');change('Fret','5');click('Set note');
+  selectString(6);await typeFret(5);
   await waitFor(()=>expect(integration.audition).toHaveBeenCalledTimes(1));
   expect(integration.audition).toHaveBeenLastCalledWith({trackId:'base/0'},[{key:64+5+2-3,startMs:0,velocity:96}],800,expect.objectContaining({project:c.getState().snapshot.project,built:c.getState()}));
 });
 it('stays silent for rests, deletions, undo, redo and while playing',async()=>{
   window.localStorage.removeItem(auditionKey);
-  const c=await setup();change('String','6');change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));expect(integration.audition).toHaveBeenCalledTimes(1);
-  click('Make rest');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  const c=await setup();selectString(6);await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));expect(integration.audition).toHaveBeenCalledTimes(1);
+  paletteCommand('make rest');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
   click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   click('Redo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
-  change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));expect(integration.audition).toHaveBeenCalledTimes(2);
-  click('Remove note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));click('Insert beat');click('Delete beat');
+  await typeFret(7);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));expect(integration.audition).toHaveBeenCalledTimes(2);
+  await removeNote();await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));await insertBeat();await deleteBeat();
   await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).toHaveBeenCalledTimes(2);
 });
 it('does not audition an entered note while playback is running',async()=>{
   window.localStorage.removeItem(auditionKey);integration.running=true;
-  const c=await setup();change('String','6');change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  const c=await setup();selectString(6);await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).not.toHaveBeenCalled();
 });
 it('keeps Play notes while editing in the View menu, on by default and remembered',async()=>{
   window.localStorage.removeItem(auditionKey);
   const c=await setup(),toggle=()=>within(screen.getByRole('region',{name:'Workspace view'})).getByLabelText('Play notes while editing') as HTMLInputElement;
   expect(toggle()).toBeChecked();fireEvent.click(toggle());expect(toggle()).not.toBeChecked();expect(window.localStorage.getItem(auditionKey)).toBe('off');
-  change('String','6');change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  selectString(6);await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).not.toHaveBeenCalled();
   cleanup();await setup();expect(toggle()).not.toBeChecked();fireEvent.click(toggle());expect(window.localStorage.getItem(auditionKey)).toBe('on');
   window.localStorage.removeItem(auditionKey);
@@ -1474,11 +1559,13 @@ const keypadOn=JSON.stringify({autoDuration:true,numpadDurations:true,pasteDiagr
 it('keeps the keypad typing frets until the Keypad sets duration preference is on',async()=>{
   window.localStorage.removeItem(inputKey);
   const c=await setup();keypad('Numpad5');
-  expect(screen.getByLabelText('Fret')).toHaveValue(5);expect(c.getState().snapshot.project.edits).toEqual([]);
+  // The digit is a fret: the pending-fret hint says so, and what lands is a note, never a duration.
+  expect(document.querySelector('.score-hint-pending-fret')).toHaveTextContent('5');
+  await waitFor(()=>expect(c.getState().snapshot.project.edits).toEqual([{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5}]));
   cleanup();window.localStorage.setItem(inputKey,JSON.stringify({autoDuration:false,numpadDurations:true,pasteDiagrams:true}));
   const d=await setup();keypad('Numpad5');
   await waitFor(()=>expect(currentBeat(d).duration).toBe(16));expect(d.getState().snapshot.project.edits).toEqual([{type:'setDuration',target:{track:0,staff:0,bar:0,voice:0,beat:0},duration:16,dots:0}]);
-  expect(screen.getByLabelText('Fret')).toHaveValue(0);
+  expect(document.querySelector('.score-hint-pending-fret')).toBeNull();expect(screen.getByTestId('status-value')).toHaveTextContent('Rest · 1/16');
   keypad('NumpadDecimal');await waitFor(()=>expect(currentBeat(d).dots).toBe(1));
   click('Undo');await waitFor(()=>expect(currentBeat(d).dots).toBe(0));
   window.localStorage.removeItem(inputKey);
@@ -1508,7 +1595,7 @@ it('auto-duration gives a written rest the last keypad duration, and the prefere
 it('leaves NumLock-off keypad keys to navigation and ignores a keypad duration that changes nothing',async()=>{
   window.localStorage.setItem(inputKey,keypadOn);
   const c=await setup();keypad('Numpad2','ArrowDown');
-  expect(screen.getByLabelText('String')).toHaveValue('5');expect(c.getState().snapshot.project.edits).toEqual([]);
+  expect(cursorReading()).toMatch(/String 5 /);expect(c.getState().snapshot.project.edits).toEqual([]);
   keypad('Numpad3');await new Promise(resolve=>setTimeout(resolve,20));
   expect(c.getState().snapshot.project.edits).toEqual([]);expect(c.getState().snapshot.canUndo).toBe(false);
   window.localStorage.removeItem(inputKey);
@@ -1523,28 +1610,25 @@ it('does not remember a refused keypad duration as the entry duration',async()=>
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setNote']);expect(currentBeat(c,1).duration).toBe(4);
   window.localStorage.removeItem(inputKey);
 });
-it('types a fret only from a plain digit, never from Ctrl or Alt with one',()=>{
-  return setup().then(()=>{
-    const workspace=screen.getByRole('region',{name:'Score workspace'}),fret=screen.getByLabelText('Fret');
-    const before=(fret as HTMLInputElement).value;
-    fireEvent.keyDown(workspace,{key:'5',ctrlKey:true});expect(fret).toHaveValue(Number(before));
-    fireEvent.keyDown(workspace,{key:'5',altKey:true});expect(fret).toHaveValue(Number(before));
-    fireEvent.keyDown(workspace,{key:'5',metaKey:true});expect(fret).toHaveValue(Number(before));
-    fireEvent.keyDown(workspace,{key:'5'});expect(fret).toHaveValue(5);
-  });
+it('types a fret only from a plain digit, never from Ctrl or Alt with one',async()=>{
+  // Rewritten: a digit writes its note at once (the Fret field is gone), so what a modified digit must not do is write one.
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(workspace,{key:'5',ctrlKey:true});fireEvent.keyDown(workspace,{key:'5',altKey:true});fireEvent.keyDown(workspace,{key:'5',metaKey:true});
+  await settle();expect(document.querySelector('.score-hint-pending-fret')).toBeNull();expect(c.getState().snapshot.project.edits).toEqual([]);
+  fireEvent.keyDown(workspace,{key:'5'});expect(document.querySelector('.score-hint-pending-fret')).toHaveTextContent('5');
+  await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));
 });
 it('does not remember a refused note as the entry duration, and never leaves a rhythm change without its note',async()=>{
+  // Rewritten: 99 came from the Fret field. A digit that sounds above the top of the range is refused instead: string 6 is tuned to pitch 125, so fret 5 there is pitch 130.
   window.localStorage.setItem(inputKey,keypadOn);
-  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  const c=await setup({...blankProject(),edits:[{type:'setTuning',track:0,tuning:[125,59,55,50,45,40],tuningName:''}]}),workspace=screen.getByRole('region',{name:'Score workspace'});
   keypad('Numpad4');await waitFor(()=>expect(currentBeat(c).duration).toBe(8));
   fireEvent.keyDown(workspace,{key:'ArrowRight'});
-  // 99 cannot be typed as digits any more (the second 9 would be a fret of its own), so the refused fret comes from the field.
-  change('Fret','99');expect(screen.getByLabelText('Fret')).toHaveValue(99);
-  fireEvent.keyDown(workspace,{key:'Enter'});await new Promise(resolve=>setTimeout(resolve,50));
-  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration']);expect(currentBeat(c,1).duration).toBe(4);
-  change('Fret','5');fireEvent.keyDown(workspace,{key:'Enter'});
+  await typeFret(5);await settle(50);
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setTuning','setDuration']);expect(currentBeat(c,1).duration).toBe(4);expect(currentBeat(c,1).notes).toHaveLength(0);
+  selectString(1);await typeFret(5);
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
-  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration','sequence']);expect(currentBeat(c,1).duration).toBe(8);
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setTuning','setDuration','sequence']);expect(currentBeat(c,1).duration).toBe(8);
   window.localStorage.removeItem(inputKey);
 });
 
@@ -1566,11 +1650,11 @@ it('turns an instrument click into one native edit that undo and redo restore',a
   await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
   expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().snapshot.project.edits.at(-1)).toEqual({type:'setNote',target:origin,string:5,fret:2});
   // The clicked string and fret become the entry position.
-  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(2));
+  await waitFor(()=>expect(screen.getByTestId('status-value')).toHaveTextContent(/Fret 2 /));expect(cursorReading()).toMatch(/String 5 /);
   fireEvent.click(screen.getByRole('button',{name:/^Remove string 5, fret 2 /}));
   await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   expect(integration.commits).toHaveBeenCalledTimes(2);expect(c.getState().snapshot.project.edits.at(-1)).toEqual({type:'removeNote',target:origin,string:5});
-  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(2));
+  await waitFor(()=>expect(screen.getByTestId('status-value')).toHaveTextContent('No note on this string'));expect(cursorReading()).toMatch(/String 5 /);
   click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
   click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   click('Redo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
@@ -1609,12 +1693,14 @@ it('offers Finalize for an open document and Unfinalize once it is finalized, wi
 });
 it('disables editing surfaces of a finalized document while transport, mixer, save and export stay usable',async()=>{
   const c=await setup();
-  click('Append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
+  paletteCommand('append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
   expect(screen.getByRole('button',{name:'Undo'})).toBeEnabled();
   click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
   const disabled=(name:string|RegExp)=>expect(functionalButton(name)).toBeDisabled();
   expect(screen.getByRole('button',{name:'Undo'})).toBeDisabled();expect(screen.getByRole('button',{name:'Redo'})).toBeDisabled();
-  disabled('Append measure');disabled('Set note');disabled('Import backing');disabled('Paste music');disabled('Cut music');
+  // The measure and note buttons are gone: the edition palette is disabled, and the palette command and a typed digit are refused.
+  expect(paletteButton('Toggle rest')).toBeDisabled();disabled('Import backing');disabled('Paste music');disabled('Cut music');
+  paletteCommand('append measure');await typeFret(5);
   // Keyboard shortcuts do not reach the native edit path.
   const before=c.getState().snapshot.project.edits;
   fireEvent.keyDown(screen.getByLabelText('Score workspace'),{key:'z',ctrlKey:true});
@@ -1656,18 +1742,19 @@ it('shows the usual alert when a finalized document refuses an edit that was alr
 it('keeps selection, scales, tuning audition and Copy music usable while finalized',async()=>{
   const c=await setup();
   click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
-  for(const name of ['Select bar','Select track','Select all','Browse scales'])expect(functionalButton(name)).toBeEnabled();
-  for(const label of ['Measure','Beat','Staff','Voice','String'])expect(exposeFunctionalControl(screen.getByLabelText(label))).toBeEnabled();
+  for(const name of ['Select bar','Select track','Select all'])expect(functionalButton(name)).toBeEnabled();expect(paletteButton('Scale diagram')).toBeEnabled();
+  // The cursor selectors are gone; the keys and the palette's measure command still move it.
+  const reading=cursorReading();workspaceKey({key:'ArrowRight'});expect(cursorReading()).not.toBe(reading);paletteCommand('measure 2');expect(cursorReading()).toMatch(/^Bar 2 /);
   fireEvent.click(functionalButton('Select bar'));
   await waitFor(()=>expect(functionalButton('Copy music')).toBeEnabled());
   expect(functionalButton('Clear selection')).toBeEnabled();expect(functionalButton('Erase selected notes')).toBeDisabled();
   expect(functionalButton('Remove track')).toBeDisabled();expect(functionalButton('Edit tuning (E4 B3 G3 D3 A2 E2)')).toBeDisabled();
-  expect(functionalButton('Set note')).toBeDisabled();expect(functionalButton('Append measure')).toBeDisabled();
+  expect(paletteButton('Toggle rest')).toBeDisabled();paletteCommand('append measure');await typeFret(5);
   expect(integration.commits).not.toHaveBeenCalled();
 });
 it('treats a mixer move on a finalized document like any edit for redo',async()=>{
   const c=await setup();
-  click('Append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
+  paletteCommand('append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
   click('Undo');await waitFor(()=>expect(c.getState().snapshot.canRedo).toBe(true));
   click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
   expect(c.getState().snapshot.canRedo).toBe(true);
@@ -1681,7 +1768,7 @@ it('treats a mixer move on a finalized document like any edit for redo',async()=
 
 it('enters a note from the notation staff as one undoable edit and refuses it on a finalized document',async()=>{
   const c=await setup();
-  const staff=screen.getByRole('group',{name:'Pitch entry staff'});
+  const staff=openProperties('Pitch entry').getByRole('group',{name:'Pitch entry staff'});
   fireEvent.click(within(staff).getByRole('button',{name:'G4'}));
   await waitFor(()=>expect(currentBeat(c).notes.map(n=>[n.string,n.fret])).toEqual([[6,3]]));
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setNote']);
@@ -1697,21 +1784,22 @@ it('a drum kit change is a sound edit that keeps the music selection',async()=>{
   const c=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Drums',program:0}]});
   fireEvent.click(within(screen.getByRole('grid',{name:'Written measure overview'})).getByRole('gridcell',{name:'Drums, measure 1, rest'}));
   click('Select bar');
-  fireEvent.click(paneButton('Track'));
+  // The drum kit is in the Sound and pedalboard dialog now.
+  fireEvent.click(paneButton('Track'));fireEvent.click(screen.getByRole('button',{name:'Sound and pedalboard…'}));
   const kit=await screen.findByLabelText('Drum kit'),before=c.getState().snapshot.project.edits.length;
   fireEvent.change(kit,{target:{value:'32'}});
   await waitFor(()=>expect(c.getState().snapshot.project.edits.length).toBe(before+1));
-  expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setTrackSound',sound:{drumKit:32}});
+  expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setTrackSound',sound:{drumKit:32}});closeDialog('Sound and pedalboard');
   fireEvent.click(exposeFunctionalControl(screen.getByText('Selected playback',{selector:'summary'})));click('Play selection');
   expect(integration.playSelection).toHaveBeenCalledWith({kind:'bars',tracks:[1],firstBar:0,lastBar:0},expect.anything());
 },60000);
 it('ties and unties the selected notes from the keyboard, as one edit each, and stays out of fields and the Sound view',async()=>{
   const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'}),last=()=>c.getState().snapshot.project.edits.at(-1);
-  click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
-  fireEvent.keyDown(workspace,{key:'ArrowRight'});click('Set note');await waitFor(()=>expect(c.getState().snapshot.project.edits.filter(edit=>edit.type==='setNote')).toHaveLength(2));
+  await typeFret(3);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  fireEvent.keyDown(workspace,{key:'ArrowRight'});await typeFret(3);await waitFor(()=>expect(c.getState().snapshot.project.edits.filter(edit=>edit.type==='setNote')).toHaveLength(2));
   fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});
   const edits=()=>c.getState().snapshot.project.edits.length,before=edits();
-  fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'t',ctrlKey:true});expect(edits()).toBe(before);
+  fireEvent.keyDown(screen.getByLabelText('Title'),{key:'t',ctrlKey:true});expect(edits()).toBe(before);
   fireEvent.keyDown(workspace,{key:'t',ctrlKey:true});await waitFor(()=>expect(last()).toMatchObject({type:'tieSelectionToEarlierPitch'}));
   expect(edits()).toBe(before+1);
   fireEvent.keyDown(workspace,{key:'T',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(last()).toMatchObject({type:'setSelectionTies',tied:false}));
@@ -1727,7 +1815,7 @@ it('a score locked for editing says so, refuses edits and unlocks with its passw
   // It is not finalized: finalizing is offered, and unfinalizing is not.
   expect(menuButton('Finalize document')).toBeInTheDocument();expect(menuButton('Unfinalize document')).not.toBeInTheDocument();
   expect(screen.queryByText('Finalized: editing is locked.')).not.toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'Undo'})).toBeDisabled();expect(functionalButton('Append measure')).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Undo'})).toBeDisabled();expect(paletteButton('Toggle rest')).toBeDisabled();
   expect(document.querySelector('[aria-keyshortcuts="Space"]')).toBeEnabled();expect(functionalButton('Save')).toBeEnabled();
   fireEvent.click(screen.getByRole('button',{name:'Unlock editing…'}));
   const dialog=await screen.findByRole('dialog',{name:'Unlock editing'});
@@ -1741,8 +1829,8 @@ it('a score locked for editing says so, refuses edits and unlocks with its passw
   expect(c.getState().snapshot.protection?.edit).toBe('unlocked');
   expect(screen.queryByText(/Locked for editing/)).not.toBeInTheDocument();
   expect(c.getState().snapshot.project.edits).toHaveLength(0);expect(integration.commits).not.toHaveBeenCalled();
-  expect(functionalButton('Append measure')).toBeEnabled();
-  click('Append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
+  expect(paletteButton('Toggle rest')).toBeEnabled();
+  paletteCommand('append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
 });
 it('opens the password protection dialog from the File menu and shows where each password stands',async()=>{
   startingProtection.value={edit:'unlocked',open:true};
@@ -1795,7 +1883,8 @@ it('switches application language at runtime through View preferences and update
   expect(screen.getByText('Help',{selector:'summary'})).toBeInTheDocument();
   window.localStorage.removeItem('tabplayer.language');
 });
-it('shows the edition palette beside the score and returns it to the inspector when hidden from View',async()=>{
+it('shows the edition palette beside the score and draws it nowhere when hidden from View',async()=>{
+  // Rewritten: the inspector no longer takes the palette back as a horizontal toolbar; hidden, it is simply not drawn, and View brings it back.
   await setup();
   const palette=screen.getByRole('complementary',{name:'Edition palette'});
   const toolbar=within(palette).getByRole('toolbar',{name:'Editing toolbar'});
@@ -1803,8 +1892,9 @@ it('shows the edition palette beside the score and returns it to the inspector w
   expect(screen.getAllByRole('toolbar',{name:'Editing toolbar',hidden:true})).toHaveLength(1);
   fireEvent.click(screen.getByLabelText('Edition palette',{selector:'input'}));
   expect(screen.queryByRole('complementary',{name:'Edition palette'})).not.toBeInTheDocument();
-  const inline=screen.getByRole('toolbar',{name:'Editing toolbar',hidden:true});
-  expect(inline).toHaveAttribute('aria-orientation','horizontal');expect(inline.closest('.workstation-inspector')).not.toBeNull();
+  expect(screen.queryByRole('toolbar',{name:'Editing toolbar',hidden:true})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText('Edition palette',{selector:'input'}));
+  expect(within(screen.getByRole('complementary',{name:'Edition palette'})).getByRole('toolbar',{name:'Editing toolbar'})).toHaveAttribute('aria-orientation','vertical');
 });
 
 it('opens the measure settings from the tempo link in the position display',async()=>{
@@ -1812,10 +1902,11 @@ it('opens the measure settings from the tempo link in the position display',asyn
   const lcd=screen.getByRole('group',{name:'Song position'});
   expect(within(lcd).getByRole('combobox',{name:'Current track'})).toHaveValue('0');
   fireEvent.click(within(lcd).getByRole('button',{name:/^Tempo .* \(click to change\)$/}));
-  const summary=await screen.findByText('Measure & notation',{selector:'summary'});
+  // The measure settings are in the Properties dialog's Bar tab now.
+  const dialog=await screen.findByRole('dialog',{name:'Properties'});expect(within(dialog).getByRole('tab',{name:'Bar'})).toHaveAttribute('aria-selected','true');
+  const summary=within(dialog).getByText('Measure & notation',{selector:'summary'});
   await waitFor(()=>expect(summary).toHaveFocus());
   expect(summary.parentElement).toHaveProperty('open',true);
-  expect(screen.getByRole('button',{name:'Measure',pressed:true})).toBeInTheDocument();
 });
 
 const entryProps=()=>engravingView.mock.lastCall?.[0] as {noteEntry:{onHit:(target:unknown,step:number,options:{chord:boolean})=>void;describe:(target:unknown,step:number)=>string|null}|null;editTarget:unknown};
@@ -2493,7 +2584,8 @@ describe('GP8 edit and cursor keys',()=>{
     // Once the queue is empty, entry works again.
     press({key:'a'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
   });
-  const fretField=()=>(screen.getByLabelText('Fret') as HTMLInputElement).value;
+  /** The fret of the note under the cursor, as the status bar reads it (the Fret field is gone). */
+  const fretField=()=>/Fret (\d+)/.exec(screen.getByTestId('status-value').textContent??'')?.[1]??null;
   const hint='Fret 7 written: another digit within a second makes it two digits';
   it('writes a typed digit at once on the cursor string, with no Enter, and leaves the cursor where it is',async()=>{
     const c=await setup(withNotes());
@@ -2556,14 +2648,18 @@ describe('GP8 edit and cursor keys',()=>{
     press({key:'2'});await waitFor(()=>expect(edits(c)).toHaveLength(4));
     expect(edits(c)[3]).toMatchObject({fret:2});
   });
-  it('Enter writes the Fret field value, and records nothing when the note already has that fret',async()=>{
+  it('Enter writes the entry fret, and records nothing when the note already has that fret',async()=>{
+    // Rewritten: the Fret field is gone, so the fret to write comes from a typed digit and the palette's fret command, and Enter writes what the entry fret then holds.
     const c=await setup(withNotes());
     press({key:'5'});await waitFor(()=>expect(edits(c)).toHaveLength(3));
     press({key:'Enter'});await quiet();expect(edits(c)).toHaveLength(3);
-    change('Fret','9');expect(fretField()).toBe('9');
-    press({key:'Enter'});
-    await waitFor(()=>expect(edits(c)).toHaveLength(4));
-    expect(edits(c)[3]).toMatchObject({type:'setNote',string:6,fret:9});
+    paletteCommand('fret 9');await waitFor(()=>expect(edits(c)).toHaveLength(4));expect(edits(c)[3]).toMatchObject({type:'setNote',string:6,fret:9});
+    await waitFor(()=>expect(fretField()).toBe('9'));
+    press({key:'Enter'});await quiet();expect(edits(c)).toHaveLength(4);
+    // On the next beat the entry fret follows the cursor to what that beat holds (nothing: 0), and Enter writes it.
+    press({key:'ArrowRight'});press({key:'Enter'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(5));
+    expect(edits(c)[4]).toMatchObject({type:'setNote',target:{beat:1},string:6,fret:0});
   });
   it('shows the written fret and the chance of a second digit in one status region, then drops it when the window closes',async()=>{
     await setup(withNotes());
@@ -2616,7 +2712,7 @@ describe('GP8 edit and cursor keys',()=>{
   });
   it('leaves the document as it was when the two digits are the fret the note had, and says what stays in Redo',async()=>{
     const c=await setup(withNotes());
-    change('Fret','12');press({key:'Enter'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
+    paletteCommand('fret 12');await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
     press({key:'1'});await waitFor(()=>expect(edits(c)).toHaveLength(4));
     press({key:'2'});await waitFor(()=>expect(edits(c)).toHaveLength(3));await quiet();
     expect(lastFret(c)).toBe(12);
@@ -2929,14 +3025,14 @@ describe('small windows (THE-196)',()=>{
     const saved=()=>JSON.parse(window.localStorage.getItem(defaultsKey)!);
     it('Use current view while the page is fitted saves fit width, as shown, and the open score keeps its fit',async()=>{
       const c=await setup(),before=c.getState();act(()=>lastScoreProps().onAutoFit(true));
-      click('Use current view');click('Save default view');
+      openScoreStyle('Page and view');click('Use current view');click('Save default view');closeDialog('Score style');
       expect(saved()).toEqual({layout:'parchment',zoomMode:'fitWidth',zoom:100,tracks:'selected'});
       expect(lastScoreProps()).toMatchObject({autoFit:false,display:{layout:'parchment',zoomMode:'fitWidth'}});
       expect(testWorkspace.getState().documents[0].view.scoreDisplay).toEqual({layout:'parchment',zoomMode:'fitWidth'});
       expect(c.getState()).toBe(before);expect(c.getState().snapshot.dirty).toBe(false);
     });
     it('a new score then opens fitted by the saved default, not by automatic fit',async()=>{
-      await setup();act(()=>lastScoreProps().onAutoFit(true));click('Use current view');click('Save default view');
+      await setup();act(()=>lastScoreProps().onAutoFit(true));openScoreStyle('Page and view');click('Use current view');click('Save default view');closeDialog('Score style');
       const first=testWorkspace.getState().active.documentId;
       fireEvent.click(within(openCommand('File')).getByRole('button',{name:'New'}));await waitFor(()=>expect(testWorkspace.getState().active.documentId).not.toBe(first));
       const view=testWorkspace.getState().documents.find(entry=>entry.id===testWorkspace.getState().active.documentId)!.view;
@@ -2979,11 +3075,11 @@ it('selects the beat of a clicked instrument note in the score, as a click on th
   window.localStorage.removeItem(instrumentEditKey);
   const c=await setup(seededProject(),undefined,{instrumentVisible:true});
   integration.activeNotes.mockImplementation(()=>[{id:'n0',trackId:'base/0',source:{target:origin,string:6},occurrence:0,startTick:0,endTick:960,key:69,velocity:90,articulation:'normal',legatoFrom:null,pitch:[]}] as never);
-  change('Measure','3');expect(screen.getByLabelText('Measure')).toHaveValue(3);
+  paletteCommand('measure 3');expect(cursorReading()).toMatch(/^Bar 3 /);
   fireEvent.click(screen.getByRole('button',{name:'Hide instrument'}));fireEvent.click(screen.getByRole('button',{name:'Show instrument'}));
   const mark=await screen.findByRole('button',{name:/^Select A4/});
   const before=c.getState().snapshot;fireEvent.click(mark);
-  await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(1));
+  await waitFor(()=>expect(cursorReading()).toMatch(/^Bar 1 /));
   expect(c.getState().snapshot).toBe(before);expect(integration.commits).not.toHaveBeenCalled();
   integration.activeNotes.mockImplementation(()=>[]);
 });
@@ -3029,7 +3125,7 @@ it('gives the keyboard its own dock panel, apart from the neck',async()=>{
 });
 it('edits the score by clicking a scale overlay position: one undoable edit, and nothing for the note already there',async()=>{
   const c=await setup(seededProject());
-  click('Browse scales');const dialog=await screen.findByRole('dialog',{name:'Scale browser'});
+  openScales();const dialog=await screen.findByRole('dialog',{name:'Scale browser'});
   const position=()=>within(dialog).getByRole('button',{name:'Put F2 on string 1, fret 1 of the selected beat'});
   fireEvent.click(position());
   await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
@@ -3062,9 +3158,9 @@ it('replaces an earlier range selection when an instrument note is clicked, so a
 });
 it('copies the clicked instrument note like a click on the score does when nothing was selected',async()=>{
   const {mark}=await instrumentWithNoteAt(farTarget),workspace=screen.getByRole('region',{name:'Score workspace'});
-  expect(screen.queryByLabelText('Paste repetitions')).not.toBeInTheDocument();
+  openProperties('Selection');expect(screen.queryByLabelText('Paste repetitions')).not.toBeInTheDocument();closeDialog();
   fireEvent.click(mark);fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
-  await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
+  openProperties('Selection');await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());closeDialog();
   integration.activeNotes.mockImplementation(()=>[]);
 });
 

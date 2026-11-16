@@ -61,16 +61,16 @@ function guitarScore() {
 }
 
 interface Surface { title: string; mount: () => ReturnType<typeof render>; sample: string[]; keys: MessageKey[]; }
-const editorProps = () => ({ score: music(), target, string: 6, fret: 3, noteIndex: null, busy: false, musicSelection: null,
-  onSelectNote: vi.fn(), onSelect: vi.fn(), onString: vi.fn(), onFret: vi.fn(), onEdit: vi.fn(), onMusicSelection: vi.fn(), onChord: vi.fn(), onScales: vi.fn() });
+const editorProps = () => ({ score: music(), target, string: 6, fret: 3, noteIndex: null, busy: false, musicSelection: null, properties: { tab: 'note' as const, nonce: 1 },
+  onSelectNote: vi.fn(), onSelect: vi.fn(), onEdit: vi.fn(), onMusicSelection: vi.fn(), onChord: vi.fn(), onScales: vi.fn(), onOpenLyrics: vi.fn(), onProperties: vi.fn(), onCloseProperties: vi.fn() });
 const mixerScore = () => previewEdit(previewEdit(blankProject(), { type: 'setRest', target }).project, { type: 'addTrack', name: 'Bass', tuning: [43, 38, 33, 28], program: 33 }).score;
 
 const surfaces: Surface[] = [
   {
     title: 'editor',
     mount: () => render(<EditorPanel {...editorProps()} />),
-    sample: ['Set note', 'Remove note', 'Apply rhythm', 'Make rest', 'Delete beat', 'Remove measure', 'Edit chord diagram', 'Browse scales', 'Inspector context', 'Pitched beat', 'Current staff', 'Current track', 'All tracks', 'Staff 1', 'Measure 1'],
-    keys: ['editor.set_note', 'editor.remove_note', 'editor.apply_rhythm', 'editor.make_rest', 'editor.delete_beat', 'editor.remove_measure', 'editor.edit_chord_diagram', 'editor.browse_scales'],
+    sample: ['Properties', 'Property groups', 'Beat', 'Bar', 'Selection', 'Staff and voices', 'Pitch entry', 'Score'],
+    keys: ['properties.title', 'properties.tabs', 'properties.tab_note', 'properties.tab_beat', 'properties.tab_bar', 'properties.tab_selection', 'properties.tab_staff', 'properties.tab_entry', 'properties.tab_score'],
   },
   {
     title: 'mixer',

@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealInspectorTab} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,styleSection,closeScoreStyle} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -34,14 +34,14 @@ try{
   assert.deepEqual(await view(),['parchment','100','selected']);
 
   await control('Zoom (%)').fill('130');await control('Displayed tracks').selectOption('all');await settled(['parchment','130','all']);
-  await revealInspectorTab(page,'Song');
-  await page.locator('summary').filter({hasText:/^Default view$/}).first().evaluate(node=>{for(let item=node.parentElement;item;item=item.parentElement)if(item.tagName==='DETAILS')item.open=true;});
+  // Default view is in the Score style dialog (Song tab, Page and view).
+  await styleSection(page,'Default view');
   await page.getByRole('button',{name:'Use current view',exact:true}).click();
   assert.deepEqual([await chosen('Default layout'),await control('Default zoom (%)').inputValue(),await chosen('Default tracks')],['Parchment','130','All tracks']);
   await choose('Default layout','Vertical page');
   assert.equal(await chosen('Default layout'),'Vertical page');
   await page.getByRole('button',{name:'Save default view',exact:true}).click();
-  await page.getByText('Saved. Scores opened or created from now on start in this view.',{exact:true}).waitFor();
+  await page.getByText('Saved. Scores opened or created from now on start in this view.',{exact:true}).waitFor();await closeScoreStyle(page);
   assert.deepEqual(JSON.parse(await page.evaluate(()=>localStorage.getItem('tabplayer.viewDefaults'))),{layout:'verticalPage',zoomMode:'manual',zoom:130,tracks:'all'});
   assert.deepEqual(await view(),['parchment','130','all'],'Saving a default leaves the open score view alone.');
 

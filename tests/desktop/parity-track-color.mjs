@@ -19,9 +19,10 @@ try{
   const swatch=async()=>{await revealDock(page,'Mixer');return page.getByRole('button',{name:'Track 2: Bass6',exact:true}).locator('.track-color-swatch').evaluate(node=>getComputedStyle(node).backgroundColor);};
   await button('Open');await button('Track 2: Bass6');
   const original=await swatch();
-  await revealLeftTask(page,'Track');const settings=page.locator('.track-settings');await settings.getByText('Selected instrument',{exact:true}).click();
+  // The colour is a swatch input that applies when the picker settles (there is no Apply track color button).
+  await revealLeftTask(page,'Track');const settings=page.locator('.track-settings');
   const input=settings.getByLabel('Track color',{exact:true});
-  await input.fill('#ff8800');await settings.getByRole('button',{name:'Apply track color',exact:true}).click();await waitForWorkspaceIdle(page);
+  await input.fill('#ff8800');await waitForWorkspaceIdle(page);
   assert.deepEqual((await readActiveDocument(page)).project.edits.at(-1),{type:'setTrackColor',track:1,color:'#ff8800'});
   assert.equal(await swatch(),'rgb(255, 136, 0)');
   assert.notEqual(original,'rgb(255, 136, 0)');

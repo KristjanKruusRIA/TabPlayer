@@ -2,6 +2,7 @@ import { useI18n } from '../i18n';
 import { useEffect,useState } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { BarGestureCommand } from './gestures-types';
+import { BusyFieldset } from '../ui/BusyFieldset';
 
 export interface BarGesturePanelProps {
   score:model.Score; track:number; staff:number; bar:number; busy:boolean;
@@ -42,7 +43,7 @@ export function BarGesturePanel({score,track,staff,bar,busy,onEdit}:BarGesturePa
     }
     setError('');onEdit({type:'setMasterBarGestures',bar,commonTime:values.commonTime,doubleBar:values.doubleBar,tripletFeel:values.tripletFeel,beaming:values.custom?{unit:values.unit,groups}:null});
   };
-  return <details><summary>{t('editor.bar_gestures')}</summary><fieldset disabled={busy}>
+  return <details><summary>{t('editor.bar_gestures')}</summary><BusyFieldset busy={busy}>
     <p>{t('editor.measure_n',{measure:bar+1})}</p>
     <label>{t('editor.clef_octave')}<select value={values.clefOttava} onChange={e=>setValues({...values,clefOttava:Number(e.target.value)})}>{octaveKeys.map((key,value)=><option key={value} value={value}>{t(key)}</option>)}</select></label>
     <button onClick={()=>onEdit({type:'setBarGestures',track,staff,bar,clefOttava:values.clefOttava})}>{t('editor.apply_clef_octave')}</button>
@@ -57,5 +58,5 @@ export function BarGesturePanel({score,track,staff,bar,busy,onEdit}:BarGesturePa
     <label>{t('editor.beaming_groups')}<input disabled={!values.custom} value={values.groups} placeholder="2, 2, 3" onChange={e=>setValues({...values,groups:e.target.value})}/></label>
     {error&&<p role="alert">{error}</p>}
     <button onClick={applyMaster}>{t('editor.apply_measure_gestures')}</button>
-  </fieldset></details>;
+  </BusyFieldset></details>;
 }

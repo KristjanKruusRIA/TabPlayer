@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkspaceCommand,closeWelcomeLibrary,revealInspectorTab} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkspaceCommand,closeWelcomeLibrary,writeNote,runCommand} from './workstation-commands.mjs';
 import { readActiveDocument,readDocumentRecord } from './document-context.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -16,12 +16,11 @@ const idle=()=>waitForWorkspaceIdle(page);
 try {
   await closeWelcomeLibrary(page);
   await clickWorkspaceCommand(page,'Open',{waitForIdle:false});await idle();
-  assert.equal((await snapshot()).project.base.sha256,hash);await revealInspectorTab(page,'Selection');
+  assert.equal((await snapshot()).project.base.sha256,hash);
   assert.equal((await snapshot()).project.base.bytesBase64,bytes.toString('base64'));
-  if(await page.getByRole('button',{name:'Set note',exact:true}).isDisabled()){
-    await page.getByRole('button',{name:'Insert beat',exact:true}).click();await idle();
-  }
-  await page.getByRole('combobox',{name:/^String/}).selectOption('2');await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();await idle();
+  // With no beat under the cursor the status bar has nothing to say about it: insert one (the palette's 'insert beat').
+  if(!(await page.getByTestId('status-value').innerText()).trim()){await runCommand(page,'insert beat');await idle();}
+  await writeNote(page,2,7);await idle();
   assert.equal((await snapshot()).dirty,true);
   const origin=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
   const {documentId,revision}=await readDocumentRecord(page,origin.documentId);

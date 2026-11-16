@@ -74,8 +74,8 @@ export async function runFinalizeAcceptance({buildPath}={}){
 
     // First session: two edits with the second undone, so history and redo both exist when the lock lands.
     await launch({session:paths.session,open:inputPath});await dismissLibrary();await button('Open');await scoreReady();
-    await ui.revealInspector(page);await button('Edit');
-    const write=async fret=>{await page.getByRole('combobox',{name:'String',exact:true}).selectOption('5');await page.getByLabel('Fret',{exact:true}).fill(String(fret));await button('Set note');};
+    // A note is written on string 5 with the palette's 'fret N' (the Selection tab's string, Fret and Set note are gone).
+    const write=async fret=>{await ui.writeNote(page,5,fret);await idle();};
     await write(3);await write(5);await button('Undo');
     const unlocked=await assertLocked(null);assert.deepEqual(unlocked.snapshot.project.edits,[setNote(3)]);assert.deepEqual(unlocked.snapshot.redoEdit,setNote(5));assert.equal(unlocked.snapshot.canRedo,true);
 
@@ -83,7 +83,7 @@ export async function runFinalizeAcceptance({buildPath}={}){
     await control('Unfinalize').click();await idle();await page.getByText(banner,{exact:true}).waitFor({state:'hidden'});assert.equal((await assertLocked(null)).snapshot.canRedo,true,'Finalizing and unfinalizing keep redo');
     await button('Finalize document');await page.getByText(banner,{exact:true}).waitFor();
     const locked=await assertLocked(finalized);assert.equal(locked.snapshot.dirty,true,'Finalizing is an unsaved change');assert.deepEqual(locked.snapshot.project.edits,unlocked.snapshot.project.edits,'The lock is not a history entry');
-    for(const name of ['Set note','Undo','Redo'])assert.equal(await control(name).isDisabled(),true,`${name} is disabled`);
+    for(const name of ['Dotted','Undo','Redo'])assert.equal(await control(name).isDisabled(),true,`${name} is disabled`);
     await screenshot('01-finalized.png');step('Finalize shows the banner, disables editing and marks the document unsaved',{document:address(locked)});
 
     await refused('apply_edit',{document:address(locked),command:setNote(7),assetToken:null});await refused('undo_edit',{document:address(locked)});await refused('redo_edit',{document:address(locked)});
@@ -108,7 +108,7 @@ export async function runFinalizeAcceptance({buildPath}={}){
 
     await control('Unfinalize').click();await idle();await page.getByText(banner,{exact:true}).waitFor({state:'hidden'});
     const unfinalized=await assertLocked(null);assert.equal(unfinalized.snapshot.dirty,true,'Unfinalizing is an unsaved change');
-    await ui.revealInspector(page);await button('Edit');await write(9);
+    await write(9);
     const edited=await poll(record,current=>current.snapshot.project.edits.length===3,'accepted edit');assert.deepEqual(edited.snapshot.project.edits.at(-1),setNote(9));
     await button('Save');await poll(record,current=>!current.snapshot.dirty,'saved unlocked');assert.notEqual(sha256(readFileSync(savePath)),savedHash);assert.equal('lock' in fileProject(),false,'An unlocked file has no lock field');
     step('Unfinalize allows edits, and Save removes the lock',{edit:edited.snapshot.project.edits.at(-1)});

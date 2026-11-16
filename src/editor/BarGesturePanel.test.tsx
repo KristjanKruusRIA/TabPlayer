@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { BarGesturePanel } from './BarGesturePanel';
 import type { BarGestureCommand } from './gestures-types';
-import { music,reopened } from './fixtures';
+import { music,reopened, refused} from './fixtures';
 import { applyBarGestureEdit } from './bar-gestures';
 
 afterEach(cleanup);
@@ -43,7 +43,7 @@ it('bar_panel_dispatches_named_finite_commands with one-based measure labels and
 it('clears the explicit beaming override and authors common/cut display through finite DTOs',()=>{
   const score=music(),commands:BarGestureCommand[]=[];score.masterBars[0].timeSignatureNumerator=2;score.masterBars[0].timeSignatureDenominator=2;
   render(<BarGesturePanel score={score} track={0} staff={0} bar={0} busy={false} onEdit={edit=>commands.push(edit)}/>);
-  expect(screen.getByLabelText('Beaming groups')).toBeDisabled();fireEvent.click(screen.getByLabelText('Common / cut time'));
+  expect(refused(screen.getByLabelText('Beaming groups'))).toBe(true);fireEvent.click(screen.getByLabelText('Common / cut time'));
   fireEvent.click(screen.getByRole('button',{name:'Apply measure gestures'}));
   expect(commands).toEqual([{type:'setMasterBarGestures',bar:0,commonTime:true,doubleBar:false,tripletFeel:0,beaming:null}]);
   applyBarGestureEdit(score,commands[0]);expect(reopened(score).masterBars[0].timeSignatureCommon).toBe(true);
@@ -66,7 +66,7 @@ it('resets drafts and errors on score or selection change and disables every act
   view.rerender(<BarGesturePanel {...props} score={reopened(score)}/>);expect(screen.getByLabelText('Beaming groups')).toHaveValue('2, 2, 3');expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   view.rerender(<BarGesturePanel {...props} bar={0}/>);expect(screen.getByText('Measure 1')).toBeInTheDocument();expect(screen.getByLabelText('Clef octave')).toHaveValue('2');expect(screen.getByLabelText('Custom beaming')).not.toBeChecked();
   view.rerender(<BarGesturePanel {...props} busy/>);
-  for(const input of screen.getAllByRole('combobox'))expect(input).toBeDisabled();for(const button of screen.getAllByRole('button'))expect(button).toBeDisabled();expect(screen.getByLabelText('Beaming groups')).toBeDisabled();
+  for(const input of screen.getAllByRole('combobox'))expect(refused(input)).toBe(true);for(const button of screen.getAllByRole('button'))expect(refused(button)).toBe(true);expect(refused(screen.getByLabelText('Beaming groups'))).toBe(true);
 });
 
 it('reads either double-simile half as a two-measure repeat and permits clearing it',()=>{

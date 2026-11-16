@@ -1,11 +1,13 @@
 import { useI18n } from '../i18n';
-import { useState } from 'react';
+import { useState, type MutableRefObject } from 'react';
 import type { model } from '@coderline/alphatab';
 import { formatPitch } from '../tuning';
 import { noPartialCapo, openStringKey, type PartialCapo } from './partial-capo';
 
 /** Fret and strings of a capo over part of the neck. The fret is committed on blur or Enter, the strings at once. `onChange` only ever gets a valid value, never one for a field nobody changed; `onInvalid` says whether the draft on screen is not valid, so the caller can hold back Apply and keep the last valid value. */
-export function PartialCapoControls({staff,value,disabled,onChange,onInvalid}:{staff:model.Staff;value:PartialCapo;disabled?:boolean;onChange:(value:PartialCapo)=>void;onInvalid?:(invalid:boolean)=>void}) {
+/** What a draft that was typed but not yet left comes to: its valid value (also handed to `onChange`), or invalid. */
+export type SettledDraft<T> = { value: T } | { invalid: true } | null;
+export function PartialCapoControls({staff,value,disabled,onChange,onInvalid,settleRef}:{staff:model.Staff;value:PartialCapo;disabled?:boolean;onChange:(value:PartialCapo)=>void;onInvalid?:(invalid:boolean)=>void;/** Filled with a function that settles a fret typed but not left, for a caller that submits from another control and needs the value at once. */settleRef?:MutableRefObject<(()=>SettledDraft<PartialCapo>)|null>}) {
   const { t } = useI18n();
   const [fretText,setFretText]=useState(value.fret?String(value.fret):''),[strings,setStrings]=useState<number[]>(value.strings),[dirty,setDirty]=useState(false);
   const count=staff.tuning.length,fret=fretText.trim()===''?0:Number(fretText),fretValid=Number.isInteger(fret)&&fret>=0&&fret<=127;
@@ -16,6 +18,12 @@ export function PartialCapoControls({staff,value,disabled,onChange,onInvalid}:{s
   };
   const toggle=(string:number,on:boolean)=>{const next=on?[...strings,string]:strings.filter(value=>value!==string);setStrings(next);setDirty(true);commit(fret,next,fretValid);};
   const settle=()=>{if(dirty)commit(fret,strings,fretValid);};
+  if(settleRef)settleRef.current=()=>{
+    if(!dirty)return null;
+    const good=fretValid&&(fret===0?strings.length===0:fret>=1&&strings.length>0);
+    commit(fret,strings,fretValid);
+    return good?{value:fret===0?noPartialCapo:{fret,strings:[...strings].sort((a,b)=>a-b)}}:{invalid:true};
+  };
   return <fieldset className="partial-capo" disabled={disabled||staff.isPercussion||!count}>
     <legend>{t('editor.partial_capo')}</legend>
     <label>{t('editor.partial_capo_fret')}<input type="number" min={0} max={127} value={fretText} onChange={event=>{setFretText(event.target.value);setDirty(true);}} onBlur={settle} onKeyDown={event=>{if(event.key==='Enter')settle();}}/></label>

@@ -144,21 +144,46 @@ Both are within the targets plus 10 %, not exactly on them. A 510 px pane shows 
 
 ## Desktop drivers (real app, real clicks and keys)
 
-Run against the final build from this branch's default `src-tauri/target`. CDP port 9223 was shared with other agents' apps; runs that failed at launch because another app held the port or the single-instance identifier were repeated; no run was repeated because of an assertion failure except after a driver fix.
+Every driver this branch touched was run one at a time against a build of this branch, each in its own launch, and the app was closed after every run. CDP port 9223 is shared with other agents' apps, so each run waited until no `tabplayer.exe` was running, and runs that failed at launch (port held, single-instance identifier, "foreign ancestry") were repeated. A run was repeated after an assertion failure only after a driver fix, except where the table says otherwise.
 
-| Driver | Result |
+Builds: the normal desktop-test build (`scripts/build-desktop-test.ps1`) for drivers that launch `.analysis/desktop-smoke/tabplayer.exe`, and a frozen packet (`string-count-build.mjs` with `STRING_COUNT_TARGET` set to the default `src-tauri/target`, run with `--run --build=<packet>`) for the drivers that admit only a packet. A packet is rejected if anything under `tests/desktop` or the other source folders changes after it was built, so it was rebuilt after each driver edit and nothing was built while a packet batch ran. `parity-resume-playback` also needs the packet's executable copied over `.analysis/desktop-smoke/tabplayer.exe`; that was done for its run and undone afterwards.
+
+An earlier version of this note listed several packet drivers as passing. Those runs had not been given `--run`, so they only printed their usage text; all of them were run again properly and the results are below.
+
+### Pass
+
+| Build | Drivers |
 |---|---|
-| `inspector-relocation.mjs` (new) | passes: only Song and Track tabs; a stored `selection`, an unknown value, and `song` open Track, Track, Song; status bar readout; Title, Subtitle, Track name, colour, notation toggles, transposition, Add staff, capo in the Tuning dialog, sound preset, a pedal in the Sound dialog, playing style, palm mute, a 5:3 tuplet, time signature, Add voice: each exactly one edit of the expected type, Undo takes it back, unchanged values record nothing; Score style, Sound and pedalboard, Mastering, Tuning and Properties dialogs open, Escape closes, focus returns; en, et and de at the narrowest and widest sidebar: no covered, clipped, tiny (under 24 px) or overflowing control in the tabs and the dialogs, dialogs inside the window |
-| `inspector-inventory.mjs` | passes (heights above) |
-| `parity-tuning-dialog.mjs` | passes (12 checks) |
-| `parity-workstation.mjs`, `parity-entry.mjs`, `parity-click-seek-space.mjs`, `parity-engraving.mjs`, `parity-master-effects.mjs`, `parity-effect-order.mjs`, `parity-factory-sounds.mjs` | pass |
-| `parity-staff-groups.mjs` | 17 of 18 checks pass; the last, a catch-all `driver` check, ends with the page error "A notation system does not fit this page" (it was the same on the first run before the Score style dialog was involved at that step, so I could not attribute it to this change; not compared with a clean build) |
-| `display-modes.mjs` | 679 checks, 18 fail, all "tab digits stay at least 6px tall" for the dense fixture on the fit-page layouts (zoom 32 to 42 %). Not touched by this change as far as I can tell (the inspector width is the same); I did not compare with a clean build |
-| `editor.mjs` | passes |
-| `parity-string-count.mjs`, `parity-saved-tunings.mjs` | pass, from a frozen build packet of this branch (`string-count-build.mjs` with `STRING_COUNT_TARGET` set to the default `src-tauri/target`; a packet is rejected if any file under `tests/desktop` changes after it was built, so it was rebuilt after each driver edit) |
-| Also changed and run, passing | `parity-clipboard`, `parity-partial-capo`, `parity-banjo-drone`, `parity-range-measures`, `review-regressions`, `parity-stylesheet`, `parity-author-defaults`, `parity-view-defaults`, `parity-midi-out`, `parity-track-color`, `parity-notation`, `parity-score-errors`, `parity-note-audio` |
-| Changed, not passing | `parity-harmony.mjs` (the chord and scale openers now use the palette buttons; it gets as far as the harmony transposition and then the palette's chord button times out in `openChord`; not diagnosed, so this driver is not verified).  |
-| Changed but not run | about 25 other drivers got the same mechanical updates (`advanced-editor`, `cancellation`, `critique-fixes`, `exports`, `loop-through-edit`, `native-audio`, `parity-backing-tempo`, `parity-backing-waveform`, `parity-command-palette`, `parity-cut-sustained`, `parity-document-tabs`, `parity-file-library`, `parity-finalize`, `parity-font-roles`, `parity-header-footer`, `parity-input-preferences`, `parity-library-browse`, `parity-note-audition`, `parity-pitch-effects`, `parity-recovery*`, `parity-reload-recovery`, `parity-resume-playback`, `parity-scale-diagrams`, `parity-score-layouts`, `parity-selection-playback`, `parity-selection-ties`, `parity-stroke-patterns`, `parity-style-typography`, `parity-stylesheets`, `parity-sustain-pedal`, `parity-system-gaps`, `performance`, `roundtrip`, `selection-playback-gestures`). They were not run, so treat them as unverified. `advanced-editor.mjs` also needs `TABPLAYER_TEST_GP`. |
+| Normal build, final run | `inspector-relocation` (new), `inspector-inventory`, `parity-tuning-dialog`, `parity-workstation`, `editor`, `parity-entry`, `parity-click-seek-space`, `parity-engraving`, `parity-master-effects`, `parity-effect-order`, `parity-factory-sounds`, `critique-fixes`, `parity-author-defaults`, `parity-clipboard`, `parity-font-roles`, `parity-harmony`, `parity-midi-out`, `parity-notation`, `parity-range-measures`, `parity-score-errors`, `parity-stroke-patterns`, `parity-stylesheet`, `parity-sustain-pedal`, `parity-track-color`, `parity-view-defaults`, `review-regressions`, `parity-document-tabs`, `advanced-editor`, `native-audio`, `cancellation`, `exports`, `loop-through-edit`, `parity-command-palette`, `parity-cut-sustained`, `parity-header-footer`, `parity-pitch-effects`, `roundtrip`, `parity-selection-ties`, `parity-system-gaps`, `performance` |
+| Normal build | `parity-file-library --group=core` (the `restart` and `folders` groups need the user's own pickers and were not run) |
+| Normal build, second run | `parity-recovery --group=crash,clean,paths,corruption,ownership,visual`: the first run failed once at "Redo prepares retained embedded backing while both original WAVs are absent" (the backing duration was not yet known when read), the second run passed with no change; I did not find out why the first run was early, so treat it as a timing flake in the driver until it shows up again |
+| Frozen packet, final | `parity-string-count`, `parity-style-typography`, `parity-stylesheets`, `parity-scale-diagrams`, `parity-resume-playback` |
+| Frozen packet, earlier build of this branch (it already had the product fix below; the later builds only changed three other drivers) | `parity-saved-tunings`, `parity-partial-capo`, `parity-banjo-drone`, `parity-finalize`, `parity-library-browse`, `parity-note-audio`, `parity-note-audition`, `parity-reload-recovery` |
+
+`parity-saved-tunings`, `parity-string-count` and the Tuning dialog drivers were run again after the Enter fix below.
+
+### Failing, with the attribution
+
+| Driver | Result | Cause |
+|---|---|---|
+| `display-modes.mjs` | 679 checks, 18 fail ("tab digits stay at least 6px tall" on the fit-page layouts at 32 to 42 % zoom) | Not caused here. The same driver against a build of `develop` (13922ef) fails 19 checks, the same 18 plus a one-pixel window-size check. |
+| `parity-staff-groups.mjs` | 17 of 18; the last check ends with the page error "A notation system does not fit this page" | Not caused here. A `develop` build gives the identical 17 of 18 and the identical error. |
+| `parity-selection-playback.mjs`, `selection-playback-gestures.mjs` | stop at a click on "Loop selection": the name now matches two buttons | Not caused here. The `develop` build fails both drivers at the same click with the same message (the transport button and the Selection tab button share the name there too). Not fixed. |
+| `parity-input-preferences.mjs` | fails at "Keypad is inert while the preference is off": a typed fret now writes the note at once | Not caused here. This comes from THE-213 (typed digits write at once, already on `develop`); the driver still expects the old pending-fret behaviour. I changed it only to read the fret from the status bar and left a note in the file. It needs the owner's decision on what the keypad check should say. |
+
+### Not run
+
+| Driver | Why |
+|---|---|
+| `parity-backing-tempo.mjs`, `parity-backing-waveform.mjs`, `parity-score-layouts.mjs` | They run only from an admission a person writes and signs off (`docs/acceptance/admission-gated-drivers.md`); I cannot write one. Their node self-tests (14 of 14) pass. |
+| `parity-recovery-production.mjs` | Needs the production build that the root supplies; inert without it. |
+| `parity-file-library.mjs` `restart` and `folders` groups | Need the user's own file pickers. |
+
+### Faults found and fixed by the driver pass
+
+- The Tuning dialog's partial capo and banjo drone fret fields settled on Enter and then let the key submit the dialog, which applied the whole tuning with the stale draft. Enter in those two fields now only settles the field (`TuningDialog.tsx`, with a unit test in `TrackSettingsPanel.test.tsx` that fails without the fix). Enter in the Capo field itself still applies, as in any dialog.
+- Drivers written for the Selection tab and the old panels were updated to the new homes. Several had to reopen the Score style or Properties dialog before the next control, because a button used inside a dialog closes it. `parity-harmony` failed because the Properties dialog was left open and its backdrop covered the palette's chord button (a stale driver, not a product fault).
+- `parity-scale-diagrams` matched the diagram cell "String 5, fret 3" by substring, which also matched the "Put C3 on string 5, fret 3" button; it now matches the start of the label, and moves the pointer off the chip before hovering it again.
 
 ## Limits
 

@@ -48,8 +48,12 @@
 //! when it attaches, and `TABPLAYER_TEST_PLUGIN_VIEW_HANG_MS=<n>` blocks the editor's thread for `n` milliseconds after
 //! it attaches.
 //!
-//! It is a single class that is both the component and the edit controller, which VST3 allows. The probe therefore
-//! sees exactly one class, [`TEST_CLASS_ID`].
+//! Each class is a single object that is both the component and the edit controller, which VST3 allows. The probe sees
+//! two classes: the gain, [`TEST_CLASS_ID`] (sub-categories `Fx`), and "TabPlayer Test Drum", [`DRUM_CLASS_ID`]
+//! (`Instrument|Drum`), an instrument with no audio input, a stereo output and one event input bus. The drum makes a
+//! period-4 square wave while any note is held, whose amplitude says which note and how hard (see [`drum_amplitude`]);
+//! it shares the gain's parameters, state, modes and delay, which are applied to what it makes.
+//! `TABPLAYER_TEST_PLUGIN_DRUM_MONO=1` makes its output mono.
 //!
 //! Latency changes are announced with `restartComponent(kLatencyChanged)` whichever way they arrive: the controller's
 //! `setParamNormalized`, the processor's parameter queue in `process`, or `setState`. The decision is
@@ -82,6 +86,18 @@ pub const TEST_CLASS_ID: &str = "7ABB1A7E57E5701C8E5700000000A001";
 
 /// The name the plug-in registers under.
 pub const TEST_PLUGIN_NAME: &str = "TabPlayer Test Gain";
+
+/// The class ID of the instrument class, in the same form as [`TEST_CLASS_ID`].
+pub const DRUM_CLASS_ID: &str = "7ABB1A7E57E5701C8E5700000000A002";
+
+/// The name the instrument class registers under.
+pub const DRUM_PLUGIN_NAME: &str = "TabPlayer Test Drum";
+
+/// The sub-categories the instrument class reports.
+pub const DRUM_SUBCATEGORIES: &str = "Instrument|Drum";
+
+/// The most events the drum reads from one block's list.
+pub const DRUM_MAX_EVENTS: usize = 1024;
 
 /// The version the factory reports.
 pub const TEST_PLUGIN_VERSION: &str = "1.0.0";
@@ -121,6 +137,7 @@ pub const EDITOR_WIDTH: i32 = 300;
 pub const EDITOR_HEIGHT: i32 = 200;
 
 const ENV_HANG_FACTORY: &str = "TABPLAYER_TEST_PLUGIN_HANG_FACTORY";
+const ENV_DRUM_MONO: &str = "TABPLAYER_TEST_PLUGIN_DRUM_MONO";
 const ENV_PRINT: &str = "TABPLAYER_TEST_PLUGIN_PRINT";
 const ENV_IGNORE_WRITE_FAILURE: &str = "TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE";
 const ENV_ANNOUNCE_ON_ACTIVE: &str = "TABPLAYER_TEST_PLUGIN_ANNOUNCE_ON_ACTIVE";
@@ -370,6 +387,150 @@ pub fn process_block(
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// The drum: what the instrument class makes of its notes, as pure functions
+// ---------------------------------------------------------------------------------------------------------------
+
+/// One note event as the drum reads it from a block's event list. `offset` is the frame in the block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrumEvent {
+    On {
+        offset: u32,
+        channel: u8,
+        key: u8,
+        velocity: u8,
+    },
+    Off {
+        offset: u32,
+        channel: u8,
+        key: u8,
+    },
+}
+
+impl DrumEvent {
+    pub fn offset(&self) -> u32 {
+        match *self {
+            DrumEvent::On { offset, .. } | DrumEvent::Off { offset, .. } => offset,
+        }
+    }
+}
+
+/// Puts events in offset order, equal offsets keeping their order. An insertion sort: it never allocates.
+pub fn sort_drum_events(events: &mut [DrumEvent]) {
+    for i in 1..events.len() {
+        let mut at = i;
+        while at > 0 && events[at - 1].offset() > events[at].offset() {
+            events.swap(at - 1, at);
+            at -= 1;
+        }
+    }
+}
+
+/// The amplitude of the drum's square wave for a note: `(key * 128 + velocity) / 16384`, which a float holds exactly, so
+/// [`drum_decode`] reads the key and the velocity back from one sample. It is never zero for a valid note (velocity 1 to
+/// 127) and below 1.
+pub fn drum_amplitude(key: u8, velocity: u8) -> f32 {
+    f32::from(u16::from(key.min(127)) * 128 + u16::from(velocity.min(127))) / 16384.0
+}
+
+/// The key and velocity a sample of the drum's output carries, when the gain is 1: the inverse of [`drum_amplitude`].
+pub fn drum_decode(sample: f32) -> (u8, u8) {
+    let n = (sample.abs() * 16384.0).round() as u32;
+    ((n / 128).min(127) as u8, (n % 128) as u8)
+}
+
+/// What the drum holds: which keys of which channels are down, the latest note, and where it is in the wave.
+///
+/// While any key is held, the output is a square wave with a period of four frames (+a +a -a -a), with `a` from the
+/// latest NoteOn ([`drum_amplitude`]); the wave starts at +a on the frame of a NoteOn. With nothing held it is silence. A
+/// NoteOff for a key that is not held does nothing. Held keys are not cleared by `setProcessing(false)` or by a restart,
+/// as a sloppy plug-in's would not be: a host has to send the NoteOffs, which is what a test of stuck notes needs.
+#[derive(Debug, Clone)]
+pub struct DrumVoices {
+    held: [u128; 16],
+    count: u32,
+    key: u8,
+    velocity: u8,
+    phase: u32,
+}
+
+impl Default for DrumVoices {
+    fn default() -> Self {
+        DrumVoices {
+            held: [0; 16],
+            count: 0,
+            key: 0,
+            velocity: 0,
+            phase: 0,
+        }
+    }
+}
+
+impl DrumVoices {
+    pub fn new() -> DrumVoices {
+        DrumVoices::default()
+    }
+
+    /// How many keys are down.
+    pub fn held(&self) -> u32 {
+        self.count
+    }
+
+    pub fn apply(&mut self, event: &DrumEvent) {
+        match *event {
+            DrumEvent::On {
+                channel,
+                key,
+                velocity,
+                ..
+            } => {
+                let (channel, bit) = (usize::from(channel & 15), 1u128 << (key & 127));
+                if self.held[channel] & bit == 0 {
+                    self.held[channel] |= bit;
+                    self.count += 1;
+                }
+                self.key = key & 127;
+                self.velocity = velocity.clamp(1, 127);
+                self.phase = 0;
+            }
+            DrumEvent::Off { channel, key, .. } => {
+                let (channel, bit) = (usize::from(channel & 15), 1u128 << (key & 127));
+                if self.held[channel] & bit != 0 {
+                    self.held[channel] &= !bit;
+                    self.count -= 1;
+                }
+            }
+        }
+    }
+
+    /// Fills `out` (one channel) for a block. `events` must be in offset order ([`sort_drum_events`]); an event applies
+    /// from its offset on, and one past the end of the block applies after the last frame.
+    pub fn render(&mut self, events: &[DrumEvent], out: &mut [f32]) {
+        let mut next = 0;
+        for (frame, sample) in out.iter_mut().enumerate() {
+            while next < events.len() && events[next].offset() as usize <= frame {
+                self.apply(&events[next]);
+                next += 1;
+            }
+            *sample = if self.count > 0 {
+                let amplitude = drum_amplitude(self.key, self.velocity);
+                let value = if self.phase % 4 < 2 {
+                    amplitude
+                } else {
+                    -amplitude
+                };
+                self.phase = self.phase.wrapping_add(1);
+                value
+            } else {
+                0.0
+            };
+        }
+        for event in &events[next..] {
+            self.apply(event);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Parameters, as pure functions
 // ---------------------------------------------------------------------------------------------------------------
 
@@ -543,6 +704,10 @@ struct Inner {
     delay: DelayLine,
     scratch_in: Vec<[f32; 2]>,
     scratch_out: Vec<[f32; 2]>,
+    /// The instrument class only: what it holds, the events of the block, and the one-channel signal it makes.
+    voices: DrumVoices,
+    drum_events: Vec<DrumEvent>,
+    scratch_drum: Vec<f32>,
 }
 
 pub(crate) struct Shared {
@@ -564,6 +729,9 @@ impl Shared {
                 delay: DelayLine::new(),
                 scratch_in: Vec::new(),
                 scratch_out: Vec::new(),
+                voices: DrumVoices::new(),
+                drum_events: Vec::with_capacity(DRUM_MAX_EVENTS),
+                scratch_drum: Vec::new(),
             }),
             handler: Mutex::new(None),
             reported_latency: AtomicU32::new(0),
@@ -732,6 +900,48 @@ const fn hex_digit(byte: u8) -> u8 {
 }
 
 const CID: TUID = tuid_from_hex(TEST_CLASS_ID);
+const DRUM_CID: TUID = tuid_from_hex(DRUM_CLASS_ID);
+
+/// Whether the instrument's output is mono (`TABPLAYER_TEST_PLUGIN_DRUM_MONO=1`).
+fn drum_mono() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var(ENV_DRUM_MONO).as_deref() == Ok("1"))
+}
+
+/// The drum event a VST3 event is, or `None` for anything but a note. A NoteOn with no velocity is a NoteOff, as MIDI has it.
+unsafe fn drum_event(event: &Event) -> Option<DrumEvent> {
+    let offset = event.sampleOffset.max(0) as u32;
+    let kind = i64::from(event.r#type);
+    if kind == Event_::EventTypes_::kNoteOnEvent as i64 {
+        let note = event.__field0.noteOn;
+        let channel = note.channel.clamp(0, 15) as u8;
+        let key = note.pitch.clamp(0, 127) as u8;
+        let velocity = (note.velocity * 127.0).round().clamp(0.0, 127.0) as u8;
+        Some(if velocity == 0 {
+            DrumEvent::Off {
+                offset,
+                channel,
+                key,
+            }
+        } else {
+            DrumEvent::On {
+                offset,
+                channel,
+                key,
+                velocity,
+            }
+        })
+    } else if kind == Event_::EventTypes_::kNoteOffEvent as i64 {
+        let note = event.__field0.noteOff;
+        Some(DrumEvent::Off {
+            offset,
+            channel: note.channel.clamp(0, 15) as u8,
+            key: note.pitch.clamp(0, 127) as u8,
+        })
+    } else {
+        None
+    }
+}
 
 /// With `TABPLAYER_TEST_PLUGIN_PRINT=1`, writes a line through Rust's standard output and one through the C runtime's, the
 /// two ways a plug-in's code usually prints. A host that keeps them off its control pipe is not disturbed; one that
@@ -758,6 +968,8 @@ fn print_noise(what: &str) {
 
 struct TestPlugin {
     shared: Arc<Shared>,
+    /// The instrument class: no audio input, an event input, and the drum's signal instead of the gain's.
+    drum: bool,
 }
 
 impl Class for TestPlugin {
@@ -770,10 +982,90 @@ impl Class for TestPlugin {
 }
 
 impl TestPlugin {
-    fn new() -> TestPlugin {
+    fn new(drum: bool) -> TestPlugin {
         TestPlugin {
             shared: Arc::new(Shared::new()),
+            drum,
         }
+    }
+
+    /// The arrangement of the instrument's output.
+    fn drum_arrangement() -> SpeakerArrangement {
+        if drum_mono() {
+            SpeakerArr::kMono
+        } else {
+            SpeakerArr::kStereo
+        }
+    }
+
+    /// The instrument's output: one frame in `numSamples`, both channels, from what it holds and the block's events.
+    unsafe fn process_drum(&self, process_data: &ProcessData) -> tresult {
+        let frames = process_data.numSamples.max(0) as usize;
+        if frames == 0
+            || process_data.numInputs != 0
+            || process_data.numOutputs != 1
+            || process_data.outputs.is_null()
+        {
+            return kResultOk;
+        }
+        let output_bus = process_data.outputs;
+        let channels = (*output_bus).numChannels;
+        let output_channels = (*output_bus).__field0.channelBuffers32;
+        if !(1..=2).contains(&channels) || output_channels.is_null() {
+            return kResultOk;
+        }
+        let out_l = *output_channels;
+        let out_r = if channels == 2 {
+            *output_channels.add(1)
+        } else {
+            out_l
+        };
+        if out_l.is_null() || out_r.is_null() {
+            return kResultOk;
+        }
+
+        let mut guard = lock(&self.shared.inner);
+        let inner = &mut *guard;
+        inner.drum_events.clear();
+        if let Some(list) = ComRef::from_raw(process_data.inputEvents) {
+            let count = list.getEventCount().clamp(0, DRUM_MAX_EVENTS as i32);
+            for index in 0..count {
+                let mut event: Event = std::mem::zeroed();
+                if list.getEvent(index, &mut event) != kResultOk {
+                    continue;
+                }
+                if let Some(event) = drum_event(&event) {
+                    inner.drum_events.push(event);
+                }
+            }
+        }
+        sort_drum_events(&mut inner.drum_events);
+        inner.scratch_drum.clear();
+        inner.scratch_drum.resize(frames, 0.0);
+        inner
+            .voices
+            .render(&inner.drum_events, &mut inner.scratch_drum);
+        // The gain, the delay and NaN mode are the gain class's own code, applied to what the drum made.
+        inner.scratch_in.clear();
+        inner
+            .scratch_in
+            .extend(inner.scratch_drum.iter().map(|sample| [*sample, *sample]));
+        inner.scratch_out.clear();
+        inner.scratch_out.resize(frames, [0.0; 2]);
+        process_block(
+            &inner.state,
+            &mut inner.delay,
+            &inner.scratch_in,
+            &mut inner.scratch_out,
+        );
+        for (index, frame) in inner.scratch_out.iter().enumerate() {
+            *out_l.add(index) = frame[0];
+            if channels == 2 {
+                *out_r.add(index) = frame[1];
+            }
+        }
+        (*output_bus).silenceFlags = 0;
+        kResultOk
     }
 }
 
@@ -801,11 +1093,10 @@ impl IComponentTrait for TestPlugin {
     }
 
     unsafe fn getBusCount(&self, media_type: MediaType, dir: BusDirection) -> i32 {
-        match media_type as MediaTypes {
-            MediaTypes_::kAudio => match dir as BusDirections {
-                BusDirections_::kInput | BusDirections_::kOutput => 1,
-                _ => 0,
-            },
+        match (media_type as MediaTypes, dir as BusDirections) {
+            (MediaTypes_::kAudio, BusDirections_::kInput) => i32::from(!self.drum),
+            (MediaTypes_::kAudio, BusDirections_::kOutput) => 1,
+            (MediaTypes_::kEvent, BusDirections_::kInput) => i32::from(self.drum),
             _ => 0,
         }
     }
@@ -817,18 +1108,29 @@ impl IComponentTrait for TestPlugin {
         index: i32,
         bus: *mut BusInfo,
     ) -> tresult {
-        if media_type as MediaTypes != MediaTypes_::kAudio || index != 0 || bus.is_null() {
+        if index != 0 || bus.is_null() {
             return kInvalidArgument;
         }
-        let (name, direction) = match dir as BusDirections {
-            BusDirections_::kInput => ("Input", BusDirections_::kInput),
-            BusDirections_::kOutput => ("Output", BusDirections_::kOutput),
-            _ => return kInvalidArgument,
-        };
+        let (media, name, direction, channels) =
+            match (media_type as MediaTypes, dir as BusDirections) {
+                (MediaTypes_::kAudio, BusDirections_::kInput) if !self.drum => {
+                    (MediaTypes_::kAudio, "Input", BusDirections_::kInput, 2)
+                }
+                (MediaTypes_::kAudio, BusDirections_::kOutput) => (
+                    MediaTypes_::kAudio,
+                    "Output",
+                    BusDirections_::kOutput,
+                    if self.drum && drum_mono() { 1 } else { 2 },
+                ),
+                (MediaTypes_::kEvent, BusDirections_::kInput) if self.drum => {
+                    (MediaTypes_::kEvent, "Events", BusDirections_::kInput, 1)
+                }
+                _ => return kInvalidArgument,
+            };
         let bus = &mut *bus;
-        bus.mediaType = MediaTypes_::kAudio as MediaType;
+        bus.mediaType = media as MediaType;
         bus.direction = direction as BusDirection;
-        bus.channelCount = 2;
+        bus.channelCount = channels;
         copy_wstring(name, &mut bus.name);
         bus.busType = BusTypes_::kMain as BusType;
         bus.flags = BusInfo_::BusFlags_::kDefaultActive as u32;
@@ -910,6 +1212,17 @@ impl IAudioProcessorTrait for TestPlugin {
         outputs: *mut SpeakerArrangement,
         num_outs: i32,
     ) -> tresult {
+        if self.drum {
+            // No audio input, one output, in the arrangement the instrument makes.
+            if num_ins != 0 || num_outs != 1 || outputs.is_null() {
+                return kResultFalse;
+            }
+            return if *outputs == TestPlugin::drum_arrangement() {
+                kResultTrue
+            } else {
+                kResultFalse
+            };
+        }
         if num_ins != 1 || num_outs != 1 || inputs.is_null() || outputs.is_null() {
             return kResultFalse;
         }
@@ -929,8 +1242,16 @@ impl IAudioProcessorTrait for TestPlugin {
             return kInvalidArgument;
         }
         match dir as BusDirections {
-            BusDirections_::kInput | BusDirections_::kOutput => {
+            BusDirections_::kInput if !self.drum => {
                 *arr = SpeakerArr::kStereo;
+                kResultOk
+            }
+            BusDirections_::kOutput => {
+                *arr = if self.drum {
+                    TestPlugin::drum_arrangement()
+                } else {
+                    SpeakerArr::kStereo
+                };
                 kResultOk
             }
             _ => kInvalidArgument,
@@ -1010,6 +1331,9 @@ impl IAudioProcessorTrait for TestPlugin {
             return kResultFalse;
         }
 
+        if self.drum {
+            return self.process_drum(process_data);
+        }
         let frames = process_data.numSamples.max(0) as usize;
         if frames == 0
             || process_data.numInputs != 1
@@ -1235,6 +1559,15 @@ impl IEditControllerTrait for TestPlugin {
 
 struct Factory {}
 
+/// The class ID, the name and the sub-categories of the factory's class at `index`: the gain, then the drum.
+fn class_at(index: i32) -> Option<(TUID, &'static str, &'static str)> {
+    match index {
+        0 => Some((CID, TEST_PLUGIN_NAME, "Fx")),
+        1 => Some((DRUM_CID, DRUM_PLUGIN_NAME, DRUM_SUBCATEGORIES)),
+        _ => None,
+    }
+}
+
 impl Class for Factory {
     type Interfaces = (IPluginFactory2,);
 }
@@ -1254,18 +1587,21 @@ impl IPluginFactoryTrait for Factory {
     }
 
     unsafe fn countClasses(&self) -> i32 {
-        1
+        2
     }
 
     unsafe fn getClassInfo(&self, index: i32, info: *mut PClassInfo) -> tresult {
-        if index != 0 || info.is_null() {
+        let Some((cid, name, _)) = class_at(index) else {
+            return kInvalidArgument;
+        };
+        if info.is_null() {
             return kInvalidArgument;
         }
         let info = &mut *info;
-        info.cid = CID;
+        info.cid = cid;
         info.cardinality = PClassInfo_::ClassCardinality_::kManyInstances as int32;
         copy_cstring("Audio Module Class", &mut info.category);
-        copy_cstring(TEST_PLUGIN_NAME, &mut info.name);
+        copy_cstring(name, &mut info.name);
         kResultOk
     }
 
@@ -1282,10 +1618,12 @@ impl IPluginFactoryTrait for Factory {
         if cid.is_null() || iid.is_null() {
             return kInvalidArgument;
         }
-        if *(cid as *const TUID) != CID {
-            return kInvalidArgument;
-        }
-        let Some(instance) = ComWrapper::new(TestPlugin::new()).to_com_ptr::<FUnknown>() else {
+        let drum = match *(cid as *const TUID) {
+            wanted if wanted == CID => false,
+            wanted if wanted == DRUM_CID => true,
+            _ => return kInvalidArgument,
+        };
+        let Some(instance) = ComWrapper::new(TestPlugin::new(drum)).to_com_ptr::<FUnknown>() else {
             return kOutOfMemory;
         };
         let raw = instance.as_ptr();
@@ -1295,16 +1633,19 @@ impl IPluginFactoryTrait for Factory {
 
 impl IPluginFactory2Trait for Factory {
     unsafe fn getClassInfo2(&self, index: i32, info: *mut PClassInfo2) -> tresult {
-        if index != 0 || info.is_null() {
+        let Some((cid, name, sub_categories)) = class_at(index) else {
+            return kInvalidArgument;
+        };
+        if info.is_null() {
             return kInvalidArgument;
         }
         let info = &mut *info;
-        info.cid = CID;
+        info.cid = cid;
         info.cardinality = PClassInfo_::ClassCardinality_::kManyInstances as int32;
         copy_cstring("Audio Module Class", &mut info.category);
-        copy_cstring(TEST_PLUGIN_NAME, &mut info.name);
+        copy_cstring(name, &mut info.name);
         info.classFlags = 0;
-        copy_cstring("Fx", &mut info.subCategories);
+        copy_cstring(sub_categories, &mut info.subCategories);
         copy_cstring("TabPlayer", &mut info.vendor);
         copy_cstring(TEST_PLUGIN_VERSION, &mut info.version);
         copy_cstring("VST 3.8.0", &mut info.sdkVersion);
@@ -1798,6 +2139,140 @@ mod tests {
 /// The COM layer, in process: the factory, a plug-in instance and the host's side of the conversation, all built on
 /// `ComWrapper` here. No library is loaded, so it runs wherever the unit tests do.
 #[cfg(test)]
+mod drum_tests {
+    use super::*;
+
+    fn on(offset: u32, key: u8, velocity: u8) -> DrumEvent {
+        DrumEvent::On {
+            offset,
+            channel: 0,
+            key,
+            velocity,
+        }
+    }
+
+    fn off(offset: u32, key: u8) -> DrumEvent {
+        DrumEvent::Off {
+            offset,
+            channel: 0,
+            key,
+        }
+    }
+
+    fn render(voices: &mut DrumVoices, events: &[DrumEvent], frames: usize) -> Vec<f32> {
+        let mut out = vec![f32::NAN; frames];
+        voices.render(events, &mut out);
+        out
+    }
+
+    #[test]
+    fn the_amplitude_says_which_note_and_how_hard() {
+        for key in 0..=127u8 {
+            for velocity in 1..=127u8 {
+                let a = drum_amplitude(key, velocity);
+                assert!(a > 0.0 && a < 1.0, "{key} {velocity}");
+                assert_eq!(drum_decode(a), (key, velocity));
+                assert_eq!(drum_decode(-a), (key, velocity));
+            }
+        }
+    }
+
+    #[test]
+    fn a_note_starts_on_its_frame_with_a_period_four_square_wave() {
+        let mut voices = DrumVoices::new();
+        let a = drum_amplitude(40, 100);
+        let out = render(&mut voices, &[on(5, 40, 100)], 16);
+        assert!(out[..5].iter().all(|s| *s == 0.0), "silence before it");
+        assert_eq!(
+            out[5..13],
+            [a, a, -a, -a, a, a, -a, -a],
+            "the wave starts on the NoteOn's frame"
+        );
+        assert_eq!(voices.held(), 1);
+        // It goes on in the next block, in phase, until a NoteOff.
+        let more = render(&mut voices, &[off(2, 40)], 6);
+        assert_eq!(more, vec![-a, a, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(voices.held(), 0);
+    }
+
+    #[test]
+    fn silence_when_nothing_is_held_and_the_latest_note_sets_the_amplitude() {
+        let mut voices = DrumVoices::new();
+        assert!(render(&mut voices, &[], 8).iter().all(|s| *s == 0.0));
+        let out = render(&mut voices, &[on(0, 36, 10), on(4, 38, 20), off(6, 36)], 12);
+        assert_eq!(out[0].abs(), drum_amplitude(36, 10));
+        assert_eq!(out[4].abs(), drum_amplitude(38, 20));
+        assert_eq!(
+            out[11].abs(),
+            drum_amplitude(38, 20),
+            "key 38 is still held after 36 was released"
+        );
+        let end = render(&mut voices, &[off(0, 38)], 4);
+        assert!(end.iter().all(|s| *s == 0.0));
+        // A NoteOff for a key that is not held changes nothing.
+        let mut voices = DrumVoices::new();
+        render(&mut voices, &[on(0, 60, 90)], 4);
+        render(&mut voices, &[off(0, 61)], 4);
+        assert_eq!(voices.held(), 1);
+    }
+
+    #[test]
+    fn a_note_on_again_does_not_hold_the_key_twice() {
+        let mut voices = DrumVoices::new();
+        render(&mut voices, &[on(0, 60, 90), on(1, 60, 91)], 4);
+        assert_eq!(voices.held(), 1);
+        let out = render(&mut voices, &[off(0, 60)], 4);
+        assert!(out.iter().all(|s| *s == 0.0), "one NoteOff ends it");
+    }
+
+    #[test]
+    fn held_notes_are_not_cleared_by_anything_but_a_note_off() {
+        let mut voices = DrumVoices::new();
+        let out = render(&mut voices, &[on(0, 60, 90)], 4);
+        assert_ne!(out[0], 0.0);
+        // Nothing clears them (not `setProcessing(false)` either: that is the delay's): a stuck note stays audible.
+        let later = render(&mut voices, &[], 4);
+        assert!(later.iter().all(|s| *s != 0.0));
+    }
+
+    #[test]
+    fn events_are_sorted_by_offset_and_equal_offsets_keep_their_order() {
+        let mut events = [on(9, 1, 1), off(2, 3), on(2, 4, 4), off(0, 5), on(9, 6, 6)];
+        sort_drum_events(&mut events);
+        assert_eq!(
+            events,
+            [off(0, 5), off(2, 3), on(2, 4, 4), on(9, 1, 1), on(9, 6, 6)]
+        );
+    }
+
+    #[test]
+    fn an_event_past_the_block_applies_after_its_last_frame() {
+        let mut voices = DrumVoices::new();
+        let out = render(&mut voices, &[on(500, 60, 90)], 4);
+        assert!(out.iter().all(|s| *s == 0.0));
+        assert_eq!(voices.held(), 1);
+    }
+
+    #[test]
+    fn the_gain_delay_and_nan_mode_apply_to_what_the_drum_makes() {
+        let mut voices = DrumVoices::new();
+        let mut delay = DelayLine::new();
+        let state = TestState {
+            gain: 0.5,
+            latency: 3,
+            ..TestState::default()
+        };
+        let drum = render(&mut voices, &[on(1, 60, 100)], 8);
+        let input: Vec<[f32; 2]> = drum.iter().map(|s| [*s, *s]).collect();
+        let mut out = vec![[0.0; 2]; 8];
+        process_block(&state, &mut delay, &input, &mut out);
+        let a = drum_amplitude(60, 100);
+        assert_eq!(out[3], [0.0, 0.0]);
+        assert_eq!(out[4], [a * 0.5, a * 0.5], "frame 1 plus the latency of 3");
+    }
+}
+
+#[cfg(test)]
 mod com_tests {
     use super::*;
     use std::cell::{Cell, RefCell};
@@ -2034,11 +2509,15 @@ mod com_tests {
 
     impl Rig {
         fn new() -> Rig {
+            Rig::of(&CID)
+        }
+
+        fn of(cid: &TUID) -> Rig {
             unsafe {
                 let factory = ComPtr::from_raw(GetPluginFactory()).expect("a factory");
                 let mut object = ptr::null_mut();
                 let result = factory.createInstance(
-                    CID.as_ptr(),
+                    cid.as_ptr(),
                     <IComponent as Interface>::IID.as_ptr() as FIDString,
                     &mut object,
                 );
@@ -2147,10 +2626,10 @@ mod com_tests {
     }
 
     #[test]
-    fn the_factory_lists_one_effect_class() {
+    fn the_factory_lists_an_effect_class_and_an_instrument_class() {
         unsafe {
             let factory = ComPtr::from_raw(GetPluginFactory()).expect("a factory");
-            assert_eq!(factory.countClasses(), 1);
+            assert_eq!(factory.countClasses(), 2);
 
             let mut factory_info: PFactoryInfo = std::mem::zeroed();
             assert_eq!(factory.getFactoryInfo(&mut factory_info), kResultOk);
@@ -2171,7 +2650,16 @@ mod com_tests {
             assert_eq!(id, TEST_CLASS_ID);
             assert_eq!(text(&info.name), "TabPlayer Test Gain");
             assert_eq!(text(&info.category), "Audio Module Class");
-            assert_eq!(factory.getClassInfo(1, &mut info), kInvalidArgument);
+            assert_eq!(factory.getClassInfo(1, &mut info), kResultOk);
+            let id: String = info
+                .cid
+                .iter()
+                .map(|b| format!("{:02X}", *b as u8))
+                .collect();
+            assert_eq!(id, DRUM_CLASS_ID);
+            assert_eq!(text(&info.name), "TabPlayer Test Drum");
+            assert_eq!(text(&info.category), "Audio Module Class");
+            assert_eq!(factory.getClassInfo(2, &mut info), kInvalidArgument);
 
             let factory2 = factory.cast::<IPluginFactory2>().expect("IPluginFactory2");
             let mut info2: PClassInfo2 = std::mem::zeroed();
@@ -2180,7 +2668,11 @@ mod com_tests {
             assert_eq!(text(&info2.vendor), "TabPlayer");
             assert_eq!(text(&info2.version), TEST_PLUGIN_VERSION);
             assert_eq!(text(&info2.name), "TabPlayer Test Gain");
-            assert_eq!(factory2.getClassInfo2(1, &mut info2), kInvalidArgument);
+            assert_eq!(factory2.getClassInfo2(1, &mut info2), kResultOk);
+            assert_eq!(text(&info2.subCategories), DRUM_SUBCATEGORIES);
+            assert_eq!(text(&info2.vendor), "TabPlayer");
+            assert_eq!(text(&info2.name), "TabPlayer Test Drum");
+            assert_eq!(factory2.getClassInfo2(2, &mut info2), kInvalidArgument);
         }
     }
 
@@ -2521,5 +3013,234 @@ mod com_tests {
             Event::Perform(PARAM_EDITS, 1.0),
             "performEdit carries the saturated count"
         );
+    }
+    // ---- the instrument class ------------------------------------------------------------------------------------
+
+    /// A host's event list for one block.
+    struct Events(Vec<vst3::Steinberg::Vst::Event>);
+
+    impl Class for Events {
+        type Interfaces = (IEventList,);
+    }
+
+    impl IEventListTrait for Events {
+        unsafe fn getEventCount(&self) -> int32 {
+            self.0.len() as i32
+        }
+
+        unsafe fn getEvent(
+            &self,
+            index: int32,
+            event: *mut vst3::Steinberg::Vst::Event,
+        ) -> tresult {
+            match self.0.get(index as usize) {
+                Some(found) => {
+                    *event = *found;
+                    kResultOk
+                }
+                None => kInvalidArgument,
+            }
+        }
+
+        unsafe fn addEvent(&self, _: *mut vst3::Steinberg::Vst::Event) -> tresult {
+            kNotImplemented
+        }
+    }
+
+    fn note_on(
+        offset: i32,
+        channel: i16,
+        pitch: i16,
+        velocity: f32,
+    ) -> vst3::Steinberg::Vst::Event {
+        unsafe {
+            let mut event: vst3::Steinberg::Vst::Event = std::mem::zeroed();
+            event.sampleOffset = offset;
+            event.r#type = Event_::EventTypes_::kNoteOnEvent as u16;
+            event.__field0.noteOn = NoteOnEvent {
+                channel,
+                pitch,
+                tuning: 0.0,
+                velocity,
+                length: 0,
+                noteId: -1,
+            };
+            event
+        }
+    }
+
+    fn note_off(offset: i32, channel: i16, pitch: i16) -> vst3::Steinberg::Vst::Event {
+        unsafe {
+            let mut event: vst3::Steinberg::Vst::Event = std::mem::zeroed();
+            event.sampleOffset = offset;
+            event.r#type = Event_::EventTypes_::kNoteOffEvent as u16;
+            event.__field0.noteOff = NoteOffEvent {
+                channel,
+                pitch,
+                velocity: 0.0,
+                noteId: -1,
+                tuning: 0.0,
+            };
+            event
+        }
+    }
+
+    impl Rig {
+        /// Runs the instrument's `process` over `frames` frames with these events, and returns its left channel.
+        fn process_drum(
+            &self,
+            frames: usize,
+            events: Vec<vst3::Steinberg::Vst::Event>,
+        ) -> Vec<f32> {
+            unsafe {
+                let mut out_l = vec![f32::NAN; frames];
+                let mut out_r = vec![f32::NAN; frames];
+                let mut outputs = [out_l.as_mut_ptr(), out_r.as_mut_ptr()];
+                let mut output_bus: AudioBusBuffers = std::mem::zeroed();
+                output_bus.numChannels = 2;
+                output_bus.__field0.channelBuffers32 = outputs.as_mut_ptr();
+                let list = ComWrapper::new(Events(events))
+                    .to_com_ptr::<IEventList>()
+                    .unwrap();
+                let mut data: ProcessData = std::mem::zeroed();
+                data.symbolicSampleSize = SymbolicSampleSizes_::kSample32 as i32;
+                data.numSamples = frames as i32;
+                data.numInputs = 0;
+                data.numOutputs = 1;
+                data.outputs = &mut output_bus;
+                data.inputEvents = list.as_ptr();
+                assert_eq!(self.processor.process(&mut data), kResultOk);
+                let bits =
+                    |channel: &[f32]| channel.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+                assert_eq!(
+                    bits(&out_l),
+                    bits(&out_r),
+                    "both channels carry the same signal"
+                );
+                out_l
+            }
+        }
+    }
+
+    #[test]
+    fn the_instrument_has_an_event_input_a_stereo_output_and_no_audio_input() {
+        let rig = Rig::of(&DRUM_CID);
+        unsafe {
+            let audio = MediaTypes_::kAudio as MediaType;
+            let event = MediaTypes_::kEvent as MediaType;
+            let (input, output) = (
+                BusDirections_::kInput as BusDirection,
+                BusDirections_::kOutput as BusDirection,
+            );
+            assert_eq!(rig.component.getBusCount(audio, input), 0);
+            assert_eq!(rig.component.getBusCount(audio, output), 1);
+            assert_eq!(rig.component.getBusCount(event, input), 1);
+            assert_eq!(rig.component.getBusCount(event, output), 0);
+            let mut info: BusInfo = std::mem::zeroed();
+            assert_eq!(
+                rig.component.getBusInfo(event, input, 0, &mut info),
+                kResultOk
+            );
+            assert_eq!(info.mediaType, event);
+            assert_eq!(info.direction, input);
+            assert_eq!(
+                rig.component.getBusInfo(audio, input, 0, &mut info),
+                kInvalidArgument
+            );
+            assert_eq!(
+                rig.component.getBusInfo(audio, output, 0, &mut info),
+                kResultOk
+            );
+            assert_eq!(info.channelCount, 2);
+            let mut arrangement = 0;
+            assert_eq!(
+                rig.processor.getBusArrangement(output, 0, &mut arrangement),
+                kResultOk
+            );
+            assert_eq!(arrangement, SpeakerArr::kStereo);
+            let mut stereo = SpeakerArr::kStereo;
+            let mut mono = SpeakerArr::kMono;
+            assert_eq!(
+                rig.processor
+                    .setBusArrangements(ptr::null_mut(), 0, &mut stereo, 1),
+                kResultTrue
+            );
+            assert_eq!(
+                rig.processor
+                    .setBusArrangements(ptr::null_mut(), 0, &mut mono, 1),
+                kResultFalse
+            );
+            let mut input_arrangement = SpeakerArr::kStereo;
+            assert_eq!(
+                rig.processor
+                    .setBusArrangements(&mut input_arrangement, 1, &mut stereo, 1),
+                kResultFalse,
+                "it takes no audio input"
+            );
+        }
+    }
+
+    #[test]
+    fn the_effect_has_no_event_input() {
+        let rig = Rig::new();
+        unsafe {
+            let event = MediaTypes_::kEvent as MediaType;
+            assert_eq!(
+                rig.component
+                    .getBusCount(event, BusDirections_::kInput as BusDirection),
+                0
+            );
+            assert_eq!(
+                rig.component.getBusCount(
+                    MediaTypes_::kAudio as MediaType,
+                    BusDirections_::kInput as BusDirection
+                ),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn the_instrument_sounds_a_note_from_its_offset_and_goes_silent_after_its_note_off() {
+        let rig = Rig::of(&DRUM_CID);
+        let a = drum_amplitude(40, 100);
+        let velocity = 100.0 / 127.0;
+        let out = rig.process_drum(16, vec![note_on(5, 0, 40, velocity), note_off(11, 0, 40)]);
+        assert!(out[..5].iter().all(|s| *s == 0.0));
+        assert_eq!(out[5..11], [a, a, -a, -a, a, a]);
+        assert!(out[11..].iter().all(|s| *s == 0.0));
+        // Held across blocks until the NoteOff.
+        rig.process_drum(4, vec![note_on(0, 3, 64, 1.0)]);
+        let held = rig.process_drum(4, vec![]);
+        assert!(held.iter().all(|s| s.abs() == drum_amplitude(64, 127)));
+        let ended = rig.process_drum(4, vec![note_off(1, 3, 64)]);
+        assert_eq!(ended[0].abs(), drum_amplitude(64, 127));
+        assert!(ended[1..].iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn the_instrument_takes_its_gain_latency_and_nan_mode_from_the_shared_state() {
+        let rig = Rig::of(&DRUM_CID);
+        assert_eq!(
+            rig.set_state(&TestState {
+                gain: 0.5,
+                latency: 2,
+                ..TestState::default()
+            }),
+            kResultOk
+        );
+        let a = drum_amplitude(40, 100);
+        let out = rig.process_drum(8, vec![note_on(1, 0, 40, 100.0 / 127.0)]);
+        assert_eq!(out[..3], [0.0, 0.0, 0.0]);
+        assert_eq!(out[3], a * 0.5);
+        assert_eq!(rig.set_state(&TestState::default()), kResultOk);
+        assert_eq!(
+            rig.set_state(&TestState {
+                mode: TestMode::Nan,
+                ..TestState::default()
+            }),
+            kResultOk
+        );
+        assert!(rig.process_drum(4, vec![]).iter().all(|s| s.is_nan()));
     }
 }

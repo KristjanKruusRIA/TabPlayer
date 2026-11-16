@@ -752,6 +752,81 @@ mod tests {
         assert_eq!(too_large, 0, "refused blocks allocated");
     }
 
+    /// The instrument's block path, from the raw event words to the plug-in: the guard admits a full block of 64 words
+    /// (notes, retriggers, an AllNotesOff, controllers and invalid words) and the processor hands the events to the
+    /// plug-in. It makes no heap operation, and the plug-in sounds what it was given.
+    #[test]
+    #[ignore = "needs: cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin"]
+    fn the_instrument_block_path_never_allocates_with_a_full_block_of_events() {
+        use crate::notes::{MAX_BLOCK_EVENTS, NoteGuard};
+        use tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK;
+        use tabplayer_test_plugin::DRUM_CLASS_ID;
+        let (_guard, _dir, mut core) = load_plugin(DRUM_CLASS_ID, PluginKind::Instrument);
+        let mut processor = core.processor().unwrap();
+        let input = [[0.0f32; 2]; BLOCK_FRAMES];
+        let mut output = [[0.0f32; 2]; BLOCK_FRAMES];
+        let meta = BlockMeta::default();
+        let words: Vec<u64> = (0..EVENTS_PER_BLOCK as u8)
+            .map(|i| {
+                let event = match i % 8 {
+                    0..=3 => MidiEvent::NoteOn {
+                        offset: 127 - i,
+                        channel: i % 3,
+                        key: 36 + i % 5,
+                        velocity: 1 + i,
+                    },
+                    4 => MidiEvent::NoteOff {
+                        offset: i,
+                        channel: i % 3,
+                        key: 36 + i % 5,
+                    },
+                    5 => MidiEvent::Controller {
+                        offset: i,
+                        channel: 0,
+                        controller: 1,
+                        value: 5,
+                    },
+                    6 => MidiEvent::AllNotesOff {
+                        offset: i,
+                        channel: i % 3,
+                    },
+                    _ => return u64::MAX,
+                };
+                event.encode().unwrap()
+            })
+            .collect();
+        let mut notes = NoteGuard::new();
+        let mut admitted = [MidiEvent::AllNotesOff {
+            offset: 0,
+            channel: 0,
+        }; MAX_BLOCK_EVENTS];
+        let mut block = |notes: &mut NoteGuard, words: &[u64]| {
+            let mut count = 0;
+            notes.admit(words, &mut |event| {
+                if let Some(slot) = admitted.get_mut(count) {
+                    *slot = event;
+                    count += 1;
+                }
+            });
+            processor.process(&input, &mut output, &meta, &admitted[..count]);
+        };
+        // Warm up, so one-off set-up is not counted.
+        block(&mut notes, &words);
+        let working = heap_operations(|| {
+            for round in 0..200 {
+                block(&mut notes, &words);
+                if round % 5 == 0 {
+                    notes.release_all();
+                }
+            }
+        });
+        assert_eq!(working, 0, "a full block of events allocated");
+        assert!(
+            output.iter().any(|frame| frame[0] != 0.0),
+            "the plug-in sounded"
+        );
+    }
+
     /// The plug-in is loaded into the test process, which has one "main thread" at a time: the tests that do it take turns.
     static IN_PROCESS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 

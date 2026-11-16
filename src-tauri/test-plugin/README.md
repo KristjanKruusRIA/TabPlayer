@@ -6,7 +6,17 @@ A VST3 plug-in for TabPlayer's own tests. It is not shipped and it is not a prod
 
 A stereo gain with an exact delay. The output is the input times the gain, delayed by exactly the latency in frames, and `getLatencySamples` reports that latency. Whenever the latency changes, the plug-in calls `restartComponent(kLatencyChanged)` on the host's handler, once a handler is set. That covers every way it can change: the controller's `setParamNormalized`, the processor's parameter queue in `process`, and `setState`. It remembers the latency the host last read with `getLatencySamples` (or was last told) and announces a latency that differs, so the order in which a host delivers a parameter does not matter. The call comes from the thread that made the change, with no lock held, so a host that re-reads `getLatencySamples` from inside it sees the new value. A latency loaded before a handler exists is not announced; the host reads it anyway. `setProcessing(false)` clears the delay line.
 
-It is one class that is both the component and the edit controller, so a probe sees exactly one class: `TEST_CLASS_ID`, named "TabPlayer Test Gain".
+Each class is one object that is both the component and the edit controller. A probe sees two classes: the gain, `TEST_CLASS_ID`, named "TabPlayer Test Gain" (sub-category `Fx`), and the instrument described next, `DRUM_CLASS_ID`, "TabPlayer Test Drum".
+
+## The instrument class
+
+"TabPlayer Test Drum" (`7ABB1A7E57E5701C8E5700000000A002`, sub-categories `Instrument|Drum`) makes sound from notes, so a test can read back what a host sent it. It has no audio input, one stereo audio output and one event input bus (`TABPLAYER_TEST_PLUGIN_DRUM_MONO=1` makes the output mono; it then accepts only a mono arrangement). It reads NoteOn and NoteOff events from `inputEvents` at their `sampleOffset`, puts them in offset order, and ignores every other kind.
+
+While any key is held, the output is a square wave with a period of four frames (+a, +a, -a, -a) on both channels. The wave starts at +a on the frame of a NoteOn, and `a` comes from the most recent NoteOn: `a = (key * 128 + velocity) / 16384`, where velocity is the event's velocity times 127, rounded (`drum_amplitude`; `drum_decode` reads the key and velocity back from one sample). With nothing held the output is silence, so a test can see the exact onset frame, which note and how hard, and a note that was never stopped. A NoteOff for a key that is not held does nothing, a NoteOn for a held key does not hold it twice (one NoteOff ends it), and a NoteOn with no velocity counts as a NoteOff.
+
+Held keys are not cleared by `setProcessing(false)`, `setActive(false)` or a restart. A real plug-in may or may not clear its voices there; this one never does, so only a NoteOff stops a note.
+
+The drum uses the gain class's parameters, state and modes as they are: its signal goes through the same gain, the same exact delay (so a note starts `latency` frames later, and `getLatencySamples` reports it) and the same Normal, Crash, Hang, NaN, Slow, Hang on load, Reject state, Fail process and Fault modes. It has the same editor and the same controller state.
 
 The controller's `getState` writes five bytes: the `processMode` the host passed to `setupProcessing` (0 realtime, 1 prefetch, 2 offline), then how many times the component has been activated (`setActive(true)`), as a little-endian `u32`. The component's state is the record described below.
 
@@ -40,7 +50,7 @@ To make the plug-in produce a large state on its own, for a host that cannot sen
 
 ## Factory
 
-The factory implements `IPluginFactory2`: the class reports the subcategory `Fx`, version `1.0.0` and vendor `TabPlayer`. It does not set `kUnicode`, because that promises `IPluginFactory3`.
+The factory implements `IPluginFactory2` and lists two classes, the gain first: the gain reports the subcategory `Fx` and the drum `Instrument|Drum`; both report version `1.0.0` and vendor `TabPlayer`. It does not set `kUnicode`, because that promises `IPluginFactory3`.
 
 ## Editor (Windows)
 
@@ -58,6 +68,7 @@ They are read inside the process that hosts the plug-in.
 - `TABPLAYER_TEST_PLUGIN_ANNOUNCE_ON_ACTIVE=1`: `setActive(true)` calls `restartComponent(kLatencyChanged)` whether or not the latency changed, as plug-ins do that work it out in their own set-up. A host that re-activates the plug-in in answer would loop.
 - `TABPLAYER_TEST_PLUGIN_ANNOUNCE_EVERY_BLOCK=1`: every `process` call does the same, from the audio thread.
 - `TABPLAYER_TEST_PLUGIN_IGNORE_WRITE_FAILURE=1`: `getState` returns `kResultOk` even when the host's stream refused a write, as plug-ins that write without checking do.
+- `TABPLAYER_TEST_PLUGIN_DRUM_MONO=1`: the drum's output is one channel instead of two.
 - `TABPLAYER_TEST_PLUGIN_PRINT=1`: the plug-in prints on load and on every block, through Rust's standard output and error and through the C runtime's `puts`. A host must keep that off its control pipe.
 
 ## Build
@@ -74,7 +85,7 @@ The COM plumbing (the class, the factory, the entry points and the bus code) is 
 
 ## Tests and their limits
 
-`cargo test -p tabplayer-test-plugin` runs the pure unit tests and an in-process COM test (`com_tests`) that drives the factory, a plug-in instance, a Rust `IBStream` and a Rust `IComponentHandler`, with no library loaded. It is written for Windows, macOS and Linux and covers the restart, `RejectState`, the padding size, `setProcessing(0)` and `setComponentState`. It has only been run on Windows. The bindings differ by platform in three ways: the enum type (which sets the width of every enum, including the seek mode), the byte order of class IDs, and result-code values. The test casts the seek mode to its own type and uses only named constants, so it depends on none of these.
+`cargo test -p tabplayer-test-plugin` runs the pure unit tests (the drum's are in `drum_tests`) and an in-process COM test (`com_tests`) that drives the factory, a plug-in instance, a Rust `IBStream`, a Rust `IComponentHandler` and a Rust `IEventList`, with no library loaded. It is written for Windows, macOS and Linux and covers the restart, `RejectState`, the padding size, `setProcessing(0)` and `setComponentState`. It has only been run on Windows. The bindings differ by platform in three ways: the enum type (which sets the width of every enum, including the seek mode), the byte order of class IDs, and result-code values. The test casts the seek mode to its own type and uses only named constants, so it depends on none of these.
 
 The tests read the process environment through the plug-in, so they expect `TABPLAYER_TEST_PLUGIN_HANG_FACTORY` and `TABPLAYER_TEST_PLUGIN_STATE_PADDING` to be unset: the first hangs every COM test, the second changes the state sizes they check.
 

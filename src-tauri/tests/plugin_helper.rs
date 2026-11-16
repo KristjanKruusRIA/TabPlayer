@@ -802,11 +802,15 @@ mod windows_tests {
             assert!(report.recv_timeout(Duration::from_millis(300)).is_err(), "asked, so not a crash");
         }
 
-        fn probe_lists_the_test_class() {
+        fn probe_lists_the_test_classes() {
             let fixture = Fixture::new();
             let classes = probe(&helper_exe(), &fixture.bundle, Duration::from_secs(60)).expect("a probe");
-            assert_eq!(classes.len(), 1);
+            // The helper lists the instrument too; it is the library that keeps only the effects for now.
+            assert_eq!(classes.len(), 2);
             assert_eq!(classes[0].class_id, TEST_CLASS_ID);
+            assert_eq!(classes[0].kind, tabplayer_plugin_protocol::control::PluginKind::Effect);
+            assert_eq!(classes[1].class_id, tabplayer_test_plugin::DRUM_CLASS_ID);
+            assert_eq!(classes[1].kind, tabplayer_plugin_protocol::control::PluginKind::Instrument);
 
             let error = probe(&helper_exe(), &fixture._dir.path().join("Missing.vst3"), Duration::from_secs(60))
                 .expect_err("no such bundle");

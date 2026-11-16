@@ -46,7 +46,10 @@ function eachBeat(score:model.Score,visit:(beat:model.Beat,target:BeatTarget)=>v
 /** All diagrams, with the position of their beat, in score order. */
 export function listScaleDiagrams(score:model.Score):Array<{target:BeatTarget;diagram:ScaleDiagram}> {
   const found:Array<{target:BeatTarget;diagram:ScaleDiagram}>=[];
-  eachBeat(score,(beat,target)=>{const diagram=sources.get(beat);if(diagram)found.push({target,diagram:structuredClone(diagram)});});
+  // Called after every edit by the score view; a long score has tens of thousands of beats and almost none carries a diagram, so a position is only made for the ones that do.
+  for(let t=0;t<score.tracks.length;t++){const staves=score.tracks[t].staves;for(let s=0;s<staves.length;s++){const bars=staves[s].bars;for(let b=0;b<bars.length;b++){const voices=bars[b].voices;for(let v=0;v<voices.length;v++){const beats=voices[v].beats;for(let i=0;i<beats.length;i++){
+    const diagram=sources.get(beats[i]);if(diagram)found.push({target:{track:t,staff:s,bar:b,voice:v,beat:i},diagram:structuredClone(diagram)});
+  }}}}}
   return found;
 }
 /** Call after any full clone that keeps the score's structure, as for chord sources. */

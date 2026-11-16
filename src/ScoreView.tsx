@@ -36,11 +36,16 @@ import { targetSymbols,type SymbolRef } from './editor/symbol-edit';
 import { resolveSymbol,systemAt } from './editor/symbol-hit';
 import { SymbolPopover,type SymbolView } from './SymbolPopover';
 import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score-entry-hit';
+import { visibleIndexes,type LayoutPartial } from './engraving/lazy-paint';
+import { developerHooks,drawFlags } from './engraving/draw-flags';
+import { exposeDrawCheck,recordDrawStats } from './engraving/draw-check';
 import { useI18n } from './i18n';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
 /** How often, and for how long each time, a draw gives way to keys and clicks that are waiting. */
-const DRAW_DEFERRALS_MAX=6,DRAW_DEFERRAL_MS=16;
+const DRAW_DEFERRAL_MS=16;
+/** A piece this close (in pixels) to the score area counts as in view when painting: alphaTab's own check treats one pixel as in view, and a piece it clears again would be painted for nothing if this were wider. */
+const PAINT_MARGIN=2;
 const diagramScale=.45,chipHeight=16,chipGap=2;
 const chipWidth=(diagram:ScaleDiagram)=>18+6*Math.min(14,(diagram.name||'Scale').length);
 const chipLabel=(diagram:ScaleDiagram)=>(diagram.name||'Scale').slice(0,14);
@@ -129,6 +134,8 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   const pageKey=JSON.stringify({...pageInput,headerFooter:undefined}),page=useMemo(()=>pageInput,[pageKey]);
   const geometry=useMemo(()=>pageGeometry(page),[page]),physicalRequested=isPhysicalPageLayout(display.layout);
   const scrollHost=useRef<HTMLElement|null>(null),[available,setAvailable]=useState({width:0,height:0});
+  /** Called when the score area changes size (it shows other systems without any scroll): paints the ones in view that are empty. */
+  const areaChanged=useRef<()=>void>(()=>{});
   const [completed,setCompleted]=useState<{score:model.Score;tracks:string;page:PageLayout;engraving:EngravingOverrides|undefined;chunks:readonly ScreenRenderChunk[];bounds:ScreenBounds;plan:AccoladePlan|null;metrics:AccoladeMetrics}|null>(null);
   // A completion whose arrangement failed stays through the next render start, so the continuous fallback does not flicker.
   const failedCompletion=useRef<unknown>(null);
@@ -213,7 +220,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   const [rangeBlocks,setRangeBlocks]=useState<Band[]>([]),[loopBlocks,setLoopBlocks]=useState<Band[]>([]),[surfaceClass,setSurfaceClass]=useState('');
   useLayoutEffect(()=>{
     const host=wrapper.current?.closest<HTMLElement>('.paper-scroll')??wrapper.current?.parentElement??null;scrollHost.current=host;
-    const measure=()=>{if(!host)return;const css=getComputedStyle(host),width=Math.max(0,host.clientWidth-(parseFloat(css.paddingLeft)||0)-(parseFloat(css.paddingRight)||0)),height=Math.max(0,host.clientHeight-(parseFloat(css.paddingTop)||0)-(parseFloat(css.paddingBottom)||0));setAvailable(old=>old.width===width&&old.height===height?old:{width,height});};
+    const measure=()=>{if(!host)return;const css=getComputedStyle(host),width=Math.max(0,host.clientWidth-(parseFloat(css.paddingLeft)||0)-(parseFloat(css.paddingRight)||0)),height=Math.max(0,host.clientHeight-(parseFloat(css.paddingTop)||0)-(parseFloat(css.paddingBottom)||0));setAvailable(old=>old.width===width&&old.height===height?old:{width,height});areaChanged.current();};
     measure();const observer=typeof ResizeObserver==='undefined'?null:new ResizeObserver(measure);if(host)observer?.observe(host);window.addEventListener('resize',measure);
     return()=>{observer?.disconnect();window.removeEventListener('resize',measure);};
   },[]);
@@ -440,7 +447,15 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   };
   useEffect(()=>{
     const view=new AlphaTabApi(container.current!,{core:{fontDirectory:'/font/',scriptFile:'/alphatab/alphaTab.mjs',includeNoteBounds:true,useWorkers:false,engine:'svg',enableLazyLoading:false},player:{playerMode:'EnabledExternalMedia',enableCursor:false,enableUserInteraction:false,scrollElement:'.paper-scroll'}});api.current=view;
-    const adapter=installScreenPlayback(view,()=>({...presentation.current,wrapper:wrapper.current,scrollHost:scrollHost.current,barElement:barElement.current,beatElement:beatElement.current}));playbackPresentation.current=adapter;
+    const unhookCheck=developerHooks?exposeDrawCheck(()=>({view:api.current,partials:layoutPartials.current})):()=>{};
+    // alphaTab empties a piece when its browser reports the piece out of view, one frame late: a piece that is back in view by then would be shown empty. The mutation callback runs
+    // before the next frame is drawn, so the piece is painted again in time (only pieces emptied from outside count: ours are painted, never emptied, while in view).
+    const surface=(view.canvasElement as unknown as {element?:HTMLElement}).element;
+    const emptied=surface&&typeof MutationObserver!=='undefined'?new MutationObserver(records=>{
+      if(view.settings.core.enableLazyLoading&&records.some(record=>record.removedNodes.length>0&&record.addedNodes.length===0&&record.target.parentElement===surface))areaChanged.current();
+    }):null;
+    if(surface)emptied?.observe(surface,{childList:true,subtree:true});
+    const adapter=installScreenPlayback(view,()=>({...presentation.current,wrapper:wrapper.current,scrollHost:scrollHost.current,barElement:barElement.current,beatElement:beatElement.current,ensurePainted:index=>ensurePaintedRef.current(index)}));playbackPresentation.current=adapter;
     view.settings.player.enableCursor=true;
     // Reuse the facade's public DOM surface classes so its instance-specific font CSS also applies to copied SVGs.
     setSurfaceClass(container.current?.querySelector('.at-surface')?.className??'');
@@ -473,7 +488,9 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     };
     pointerActions.current={downBeat,downNote,move};
     const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
-      collecting=true;chunks=[];generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setLoopBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
+      collecting=true;chunks=[];layoutPartials.current=[];failedPieces.current=new Set();paintedPieces.current=new Set();generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setLoopBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
+    }),view.renderer.partialLayoutFinished.on(event=>{
+      layoutPartials.current.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex});
     }),view.renderer.partialRenderFinished.on(event=>{
       if(collecting&&typeof event.renderResult==='string')chunks.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex,svg:event.renderResult});
     }),view.postRenderFinished.on(()=>{
@@ -482,17 +499,19 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
         if(c.sourcePhysical){if(planned)setCompleted({score:c.renderedScore,tracks:c.trackKey,page:c.page,engraving:c.engraving,chunks:[...chunks],bounds:view.boundsLookup,plan:planned.plan,metrics:planned.metrics});}
         else if(planned?.plan){try{setOverlay(accoladeOverlay(planned.plan,planned.metrics,view.boundsLookup.staffSystems));}catch{setOverlay(null);}}
         if((c.display.layout==='verticalScreen'||c.display.layout==='horizontalScreen')&&c.display.zoomMode!=='manual'&&c.baseWidth===null){
-          const width=Math.max(1,...chunks.map(chunk=>chunk.x+chunk.width),...view.boundsLookup.staffSystems.map(system=>system.realBounds.x+system.realBounds.w));
+          const width=Math.max(1,...layoutPartials.current.map(piece=>piece.x+piece.width),...view.boundsLookup.staffSystems.map(system=>system.realBounds.x+system.realBounds.w));
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
         }
       }
       refreshOverlays();
+      // The layout is done: the pieces in view are painted now (this also covers a render that waited for alphaTab's fonts and so ran after draw() returned).
+      if(view.settings.core.enableLazyLoading){paintVisible(view);scheduleAheadRef.current(view);}
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
     };
     const mouseUp=()=>{drag.current=null;};document.addEventListener('mousemove',mouseMove);document.addEventListener('mouseup',mouseUp);
-    return ()=>{for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);adapter.dispose();playbackPresentation.current=null;roots.current.clear();view.destroy();api.current=null;loaded.current=null;};
+    return ()=>{unhookCheck();emptied?.disconnect();for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);adapter.dispose();playbackPresentation.current=null;roots.current.clear();view.destroy();api.current=null;loaded.current=null;};
   },[]);
   useEffect(()=>{anchor.current=null;drag.current=null;},[score,track,projection,visibleTracks]);
   // A selection this view did not publish (an instrument pick, say) ends the click that anchored Shift selection.
@@ -513,17 +532,120 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   useEffect(()=>{refreshCaret.current();},[score,track,zoom,profile,projection,visibleTracks,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
   useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){const host=scrollHost.current;if(host){const box=caretElement.current.getBoundingClientRect(),viewport=host.getBoundingClientRect();if(box.top<viewport.top)host.scrollTop+=box.top-viewport.top;else if(box.bottom>viewport.bottom)host.scrollTop+=box.bottom-viewport.bottom;if(box.left<viewport.left)host.scrollLeft+=box.left-viewport.left;else if(box.right>viewport.right)host.scrollLeft+=box.right-viewport.right;}revealCaret.current=false;}},[caret]);
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
-  const loaded=useRef<{score:model.Score;tracks:string}|null>(null);
+  const loaded=useRef<{score:model.Score;tracks:string}|null>(null),layoutPartials=useRef<LayoutPartial[]>([]),failedPieces=useRef(new Set<string>()),paintedPieces=useRef(new Set<string>());
   // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
   const [drawFailure,setDrawFailure]=useState<{error:unknown}|null>(null);
   const renderGeneration=useRef(0);
-  // A draw of a long score takes a fifth of a second and cannot be interrupted. When keys or clicks are already waiting (a pointer merely moving over the page does not count) (a run of edits typed
-  // quickly), the draw lets them go first, a few frames at most; each of them changes the score again, and only the newest is drawn.
+  // A draw cannot be interrupted. It used to take a fifth of a second or more on a long score, so when keys or clicks were already waiting (a pointer merely moving over the page does not count) it let
+  // them go first, a few frames at most, and only the newest score was drawn. Painting only what is in view takes a few tens of milliseconds, and the key-up of the key just typed counts as
+  // waiting input, so by default (`drawFlags.deferrals`) it no longer waits.
   const [drawRetry,setDrawRetry]=useState(0),drawDeferred=useRef(0);
+  const pieceElements=(view:AlphaTabApi)=>(view.canvasElement as unknown as {element?:HTMLElement}).element?.children;
+  /** Where the canvas and the score area are, in client coordinates (one forced layout, which is cheap while the pieces are empty). */
+  const viewGeometry=(view:AlphaTabApi)=>{
+    const host=scrollHost.current;if(!host)return null;
+    const offset=view.uiFacade.getOffset(null,view.canvasElement);
+    return {canvas:{left:offset.x-window.scrollX,top:offset.y-window.scrollY},area:host.getBoundingClientRect()};
+  };
+  /**
+   * Paints piece `index` when it needs it: nothing is in it (alphaTab has not painted it yet, or cleared it when it left the view), or what is in it was not painted for this layout (a resize keeps
+   * the old drawing in the pieces and alphaTab only paints them again when it sees them in view, a frame late). alphaTab swallows an error in painting and leaves the piece empty: such a piece is
+   * not tried again until the next layout (an untrusted score must not keep the painters busy for ever).
+   */
+  const paintPiece=(view:AlphaTabApi,index:number)=>{
+    const partials=layoutPartials.current,pieces=pieceElements(view);
+    if(!pieces||pieces.length!==partials.length||!pieces[index])return false;
+    const id=partials[index].id;
+    if(failedPieces.current.has(id)||(pieces[index].childElementCount>0&&paintedPieces.current.has(id)))return false;
+    view.renderer.renderResult(id);
+    if(pieces[index].childElementCount===0){failedPieces.current.add(id);return false;}
+    paintedPieces.current.add(id);return true;
+  };
+  /**
+   * With lazy loading alphaTab paints a piece when its browser says the piece is on screen, a frame after the layout, and clears it again when it leaves; the pieces in view are
+   * painted here instead, in the same turn, so no frame shows one blank or as it was. `onlyEmpty` (used while scrolling, which comes before the frame is drawn) paints only the
+   * ones that have nothing in them: those are the ones alphaTab has cleared or not painted yet, and painting them now is what keeps a scroll from showing a blank system.
+   * New nodes carry no highlight, so the sounding beat's is put on again after a piece was painted.
+   */
+  const paintVisible=(view:AlphaTabApi,onlyEmpty=false,where='draw')=>{
+    try{
+      const geometry=viewGeometry(view),partials=layoutPartials.current;if(!geometry||!partials.length)return;
+      let painted=false;
+      for(const index of visibleIndexes(partials,geometry.canvas,geometry.area,PAINT_MARGIN)){
+        if(onlyEmpty){if(paintPiece(view,index))painted=true;}else{if(pieceElements(view)?.length===partials.length)paintPiece(view,index);else view.renderer.renderResult(partials[index].id);painted=true;}
+      }
+      if(painted)playbackPresentation.current?.rehighlight();
+      if(developerHooks)recordDrawStats(where,partials,pieceElements(view),geometry.canvas,geometry.area,PAINT_MARGIN,geometry.area.height*drawFlags.ahead*(where==='draw'?1:2));
+    }catch{ /* alphaTab paints them as they scroll into view */ }
+  };
+  /**
+   * Paints the empty pieces within `drawFlags.ahead` viewports above and below the score area, nearest first, one per task and only while no key or click is waiting, so a fast scroll
+   * (which can present the new position before its `scroll` event runs) lands on painted systems. alphaTab clears a piece it has not been told about only after the piece has been
+   * in view and left it, so these stay. A new call, a new draw and unmounting end the one before.
+   */
+  const ahead=useRef({token:0,timer:0 as ReturnType<typeof setTimeout>|0});
+  const scheduleAhead=(view:AlphaTabApi,where='ahead',delay=400)=>{
+    const state=ahead.current;state.token++;const token=state.token;clearTimeout(state.timer||undefined);
+    if(!(drawFlags.ahead>0))return;
+    const step=()=>{
+      if(token!==state.token||!view.settings.core.enableLazyLoading)return;
+      try{
+        const scheduling=(navigator as Navigator&{scheduling?:{isInputPending?:(options?:{includeContinuous?:boolean})=>boolean}}).scheduling;
+        if(scheduling?.isInputPending?.({includeContinuous:false})){state.timer=setTimeout(step,50);return;}
+        const geometry=viewGeometry(view),partials=layoutPartials.current,pieces=pieceElements(view);
+        if(!geometry||!pieces||pieces.length!==partials.length)return;
+        const middle=(geometry.area.top+geometry.area.bottom)/2;let best=-1,distance=Infinity;
+        for(const index of visibleIndexes(partials,geometry.canvas,geometry.area,geometry.area.height*drawFlags.ahead)){
+          if(pieces[index].childElementCount>0||failedPieces.current.has(partials[index].id))continue;
+          const away=Math.abs(geometry.canvas.top+partials[index].y+partials[index].height/2-middle);if(away<distance){distance=away;best=index;}
+        }
+        if(best<0){
+          // Nothing left to paint ahead: pieces painted earlier and now more than two margins away are emptied again (alphaTab only clears a piece after it has been in view and left it),
+          // so a long scroll or a long playback does not end with the whole score painted. The scroll listener and the cursor paint an empty piece before it is seen.
+          const keep=new Set(visibleIndexes(partials,geometry.canvas,geometry.area,geometry.area.height*drawFlags.ahead*2));
+          for(let index=0;index<pieces.length;index++)if(!keep.has(index)&&pieces[index].childElementCount>0)pieces[index].replaceChildren();
+          if(developerHooks)recordDrawStats(where,partials,pieces,geometry.canvas,geometry.area,PAINT_MARGIN,geometry.area.height*drawFlags.ahead*2);return;
+        }
+        paintPiece(view,best);playbackPresentation.current?.rehighlight();state.timer=setTimeout(step,0);
+      }catch{ /* alphaTab paints them as they scroll into view */ }
+    };
+    state.timer=setTimeout(step,delay);
+  };
+  const scheduleAheadRef=useRef(scheduleAhead);scheduleAheadRef.current=scheduleAhead;
+  /**
+   * Called by the playback cursor before it highlights and scrolls (screen-playback.ts), and by alphaTab after every render too: the system with this bar is painted now. When it is not
+   * wholly in view, the scroll that follows (alphaTab's, made in this same frame, its `scroll` event only comes in the next one) will show it and whatever lies within a viewport of it, so
+   * those are painted now as well (only the empty ones cost anything); when it is in view nothing scrolls and nothing more is painted, so an edit does not pay for it.
+   */
+  const ensurePainted=(masterBarIndex:number)=>{
+    const view=api.current;if(!view||!view.settings.core.enableLazyLoading||!drawFlags.paintOnCursor)return;
+    try{
+      const partials=layoutPartials.current,index=partials.findIndex(piece=>piece.firstMasterBarIndex!==undefined&&masterBarIndex>=piece.firstMasterBarIndex&&masterBarIndex<=(piece.lastMasterBarIndex??piece.firstMasterBarIndex));
+      if(index<0)return;
+      paintPiece(view,index);
+      const geometry=viewGeometry(view),here=partials[index];if(!geometry)return;
+      const top=geometry.canvas.top+here.y,whole=top>=geometry.area.top&&top+here.height<=geometry.area.bottom;
+      if(whole)return;
+      const reach=geometry.area.height;
+      for(let other=0;other<partials.length;other++){const piece=partials[other];if(other!==index&&piece.y+piece.height>=here.y-reach&&piece.y<=here.y+here.height+reach)paintPiece(view,other);}
+    }catch{ /* alphaTab paints it when it is in view */ }
+  };
+  const ensurePaintedRef=useRef(ensurePainted);ensurePaintedRef.current=ensurePainted;
+  useEffect(()=>{
+    const host=scrollHost.current;if(!host)return;
+    const onScroll=()=>{const view=api.current;if(view&&view.settings.core.enableLazyLoading){paintVisible(view,true,'scroll');scheduleAheadRef.current(view);}};
+    // A taller or wider score area shows systems without any scroll: they are painted when it changes size, too.
+    areaChanged.current=onScroll;
+    host.addEventListener('scroll',onScroll,{passive:true});
+    return()=>{areaChanged.current=()=>{};host.removeEventListener('scroll',onScroll);ahead.current.token++;clearTimeout(ahead.current.timer||undefined);};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0||holdDraw)return;
     const scheduling=(navigator as Navigator&{scheduling?:{isInputPending?:(options?:{includeContinuous?:boolean})=>boolean}}).scheduling;
-    if(drawDeferred.current<DRAW_DEFERRALS_MAX&&scheduling?.isInputPending?.({includeContinuous:false})){
+    // A draw that paints only what is in view is short enough not to wait for keys; one that draws the whole score still lets waiting keys go first (`drawFlags`).
+    const lazyDraw=!sourcePhysical&&display.layout!=='horizontalScreen'&&drawFlags.lazy;
+    if(drawDeferred.current<(lazyDraw?drawFlags.deferrals:drawFlags.completeDeferrals)&&scheduling?.isInputPending?.({includeContinuous:false})){
       drawDeferred.current++;const timer=setTimeout(()=>setDrawRetry(count=>count+1),DRAW_DEFERRAL_MS);return()=>clearTimeout(timer);
     }
     drawDeferred.current=0;
@@ -549,6 +671,9 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
           try{configureAccolades(view.settings,projection.score,null,projection.bracketMode);}catch{/* nothing more can be undone */}
         }
       }
+      // The vertical live layouts paint only what is on screen (alphaTab does the rest as it scrolls into view). The page layouts compose every piece themselves, and the horizontal strip
+      // stays complete: it builds its bounds again after each piece is painted, so with lazy painting a two-digit fret's note head would get a narrower click area than it has today (found by the draw check).
+      view.settings.core.enableLazyLoading=lazyDraw;
       view.renderer.width=sourceWidth;view.updateSettings();
       accolade.current={plan,metrics:accoladeMetrics(view.settings)};
       const old=loaded.current;

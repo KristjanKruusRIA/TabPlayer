@@ -79,3 +79,22 @@ it('cancels the retained mapped interval at a different system and page boundary
  handler.transitionBeatCursor(f.source as never,f.bounds,20,100,1000,1);expect(element.hidden).toBe(true);
  handler.placeBeatCursor(f.source as never,next,30);expect(element.hidden).toBe(false);expect(element.style.top).toBe('684px');f.adapter.dispose();
 });
+it('has the system of a bar painted before the bar cursor, the highlight and the scroll that follow it (THE-213)',()=>{
+ const f=fixture(),handler=f.api.customCursorHandler!,order:string[]=[],painted=vi.fn((index:number)=>{order.push(`paint ${index}`);});
+ Object.assign(f.context(),{ensurePainted:painted});
+ f.originalHighlight.mockImplementation(()=>{order.push('highlight');});
+ handler.placeBarCursor(f.source as never,f.bounds);f.api.uiFacade.highlightElements('opaque-one',0);
+ expect(painted).toHaveBeenCalledWith(f.bounds.barBounds.masterBarBounds.index);
+ expect(order).toEqual([`paint ${f.bounds.barBounds.masterBarBounds.index}`,'highlight']);
+});
+it('has the system painted even when the bar belongs to a stale render (it is only a paint)',()=>{
+ const f=fixture(),handler=f.api.customCursorHandler!,painted=vi.fn();Object.assign(f.context(),{ensurePainted:painted});
+ f.adapter.renderStarted();handler.placeBarCursor(f.source as never,f.bounds);expect(painted).toHaveBeenCalledTimes(1);
+});
+it('puts the highlight of the sounding beat back on a system that was painted again (THE-213)',()=>{
+ const f=fixture(),handler=f.api.customCursorHandler!;
+ handler.placeBarCursor(f.source as never,f.bounds);f.api.uiFacade.highlightElements('beat-a',0);f.api.uiFacade.highlightElements('beat-b',0);
+ f.originalHighlight.mockClear();f.adapter.rehighlight();
+ expect(f.originalHighlight.mock.calls).toEqual([['beat-a',0],['beat-b',0]]);
+ f.api.uiFacade.removeHighlights();f.originalHighlight.mockClear();f.adapter.rehighlight();expect(f.originalHighlight).not.toHaveBeenCalled();
+});

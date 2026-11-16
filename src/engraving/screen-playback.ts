@@ -1,6 +1,8 @@
 import type {AlphaTabApi,model} from '@coderline/alphatab';
 import {mapScreenRect,type ScreenPagination,type ScreenPageArrangement,type ScreenRect,type ScreenBounds} from './screen-pages';
-export type ScreenPlaybackContext={renderedScore:model.Score;wrapper:HTMLElement|null;scrollHost:HTMLElement|null;physical:{pagination:ScreenPagination;arrangement:ScreenPageArrangement;roots:ReadonlyMap<string,HTMLElement>}|null;barElement:HTMLElement|null;beatElement:HTMLElement|null};
+export type ScreenPlaybackContext={renderedScore:model.Score;wrapper:HTMLElement|null;scrollHost:HTMLElement|null;physical:{pagination:ScreenPagination;arrangement:ScreenPageArrangement;roots:ReadonlyMap<string,HTMLElement>}|null;barElement:HTMLElement|null;beatElement:HTMLElement|null;
+ /** Paints the system that holds this master bar when it is empty. alphaTab moves its cursor inside an animation frame: it places the bar cursor, highlights the sounding beats in the system's drawing and then scrolls, so a system that is not painted yet has to be painted at the first of these. */
+ ensurePainted?:(masterBarIndex:number)=>void};
 type CursorHandler=NonNullable<AlphaTabApi['customCursorHandler']>;
 type BeatBounds=Parameters<CursorHandler['placeBeatCursor']>[1];
 type Container=Parameters<CursorHandler['placeBeatCursor']>[0];
@@ -51,6 +53,7 @@ export function installScreenPlayback(api:AlphaTabApi,getContext:()=>ScreenPlayb
  const cursor:CursorHandler={
   onAttach(){},onDetach(){sourceBar=null;sourceBeat=null;hide();},
   placeBarCursor(container,bounds){
+   getContext().ensurePainted?.(bounds.barBounds.masterBarBounds.index);
    gate=valid(bounds)?bounds:null;if(!gate)return;
    if(bar&&bar.barBounds.masterBarBounds.staffSystemBounds!==bounds.barBounds.masterBarBounds.staffSystemBounds){beat=null;sourceBeat?.stopAnimation();}bar=bounds;sourceBar=container;
    const rect=bounds.barBounds.masterBarBounds.visualBounds;container.setBounds(rect.x,rect.y,rect.w,rect.h);paint();
@@ -84,6 +87,8 @@ export function installScreenPlayback(api:AlphaTabApi,getContext:()=>ScreenPlayb
   renderStarted(){completed=null;gate=null;bar=null;beat=null;groups.clear();clearNodes();sourceBeat?.stopAnimation();sourceBar?.stopAnimation();hide();},
   renderCompleted(){if(active)completed=api.boundsLookup??null;},
   presentationChanged(){paint();mirror();},
+  /** The sounding beats' highlight, put on again after a system was painted again (new nodes carry no class): the groups alphaTab highlighted last, in the live layouts too. */
+  rehighlight(){if(!active||!gate||!valid(gate))return;for(const [id,index] of groups)highlight.call(facade,id,index);},
   dispose(){if(!active)return;active=false;completed=null;gate=null;bar=null;beat=null;groups.clear();clearNodes();hide();sourceBeat?.stopAnimation();sourceBar=null;sourceBeat=null;
    if(api.customCursorHandler===cursor)api.customCursorHandler=undefined;if(api.customScrollHandler===scroll)api.customScrollHandler=undefined;
    if(facade.highlightElements===highlightWrapper){if(highlightDescriptor)Object.defineProperty(facade,'highlightElements',highlightDescriptor);else Reflect.deleteProperty(facade,'highlightElements');}

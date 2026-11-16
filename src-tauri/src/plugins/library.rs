@@ -515,6 +515,7 @@ fn clean_classes(raw: Vec<ClassInfo>) -> Vec<ClassInfo> {
             vendor: clean_text(&class.vendor, MAX_NAME_CHARS),
             version: clean_text(&class.version, MAX_VERSION_CHARS),
             subcategories: clean_text(&class.subcategories, MAX_SUBCATEGORIES_CHARS),
+            kind: class.kind,
         };
         if clean.validate().is_ok() && out.iter().all(|seen| seen.class_id != clean.class_id) {
             out.push(clean);
@@ -719,6 +720,7 @@ mod tests {
             vendor: "Vendor".into(),
             version: "1.0".into(),
             subcategories: "Fx".into(),
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
         }
     }
 
@@ -729,6 +731,7 @@ mod tests {
             vendor: String::new(),
             version: String::new(),
             subcategories: "Fx".into(),
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
         }
     }
 
@@ -1237,6 +1240,7 @@ mod tests {
                 vendor: "\u{202E}\u{2066}".into(),
                 version: "v\u{0}1 ".repeat(40),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             },
             ClassInfo {
                 name: "\u{1}\u{202E}".into(),

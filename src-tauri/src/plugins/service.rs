@@ -2623,6 +2623,7 @@ pub(crate) mod fakes {
                 vendor: "Vendor".into(),
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             }])
         }
 
@@ -2657,6 +2658,7 @@ pub(crate) mod fakes {
                 vendor: "Vendor".into(),
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             }])
         })
         .unwrap();
@@ -2701,6 +2703,7 @@ pub(crate) mod fakes {
                 vendor: "Vendor".into(),
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             }])
         })
         .unwrap();

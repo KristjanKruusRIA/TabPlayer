@@ -16,6 +16,7 @@
 mod build_id;
 pub mod bundle;
 pub mod control;
+pub mod event;
 pub mod limits;
 pub mod ring;
 pub mod state;

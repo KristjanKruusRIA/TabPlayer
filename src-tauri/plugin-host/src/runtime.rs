@@ -361,6 +361,8 @@ pub fn main() -> i32 {
             class_id,
             sample_rate,
             mode,
+            // Not consumed yet: a later slice makes the helper host instruments.
+            kind: _,
             ring,
             input_event,
             output_event,

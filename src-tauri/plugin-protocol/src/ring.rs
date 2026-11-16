@@ -6,6 +6,7 @@
 //! RingHeader | input BlockHeader × RING_BLOCKS | output BlockHeader × RING_BLOCKS
 //!            | input samples  RING_BLOCKS × BLOCK_FRAMES × [f32; 2]
 //!            | output samples RING_BLOCKS × BLOCK_FRAMES × [f32; 2]
+//!            | input events   RING_BLOCKS × EVENTS_PER_BLOCK × u64
 //! ```
 //!
 //! Block `seq` lives in slot `seq % RING_BLOCKS` and the sequence only ever grows. A flush bumps the *epoch* instead of
@@ -24,11 +25,14 @@
 //!   out of this process, is not a data race. Blocks are copied in and out whole, seqlock style: the block's sequence and
 //!   epoch are checked before and after a read, finiteness is checked on the copy, and only the copy is played.
 //! - Header fields the other side can write are atomics too.
+//! - Events ride in the same seqlock window as the samples of their block. The count the other side wrote is clamped to
+//!   [`EVENTS_PER_BLOCK`] before it indexes anything, the events are copied before the sequence is re-checked, and a
+//!   block that was not read whole yields no events at all.
 //!
 //! The host side does not allocate, lock, log or wait: it touches atomics and the mapping only. A wake-up event is the
 //! caller's business, not the ring's.
 use crate::limits::{
-    BLOCK_FRAMES, MAX_SAMPLE_RATE, MIN_SAMPLE_RATE, PROTOCOL_VERSION, RING_BLOCKS,
+    BLOCK_FRAMES, EVENTS_PER_BLOCK, MAX_SAMPLE_RATE, MIN_SAMPLE_RATE, PROTOCOL_VERSION, RING_BLOCKS,
 };
 use std::{
     alloc::{Layout, alloc_zeroed, dealloc},
@@ -47,6 +51,8 @@ pub const EMPTY_SEQUENCE: u64 = u64::MAX;
 pub type Block = [[f32; 2]; BLOCK_FRAMES];
 /// A block as it sits in the mapping: the bits of each `f32`, in atomic cells.
 type RawBlock = [[AtomicU32; 2]; BLOCK_FRAMES];
+/// One input block's events as they sit in the mapping.
+type RawEvents = [AtomicU64; EVENTS_PER_BLOCK];
 
 #[repr(C, align(64))]
 pub struct RingHeader {
@@ -77,7 +83,8 @@ pub struct BlockHeader {
     tempo: AtomicU64,
     /// `sig_num` in the low 16 bits, `sig_den` in the high 16.
     signature: AtomicU32,
-    _reserved: AtomicU32,
+    /// Input blocks only: how many of the block's events are valid. Untrusted on the helper side (clamped on read).
+    event_count: AtomicU32,
     project_frame: AtomicI64,
     project_quarters: AtomicU64,
 }
@@ -105,14 +112,20 @@ const IN_HEADERS: usize = HEADER_BYTES;
 const OUT_HEADERS: usize = IN_HEADERS + BLOCK_HEADERS_BYTES;
 const IN_DATA: usize = OUT_HEADERS + BLOCK_HEADERS_BYTES;
 const OUT_DATA: usize = IN_DATA + DATA_BYTES;
+const IN_EVENTS: usize = OUT_DATA + DATA_BYTES;
+const EVENT_BYTES: usize = RING_BLOCKS * size_of::<RawEvents>();
 /// The size of the mapping.
-pub const RING_BYTES: usize = OUT_DATA + DATA_BYTES;
+pub const RING_BYTES: usize = IN_EVENTS + EVENT_BYTES;
 
 const _: () = assert!(size_of::<RingHeader>() == 64 && align_of::<RingHeader>() == 64);
 const _: () = assert!(size_of::<BlockHeader>() == 64 && align_of::<BlockHeader>() == 64);
 const _: () = assert!(size_of::<RawBlock>() == size_of::<Block>() && align_of::<RawBlock>() == 4);
 const _: () = assert!(size_of::<RawBlock>() % 64 == 0);
 const _: () = assert!(IN_DATA % 64 == 0 && OUT_DATA % 64 == 0 && RING_BYTES % 64 == 0);
+const _: () =
+    assert!(size_of::<RawEvents>() == EVENTS_PER_BLOCK * 8 && align_of::<RawEvents>() == 8);
+const _: () = assert!(IN_EVENTS % 8 == 0 && EVENT_BYTES % 64 == 0);
+const _: () = assert!(EVENTS_PER_BLOCK <= u8::MAX as usize);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RingError {
@@ -275,6 +288,11 @@ impl View {
         debug_assert!(slot < RING_BLOCKS);
         // SAFETY: as above.
         unsafe { &*(self.base.add(OUT_DATA) as *const RawBlock).add(slot) }
+    }
+    fn in_events(&self, slot: usize) -> &RawEvents {
+        debug_assert!(slot < RING_BLOCKS);
+        // SAFETY: as above; `open` checked the region is `RING_BYTES` long, which includes the event region.
+        unsafe { &*(self.base.add(IN_EVENTS) as *const RawEvents).add(slot) }
     }
 }
 
@@ -443,11 +461,18 @@ impl HostRing {
         self.next_input
     }
 
-    /// Copies `frames` into input block `seq` and publishes it with `meta`, in the current epoch. Only the next sequence
-    /// is accepted (false otherwise), and a block is only ever published whole: the slot, which may still hold the block
-    /// of a lap ago that a stalled helper is reading, is invalidated before the first sample is written, so the helper's
-    /// seqlock check fails instead of seeing a mix.
-    pub fn send_input(&mut self, seq: u64, frames: &Block, meta: &BlockMeta) -> bool {
+    /// Copies `frames` and `events` into input block `seq` and publishes it with `meta`, in the current epoch. Only the
+    /// next sequence is accepted (false otherwise), and a block is only ever published whole: the slot, which may still
+    /// hold the block of a lap ago that a stalled helper is reading, is invalidated before the first sample is written, so
+    /// the helper's seqlock check fails instead of seeing a mix. At most [`EVENTS_PER_BLOCK`] events are sent; the rest of
+    /// a longer slice is dropped. The words are not checked here: the reader decodes and refuses what is invalid.
+    pub fn send_input(
+        &mut self,
+        seq: u64,
+        frames: &Block,
+        meta: &BlockMeta,
+        events: &[u64],
+    ) -> bool {
         if seq != self.next_input {
             return false;
         }
@@ -457,6 +482,13 @@ impl HostRing {
         header.sequence.store(EMPTY_SEQUENCE, Ordering::Relaxed);
         fence(Ordering::Release);
         copy_to_mapping(frames, view.in_data(slot));
+        let events = &events[..events.len().min(EVENTS_PER_BLOCK)];
+        for (cell, word) in view.in_events(slot).iter().zip(events) {
+            cell.store(*word, Ordering::Relaxed);
+        }
+        header
+            .event_count
+            .store(events.len() as u32, Ordering::Relaxed);
         store_meta(header, self.control.epoch.load(Ordering::Acquire), meta);
         header.sequence.store(seq, Ordering::Release);
         view.header().input_write.store(seq + 1, Ordering::Release);
@@ -538,6 +570,8 @@ impl HostRing {
 pub struct InputBlock {
     pub epoch: u32,
     pub meta: BlockMeta,
+    /// How many of the caller's `events` are valid: at most [`EVENTS_PER_BLOCK`], whatever the mapping said.
+    pub event_count: u8,
 }
 
 /// The outcome of copying an input block out of the mapping.
@@ -613,8 +647,41 @@ impl HelperRing {
         self.view.header().flush_epoch.load(Ordering::Acquire)
     }
 
-    /// Copies input block `seq` into `scratch`.
-    pub fn read_input(&self, seq: u64, scratch: &mut Block) -> InputRead {
+    /// Copies input block `seq` into `scratch` and its events into `events`. Only `events[..event_count]` of a `Ready`
+    /// result mean anything (the words are still untrusted: decode them). Any other result zeroes `events`, so a block
+    /// that was not read whole never leaves events behind.
+    pub fn read_input(
+        &self,
+        seq: u64,
+        scratch: &mut Block,
+        events: &mut [u64; EVENTS_PER_BLOCK],
+    ) -> InputRead {
+        self.read_input_with(seq, scratch, events, || {})
+    }
+
+    /// `read_input` with a hook that runs between the copy and the second check, so tests can rewrite the block at that
+    /// moment.
+    fn read_input_with(
+        &self,
+        seq: u64,
+        scratch: &mut Block,
+        events: &mut [u64; EVENTS_PER_BLOCK],
+        between: impl FnOnce(),
+    ) -> InputRead {
+        let read = self.read_input_inner(seq, scratch, events, between);
+        if !matches!(read, InputRead::Ready(_)) {
+            events.fill(0);
+        }
+        read
+    }
+
+    fn read_input_inner(
+        &self,
+        seq: u64,
+        scratch: &mut Block,
+        events: &mut [u64; EVENTS_PER_BLOCK],
+        between: impl FnOnce(),
+    ) -> InputRead {
         if self.view.header().input_write.load(Ordering::Acquire) <= seq {
             return InputRead::NotYet;
         }
@@ -624,12 +691,27 @@ impl HelperRing {
         }
         let epoch = header.epoch.load(Ordering::Relaxed);
         let meta = load_meta(header);
+        // The count is the other side's word: clamp it before it indexes anything.
+        let count = (header.event_count.load(Ordering::Relaxed) as usize).min(EVENTS_PER_BLOCK);
         copy_from_mapping(self.view.in_data(slot_of(seq)), scratch);
+        // Copied before the re-check below, so a rewrite while they are read makes the whole block `Torn`.
+        for (word, cell) in events
+            .iter_mut()
+            .zip(self.view.in_events(slot_of(seq)))
+            .take(count)
+        {
+            *word = cell.load(Ordering::Relaxed);
+        }
+        between();
         fence(Ordering::Acquire);
         if header.sequence.load(Ordering::Relaxed) == seq
             && header.epoch.load(Ordering::Relaxed) == epoch
         {
-            InputRead::Ready(InputBlock { epoch, meta })
+            InputRead::Ready(InputBlock {
+                epoch,
+                meta,
+                event_count: count as u8,
+            })
         } else {
             InputRead::Torn
         }
@@ -780,15 +862,20 @@ mod tests {
         }
     }
 
+    /// `read_input` for a test that does not look at the events.
+    fn read_in(helper: &HelperRing, seq: u64, scratch: &mut Block) -> InputRead {
+        helper.read_input(seq, scratch, &mut [0; EVENTS_PER_BLOCK])
+    }
+
     fn send(host: &mut HostRing, seq: u64) {
-        assert!(host.send_input(seq, &pattern(seq, 1.0), &meta(seq)));
+        assert!(host.send_input(seq, &pattern(seq, 1.0), &meta(seq), &[]));
     }
 
     /// The fake helper for one block: reads input `seq` and answers with it doubled.
     fn answer(helper: &mut HelperRing, seq: u64) {
         let mut input = [[0.0; 2]; BLOCK_FRAMES];
         let info = helper
-            .read_input(seq, &mut input)
+            .read_input(seq, &mut input, &mut [0; EVENTS_PER_BLOCK])
             .block()
             .expect("input block");
         assert_eq!(info.meta, meta(seq));
@@ -809,8 +896,13 @@ mod tests {
 
     #[test]
     fn layout_is_the_documented_one() {
-        assert_eq!(RING_BYTES, 64 + 2 * 66 * 64 + 2 * 66 * BLOCK_FRAMES * 8);
-        assert_eq!(RING_BYTES, 143_680);
+        assert_eq!(
+            RING_BYTES,
+            64 + 2 * 66 * 64 + 2 * 66 * BLOCK_FRAMES * 8 + 66 * EVENTS_PER_BLOCK * 8
+        );
+        assert_eq!(RING_BYTES, 143_680 + 33_792);
+        assert_eq!(IN_EVENTS % 8, 0);
+        assert_eq!(IN_EVENTS + EVENT_BYTES, RING_BYTES);
     }
 
     #[test]
@@ -839,9 +931,15 @@ mod tests {
         let ring = OwnedRing::new(44_100);
         let (mut host, mut helper) = (ring.host(), ring.helper());
         let frames = pattern(1, 1.0);
-        assert!(!host.send_input(1, &frames, &meta(1)), "skipping ahead");
+        assert!(
+            !host.send_input(1, &frames, &meta(1), &[]),
+            "skipping ahead"
+        );
         send(&mut host, 0);
-        assert!(!host.send_input(0, &frames, &meta(0)), "already published");
+        assert!(
+            !host.send_input(0, &frames, &meta(0), &[]),
+            "already published"
+        );
         let block = [[0.0; 2]; BLOCK_FRAMES];
         assert!(!helper.publish_output(1, 0, &block, &meta(1)));
         assert!(helper.publish_output(0, 0, &block, &meta(0)));
@@ -856,7 +954,7 @@ mod tests {
         for seq in 0..RING_BLOCKS as u64 + 3 {
             send(&mut host, seq);
             let mut input = [[0.0; 2]; BLOCK_FRAMES];
-            let info = helper.read_input(seq, &mut input).block().unwrap();
+            let info = read_in(&helper, seq, &mut input).block().unwrap();
             assert_eq!(input, pattern(seq, 1.0), "block {seq}");
             assert_eq!(info.meta, meta(seq));
             answer_without_check(&mut helper, seq);
@@ -1010,7 +1108,8 @@ mod tests {
         };
         field(&header.magic, 0, RingError::BadMagic);
         field(&header.magic, RING_MAGIC ^ 1, RingError::BadMagic);
-        field(&header.version, 2, RingError::BadVersion);
+        field(&header.version, 1, RingError::BadVersion);
+        field(&header.version, PROTOCOL_VERSION + 1, RingError::BadVersion);
         field(&header.block_frames, 64, RingError::BadGeometry);
         field(&header.ring_blocks, 64, RingError::BadGeometry);
         field(&header.sample_rate, 0, RingError::BadSampleRate);
@@ -1075,10 +1174,10 @@ mod tests {
         assert_eq!(helper.resync_point(), 0);
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
         // Claimed published, but the slot says otherwise.
-        assert_eq!(helper.read_input(2, &mut scratch), InputRead::Lapped);
+        assert_eq!(read_in(&helper, 2, &mut scratch), InputRead::Lapped);
         // Not claimed.
-        assert_eq!(helper.read_input(3, &mut scratch), InputRead::NotYet);
-        assert_eq!(helper.read_input(u64::MAX, &mut scratch), InputRead::NotYet);
+        assert_eq!(read_in(&helper, 3, &mut scratch), InputRead::NotYet);
+        assert_eq!(read_in(&helper, u64::MAX, &mut scratch), InputRead::NotYet);
     }
 
     #[test]
@@ -1090,17 +1189,14 @@ mod tests {
         for seq in 0..71 {
             send(&mut host, seq);
         }
-        assert_eq!(helper.read_input(0, &mut scratch), InputRead::Lapped);
-        assert_eq!(helper.read_input(4, &mut scratch), InputRead::Lapped);
+        assert_eq!(read_in(&helper, 0, &mut scratch), InputRead::Lapped);
+        assert_eq!(read_in(&helper, 4, &mut scratch), InputRead::Lapped);
         let resume = helper.resync_point();
         assert_eq!(resume, 71 - (RING_BLOCKS as u64 - 1));
-        let info = helper.read_input(resume, &mut scratch).block().unwrap();
+        let info = read_in(&helper, resume, &mut scratch).block().unwrap();
         assert_eq!(scratch, pattern(resume, 1.0));
         assert_eq!(info.meta, meta(resume));
-        assert_eq!(
-            helper.read_input(70, &mut scratch).block().unwrap().epoch,
-            0
-        );
+        assert_eq!(read_in(&helper, 70, &mut scratch).block().unwrap().epoch, 0);
     }
 
     #[test]
@@ -1149,9 +1245,9 @@ mod tests {
         // The helper reads block 0 while the host (a lap later, in this forged case) starts writing over its slot.
         let header = host.control.view.in_header(0);
         let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
-        assert!(helper.read_input(0, &mut scratch).block().is_some());
+        assert!(read_in(&helper, 0, &mut scratch).block().is_some());
         header.sequence.store(EMPTY_SEQUENCE, Ordering::Release);
-        assert_eq!(helper.read_input(0, &mut scratch), InputRead::Lapped);
+        assert_eq!(read_in(&helper, 0, &mut scratch), InputRead::Lapped);
     }
 
     #[test]
@@ -1216,7 +1312,7 @@ mod tests {
             let frames = [[0.0; 2]; BLOCK_FRAMES];
             while trials < 20_000 && !(torn >= 25 && accepted > 0) {
                 let t = trials;
-                assert!(host.send_input(t, &frames, &BlockMeta::default()));
+                assert!(host.send_input(t, &frames, &BlockMeta::default(), &[]));
                 announced.store(t + 1, Ordering::Release);
                 let mut first_read = false;
                 loop {
@@ -1328,5 +1424,195 @@ mod tests {
         assert!(host.read_output(0, 0, &mut scratch));
         assert!(host.read_output(1, 1, &mut scratch));
         assert!(!host.read_output(1, 0, &mut scratch));
+    }
+
+    // ---- events ----------------------------------------------------------------------------------------------------
+
+    fn words(seed: u64, n: usize) -> Vec<u64> {
+        (0..n as u64).map(|i| seed * 1000 + i + 1).collect()
+    }
+
+    fn read_events(helper: &HelperRing, seq: u64) -> (InputRead, [u64; EVENTS_PER_BLOCK]) {
+        let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
+        let mut events = [0u64; EVENTS_PER_BLOCK];
+        let read = helper.read_input(seq, &mut scratch, &mut events);
+        (read, events)
+    }
+
+    #[test]
+    fn events_round_trip_with_the_audio() {
+        let ring = OwnedRing::new(48_000);
+        let (mut host, helper) = (ring.host(), ring.helper());
+        let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
+        let mut events = [0u64; EVENTS_PER_BLOCK];
+        // Several laps, with a different count each time (including none and the full 64).
+        for seq in 0..3 * RING_BLOCKS as u64 {
+            let sent = words(seq + 1, (seq as usize * 7) % (EVENTS_PER_BLOCK + 1));
+            assert!(host.send_input(seq, &pattern(seq, 1.0), &meta(seq), &sent));
+            let read = helper.read_input(seq, &mut scratch, &mut events);
+            let block = read.block().expect("a block");
+            assert_eq!(block.event_count as usize, sent.len(), "block {seq}");
+            assert_eq!(&events[..sent.len()], &sent[..], "block {seq}");
+            assert_eq!(scratch, pattern(seq, 1.0));
+            assert_eq!(block.meta, meta(seq));
+        }
+    }
+
+    #[test]
+    fn a_slice_of_200_events_is_clamped_to_64_on_write() {
+        let ring = OwnedRing::new(48_000);
+        let (mut host, helper) = (ring.host(), ring.helper());
+        let sent = words(9, 200);
+        assert!(host.send_input(0, &pattern(0, 1.0), &meta(0), &sent));
+        let (read, events) = read_events(&helper, 0);
+        assert_eq!(read.block().unwrap().event_count, 64);
+        assert_eq!(&events[..], &sent[..EVENTS_PER_BLOCK]);
+        // The mapping itself holds the clamped count, and the next slot's events are untouched.
+        assert_eq!(
+            host.control
+                .view
+                .in_header(0)
+                .event_count
+                .load(Ordering::Relaxed),
+            64
+        );
+        assert_eq!(host.control.view.in_events(1)[0].load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn a_forged_count_of_255_is_clamped_to_64_on_read() {
+        let ring = OwnedRing::new(48_000);
+        let (mut host, helper) = (ring.host(), ring.helper());
+        assert!(host.send_input(0, &pattern(0, 1.0), &meta(0), &words(3, 2)));
+        // A hostile host rewrites the count and fills the whole event region of the slot.
+        let forged = words(5, EVENTS_PER_BLOCK);
+        for (cell, word) in host.control.view.in_events(0).iter().zip(&forged) {
+            cell.store(*word, Ordering::Relaxed);
+        }
+        host.control
+            .view
+            .in_header(0)
+            .event_count
+            .store(255, Ordering::Relaxed);
+        let (read, events) = read_events(&helper, 0);
+        assert_eq!(read.block().unwrap().event_count, 64);
+        assert_eq!(&events[..], &forged[..]);
+        host.control
+            .view
+            .in_header(0)
+            .event_count
+            .store(u32::MAX, Ordering::Relaxed);
+        assert_eq!(read_events(&helper, 0).0.block().unwrap().event_count, 64);
+    }
+
+    #[test]
+    fn a_torn_read_does_not_return_events() {
+        let ring = OwnedRing::new(48_000);
+        let (mut host, helper) = (ring.host(), ring.helper());
+        let sent = words(1, 10);
+        assert!(host.send_input(0, &pattern(0, 1.0), &meta(0), &sent));
+        let header = host.control.view.in_header(0);
+        let cells = host.control.view.in_events(0);
+        let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
+
+        // The host starts rewriting the slot for the next lap mid-copy: events change, and the slot is invalidated.
+        let mut events = [0u64; EVENTS_PER_BLOCK];
+        let read = helper.read_input_with(0, &mut scratch, &mut events, || {
+            header.sequence.store(EMPTY_SEQUENCE, Ordering::Release);
+            cells[0].store(0xDEAD, Ordering::Relaxed);
+        });
+        assert_eq!(read, InputRead::Torn);
+        assert_eq!(
+            events, [0u64; EVENTS_PER_BLOCK],
+            "no half-old, half-new events survive"
+        );
+        header.sequence.store(0, Ordering::Release);
+        cells[0].store(sent[0], Ordering::Relaxed);
+
+        // The slot is republished for another block mid-copy.
+        let read = helper.read_input_with(0, &mut scratch, &mut events, || {
+            header.sequence.store(RING_BLOCKS as u64, Ordering::Release);
+        });
+        assert_eq!(read, InputRead::Torn);
+        assert_eq!(events, [0u64; EVENTS_PER_BLOCK]);
+        header.sequence.store(0, Ordering::Release);
+
+        // Nothing changes: accepted, with the events.
+        let read = helper.read_input_with(0, &mut scratch, &mut events, || {});
+        assert_eq!(read.block().unwrap().event_count, 10);
+        assert_eq!(&events[..10], &sent[..]);
+
+        // Lapped and not-yet results leave no events either.
+        let mut events = [7u64; EVENTS_PER_BLOCK];
+        assert_eq!(
+            helper.read_input(5, &mut scratch, &mut events),
+            InputRead::NotYet
+        );
+        assert_eq!(events, [0u64; EVENTS_PER_BLOCK]);
+    }
+
+    #[test]
+    fn an_epoch_flush_drops_pending_events_exactly_as_it_drops_audio() {
+        let ring = OwnedRing::new(48_000);
+        let (mut host, helper) = (ring.host(), ring.helper());
+        // Block 0 is pending (events and audio) when the flush happens; block 1 is sent after it.
+        assert!(host.send_input(0, &pattern(0, 1.0), &meta(0), &words(1, 5)));
+        let epoch = host.begin_flush();
+        assert_eq!(epoch, 1);
+        assert!(host.send_input(1, &pattern(1, 1.0), &meta(1), &[]));
+        assert!(host.send_input(2, &pattern(2, 1.0), &meta(2), &words(2, 3)));
+
+        // The stale block keeps its old epoch, which is what the helper compares with `flush_epoch` to answer it with
+        // silence: the events travel with that tag, so the helper drops them with the audio.
+        let (read, _) = read_events(&helper, 0);
+        let stale = read.block().unwrap();
+        assert_eq!(stale.epoch, 0);
+        assert!((helper.flush_epoch().wrapping_sub(stale.epoch) as i32) > 0);
+        // The block sent after the flush carries the new epoch and none of the old events.
+        let (read, _) = read_events(&helper, 1);
+        let fresh = read.block().unwrap();
+        assert_eq!((fresh.epoch, fresh.event_count), (1, 0));
+        let (read, events) = read_events(&helper, 2);
+        assert_eq!(read.block().unwrap().epoch, 1);
+        assert_eq!(&events[..3], &words(2, 3)[..]);
+    }
+
+    #[test]
+    fn a_block_with_zero_events_reads_zero_even_over_a_slot_that_held_events() {
+        let ring = OwnedRing::new(48_000);
+        let (mut host, helper) = (ring.host(), ring.helper());
+        let mut scratch = [[0.0; 2]; BLOCK_FRAMES];
+        for seq in 0..RING_BLOCKS as u64 {
+            assert!(host.send_input(seq, &pattern(seq, 1.0), &meta(seq), &words(seq + 1, 64)));
+        }
+        // One lap later the same slots carry no events: stale words in the region must not be reported.
+        let seq = RING_BLOCKS as u64;
+        assert!(host.send_input(seq, &pattern(seq, 1.0), &meta(seq), &[]));
+        let mut events = [u64::MAX; EVENTS_PER_BLOCK];
+        let block = helper
+            .read_input(seq, &mut scratch, &mut events)
+            .block()
+            .unwrap();
+        assert_eq!(block.event_count, 0);
+        // Only the first `event_count` entries are written on a good read; none are, here.
+        assert_eq!(events, [u64::MAX; EVENTS_PER_BLOCK]);
+        let (read, _) = read_events(&helper, seq);
+        assert_eq!(read.block().unwrap().event_count, 0);
+    }
+
+    #[test]
+    fn a_version_1_ring_is_refused() {
+        let ring = OwnedRing::new(48_000);
+        assert_eq!(PROTOCOL_VERSION, 2);
+        ring.header().version.store(1, Ordering::Relaxed);
+        let result = unsafe { HelperRing::from_raw(ring.as_ptr(), ring.len()) };
+        assert_eq!(result.err(), Some(RingError::BadVersion));
+        // And a v1-sized mapping, which has no room for the events, is too short.
+        let old_len = RING_BYTES - EVENT_BYTES;
+        ring.header()
+            .version
+            .store(PROTOCOL_VERSION, Ordering::Relaxed);
+        let result = unsafe { HelperRing::from_raw(ring.as_ptr(), old_len) };
+        assert_eq!(result.err(), Some(RingError::TooShort));
     }
 }

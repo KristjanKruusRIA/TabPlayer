@@ -5,7 +5,7 @@
 //! cleans a file name, before they are sent: control, format and non-characters are dropped, white space is trimmed and
 //! the text is cut to its cap.
 use tabplayer_plugin_protocol::{
-    control::ClassInfo,
+    control::{ClassInfo, PluginKind},
     limits::{MAX_CLASSES, MAX_NAME_CHARS, MAX_SUBCATEGORIES_CHARS, MAX_VERSION_CHARS},
     validate::clean_text,
 };
@@ -72,6 +72,8 @@ pub fn clean_class(class: &RawClassInfo) -> ClassInfo {
         vendor: clean_text(&class.vendor, MAX_NAME_CHARS),
         version: clean_text(&class.version, MAX_VERSION_CHARS),
         subcategories: clean_text(&class.sub_categories, MAX_SUBCATEGORIES_CHARS),
+        // Only audio-effect classes are listed so far.
+        kind: PluginKind::Effect,
     }
 }
 

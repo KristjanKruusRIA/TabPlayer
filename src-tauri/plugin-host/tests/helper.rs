@@ -19,8 +19,8 @@ mod windows_helper {
     use std::time::{Duration, Instant};
     use tabplayer_plugin_protocol::{
         control::{
-            ClassInfo, ErrorCode, FrameError, HelperMessage, HostMessage, Mode, read_frame,
-            write_frame,
+            ClassInfo, ErrorCode, FrameError, HelperMessage, HostMessage, Mode, PluginKind,
+            read_frame, write_frame,
         },
         limits::{BLOCK_FRAMES, MAX_STATE_BYTES},
         ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, HostRing, RING_BYTES},
@@ -131,7 +131,7 @@ mod windows_helper {
         /// Sends the next block, stamped with `meta`, and signals the helper.
         fn send(&mut self, block: &Block, meta: &BlockMeta) -> u64 {
             let seq = self.next;
-            assert!(self.host.send_input(seq, block, meta));
+            assert!(self.host.send_input(seq, block, meta, &[]));
             self.next += 1;
             // SAFETY: an event handle this struct owns.
             unsafe { SetEvent(self.input_event) };
@@ -280,6 +280,7 @@ mod windows_helper {
                 class_id: self.class_id.clone(),
                 sample_rate: RATE,
                 mode,
+                kind: PluginKind::Effect,
                 ring: self.give(ring.mapping),
                 input_event: self.give(ring.input_event),
                 output_event: self.give(ring.output_event),
@@ -442,6 +443,7 @@ mod windows_helper {
                             vendor: "TabPlayer".into(),
                             version: "1.0.0".into(),
                             subcategories: "Fx".into(),
+                            kind: PluginKind::Effect,
                         }]
                     );
                 }
@@ -501,6 +503,7 @@ mod windows_helper {
                 class_id: "00000000000000000000000000000001".into(),
                 sample_rate: RATE,
                 mode: Mode::Realtime,
+                kind: PluginKind::Effect,
                 ring: helper.give(ring.mapping),
                 input_event: helper.give(ring.input_event),
                 output_event: helper.give(ring.output_event),
@@ -517,6 +520,7 @@ mod windows_helper {
                 class_id: TEST_CLASS_ID.into(),
                 sample_rate: RATE,
                 mode: Mode::Realtime,
+                kind: PluginKind::Effect,
                 ring: 0xDEAD_BEE0,
                 input_event: 0xDEAD_BEE4,
                 output_event: 0xDEAD_BEE8,

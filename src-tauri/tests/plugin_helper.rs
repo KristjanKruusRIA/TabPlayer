@@ -181,7 +181,7 @@ mod windows_tests {
         let seq = link
             .with_host(|host| {
                 let seq = host.next_input();
-                assert!(host.send_input(seq, &block, &meta()));
+                assert!(host.send_input(seq, &block, &meta(), &[]));
                 seq
             })
             .expect("the host end is free");
@@ -276,7 +276,7 @@ mod windows_tests {
     fn loaded_json(latency: u32) -> String {
         format!(
             "{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":{latency},\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\"name\":\"X\",\
-             \"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}",
+             \"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\",\"kind\":\"effect\"}},\"mono\":false}}}}",
             tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
             tabplayer_plugin_protocol::limits::BUILD_ID
         )
@@ -999,7 +999,7 @@ mod windows_tests {
         let job = HelperJob::new().unwrap();
         let script = format!(
             "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":0,\"class\":{{\"classId\":\"00000000000000000000000000000001\",\
-             \"name\":\"Other\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+             \"name\":\"Other\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\",\"kind\":\"effect\"}},\"mono\":false}}}}'; Start-Sleep 30",
             tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
             tabplayer_plugin_protocol::limits::BUILD_ID
         );
@@ -1359,7 +1359,7 @@ mod windows_tests {
         let job = HelperJob::new().unwrap();
         let script = format!(
             "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"stale-build-id\",\"latency\":0,\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\
-             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\",\"kind\":\"effect\"}},\"mono\":false}}}}'; Start-Sleep 30",
             tabplayer_plugin_protocol::limits::PROTOCOL_VERSION
         );
         let helper = fake_helper(&job, &script);
@@ -1378,7 +1378,7 @@ mod windows_tests {
         let job = HelperJob::new().unwrap();
         let script = format!(
             "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":0,\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\
-             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\",\"kind\":\"effect\"}},\"mono\":false}}}}'; Start-Sleep 30",
             tabplayer_plugin_protocol::limits::PROTOCOL_VERSION + 99,
             tabplayer_plugin_protocol::limits::BUILD_ID
         );

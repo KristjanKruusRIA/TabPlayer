@@ -628,7 +628,7 @@ impl PluginInsert {
         let (seq, block, meta) = (self.next_send, &self.in_block, &self.in_meta);
         let sent = self
             .link
-            .with_host(|host| host.send_input(seq, block, meta))
+            .with_host(|host| host.send_input(seq, block, meta, &[]))
             .unwrap_or(false);
         self.next_send = self.next_send.wrapping_add(1);
         if sent {

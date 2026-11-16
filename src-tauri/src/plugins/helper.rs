@@ -67,7 +67,7 @@ use std::time::{Duration, Instant};
 use tabplayer_plugin_protocol::{
     MAX_FRAME_BYTES,
     control::{
-        ClassInfo, ErrorCode, FrameError, HelperMessage, HostMessage, Mode, Rect,
+        ClassInfo, ErrorCode, FrameError, HelperMessage, HostMessage, Mode, PluginKind, Rect,
         read_frame_limited, write_frame,
     },
     limits::{
@@ -1006,6 +1006,8 @@ impl HelperProcess {
             class_id: request.class_id.clone(),
             sample_rate: rate,
             mode: request.mode,
+            // The app hosts effects only until a later slice carries the kind in the request.
+            kind: PluginKind::Effect,
             ring: 1,
             input_event: 1,
             output_event: 1,
@@ -1566,6 +1568,7 @@ mod tests {
             vendor: String::new(),
             version: String::new(),
             subcategories: String::new(),
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
         };
         vec![
             HelperMessage::Probed {

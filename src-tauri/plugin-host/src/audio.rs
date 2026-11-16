@@ -87,6 +87,8 @@ type Frames = [[f32; 2]; BLOCK_FRAMES];
 /// Runs until `stop` is set. The caller sets the thread up (priority class) before it calls this.
 pub fn run(mut audio: AudioLoop) {
     let mut input: Frames = [[0.0; 2]; BLOCK_FRAMES];
+    // Read with every block; a later slice hands them to an instrument.
+    let mut events = [0u64; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK];
     let mut output: Frames = [[0.0; 2]; BLOCK_FRAMES];
     let silence: Frames = [[0.0; 2]; BLOCK_FRAMES];
     // The sequence of the next input block to answer. It always equals the ring's next output sequence.
@@ -118,7 +120,7 @@ pub fn run(mut audio: AudioLoop) {
             continue;
         }
         for _ in 0..available {
-            match audio.ring.read_input(next, &mut input) {
+            match audio.ring.read_input(next, &mut input, &mut events) {
                 InputRead::Ready(block) => {
                     let latest = audio.ring.flush_epoch();
                     // `latest - block` above half the range means the block is older than the newest epoch. A block
@@ -273,7 +275,7 @@ mod tests {
                 tempo: 90.0 + seq as f64,
                 ..BlockMeta::default()
             };
-            assert!(self.host.send_input(seq, &block, &meta));
+            assert!(self.host.send_input(seq, &block, &meta, &[]));
             self.input.signal();
         }
 

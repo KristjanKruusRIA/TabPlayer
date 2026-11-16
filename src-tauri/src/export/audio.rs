@@ -875,6 +875,7 @@ mod tests {
                 vendor: "Vendor".into(),
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             }])
         })
         .unwrap();
@@ -1017,7 +1018,14 @@ mod tests {
             let mut seq = 0;
             while !stop_clone.load(Ordering::Relaxed) {
                 thread_input_ev.wait(Duration::from_millis(2));
-                while let Some(input) = helper.read_input(seq, &mut block).block() {
+                while let Some(input) = helper
+                    .read_input(
+                        seq,
+                        &mut block,
+                        &mut [0; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK],
+                    )
+                    .block()
+                {
                     helper.publish_output(seq, input.epoch, &block, &input.meta);
                     output_ev.signal();
                     seq = seq.wrapping_add(1);
@@ -1196,7 +1204,14 @@ mod tests {
             let mut seq = 0;
             while !stop_clone.load(Ordering::Relaxed) {
                 thread_input_ev.wait(Duration::from_millis(2));
-                while let Some(input) = helper.read_input(seq, &mut block).block() {
+                while let Some(input) = helper
+                    .read_input(
+                        seq,
+                        &mut block,
+                        &mut [0; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK],
+                    )
+                    .block()
+                {
                     if epoch != Some(input.epoch) {
                         line.iter_mut().for_each(|f| *f = [0.0; 2]);
                         epoch = Some(input.epoch);

@@ -341,9 +341,10 @@ impl LowBand {
                 // The clock leapt out there while V was heard (a map that carries it far past the audio within a grain):
                 // V leaves over this grain as after any leap. Where this grain starts, the grains' low band is silent
                 // (the low-pass reaches far less than `far`), and it is not read, since it may lie beyond any index.
-                // The voice plays nothing while the clock is outside the audio the map lets through, so this is heard
-                // only by a caller that brings the clock back within the grain without a seek, which the renderer never
-                // does.
+                // This is not heard: V is heard only after a grain near the audio, the clock moves only forwards between
+                // seeks (the map rises, and the renderer seeks for every jump and loop), so a clock that leapt this far
+                // stays past the end, and the voice plays nothing there, from this grain's first frame on. Only a caller
+                // that brought the clock back within the grain without a seek would hear it.
                 return self.leave(source, None, previous);
             }
             self.framed = false;

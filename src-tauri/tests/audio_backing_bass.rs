@@ -1482,13 +1482,15 @@ fn changing_the_speed_while_playing_makes_no_level_jump() {
 /// phases that disagree, so the hand-over dips for a moment, and deeper than develop's grains do: the deepest window
 /// on this branch is -2.89 dB at 82.4 Hz and -6.45 dB at 55 Hz, against develop's -0.78 and -4.83 dB. The bounds on the
 /// deepest window are therefore this branch's own measured values, not develop's. Fewer windows are more than 3 dB
-/// under than develop's (82.4 Hz: none, develop none; 55 Hz: 8 of 507, develop 25), which is checked against develop.
+/// under than develop's (82.4 Hz: none, develop none; 55 Hz: 8 of 507, develop 25); the count is bounded by this
+/// branch's own measured values (none, 10) and by develop's.
 /// The dips fall where V leaves ahead of an attack under 40% of the speed (it needs whole windows there, so it leaves
 /// up to 96 ms of source ahead, in the last note's tail) and where it comes back after one.
 #[test]
 fn handing_the_low_band_over_and_back_keeps_the_level() {
-    // The deepest window allowed for each tone below the grains' reach: this branch's own measured values.
-    let below_reach = [(82.4, -3.25), (55.0, -7.0)];
+    // The deepest window allowed for each tone below the grains' reach, and how many windows more than 3 dB under: this
+    // branch's own measured values (the count also no more than develop's).
+    let below_reach = [(82.4, -3.25, 0usize), (55.0, -7.0, 10)];
     for hz in [110.0, 100.0, 82.4, 55.0] {
         let envelope = |age: f64| {
             if age < 0.0 {
@@ -1561,8 +1563,8 @@ fn handing_the_low_band_over_and_back_keeps_the_level() {
                     );
                 }
             }
-            Some(&(_, floor)) => assert!(
-                deepest(mine) >= floor && under(mine, -3.0) <= under(develop, -3.0),
+            Some(&(_, floor, count)) => assert!(
+                deepest(mine) >= floor && under(mine, -3.0) <= count.min(under(develop, -3.0)),
                 "{hz} Hz: deepest {:+.2} dB, {} windows under -3 dB (develop {:+.2} dB, {})",
                 deepest(mine),
                 under(mine, -3.0),
@@ -1689,6 +1691,11 @@ fn deepest_with_one_slow_grain(hz: f64, slow: usize) -> f64 {
         let (c, _) = fit(&x[k..k + 480], &[hz]);
         deepest = deepest.min(20.0 * (c[0].0.hypot(c[0].1) / 0.4).log10());
     }
+    // The slow grain was played, and windows were measured.
+    assert!(
+        first.is_some_and(|f| f + slow < 28_000 / 256) && deepest.is_finite(),
+        "{hz} Hz, slow grain {slow}: nothing measured"
+    );
     deepest
 }
 
@@ -1701,9 +1708,9 @@ fn deepest_with_one_slow_grain(hz: f64, slow: usize) -> f64 {
 /// The hand-over still dips there (see the Limits of the validation note): V and the grains carry such a tone at phases
 /// that disagree, and the hand-over crossfades the two. On average over the 30 positions the deepest window is
 /// shallower than develop's, which the test checks, but at single positions it is far deeper: at worst -7.50, -11.95
-/// and -24.49 dB, where develop's is never deeper than -3.95, -4.92 and -8.75 dB. The other bounds are this branch's own
-/// measured values. Over the 30 positions, the mean of the deepest windows and how many positions dip by more than the
-/// given depth:
+/// and -24.49 dB, where develop's is never deeper than -3.95, -4.92 and -8.75 dB (bounded at -8.0, -12.5 and -25.5 dB,
+/// this branch's own values). The other bounds are this branch's own measured values too. Over the 30 positions, the
+/// mean of the deepest windows and how many positions dip by more than the given depth:
 /// - this branch: 61.7 Hz -1.39 dB, 2 deeper than 3 dB; 55 Hz -3.99 dB, 7 deeper than 6 dB; 41.2 Hz -6.26 dB, 10
 ///   deeper than 6 dB;
 /// - with V's own phase carried into the grain it comes back in: -1.82 dB, 6; -4.65 dB, 10; -6.77 dB, 13;
@@ -1712,11 +1719,12 @@ fn deepest_with_one_slow_grain(hz: f64, slow: usize) -> f64 {
 /// The rebuilt frame is not better at every position: at 41.2 Hz it dips deeper at 5 of the 30 (and shallower at 14).
 #[test]
 fn coming_back_after_one_grain_starts_from_the_grains_phases() {
-    // The tone, the lowest mean of the deepest windows, the depth counted, and how many positions may dip deeper.
-    for (hz, mean_floor, depth, most) in [
-        (61.7, -1.6, -3.0, 3usize),
-        (55.0, -4.3, -6.0, 8),
-        (41.2, -6.5, -6.0, 11),
+    // The tone, the lowest mean of the deepest windows, the depth counted, how many positions may dip deeper, and the
+    // deepest window allowed at any position.
+    for (hz, mean_floor, depth, most, floor) in [
+        (61.7, -1.6, -3.0, 3usize, -8.0),
+        (55.0, -4.3, -6.0, 8, -12.5),
+        (41.2, -6.5, -6.0, 11, -25.5),
     ] {
         let mean_of = |develop: bool| {
             DEVELOP.with(|d| d.set(develop));
@@ -1728,9 +1736,10 @@ fn coming_back_after_one_grain_starts_from_the_grains_phases() {
         };
         let ((mean, deepest), (develop_mean, _)) = (mean_of(false), mean_of(true));
         let deeper = deepest.iter().filter(|&&d| d < depth).count();
+        let worst = deepest.iter().copied().fold(f64::INFINITY, f64::min);
         assert!(
-            mean >= mean_floor && mean >= develop_mean && deeper <= most,
-            "{hz} Hz: the deepest windows {mean:+.2} dB on average (develop {develop_mean:+.2} dB), {deeper} of 30 deeper than {depth} dB: {deepest:.2?}"
+            mean >= mean_floor && mean >= develop_mean && deeper <= most && worst >= floor,
+            "{hz} Hz: the deepest windows {mean:+.2} dB on average (develop {develop_mean:+.2} dB), {deeper} of 30 deeper than {depth} dB, the deepest {worst:+.2} dB: {deepest:.2?}"
         );
     }
 }

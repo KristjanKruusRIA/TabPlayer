@@ -316,11 +316,13 @@ fn speed_changes_near_attacks_never_click() {
 ///
 /// The clock may also leap far past the end of the audio within a grain (a map whose last anchor is misplaced, or a
 /// jump), where the low band does not follow it. V leaves over that grain the same way, within the same budget (before
-/// this it stopped at once, uncounted). Nothing of that is heard: the voice plays nothing for a clock past the audio, so
-/// the output falls silent at the same frame as develop's and is develop's, bit for bit, from there on, with or without
-/// the leave. That cut is develop's own; its size is where the tone is in its cycle at that frame, so it is not compared
-/// (V's phase differs from the grains': measured 0.39 against develop's 0.35 at 48 kHz, 0.006 against 0.012 at 192 kHz
-/// and 0.40 against 0.19 at 384 kHz).
+/// this it stopped at once, uncounted, which the leave count catches). Nothing of that is heard: the clock moves only
+/// forwards between seeks, so it stays past the end, where the voice plays nothing. The output falls silent at the same
+/// frame as develop's and is develop's, bit for bit, from there on; with the jump, from the first frame after it. (The
+/// output there was the same without the leave, measured once; this test compares only with develop.) That cut is
+/// develop's own; its size is where the tone is in its cycle at that frame, so it is not compared (V's phase differs
+/// from the grains': measured 0.39 against develop's 0.35 at 48 kHz, 0.006 against 0.012 at 192 kHz and 0.40 against
+/// 0.19 at 384 kHz).
 #[test]
 fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
     let anchors = |list: [(u32, f64, f64); 4]| {

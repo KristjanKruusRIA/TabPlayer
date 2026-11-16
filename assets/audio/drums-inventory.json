@@ -170,9 +170,14 @@
     "size": 1104
   },
   {
+    "path": "Programs/tabplayer-kit.processing.json",
+    "sha256": "8ae0ac67e755f6ee8d68d0ab058c12087dc981d7c1a63447abc814416ca9d3e7",
+    "size": 2574
+  },
+  {
     "path": "Programs/tabplayer-kit.sfz",
-    "sha256": "00d62b533690626bb8a5ec915e26942465745fe1a8b57f6172018c88961c654c",
-    "size": 18112
+    "sha256": "7d5c8ce9164af14b69962d2cd219efe513e7e4d6351d6b941b24531e3f353aba",
+    "size": 19495
   },
   {
     "path": "Samples/kickmic/kick/kickmic_kick_snoff_vl1_rr1.flac",
@@ -333,6 +338,166 @@
     "path": "Samples/kickmic/kick/kickmic_kick_snon_vl4_rr4.flac",
     "sha256": "56a761ae239e1f0c2899889df6fecabbd8847956ce9a33d3612fd511b54b82b0",
     "size": 111126
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl1_rr1.flac",
+    "sha256": "dbdf117f45f94e10c7c2261a178aa40cfd98a36bcad8ac91896a8b1f9d986f09",
+    "size": 121734
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl1_rr2.flac",
+    "sha256": "c1fb16d4c78b9215574ef34209f433974317820285423df4df773912b6cd3f9d",
+    "size": 114477
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl1_rr3.flac",
+    "sha256": "cbe46da351e520479f3479f6d1481104d75b74e76e40cfec4f9748f1e4f7acb5",
+    "size": 101328
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl1_rr4.flac",
+    "sha256": "47fdcd4104bd335f983ef45df94c4625789c6ab008fc0c950734a85a0fe74bba",
+    "size": 120735
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl2_rr1.flac",
+    "sha256": "c190ac20645a7a0183652a67a3346f3d58bb4d7fbad08036154dc027acffc3a1",
+    "size": 123778
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl2_rr2.flac",
+    "sha256": "068d99b3913efda461ebe1ced6b3336bcb95de0348676c928977ce5f3f4a6f63",
+    "size": 120999
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl2_rr3.flac",
+    "sha256": "047390eb8cc600749eb2e364030045f220e3afa67c2171d839ba27987bc916d1",
+    "size": 113816
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl2_rr4.flac",
+    "sha256": "cf8f6e2cd831a00b19a9840f936816c8efac673a0432fb217871d62fa2ba61c1",
+    "size": 103430
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl3_rr1.flac",
+    "sha256": "d6f13c9476d68fa637f85fe6349c182d49e64c1a591944a52e0ec14e7c4687d7",
+    "size": 130853
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl3_rr2.flac",
+    "sha256": "5b19e5d98a21068bc75213dd8993749ace6eeb703a8a51f24f01b89ca0861c7f",
+    "size": 128994
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl3_rr3.flac",
+    "sha256": "bb734c74012140cc7a5d56107fa0001a0af5e5230850786f8db1384bf3fe78a7",
+    "size": 133705
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl3_rr4.flac",
+    "sha256": "013ad54f999b0a40a45d0a5f721a3534e1b43738a1f1fdc171c00c9d648e52d7",
+    "size": 144312
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl4_rr1.flac",
+    "sha256": "7bfeb2c52182375a5530c138a9612289b909e163d3e05e85cf39fd369c2cb632",
+    "size": 191251
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl4_rr2.flac",
+    "sha256": "adee06bca3504bced69550fab7a58211d28777e45a32f12272c8740ee81f5f8c",
+    "size": 182745
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl4_rr3.flac",
+    "sha256": "4896f7c7ac177cfaf73e061736d2bfb022d72355b6a8a8c9277e5093e4e1bc90",
+    "size": 190228
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snoff_vl4_rr4.flac",
+    "sha256": "cf562e80797bc1277f585a5413f315b2be3422794e687b8d625838ba877ea6a5",
+    "size": 169275
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl1_rr1.flac",
+    "sha256": "0591bbe001f3b80b40ab680bd7ae1c1bde5057a9e0201b397cf41edf49fb5513",
+    "size": 146547
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl1_rr2.flac",
+    "sha256": "a13089840983b397ab5174d5499ed8c061be0bc67fe7529b7b10b1a4bf7a5b6a",
+    "size": 122012
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl1_rr3.flac",
+    "sha256": "b0b0f427b8238155978e244aec46436d7db51490a6426da1560b599d148f2e72",
+    "size": 121975
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl1_rr4.flac",
+    "sha256": "50e660b871ce72cb395d383ad696446875236952b7740718aebd09b45f43894b",
+    "size": 114531
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl2_rr1.flac",
+    "sha256": "f52918e5326d459b21a72166e3311cb1cceb4271a36f56d850f463c37fd70ddf",
+    "size": 124395
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl2_rr2.flac",
+    "sha256": "c44e19b67a59004fdbe8f37c64fcef1b9437f061fbe11c3fb58801536292590c",
+    "size": 117747
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl2_rr3.flac",
+    "sha256": "459f33346f22a556d8e0d4a7548eed6fed3d9d3f63721f4ae8c87f134c690ea2",
+    "size": 129804
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl2_rr4.flac",
+    "sha256": "adc1bfe01fe1e47cac2ef46d3cd028141b83661fbd5d762ea91a32d872f50e32",
+    "size": 119047
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl3_rr1.flac",
+    "sha256": "3f902da8d2840b4d3c0b6ba7c2424c9ac9f5d47f209cdcaff09d3fe57750ab57",
+    "size": 145422
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl3_rr2.flac",
+    "sha256": "4d1aa7935419b19533eb9b60826d9053a6c7b845aa56b7724cde0684be2d519b",
+    "size": 148900
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl3_rr3.flac",
+    "sha256": "6e1cc0dff54169ac08a2b3dbef0fe229dccc1a0ba63c8f79cf7dccd24403ee92",
+    "size": 150342
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl3_rr4.flac",
+    "sha256": "51909a9b89fe9cd7c0346bd4468577156205dbbf7bb8650979db184b5f4af0a2",
+    "size": 135100
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl4_rr1.flac",
+    "sha256": "fbf10d31a3cdad542a7c62988e4a529eaf4c520075a2019f84f067b0f8935365",
+    "size": 149522
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl4_rr2.flac",
+    "sha256": "7ece2f71f4f54dfc301abc01fede257bd98d389cb1964271a3e8f48339488d06",
+    "size": 157167
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl4_rr3.flac",
+    "sha256": "fb45bb9a4e7890f8a55a269557e76cfb4c284abcad842151b0e4904be83e2afc",
+    "size": 147137
+  },
+  {
+    "path": "Samples/lofi/kick/lofi_kick_snon_vl4_rr4.flac",
+    "sha256": "df95666d63884080641a713eb6632020156576616c254eb8d1bb63f46066f23f",
+    "size": 148431
   },
   {
     "path": "Samples/oh/crash/oh_crash_crash_vl1_rr1.flac",

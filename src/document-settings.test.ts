@@ -140,7 +140,7 @@ it('reads a stored null capture or impulse response as none, so a sound with one
 });
 it('leaves the amp exactly as it was while no capture is chosen',()=>{
   expect(defaultEffects().amp).toEqual({enabled:false,model:'clean',drive:.1,gainDb:0});
-  expect(laterFields('amp')).toEqual(['bassDb','midDb','trebleDb','presenceDb','capture']);
+  expect(laterFields('amp')).toEqual(['bassDb','midDb','trebleDb','presenceDb','lowEndOct','capture']);
   const older=ampSound();expect('capture' in older.effects.amp).toBe(false);
   expect(soundProblem(older)).toBeNull();expect(completeSound(older).effects.amp).toEqual(older.effects.amp);
 });

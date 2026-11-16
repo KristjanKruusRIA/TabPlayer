@@ -573,11 +573,12 @@ impl Tube {
         self.knee = 1.0;
         self
     }
-    fn resolve(&self, gain: f64, rate: f64) -> StageShape {
+    /// `low` scales the corners of the stage's low cut, 1 for the stage as designed.
+    fn resolve(&self, gain: f64, low: f64, rate: f64) -> StageShape {
         let mut shape = StageShape {
-            couple: one_pole(self.couple_hz, rate),
+            couple: one_pole(self.couple_hz * low, rate),
             split: if self.shelf_hz > 0.0 {
-                one_pole(self.shelf_hz, rate)
+                one_pole(self.shelf_hz * low, rate)
             } else {
                 0.0
             },
@@ -595,10 +596,16 @@ impl Tube {
     }
 }
 /// Resolves `tubes`, the one at `pot` scaled by `taper`, as a guitar amp's gain control sits between two stages.
-fn resolved(tubes: &[Tube], pot: usize, taper: f64, rate: f64) -> ([StageShape; STAGES], usize) {
+fn resolved(
+    tubes: &[Tube],
+    pot: usize,
+    taper: f64,
+    low: f64,
+    rate: f64,
+) -> ([StageShape; STAGES], usize) {
     let mut stages = [StageShape::UNUSED; STAGES];
     for (index, tube) in tubes.iter().enumerate() {
-        stages[index] = tube.resolve(if index == pot { taper } else { 1.0 }, rate);
+        stages[index] = tube.resolve(if index == pot { taper } else { 1.0 }, low, rate);
     }
     (stages, tubes.len())
 }
@@ -642,6 +649,28 @@ fn taper(drive: f64, span: f64) -> f64 {
 /// clips: lifted lows and highs around a low-mid dip. The lows it restores cannot intermodulate, and the cabinet then
 /// takes away what lies below the guitar.
 pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
+    amp_shape_voiced(model, drive, Voicing::default(), rate)
+}
+/// How an amp is set up for the guitar it follows, beyond its model and gain. The default leaves the amp as designed.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Voicing {
+    /// Octaves down, up to 1, that the low cut ahead of each stage of the metal preamp moves. The stages thin a low string where it would beat against
+    /// its neighbours; they are set for a guitar in standard tuning, and take the fundamental from one tuned an octave
+    /// lower before it reaches the clipping.
+    pub low_end_oct: f64,
+}
+/// A driven amp resolved for `rate` and a `voicing`.
+pub fn amp_shape_voiced(model: &str, drive: f64, voicing: Voicing, rate: f64) -> Option<Shape> {
+    // Only the metal preamp takes the setting, the one it was measured on. On a held synthetic note, raising it past about an
+    // octave made the crunch and lead preamps thin their lows (more of the fundamental into the clipping pushes the energy up
+    // into its harmonics), though a real riff through the crunch preamp gained 1.0 dB over two octaves. The bass drive's low path
+    // around the stages is tuned against the cuts; on a real riff its 60-250 Hz band rose 2.4 dB over two octaves, so the two
+    // did not cancel, and it is left alone as a choice, not a necessity.
+    let low = if voicing.low_end_oct == 0.0 || model != "metal" {
+        1.0
+    } else {
+        2f64.powf(-voicing.low_end_oct)
+    };
     let over = rate * oversampling(rate) as f64;
     let mut shape = flat_shape(over);
     shape.input = PICKUP;
@@ -653,7 +682,7 @@ pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
                 tube(90.0, 16.0, [1.2, 1.0], -0.03, 9_000.0),
                 tube(70.0, 3.5, [1.0, 1.25], 0.02, 12_000.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 38.0), over);
+            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 38.0), low, over);
             shape.voicing = [
                 Section::shelf(190.0, 3.0, over, false),
                 Section::peak(1_100.0, 2.0, 0.8, over),
@@ -671,7 +700,7 @@ pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
                 tube(90.0, 6.0, [0.95, 1.25], 0.03, 6_500.0),
                 tube(60.0, 2.0, [1.2, 1.0], -0.02, 12_000.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), over);
+            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), low, over);
             shape.voicing = [
                 Section::shelf(170.0, 5.0, over, false),
                 Section::peak(900.0, 2.5, 0.7, over),
@@ -690,7 +719,7 @@ pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
                 tube(90.0, 4.0, [1.2, 1.0], -0.02, 7_000.0),
                 tube(60.0, 1.6, [1.1, 1.2], 0.01, 12_000.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), over);
+            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), low, over);
             shape.voicing = [
                 Section::shelf(170.0, 10.0, over, false),
                 Section::peak(520.0, -1.0, 0.6, over),
@@ -708,7 +737,7 @@ pub fn amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
                 tube(160.0, 12.0, [1.1, 0.9], -0.04, 5_000.0),
                 tube(90.0, 3.0, [1.0, 1.3], 0.02, 3_800.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), over);
+            (shape.stages, shape.count) = resolved(&tubes, 1, taper(drive, 34.0), low, over);
             // Inverted, because a low-pass and the stages' high-passes meet near opposite phase, and would cancel.
             shape.around = Section::low_pass(170.0, 0.707, over);
             shape.around_gain = -0.34;
@@ -759,7 +788,7 @@ pub fn drive_shape(model: &str, drive: f64, rate: f64) -> (Shape, f64) {
                 tube(60.0, DIODE_GAIN, [0.7, 0.7], 0.0, 6_500.0).diode(),
                 tube(50.0, 1.3, [0.9, 0.9], 0.0, 4_500.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, over);
+            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, 1.0, over);
             0.0
         }
         "fuzz" => {
@@ -767,7 +796,7 @@ pub fn drive_shape(model: &str, drive: f64, rate: f64) -> (Shape, f64) {
                 tube(40.0, 1.0 + 120.0 * drive, [0.9, 0.9], 0.0, 5_500.0),
                 tube(60.0, 1.0 + 12.0 * drive, [0.9, 0.9], 0.0, 7_000.0),
             ];
-            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, over);
+            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, 1.0, over);
             shape.voicing[0] = Section::peak(800.0, -2.0, 0.7, over);
             FUZZ_BIAS
         }
@@ -779,7 +808,7 @@ pub fn drive_shape(model: &str, drive: f64, rate: f64) -> (Shape, f64) {
                 0.0,
                 6_500.0,
             )];
-            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, over);
+            (shape.stages, shape.count) = resolved(&tubes, usize::MAX, 1.0, 1.0, over);
             shape.around_gain = 1.0;
             0.0
         }
@@ -1238,6 +1267,166 @@ mod tests {
                 let db = 20.0 * line(&raised, image, 192_000.0).log10();
                 println!("{hz} Hz image at {image}: {db:.1} dB");
                 assert!(db < -70.0, "{hz} Hz image at {image}: {db} dB");
+            }
+        }
+    }
+}
+
+/// The amp as it stood before the `lowEndOct` setting (THE-217), copied verbatim from the commit before it apart from the
+/// names, so that the new code is held to the old arithmetic by comparing values, not by calling itself: on any platform.
+#[cfg(test)]
+mod legacy_equivalence {
+    use super::*;
+
+    fn legacy_resolve(tube: &Tube, gain: f64, rate: f64) -> StageShape {
+        let mut shape = StageShape {
+            couple: one_pole(tube.couple_hz, rate),
+            split: if tube.shelf_hz > 0.0 {
+                one_pole(tube.shelf_hz, rate)
+            } else {
+                0.0
+            },
+            cut: 1.0 - 10f64.powf(-tube.shelf_db / 20.0),
+            gain: tube.gain * gain,
+            rise: tube.rise,
+            fall: tube.fall,
+            bias: tube.bias,
+            rest: 0.0,
+            knee: tube.knee,
+            smooth: one_pole(tube.smooth_hz, rate),
+        };
+        shape.rest = shape.curve(tube.bias);
+        shape
+    }
+
+    fn legacy_resolved(
+        tubes: &[Tube],
+        pot: usize,
+        taper: f64,
+        rate: f64,
+    ) -> ([StageShape; STAGES], usize) {
+        let mut stages = [StageShape::UNUSED; STAGES];
+        for (index, tube) in tubes.iter().enumerate() {
+            stages[index] = legacy_resolve(tube, if index == pot { taper } else { 1.0 }, rate);
+        }
+        (stages, tubes.len())
+    }
+
+    fn legacy_amp_shape(model: &str, drive: f64, rate: f64) -> Option<Shape> {
+        let over = rate * oversampling(rate) as f64;
+        let mut shape = flat_shape(over);
+        shape.input = PICKUP;
+        match model {
+            // A cranked British plexi: three stages, open and dynamic, with a forward midrange and power stage in the sound.
+            "crunch" => {
+                let tubes = [
+                    tube(30.0, 3.0, [1.2, 2.0], 0.04, 16_000.0).shelved(160.0, 6.0),
+                    tube(90.0, 16.0, [1.2, 1.0], -0.03, 9_000.0),
+                    tube(70.0, 3.5, [1.0, 1.25], 0.02, 12_000.0),
+                ];
+                (shape.stages, shape.count) = legacy_resolved(&tubes, 1, taper(drive, 38.0), over);
+                shape.voicing = [
+                    Section::shelf(190.0, 3.0, over, false),
+                    Section::peak(1_100.0, 2.0, 0.8, over),
+                    Section::shelf(2_200.0, 4.0, over, true),
+                ];
+                shape.power = 0.6;
+                shape.power_limits = [1.0, 1.15];
+                shape.sag = 0.3;
+            }
+            // A hot-rodded lead channel: four stages with a strong midrange, so single notes sing.
+            "lead" => {
+                let tubes = [
+                    tube(30.0, 3.0, [1.2, 2.0], 0.04, 16_000.0).shelved(200.0, 6.0),
+                    tube(120.0, 11.0, [1.2, 0.95], -0.04, 9_000.0),
+                    tube(90.0, 6.0, [0.95, 1.25], 0.03, 6_500.0),
+                    tube(60.0, 2.0, [1.2, 1.0], -0.02, 12_000.0),
+                ];
+                (shape.stages, shape.count) = legacy_resolved(&tubes, 1, taper(drive, 34.0), over);
+                shape.voicing = [
+                    Section::shelf(170.0, 5.0, over, false),
+                    Section::peak(900.0, 2.5, 0.7, over),
+                    Section::shelf(2_000.0, 8.0, over, true),
+                ];
+                shape.power = 0.4;
+                shape.power_limits = [1.0, 1.1];
+                shape.sag = 0.2;
+            }
+            // A modern high-gain channel: five stages and the deepest V, for chords that stay separate under a lot of gain.
+            "metal" => {
+                let tubes = [
+                    tube(60.0, 3.0, [1.2, 2.0], 0.04, 16_000.0).shelved(250.0, 6.0),
+                    tube(160.0, 11.0, [1.2, 0.95], -0.04, 9_000.0),
+                    tube(120.0, 7.0, [0.95, 1.25], 0.03, 6_500.0),
+                    tube(90.0, 4.0, [1.2, 1.0], -0.02, 7_000.0),
+                    tube(60.0, 1.6, [1.1, 1.2], 0.01, 12_000.0),
+                ];
+                (shape.stages, shape.count) = legacy_resolved(&tubes, 1, taper(drive, 34.0), over);
+                shape.voicing = [
+                    Section::shelf(170.0, 10.0, over, false),
+                    Section::peak(520.0, -1.0, 0.6, over),
+                    Section::shelf(1_900.0, 8.0, over, true),
+                ];
+                shape.power = 0.3;
+                shape.power_limits = [1.0, 1.05];
+                shape.sag = 0.15;
+            }
+            // A bass overdrive: the lows go around the clipping, so the note's weight stays clean under a driven upper
+            // band, which is how a bass keeps its pitch under distortion.
+            "bassDrive" => {
+                let tubes = [
+                    tube(220.0, 3.0, [1.2, 1.9], 0.04, 7_000.0),
+                    tube(160.0, 12.0, [1.1, 0.9], -0.04, 5_000.0),
+                    tube(90.0, 3.0, [1.0, 1.3], 0.02, 3_800.0),
+                ];
+                (shape.stages, shape.count) = legacy_resolved(&tubes, 1, taper(drive, 34.0), over);
+                // Inverted, because a low-pass and the stages' high-passes meet near opposite phase, and would cancel.
+                shape.around = Section::low_pass(170.0, 0.707, over);
+                shape.around_gain = -0.34;
+                shape.voicing = [
+                    Section::peak(700.0, -3.0, 0.7, over),
+                    Section::peak(1_400.0, 2.5, 0.9, over),
+                    Section::FLAT,
+                ];
+                shape.power = 0.5;
+                shape.power_limits = [1.1, 1.2];
+                shape.sag = 0.15;
+            }
+            _ => return None,
+        }
+        Some(shape.calibrated(rate, 0.1, 0.0, AMP_TARGET))
+    }
+
+    /// At `lowEndOct` 0 every driven model's circuit is the old one bit for bit, for several drives and every rate the
+    /// app runs at, and so is what it plays.
+    #[test]
+    fn the_default_voicing_is_the_amp_as_it_was() {
+        for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
+            for model in ["clean", "crunch", "lead", "metal", "bass", "bassDrive"] {
+                for drive in [0.0, 0.1, 0.2, 0.45, 0.55, 0.8, 1.0] {
+                    let (old, new) = (
+                        legacy_amp_shape(model, drive, rate),
+                        amp_shape(model, drive, rate),
+                    );
+                    assert_eq!(old, new, "{model} drive {drive} at {rate}");
+                    let (Some(old), Some(new)) = (old, new) else {
+                        continue;
+                    };
+                    // What each plays, frame by frame, for a low note with a hard attack, compared as bits.
+                    let (mut a, mut b) = (Chain::new(rate), Chain::new(rate));
+                    for n in 0..2_000 {
+                        let t = n as f64 / rate;
+                        let x = ((TAU * 55.0 * t).sin() * 0.2 * (-t * 20.0).exp()
+                            + (TAU * 330.0 * t).sin() * 0.05)
+                            as f32;
+                        let (y, z) = (a.process(&old, [x; 2], 0.0), b.process(&new, [x; 2], 0.0));
+                        assert_eq!(
+                            y.map(f64::to_bits),
+                            z.map(f64::to_bits),
+                            "{model} {drive} {rate} frame {n}"
+                        );
+                    }
+                }
             }
         }
     }

@@ -759,7 +759,8 @@ pub fn lead_in_frames(audio: &DecodedAudio) -> f64 {
 /// How much quieter (negative) a palm mute or dead note sounds on a recorded voice than on the black electric guitar, whose recordings the
 /// constants above were balanced for. The black guitar serves the clean, crunch and distorted electric programs alike, so its balance is the
 /// one that is right dry and clean; the other voices keep a palm mute about as far from an open note as they had before THE-214, and a dead
-/// note clearly under it. Measured by `palm-mute` renders dry, clean, classic-rock and metal-rhythm (docs/validation/2026-11-15-the-214-palm-mute.md).
+/// note clearly under it. Measured by `palm-mute` renders dry, clean, classic-rock and the metal rhythm sound as it was then (docs/validation/2026-11-15-the-214-palm-mute.md;
+/// the metal rhythm sound was retuned afterwards, see docs/validation/2026-11-15-the-217-metal-rhythm-amp.md, and these trims were not).
 pub fn technique_trims_db(instrument_id: &str) -> (f64, f64) {
     match instrument_id {
         "green-guitar" => (-3.0, -6.0),

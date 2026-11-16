@@ -63,7 +63,7 @@ export interface FxSettings {
   gate: {enabled:boolean;thresholdDb:number;releaseMs:number};
   compressor: {enabled:boolean;thresholdDb:number;ratio:number;attackMs:number;releaseMs:number;makeupDb:number};
   /** The tone stack fields are absent while flat (0 dB). `capture` names a NAM capture in the user's own library, which plays in place of `model` where the library has it. */
-  amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'metal'|'bass'|'bassDrive';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number;capture?:AmpCapture};
+  amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'metal'|'bass'|'bassDrive';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number;lowEndOct?:number;capture?:AmpCapture};
   /** `ir` names a cabinet impulse response in the user's own library, which plays in place of `model` where the library has it. */
   cabinet: {enabled:boolean;model:'open'|'closed'|'combo'|'bass'|'bassStack';ir?:CabinetIrRef};
   eq: {enabled:boolean;lowDb:number;midDb:number;highDb:number;midHz:number};

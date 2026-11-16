@@ -1696,6 +1696,8 @@ export const et: MessageCatalog = {
   'param.mid_db': "Keskhelid (dB)",
   'param.treble_db': "Kõrged (dB)",
   'param.presence_db': "Kohaolu (dB)",
+  'param.low_end_oct': "Madal häälestus (okt)",
+  'param.low_end_oct_hint': "Laiendab võimendi madalaid helisid madalalt häälestatud kitarrile: nihutab eelvõimendi madalate helide piiri nii mitu oktavit allapoole.",
   'param.low_db': "Madalad (dB)",
   'param.high_db': "Kõrged (dB)",
   'param.mid_hz': "Kesksagedus (Hz)",

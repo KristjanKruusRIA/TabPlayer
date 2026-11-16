@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { model } from '@coderline/alphatab';
-import { factorySound } from '../audio/factory-sounds';
+import { earlierFactorySound, earlierFactorySounds, factorySound } from '../audio/factory-sounds';
+import { factorySounds } from '../audio/factory-sounds';
 import { DEFAULT_PRACTICE } from '../audio/practice-types';
 import { soundPreset } from '../audio/sound-model';
 import type { PlaybackState } from '../audio/types';
@@ -345,6 +346,40 @@ it('reads a tweaked sound as edited, and a restored one as its preset or factory
   // The strip shows it too.
   render(<MixerView {...props(base(),{[trackIdentity(guitar)]:tweakedPreset})}/>);
   expect(within(screen.getByRole('group',{name:'Sound Guitar'})).getByText('Crunch (edited)')).toBeInTheDocument();
+});
+
+it('names the settings an earlier version of a factory sound saved, instead of a preset marked edited (THE-217)', ()=>{
+  const [guitar]=base().tracks;
+  const tone=(sound:TrackSound)=>describeTrackSound(guitar,sound).tone;
+  const earlier=earlierFactorySound('metal-rhythm')!;
+  // A project that copied the old Metal rhythm keeps its settings and says so; it is not the current sound, nor a Lead.
+  expect(earlier.effects.amp.model).toBe('metal');expect(earlier.effects.amp.drive).toBe(.55);expect(earlier.effects.drive.enabled).toBe(true);
+  expect(tone(earlier)).toBe('Metal rhythm (earlier version)');
+  expect(tone(factorySound('metal-rhythm')!)).toBe('Metal rhythm');
+  // Edited from there it is still the preset it started from, as every edited sound is.
+  earlier.effects.amp.drive=.9;
+  expect(tone(earlier)).toBe('Lead (edited)');
+  expect(earlierFactorySound('jazz-clean')).toBeNull();
+});
+
+/** `value` with the keys of every object in the opposite order, as another writer of the same settings may list them; lists keep their order. */
+const reversedKeys=(value:unknown):unknown=>Array.isArray(value)?value.map(reversedKeys):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).reverse().map(([key,inner])=>[key,reversedKeys(inner)])):value;
+
+it('names a sound by its settings whatever order their fields are listed in (THE-217)',()=>{
+  const [guitar]=base().tracks;
+  const tone=(sound:TrackSound)=>describeTrackSound(guitar,sound).tone;
+  // The native player writes the amp's fields as drive, gain, tone stack, low end; the editor's definition lists them otherwise.
+  const metal=factorySound('metal-rhythm')!;
+  const amp=metal.effects.amp as unknown as Record<string,unknown>;
+  const written={...metal,effects:{...metal.effects,amp:{enabled:amp.enabled,model:amp.model,drive:amp.drive,gainDb:amp.gainDb,bassDb:amp.bassDb,presenceDb:amp.presenceDb,lowEndOct:amp.lowEndOct}}} as TrackSound;
+  expect(Object.keys(written.effects.amp)).not.toEqual(Object.keys(metal.effects.amp));
+  expect(tone(written)).toBe('Metal rhythm');
+  // Every factory sound and every earlier version is recognised with the keys of every block, and of the pedalboard, reversed.
+  for(const entry of factorySounds)expect(tone(reversedKeys(factorySound(entry.id)) as TrackSound),entry.id).toBe(entry.name);
+  for(const entry of earlierFactorySounds)expect(tone(reversedKeys(earlierFactorySound(entry.id)) as TrackSound),entry.id).toBe(entry.name);
+  // The order of the pedalboard itself still matters: a sound that moves a block is another sound.
+  const moved=factorySound('metal-rhythm')!;const order=[...moved.effects.order!];order.reverse();moved.effects.order=order;
+  expect(tone(moved)).toBe('Lead (edited)');
 });
 
 it('puts the master output in the mixer and sends its changes through setMaster, not the track mix', async()=>{

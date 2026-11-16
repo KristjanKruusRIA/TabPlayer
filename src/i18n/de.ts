@@ -1696,6 +1696,8 @@ export const de: MessageCatalog = {
   'param.mid_db': "Mitten (dB)",
   'param.treble_db': "Höhen (dB)",
   'param.presence_db': "Presence (dB)",
+  'param.low_end_oct': "Tiefe Stimmung (Okt)",
+  'param.low_end_oct_hint': "Erweitert den Tiefbass des Verstärkers für eine tief gestimmte Gitarre: verschiebt die Bassgrenze der Vorstufe um so viele Oktaven nach unten.",
   'param.low_db': "Tiefen (dB)",
   'param.high_db': "Höhen (dB)",
   'param.mid_hz': "Mittenfrequenz (Hz)",

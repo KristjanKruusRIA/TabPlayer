@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { defaultEffects, delayDivisions, modulationDivisions, syncedBlocks } from '../document-settings';
 import type { EffectBlock } from '../edit-types';
-import { ampModels, blockNames, cabinetModels, graphicBands, modelName, parameters, localizedBlockName, localizedParamLabel, localizedAmpModelName, localizedCabinetModelName } from '../audio/sound-model';
+import { ampModels, blockNames, cabinetModels, graphicBands, modelName, visibleParameters, localizedParamHint, localizedBlockName, localizedParamLabel, localizedAmpModelName, localizedCabinetModelName } from '../audio/sound-model';
 import type { NumericControl } from '../audio/sound-model';
 import type { Board, SoundEditing } from '../audio/useSoundEditing';
 import { Fader, Knob, Segmented, busyGuard } from '../ui';
@@ -30,12 +30,12 @@ function ampScale(p:NumericControl) {
 }
 /** The knobs for the numeric fields of a block, with the same accessible names the inspector's fields have. `spots` lays them out over a face. */
 function BlockKnobs({editing,board,block,tone,spots}:{editing:SoundEditing;board:Board;block:EffectBlock;tone:'pedal'|'amp';spots?:readonly (readonly [number,number])[]}) {
-  const settings=settingsOf(board,block),{fx,syncOf,busy}=editing;
-  return <>{parameters[block].map((p:NumericControl,index)=>{
+  const settings=settingsOf(board,block),{fx,syncOf,busy}=editing,{lang}=useI18n();
+  return <>{visibleParameters(block,board.effects).map((p:NumericControl,index)=>{
     const {short,unit}=nameAndUnit(p.label);
     // Switched off by the mode or by following the tempo, as the inspector's fields are.
     const off=block==='wah'&&p.key===(board.effects.wah.mode==='auto'?'position':'sensitivity')||p.key==='rateHz'&&syncOf(board,block)!==0;
-    const knob=<Knob key={p.key} tone={tone} scale={tone==='amp'?ampScale(p):undefined} label={short} ariaLabel={board.name(`${block} ${p.label}`)} unit={unit} min={p.min} max={p.max} step={p.step} value={Number(settings[p.key]??0)} defaultValue={Number(defaults[block][p.key]??0)} disabled={busy||off} onCommit={value=>fx(board,block,p.key,value)} onInput={value=>editing.hearField(board,block,p.key,value)} onInputEnd={committed=>{if(!committed)void editing.endLive();}}/>;
+    const knob=<Knob key={p.key} title={localizedParamHint(p.key,p.hint,lang)} tone={tone} scale={tone==='amp'?ampScale(p):undefined} label={short} ariaLabel={board.name(`${block} ${p.label}`)} unit={unit} min={p.min} max={p.max} step={p.step} value={Number(settings[p.key]??0)} defaultValue={Number(defaults[block][p.key]??0)} disabled={busy||off} onCommit={value=>fx(board,block,p.key,value)} onInput={value=>editing.hearField(board,block,p.key,value)} onInputEnd={committed=>{if(!committed)void editing.endLive();}}/>;
     const spot=spots?.[index];
     return spot?<span key={p.key} className="rig-spot-knob" style={{left:`${spot[0]}%`,top:`${spot[1]/1.2}%`}}>{knob}</span>:knob;
   })}</>;
@@ -83,7 +83,7 @@ function AmpStage({editing,board,ampCapture}:{editing:SoundEditing;board:Board;a
   return <div className="rig-amp-stage">
     <div className="rig-art-slot"><div className="rig-amp" data-on={board.effects.amp.enabled} style={{'--knob-ink':look.ink} as React.CSSProperties}>
       <AmpArt look={look} on={board.effects.amp.enabled}/>
-      <div className="rig-amp-knobs"><BlockKnobs editing={editing} board={board} block="amp" tone="amp"/></div>
+      <div className="rig-amp-knobs" data-knobs={visibleParameters('amp',board.effects).length} style={{'--amp-knobs':visibleParameters('amp',board.effects).length} as React.CSSProperties}><BlockKnobs editing={editing} board={board} block="amp" tone="amp"/></div>
     </div></div>
     <div className="rig-slot" data-slot="amp-capture">{ampCapture?.(board)}</div>
   </div>;
@@ -126,7 +126,7 @@ function GraphicEqStage({editing,board}:{editing:SoundEditing;board:Board}) {
 }
 
 function PedalStage({editing,board,block}:{editing:SoundEditing;board:Board;block:EffectBlock}) {
-  const on=board.effects[block].enabled,look=blockLook[block],count=parameters[block].length,wah=look.kind==='wah';
+  const on=board.effects[block].enabled,look=blockLook[block],count=visibleParameters(block,board.effects).length,wah=look.kind==='wah';
   return <div className="rig-pedal-stage">
     <div className="rig-art-slot"><div className="rig-pedal" data-on={on} style={{'--pedal':look.color} as React.CSSProperties}>
       <BlockFace block={block} on={on} detail knobs={count}/>

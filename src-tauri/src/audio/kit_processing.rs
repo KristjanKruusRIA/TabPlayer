@@ -445,8 +445,11 @@ pub fn process_hit(
     if profile.eq.iter().any(|b| b.hz >= 0.45 * rate) {
         return Err("An equaliser band is above 0.45 of the sample rate".into());
     }
-    let mut frames: Vec<[f64; 2]> = main
-        .frames
+    // What the envelope will cut is not worked on at all: the filters and the compressor see only the part that is kept.
+    let length = profile.envelope.as_ref().map_or(main.frames.len(), |e| {
+        ((e.end_ms / 1000.0 * rate) as usize).min(main.frames.len())
+    });
+    let mut frames: Vec<[f64; 2]> = main.frames[..length]
         .iter()
         .map(|f| [f[0] as f64, f[1] as f64])
         .collect();
@@ -464,10 +467,9 @@ pub fn process_hit(
                 c.min_correlation,
             )?;
             let gain = 10f64.powf(c.gain_db / 20.0);
-            for (frame, second) in
-                frames
-                    .iter_mut()
-                    .zip(moved(&other.frames, main.frames.len(), &alignment))
+            for (frame, second) in frames
+                .iter_mut()
+                .zip(moved(&other.frames, length, &alignment))
             {
                 frame[0] += gain * second[0];
                 frame[1] += gain * second[1];

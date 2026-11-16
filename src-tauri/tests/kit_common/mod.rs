@@ -5,6 +5,9 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use tabplayer_lib::audio::resources::{Region, SampleRequest};
 
+/// The id the loader gives the percussion kit, the one instrument with a General MIDI fall back.
+pub const KIT_ID: &str = "virtuosity-kit";
+
 // The recorded kit's processing: baked once when the recordings are loaded, from a table in the manifest that is not trusted.
 
 /// A mono thump (70 Hz under a decay) of `seconds`, starting `start` seconds in, as a 48 kHz float WAV.
@@ -86,7 +89,7 @@ pub fn kit_root(table: serde_json::Value, companion_of_kick: bool) -> tempfile::
         "preparationId": "fixture",
         "sources": [{"id":"k","repository":"a/b","revision":"0".repeat(40),"license":"CC0-1.0","licensePath":"license.txt","licenseSha256":hash(license)}],
         "instruments": [{
-            "id": "kit", "name": "Kit", "sourceId": "k",
+            "id": KIT_ID, "name": "Kit", "sourceId": "k",
             "regions": [region("main", 36, companion_of_kick.then_some("second")), region("snare", 38, None)],
             "processing": table
         }, {
@@ -120,7 +123,7 @@ pub fn kit_table() -> serde_json::Value {
 
 pub fn kick_request() -> Vec<SampleRequest> {
     vec![SampleRequest {
-        instrument_id: "kit".into(),
+        instrument_id: KIT_ID.into(),
         key: 36,
         velocity: 100,
         articulation: "picked".into(),

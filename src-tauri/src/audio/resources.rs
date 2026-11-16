@@ -1,5 +1,6 @@
 use super::decode::{DecodedAudio, decode_audio};
 use super::kit_processing::{KitProcessing, process_hit};
+use super::voices::RECORDED_KIT;
 use rustysynth::SoundFont;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -261,6 +262,10 @@ impl AudioResources {
         }
         let mut set_aside_ids_now = HashSet::new();
         for (id, error) in refused {
+            // Only the percussion kit has General MIDI to fall back to; any other instrument's bad data stays a failed load.
+            if id != RECORDED_KIT {
+                return Err(format!("{id}: {error}"));
+            }
             notices.push(set_aside(&mut manifest, &id, &error));
             set_aside_ids_now.insert(id);
         }
@@ -449,6 +454,9 @@ impl AudioResources {
             }
         }
         for (id, error) in shaped_failures {
+            if id != RECORDED_KIT {
+                return Err(format!("{id}: {error}"));
+            }
             for sample in set_aside_ids(&mut manifest, &id) {
                 samples.remove(&sample);
             }

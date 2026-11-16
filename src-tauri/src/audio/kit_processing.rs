@@ -316,7 +316,8 @@ pub fn align_companion(
     max_offset_ms: f64,
     min_correlation: f64,
 ) -> Result<Alignment, String> {
-    if !RATES.contains(&(rate as u32)) || ALIGN_LOWPASS_HZ >= 0.45 * rate {
+    // Within the supported rates the 250 Hz low-pass is always far under half the rate (the lowest rate is 8 kHz).
+    if !RATES.contains(&(rate as u32)) {
         return Err(format!(
             "The sample rate {rate} Hz is not one the microphones can be aligned at"
         ));
@@ -876,10 +877,32 @@ mod tests {
                 .unwrap();
             assert!(error.contains("sample rate"), "{error}");
         }
-        // The alignment's low-pass has to sit well under half the rate.
+        // The alignment refuses the same rates itself (it is public).
         let hit = thump(0.004, 0.4, 1.0);
         assert!(align_companion(&hit, &hit, 400.0, 8.0, 0.5).is_err());
         assert!(align_companion(&hit, &hit, 48_000.0, 8.0, 0.5).is_ok());
+    }
+
+    #[test]
+    fn the_rate_and_peak_limits_are_exact() {
+        let at = |rate: u32, value: f32| DecodedAudio {
+            sample_rate: rate,
+            channels: 2,
+            frames: Arc::new(vec![[value, 0.0]; 480]),
+        };
+        let plain = Profile::default();
+        // 8 000 and 192 000 Hz are accepted, one hertz outside is not.
+        for rate in [8_000, 192_000] {
+            assert!(process_hit(&plain, &at(rate, 0.1), None).is_ok(), "{rate}");
+        }
+        for rate in [7_999, 192_001] {
+            assert!(process_hit(&plain, &at(rate, 0.1), None).is_err(), "{rate}");
+        }
+        // A peak of exactly the ceiling passes; a hair over does not.
+        assert!(process_hit(&plain, &at(48_000, MAX_PROCESSED_PEAK), None).is_ok());
+        assert!(process_hit(&plain, &at(48_000, MAX_PROCESSED_PEAK * 1.0001), None).is_err());
+        assert!(process_hit(&plain, &at(48_000, -MAX_PROCESSED_PEAK), None).is_ok());
+        assert!(process_hit(&plain, &at(48_000, -MAX_PROCESSED_PEAK * 1.0001), None).is_err());
     }
 
     #[test]

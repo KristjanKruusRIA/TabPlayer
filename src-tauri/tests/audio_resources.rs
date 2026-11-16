@@ -499,7 +499,7 @@ fn assert_kit_set_aside(root: &tempfile::TempDir, reason: &str) {
         ("kick only", &kick_only),
     ] {
         assert!(
-            loaded.manifest.instruments.iter().all(|i| i.id != "kit"),
+            loaded.manifest.instruments.iter().all(|i| i.id != KIT_ID),
             "{name}: the kit is still there"
         );
         assert!(
@@ -507,7 +507,7 @@ fn assert_kit_set_aside(root: &tempfile::TempDir, reason: &str) {
                 .manifest
                 .notices
                 .iter()
-                .any(|n| n.contains(reason) && n.starts_with("kit:")),
+                .any(|n| n.contains(reason) && n.starts_with(&format!("{KIT_ID}:"))),
             "{name}: {:?} lacks {reason}",
             loaded.manifest.notices
         );
@@ -635,7 +635,7 @@ fn inconsistent_regions_of_a_kit_are_refused_whatever_is_requested() {
         "{:?}",
         error.manifest.notices
     );
-    assert!(error.manifest.instruments.iter().all(|i| i.id != "kit"));
+    assert!(error.manifest.instruments.iter().all(|i| i.id != KIT_ID));
     // A sound in a region that spans keys.
     let range = kit_root(kit_table(), true);
     edit_manifest(&range, |m| {
@@ -671,4 +671,46 @@ fn a_kit_without_a_table_plays_as_recorded() {
     let loaded = AudioResources::load(root.path()).unwrap();
     assert_eq!(loaded.samples["main"].frames, raw.frames);
     assert!(loaded.manifest.notices.is_empty());
+}
+
+#[test]
+fn an_instrument_other_than_the_kit_with_bad_processing_data_still_fails_the_load() {
+    // Only the percussion kit has General MIDI to fall back to: the same bad table on any other instrument is a failed load.
+    let bad_table = kit_root(kit_table(), false);
+    edit_manifest(&bad_table, |m| {
+        m["instruments"][1]["processing"] =
+            serde_json::json!({"profiles": {}, "sounds": {"50": "missing"}});
+    });
+    let error = AudioResources::load(bad_table.path()).err().unwrap();
+    assert!(error.contains("other:"), "{error}");
+    assert!(AudioResources::load_for_requests(bad_table.path(), &[other_request()]).is_err());
+    // A companion in an instrument with no table.
+    let companion = kit_root(kit_table(), false);
+    edit_manifest(&companion, |m| {
+        m["instruments"][1]["regions"][0]["companionId"] = "third".into()
+    });
+    assert!(
+        AudioResources::load(companion.path())
+            .err()
+            .unwrap()
+            .contains("no kit processing")
+    );
+    // A table that fails only when the hits are processed (its second microphone does not match) fails the same way.
+    let mut table = serde_json::json!({
+        "profiles": {"kick": {"companion": {"gainDb": 0, "maxOffsetMs": 0.5, "minCorrelation": 0.99}}},
+        "sounds": {"50": "kick"}
+    });
+    table["profiles"]["kick"]["envelope"] =
+        serde_json::json!({"holdMs": 50, "decayDbPerSecond": 200, "endMs": 400});
+    let processing = kit_root(kit_table(), false);
+    edit_manifest(&processing, |m| {
+        m["instruments"][1]["processing"] = table.clone();
+        m["instruments"][1]["regions"][0]["companionId"] = "third".into();
+    });
+    assert!(
+        AudioResources::load(processing.path())
+            .err()
+            .unwrap()
+            .contains("other:")
+    );
 }

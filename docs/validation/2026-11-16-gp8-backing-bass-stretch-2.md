@@ -9,7 +9,9 @@ for listening outside the repository; they are not committed.
 **Develop figures.** They were measured with the same functions on develop's stretcher: the voice built without the
 new low band (`BackingVoice::without_low_band`, a hidden hook for tests), which is develop's code path. The only other
 changes on it read the clock rate and the previous grain's position for the low band (unused without it), and make
-develop's grain read saturate past `i64::MAX`, which changes nothing below it. The develop columns of the scorecard
+develop's grain read saturate past `i64::MAX`, which changes nothing below it. Outside `backing.rs` the branch adds
+`ReferenceSyncMap::frame_range` in `reference_sync.rs`, which only the low band calls: the frames the map lets through,
+as a range. The develop columns of the scorecard
 come from `cargo test --release --test audio_backing_bass scorecard -- --ignored --nocapture` with the voices built
 that way. The develop figures written into the tests (`DEVELOP_HITS`, `DEVELOP_NOISE`, `DEVELOP_BURSTS` and
 `DEVELOP_MID_COHERENCE` in `audio_backing_bass.rs`) were printed by that run. `the_develop_figures_are_develops`
@@ -132,20 +134,43 @@ the head the grain crossfades, so it reads the phase step at every splice straig
     8 times with the key an octave up. The search radius is at its cap there.
 
   V always leaves over a grain's ramp, never at once. Where it leaves because the clock leapt without a seek, it
-  leaves from what its last frame carries into that grain, and makes no frame at the new place. Where a low-pass sum
+  leaves from what its last frame carries into that grain, and makes no frame at the new place. That includes a leap
+  far past the audio (a map whose last anchor is misplaced). There the grains' low band at the new place is taken as
+  silence, without being read: the low-pass does not reach that far, and the place may lie beyond any index.
+
+  That leave is never heard:
+  - V is heard only after a grain near the audio.
+  - The clock moves only forwards between seeks: the map rises, and the renderer seeks for every jump and loop. So a
+    clock that leapt that far stays past the end.
+  - Past the end the voice plays nothing, from the very frame the grain starts on.
+
+  The output falls silent at the same frame as develop's, and from there on it is develop's, bit for bit (checked in
+  the leap test). It was the same without the leave too; that was measured once, on the code before, and the test
+  does not run it. Only a caller that brought the clock back within the grain without a seek would hear the leave.
+
+  Where a low-pass sum
   is larger than any sum of audio within +12 dBFS can be, or not a number, it is taken again from the samples clipped
   at +12 dBFS. So a damaged file's sample near the largest float, or one that is not a number, leaves nothing behind
   in V.
 - **Real time.** Every buffer is made when the voice is built. A grain's work is bounded by counts, not by where the
   clock goes:
   - **Frames:** at most two, each four forward real transforms of 512 and two inverse.
-  - **The attack scan's low-pass:** at most a budget of decimated samples. The budget is 2^18 multiplies of the
-    low-pass, or twice what the clock moves the scan on where that is more. While V is heard, it also covers what a
-    change of speed moves the scan on and one attack's search, so V never leaves for want of the scan at a speed it
-    follows (with at most one change of speed in a grain). Under the read guard the budget never exceeds 1096
-    samples; that is 7 million multiplies for the longest low-pass, reached only at 8 times the neutral speed with a
-    file at 16 times the output rate.
-  - **Beyond the budget:** one attack's search, and what the frames' and grains' reads still need.
+  - **The attack scan's low-pass:** at most a budget of decimated samples, the larger of two parts:
+    - **Catch-up:** 2^18 multiplies of the low-pass, which is 2^18 / (2 × taps) samples. For a short low-pass this
+      comes to more than 1096 samples: where the search radius is under about 76, as for a 22.05 kHz file an octave
+      down, or a 44.1 or 48 kHz file at a 192 kHz device. It is still 2^18 multiplies.
+    - **Keeping up with the clock:** twice what the clock moves the scan on. While V is heard, it also covers what a
+      change of speed moves the scan on and one attack's search. So V never leaves for want of the scan at a speed it
+      follows (with at most one change of speed in a grain). Under the read guard this part never exceeds 1096
+      samples: 7.05 million multiplies for the longest low-pass, reached only at 8 times the neutral speed with a file
+      at 16 times the output rate.
+
+    So a grain's scan computes at most about max(2^18, 1096 × 2 × taps) multiplies, 7.05 million at most.
+  - **Beyond the budget:**
+    - One attack's search: at most 48 new samples once the budget is spent. From a fresh start a search and its
+      detection take up to 56, the figure the leap test allows.
+    - The grains' crossfade reads of the low band: up to 108 samples where all three read ranges are new. A leave
+      reads two of them, 72 at most, the figure the leap test allows.
   - **The scan's steps:** over at most three quarters of the cache.
 
   Starting afresh needs about 850 decimated samples before V can come in. That happens after a seek, a loop, or a
@@ -386,20 +411,40 @@ develop's own figures, measured with these functions, within the margins stated 
     the exact level in the source at the score clock.
   - 110 and 100 Hz, which the grains splice coherently: no window more than 0.25 dB under (this branch: 0.11 dB),
     except where develop's grains are too.
-  - Below the grains' reach the hand-over dips, because V and the grains carry the tone at phases that disagree. The
-    test holds the measured values as bounds:
+  - Below the grains' reach the hand-over dips, because V and the grains carry the tone at phases that disagree, and
+    its deepest window is deeper than develop's:
     - 82.4 Hz: the deepest window -2.89 dB, none under -3 dB (develop: -0.78 dB, none);
     - 55 Hz: -6.45 dB, with 8 of 507 windows under -3 dB (develop: -4.83 dB, 25 of 507).
 
-    These are honest bounds, not a pass against develop. See the limits.
+    The bounds on the deepest window (-3.25 and -7.0 dB) are this branch's own measured values; the test's comment says
+    so. The count of windows under -3 dB is bounded by this branch's own values (none, 10) and by develop's count. See
+    the limits.
 - `leaving_and_coming_back_on_consecutive_grains_makes_no_level_dip`: V leaves in one grain and comes back in the
   next. The signal is a sustained tone at 100 and 110 Hz, with five patterns of 35% grains among 45%, from 25 to 90 ms
   after the attack. Every 20 ms window is within 0.05 dB (measured: 0.02 dB).
-  - It passes on the code before the fix too. On a sustained tone at those pitches, V's own phase stays in step with
-    the grains', so there was no dip to see.
-  - The fix rebuilds V's start frame from the grains' phases whenever it comes back from a carry that kept its own.
-    In a probe (not committed) with V out for single grains on 82.4 and 55 Hz tones, the deepest window was -1.22 and
-    -3.09 dB before the fix and -0.69 and -2.27 dB after.
+  - It passes without the frame made again too (see the next test). On a sustained tone at those pitches, V's own
+    phase stays in step with the grains', so there was no dip to see.
+- `coming_back_after_one_grain_starts_from_the_grains_phases`: the frame made again when V comes back. When V comes
+  back in the grain after it left, the frame whose second half carries into that grain is made again from the grains'
+  phases.
+  - The signal: a sustained tone at 61.7, 55 and 41.2 Hz, played at 45% with one grain at 35%, at each of the 30
+    grains from 25 ms after the attack. The measure: the deepest 10 ms window at the tone's own pitch.
+
+  | Tone | Bound: mean of the deepest | This branch | Without the frame made again | Develop | Bound: positions deeper | This branch | Without | Develop |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | 61.7 Hz | -1.6 dB | -1.39 dB | -1.82 dB | -3.89 dB | 3 deeper than 3 dB | 2 | 6 | 30 |
+  | 55 Hz | -4.3 dB | -3.99 dB | -4.65 dB | -4.74 dB | 8 deeper than 6 dB | 7 | 10 | 0 |
+  | 41.2 Hz | -6.5 dB | -6.26 dB | -6.77 dB | -7.41 dB | 11 deeper than 6 dB | 10 | 13 | 30 |
+
+  - The mean must also be no lower than develop's.
+  - No position may dip deeper than -8.0, -12.5 and -25.5 dB, this branch's own values: it measured -7.50, -11.95 and
+    -24.49 dB.
+  - It fails without the frame made again: at 61.7 Hz the mean of the deepest is -1.82 dB, with 6 positions deeper
+    than 3 dB.
+  - The bounds are this branch's own measured values. The frame made again is not better everywhere: at 41.2 Hz it
+    dips deeper at 5 of the 30 positions, and shallower at 14.
+  - The deepest single windows are far deeper than develop's: -7.50, -11.95 and -24.49 dB, against develop's -3.95,
+    -4.92 and -8.75 dB. See the limits.
 - `the_develop_figures_are_develops`: develop's figures in the tests above, measured again from develop's code path.
 
 `src-tauri/tests/audio_backing_realtime.rs`:
@@ -431,8 +476,9 @@ develop's own figures, measured with these functions, within the margins stated 
   the same steps develop's grains make at the same frames; the source's largest is under 0.02. Before, V left over its
   ramp only some of the time, and made a step of 0.51.
 - `a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget`: a sync map 100 times steeper than the speed for
-  10 ms of score, and a jump of the clock, while V is heard. It runs at 48 kHz and for files at 192 and 384 kHz an
-  octave up. The work is counted, not timed.
+  10 ms of score, and a jump of the clock, while V is heard. Each is also run so that it lands past the end of the
+  audio: 2 s past it with the map, 0.98 s with the jump. It runs at 48 kHz and for files at 192 and 384 kHz an octave
+  up. The work is counted, not timed.
   - No grain across the leap computes more than the worst grain after a cold seek, plus one attack's search (56
     samples, which a grain may always compute while V is heard), plus its own crossfade reads (72 at most). No grain
     makes more than two frames, and V leaves once.
@@ -442,6 +488,18 @@ develop's own figures, measured with these functions, within the margins stated 
     76 to 126 at 384 kHz (40).
   - On 0b3d7cc the grain where the clock leapt computed everything up to the new place at once: 203 to 1508 samples
     (0.36 to 9.7 million multiplies). The test failed there.
+  - **Past the end of the audio:**
+    - The same work bound holds: 0 to 8 samples in a grain, at most one frame.
+    - V leaves once, over a grain. On 9a7c696 V stopped at once there, without counting a leave, and the test fails
+      on that count.
+    - The output falls silent at the same frame as develop's. From there on it is develop's, bit for bit. With the
+      jump that is from the first frame after it, so there the test checks only the work and the leave.
+    - The audio rendered on the code before was the same, bit for bit (measured once with a hash; the test does not
+      run that code). The clock stays past the end, where the voice plays nothing, so the step a review predicted
+      there cannot be heard.
+    - The step into that silence is develop's own cut, so it is not compared with develop's. Its size is where the tone
+      is in its cycle at that frame, and V's phase differs from the grains'. Measured: 0.39 against develop's 0.35 at
+      48 kHz, 0.006 against 0.012 at 192 kHz, and 0.40 against 0.19 at 384 kHz.
 - `samples_near_the_largest_float_leave_nothing_behind`: one sample of 3e38, sixteen of plus and minus 3e38, and
   sixteen that are not numbers, in a 55 Hz tone, unshifted and at +7.
   - The output stays finite.
@@ -471,19 +529,22 @@ Existing suites all pass, release and debug:
 
 ## Final verification
 
-Run on 87247e7. Its code is that of 864d396; 87247e7 changes only comments.
+Run on ba59e20, the final code.
 
 - `cargo fmt --all -- --check`: clean.
-- `cargo test --locked --workspace --no-fail-fast`, debug: 98 test programs; 2083 passed, 0 failed, 99 ignored.
-- `selected_real_100bar_fourtrack_resource_budget` (`audio_resources`, ignored, release): passed in 2.95 s.
+- `cargo test --locked --workspace --no-fail-fast`, debug: 98 test programs; 2084 passed, 0 failed, 99 ignored.
+- `selected_real_100bar_fourtrack_resource_budget` (`audio_resources`, ignored, release): passed in 3.01 s.
 - The five `audio_backing*` suites in release, all passed:
   - `audio_backing` 6;
   - `audio_backing_alignment` 12;
-  - `audio_backing_bass` 10, with 3 ignored tables;
+  - `audio_backing_bass` 11, with 3 ignored tables;
   - `audio_backing_realtime` 7;
   - `audio_backing_stretch` 9, with 2 ignored tables.
 - Two compiler warnings come from develop's code, not this branch: `list_inputs` is unused in a release build, and a
   `mut` in `audio_backing_stretch.rs` is not needed.
+- The listening clips were rendered again from ba59e20 into a separate folder for a check. All 28 are byte-identical
+  to the clips in `stretch2-listen`, so the changes since 87247e7 do not change the output for the synthetic signals,
+  and the clips were not replaced.
 
 ## Review
 
@@ -506,6 +567,18 @@ A fresh-context, read-only reviewer was briefed to break the change.
    in 864d396.
 4. **864d396: approved.** Its two nits are fixed in 87247e7: the ceiling is now stated as 1096 samples, and a comment
    is rewrapped.
+5. **A further fresh review of 0b3d7cc..9a7c696: changes needed.**
+   - V stopped at once when the clock leapt far past the audio.
+   - The note overstated the cap on the scan's budget.
+   - No test failed without the frame made again when V comes back.
+   - The hand-over bounds should be relative to develop where that is honest.
+
+   All addressed in 6919987. The leap far past the audio turned out not to be audible: the output there is develop's,
+   bit for bit, with or without the leave (see the leap test). The leave was made anyway, so V leaves over a grain
+   everywhere.
+6. **6919987: approved by a new reviewer.** It had two suggestions: keep the 55 Hz count bound at this branch's own
+   value, and bound the deepest single position in the new test. Both are in ba59e20, which the same reviewer
+   approved.
 
 ## Limits
 
@@ -528,8 +601,8 @@ A fresh-context, read-only reviewer was briefed to break the change.
   - The scan's budget always covers what a clock V follows needs, so it cannot fall behind for good.
 - **A clock that leaps without a seek while V is heard** makes V leave over that grain, from what its last frame
   carries, and the bass is develop's until the scan has caught up. Such a leap is a sync map steeper than 8 times the
-  neutral speed, which the anchors allow, or a jump. The leap test covers a steep map and a jump; nothing else about
-  how often real maps do this was measured.
+  neutral speed, which the anchors allow, or a jump. The leap test covers a steep map and a jump, each also landing
+  past the end of the audio, where the voice is silent; nothing else about how often real maps do this was measured.
 - **Near attacks the low band is the grains'.** That covers:
   - about 8 ms after a low attack;
   - where a frame they would hear reads across one;
@@ -537,13 +610,25 @@ A fresh-context, read-only reviewer was briefed to break the change.
 
   Below 40% of the speed the grains hear only whole windows, so the bass is develop's for about 96 ms of source after
   each low attack (0.27 to 0.96 s of playing at 10 to 35%).
-- **Hand-overs below about 94 Hz dip for a moment.** Where V hands the low band to the grains, or takes it back, a tone
-  the grains cannot splice coherently is carried at phases that disagree. The hand-over test measured, in 10 ms
-  windows:
-  - 82.4 Hz: down to -2.89 dB (develop: -0.78 dB);
-  - 55 Hz: down to -6.45 dB, with 8 windows of 507 under -3 dB (develop: -4.83 dB, 25 windows).
+- **Hand-overs below about 94 Hz dip for a moment, deeper than develop's.** Where V hands the low band to the grains,
+  or takes it back, a tone the grains cannot splice coherently is carried at phases that disagree, and the hand-over
+  crossfades the two. Measured in 10 ms windows at the tone's own pitch:
+  - **Notes with the speed changing** (the hand-over test):
+    - 82.4 Hz: down to -2.89 dB (develop: -0.78 dB);
+    - 55 Hz: down to -6.45 dB, with 8 windows of 507 under -3 dB (develop: -4.83 dB, 25 windows).
+  - **V out for one grain** soon after an attack (45% with one grain at 35%, at 30 positions):
+    - on average shallower than develop: the mean of the deepest windows is -1.39, -3.99 and -6.26 dB at 61.7, 55 and
+      41.2 Hz, against develop's -3.89, -4.74 and -7.41 dB;
+    - at single positions far deeper: -7.50, -11.95 and -24.49 dB, against develop's -3.95, -4.92 and -8.75 dB at
+      worst;
+    - the deep dips last about one 10 ms window.
 
-  Whether that is audible has not been checked.
+  Whether they are audible needs the owner's ear. The bounds the tests hold for these dips are this branch's own
+  measured values. Two are also compared with develop: the count of windows under -3 dB, and the mean over the 30
+  positions.
+- **At the end of the audio** the voice falls silent at once, as develop's does. The size of that cut is where the tone
+  is in its cycle at that frame, and V's phase differs from the grains'. So at a given frame it can be larger or
+  smaller than develop's: 0.40 against 0.19 at 384 kHz in the leap test, and 0.006 against 0.012 at 192 kHz.
 - **Not measured:**
   - **Note changes without an attack.** A legato or slid bass note change, a hammer-on, or a sustained synth bass
     changing note at a steady level never triggers the attack detector. V's 170 ms frame then spans both notes, so the

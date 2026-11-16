@@ -28,7 +28,7 @@ Evidence:
   to a point in the bounds lookup's own space (system chosen by `y`, then the beat or notehead of the staff whose bar contains the point, preferring the given lane among voices).
 - `src/ScoreView.tsx`: the press position is recorded by the existing capture handler. For `beatMouseDown`, when `hitTestBounds` finds a beat in a **different bar** than the one alphaTab
   reported, that staff's beat (and the note under the point, if any) is passed to `downBeat`/`downNote` instead, and alphaTab's own `noteMouseDown` for that press is ignored. When the
-  bar is the same, nothing changes at all (the same events, the same arguments), so the active-track behaviours (string from the click's y, shift-click, drag, double and triple click,
+  bar is the same, nothing changes at all (the same events, the same arguments), so the active-track behaviours (string from the note under the click, shift-click, drag, double and triple click,
   click-to-seek and its coalescing, the count-in and loop refusals) run through the same code as before. A drag in the continuous layouts also reads its beat through
   `hitTestBounds` (preferring the drag's lane), falling back to alphaTab's lookup. The page layouts, `physicalDown` and everything under `src-tauri` are untouched; no edit type,
   schema or text changed. Systems painted lazily are not a factor: the lookup is layout geometry, not painted SVG.
@@ -46,7 +46,7 @@ Results are in the final section below.
 ## Limits
 
 - The driver runs on the small generated score (three tab-only tracks); the large one was not re-run for this section. Standard-notation staves and the second staff of one track
-  are covered by the unit test only, not by a real-app click. A click in the gap between two staves of different tracks keeps alphaTab's answer (the top staff's beat), as before.
+  are covered by the unit test only, not by a real-app click. Each staff's box includes the bands drawn above and below its lines (effects, chord names), so a click there goes to that staff; only a click in the bare padding between two staves keeps alphaTab's answer (the top staff's beat), as before. A redirected click that is not on a note keeps the current string. In the horizontal strip a drag now tests every bar of the score on each mouse move; its cost on a large score was not measured.
 - Drag selection across a lower track in the real app was not exercised; it is covered only by the unchanged `ScoreView.test.tsx` mocks and reasoning.
 - The page layouts were driven at 60 % only for the new section (at 100 % the third track does not fit the pane).
 - No ScoreView-level unit test of the redirect exists (the existing ScoreView tests use a mocked alphaTab); the driver is its proof.

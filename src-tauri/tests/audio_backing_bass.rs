@@ -441,7 +441,7 @@ fn solve(columns: &[Vec<f64>], w: &[f64], x: &[f64]) -> Vec<f64> {
 /// The frequency near `nominal` that a single sine fits `x` best at.
 fn peak(x: &[f64], nominal: f64) -> f64 {
     let mut best = (f64::INFINITY, nominal);
-    let mut search = |from: f64, to: f64, step: f64, best: &mut (f64, f64)| {
+    let search = |from: f64, to: f64, step: f64, best: &mut (f64, f64)| {
         let mut f = from;
         while f <= to + 1e-9 {
             let (_, residual) = fit(x, &[f]);
@@ -764,8 +764,7 @@ fn stereo_reference() -> (f64, f64, f64) {
 
 /// (d) White noise through the stretcher: band power against the source (dB) in 30-150, 150-500, 500-4000 and
 /// 4000-16000 Hz, and the change of spectral flatness over 100-16000 Hz (dB, negative is more coloured).
-fn noise_row(speed: f64) -> ([f64; 4], f64) {
-    let frames = 480_000;
+fn noise_row(speed: f64, frames: usize) -> ([f64; 4], f64) {
     let source = white(frames, 0x7777_1234, 0.3);
     let out_frames = ((frames - 48_000) as f64 / speed) as usize;
     let out = run(&mono(&source), speed, 0, out_frames);
@@ -872,7 +871,7 @@ fn scorecard() {
     }
     // (d)
     for &s in &SPEEDS {
-        let (bands, flat) = noise_row(s);
+        let (bands, flat) = noise_row(s, 480_000);
         eprintln!(
             "D {s}: noise bands dB {:+.2} {:+.2} {:+.2} {:+.2} flatness change {:+.2} dB",
             bands[0], bands[1], bands[2], bands[3], flat
@@ -1040,4 +1039,263 @@ fn cost_of_a_second_of_audio() {
             runs[2], runs[0], runs[4]
         );
     }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The scorecard's rows as tests. The bass rows fail on develop (its figures are in the validation note); the others hold
+// develop's own figures, measured with these same functions, within the margins stated.
+
+/// (a, b) A sustained low sine or pair keeps its pitch, its level and its steadiness at every practice speed. On develop
+/// a sine below 94 Hz comes out at its pitch times the speed (0 dB of it at the tone at several speeds) and the pairs
+/// swing 12 to 39 dB.
+#[test]
+fn sustained_low_tones_keep_their_pitch_level_and_steadiness() {
+    // The largest swing (dB), level error (dB) and share off the tones (dB) allowed. This branch measures at most 0.00 dB,
+    // 0.00 dB and -74 dB for the sines; 0.07, 0.03 and -50 for 55 + 82 Hz; 1.25, -0.62 and -26 for 41 + 62 Hz (1.75 bins
+    // of the vocoder apart, the closest pair it resolves).
+    let limits = [
+        (0.5, 0.5, -60.0),
+        (0.5, 0.5, -60.0),
+        (0.5, 0.5, -60.0),
+        (1.0, 0.5, -40.0),
+        (2.5, 1.0, -20.0),
+    ];
+    for ((name, set), (swing, level, off)) in low_sets().into_iter().zip(limits) {
+        for &speed in &SPEEDS {
+            let q = steady(speed, 0, &set);
+            assert!(
+                q.swing_db <= swing && q.level_db.abs() <= level && q.off_tone_db <= off,
+                "{name} at {speed}: swing {:.2} dB, level {:+.2} dB, off the tones {:.1} dB",
+                q.swing_db,
+                q.level_db,
+                q.off_tone_db
+            );
+        }
+    }
+}
+
+/// (a) The low band keeps its power, at its own pitch, for tones and for signals with attacks. On develop at 50% the
+/// 41 Hz sine keeps -34 dB of it at its pitch, the bass line -3.1 dB, the mix -2.8 dB.
+#[test]
+fn the_low_band_keeps_its_power_at_its_own_pitch() {
+    let seconds = 5.0;
+    let frames = (seconds * SR) as usize + 48_000;
+    let signals: Vec<(&str, Vec<f64>)> = vec![
+        ("sine41", tones(&[(41.2, 0.5)], frames)),
+        ("pair41+62", tones(&[(41.2, 0.3), (61.7, 0.3)], frames)),
+        ("bassnotes", bass_notes(frames)),
+        ("kick+note", kicks(24, 0.15).0),
+        ("mix", mix(frames)),
+    ];
+    for (name, source) in &signals {
+        for speed in [0.5, 0.75] {
+            let (power, matched) = low_band_ratio(source, speed, seconds);
+            assert!(
+                power.abs() <= 1.0 && matched >= -1.0,
+                "{name} at {speed}: power {power:+.2} dB, at its pitch {matched:+.2} dB"
+            );
+        }
+    }
+}
+
+/// (c) Develop's hits at 50, 60, 75 and 90%: pre-echo (dB; -300 is none at all), attack (ms) and onset error (ms) of the
+/// kick in the full band and below 150 Hz, of the beater click over a note above 500 Hz, of a drum hit and of a plucked
+/// 82 Hz note.
+const DEVELOP_HITS: [[(f64, f64, f64); 5]; 4] = [
+    [
+        (-7.9, 1.52, -3.73),
+        (-25.3, 7.33, -4.00),
+        (1.0, 1.21, -6.60),
+        (-4.8, 0.88, -3.33),
+        (-8.3, 1.23, -3.33),
+    ],
+    [
+        (-10.6, 1.48, -2.10),
+        (-44.3, 7.10, -2.42),
+        (3.0, 8.48, -10.88),
+        (-8.3, 2.67, -2.08),
+        (-13.3, 16.12, -2.10),
+    ],
+    [
+        (-29.3, 1.65, -0.65),
+        (-112.1, 7.04, -0.90),
+        (0.1, 8.48, -8.06),
+        (-9.4, 0.88, -0.67),
+        (-14.1, 1.17, -0.67),
+    ],
+    [
+        (-300.0, 1.54, -0.08),
+        (-300.0, 7.02, -0.27),
+        (13.2, 1.06, -6.15),
+        (-300.0, 1.77, -0.27),
+        (-300.0, 2.52, -0.27),
+    ],
+];
+
+/// (c) Attacks are no more smeared, early or doubled than on develop: pre-echo at most 1 dB more (or under -60 dB), the
+/// attack at most 0.5 ms slower and the onset within 0.5 ms of develop's.
+#[test]
+fn transients_are_no_worse_than_before() {
+    let (kick_src, kick_onsets) = kicks(8, 0.0);
+    let (over_src, over_onsets) = kicks(8, 0.15);
+    let (drum_src, drum_onsets) = hits(true);
+    let (pluck_src, pluck_onsets) = hits(false);
+    let names = [
+        "kick",
+        "kick below 150 Hz",
+        "click over a note",
+        "drum",
+        "pluck",
+    ];
+    for (row, &speed) in SPEEDS.iter().enumerate() {
+        let measured = [
+            hit(&kick_src, &kick_onsets, speed, 0, None, 10, 30),
+            hit(
+                &kick_src,
+                &kick_onsets,
+                speed,
+                0,
+                Some((150.0, false)),
+                20,
+                60,
+            ),
+            hit(
+                &over_src,
+                &over_onsets,
+                speed,
+                0,
+                Some((500.0, true)),
+                10,
+                30,
+            ),
+            hit(&drum_src, &drum_onsets, speed, 0, None, 10, 30),
+            hit(&pluck_src, &pluck_onsets, speed, 0, None, 10, 30),
+        ];
+        for ((m, &(pre, attack, lag)), name) in measured.iter().zip(&DEVELOP_HITS[row]).zip(names) {
+            assert!(
+                m.pre_echo_db <= (pre + 1.0).max(-60.0)
+                    && m.attack_ms <= attack + 0.5
+                    && (m.lag_ms - lag).abs() <= 0.5,
+                "{name} at {speed}: pre-echo {:.1} dB, attack {:.2} ms, onset {:+.2} ms (develop {pre}, {attack}, {lag})",
+                m.pre_echo_db,
+                m.attack_ms,
+                m.lag_ms
+            );
+        }
+    }
+}
+
+/// (d) Develop's noise row at 50, 60, 75 and 90% from 4 s of noise: band power against the source (dB) in 150-500,
+/// 500-4000 and 4000-16000 Hz, and the change of flatness (dB).
+const DEVELOP_NOISE: [([f64; 3], f64); 4] = [
+    ([-0.69, -0.64, -2.09], -0.11),
+    ([-1.38, -1.40, -2.67], -0.08),
+    ([-0.34, -0.34, -1.14], -0.03),
+    ([-1.49, -1.34, -2.67], -0.11),
+];
+
+/// (d) Noise keeps its mid and high bands and its flatness as on develop (within 0.25 dB and 0.05 dB), and its lowest
+/// band within 1 dB of the source (develop loses 0.7 to 2.0 dB there).
+#[test]
+fn noise_keeps_its_bands_and_flatness() {
+    for (row, &speed) in SPEEDS.iter().enumerate() {
+        let (bands, flat) = noise_row(speed, 192_000);
+        let (develop, develop_flat) = DEVELOP_NOISE[row];
+        assert!(
+            bands[0] >= -1.0
+                && bands[1..]
+                    .iter()
+                    .zip(develop)
+                    .all(|(b, d)| (b - d).abs() <= 0.25)
+                && flat >= develop_flat - 0.05,
+            "at {speed}: bands {bands:?} dB, flatness {flat:+.2} dB (develop {develop:?}, {develop_flat})"
+        );
+    }
+}
+
+/// (e) Develop's worst burst errors (ms) at 50, 60, 75 and 90%: 1 kHz bursts of 40 and 200 ms and noise bursts of 40 ms.
+const DEVELOP_BURSTS: [[f64; 3]; 4] = [
+    [-0.25, -0.01, -1.95],
+    [-0.35, -0.08, -1.99],
+    [-0.24, -0.00, -3.50],
+    [-0.19, -0.04, 1.68],
+];
+
+/// (e) Bursts sit on the score clock as on develop (within 0.25 ms), and a 200 ms burst of 55 Hz within 2.5 ms of it
+/// (develop: 2.0 to 5.4 ms early).
+#[test]
+fn bursts_stay_on_the_score_clock() {
+    for (row, &speed) in SPEEDS.iter().enumerate() {
+        let measured = [
+            worst(&burst_errors(speed, 1_000.0, 1_920, 8)),
+            worst(&burst_errors(speed, 1_000.0, 9_600, 6)),
+            worst(&burst_errors(speed, 0.0, 1_920, 8)),
+        ];
+        for (m, d) in measured.iter().zip(DEVELOP_BURSTS[row]) {
+            assert!(
+                m.abs() <= d.abs() + 0.25,
+                "at {speed}: {measured:?} ms (develop {:?})",
+                DEVELOP_BURSTS[row]
+            );
+        }
+        let low = worst(&burst_errors(speed, 55.0, 9_600, 6));
+        assert!(low.abs() <= 2.5, "55 Hz at {speed}: {low:+.2} ms");
+    }
+}
+
+/// (f) Develop's coherence of the 500-4000 Hz band (the grains' own) at 50, 60, 75 and 90%.
+const DEVELOP_MID_COHERENCE: [f64; 4] = [0.3728, 0.3726, 0.3719, 0.3784];
+
+/// (f) Channels that are proportional stay exactly so, the low band keeps its inter-channel coherence and phase and its
+/// mono sum, and the mid band its coherence as on develop.
+#[test]
+fn the_stereo_image_and_the_mono_sum_are_kept() {
+    let (low, _, mono) = stereo_reference();
+    for (row, &speed) in SPEEDS.iter().enumerate() {
+        let s = stereo(speed, 0);
+        assert!(
+            s.proportional_error == 0.0
+                && s.phase_error_deg.abs() <= 0.5
+                && (s.low_coherence - low).abs() <= 0.002
+                && (s.low_mono_db - mono).abs() <= 0.1
+                && (s.mid_coherence - DEVELOP_MID_COHERENCE[row]).abs() <= 0.005,
+            "at {speed}: proportional error {:.2e}, phase error {:+.2} deg, low coherence {:.4} (source {low:.4}), low mono {:+.2} dB (source {mono:+.2}), mid coherence {:.4}",
+            s.proportional_error,
+            s.phase_error_deg,
+            s.low_coherence,
+            s.low_mono_db,
+            s.mid_coherence
+        );
+    }
+}
+
+/// No level jump when the speed changes while playing: a steady 55 Hz sine at 75%, then 100%, then 75% again, then 100%,
+/// its level in every 20 ms within 1 dB of the source's. This branch stays within 0.05 dB; develop swings by 1.4 dB at 75%
+/// alone. Handing the low band from the vocoder back to the grains in the middle of a sustained tone would cancel it for a
+/// moment (by 9 dB here), because the two carry it at different phases.
+#[test]
+fn changing_the_speed_while_playing_makes_no_level_jump() {
+    let source: Vec<[f32; 2]> = tones(&[(55.0, 0.5)], 400_000)
+        .iter()
+        .map(|&v| [v as f32; 2])
+        .collect();
+    let mut voice = voice(source, 0);
+    voice.seek(0.0);
+    let mut clock = 0.0;
+    let mut out = Vec::new();
+    for (speed, frames) in [(0.75, 72_000), (1.0, 48_000), (0.75, 72_000), (1.0, 24_000)] {
+        for _ in 0..frames {
+            clock += speed / SR;
+            out.push(f64::from(voice.next_frame(clock)[0]));
+        }
+    }
+    let levels: Vec<f64> = out[12_000..]
+        .chunks_exact(960)
+        .map(|w| {
+            let (c, _) = fit(w, &[55.0]);
+            20.0 * (c[0].0.hypot(c[0].1) / 0.5).log10()
+        })
+        .collect();
+    let worst = worst(&levels);
+    assert!(worst.abs() <= 1.0, "worst 20 ms level {worst:+.2} dB");
 }

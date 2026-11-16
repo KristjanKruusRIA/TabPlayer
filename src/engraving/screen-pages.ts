@@ -140,8 +140,27 @@ export function unmapScreenPoint(pagination:ScreenPagination,arrangement:ScreenP
 }
 
 export function hitTestScreenPages(pagination:ScreenPagination,arrangement:ScreenPageArrangement,point:ScreenPoint,preferredLane?:{track:number;staff:number;voice:number}):ScreenPageHit|null {
-  const hit=unmapScreenPoint(pagination,arrangement,point);if(!hit)return null;
-  const {system,point:source}=hit,notes:ScreenPageHit[]=[],beats:ScreenPageHit[]=[];
+  const hit=unmapScreenPoint(pagination,arrangement,point);
+  return hit?hitTestSystem(hit.system,hit.point,preferredLane):null;
+}
+
+/**
+ * The beat, and the note if the point is on one, under a point in the bounds lookup's own space (the continuous layouts). Unlike alphaTab's `getBeatAtPos`, which uses y only to pick the system and then
+ * the first staff whose bar spans x, this reads y against every staff's bar, so a click on a lower track or a second staff answers with that staff's beat. Null where no bar holds the point.
+ */
+export function hitTestBounds(bounds:ScreenBounds,point:ScreenPoint,preferredLane?:{track:number;staff:number;voice:number}):ScreenPageHit|null {
+  if(![point.x,point.y].every(Number.isFinite))return null;
+  for(const system of bounds.staffSystems??[]) {
+    const box=system.realBounds;
+    if(point.y<box.y||point.y>=box.y+box.h)continue;
+    const hit=hitTestSystem(system,point,preferredLane);
+    if(hit)return hit;
+  }
+  return null;
+}
+
+function hitTestSystem(system:ScreenSystem,source:ScreenPoint,preferredLane?:{track:number;staff:number;voice:number}):ScreenPageHit|null {
+  const notes:ScreenPageHit[]=[],beats:ScreenPageHit[]=[];
   // Actual noteheads take precedence over the broad beat rectangles of another voice.
   for(const master of system.bars)for(const bar of master.bars)for(const beat of bar.beats) {
     for(const note of beat.notes??[])if(contains(note.noteHeadBounds,source))notes.push({system,beat:beat.beat,note:note.note});

@@ -21,7 +21,7 @@ import {wantsAutoFit} from './engraving/auto-fit';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
 import {passageBands,type PassageBar} from './engraving/passage-bands';
 import type {LoopBar,LoopPassage} from './audio/loop-passage';
-import {arrangeScreenPages,beatSpanOf,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenBounds,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
+import {arrangeScreenPages,beatSpanOf,hitTestBounds,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenBounds,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
 import {accoladeMetrics,accoladeSvg,configureAccolades,planAccolades,systemAccoladeMarks,type AccoladeMetrics,type AccoladePlan} from './engraving/accolades';
 import {composeScreenChunks,shiftTotal,staffLeftOf,systemTrackBands} from './engraving/staff-layout';
@@ -255,7 +255,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     prevFit.current={mode:fitMode,layout:display.layout};
   },[fitMode,display.layout]);
   const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop};
-  const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null),published=useRef<MusicSelection|null>(null);
+  const modifiers=useRef({shift:false,toggle:false,detail:0}),pressPoint=useRef<{x:number;y:number}|null>(null),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null),published=useRef<MusicSelection|null>(null);
   const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
   const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{}),refreshLoop=useRef(()=>{});
@@ -487,7 +487,18 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
       if(index>=0)selected.splice(index,1);else selected.push({target:point,noteIndex:source.index});anchor.current=point;drag.current=null;publish(selected.length?{kind:'notes',notes:selected}:null);
     };
     pointerActions.current={downBeat,downNote,move};
-    const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
+    /** alphaTab picks the beat under a press from x alone once y has found the system, so a press on a lower track or a second staff answers with the top staff's beat. Where the press is in another staff's bar, that staff's beat and note stand in for it. */
+    const lookupAt=(clientX:number,clientY:number,lane=current.current.editTarget)=>{
+      const lookup=view.boundsLookup;if(!lookup||presentation.current.physical||layoutCurrent.current.sourcePhysical)return null;
+      const canvas=view.uiFacade.getOffset(null,view.canvasElement);
+      return hitTestBounds(lookup,{x:clientX+window.scrollX-canvas.x,y:clientY+window.scrollY-canvas.y},lane);
+    };
+    let redirected=false;
+    const downPressed=(beat:model.Beat)=>{
+      const press=pressPoint.current,hit=press?lookupAt(press.x,press.y):null,other=hit&&hit.beat.voice.bar!==beat.voice.bar?hit:null;
+      redirected=!!other;downBeat(other?other.beat:beat);if(other?.note)downNote(other.note);
+    };
+    const subscriptions=[view.beatMouseDown.on(downPressed),view.noteMouseDown.on(note=>{if(!redirected)downNote(note);}),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
       collecting=true;chunks=[];layoutPartials.current=[];failedPieces.current=new Set();paintedPieces.current=new Set();generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setLoopBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
     }),view.renderer.partialLayoutFinished.on(event=>{
       layoutPartials.current.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex});
@@ -508,7 +519,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
       if(view.settings.core.enableLazyLoading){paintVisible(view);scheduleAheadRef.current(view);}
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
-      if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
+      if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=lookupAt(event.clientX,event.clientY,drag.current.anchor)?.beat??view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
     };
     const mouseUp=()=>{drag.current=null;};document.addEventListener('mousemove',mouseMove);document.addEventListener('mouseup',mouseUp);
     return ()=>{unhookCheck();emptied?.disconnect();for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);adapter.dispose();playbackPresentation.current=null;roots.current.clear();view.destroy();api.current=null;loaded.current=null;};
@@ -738,7 +749,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   const loopKey=loop?JSON.stringify(loop.bars):'';
   useEffect(()=>{refreshLoop.current();},[loopKey,score,track,zoom,profile,projection,visibleTracks,playback]);
   useEffect(()=>{refreshDiagrams.current();},[score,track,zoom,profile,projection,visibleTracks]);
-  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0||(event.target instanceof Element&&event.target.closest('.score-bar-handle,.score-symbol-popover,.score-scale-diagram')))return;
+  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{pressPoint.current={x:event.clientX,y:event.clientY};if(event.button!==0||(event.target instanceof Element&&event.target.closest('.score-bar-handle,.score-symbol-popover,.score-scale-diagram')))return;
     // In entry mode a click on a notation staff writes there; anywhere else it selects as usual.
     const entry=entering.current,hit=entry&&!event.ctrlKey&&!event.metaKey&&!event.altKey?entryHitAt(event.clientX,event.clientY):null;
     if(entry&&hit){event.preventDefault();event.stopPropagation();event.currentTarget.focus({preventScroll:true});drag.current=null;setGhost(null);entry.onHit(hit.target,hit.step,{chord:event.shiftKey});return;}event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};

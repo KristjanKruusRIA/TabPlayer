@@ -72,11 +72,13 @@ const MAX_RATIO: f64 = 8.0;
 /// at its usual radius); further, the search radius is at its cap and a frame would not span what the grains read.
 const MOST_READ: f64 = 32.0;
 /// The attack scan computes at most this many multiplies of the low-pass per grain (about 0.1 ms), or what keeps it up
-/// with a clock V follows (see `prepare`) where that is more. A seek, a loop or a return from the neutral speed into audio
+/// with a clock V follows where that is more (see `prepare`; at most 1112 decimated samples, which for the longest
+/// low-pass is 7 million multiplies, only at 8 times the neutral speed with a file at 16 times the output rate). A seek, a loop or a return from the neutral speed into audio
 /// the low band has not seen needs some 850 decimated samples before V can come in, which at once take 0.5 ms of one
 /// device callback at 48 kHz and 2.3 ms for a 192 kHz file an octave up. V comes in once the scan has caught up
-/// instead, which it has in the 3rd to 7th grain after a seek at 44.1 and 48 kHz (16 to 37 ms of output) and in the 10th
-/// or 11th for files at 96 kHz and more an octave up (53 to 59 ms); the grains keep their own low band until then.
+/// instead, which it has in the 3rd to 7th grain after a seek at 44.1 and 48 kHz (16 to 37 ms of output), the 13th or 14th
+/// for a 96 kHz file an octave up (69 to 75 ms) and the 20th to 31st for files at 192 and 384 kHz an octave up (107 to
+/// 165 ms); the grains keep their own low band until then.
 const CATCH_UP: usize = 1 << 18;
 /// Where a low-pass sum comes out larger than any sum of audio within this (+12 dBFS) can (`most`), or not a number, the
 /// low band takes it again from the samples clipped at this, far above what a decoder gives for real audio. A damaged or
@@ -330,7 +332,7 @@ impl LowBand {
         let far = 2.0 * (N as f64) * self.d + MAX_AIM;
         // The grain before may have been out there (a map steep enough sends the clock beyond any index and back within
         // a grain): V was out then, and this grain does not read on from it.
-        let out = far + MAX_AIM + self.radius;
+        let out = far + MAX_AIM + self.radius + 64.0;
         if !(clock > source.first as f64 - far && clock < source.end as f64 + far)
             || previous
                 .is_some_and(|p| !(p > source.first as f64 - out && p < source.end as f64 + out))
@@ -384,17 +386,19 @@ impl LowBand {
         );
         // The attacks are needed wherever the frames or the grains read, only while V may stay in. The scan spreads its
         // work over grains (see CATCH_UP), in every grain; what the frames and the grains read lies in what it has
-        // computed once it has caught up. While the clock moves at a speed V follows, the scan's end moves on by at most
-        // twice what the clock moves over a grain and by what the change of speed moves it, and finding an attack
-        // computes ATTACK_SEARCH + RISE_AHEAD samples ahead of it at once: a grain may always compute that much, so that
-        // V leaves only where the clock leapt.
+        // computed once it has caught up. The scan's end moves on by at most twice what the clock moves over a grain, and
+        // the scan may always compute that much. While V is heard and the clock moves at a speed V follows (changing at
+        // most once in a grain), it moves on also by what the change of speed moves it, and finding an attack computes
+        // ATTACK_SEARCH + RISE_AHEAD samples ahead of it at once: such a grain may compute that much too (`before` is
+        // then the last grain's rate), so that V leaves only where the clock leapt. Under MOST_READ and MAX_RATIO this
+        // is never more than 1112 samples.
         let moved = |rate: f64| (HOP as f64 * rate / self.d).ceil() as usize;
-        let limit = self.catch_up.max(
-            2 * moved(self.rate)
-                + 2 * moved((self.rate - before).abs())
-                + (ATTACK_SEARCH + RISE_AHEAD) as usize
-                + 16,
-        );
+        let heard = if active && self.alpha > 0.0 {
+            2 * moved((self.rate - before).abs()) + (ATTACK_SEARCH + RISE_AHEAD) as usize
+        } else {
+            0
+        };
+        let limit = self.catch_up.max(2 * moved(self.rate) + 16 + heard);
         let ready = if active {
             self.scan(
                 source,

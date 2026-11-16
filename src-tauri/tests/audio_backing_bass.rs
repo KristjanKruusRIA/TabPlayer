@@ -1077,10 +1077,10 @@ fn cost_of_a_second_of_audio() {
                 })
                 .collect();
             runs.sort_by(f64::total_cmp);
-            // The first 8192 output frames after a seek (32 grains, 171 ms of audio: the low band's scan of the attacks
-            // catching up, its first frames, and the grain V comes in at, which is the 10th or 11th for the files at 192
-            // and 384 kHz), median of 41 seeks, against the same frames a second later; and the slowest of their 64 128-frame
-            // blocks (one device callback of 2.67 ms at 48 kHz), median and worst of 41. The seeks jump 4.8 s (or back
+            // The first 16384 output frames after a seek (64 grains, 341 ms of audio: the low band's scan of the attacks
+            // catching up, its first frames, and the grain V comes in at, which is the 20th to 31st for the files at 192
+            // and 384 kHz), median of 41 seeks, against the same frames from 47 000 frames after the seek; and the slowest
+            // of their 128 128-frame blocks (one device callback of 2.67 ms at 48 kHz), median and worst of 41. The seeks jump 4.8 s (or back
             // 10.4 s), so that nothing the low band computed before is near: a cold start. Also the most decimated samples
             // of the low-pass and frames of V any one grain made, counted, in each window.
             let mut after_seek = Vec::new();
@@ -1096,7 +1096,7 @@ fn cost_of_a_second_of_audio() {
                 let mut m = 0usize;
                 for (window, (untimed, times, blocks)) in [
                     (0usize, &mut after_seek, &mut block_after),
-                    (47_000, &mut steady, &mut block_later),
+                    (30_616, &mut steady, &mut block_later),
                 ]
                 .into_iter()
                 .enumerate()
@@ -1107,7 +1107,7 @@ fn cost_of_a_second_of_audio() {
                     }
                     voice.low_band_work();
                     let (mut total, mut slowest) = (0.0f64, 0.0f64);
-                    for _ in 0..64 {
+                    for _ in 0..128 {
                         let started = std::time::Instant::now();
                         for _ in 0..128 {
                             sum += voice.next_frame(at + m as f64 * speed / SR)[0];
@@ -1135,7 +1135,7 @@ fn cost_of_a_second_of_audio() {
             }
             let rate_khz = f64::from(rate) / 1e3;
             eprintln!(
-                "{} {rate_khz} kHz {speed}x key {shift}: {:.2} ms per second of audio (median of 5; min {:.2}, max {:.2}); 8192 frames after a seek {:.0} us, later {:.0} us (medians); slowest 128-frame block after a seek {:.0} us (worst {:.0}), later {:.0} us (worst {:.0}); most in a grain after a seek {} samples and {} frames, later {} and {}; voice built in {build_ms:.1} ms",
+                "{} {rate_khz} kHz {speed}x key {shift}: {:.2} ms per second of audio (median of 5; min {:.2}, max {:.2}); 16384 frames after a seek {:.0} us, later {:.0} us (medians); slowest 128-frame block after a seek {:.0} us (worst {:.0}), later {:.0} us (worst {:.0}); most in a grain after a seek {} samples and {} frames, later {} and {}; voice built in {build_ms:.1} ms",
                 if develop { "D" } else { "G" },
                 runs[2],
                 runs[0],

@@ -307,11 +307,12 @@ fn speed_changes_near_attacks_never_click() {
 /// last frame carries, making no frame at the new place, and comes back once the attack scan has caught up. At 48 kHz,
 /// and for files at 192 and 384 kHz an octave up, where the low-pass is longest. The work is counted, not timed: the most
 /// decimated samples of the low-pass computed and the most frames of V made in any one grain. No grain across the leap
-/// computes more than the worst grain after a cold seek, plus what a grain reads of the low band itself for its
-/// crossfade (twice 36 samples at most), nor makes more than two frames. Before this, the grain where the clock leapt
-/// computed everything up to the new place at once: 203 to 1508 samples here (0.36 to 9.7 million multiplies). The
-/// output stays finite, steps at most a quarter more than develop's grains do across the leap (this branch: 11% more at
-/// most), and the tone keeps its level at its own pitch before the leap and after.
+/// computes more than the worst grain after a cold seek, plus one attack's search, which a grain may always compute
+/// while V is heard (56 samples), plus what a grain reads of the low band itself for its crossfade (twice 36 at most),
+/// nor makes more than two frames; V leaves once. Before this, the grain where the clock leapt computed everything up to
+/// the new place at once: 203 to 1508 samples here (0.36 to 9.7 million multiplies). The output stays finite, steps at
+/// most a quarter more than develop's grains do across the leap (this branch: 13% more at most), and the tone keeps its
+/// level at its own pitch before the leap and after.
 #[test]
 fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
     // Score 0 to 1 s plays source 0 to 1 s; the next 10 ms of score play a whole second of source (100 times the speed,
@@ -392,11 +393,12 @@ fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
                 "{leap} at {rate} Hz, key shift {shift}: worst grain after the seek {seek_work} samples, {seek_frames} frames; across the leap {leap_work} samples, {leap_frames} frames, V left {leap_leaves} times; level before {level_before:+.2} dB, after {level_after:+.2} dB; largest step across {step:.5} (develop {develop_step:.5})"
             );
             assert!(
-                leap_work <= seek_work + 72
+                leap_work <= seek_work + 56 + 72
                     && seek_frames <= 2
                     && leap_frames <= 2
-                    && seek_leaves == 0,
-                "{leap} at {rate} Hz: {leap_work} samples and {leap_frames} frames in a grain (after a seek {seek_work}, {seek_frames})"
+                    && seek_leaves == 0
+                    && leap_leaves == 1,
+                "{leap} at {rate} Hz: {leap_work} samples and {leap_frames} frames in a grain, V left {leap_leaves} times (after a seek {seek_work}, {seek_frames})"
             );
             assert!(
                 level_before.abs() <= 0.1 && level_after.abs() <= 0.1,
@@ -505,6 +507,7 @@ fn a_grain_after_one_beyond_any_index_does_not_overflow() {
         );
     }
 }
+
 /// A damaged or hostile file may hold samples at the very top of what an f32 holds, or ones that are not numbers: sums of
 /// them overflow, and a finite one that large would be spread over every frame of V that spans it. The low band hears
 /// them clipped, so it carries nothing of them on: the output stays finite, it is out of range for no more output frames

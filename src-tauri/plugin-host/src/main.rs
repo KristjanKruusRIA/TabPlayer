@@ -11,9 +11,12 @@
 
 mod audio;
 mod core;
+mod notes;
 mod probe;
 mod session;
 mod stub;
+#[cfg(test)]
+mod test_alloc;
 
 #[cfg(windows)]
 mod editor;

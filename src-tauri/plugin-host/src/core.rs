@@ -5,7 +5,8 @@
 use crate::audio::PauseGate;
 use std::path::Path;
 use tabplayer_plugin_protocol::{
-    control::{ClassInfo, ErrorCode, HelperMessage, Mode, Rect},
+    control::{ClassInfo, ErrorCode, HelperMessage, Mode, PluginKind, Rect},
+    event::MidiEvent,
     ring::{BLOCK_FLAG_PLAYING, BlockMeta},
 };
 
@@ -55,20 +56,35 @@ pub trait BlockProcessor {
     /// Clears the plug-in's tails and delay lines: `setProcessing(false)`, and `true` again with the next block.
     fn reset(&mut self);
     /// Processes one block of `input.len()` frames (at most `BLOCK_FRAMES`) into `output`, with the transport state the
-    /// block carries. The output is silence when the plug-in fails. Nothing here may allocate or take a lock.
-    fn process(&mut self, input: &[[f32; 2]], output: &mut [[f32; 2]], ctx: &BlockMeta);
+    /// block carries and the note events the guard admitted for it (`NoteGuard`: only NoteOn and NoteOff, in offset order,
+    /// at most `MAX_BLOCK_EVENTS`; empty for an effect, which ignores them whatever they are). An instrument ignores
+    /// `input`. The output is silence when the plug-in fails. Nothing here may allocate or take a lock.
+    fn process(
+        &mut self,
+        input: &[[f32; 2]],
+        output: &mut [[f32; 2]],
+        ctx: &BlockMeta,
+        events: &[MidiEvent],
+    );
 }
 
 /// One plug-in, loaded. The helper holds exactly one.
 pub trait PluginCore: Sized {
-    /// The audio-effect classes of a bundle, at most 64, with names the protocol accepts.
+    /// The effect and instrument classes of a bundle, at most 64 in all, with names the protocol accepts.
     fn probe(bundle: &Path) -> Result<Vec<ClassInfo>, CoreError>;
-    /// Loads one class at `rate`. The plug-in is not processing yet.
-    fn load(bundle: &Path, class_id: &str, rate: u32, mode: Mode) -> Result<Self, CoreError>;
+    /// Loads one class at `rate`. The plug-in is not processing yet. The class must be of `kind`, the kind the app asked
+    /// for: a class of the other kind is refused as an unsupported layout.
+    fn load(
+        bundle: &Path,
+        class_id: &str,
+        rate: u32,
+        mode: Mode,
+        kind: PluginKind,
+    ) -> Result<Self, CoreError>;
     /// The process ID of the app, so closing an editor can hand it the foreground.
     fn set_app_pid(&mut self, _pid: u32) {}
     fn class(&self) -> &ClassInfo;
-    /// Whether the plug-in is mono-only, so the processor downmixes its input and duplicates its output.
+    /// Whether the plug-in is mono-only, so the processor downmixes its input (an effect) and duplicates its output.
     fn mono(&self) -> bool;
     /// The plug-in's latency in frames.
     fn latency(&self) -> u32;

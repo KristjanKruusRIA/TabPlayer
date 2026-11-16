@@ -29,7 +29,7 @@ use std::{
 };
 use tabplayer_plugin_protocol::{
     bundle::{ARCH_DIRS, bundle_binary, is_vst3_name},
-    control::ClassInfo,
+    control::{ClassInfo, PluginKind},
     limits::{MAX_CLASSES, MAX_NAME_CHARS, MAX_SUBCATEGORIES_CHARS, MAX_VERSION_CHARS},
     validate::{clean_text, valid_class_id, valid_name, valid_text, valid_vendor},
 };
@@ -499,12 +499,18 @@ fn locate(picked: &Path) -> Result<Located, LibraryError> {
 
 // ---- probe results -----------------------------------------------------------------------------------------------
 
-/// The classes of a probe result as the library keeps them: cleaned with the protocol's own cleaner (the helper's too),
-/// valid, each class ID once, at most [`MAX_CLASSES`]. The helper cleans, but this result crosses a process boundary, so
-/// it is not taken on trust.
+/// The kinds of plug-in the library offers. The helper's probe lists instruments too (they are hosted from the next slice
+/// of THE-218), but nothing in the app can use one yet, so a library that held them would offer a plug-in that cannot be
+/// put on a track. This is the one place that keeps them out: when instruments are offered, add `Instrument` here and
+/// nothing else in the library changes.
+const OFFERED_KINDS: &[PluginKind] = &[PluginKind::Effect];
+
+/// The classes of a probe result as the library keeps them: of an offered kind ([`OFFERED_KINDS`]), cleaned with the
+/// protocol's own cleaner (the helper's too), valid, each class ID once, at most [`MAX_CLASSES`]. The helper cleans, but
+/// this result crosses a process boundary, so it is not taken on trust.
 fn clean_classes(raw: Vec<ClassInfo>) -> Vec<ClassInfo> {
     let mut out: Vec<ClassInfo> = Vec::new();
-    for class in raw {
+    for class in raw.into_iter().filter(|c| OFFERED_KINDS.contains(&c.kind)) {
         let mut name = clean_text(&class.name, MAX_NAME_CHARS);
         if name.is_empty() {
             name = UNNAMED.into();
@@ -758,6 +764,28 @@ mod tests {
 
     fn ok(classes: Vec<ClassInfo>) -> impl FnOnce(&Path) -> Result<Vec<ClassInfo>, HelperError> {
         move |_| Ok(classes)
+    }
+
+    #[test]
+    fn instruments_are_not_offered_yet() {
+        let mut synth = class('B', "Synth");
+        synth.kind = PluginKind::Instrument;
+        synth.subcategories = "Instrument|Synth".into();
+        let kept = clean_classes(vec![class('A', "Amp"), synth.clone(), class('C', "Cab")]);
+        let names: Vec<_> = kept.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["Amp", "Cab"]);
+        assert!(kept.iter().all(|c| c.kind == PluginKind::Effect));
+        // A bundle that has nothing but instruments has no effects to add.
+        assert!(clean_classes(vec![synth]).is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let root = bundle(dir.path(), "Synths", b"module");
+        let mut only = class('D', "Only Synth");
+        only.kind = PluginKind::Instrument;
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
+        assert!(matches!(
+            library.add(&root, ok(vec![only])),
+            Err(LibraryError::NoEffects)
+        ));
     }
 
     #[test]

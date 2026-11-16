@@ -13,7 +13,7 @@ function confined(root, name) {
   if (rel === '..' || rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) || isAbsolute(rel)) throw new Error(`Path escapes source: ${name}`);
   return path;
 }
-const allowed = new Set(['sample','lokey','hikey','key','pitch_keycenter','lovel','hivel','seq_length','seq_position','volume','ampeg_attack','ampeg_release','loop_mode','loop_start','loop_end','trigger','pitch_keytrack','rt_decay','transpose','bend_up','bend_down','lfo02_pitch_oncc113','group','off_by','amplitude_curvecc29']);
+const allowed = new Set(['sample','lokey','hikey','key','pitch_keycenter','lovel','hivel','seq_length','seq_position','volume','ampeg_attack','ampeg_release','loop_mode','loop_start','loop_end','trigger','pitch_keytrack','rt_decay','transpose','bend_up','bend_down','lfo02_pitch_oncc113','group','off_by','amplitude_curvecc29','tp_pair']);
 const numeric = (value, fallback) => value === undefined ? fallback : Number(value);
 
 // Resolve selected centre maps, including inherited SFZ scope. Controller-generated
@@ -46,6 +46,8 @@ export async function resolveSfz(sourceRoot, entry, defaults = {}) {
     const base=defaults.sampleBasePath ?? dirname(entry);
     const full=confined(sourceRoot,join(base,op.sample));
     const root=numeric(op.pitch_keycenter,numeric(op.key,60));
+    // tp_pair names a second microphone's recording of the same performance, which the kit's processing mixes in at load.
+    const pair=op.tp_pair===undefined?null:relative(sourceRoot,confined(sourceRoot,join(base,op.tp_pair))).replaceAll('\\','/');
     const gainCap=Object.entries(op).find(([key,value])=>/^amp_velcurve_\d+$/.test(key)&&Number(value)===1);
     const item={sourcePath:relative(sourceRoot,full).replaceAll('\\','/'), rootKey:root,
       keyLow:numeric(op.lokey,numeric(op.key,0)),keyHigh:numeric(op.hikey,numeric(op.key,127)),
@@ -57,7 +59,7 @@ export async function resolveSfz(sourceRoot, entry, defaults = {}) {
       velocityGainHigh:gainCap?Number(gainCap[0].slice(13)):127,
       releaseDecayDbPerSecond:numeric(op.rt_decay,0),loopMode:op.loop_mode??'no_loop',
       // A voice of a group stops the voices whose off_by names it; the renderer applies this to drum kits.
-      group:numeric(op.group,0),offBy:numeric(op.off_by,0)};
+      group:numeric(op.group,0),offBy:numeric(op.off_by,0),...(pair?{companionSourcePath:pair}:{})};
     for(const key of ['group','offBy'])if(!Number.isSafeInteger(item[key])||item[key]<0||item[key]>2**31)throw new Error(`Invalid ${key} in ${entry}`);
     if (numeric(op.transpose,0)!==0) throw new Error(`Unsupported recorded-region transpose in ${entry}`);
     for(const [key,value] of Object.entries(item)) if(typeof value==='number'&&!Number.isFinite(value))throw new Error(`Invalid ${key} in ${entry}`);
@@ -159,31 +161,45 @@ export async function prepareLibrary({sourceRoot, outputRoot, source, instrument
     }
     observed.set(path,item);return bytes;
   }
+  // Each recording is verified, copied and listed once however many regions (or companions) name it.
+  async function prepared(sourcePath) {
+    const id=`${source.id}:${sourcePath}`;
+    let info=samples.get(id);
+    if(!info) {
+      const original=await verified(sourcePath),flac=/[.]flac$/i.test(sourcePath);
+      const bytes=flac?original:normalizeWave(original),wave=flac?flacFrames(bytes):wavFrames(bytes);
+      const path=`samples/${source.id}/${sourcePath}`;
+      await mkdir(dirname(confined(outputRoot,path)),{recursive:true});
+      await writeFile(confined(outputRoot,path),bytes);
+      info={id,path,sha256:sha256(bytes),size:bytes.length,sourceSha256:sha256(original),...wave};samples.set(id,info);
+    }
+    return info;
+  }
   for(const instrument of instruments) {
     const regions=[];
     for(const map of instrument.maps) {
       const mapped=await resolveSfz(sourceRoot,map.path,{...map,sampleBasePath:map.sampleBasePath??'Programs'});
       for(const path of mapped.inputs)await verified(path);
       for(const region of mapped) {
-        const id=`${source.id}:${region.sourcePath}`;
-        let info=samples.get(id);
-        if(!info) {
-          const original=await verified(region.sourcePath),flac=/\.flac$/i.test(region.sourcePath);
-          const bytes=flac?original:normalizeWave(original),wave=flac?flacFrames(bytes):wavFrames(bytes);
-          const path=`samples/${source.id}/${region.sourcePath}`;
-          await mkdir(dirname(confined(outputRoot,path)),{recursive:true});
-          await writeFile(confined(outputRoot,path),bytes);
-          info={id,path,sha256:sha256(bytes),size:bytes.length,sourceSha256:sha256(original),...wave};samples.set(id,info);
-        }
+        const info=await prepared(region.sourcePath);
+        const id=info.id;
+        if(region.companionSourcePath)region.companionId=(await prepared(region.companionSourcePath)).id;
         if(region.loopMode==='loop_continuous') {
           region.loopStart??=info.loop?.[0]??0;region.loopEnd??=info.loop?.[1]??info.frames;
         }
         if(region.loopStart!==null&&(region.loopStart<0||region.loopEnd===null||region.loopEnd<=region.loopStart||region.loopEnd>info.frames))throw new Error(`Invalid sample loop: ${id}`);
-        const {sourcePath,loopMode,...mapping}=region;
+        const {sourcePath,companionSourcePath,loopMode,...mapping}=region;
         regions.push({sampleId:id,...mapping});
       }
     }
-    parsed.push({id:instrument.id,name:instrument.name,sourceId:source.id,regions});
+    // The kit's processing table is data beside its map: read as pinned, checked for shape here and strictly by the loader.
+    let processing;
+    if(instrument.processing) {
+      processing=JSON.parse((await verified(instrument.processing)).toString('utf8'));
+      if(!processing||typeof processing!=='object'||Array.isArray(processing)||Object.keys(processing).some(key=>!['profiles','sounds'].includes(key)))throw new Error(`Invalid kit processing table: ${instrument.processing}`);
+    }
+    if(!processing&&regions.some(region=>region.companionId))throw new Error(`Companion recordings without a processing table: ${instrument.id}`);
+    parsed.push({id:instrument.id,name:instrument.name,sourceId:source.id,regions,...(processing?{processing}:{})});
   }
   const license=await verified(source.licensePath);
   await mkdir(join(outputRoot,'licenses'),{recursive:true});
@@ -285,7 +301,7 @@ export async function prepareAudio({recordInventory=false,offline=false}={}) {
   // App-owned maps and licenses are part of the preparation, so editing one prepares again. A source may own its maps
   // and take its license from the pinned repository.
   let owned='';
-  for(const source of config.sources.filter(item=>item.localRoot))for(const path of [source.licensePath,...source.instruments.flatMap(i=>i.maps.map(m=>m.path))]) {
+  for(const source of config.sources.filter(item=>item.localRoot))for(const path of [source.licensePath,...source.instruments.flatMap(i=>[...i.maps.map(m=>m.path),...(i.processing?[i.processing]:[])])]) {
     const bytes=await localBytes(source,path,root);
     if(bytes)owned+=`
 ${path}
@@ -315,14 +331,14 @@ ${path}
     const cacheRoot=join(root,'.analysis/expansion/audio-assets',source.id);
     const inventoryPath=join(root,'assets/audio',source.inventoryPath);
     const inventory=recordInventory?null:JSON.parse(await readFile(inventoryPath,'utf8'));
-    const wanted=new Set([source.licensePath,...source.instruments.flatMap(i=>i.maps.map(m=>m.path))]);
+    const wanted=new Set([source.licensePath,...source.instruments.flatMap(i=>[...i.maps.map(m=>m.path),...(i.processing?[i.processing]:[])])]);
     // Chosen maps use no includes today; recursively fetch includes for future pinned maps.
     for(const path of wanted) {
       await fetchSource(source,path,cacheRoot,inventory,offline,root);
       if(path.endsWith('.sfz'))for(const m of (await readFile(confined(cacheRoot,path),'utf8')).matchAll(/#include\s+"([^"]+)"/g))wanted.add(relative(cacheRoot,confined(cacheRoot,join(dirname(path),m[1]))).replaceAll('\\','/'));
     }
     const samples=new Set();
-    for(const i of source.instruments)for(const m of i.maps)for(const r of await resolveSfz(cacheRoot,m.path,{...m,sampleBasePath:m.sampleBasePath??'Programs'}))samples.add(r.sourcePath);
+    for(const i of source.instruments)for(const m of i.maps)for(const r of await resolveSfz(cacheRoot,m.path,{...m,sampleBasePath:m.sampleBasePath??'Programs'})) {samples.add(r.sourcePath);if(r.companionSourcePath)samples.add(r.companionSourcePath);}
     const entries=[...samples];let next=0,done=0;
     await Promise.all(Array.from({length:8},async()=>{while(next<entries.length){const path=entries[next++];await fetchSource(source,path,cacheRoot,inventory,offline,root);done++;if(done%200===0)console.log(`${source.id}: ${done}/${entries.length} samples ready`);}}));
     const result=await prepareLibrary({sourceRoot:cacheRoot,outputRoot,source,instruments:source.instruments,inventory});

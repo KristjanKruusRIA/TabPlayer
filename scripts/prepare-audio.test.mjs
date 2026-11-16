@@ -136,3 +136,30 @@ test('pcm_format_chunk_with_zero_extension_is_shortened', async () => {
   assert.equal(shortenPcmFormat(plain),plain);
   assert.throws(()=>shortenPcmFormat(wave(Buffer.from([0,0,1,0]))),/format extension/);
 });
+
+test('a_companion_recording_and_a_processing_table_are_pinned_and_carried_into_the_manifest', async () => {
+  const { prepareLibrary, resolveSfz } = await api();
+  const root = await fixture();
+  await writeFile(join(root, 'Programs/main.sfz'), '<region> sample=../Samples/soft1.wav tp_pair=../Samples/soft2.wav key=36 pitch_keytrack=0\n<region> sample=../Samples/hard1.wav key=38 pitch_keytrack=0');
+  const table = { profiles: { kick: { envelope: { holdMs: 40, decayDbPerSecond: 200, endMs: 300 } } }, sounds: { 36: 'kick' } };
+  await writeFile(join(root, 'Programs/main.processing.json'), JSON.stringify(table));
+  const regions = await resolveSfz(root, 'Programs/main.sfz', { articulation: 'picked' });
+  assert.equal(regions[0].companionSourcePath, 'Samples/soft2.wav');
+  assert.equal(regions[1].companionSourcePath, undefined);
+  const options = { sourceRoot: root, outputRoot: join(root, 'out'), source: { id: 'fixture', licensePath: 'LICENSE' }, instruments: [{ id: 'test', name: 'Test', maps: [{ path: 'Programs/main.sfz', articulation: 'picked' }], processing: 'Programs/main.processing.json' }] };
+  const result = await prepareLibrary(options);
+  const [kick, snare] = result.instruments[0].regions;
+  assert.equal(kick.companionId, 'fixture:Samples/soft2.wav');
+  assert.equal(kick.companionSourcePath, undefined);
+  assert.equal(snare.companionId, undefined);
+  // The companion is a listed, copied, pinned recording of its own; the table travels with the instrument.
+  assert.deepEqual(result.samples.map(item => item.id).sort(), ['fixture:Samples/hard1.wav', 'fixture:Samples/soft1.wav', 'fixture:Samples/soft2.wav']);
+  for (const path of ['Samples/soft2.wav', 'Programs/main.processing.json']) assert.ok(result.inventory.some(item => item.path === path), path);
+  assert.deepEqual(result.instruments[0].processing, table);
+  // A table with an unknown top-level key, or a companion with no table, or a companion path that escapes, is refused.
+  await writeFile(join(root, 'Programs/main.processing.json'), JSON.stringify({ ...table, extra: 1 }));
+  await assert.rejects(prepareLibrary(options), /processing table/);
+  await assert.rejects(prepareLibrary({ ...options, instruments: [{ ...options.instruments[0], processing: undefined }] }), /without a processing table/);
+  await writeFile(join(root, 'Programs/main.sfz'), '<region> sample=../Samples/soft1.wav tp_pair=../../outside.wav');
+  await assert.rejects(resolveSfz(root, 'Programs/main.sfz'), /escape|outside/i);
+});

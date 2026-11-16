@@ -1078,8 +1078,8 @@ fn cost_of_a_second_of_audio() {
                 .collect();
             runs.sort_by(f64::total_cmp);
             // The first 8192 output frames after a seek (32 grains, 171 ms of audio: the low band's scan of the attacks
-            // catching up, its first frames, and the grain V comes in at, which is the 25th to 28th for the files at 192 and
-            // 384 kHz), median of 41 seeks, against the same frames a second later; and the slowest of their 64 128-frame
+            // catching up, its first frames, and the grain V comes in at, which is the 10th or 11th for the files at 192
+            // and 384 kHz), median of 41 seeks, against the same frames a second later; and the slowest of their 64 128-frame
             // blocks (one device callback of 2.67 ms at 48 kHz), median and worst of 41. The seeks jump 4.8 s (or back
             // 10.4 s), so that nothing the low band computed before is near: a cold start. Also the most decimated samples
             // of the low-pass and frames of V any one grain made, counted, in each window.
@@ -1119,7 +1119,7 @@ fn cost_of_a_second_of_audio() {
                     }
                     times.push(total);
                     blocks.push(slowest);
-                    if let Some((samples, frames)) = voice.low_band_work() {
+                    if let Some((samples, frames, _)) = voice.low_band_work() {
                         work[window] = (work[window].0.max(samples), work[window].1.max(frames));
                     }
                 }

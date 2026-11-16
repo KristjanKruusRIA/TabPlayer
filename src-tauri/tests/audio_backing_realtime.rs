@@ -310,7 +310,7 @@ fn speed_changes_near_attacks_never_click() {
 /// computes more than the worst grain after a cold seek, plus what a grain reads of the low band itself for its
 /// crossfade (twice 36 samples at most), nor makes more than two frames. Before this, the grain where the clock leapt
 /// computed everything up to the new place at once: 203 to 1508 samples here (0.36 to 9.7 million multiplies). The
-/// output stays finite, steps at most a quarter more than develop's grains do across the leap (this branch: 13% more at
+/// output stays finite, steps at most a quarter more than develop's grains do across the leap (this branch: 11% more at
 /// most), and the tone keeps its level at its own pitch before the leap and after.
 #[test]
 fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
@@ -373,7 +373,7 @@ fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
                 runs.push((before, across, after, seek, crossing));
             }
             let (before, across, after, seek, crossing) = &runs[0];
-            let ((seek_work, seek_frames), (leap_work, leap_frames)) =
+            let ((seek_work, seek_frames, seek_leaves), (leap_work, leap_frames, leap_leaves)) =
                 (seek.unwrap(), crossing.unwrap());
             let hz = 55.0 * neutral;
             let level = |x: &[[f32; 2]]| {
@@ -389,10 +389,13 @@ fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
                 (level(&before[before.len() - 24_000..]), level(after));
             let (step, develop_step) = (largest(across), largest(&runs[1].1));
             eprintln!(
-                "{leap} at {rate} Hz, key shift {shift}: worst grain after the seek {seek_work} samples, {seek_frames} frames; across the leap {leap_work} samples, {leap_frames} frames; level before {level_before:+.2} dB, after {level_after:+.2} dB; largest step across {step:.5} (develop {develop_step:.5})"
+                "{leap} at {rate} Hz, key shift {shift}: worst grain after the seek {seek_work} samples, {seek_frames} frames; across the leap {leap_work} samples, {leap_frames} frames, V left {leap_leaves} times; level before {level_before:+.2} dB, after {level_after:+.2} dB; largest step across {step:.5} (develop {develop_step:.5})"
             );
             assert!(
-                leap_work <= seek_work + 72 && seek_frames <= 2 && leap_frames <= 2,
+                leap_work <= seek_work + 72
+                    && seek_frames <= 2
+                    && leap_frames <= 2
+                    && seek_leaves == 0,
                 "{leap} at {rate} Hz: {leap_work} samples and {leap_frames} frames in a grain (after a seek {seek_work}, {seek_frames})"
             );
             assert!(
@@ -407,6 +410,101 @@ fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
     }
 }
 
+/// While the clock moves at a speed V follows, V leaves only where an attack keeps it out, over a grain's ramp, never
+/// because the attack scan ran out of a grain's budget: a grain may compute twice what the clock moves the scan on, plus
+/// what finding one attack takes and what a change of speed moves the scan's end on. Plucked low notes (an attack every
+/// 0.37 s) at 48 kHz and for files at 192 and 384 kHz, unshifted and an octave up (where the low-pass is longest and the
+/// budget for a cold start smallest), at steady half and three-quarter speed and with the speed jumping mid-grain between
+/// 10 and 300% and between 25 and 200%: V never leaves for want of the scan. Before this the budget was too small there
+/// for a grain that finds an attack: for the 192 kHz file an octave up at half speed V left 8 times in 3 s of output.
+#[test]
+fn the_vocoder_never_leaves_for_want_of_the_scan_at_a_speed_it_follows() {
+    let output = 48_000u32;
+    for (rate, shift) in [(48_000u32, 0i8), (192_000, 12), (384_000, 0), (384_000, 12)] {
+        let neutral = 2.0_f64.powf(f64::from(shift) / 12.0);
+        let frames: Vec<[f32; 2]> = (0..7 * rate as usize)
+            .map(|n| {
+                let t = n as f64 / f64::from(rate);
+                let last = (t / 0.37).floor() as usize;
+                let x: f64 = (last.saturating_sub(2)..=last)
+                    .map(|k| {
+                        let age = t - k as f64 * 0.37;
+                        let hz = [55.0, 41.2, 61.7, 49.0][k % 4];
+                        0.4 * (age / 0.003).min(1.0) * (-age / 0.3).exp() * (TAU * hz * age).sin()
+                    })
+                    .sum();
+                [x as f32, (0.8 * x) as f32]
+            })
+            .collect();
+        let map = BackingMap::new(&[], 0.0, &plan()).unwrap();
+        let mut voice = mapped(rate, output, frames, map, shift);
+        for (name, speeds) in [
+            ("half speed", [0.5, 0.5]),
+            ("three quarters", [0.75, 0.75]),
+            ("10 and 300%", [0.1, 3.0]),
+            ("25 and 200%", [0.25, 2.0]),
+        ] {
+            let mut clock = 0.2f64;
+            voice.seek(clock);
+            voice.low_band_work();
+            let mut n = 0usize;
+            while n < 3 * output as usize && clock < 6.5 {
+                clock += speeds[(n / 1_000) % 2] * neutral / f64::from(output);
+                assert!(voice.next_frame(clock).iter().all(|v| v.is_finite()));
+                n += 1;
+            }
+            let (samples, _, leaves) = voice.low_band_work().unwrap();
+            assert_eq!(
+                leaves, 0,
+                "{rate} Hz, key shift {shift}, {name}: V left {leaves} times for want of the scan ({samples} samples in a grain at most)"
+            );
+        }
+    }
+}
+
+/// A sync map may send the clock for a moment to source positions beyond what a sample index holds (anchors need only
+/// distinct score positions and increasing audio times, so the slope before the first can be anything) and from there on
+/// to the audio at a practice speed. The grain after it reads on from a grain that was out there: nothing overflows (a
+/// debug build checks every operation), the output stays finite, and on the audio after it the low tone has its level at
+/// its own pitch, the vocoder's. Before this the scan started from the grain out there, and a debug build panicked on an
+/// overflow of its index.
+#[test]
+fn a_grain_after_one_beyond_any_index_does_not_overflow() {
+    // Score 0 plays source 1 s, score 2e-30 s source 2 s, and score 1 s source 3 s: before score 0, every millisecond of
+    // score is some 5e26 s of source back.
+    let anchors =
+        [(0.0, 1000.0), (1e-30, 2000.0), (0.5, 3000.0)].map(|(ratio, audio_ms)| SyncAnchor {
+            bar: 0,
+            occurrence: 0,
+            ratio,
+            audio_ms,
+        });
+    let output = 48_000u32;
+    for (rate, shift) in [(48_000u32, 0i8), (384_000, 12)] {
+        let neutral = 2.0_f64.powf(f64::from(shift) / 12.0);
+        let frames: Vec<[f32; 2]> = (0..4 * rate as usize)
+            .map(|n| [(0.4 * (TAU * 55.0 * n as f64 / f64::from(rate)).sin()) as f32; 2])
+            .collect();
+        let map = BackingMap::new(&anchors, 0.0, &plan()).unwrap();
+        let mut voice = mapped(rate, output, frames, map, shift);
+        let mut clock = -0.05f64;
+        voice.seek(clock);
+        let heard: Vec<f32> = (0..output)
+            .map(|_| {
+                clock += 0.5 * neutral / f64::from(output);
+                let x = voice.next_frame(clock);
+                assert!(x.iter().all(|v| v.is_finite()), "{rate} Hz");
+                x[0]
+            })
+            .collect();
+        let level =
+            20.0 * (tone(&heard[output as usize / 2..], 55.0 * neutral, output) / 0.4).log10();
+        assert!(
+            level.abs() <= 0.1,
+            "{rate} Hz, key shift {shift}: the tone at {level:+.2} dB after the clock came back"
+        );
+    }
+}
 /// A damaged or hostile file may hold samples at the very top of what an f32 holds, or ones that are not numbers: sums of
 /// them overflow, and a finite one that large would be spread over every frame of V that spans it. The low band hears
 /// them clipped, so it carries nothing of them on: the output stays finite, it is out of range for no more output frames

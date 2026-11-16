@@ -1674,7 +1674,7 @@ fn recorded_kit_fidelity() {
 // processing table (assets/audio/drums/Programs/tabplayer-kit.processing.json) and to assert its targets.
 
 /// The elements measured: name, kit sound, velocity.
-const PRODUCED_ELEMENTS: [(&str, u8, u8); 11] = [
+const PRODUCED_ELEMENTS: [(&str, u8, u8); 15] = [
     ("kick", 36, 95),
     ("kick", 36, 127),
     ("snare", 38, 110),
@@ -1686,6 +1686,11 @@ const PRODUCED_ELEMENTS: [(&str, u8, u8); 11] = [
     ("crash", 49, 100),
     ("ride", 51, 100),
     ("crash", 49, 127),
+    // The other four toms play the two recorded ones transposed (41 and 43 down from the low tom, 47 and 50 up from the high tom).
+    ("tom 41", 41, 100),
+    ("tom 43", 43, 100),
+    ("tom 47", 47, 100),
+    ("tom 50", 50, 100),
 ];
 
 /// What one hit of an element measures, from its first sound (the recording's lead-in is not counted).
@@ -1840,7 +1845,7 @@ fn recorded_kit_kick_pairs() {
         )
         .unwrap()
     };
-    let (mut lags, mut worst) = (vec![], 1.0f64);
+    let (mut lags, mut worst, mut margin) = (vec![], 1.0f64, 1.0f64);
     let mut inverted = 0;
     let mut pairs = 0;
     for region in instrument
@@ -1862,19 +1867,45 @@ fn recorded_kit_kick_pairs() {
         .unwrap();
         lags.push(found.lag as f64 * 1000.0 / RATE as f64);
         worst = worst.min(found.correlation);
+        margin = margin.min(found.margin);
+        // On the loudest layer, whose first arrival is not lost in the noise, the thump's alignment agrees with when each microphone
+        // first heard the hit, to within 2 ms: the right cycle and polarity, which the correlation alone cannot promise (see margin).
+        if region.velocity_low >= 96 {
+            let arrival = |a: &[[f32; 2]]| {
+                let peak = a
+                    .iter()
+                    .map(|f| f[0].abs().max(f[1].abs()))
+                    .fold(0.0, f32::max);
+                a.iter()
+                    .position(|f| f[0].abs().max(f[1].abs()) > peak * 0.0316)
+                    .unwrap() as f64
+            };
+            let heard = (arrival(&other.frames) - arrival(&main.frames)) * 1000.0 / RATE as f64;
+            assert!(
+                (heard - lags.last().unwrap()).abs() < 2.0,
+                "{}: arrivals {heard:.2} ms apart, thumps {:.2}",
+                region.sample_id,
+                lags.last().unwrap()
+            );
+        }
         inverted += (found.sign < 0.0) as usize;
         pairs += 1;
     }
     let low = lags.iter().cloned().fold(f64::MAX, f64::min);
     let high = lags.iter().cloned().fold(f64::MIN, f64::max);
     println!(
-        "kickpairs: {pairs} pairs, the companion moves {low:.2} to {high:.2} ms earlier, {inverted} inverted, worst correlation {worst:.3}"
+        "kickpairs: {pairs} pairs, the companion moves {low:.2} to {high:.2} ms earlier, {inverted} inverted, worst correlation {worst:.3}, smallest margin over the best other alignment {margin:.3}"
     );
     assert_eq!(pairs, 32);
     // The two arrive 3 to 5 ms apart (the offset measured between the microphones), none is inverted, and the thumps match.
     assert!(low > 3.0 && high < 5.5, "{low} to {high} ms");
     assert_eq!(inverted, 0);
     assert!(worst > 0.6, "{worst}");
+    // Every pair agrees on the lag to 0.5 ms and on the polarity: a wrong cycle in one pair would show as a jump. The margin of the
+    // best alignment over any other (a wrong cycle or the inverted microphone) is thin, because a thump near 80 Hz is nearly a sine;
+    // it is positive for every pair and the agreement of all 32 is what makes the choice safe.
+    assert!(high - low < 0.5, "{low} to {high} ms");
+    assert!(margin > 0.01, "smallest margin {margin}");
 }
 /// How far the first 50 ms of the metal pattern's kicks stand above the rest of the mix at that moment, above 100 Hz and in 2 to
 /// 6 kHz, dB, power-averaged over the kicks.
@@ -1931,6 +1962,10 @@ fn recorded_kit_meets_its_produced_targets() {
         ("rim shot", 0.15, 0.08),
         ("low tom", 0.45, 0.20),
         ("high tom", 0.45, 0.20),
+        ("tom 41", 0.45, 0.20),
+        ("tom 43", 0.45, 0.20),
+        ("tom 47", 0.45, 0.20),
+        ("tom 50", 0.45, 0.20),
         ("closed hat", 0.15, 0.05),
         ("open hat", 1.10, 0.60),
         ("crash", 1.60, 0.80),
@@ -1950,7 +1985,15 @@ fn recorded_kit_meets_its_produced_targets() {
         // Its body is dense: a drum's first 300 ms is not a lone spike (crest factor within 8 dB of General MIDI's).
         if matches!(
             *name,
-            "kick" | "snare" | "rim shot" | "low tom" | "high tom"
+            "kick"
+                | "snare"
+                | "rim shot"
+                | "low tom"
+                | "high tom"
+                | "tom 41"
+                | "tom 43"
+                | "tom 47"
+                | "tom 50"
         ) {
             assert!(
                 h.crest < g.crest + 8.0,
@@ -1963,7 +2006,10 @@ fn recorded_kit_meets_its_produced_targets() {
         if matches!(*name, "kick" | "snare" | "rim shot" | "closed hat") {
             assert!(h.tail < -30.0, "{name} {velocity}: tail {:.1} dB", h.tail);
         }
-        if matches!(*name, "low tom" | "high tom") {
+        if matches!(
+            *name,
+            "low tom" | "high tom" | "tom 41" | "tom 43" | "tom 47" | "tom 50"
+        ) {
             assert!(h.tail < -20.0, "{name} {velocity}: tail {:.1} dB", h.tail);
         }
     }
@@ -2034,19 +2080,121 @@ fn recorded_kit_meets_its_produced_targets() {
         assert!(kit_peak < -3.0, "{name}: peak {kit_peak:.1} dBFS");
     }
     // Loading: the recordings the metal pattern asks for hold less decoded audio than the unprocessed kit's 38.4 MB (the tails
-    // are cut), and load, processing included, in well under a second (0.09 s before the processing, about 0.12 s with it).
+    // are cut). The time is the best of three loads and bounded at 1.5 s: it takes 0.12 s here (0.09 s before the processing), so
+    // a runner several times slower still passes, and a path that has become quadratic (the alignment's reach, a filter run per
+    // sample) is ten or more times slower and does not.
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio");
     let plan = pattern_plan(&metal(), 120.0, 1.0, None, true);
     let requests = resource_requests(&plan, &DocumentSettings::default());
-    let started = std::time::Instant::now();
-    let loaded = AudioResources::load_for_requests(&root, &requests).unwrap();
-    let seconds = started.elapsed().as_secs_f64();
+    let mut seconds = f64::MAX;
+    let mut loaded = None;
+    for _ in 0..3 {
+        let started = std::time::Instant::now();
+        loaded = Some(AudioResources::load_for_requests(&root, &requests).unwrap());
+        seconds = seconds.min(started.elapsed().as_secs_f64());
+    }
     let megabytes: f64 = loaded
+        .unwrap()
         .samples
         .iter()
         .filter(|(id, _)| id.starts_with("drums:"))
         .map(|(_, audio)| audio.frames.len() as f64 * 8.0 / 1e6)
         .sum();
     assert!(megabytes < 12.0, "{megabytes:.1} MB decoded");
-    assert!(seconds < 2.0, "{seconds:.2} s to load");
+    assert!(seconds < 1.5, "{seconds:.2} s to load");
+}
+
+/// What CI can check of the real kit: every kit sound loads by request at the velocities that open and close each recorded layer,
+/// through its processing, with nothing set aside, a decoded recording behind every region, no processed hit over half the peak
+/// ceiling, and the load bounded. Needs the prepared audio. `cargo test --release --test audio_recorded_kit -- --ignored --nocapture recorded_kit_loads_every_sound_by_request`
+#[test]
+#[ignore = "needs the prepared bundled audio"]
+fn recorded_kit_loads_every_sound_by_request() {
+    use tabplayer_lib::audio::{
+        kit_processing::MAX_PROCESSED_PEAK,
+        resources::{SampleRequest, eligible_regions},
+    };
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio");
+    let sounds: [u8; 43] = [
+        1, 2, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 56, 57, 58,
+        59, 60, 61, 62, 63, 64, 67, 68, 69, 70, 71, 72, 73, 74, 75, 80, 81, 82, 83, 84,
+    ];
+    let requests: Vec<SampleRequest> = sounds
+        .iter()
+        .flat_map(|&key| {
+            [1u8, 31, 32, 63, 64, 95, 96, 127]
+                .into_iter()
+                .map(move |velocity| SampleRequest {
+                    instrument_id: RECORDED_KIT.into(),
+                    key,
+                    velocity,
+                    articulation: "picked".into(),
+                })
+        })
+        .collect();
+    let started = std::time::Instant::now();
+    let loaded = AudioResources::load_for_requests(&root, &requests).unwrap();
+    let seconds = started.elapsed().as_secs_f64();
+    assert!(
+        loaded.manifest.notices.is_empty(),
+        "{:?}",
+        loaded.manifest.notices
+    );
+    let instrument = &loaded.manifest.instruments[0];
+    let table = instrument.kit_processing().unwrap().unwrap();
+    let mut largest = (0.0f32, String::new());
+    for request in &requests {
+        let regions = eligible_regions(
+            instrument,
+            request.key,
+            request.velocity,
+            "picked",
+            "attack",
+        );
+        assert!(
+            !regions.is_empty(),
+            "kit sound {} at {}",
+            request.key,
+            request.velocity
+        );
+        for region in regions {
+            let audio = &loaded.samples[&region.sample_id];
+            assert!(
+                !audio.frames.is_empty(),
+                "{} decoded to nothing",
+                region.sample_id
+            );
+            assert!(
+                audio.frames.iter().flatten().all(|v| v.is_finite()),
+                "{}",
+                region.sample_id
+            );
+            let peak = audio
+                .frames
+                .iter()
+                .flatten()
+                .map(|v| v.abs())
+                .fold(0.0, f32::max);
+            if table.sounds.contains_key(&region.key_low.to_string()) && peak > largest.0 {
+                largest = (peak, region.sample_id.clone());
+            }
+        }
+    }
+    println!(
+        "{} requests, {:.2} s to load; the largest processed hit peaks at {:.2} ({}), the ceiling is {MAX_PROCESSED_PEAK}",
+        requests.len(),
+        seconds,
+        largest.0,
+        largest.1
+    );
+    assert!(largest.0 < MAX_PROCESSED_PEAK / 2.0, "{largest:?}");
+    // A companion is never kept after the mix.
+    assert!(
+        loaded
+            .samples
+            .keys()
+            .all(|id| !id.contains("/lofi/")
+                || instrument.regions.iter().any(|r| &r.sample_id == id))
+    );
+    assert!(seconds < 10.0, "{seconds:.2} s to load every kit sound");
 }

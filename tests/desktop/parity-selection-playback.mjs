@@ -27,7 +27,8 @@ async function waitStatus(predicate,timeout=15000){
 }
 // More playback opens upward over the inspector. Playback buttons open it themselves; everything else closes it first so the inspector can be clicked.
 const playbackButtons=new Set(['Seek','Loop','Clear loop','Play from cursor','Play selection','Loop selection']);
-async function button(name){if(!playbackButtons.has(name))await hidePlaybackControls(page);if(name!=='Practice')await hidePractice(page);await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
+// 'Loop selection' is both the transport toggle and a button in the Selected playback panel; the toggle is the one driven here (the panel's button calls the same player command).
+async function button(name){if(!playbackButtons.has(name))await hidePlaybackControls(page);if(name!=='Practice')await hidePractice(page);if(name==='Loop selection')await page.locator('button[data-action="loop-selection"]').click();else await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
 async function playbackField(label){await revealPlaybackControls(page);return page.getByLabel(label,{exact:true});}
 async function playbackCombo(name){await revealPlaybackControls(page);await disclosure('Selected playback');return page.getByRole('combobox',{name,exact:true});}
 async function noAlerts(){assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);}
@@ -145,7 +146,7 @@ try{
 
   // Score projection and actual pointer/keyboard selection stay canonical.
   await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await cursor(1,2);
-  const fret=page.locator('[aria-label="Music notation"] svg text').filter({hasText:/^5$/}).first();await fret.scrollIntoViewIfNeeded();await fret.click();assert.match(await page.getByLabel('Editing location',{exact:true}).innerText(),/Selection guitar · Measure 1 · Beat 2/);
+  const fret=page.locator('[aria-label="Music notation"] svg text').filter({hasText:/^5$/}).first();await fret.scrollIntoViewIfNeeded();await fret.click();assert.match(await page.locator('.statusbar-track').innerText(),/Selection guitar/);assert.match(await page.locator('.statusbar-position').innerText(),/Bar 1 · Beat 2/);
   await page.keyboard.press('Shift+ArrowRight');assert.match(await selectionText(page),/2 notes · 2 beats/);await (await playbackCombo('Selection occurrence')).selectOption({label:'Measure 1, occurrence 2 → measure 1, occurrence 2'});await button('Play selection');await assertRange(8640,10560);await waitStatus(value=>value.practice.phase==='ended');await stopPlayback();result.checks.canonicalZoomAllTracksPointerAndShift=true;
   for(const width of [960,1280,1600])await picture('selected-playback-layout',width);
 

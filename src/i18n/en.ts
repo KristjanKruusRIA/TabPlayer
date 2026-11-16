@@ -1572,6 +1572,7 @@ export const en = {
   'sound.cab_bass_stack': "bass stack",
   'sound.sound_source': "Sound source",
   'sound.automatic_instrument': "Automatic instrument",
+  'sound.recorded_drum_kit': "Recorded drum kit",
   'sound.sound_preset': "Sound preset",
   'sound.restore_preset': "Restore preset",
   'sound.factory_sound': "Factory sound",

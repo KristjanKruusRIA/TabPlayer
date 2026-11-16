@@ -125,6 +125,9 @@ pub struct Amp {
     pub treble_db: f64,
     #[serde(default, skip_serializing_if = "is_zero")]
     pub presence_db: f64,
+    /// Octaves down, 0 to 1, that the metal preamp's low cut moves, for a guitar tuned low (0 for the amp as designed).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub low_end_oct: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capture: Option<CaptureRef>,
 }
@@ -139,6 +142,7 @@ impl Default for Amp {
             mid_db: 0.0,
             treble_db: 0.0,
             presence_db: 0.0,
+            low_end_oct: 0.0,
             capture: None,
         }
     }
@@ -484,6 +488,17 @@ struct DriveShape {
     bias: f64,
     tone: f64,
     level: f64,
+}
+/// `amp`'s circuit for `rate`, or `None` for a model on the original path.
+fn amp_shape(amp: &Amp, rate: f64) -> Option<tone::Shape> {
+    tone::amp_shape_voiced(
+        &amp.model,
+        amp.drive,
+        tone::Voicing {
+            low_end_oct: amp.low_end_oct,
+        },
+        rate,
+    )
 }
 fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
     // Calibrating a circuit means running it, and a pedal that is off never runs: a ramp reads only its tone and level.
@@ -1172,6 +1187,7 @@ impl FxSettings {
             ("amp mid", self.amp.mid_db, -12.0, 12.0),
             ("amp treble", self.amp.treble_db, -12.0, 12.0),
             ("amp presence", self.amp.presence_db, -12.0, 12.0),
+            ("amp low end", self.amp.low_end_oct, 0.0, 1.0),
             ("EQ low", self.eq.low_db, -24.0, 24.0),
             ("EQ mid", self.eq.mid_db, -24.0, 24.0),
             ("EQ high", self.eq.high_db, -24.0, 24.0),
@@ -1861,7 +1877,7 @@ impl TrackDsp {
         let amp_tone_start = amp_tone(&settings.amp);
         let wah_start = wah_target(&settings.wah, 0.0);
         let drive_start = drive_shape(&settings.drive, rate);
-        let amp_start = tone::amp_shape(&settings.amp.model, settings.amp.drive, rate);
+        let amp_start = amp_shape(&settings.amp, rate);
         let capture_start = amp_capture_for(&settings.amp, sample_rate);
         let capture_side = [None, capture_start.is_some().then_some(1)];
         let cabinet_start = tone::cabinet_index(&settings.cabinet.model);
@@ -2058,10 +2074,7 @@ impl TrackDsp {
             self.drive_shapes[1],
             drive_shape(&self.settings.drive, self.rate),
         ];
-        self.amp_shapes = [
-            self.amp_shapes[1],
-            tone::amp_shape(&self.settings.amp.model, self.settings.amp.drive, self.rate),
-        ];
+        self.amp_shapes = [self.amp_shapes[1], amp_shape(&self.settings.amp, self.rate)];
         let capture = amp_capture_for(&self.settings.amp, self.rate as u32);
         let current = self.amp_cap_side[1];
         let held = current.and_then(|slot| self.amp_caps[slot].as_ref());

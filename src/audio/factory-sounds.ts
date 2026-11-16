@@ -5,10 +5,12 @@ import type { EffectBlock, FxSettings, TrackSound } from '../edit-types';
 export const factoryCategories=['Clean guitar','Crunch','Lead and high gain','Ambient','Acoustic','Bass'] as const;
 export type FactoryCategory=typeof factoryCategories[number];
 type Patch={[Block in EffectBlock]?:Partial<FxSettings[Block]>};
-interface FactoryDefinition {id:string;name:string;category:FactoryCategory;description:string;presetId:TrackSound['presetId'];effects:Patch}
+interface FactoryDefinition {id:string;name:string;category:FactoryCategory;description:string;presetId:TrackSound['presetId'];effects:Patch;
+  /** The order the signal passes through the blocks, when it is not the default one: every block once. */
+  order?:EffectBlock[]}
 /** A named sound for a kind of playing, built on one of the presets. Its blocks start from their defaults and are
  * switched on where it names them. It sets the effects only: the track keeps its instrument. */
-export type FactorySound=Omit<FactoryDefinition,'effects'>;
+export type FactorySound=Omit<FactoryDefinition,'effects'|'order'>;
 
 const definitions:readonly FactoryDefinition[]=[
   {id:'jazz-clean',name:'Warm jazz clean',category:'Clean guitar',presetId:'clean',description:'Round, dark clean tone with a little room.',effects:{
@@ -33,8 +35,14 @@ const definitions:readonly FactoryDefinition[]=[
   {id:'rock-lead',name:'Rock lead',category:'Lead and high gain',presetId:'lead',description:'Singing lead with an analog echo and a hall.',effects:{
     drive:{model:'overdrive',drive:.3,levelDb:2},amp:{model:'lead',drive:.45,gainDb:1,midDb:1},cabinet:{model:'closed'},
     delay:{model:'analog',quarterNotes:.75,feedback:.35,mix:.2},reverb:{model:'hall',room:.6,mix:.2}}},
-  {id:'metal-rhythm',name:'Metal rhythm',category:'Lead and high gain',presetId:'lead',description:'Tight, gated high gain with scooped mids.',effects:{
-    gate:{thresholdDb:-50,releaseMs:60},drive:{model:'overdrive',drive:.2,tone:.6},amp:{model:'metal',drive:.55,gainDb:-2},cabinet:{model:'closed'}}},
+  {id:'metal-rhythm',name:'Metal rhythm',category:'Lead and high gain',presetId:'lead',description:'Tight, modern high gain: a bass-cut boost ahead of the amp, a closed four-by-twelve, and plenty of upper-mid bite.',
+    // The boost (the EQ with a bass cut and a mid hump) stands ahead of the pedal and amp, which a sound's own order allows.
+    order:['microphone','gate','compressor','wah','octaver','pitch','eq','drive','amp','cabinet','graphicEq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'],effects:{
+    gate:{thresholdDb:-50,releaseMs:60},eq:{lowDb:-10,midDb:9,highDb:0,midHz:1000},drive:{model:'overdrive',drive:.1,tone:.8,levelDb:3},
+    amp:{model:'metal',drive:.45,gainDb:-4.2,lowEndOct:.5,bassDb:2,presenceDb:4},
+    // One of the closed four-by-twelve responses the app bundles; a machine without it plays the closed cabinet model instead.
+    cabinet:{model:'closed',ir:{id:'04eae0ad866f1badc2d7f2bdc5da06a2',name:'bundled closed four-by-twelve',levelDb:0}},
+    graphicEq:{gainsDb:[-12,6,6,.92,-5.17,.21,2.3,-8.08,3,-12],levelDb:0}}},
   {id:'fuzz-lead',name:'Fuzz lead',category:'Lead and high gain',presetId:'crunch',description:'Thick fuzz with a tape echo.',effects:{
     drive:{model:'fuzz',drive:.8,tone:.7},amp:{model:'crunch',drive:.2,gainDb:.5,bassDb:-3},cabinet:{model:'closed'},delay:{model:'tape',quarterNotes:.5,feedback:.4,mix:.25}}},
   {id:'octave-lead',name:'Octave-up lead',category:'Lead and high gain',presetId:'lead',description:'Lead doubled an octave up, with an echo.',effects:{
@@ -58,12 +66,28 @@ const definitions:readonly FactoryDefinition[]=[
     octaver:{octaveDown:.7,twoOctavesDown:0,direct:.6},amp:{model:'bass',drive:.4,gainDb:-5},cabinet:{model:'bass'},eq:{highDb:-4}}},
 ];
 
-export const factorySounds:readonly FactorySound[]=definitions.map(({effects:_effects,...sound})=>sound);
+/** Factory sounds as an earlier version defined them, for naming the settings a project copied before a sound was retuned. They are not
+ * offered to apply. */
+const earlierDefinitions:readonly FactoryDefinition[]=[
+  {id:'metal-rhythm',name:'Metal rhythm (earlier version)',category:'Lead and high gain',presetId:'lead',description:'The Metal rhythm as first released, before it was retuned (THE-217).',effects:{
+    gate:{thresholdDb:-50,releaseMs:60},drive:{model:'overdrive',drive:.2,tone:.6},amp:{model:'metal',drive:.55,gainDb:-2},cabinet:{model:'closed'}}},
+];
+function build(definition:FactoryDefinition,voiceId:string|null):TrackSound {
+  const effects=defaultEffects() as unknown as Record<string,Record<string,unknown>>;
+  for(const [block,patch] of Object.entries(definition.effects))effects[block]={...effects[block],...patch,enabled:true};
+  if(definition.order)(effects as unknown as {order:EffectBlock[]}).order=[...definition.order];
+  return {voiceId,presetId:definition.presetId,effects:effects as unknown as FxSettings};
+}
+/** The earlier versions that have a name, for the mixer. */
+export const earlierFactorySounds:readonly FactorySound[]=earlierDefinitions.map(({effects:_effects,order:_order,...sound})=>sound);
+/** The settings of the earlier version of factory sound `id`, or null when it has none. */
+export function earlierFactorySound(id:string):TrackSound|null {
+  const definition=earlierDefinitions.find(entry=>entry.id===id);
+  return definition?build(definition,null):null;
+}
+export const factorySounds:readonly FactorySound[]=definitions.map(({effects:_effects,order:_order,...sound})=>sound);
 /** The factory sound `id` for a track with `voiceId`, or null when there is none. */
 export function factorySound(id:string,voiceId:string|null=null):TrackSound|null {
   const definition=definitions.find(entry=>entry.id===id);
-  if(!definition)return null;
-  const effects=defaultEffects() as unknown as Record<string,Record<string,unknown>>;
-  for(const [block,patch] of Object.entries(definition.effects))effects[block]={...effects[block],...patch,enabled:true};
-  return {voiceId,presetId:definition.presetId,effects:effects as unknown as FxSettings};
+  return definition?build(definition,voiceId):null;
 }

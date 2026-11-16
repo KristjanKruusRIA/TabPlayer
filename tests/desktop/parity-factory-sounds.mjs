@@ -76,7 +76,11 @@ try{
   /** Asserts `effects` as recorded plays the catalog's chain for `id`. The native player leaves out bypassed blocks and
    * fields it added later while they hold their defaults, so a bypassed block must stay bypassed, and an enabled block
    * must record every field the catalog sets, leaving out only fields at their defaults. */
-  const plays=(effects,id)=>{for(const [block,settings] of Object.entries(entry(id).effects)){
+  const plays=(effects,id)=>{
+    // A sound that stands its blocks in its own order records that list, and one that does not records none (the default order).
+    assert.deepEqual(effects.order??[],entry(id).effects.order??[],`${id} order`);
+    for(const [block,settings] of Object.entries(entry(id).effects)){
+    if(Array.isArray(settings))continue;
     if(!settings.enabled){assert.notEqual(effects[block]?.enabled,true,`${id} ${block}`);continue;}
     assert.ok(effects[block],`${id} ${block}`);
     for(const field of new Set([...Object.keys(settings),...Object.keys(effects[block])])){
@@ -92,6 +96,10 @@ try{
   };
   await apply('jazz-clean','Warm jazz clean');const jazz=await exportWav('jazz-clean');
   await apply('metal-rhythm','Metal rhythm');const metal=await exportWav('metal-rhythm');
+  // Metal rhythm records its pedalboard order (the boost ahead of the pedal and amp); Undo restores the previous sound's order, and applying it again records the order once more.
+  assert.ok(entry('metal-rhythm').effects.order.indexOf('eq')<entry('metal-rhythm').effects.order.indexOf('drive'),'the catalog stands the boost ahead of the pedal');
+  await button('Undo');plays((await lastSound()).effects,'jazz-clean');assert.deepEqual((await lastSound()).effects.order??[],[]);
+  await apply('metal-rhythm','Metal rhythm');
   // Level over the chord from 0.1 to 1.5 s, and the share of its power from 1 to 8 kHz.
   const upper=render=>{const s=spectrum(render,0.1,1.5);return 10*Math.log10(band(s,1000,8000)/band(s,40,8000));};
   const results={jazz:{levelDb:level(jazz,0.1,1.5),upperShareDb:upper(jazz)},metal:{levelDb:level(metal,0.1,1.5),upperShareDb:upper(metal)}};

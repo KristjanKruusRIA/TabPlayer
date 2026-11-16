@@ -45,9 +45,8 @@ fn library() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/cabinet-irs");
-        let directory =
-            std::env::temp_dir().join(format!("tabplayer-metal-rhythm-{}", std::process::id()));
-        std::fs::create_dir_all(&directory).unwrap();
+        // A folder under the build's own test scratch space that nothing creates: the bundled responses are all this library serves.
+        let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("metal-rhythm-library");
         cabinet_ir::install(directory, Some(bundled));
     });
 }

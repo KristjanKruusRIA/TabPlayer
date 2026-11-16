@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { model } from '@coderline/alphatab';
-import { earlierFactorySound, factorySound } from '../audio/factory-sounds';
+import { earlierFactorySound, earlierFactorySounds, factorySound } from '../audio/factory-sounds';
+import { factorySounds } from '../audio/factory-sounds';
 import { DEFAULT_PRACTICE } from '../audio/practice-types';
 import { soundPreset } from '../audio/sound-model';
 import type { PlaybackState } from '../audio/types';
@@ -359,6 +360,26 @@ it('names the settings an earlier version of a factory sound saved, instead of a
   earlier.effects.amp.drive=.9;
   expect(tone(earlier)).toBe('Lead (edited)');
   expect(earlierFactorySound('jazz-clean')).toBeNull();
+});
+
+/** `value` with the keys of every object in the opposite order, as another writer of the same settings may list them; lists keep their order. */
+const reversedKeys=(value:unknown):unknown=>Array.isArray(value)?value.map(reversedKeys):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).reverse().map(([key,inner])=>[key,reversedKeys(inner)])):value;
+
+it('names a sound by its settings whatever order their fields are listed in (THE-217)',()=>{
+  const [guitar]=base().tracks;
+  const tone=(sound:TrackSound)=>describeTrackSound(guitar,sound).tone;
+  // The native player writes the amp's fields as drive, gain, tone stack, low end; the editor's definition lists them otherwise.
+  const metal=factorySound('metal-rhythm')!;
+  const amp=metal.effects.amp as unknown as Record<string,unknown>;
+  const written={...metal,effects:{...metal.effects,amp:{enabled:amp.enabled,model:amp.model,drive:amp.drive,gainDb:amp.gainDb,bassDb:amp.bassDb,presenceDb:amp.presenceDb,lowEndOct:amp.lowEndOct}}} as TrackSound;
+  expect(Object.keys(written.effects.amp)).not.toEqual(Object.keys(metal.effects.amp));
+  expect(tone(written)).toBe('Metal rhythm');
+  // Every factory sound and every earlier version is recognised with the keys of every block, and of the pedalboard, reversed.
+  for(const entry of factorySounds)expect(tone(reversedKeys(factorySound(entry.id)) as TrackSound),entry.id).toBe(entry.name);
+  for(const entry of earlierFactorySounds)expect(tone(reversedKeys(earlierFactorySound(entry.id)) as TrackSound),entry.id).toBe(entry.name);
+  // The order of the pedalboard itself still matters: a sound that moves a block is another sound.
+  const moved=factorySound('metal-rhythm')!;const order=[...moved.effects.order!];order.reverse();moved.effects.order=order;
+  expect(tone(moved)).toBe('Lead (edited)');
 });
 
 it('puts the master output in the mixer and sends its changes through setMaster, not the track mix', async()=>{

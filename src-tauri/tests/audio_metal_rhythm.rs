@@ -3,10 +3,7 @@
 //! setting, and the setting only moves the metal preamp. The final Metal rhythm sound is tested in `audio_metal_rhythm_sound.rs`.
 //! No recorded audio and no private material: the notes are sums of harmonics with a plucked decay.
 use std::f64::consts::TAU;
-use tabplayer_lib::audio::{
-    dsp::{FxSettings, TrackDsp},
-    tone,
-};
+use tabplayer_lib::audio::dsp::{FxSettings, TrackDsp};
 
 fn catalog() -> Vec<serde_json::Value> {
     serde_json::from_str(include_str!("../../tests/factory-sounds.json")).unwrap()
@@ -128,18 +125,8 @@ fn sustained(f0: f64, rate: u32, peak: f64) -> Vec<f32> {
 const RATES: [u32; 3] = [44_100, 48_000, 96_000];
 
 #[test]
-fn a_zero_low_end_is_the_amp_as_it_was_and_the_setting_loads_and_saves_unchanged() {
-    for rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
-        for model in ["crunch", "lead", "metal", "bassDrive", "clean", "bass"] {
-            for drive in [0.0, 0.2, 0.55, 1.0] {
-                assert_eq!(
-                    tone::amp_shape(model, drive, rate),
-                    tone::amp_shape_voiced(model, drive, tone::Voicing::default(), rate),
-                    "{model} {drive} {rate}"
-                );
-            }
-        }
-    }
+fn a_zero_low_end_loads_and_saves_unchanged_and_the_setting_is_checked() {
+    // That the amp's circuits are the old ones at zero is `legacy_equivalence` in tone.rs, against a copy of the old arithmetic.
     // A saved sound without the key loads with zero and saves without it, so older files are unchanged.
     let old = metal_rhythm_before();
     let json = serde_json::to_value(&old).unwrap();

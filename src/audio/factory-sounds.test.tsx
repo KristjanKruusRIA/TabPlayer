@@ -3,7 +3,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import {SoundPanel,soundPreset} from './SoundPanel';
-import {factoryCategories,factorySound,factorySounds} from './factory-sounds';
+import {earlierFactorySound,earlierFactorySounds,factoryCategories,factorySound,factorySounds} from './factory-sounds';
 import {defaultEffects,effectBlocks,soundProblem} from '../document-settings';
 import type {NativePlaybackController} from './NativePlaybackController';
 import type {TrackSound} from '../edit-types';
@@ -105,4 +105,15 @@ it('marks Drive, Amp and Cabinet as replaced in the inspector chain when the plu
   expect(states(container).sort()).toEqual(['Amp','Cabinet','Drive']);
   rerender(<SoundPanel trackId="base/0" sound={{...soundPreset('clean','black-guitar'),plugin:{...plug,active:false}}} onEdit={vi.fn()}/>);
   expect(states(container)).toEqual([]);
+});
+
+it('keeps the earlier version of Metal rhythm exactly the row the release held (THE-217)',()=>{
+  // tests/fixtures/released-metal-rhythm.json is the Metal rhythm row of the factory catalog as it stood on develop before the retuning.
+  const released=JSON.parse(readFileSync(resolve(__dirname,'../../tests/fixtures/released-metal-rhythm.json'),'utf8'));
+  const earlier=earlierFactorySound('metal-rhythm')!;
+  expect(earlier.presetId).toBe(released.presetId);
+  expect(earlier.effects).toEqual(released.effects);
+  expect(earlierFactorySounds.map(entry=>entry.id)).toEqual(['metal-rhythm']);
+  // And it is not the current one.
+  expect(factorySound('metal-rhythm')!.effects).not.toEqual(released.effects);
 });

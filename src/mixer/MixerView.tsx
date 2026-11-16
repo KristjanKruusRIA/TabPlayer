@@ -18,7 +18,10 @@ import './mixer.css';
 const noSubscribe=()=>()=>{};
 const noState=()=>null;
 
-const effectsKey=(sound:TrackSound)=>JSON.stringify(completeSound(sound).effects);
+/** `value` as text with the keys of every object sorted, so two writers that list the same settings' fields in different orders (the editor and the
+ * native player do, for the amp) give the same text. Lists keep their order: the pedalboard's `order` says where each block stands. */
+const canonical=(value:unknown):string=>Array.isArray(value)?`[${value.map(canonical).join(',')}]`:value&&typeof value==='object'?`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical((value as Record<string,unknown>)[key])}`).join(',')}}`:JSON.stringify(value)??'null';
+const effectsKey=(sound:TrackSound)=>canonical(completeSound(sound).effects);
 const baseKeys=new Map<string,string>();
 /** The effects of factory sound `factory:id` or preset `preset:id` as a key, worked out once: they do not depend on the instrument. */
 function baseKey(kind:'factory'|'earlier'|'preset',id:string):string {

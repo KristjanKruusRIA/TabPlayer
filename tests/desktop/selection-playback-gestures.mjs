@@ -16,7 +16,8 @@ const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_stat
 const idle=()=>waitForWorkspaceIdle(page);
 const published=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 const transport=value=>({generation:value.generation,tick:value.tick,playing:value.playing,range:value.range,loop:value.loop});
-async function button(name){await clickWorkstationButton(page,name,{waitForIdle:false});await idle();await published();}
+// 'Loop selection' is both the transport toggle and a button in the Selected playback panel; the toggle is the one driven here (the panel's button calls the same player command).
+async function button(name){if(name==='Loop selection')await page.locator('button[data-action="loop-selection"]').click();else await clickWorkstationButton(page,name,{waitForIdle:false});await idle();await published();}
 async function waitStatus(predicate){const deadline=Date.now()+15000;let value;do{value=await status();if(predicate(value))return value;await page.waitForTimeout(20);}while(Date.now()<deadline);throw new Error(`Native gesture status timed out: ${JSON.stringify(value)}`);}
 async function disclosure(label){if(label==='Selected playback')await revealPlaybackControls(page);const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();await published();}
 async function dismissPlayback(){const summary=page.locator('.transport-more>summary');if(await summary.evaluate(node=>node.parentElement.open)){await summary.press('Escape');await published();}}

@@ -10,7 +10,7 @@ import {buildEngravingFixture,fixturePath} from './engraving-fixture.mjs';
 // The engraving fixture (Guitar6, Grand Piano with two staves, Drums; 12 bars in five systems) is grouped Guitar6 + Grand Piano:
 //   - as a bracket and as a brace: one group mark per system, on screen and in the export pages handed to the PDF writer;
 //   - with long names on the first system and short names after, ending left of every mark;
-//   - with 200% (and 300%) below Guitar6, which moves the piano and drums down by the same amount and leaves the guitar alone;
+//   - with 200% (and 225%) below Guitar6, which moves the piano and drums down by the same amount and leaves the guitar alone;
 //   - together with a 200% system gap on the third system (D08), which adds its offset over the composed heights;
 //   - a click on a moved piano notehead selects that note and a click inside the opened gap selects nothing;
 //   - the playback highlight on a note inside the composed (defs/use) markup is visibly restyled;
@@ -361,16 +361,17 @@ try{
   });
   record('staff gap 200',afterGap.project,screenGap,exportGap);
 
-  // The space is linear in the percentage: 300% opens twice as much as 200% (the base is the measured space, not a constant).
-  await staffGap('Guitar6',300);const afterGap300=await snapshot();
-  const screenGap300=await settle('screen','staff gap 300',m=>Math.abs(moved(m,screenNames)['Grand Piano']-shifted200.screen['Grand Piano'])>1);
-  const exportGap300=await exportPdf('staff gap 300');
-  await check('300% below Guitar6 opens twice the space of 200%, on screen and in the export pages',async()=>{
-    near(moved(screenGap300,screenNames)['Grand Piano'],2*shifted200.screen['Grand Piano'],'screen 300% vs 200%',0.2);
-    near(moved(exportGap300,exportNames)['Grand Piano'],2*shifted200.export['Grand Piano'],'export 300% vs 200%',0.2);
-    return `${round(moved(exportGap300,exportNames)['Grand Piano'])} = 2 x ${round(shifted200.export['Grand Piano'])}`;
+  // The space is linear in the percentage above the standard 100%: 225% opens 1.25 times as much as 200% (the base is the measured space, not a constant).
+  // 300% no longer fits: the first system is then taller than the usable height of an A4 page and the export refuses it (src/export/pdf.ts, 'A notation system does not fit this page').
+  await staffGap('Guitar6',225);const afterGap225=await snapshot();
+  const screenGap225=await settle('screen','staff gap 225',m=>Math.abs(moved(m,screenNames)['Grand Piano']-shifted200.screen['Grand Piano'])>1);
+  const exportGap225=await exportPdf('staff gap 225');
+  await check('225% below Guitar6 opens 1.25 times the space of 200%, on screen and in the export pages',async()=>{
+    near(moved(screenGap225,screenNames)['Grand Piano'],1.25*shifted200.screen['Grand Piano'],'screen 225% vs 200%',0.2);
+    near(moved(exportGap225,exportNames)['Grand Piano'],1.25*shifted200.export['Grand Piano'],'export 225% vs 200%',0.2);
+    return `${round(moved(exportGap225,exportNames)['Grand Piano'])} = 1.25 x ${round(shifted200.export['Grand Piano'])}`;
   });
-  record('staff gap 300',afterGap300.project,screenGap300,exportGap300);
+  record('staff gap 225',afterGap225.project,screenGap225,exportGap225);
   await staffGap('Guitar6',200);const afterGapBack=await snapshot();
   const screenGapBack=await settle('screen','staff gap 200 again',m=>Math.abs(moved(m,screenNames)['Grand Piano']-shifted200.screen['Grand Piano'])<=0.5);
   await check('choosing the current staff gap records nothing',async()=>{
@@ -397,6 +398,8 @@ try{
     return heads.reduce((best,head)=>Math.abs(head.y-centre)<Math.abs(best.y-centre)?head:best,heads[0]);
   };
   await check('a click on a piano notehead after the 200% gap selects that note and a click inside the opened gap selects nothing',async()=>{
+    // The Score style dialog (opened by the settings above) covers the score: close it so the clicks reach the notation.
+    await closeScoreStyle(page);
     const first=(await settle('screen','click')).systems[0];
     // Select the guitar first, so that "selects nothing" is a change that would show: the gap click must leave the guitar selected.
     const guitarHead=nearestHead(first,'Guitar6'),pianoHead=nearestHead(first,'Grand Piano');
@@ -570,6 +573,8 @@ try{
   await check('parchment: the overlay draws one group brace per system and it lines up with the staves within 1 px of the page view',async()=>{
     await button('Presentation');
     await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('parchment');
+    // A continuous layout paints only the systems in view, and the staff lines are read from the painted systems: a window tall enough to hold every system puts them all in view.
+    const windowSize=await page.evaluate(()=>({width:innerWidth,height:innerHeight}));await page.setViewportSize({width:windowSize.width,height:4000});
     // The overlay (svg[data-tp-accolades]) shares its origin with alphaTab's own surface: each surface chunk sits at its wrapper's left/top.
     const read=()=>page.evaluate(()=>{
       const overlay=document.querySelector('svg[data-tp-accolades]');if(!overlay)return null;
@@ -586,11 +591,12 @@ try{
       }
       return {marks,lines:[...new Set(lines.map(y=>Math.round(y*100)/100))].sort((a,b)=>a-b)};
     });
-    let live=null;
-    for(let attempt=0;attempt<100;attempt++){live=await read();if(live&&live.marks.length===SYSTEM_COUNT&&live.marks.every(mark=>mark.name==='group-brace'))break;await page.waitForTimeout(150);live=null;}
-    assert.ok(live,'the overlay did not draw one group brace per system');
     // The same distances in the page view: from the brace's top to the first staff line inside it, and from the last staff line inside it to its bottom.
     const inside=(lines,top,bottom)=>lines.filter(y=>y>=top-5&&y<=bottom+5);
+    // Ready when every system has its brace and has been painted (its staff lines are there): the systems are painted in the background, one after the other.
+    let live=null;
+    for(let attempt=0;attempt<100;attempt++){live=await read();if(live&&live.marks.length===SYSTEM_COUNT&&live.marks.every(mark=>mark.name==='group-brace'&&inside(live.lines,mark.bottom-braceHeight(mark),mark.bottom).length>=10))break;await page.waitForTimeout(150);live=null;}
+    assert.ok(live,'the overlay did not draw one painted group brace per system');
     const reference=screenBrace.systems.map(system=>{const mark=system.marks[0],top=mark.bottom-braceHeight(mark),lines=inside(system.lines,top,mark.bottom);return {top:lines[0]-top,bottom:mark.bottom-lines.at(-1)};});
     const worst=[];
     live.marks.forEach((mark,index)=>{
@@ -600,6 +606,7 @@ try{
       near(mark.bottom-lines.at(-1),reference[index].bottom,`system ${index+1} brace bottom to its last staff line`,1);
       worst.push(round(Math.max(Math.abs(lines[0]-top-reference[index].top),Math.abs(mark.bottom-lines.at(-1)-reference[index].bottom))));
     });
+    await page.setViewportSize(windowSize);
     await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
     await settle('screen','back to the vertical page view',m=>m.systems.every(system=>markNames(system).join()===GROUP_BRACE.join()));
     return `${live.marks.length} overlay braces, music font ${live.marks[0].basePx}px, largest difference from the page view ${Math.max(...worst)} px`;

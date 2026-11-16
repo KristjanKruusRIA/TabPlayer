@@ -72,14 +72,15 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     const box=async name=>(await viewMenu()).getByRole('checkbox',{name:labels[name],exact:true});
     // Real key events carry the key a keyboard sends: Playwright's keyboard.press('Numpad2') reports ArrowDown, the NumLock-off shape.
     const press=(key,code)=>workspace$().dispatchEvent('keydown',{key,code,bubbles:true,cancelable:true});
-    // NOT UPDATED FOR THE-213: the Fret field is gone; the fret under the cursor is read from the status bar ('Fret 2 · B3'). A typed digit now writes at once, so the check below that a keypad key makes no edit needs the owner's decision.
+    // The fret under the cursor is read from the status bar ('Fret 2 · B3'). A typed digit writes at once (no Enter), so a keypad digit with the preference off is one fret edit and never a duration.
     const fret=async()=>/^Fret (\d+)/.exec(await page.getByTestId('status-value').innerText())?.[1]??'';
 
-    // With the preference off a keypad key types a fret and makes no edit.
+    // With the preference off a keypad key types a fret: one setNote edit on the beat under the cursor, and no duration change.
     assert.notEqual(await fret(),'2');
     await press('2','Numpad2');await poll(fret,value=>value==='2','keypad 2 types fret 2');
-    assert.deepEqual(await record(),initial,'Keypad is inert while the preference is off');
-    step('Keypad keys type frets and make no edit by default',{});
+    const typed=await record();assert.deepEqual(typed.snapshot.project.edits.map(({type,fret})=>({type,fret})),[{type:'setNote',fret:2}],'Keypad 2 with the preference off writes the fret and sets no duration');assert.deepEqual(typed.snapshot.project.edits[0].target,{track:0,...at});
+    initial=typed;
+    step('Keypad keys type frets (one setNote edit, no duration) by default',{});
 
     // The View menu holds every score-input choice and remembers them.
     for(const name of Object.keys(labels))await (await box(name)).waitFor();
@@ -89,7 +90,7 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     await (await box('keypad')).check();await (await box('auto')).check();await (await box('diagrams')).uncheck();
     // Advancing after a note is on by default; these walks assume the cursor stays on the beat it wrote.
     assert.equal(await (await box('advance')).isChecked(),true,'Advance defaults on');await (await box('advance')).uncheck();
-    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false,advance:false,swapPlusMinus:false});
+    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false,advance:false,swapPlusMinus:false,writeWhilePlaying:true});
     assert.deepEqual(await record(),initial,'Preferences never edit the score');
 
     // Read path: after a reload the stored choices come back into the menu and the clipboard panel.
@@ -97,15 +98,17 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     await sleep(3000);await stop();const again=resolve(runDirectory,'session-2');mkdirSync(again);await launch(again);
     await workspace$().waitFor();initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
     assert.equal(await (await box('keypad')).isChecked(),true);assert.equal(await (await box('auto')).isChecked(),true);assert.equal(await (await box('diagrams')).isChecked(),false);
-    await ui.revealInspector(page);
-    // Paste options appear once something is copied; copying never edits.
-    const open=name=>page.locator('summary').filter({hasText:name}).first().evaluate(node=>{node.parentElement.open=true;});
-    await open('Music selection');await button('Select bar');await workspace$().focus();await page.keyboard.press('Control+c');await idle();await open('Musical clipboard');
-    const filter=page.getByLabel('Chord diagrams',{exact:true});await filter.waitFor();
-    assert.equal(await filter.isChecked(),false,'Clipboard diagram filter starts from the preference');
-    await (await box('diagrams')).check();assert.equal(await filter.isChecked(),true,'Turning the preference on moves the filter');
-    await (await box('diagrams')).uncheck();assert.equal(await filter.isChecked(),false);
-    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false,advance:false,swapPlusMinus:false});
+    // Paste options appear once something is copied; copying never edits. The clipboard filter is the Musical clipboard section of the Properties dialog's Selection tab, read by opening and closing the dialog.
+    await button('Select bar');await workspace$().focus();await page.keyboard.press('Control+c');await idle();
+    const filterOn=async()=>{
+      const dialog=await ui.openProperties(page,'selection');
+      await dialog.locator('summary').filter({hasText:/^Musical clipboard$/}).first().evaluate(node=>{node.parentElement.open=true;});
+      const filter=dialog.getByLabel('Chord diagrams',{exact:true});await filter.waitFor();const checked=await filter.isChecked();await ui.closeProperties(page);return checked;
+    };
+    assert.equal(await filterOn(),false,'Clipboard diagram filter starts from the preference');
+    await (await box('diagrams')).check();assert.equal(await filterOn(),true,'Turning the preference on moves the filter');
+    await (await box('diagrams')).uncheck();assert.equal(await filterOn(),false);
+    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false,advance:false,swapPlusMinus:false,writeWhilePlaying:true});
     step('Preferences are saved, reloaded and drive the clipboard filter',{prefs:await prefs()});
 
     // NumLock off: the keypad reports navigation keys, which keep navigating and never edit.
@@ -163,10 +166,10 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     assert.equal(beatAt(1,2).notes.length,1);assert.equal(beatAt(2,1).duration,4);assert.equal(beatAt(2,1).notes.length,1);
     assert.deepEqual(await record(),final,'Export never edits');step('Exported GP reads back the dotted half and both written notes',{exportPath,sha256:hashFile(exportPath)});
 
-    // Keypad off again: the key types a fret and edits nothing.
+    // Keypad off again: the key types a fret, one setNote edit and no duration.
     await (await box('keypad')).uncheck();
     await press('3','Numpad3');await poll(fret,value=>value==='3','keypad 3 types fret 3');
-    assert.deepEqual(await record(),final);step('Keypad preference off again types frets',{});
+    const typedAgain=await record();assert.deepEqual(typedAgain.snapshot.project.edits.slice(0,final.snapshot.project.edits.length),final.snapshot.project.edits);assert.deepEqual(typedAgain.snapshot.project.edits.slice(final.snapshot.project.edits.length).map(({type,fret})=>({type,fret})),[{type:'setNote',fret:3}]);step('Keypad preference off again types frets',{});
     healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};if(page)try{await page.screenshot({path:resolve(paths.results,'failure.png')});}catch{}}
   finally{

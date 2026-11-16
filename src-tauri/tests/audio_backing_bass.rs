@@ -1490,8 +1490,10 @@ fn changing_the_speed_while_playing_makes_no_level_jump() {
 fn handing_the_low_band_over_and_back_keeps_the_level() {
     // The deepest window allowed for each tone below the grains' reach, and how many windows more than 3 dB under: this
     // branch's own measured values (the count also no more than develop's).
-    let below_reach = [(82.4, -3.25, 0usize), (55.0, -7.0, 10)];
-    for hz in [110.0, 100.0, 82.4, 55.0] {
+    // 41.2 Hz (low E of a bass) does not meet the bound of 55 Hz: its entry is the measured value on this branch (deepest -19.25 dB,
+    // 26 windows under -3 dB), against develop's -13.09 dB and 110 windows. It pins what is measured; it is not a target.
+    let below_reach = [(82.4, -3.25, 0usize), (55.0, -7.0, 10), (41.2, -19.3, 26)];
+    for hz in [110.0, 100.0, 82.4, 55.0, 41.2] {
         let envelope = |age: f64| {
             if age < 0.0 {
                 0.0
@@ -1554,6 +1556,15 @@ fn handing_the_low_band_over_and_back_keeps_the_level() {
         let (mine, develop) = (&levels[0], &levels[1]);
         let deepest = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
         let under = |v: &[f64], l: f64| v.iter().filter(|&&w| w < l).count();
+        eprintln!(
+            "{hz} Hz: {} windows, deepest {:+.2} dB, {} under -3 dB (develop: {} windows, deepest {:+.2} dB, {} under -3 dB)",
+            mine.len(),
+            deepest(mine),
+            under(mine, -3.0),
+            develop.len(),
+            deepest(develop),
+            under(develop, -3.0)
+        );
         match below_reach.iter().find(|r| r.0 == hz) {
             None => {
                 for (k, (m, d)) in mine.iter().zip(develop).enumerate() {

@@ -10,7 +10,7 @@ import { busyGuard, busySelect } from '../ui/useBusyGuard';
 import { AmpGlyph } from '../shell/glyphs';
 import { SoundPanel } from './SoundPanel';
 import { useSoundEditing } from './useSoundEditing';
-import { playsRecordedKit, presetIds, soundPreset, localizedBlockName, localizedPresetName, voiceNames } from './sound-model';
+import { playsRecordedKit, sourceChoices, presetIds, soundPreset, localizedBlockName, localizedPresetName, voiceNames } from './sound-model';
 import type { NativePlaybackController } from './NativePlaybackController';
 import type { PluginStatus } from './plugin-host';
 
@@ -30,7 +30,7 @@ export function SoundSummary(props: Props) {
   const active = order.filter(block => first.effects[block].enabled);
   return <div className="sound-summary">
     <BusyFieldset busy={busy} className="sound-choices">
-      <label>{t('sound.sound_source')}<CommitSelect value={current.voiceId ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : save({ ...current, voiceId: chosen || null }))}>{/* A drum track's automatic choice is the recorded kit (unless its kit is Room, Jazz or Brush), so the option says so. */}<option value="">{t(playsRecordedKit(0, percussion, current.drumKit) ? 'sound.recorded_drum_kit' : 'sound.automatic_instrument')}</option>{(['gm', 'green-guitar', 'black-guitar', 'darkblack-bass', 'babyblue-bass'] as const).map(id => <option key={id} value={id}>{voiceNames[id]}</option>)}</CommitSelect></label>
+      <label>{t('sound.sound_source')}<CommitSelect value={current.voiceId ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : save({ ...current, voiceId: chosen || null }))}>{/* A drum track's automatic choice is the recorded kit (unless its kit is Room, Jazz or Brush), so the option says so. */}<option value="">{t(playsRecordedKit(0, percussion, current.drumKit) ? 'sound.recorded_drum_kit' : 'sound.automatic_instrument')}</option>{sourceChoices(percussion, current.voiceId).map(id => <option key={id} value={id}>{percussion && id === 'gm' ? t('sound.general_midi_drums') : voiceNames[id]}</option>)}</CommitSelect></label>
       <label>{t('sound.sound_preset')}<CommitSelect value={current.presetId} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : save(soundPreset(chosen as TrackSound['presetId'], current.voiceId)))}>{presetIds.map(id => <option value={id} key={id}>{localizedPresetName(id, lang)}</option>)}</CommitSelect></label>
     </BusyFieldset>
     <ul className="effect-strip" aria-label={t('sound_summary.strip')}>

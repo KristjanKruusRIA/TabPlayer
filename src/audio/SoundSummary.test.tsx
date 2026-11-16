@@ -34,12 +34,18 @@ it('a drum track names its automatic source as the recorded drum kit, in the sum
   const { rerender } = render(<SoundSummary trackId="drums" percussion sound={soundPreset('gm')} onEdit={vi.fn()} />);
   const first = (select: HTMLElement) => (select as HTMLSelectElement).options[0];
   expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Recorded drum kit');expect(first(screen.getByLabelText('Sound source')).value).toBe('');
+  const offered = (select: HTMLElement) => [...(select as HTMLSelectElement).options].map(option => option.textContent);
+  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Recorded drum kit', 'General MIDI drums']);
   fireEvent.click(screen.getByRole('button', { name: /Sound and pedalboard|Open/ }));
   expect(first(within(screen.getByRole('dialog')).getByLabelText('Sound source')).textContent).toBe('Recorded drum kit');
   fireEvent.keyDown(document, { key: 'Escape' });
   rerender(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), drumKit: 8 }} onEdit={vi.fn()} />);
   expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic instrument');
+  // A guitar voice a drum track already stores stays in its list, so the list shows what is set.
+  rerender(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), voiceId: 'green-guitar' }} onEdit={vi.fn()} />);
+  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Recorded drum kit', 'General MIDI drums', 'Green Guitar']);expect(screen.getByLabelText('Sound source')).toHaveValue('green-guitar');
   rerender(<SoundSummary trackId="guitar" sound={soundPreset('gm')} onEdit={vi.fn()} />);
+  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Automatic instrument', 'General MIDI', 'Green Guitar', 'Black Guitar', 'Darkblack Bass', 'Babyblue Bass']);
   expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic instrument');
 });
 

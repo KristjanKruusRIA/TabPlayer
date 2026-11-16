@@ -158,6 +158,12 @@ export function automaticVoice(program:number,percussion:boolean):VoiceId {
 }
 /** Whether Automatic plays a drum track through the recorded kit, as `automatic_voice_id` in voices.rs does: every kit but
  * the sound bank's Room (8), Jazz (32) and Brush (40), which stay General MIDI. `drumKit` is the kit chosen in the rig. */
+/** The sources a track's source list offers besides Automatic. A drum track has no use for the guitar and bass voices (they have no
+ * drums, so the track would play General MIDI), so it is offered General MIDI only, and a voice it already stores so that the list shows it. */
+export function sourceChoices(percussion:boolean,voiceId?:string|null):VoiceId[] {
+  const all:VoiceId[]=['gm','green-guitar','black-guitar','darkblack-bass','babyblue-bass'];
+  return percussion?all.filter(id=>id==='gm'||id===voiceId):all;
+}
 export function playsRecordedKit(program:number,percussion:boolean,drumKit?:number|null):boolean {
   return percussion&&![8,32,40].includes(drumKit??program);
 }

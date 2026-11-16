@@ -1,4 +1,6 @@
 //! The recorded drum kit: which notes it plays, how long they ring, what cuts them and how the kit mix reaches them.
+mod kit_common;
+use kit_common::*;
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
@@ -202,6 +204,38 @@ fn a_kit_sound_plays_its_recording_instead_of_general_midi_and_a_missing_one_pla
     );
     let guitars = render(snare(Some(38)), resources(true), guitar);
     assert!(energy(&guitars, 0.0, 0.5) > 1e-6);
+}
+
+#[test]
+fn a_drum_track_plays_general_midi_when_the_kits_processing_data_is_refused() {
+    // The kit's second microphone does not match the first within the alignment's reach, so the kit is refused at load.
+    let mut table = kit_table();
+    table["profiles"]["kick"]["companion"]["maxOffsetMs"] = 0.5.into();
+    let root = kit_root(table, true);
+    edit_manifest(&root, |m| m["instruments"][0]["id"] = RECORDED_KIT.into());
+    let hits = plan(&[(0.0, 480.0, 36, Some(36), false)]);
+    let requests = resource_requests(&hits, &DocumentSettings::default());
+    assert_eq!(requests[0].instrument_id, RECORDED_KIT);
+    let resources = Arc::new(AudioResources::load_for_requests(root.path(), &requests).unwrap());
+    assert!(
+        resources
+            .manifest
+            .instruments
+            .iter()
+            .all(|i| i.id != RECORDED_KIT)
+    );
+    assert!(
+        resources
+            .manifest
+            .notices
+            .iter()
+            .any(|n| n.contains("do not match")),
+        "{:?}",
+        resources.manifest.notices
+    );
+    // The track still sounds, from the General MIDI bank, and the renderer was built without the kit.
+    let output = render(hits, resources, DocumentSettings::default());
+    assert!(energy(&output, 0.0, 0.5) > 1e-6);
 }
 
 #[test]
@@ -1794,8 +1828,8 @@ fn recorded_kit_kick_pairs() {
         .find(|i| i.id == RECORDED_KIT)
         .unwrap();
     let table = instrument
-        .processing
-        .as_ref()
+        .kit_processing()
+        .unwrap()
         .expect("the kit has a processing table");
     let companion = table.profiles["kick"].companion.as_ref().unwrap();
     let path = |id: &str| {

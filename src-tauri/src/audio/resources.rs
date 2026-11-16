@@ -50,9 +50,23 @@ pub struct Instrument {
     pub name: String,
     pub source_id: String,
     pub regions: Vec<Region>,
-    /// How the instrument's recorded hits are shaped when they are loaded (see `kit_processing`); None plays them as recorded.
+    /// How the instrument's recorded hits are shaped when they are loaded (see `kit_processing`), as written in the manifest and read
+    /// by `kit_processing()`; None plays them as recorded. Kept as plain data so a bad table costs the kit and not the manifest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub processing: Option<KitProcessing>,
+    pub processing: Option<serde_json::Value>,
+}
+
+impl Instrument {
+    /// The instrument's kit processing table, read and checked; None when it plays as recorded.
+    pub fn kit_processing(&self) -> Result<Option<KitProcessing>, String> {
+        let Some(value) = &self.processing else {
+            return Ok(None);
+        };
+        let table: KitProcessing = serde_json::from_value(value.clone())
+            .map_err(|e| format!("invalid kit processing table: {e}"))?;
+        table.validate()?;
+        Ok(Some(table))
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -92,6 +106,9 @@ pub struct InstrumentManifest {
     pub instruments: Vec<Instrument>,
     pub samples: Vec<SampleAsset>,
     pub sound_font: SoundFontAsset,
+    /// What the loader set aside, in words: an instrument whose kit data was refused, so its drum tracks play General MIDI instead.
+    #[serde(skip)]
+    pub notices: Vec<String>,
 }
 
 pub struct AudioResources {
@@ -228,10 +245,37 @@ impl AudioResources {
         if manifest.schema_version != 1 {
             return Err("Unsupported audio manifest version".into());
         }
-        if let Some(requests) = requests {
+        // A kit whose processing data is refused is set aside whole, before any request narrows it: the document's other audio loads,
+        // its drum tracks play General MIDI (the renderer's fall back for a missing kit), and the manifest says why.
+        let mut notices = Vec::new();
+        let mut tables = HashMap::new();
+        let mut refused = Vec::new();
+        for instrument in &manifest.instruments {
+            match check_kit(&manifest, instrument) {
+                Ok(Some(table)) => {
+                    tables.insert(instrument.id.clone(), table);
+                }
+                Ok(None) => {}
+                Err(error) => refused.push((instrument.id.clone(), error)),
+            }
+        }
+        let mut set_aside_ids_now = HashSet::new();
+        for (id, error) in refused {
+            notices.push(set_aside(&mut manifest, &id, &error));
+            set_aside_ids_now.insert(id);
+        }
+        // Requests for an instrument set aside are dropped: its notes play General MIDI.
+        let requests: Option<Vec<SampleRequest>> = requests.map(|requests| {
+            requests
+                .iter()
+                .filter(|r| !set_aside_ids_now.contains(&r.instrument_id))
+                .cloned()
+                .collect()
+        });
+        if let Some(requests) = &requests {
             let mut selected = HashSet::new();
             let mut requested_instruments = HashSet::new();
-            for request in requests {
+            for request in requests.iter() {
                 if request.key > 127 || request.velocity == 0 || request.velocity > 127 {
                     return Err("Invalid recorded sample request".into());
                 }
@@ -378,7 +422,41 @@ impl AudioResources {
                 }
             }
         }
-        process_kits(&manifest, &mut samples)?;
+        let mut shaped_failures = Vec::new();
+        for instrument in &manifest.instruments {
+            let Some(table) = tables.get(&instrument.id) else {
+                continue;
+            };
+            match shape_kit(table, instrument, &samples) {
+                Ok(shaped) => {
+                    let own: HashSet<&str> = instrument
+                        .regions
+                        .iter()
+                        .map(|r| r.sample_id.as_str())
+                        .collect();
+                    let companions: Vec<String> = instrument
+                        .regions
+                        .iter()
+                        .filter_map(|r| r.companion_id.clone())
+                        .filter(|c| !own.contains(c.as_str()))
+                        .collect();
+                    samples.extend(shaped);
+                    for companion in companions {
+                        samples.remove(&companion);
+                    }
+                }
+                Err(error) => shaped_failures.push((instrument.id.clone(), error)),
+            }
+        }
+        for (id, error) in shaped_failures {
+            for sample in set_aside_ids(&mut manifest, &id) {
+                samples.remove(&sample);
+            }
+            let notice = format!("{id}: {error}; its drum tracks play General MIDI");
+            eprintln!("TabPlayer: {notice}");
+            notices.push(notice);
+        }
+        manifest.notices = notices;
         let font = &manifest.sound_font;
         let bytes = verified(root, &font.path, &font.sha256, Some(font.size))?;
         let sound_font = Arc::new(
@@ -393,99 +471,180 @@ impl AudioResources {
     }
 }
 
-/// Shapes each recorded hit of an instrument that has a processing table, once, on the thread that loads it: the sample of each
-/// processed region is replaced by its processed version, and a companion recording used only for mixing is dropped. A table or a
-/// profile that is out of range, a sample two kit sounds would shape differently, and a companion without a profile (or the reverse)
-/// are errors, so a bad kit file stops the load instead of being played.
-fn process_kits(
+/// Takes an instrument out of the manifest, with the recordings no other instrument uses; returns those recordings' ids.
+fn set_aside_ids(manifest: &mut InstrumentManifest, id: &str) -> Vec<String> {
+    let Some(at) = manifest.instruments.iter().position(|i| i.id == id) else {
+        return vec![];
+    };
+    let gone = manifest.instruments.remove(at);
+    let kept: HashSet<&str> = manifest
+        .instruments
+        .iter()
+        .flat_map(|i| i.regions.iter())
+        .flat_map(|r| std::iter::once(r.sample_id.as_str()).chain(r.companion_id.as_deref()))
+        .collect();
+    let removed: Vec<String> = gone
+        .regions
+        .iter()
+        .flat_map(|r| std::iter::once(r.sample_id.clone()).chain(r.companion_id.clone()))
+        .filter(|s| !kept.contains(s.as_str()))
+        .collect();
+    manifest.samples.retain(|s| !removed.contains(&s.id));
+    removed
+}
+
+/// `set_aside_ids` for an instrument refused before anything is decoded; returns the notice, which is also written to standard error.
+fn set_aside(manifest: &mut InstrumentManifest, id: &str, error: &str) -> String {
+    set_aside_ids(manifest, id);
+    let notice = format!("{id}: {error}; its drum tracks play General MIDI");
+    eprintln!("TabPlayer: {notice}");
+    notice
+}
+
+/// Checks the kit data of one instrument as a whole, before any request narrows it, so a bad pair of regions is refused whatever is
+/// asked for: its table (read, bounded); every sound the table names has a recording of its own and none lies in a key range;
+/// every sound's profile and companion agree; no recording has two profiles or two companions; nothing the processing replaces is
+/// looped or shared with another instrument; every named recording exists. Returns the table, or None for an instrument without.
+fn check_kit(
     manifest: &InstrumentManifest,
-    samples: &mut HashMap<String, Arc<DecodedAudio>>,
-) -> Result<(), String> {
-    for instrument in &manifest.instruments {
-        let Some(table) = &instrument.processing else {
-            if instrument.regions.iter().any(|r| r.companion_id.is_some()) {
-                return Err(format!(
-                    "{} names a companion recording but has no kit processing",
-                    instrument.id
-                ));
-            }
-            continue;
-        };
-        table.validate()?;
-        // The profile of each region's sample, None for a sample played as recorded.
-        let mut profiles: HashMap<&str, Option<&str>> = HashMap::new();
-        let mut companions: HashSet<&str> = HashSet::new();
-        for region in &instrument.regions {
-            let profile = (region.key_low == region.key_high)
-                .then(|| table.sounds.get(&region.key_low.to_string()))
-                .flatten()
-                .map(String::as_str);
-            let wants = profile.is_some_and(|p| table.profiles[p].companion.is_some());
-            if wants != region.companion_id.is_some() {
-                return Err(format!(
-                    "{}: a kit sound's companion recording and its profile disagree",
-                    instrument.id
-                ));
-            }
-            companions.extend(region.companion_id.as_deref());
-            if profiles
-                .insert(region.sample_id.as_str(), profile)
-                .is_some_and(|earlier| earlier != profile)
-            {
-                return Err(format!(
-                    "{}: kit sounds shaped differently share the recording {}",
-                    instrument.id, region.sample_id
-                ));
-            }
+    instrument: &Instrument,
+) -> Result<Option<KitProcessing>, String> {
+    let Some(table) = instrument.kit_processing()? else {
+        if instrument.regions.iter().any(|r| r.companion_id.is_some()) {
+            return Err("it names a companion recording but has no kit processing".into());
         }
-        // One companion may serve one recording only, or the mix would depend on the order of the regions.
-        let mut served: HashMap<&str, &str> = HashMap::new();
-        for region in &instrument.regions {
-            if let Some(companion) = &region.companion_id {
-                if served
-                    .insert(companion.as_str(), region.sample_id.as_str())
-                    .is_some_and(|other| other != region.sample_id)
-                {
+        return Ok(None);
+    };
+    let known: HashSet<&str> = manifest.samples.iter().map(|s| s.id.as_str()).collect();
+    let others: HashSet<&str> = manifest
+        .instruments
+        .iter()
+        .filter(|o| o.id != instrument.id)
+        .flat_map(|o| o.regions.iter())
+        .flat_map(|r| std::iter::once(r.sample_id.as_str()).chain(r.companion_id.as_deref()))
+        .collect();
+    let own: HashSet<&str> = instrument
+        .regions
+        .iter()
+        .map(|r| r.sample_id.as_str())
+        .collect();
+    let keys: Vec<u8> = table.sounds.keys().filter_map(|k| k.parse().ok()).collect();
+    let mut shaping: HashMap<&str, (Option<&str>, Option<&str>)> = HashMap::new();
+    let mut served: HashMap<&str, &str> = HashMap::new();
+    let mut recorded: HashSet<String> = HashSet::new();
+    for region in &instrument.regions {
+        let single = region.key_low == region.key_high;
+        if !single
+            && keys
+                .iter()
+                .any(|k| (region.key_low..=region.key_high).contains(k))
+        {
+            return Err(format!(
+                "a kit sound named in the processing table lies in the key range of {}",
+                region.sample_id
+            ));
+        }
+        let key = region.key_low.to_string();
+        let profile = single
+            .then(|| table.sounds.get(&key))
+            .flatten()
+            .map(String::as_str);
+        if profile.is_some() {
+            recorded.insert(key);
+        }
+        let wants = profile.is_some_and(|p| table.profiles[p].companion.is_some());
+        if wants != region.companion_id.is_some() {
+            return Err("a kit sound's companion recording and its profile disagree".into());
+        }
+        if profile.is_some() && (region.loop_start.is_some() || region.loop_end.is_some()) {
+            return Err(format!(
+                "{} is looped, which processing would invalidate",
+                region.sample_id
+            ));
+        }
+        if profile.is_some() {
+            for used in std::iter::once(&region.sample_id).chain(region.companion_id.as_ref()) {
+                if !known.contains(used.as_str()) {
+                    return Err(format!("Missing recording {used}"));
+                }
+                if others.contains(used.as_str()) {
                     return Err(format!(
-                        "{}: a companion recording serves two hits",
-                        instrument.id
+                        "{used} is also used by another instrument, and processing would change it for both"
                     ));
                 }
             }
         }
-        let mut shaped: HashMap<String, Arc<DecodedAudio>> = HashMap::new();
-        for region in &instrument.regions {
-            let Some(name) = profiles[region.sample_id.as_str()] else {
-                continue;
-            };
-            if shaped.contains_key(&region.sample_id) {
-                continue;
+        if let Some(companion) = &region.companion_id {
+            if own.contains(companion.as_str()) {
+                return Err(format!("{companion} is a companion and a hit of its own"));
             }
-            let main = samples
-                .get(&region.sample_id)
-                .ok_or_else(|| format!("Missing region sample {}", region.sample_id))?;
-            let companion = region
-                .companion_id
-                .as_ref()
-                .map(|id| {
-                    samples
-                        .get(id)
-                        .ok_or_else(|| format!("Missing companion recording {id}"))
-                })
-                .transpose()?;
-            let result = process_hit(&table.profiles[name], main, companion.map(|c| &**c))
-                .map_err(|e| format!("{}: {e}", region.sample_id))?;
-            shaped.insert(region.sample_id.clone(), Arc::new(result));
+            if served
+                .insert(companion.as_str(), region.sample_id.as_str())
+                .is_some_and(|other| other != region.sample_id)
+            {
+                return Err("a companion recording serves two hits".into());
+            }
         }
-        samples.extend(shaped);
-        let own: HashSet<&str> = instrument
-            .regions
-            .iter()
-            .map(|r| r.sample_id.as_str())
-            .collect();
-        for id in companions.difference(&own) {
-            samples.remove(*id);
+        match shaping.insert(
+            region.sample_id.as_str(),
+            (profile, region.companion_id.as_deref()),
+        ) {
+            Some((earlier, _)) if earlier != profile => {
+                return Err(format!(
+                    "kit sounds shaped differently share the recording {}",
+                    region.sample_id
+                ));
+            }
+            Some((_, earlier)) if earlier != region.companion_id.as_deref() => {
+                return Err(format!(
+                    "the recording {} has two different companions",
+                    region.sample_id
+                ));
+            }
+            _ => {}
         }
     }
-    Ok(())
+    if let Some(missing) = table.sounds.keys().find(|k| !recorded.contains(*k)) {
+        return Err(format!(
+            "the processing table names kit sound {missing}, which has no recording"
+        ));
+    }
+    Ok(Some(table))
+}
+
+/// Shapes each recorded hit of a checked kit, once, on the thread that loads it, and returns the processed recording of each hit.
+/// Nothing is replaced here: the caller does that only when every hit succeeded.
+fn shape_kit(
+    table: &KitProcessing,
+    instrument: &Instrument,
+    samples: &HashMap<String, Arc<DecodedAudio>>,
+) -> Result<HashMap<String, Arc<DecodedAudio>>, String> {
+    let mut shaped: HashMap<String, Arc<DecodedAudio>> = HashMap::new();
+    for region in &instrument.regions {
+        let Some(name) = (region.key_low == region.key_high)
+            .then(|| table.sounds.get(&region.key_low.to_string()))
+            .flatten()
+        else {
+            continue;
+        };
+        if shaped.contains_key(&region.sample_id) {
+            continue;
+        }
+        let main = samples
+            .get(&region.sample_id)
+            .ok_or_else(|| format!("Missing region sample {}", region.sample_id))?;
+        let companion = region
+            .companion_id
+            .as_ref()
+            .map(|id| {
+                samples
+                    .get(id)
+                    .ok_or_else(|| format!("Missing companion recording {id}"))
+            })
+            .transpose()?;
+        let result = process_hit(&table.profiles[name], main, companion.map(|c| &**c))
+            .map_err(|e| format!("{}: {e}", region.sample_id))?;
+        shaped.insert(region.sample_id.clone(), Arc::new(result));
+    }
+    Ok(shaped)
 }

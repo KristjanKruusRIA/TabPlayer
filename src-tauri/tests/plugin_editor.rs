@@ -173,6 +173,7 @@ mod windows_tests {
                 revision: doc.revision,
             };
             let slot = PluginSlot {
+                kind: tabplayer_lib::settings::SlotKind::Effect,
                 format: PluginFormat::Vst3,
                 class_id: TEST_CLASS_ID.into(),
                 name: "TestGain".into(),
@@ -282,6 +283,7 @@ mod windows_tests {
                 track_id: "base/0".into(),
                 sound: TrackSound {
                     plugin: Some(PluginSlot {
+                        kind: tabplayer_lib::settings::SlotKind::Effect,
                         format: PluginFormat::Vst3,
                         class_id: TEST_CLASS_ID.into(),
                         name: "TestGain".into(),
@@ -353,6 +355,7 @@ mod windows_tests {
                     track_id: "base/0".into(),
                     sound: TrackSound {
                         plugin: Some(PluginSlot {
+                            kind: tabplayer_lib::settings::SlotKind::Effect,
                             format: PluginFormat::Vst3,
                             class_id: TEST_CLASS_ID.into(),
                             name: "TestGain".into(),
@@ -376,6 +379,7 @@ mod windows_tests {
             let req = SlotRequest {
                 track_id: "base/0".into(),
                 slot: PluginSlot {
+                    kind: tabplayer_lib::settings::SlotKind::Effect,
                     format: PluginFormat::Vst3,
                     class_id: TEST_CLASS_ID.into(),
                     name: "TestGain".into(),
@@ -470,6 +474,7 @@ mod windows_tests {
                     track_id: "base/0".into(),
                     sound: TrackSound {
                         plugin: Some(PluginSlot {
+                            kind: tabplayer_lib::settings::SlotKind::Effect,
                             format: PluginFormat::Vst3,
                             class_id: TEST_CLASS_ID.into(),
                             name: "TestGain".into(),
@@ -492,6 +497,7 @@ mod windows_tests {
             let req = SlotRequest {
                 track_id: "base/0".into(),
                 slot: PluginSlot {
+                    kind: tabplayer_lib::settings::SlotKind::Effect,
                     format: PluginFormat::Vst3,
                     class_id: TEST_CLASS_ID.into(),
                     name: "TestGain".into(),
@@ -584,6 +590,7 @@ mod windows_tests {
                         track_id: "base/0".into(),
                         sound: TrackSound {
                             plugin: Some(PluginSlot {
+                                kind: tabplayer_lib::settings::SlotKind::Effect,
                                 format: PluginFormat::Vst3,
                                 class_id: TEST_CLASS_ID.into(),
                                 name: "TestGain".into(),
@@ -660,6 +667,7 @@ mod windows_tests {
             let req = SlotRequest {
                 track_id: "base/0".into(),
                 slot: PluginSlot {
+                    kind: tabplayer_lib::settings::SlotKind::Effect,
                     format: PluginFormat::Vst3,
                     class_id: TEST_CLASS_ID.into(),
                     name: "TestGain".into(),

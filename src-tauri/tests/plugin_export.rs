@@ -246,6 +246,7 @@ mod windows_tests {
 
     fn test_slot(class_id: &str, state_id: &str) -> PluginSlot {
         PluginSlot {
+            kind: tabplayer_lib::settings::SlotKind::Effect,
             active: true,
             format: PluginFormat::Vst3,
             class_id: class_id.to_string(),

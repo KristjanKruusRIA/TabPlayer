@@ -254,6 +254,7 @@ pub trait Launcher: Send + Sync {
         exe: &Path,
         bundle: &Path,
         class_id: &str,
+        kind: tabplayer_plugin_protocol::control::PluginKind,
         rate: u32,
         state: StateParts,
         supervisor: &Supervisor,
@@ -265,6 +266,7 @@ pub trait Launcher: Send + Sync {
         exe: &Path,
         bundle: &Path,
         class_id: &str,
+        kind: tabplayer_plugin_protocol::control::PluginKind,
         rate: u32,
         state: StateParts,
     ) -> Result<Arc<dyn HelperSession>, HelperError>;
@@ -396,6 +398,7 @@ impl Launcher for RealLauncher {
         exe: &Path,
         bundle: &Path,
         class_id: &str,
+        kind: tabplayer_plugin_protocol::control::PluginKind,
         rate: u32,
         state: StateParts,
         supervisor: &Supervisor,
@@ -407,6 +410,7 @@ impl Launcher for RealLauncher {
             class_id: class_id.to_string(),
             sample_rate: rate,
             mode: Mode::Realtime,
+            kind,
             component: state.component,
             controller: state.controller,
         };
@@ -428,6 +432,7 @@ impl Launcher for RealLauncher {
         exe: &Path,
         bundle: &Path,
         class_id: &str,
+        kind: tabplayer_plugin_protocol::control::PluginKind,
         rate: u32,
         state: StateParts,
     ) -> Result<Arc<dyn HelperSession>, HelperError> {
@@ -437,6 +442,7 @@ impl Launcher for RealLauncher {
             class_id: class_id.to_string(),
             sample_rate: rate,
             mode: Mode::Offline,
+            kind,
             component: state.component,
             controller: state.controller,
         };
@@ -1401,6 +1407,7 @@ impl PluginService {
                     &exe,
                     &bundle,
                     &slot.class_id,
+                    slot.kind.into(),
                     rate,
                     state_parts,
                     &supervisor,
@@ -1622,6 +1629,7 @@ impl PluginService {
                 &self.paths.helper,
                 &entry.bundle,
                 class_id,
+                entry.kind.into(),
                 rate,
                 empty_state,
                 &self.supervisor,
@@ -1758,6 +1766,7 @@ impl PluginService {
                 &self.paths.helper,
                 &bundle,
                 &slot.class_id,
+                slot.kind.into(),
                 rate,
                 state_parts,
             ) {
@@ -2544,6 +2553,8 @@ pub(crate) mod fakes {
         pub last_session: Mutex<Option<Arc<FakeSession>>>,
         pub sessions: Mutex<Vec<Arc<FakeSession>>>,
         pub rates: Mutex<Vec<u32>>,
+        /// The kind each launch was asked for, in order.
+        pub kinds: Mutex<Vec<tabplayer_plugin_protocol::control::PluginKind>>,
         /// Every probe fails.
         pub fail_probe: AtomicBool,
         /// Whether it hosts plug-ins. It runs no process, so it does on every platform unless a test says otherwise.
@@ -2560,6 +2571,7 @@ pub(crate) mod fakes {
                 last_session: Mutex::new(None),
                 sessions: Mutex::new(Vec::new()),
                 rates: Mutex::new(Vec::new()),
+                kinds: Mutex::new(Vec::new()),
                 fail_probe: AtomicBool::new(false),
                 hosts: AtomicBool::new(true),
             }
@@ -2588,11 +2600,13 @@ pub(crate) mod fakes {
             _exe: &Path,
             _bundle: &Path,
             _class_id: &str,
+            kind: tabplayer_plugin_protocol::control::PluginKind,
             rate: u32,
             _state: StateParts,
             _supervisor: &Supervisor,
             _key: HelperKey,
         ) -> Result<Arc<dyn HelperSession>, HelperError> {
+            self.kinds.lock().unwrap().push(kind);
             self.start(rate)
         }
 
@@ -2601,9 +2615,11 @@ pub(crate) mod fakes {
             _exe: &Path,
             _bundle: &Path,
             _class_id: &str,
+            kind: tabplayer_plugin_protocol::control::PluginKind,
             rate: u32,
             _state: StateParts,
         ) -> Result<Arc<dyn HelperSession>, HelperError> {
+            self.kinds.lock().unwrap().push(kind);
             self.start(rate)
         }
 
@@ -2634,6 +2650,7 @@ pub(crate) mod fakes {
 
     pub(crate) fn test_slot(class_id: &str, state_id: &str) -> PluginSlot {
         PluginSlot {
+            kind: Default::default(),
             active: true,
             format: PluginFormat::Vst3,
             class_id: class_id.to_string(),
@@ -3230,6 +3247,24 @@ mod tests {
         assert_eq!(session.rate, 44_100);
     }
 
+    #[test]
+    fn the_slot_decides_the_kind_a_helper_is_asked_to_load() {
+        use tabplayer_plugin_protocol::control::PluginKind;
+        let rig = test_rig();
+        let effect = test_slot(&rig.class_id, &rig.state_id);
+        assert_eq!(effect.kind, crate::settings::SlotKind::Effect);
+        let mut synth = effect.clone();
+        synth.kind = crate::settings::SlotKind::Instrument;
+        let req = vec![request("track_0", effect), request("track_1", synth)];
+        let _ = ready(&rig, 48_000, &req);
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_1"),
+            PluginStatus::Ready
+        );
+        let mut kinds = rig.launcher.kinds.lock().unwrap().clone();
+        kinds.sort_by_key(|kind| *kind == PluginKind::Instrument);
+        assert_eq!(kinds, vec![PluginKind::Effect, PluginKind::Instrument]);
+    }
     #[test]
     fn an_unknown_device_rate_starts_nothing() {
         let rig = test_rig();

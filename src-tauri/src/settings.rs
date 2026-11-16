@@ -367,6 +367,68 @@ pub enum PluginFormat {
     Vst3,
 }
 
+/// What a plug-in slot holds: an effect, which processes the track's audio, or an instrument, which makes audio from
+/// events. The document's own enum, not the helper protocol's `PluginKind`, so that the spelling a project file keeps
+/// (`"instrument"`) cannot change with a rename on the wire; the `From` impls map it across.
+///
+/// An effect is the default and is never written: a slot that holds one has no `kind` key, so every file and edit log from
+/// before instruments is unchanged, and a `kind` key is present exactly when the slot holds an instrument. Reading is as
+/// strict: `"effect"` written out, `null` and any other value are refused, so a slot has one spelling.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SlotKind {
+    #[default]
+    Effect,
+    Instrument,
+}
+
+impl SlotKind {
+    pub fn is_effect(&self) -> bool {
+        *self == SlotKind::Effect
+    }
+}
+
+impl From<SlotKind> for tabplayer_plugin_protocol::control::PluginKind {
+    fn from(kind: SlotKind) -> Self {
+        match kind {
+            SlotKind::Effect => Self::Effect,
+            SlotKind::Instrument => Self::Instrument,
+        }
+    }
+}
+
+impl From<tabplayer_plugin_protocol::control::PluginKind> for SlotKind {
+    fn from(kind: tabplayer_plugin_protocol::control::PluginKind) -> Self {
+        match kind {
+            tabplayer_plugin_protocol::control::PluginKind::Effect => Self::Effect,
+            tabplayer_plugin_protocol::control::PluginKind::Instrument => Self::Instrument,
+        }
+    }
+}
+/// How `SlotKind` is written in a file: only the non-default value has a spelling.
+#[derive(Serialize, Deserialize)]
+enum WrittenKind {
+    #[serde(rename = "instrument")]
+    Instrument,
+}
+
+impl Serialize for SlotKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            SlotKind::Instrument => WrittenKind::Instrument.serialize(serializer),
+            // Never reached through a struct that skips it with is_effect.
+            SlotKind::Effect => Err(serde::ser::Error::custom("an effect slot has no kind key")),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SlotKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        match WrittenKind::deserialize(deserializer)? {
+            WrittenKind::Instrument => Ok(SlotKind::Instrument),
+        }
+    }
+}
+
 /// The reach of a plug-in slot's input and output trims, in dB.
 pub const PLUGIN_TRIM_DB: f64 = 12.0;
 
@@ -387,6 +449,9 @@ pub struct PluginSlot {
     pub output_db: f64,
     /// The id (a lowercase SHA-256 digest) of the state asset, which has the media type `STATE_MEDIA_TYPE`.
     pub state: String,
+    /// What the slot holds. Left out for an effect, so a slot from before instruments is unchanged; see [SlotKind].
+    #[serde(default, skip_serializing_if = "SlotKind::is_effect")]
+    pub kind: SlotKind,
 }
 impl PluginSlot {
     pub fn validate(&self) -> Result<(), String> {

@@ -19,6 +19,7 @@ fn slot_edit(track: &str, state: &str) -> EditCommand {
         track_id: track.into(),
         sound: TrackSound {
             plugin: Some(PluginSlot {
+                kind: crate::settings::SlotKind::Effect,
                 format: PluginFormat::Vst3,
                 class_id: "0123456789ABCDEF0123456789ABCDEF".into(),
                 name: "Amp".into(),

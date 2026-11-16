@@ -104,6 +104,7 @@ mod windows_tests {
 
     fn request(bundle: &Path, component: Vec<u8>) -> LoadRequest {
         LoadRequest {
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             bundle: bundle.to_path_buf(),
             class_id: TEST_CLASS_ID.into(),
             sample_rate: RATE,
@@ -859,6 +860,7 @@ mod windows_tests {
         let job = HelperJob::new().unwrap();
         let helper = fake_helper(&job, "Start-Sleep 30");
         let relative = LoadRequest {
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             bundle: PathBuf::from("x.vst3"),
             class_id: TEST_CLASS_ID.into(),
             sample_rate: RATE,
@@ -1009,6 +1011,7 @@ mod windows_tests {
         );
         let helper = fake_helper(&job, &script);
         let load = LoadRequest {
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             bundle: std::env::temp_dir().join("x.vst3"),
             class_id: TEST_CLASS_ID.into(),
             sample_rate: RATE,

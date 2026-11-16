@@ -3,7 +3,7 @@
 use crate::assets::StoredAsset;
 use crate::plugins::{
     helper::{HelperError, probe},
-    library::{LibraryEntry, PluginLibrary, Resolved},
+    library::{LibraryEntry, PluginLibrary, Resolved, offered},
     service::{PluginService, TrackPluginStatus},
     state::{STATE_FILENAME, STATE_MEDIA_TYPE},
 };
@@ -67,7 +67,7 @@ fn test_selection() -> Option<PathBuf> {
 /// not an empty list.
 fn list_entries(directory: &Path) -> Result<Vec<LibraryEntry>, String> {
     let library = PluginLibrary::open(directory).map_err(String::from)?;
-    Ok(library.entries().to_vec())
+    Ok(library.offered())
 }
 
 /// Removes a class from the library in `directory`, or says why it cannot.
@@ -116,7 +116,7 @@ pub async fn plugin_library_add(
         let exe = helper_exe().map_err(|error| error.to_string())?;
         PluginLibrary::open(directory)
             .and_then(|mut library| library.add(&path, |bundle| probe(&exe, bundle, PROBE_TIMEOUT)))
-            .map(Some)
+            .map(|entries| Some(offered(&entries)))
             .map_err(String::from)
     })
     .await
@@ -132,6 +132,21 @@ pub async fn plugin_library_remove(app: tauri::AppHandle, class_id: String) -> R
     tauri::async_runtime::spawn_blocking(move || remove_entry(&directory, &class_id))
         .await
         .map_err(|error| error.to_string())?
+}
+
+/// The slot a track gets when the user chooses `entry`: the class's own kind, on, with no trim.
+fn new_slot(entry: LibraryEntry, state: String) -> PluginSlot {
+    PluginSlot {
+        format: crate::settings::PluginFormat::Vst3,
+        class_id: entry.class_id,
+        name: entry.name,
+        vendor: entry.vendor,
+        active: true,
+        input_db: 0.0,
+        output_db: 0.0,
+        state,
+        kind: entry.kind,
+    }
 }
 
 #[derive(Serialize)]
@@ -152,20 +167,6 @@ pub async fn plugin_choose(
         return Err("Invalid plug-in class ID.".into());
     }
     let service = app.state::<Arc<PluginService>>().inner().clone();
-    // The plug-in is asked for its defaults at the device's rate: some plug-ins' defaults depend on it.
-    let rate = app
-        .state::<crate::runtime::NativeAudio>()
-        .service
-        .audition_rate()
-        .unwrap_or(48_000);
-    let default_bytes = {
-        let s = service.clone();
-        let cid = class_id.clone();
-        tauri::async_runtime::spawn_blocking(move || s.default_state_at(&cid, rate))
-            .await
-            .map_err(|e| e.to_string())??
-    };
-
     let directory = library_directory(&app)?;
     let entry = {
         let dir = directory.clone();
@@ -179,6 +180,24 @@ pub async fn plugin_choose(
         })
         .await
         .map_err(|e| e.to_string())??
+    };
+    // The library keeps instruments, which nothing can play yet: the user is not offered one, and a request for one is refused
+    // before it loads anything.
+    if !entry.is_offered() {
+        return Err("This plug-in cannot be used on a track yet.".into());
+    }
+    // The plug-in is asked for its defaults at the device's rate: some plug-ins' defaults depend on it.
+    let rate = app
+        .state::<crate::runtime::NativeAudio>()
+        .service
+        .audition_rate()
+        .unwrap_or(48_000);
+    let default_bytes = {
+        let s = service.clone();
+        let cid = class_id.clone();
+        tauri::async_runtime::spawn_blocking(move || s.default_state_at(&cid, rate))
+            .await
+            .map_err(|e| e.to_string())??
     };
 
     let asset = StoredAsset::from_bytes(
@@ -196,16 +215,7 @@ pub async fn plugin_choose(
 
     service.grant_consent(&document_id, &[(class_id.clone(), state_id.clone())])?;
 
-    let slot = PluginSlot {
-        format: crate::settings::PluginFormat::Vst3,
-        class_id,
-        name: entry.name,
-        vendor: entry.vendor,
-        active: true,
-        input_db: 0.0,
-        output_db: 0.0,
-        state: state_id,
-    };
+    let slot = new_slot(entry, state_id);
 
     Ok(PluginChooseResult {
         slot,
@@ -354,6 +364,7 @@ mod tests {
             module_len: 1,
             module_modified: 2,
             previous_bundle: None,
+            kind: crate::settings::SlotKind::Effect,
         }
     }
 
@@ -369,6 +380,28 @@ mod tests {
         )
         .unwrap();
         folder
+    }
+
+    #[test]
+    fn the_list_offers_effects_only_and_a_new_slot_takes_the_class_kind() {
+        use crate::settings::SlotKind;
+        let dir = tempfile::tempdir().unwrap();
+        let folder = library_with(dir.path(), &['A']);
+        let mut synth = entry('B', dir.path());
+        synth.kind = SlotKind::Instrument;
+        let mut all = PluginLibrary::open(&folder).unwrap().entries().to_vec();
+        all.push(synth.clone());
+        // The file holds both (the format that says so is the library's own test), and the user sees the effect.
+        assert_eq!(offered(&all).len(), 1);
+        assert_eq!(list_entries(&folder).unwrap().len(), 1);
+        assert!(!synth.is_offered());
+        // The slot a choice makes says what the class is, and an effect's slot has no kind to write.
+        let slot = new_slot(synth, "0".repeat(64));
+        assert_eq!(slot.kind, SlotKind::Instrument);
+        assert_eq!(serde_json::to_value(&slot).unwrap()["kind"], "instrument");
+        let slot = new_slot(entry('A', dir.path()), "0".repeat(64));
+        assert_eq!(slot.kind, SlotKind::Effect);
+        assert!(serde_json::to_value(&slot).unwrap().get("kind").is_none());
     }
 
     #[test]
@@ -392,7 +425,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("plugins");
         std::fs::create_dir_all(&folder).unwrap();
-        let newer = br#"{"version":2,"entries":[]}"#;
+        let newer = br#"{"version":3,"entries":[]}"#;
         std::fs::write(folder.join(LIBRARY_FILE), newer).unwrap();
         let listed = list_entries(&folder).unwrap_err();
         assert!(listed.contains("newer TabPlayer"), "{listed}");

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { normalizePluginSlot } from '../document-settings';
 import type { PluginSlot } from '../edit-types';
 import { useI18n } from '../i18n';
 import { BusyFieldset, busyGuard } from '../ui';
@@ -147,7 +148,7 @@ export function PluginSlotPanel({
     }
     pluginChoose(documentId, trackId, classId)
       .then(res => {
-        onChange(res.slot, res.assetToken);
+        onChange(normalizePluginSlot(res.slot), res.assetToken);
         setError(null);
       })
       .catch(err => {

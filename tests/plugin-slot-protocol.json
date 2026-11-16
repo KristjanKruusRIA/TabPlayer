@@ -618,6 +618,48 @@
       "remove": [
         "state"
       ]
+    },
+    {
+      "name": "kind_instrument",
+      "valid": true,
+      "set": {
+        "kind": "instrument"
+      }
+    },
+    {
+      "name": "kind_effect_written_out_is_refused",
+      "valid": false,
+      "set": {
+        "kind": "effect"
+      }
+    },
+    {
+      "name": "kind_null",
+      "valid": false,
+      "set": {
+        "kind": null
+      }
+    },
+    {
+      "name": "kind_unknown",
+      "valid": false,
+      "set": {
+        "kind": "drum"
+      }
+    },
+    {
+      "name": "kind_wrong_case",
+      "valid": false,
+      "set": {
+        "kind": "Instrument"
+      }
+    },
+    {
+      "name": "kind_not_text",
+      "valid": false,
+      "set": {
+        "kind": 1
+      }
     }
   ]
 }

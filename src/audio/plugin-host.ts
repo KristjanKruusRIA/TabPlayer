@@ -50,6 +50,8 @@ export interface PluginLibraryEntry {
   moduleModified: number;
   /** Set when this class moved from another bundle file. */
   previousBundle?: string;
+  /** Present only for an instrument, as for the slot that is made from the entry. */
+  kind?: 'instrument';
 }
 
 export interface TrackPluginStatus {

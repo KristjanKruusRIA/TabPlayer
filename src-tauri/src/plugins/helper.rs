@@ -323,8 +323,30 @@ pub struct LoadRequest {
     pub class_id: String,
     pub sample_rate: u32,
     pub mode: Mode,
+    /// What the class is: the slot's kind, which the helper checks against the class it finds.
+    pub kind: PluginKind,
     pub component: Vec<u8>,
     pub controller: Vec<u8>,
+}
+
+impl LoadRequest {
+    /// The `Load` message for this request, with stand-ins for the ring and the event handles that
+    /// [`HelperProcess::load`] makes.
+    fn message(&self, bundle: String) -> HostMessage {
+        HostMessage::Load {
+            bundle,
+            class_id: self.class_id.clone(),
+            sample_rate: self.sample_rate,
+            mode: self.mode,
+            kind: self.kind,
+            ring: 1,
+            input_event: 1,
+            output_event: 1,
+            app_pid: std::process::id(),
+            component: self.component.clone().into(),
+            controller: self.controller.clone().into(),
+        }
+    }
 }
 
 /// What the helper reports once a plug-in is loaded.
@@ -1001,20 +1023,7 @@ impl HelperProcess {
         let rate = request.sample_rate;
         let limit = max_latency_frames(rate);
         // Checked whole, with stand-ins for the handles, before anything is made or given to the helper.
-        let mut message = HostMessage::Load {
-            bundle,
-            class_id: request.class_id.clone(),
-            sample_rate: rate,
-            mode: request.mode,
-            // The app hosts effects only until a later slice carries the kind in the request.
-            kind: PluginKind::Effect,
-            ring: 1,
-            input_event: 1,
-            output_event: 1,
-            app_pid: std::process::id(),
-            component: request.component.into(),
-            controller: request.controller.into(),
-        };
+        let mut message = request.message(bundle);
         message.validate().map_err(HelperError::Refused)?;
         if shared
             .load_started
@@ -1560,6 +1569,25 @@ pub fn probe_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_load_message_carries_the_kind_of_the_request() {
+        for kind in [PluginKind::Effect, PluginKind::Instrument] {
+            let request = LoadRequest {
+                bundle: std::env::temp_dir().join("X.vst3"),
+                class_id: "0123456789ABCDEF0123456789ABCDEF".into(),
+                sample_rate: 48_000,
+                mode: Mode::Realtime,
+                kind,
+                component: Vec::new(),
+                controller: Vec::new(),
+            };
+            let HostMessage::Load { kind: sent, .. } = request.message("C:\\X.vst3".into()) else {
+                panic!("not a Load");
+            };
+            assert_eq!(sent, kind);
+        }
+    }
 
     fn all_replies() -> Vec<HelperMessage> {
         let class = ClassInfo {

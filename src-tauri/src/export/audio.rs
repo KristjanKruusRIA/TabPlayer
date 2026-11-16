@@ -741,6 +741,7 @@ mod tests {
             _exe: &std::path::Path,
             _bundle: &std::path::Path,
             _class_id: &str,
+            _kind: tabplayer_plugin_protocol::control::PluginKind,
             _rate: u32,
             _state: crate::plugins::helper::StateParts,
             _supervisor: &crate::plugins::supervisor::Supervisor,
@@ -757,6 +758,7 @@ mod tests {
             _exe: &std::path::Path,
             _bundle: &std::path::Path,
             _class_id: &str,
+            _kind: tabplayer_plugin_protocol::control::PluginKind,
             _rate: u32,
             _state: crate::plugins::helper::StateParts,
         ) -> Result<
@@ -806,6 +808,7 @@ mod tests {
         let req = SlotRequest {
             track_id: "t1".into(),
             slot: PluginSlot {
+                kind: crate::settings::SlotKind::Effect,
                 active: true,
                 format: PluginFormat::Vst3,
                 class_id: "missing-class-id".into(),
@@ -887,6 +890,7 @@ mod tests {
                 _exe: &std::path::Path,
                 _bundle: &std::path::Path,
                 _class_id: &str,
+                _kind: tabplayer_plugin_protocol::control::PluginKind,
                 _rate: u32,
                 _state: StateParts,
                 _supervisor: &Supervisor,
@@ -901,6 +905,7 @@ mod tests {
                 _exe: &std::path::Path,
                 _bundle: &std::path::Path,
                 _class_id: &str,
+                _kind: tabplayer_plugin_protocol::control::PluginKind,
                 _rate: u32,
                 _state: StateParts,
             ) -> Result<Arc<dyn HelperSession>, HelperError> {
@@ -937,6 +942,7 @@ mod tests {
         let req = SlotRequest {
             track_id: "t1".into(),
             slot: PluginSlot {
+                kind: crate::settings::SlotKind::Effect,
                 active: true,
                 format: PluginFormat::Vst3,
                 class_id: class_id.clone(),

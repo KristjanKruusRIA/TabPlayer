@@ -125,7 +125,7 @@ pub(super) struct LowBand {
     spent: usize,
     catch_up: usize,
     /// Frames made during this grain, the most samples and frames any grain took since tests last asked, and how many
-    /// times V left before the scan had caught up.
+    /// times V left without making a frame (where the scan had not caught up, or the clock leapt far outside the source).
     frames: usize,
     most_spent: usize,
     most_frames: usize,
@@ -310,7 +310,7 @@ impl LowBand {
     }
 
     /// For tests: the most decimated samples the low-pass computed and the most frames made in any one grain since the
-    /// last call, and how many times V left because the scan had not caught up.
+    /// last call, and how many times V left without making a frame.
     pub(super) fn take_work(&mut self) -> (usize, usize, usize) {
         let work = (self.most_spent, self.most_frames, self.leaves);
         self.most_spent = 0;
@@ -333,10 +333,19 @@ impl LowBand {
         // The grain before may have been out there (a map steep enough sends the clock beyond any index and back within
         // a grain): V was out then, and this grain does not read on from it.
         let out = far + MAX_AIM + self.radius + 64.0;
+        let near = |p: f64| p > source.first as f64 - out && p < source.end as f64 + out;
         if !(clock > source.first as f64 - far && clock < source.end as f64 + far)
-            || previous
-                .is_some_and(|p| !(p > source.first as f64 - out && p < source.end as f64 + out))
+            || previous.is_some_and(|p| !near(p))
         {
+            if self.alpha > 0.0 && previous.is_some_and(near) {
+                // The clock leapt out there while V was heard (a map that carries it far past the audio within a grain):
+                // V leaves over this grain as after any leap. Where this grain starts, the grains' low band is silent
+                // (the low-pass reaches far less than `far`), and it is not read, since it may lie beyond any index.
+                // The voice plays nothing while the clock is outside the audio the map lets through, so this is heard
+                // only by a caller that brings the clock back within the grain without a seek, which the renderer never
+                // does.
+                return self.leave(source, None, previous);
+            }
             self.framed = false;
             self.tail_valid = false;
             self.alpha = 0.0;
@@ -418,7 +427,7 @@ impl LowBand {
             // V is heard, but where it would read next is not scanned yet: the clock leapt without a seek (a map that
             // steep, or a jump). V leaves over this grain from what its last frame carries into it, making no frame
             // here, and comes back once the scan has caught up.
-            return self.leave(source, best, previous);
+            return self.leave(source, Some(best), previous);
         }
         if !self.framed || (self.alpha == 0.0 && !self.restarted) {
             // Nothing carries into this grain, or what carries holds V's own phases while V comes in from the grains'
@@ -477,8 +486,9 @@ impl LowBand {
     }
 
     /// V leaves over this grain from what the last frame carries into it (its second half, already faded out by its
-    /// window), while the grains' own low band fades in by the same window; no frame is made.
-    fn leave(&mut self, source: &Source, best: f64, previous: Option<f64>) -> bool {
+    /// window), while the grains' own low band fades in by the same window; no frame is made. Without `best`, the grain
+    /// starts where the low band is silent.
+    fn leave(&mut self, source: &Source, best: Option<f64>, previous: Option<f64>) -> bool {
         if let Some(previous) = previous
             && !self.tail_valid
         {
@@ -488,7 +498,10 @@ impl LowBand {
         }
         for i in 0..HOP {
             let t = i as f32 / HOP as f32;
-            let head = self.read(source, best + i as f64 * self.step);
+            let head = match best {
+                Some(best) => self.read(source, best + i as f64 * self.step),
+                None => [0.0; 2],
+            };
             let heard: [f32; 2] = if previous.is_some() {
                 std::array::from_fn(|c| self.tail[i][c] * (1.0 - t) + head[c] * t)
             } else {

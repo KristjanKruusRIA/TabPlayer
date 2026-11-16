@@ -313,22 +313,40 @@ fn speed_changes_near_attacks_never_click() {
 /// the new place at once: 203 to 1508 samples here (0.36 to 9.7 million multiplies). The output stays finite, steps at
 /// most a quarter more than develop's grains do across the leap (this branch: 13% more at most), and the tone keeps its
 /// level at its own pitch before the leap and after.
+///
+/// The clock may also leap far past the end of the audio within a grain (a map whose last anchor is misplaced, or a
+/// jump), where the low band does not follow it. V leaves over that grain the same way, within the same budget (before
+/// this it stopped at once, uncounted). Nothing of that is heard: the voice plays nothing for a clock past the audio, so
+/// the output falls silent at the same frame as develop's and is develop's, bit for bit, from there on, with or without
+/// the leave. That cut is develop's own; its size is where the tone is in its cycle at that frame, so it is not compared
+/// (V's phase differs from the grains': measured 0.39 against develop's 0.35 at 48 kHz, 0.006 against 0.012 at 192 kHz
+/// and 0.40 against 0.19 at 384 kHz).
 #[test]
 fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
+    let anchors = |list: [(u32, f64, f64); 4]| {
+        list.map(|(bar, ratio, audio_ms)| SyncAnchor {
+            bar,
+            occurrence: 0,
+            ratio,
+            audio_ms,
+        })
+    };
     // Score 0 to 1 s plays source 0 to 1 s; the next 10 ms of score play a whole second of source (100 times the speed,
     // 50 at half speed: far beyond the 8 times V follows); the score after that plays at two thirds.
-    let anchors = [
-        (0u32, 0.0, 0.0),
+    let steep = anchors([
+        (0, 0.0, 0.0),
         (0, 0.5, 1000.0),
         (0, 0.505, 2000.0),
         (1, 0.5, 4000.0),
-    ]
-    .map(|(bar, ratio, audio_ms)| SyncAnchor {
-        bar,
-        occurrence: 0,
-        ratio,
-        audio_ms,
-    });
+    ]);
+    // Score 0 to 1 s plays source 0 to 1 s; 0.2 microseconds of score later the source is at 5 s, two seconds past the
+    // end of the audio, and the score after that plays on out there at about the neutral speed.
+    let past = anchors([
+        (0, 0.0, 0.0),
+        (0, 0.5, 1000.0),
+        (0, 0.5 + 1e-7, 5000.0),
+        (1, 0.5, 8000.0),
+    ]);
     let output = 48_000u32;
     for (rate, shift) in [(48_000u32, 0i8), (192_000, 12), (384_000, 12)] {
         let neutral = 2.0_f64.powf(f64::from(shift) / 12.0);
@@ -338,14 +356,16 @@ fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
                 [x as f32, (0.8 * x) as f32]
             })
             .collect();
-        for leap in ["steep map", "jump"] {
+        for (leap, map_anchors, jump) in [
+            ("steep map", &steep[..], 0.0),
+            ("jump", &[][..], 0.5),
+            ("steep map past the end", &past[..], 0.0),
+            ("jump past the end", &[][..], 3.0),
+        ] {
+            let past_the_end = leap.ends_with("past the end");
             let mut runs = Vec::new();
             for develop in [false, true] {
-                let map = if leap == "steep map" {
-                    BackingMap::new(&anchors, 0.0, &plan()).unwrap()
-                } else {
-                    BackingMap::new(&[], 0.0, &plan()).unwrap()
-                };
+                let map = BackingMap::new(map_anchors, 0.0, &plan()).unwrap();
                 let mut voice = mapped(rate, output, frames.clone(), map, shift);
                 if develop {
                     voice = voice.without_low_band();
@@ -365,9 +385,7 @@ fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
                 // From a seek into audio the low band has not seen (a cold start) to just before the leap.
                 let before = play(&mut voice, &mut clock, 65_000);
                 let seek = voice.low_band_work();
-                if leap == "jump" {
-                    clock += 0.5;
-                }
+                clock += jump;
                 let across = play(&mut voice, &mut clock, 24_000);
                 let crossing = voice.low_band_work();
                 let after = play(&mut voice, &mut clock, 24_000);
@@ -386,11 +404,24 @@ fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
                     .map(|w| (w[1][0] - w[0][0]).abs().max((w[1][1] - w[0][1]).abs()))
                     .fold(0.0f32, f32::max)
             };
-            let (level_before, level_after) =
-                (level(&before[before.len() - 24_000..]), level(after));
+            let level_before = level(&before[before.len() - 24_000..]);
+            // Past the end the audio is silent; the tone's level after is measured only where it plays on.
+            let level_after = if past_the_end { 0.0 } else { level(after) };
             let (step, develop_step) = (largest(across), largest(&runs[1].1));
+            // The frame after the last one develop plays: past the end, where the voice falls silent.
+            let silent_from =
+                |x: &[[f32; 2]]| x.iter().rposition(|v| *v != [0.0; 2]).map_or(0, |p| p + 1);
+            let (cut, develop_cut) = (silent_from(across), silent_from(&runs[1].1));
             eprintln!(
-                "{leap} at {rate} Hz, key shift {shift}: worst grain after the seek {seek_work} samples, {seek_frames} frames; across the leap {leap_work} samples, {leap_frames} frames, V left {leap_leaves} times; level before {level_before:+.2} dB, after {level_after:+.2} dB; largest step across {step:.5} (develop {develop_step:.5})"
+                "{leap} at {rate} Hz, key shift {shift}: worst grain after the seek {seek_work} samples, {seek_frames} frames; across the leap {leap_work} samples, {leap_frames} frames, V left {leap_leaves} times; level before {level_before:+.2} dB, after {level_after:+.2} dB; largest step across {step:.5} (develop {develop_step:.5}); silent from frame {cut} (develop {develop_cut})"
+            );
+            assert!(
+                !past_the_end
+                    || (cut == develop_cut
+                        && across[cut..] == runs[1].1[cut..]
+                        && after == &runs[1].2),
+                "{leap} at {rate} Hz: silent from frame {cut} of {} (develop {develop_cut}), or not as develop after it",
+                across.len()
             );
             assert!(
                 leap_work <= seek_work + 56 + 72
@@ -405,7 +436,7 @@ fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
                 "{leap} at {rate} Hz: the tone at {level_before:+.2} dB before, {level_after:+.2} dB after"
             );
             assert!(
-                step <= 1.25 * develop_step,
+                past_the_end || step <= 1.25 * develop_step,
                 "{leap} at {rate} Hz: a step of {step} across the leap (develop {develop_step})"
             );
         }

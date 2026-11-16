@@ -603,8 +603,8 @@ impl BackingVoice {
         self
     }
     /// For tests: the most decimated samples the low band's low-pass computed and the most of its frames made in any one
-    /// grain since the last call, and how many times the vocoder left because the low band's scan of the attacks had not
-    /// caught up; or None without a low band.
+    /// grain since the last call, and how many times the vocoder left without making a frame (the low band's scan of the
+    /// attacks had not caught up, or the clock leapt far outside the audio); or None without a low band.
     #[doc(hidden)]
     pub fn low_band_work(&mut self) -> Option<(usize, usize, usize)> {
         self.low.as_mut().map(|low| low.take_work())

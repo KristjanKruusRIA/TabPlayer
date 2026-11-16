@@ -45,15 +45,23 @@ it('turns the drone on with the standard fret and off with 0',()=>{
   fireEvent.click(drone());
   expect(applied(again).droneFret).toBe(0);
 });
-it('commits the fret on blur or Enter, not while typing, and holds the apply buttons back for an invalid draft',()=>{
-  const onEdit=panel(build(5,5));const fret=()=>dialog().getByLabelText('Drone string starts at fret');
-  fireEvent.change(fret(),{target:{value:'7'}});expect(applied(onEdit)).not.toHaveProperty('droneFret');
-  fireEvent.change(fret(),{target:{value:'7'}});fireEvent.keyDown(fret(),{key:'Enter'});expect(applied(onEdit).droneFret).toBe(7);
-  const calls=onEdit.mock.calls.length;
+it('records nothing while the fret is typed, settles it on blur or Enter, settles a fret typed but not left when the dialog is applied, and holds the apply buttons back for an invalid draft',()=>{
+  const fret=()=>dialog().getByLabelText('Drone string starts at fret');
+  // Typed, not left: nothing is recorded until the dialog is applied, and then the typed fret is not dropped.
+  const first=panel(build(5,5));
+  fireEvent.change(fret(),{target:{value:'7'}});expect(first).not.toHaveBeenCalled();expect(applied(first).droneFret).toBe(7);
+  cleanup();
+  // Enter settles the field and does not apply the dialog.
+  const onEdit=panel(build(5,5));
+  fireEvent.change(fret(),{target:{value:'6'}});expect(fireEvent.keyDown(fret(),{key:'Enter'})).toBe(false);
+  expect(onEdit).not.toHaveBeenCalled();expect(screen.getByRole('dialog',{name:'Tuning'})).toBeInTheDocument();
+  expect(applied(onEdit).droneFret).toBe(6);
+  cleanup();
+  const again=panel(build(5,5));
   fireEvent.change(fret(),{target:{value:'40'}});fireEvent.blur(fret());
   expect(dialog().getAllByRole('alert').map(node=>node.textContent).join(' ')).toContain('Use a drone fret from 1 to 12');
-  fireEvent.click(dialog().getByRole('button',{name:'Keep fingering'}));expect(onEdit.mock.calls.length).toBe(calls);expect(screen.getByRole('dialog',{name:'Tuning'})).toBeInTheDocument();
-  fireEvent.change(fret(),{target:{value:'6'}});fireEvent.blur(fret());expect(applied(onEdit).droneFret).toBe(6);
+  fireEvent.click(dialog().getByRole('button',{name:'Keep fingering'}));expect(again).not.toHaveBeenCalled();expect(screen.getByRole('dialog',{name:'Tuning'})).toBeInTheDocument();
+  fireEvent.change(fret(),{target:{value:'6'}});fireEvent.blur(fret());expect(applied(again).droneFret).toBe(6);
 });
 it('offers no drone on a staff that is not 5-string, and a finalized score cannot open the dialog',()=>{
   panel(build(6));

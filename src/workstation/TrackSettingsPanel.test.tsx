@@ -346,7 +346,7 @@ it('a capo and a new tuning are one edit on a one-staff track, with Keep pitch c
   fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'4'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(inDialog('Keep fingering'));
   expect(lastSettings(onEdit).settings).toMatchObject({capo:4,tuning:[64,59,55,50,45,38]});expect(lastSettings(onEdit).settings).not.toHaveProperty('keepPitch');
 });
-it('a capo with a string count change, or with a retune of a track with several staves, is refused in the dialog with its reason and no edit',async()=>{
+it('a capo with a string count change is refused in the dialog with its reason and no edit; with several staves a capo and a retune of the same count are one edit on the staff',async()=>{
   const onEdit=vi.fn();const view=render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
   fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'3'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});fireEvent.click(inDialog('Change string count'));
   expect(onEdit).not.toHaveBeenCalled();expect(await within(dialog()).findByRole('alert')).toHaveTextContent('one at a time');
@@ -354,8 +354,9 @@ it('a capo with a string count change, or with a retune of a track with several 
   const two=previewEdit(blankProject(),{type:'addStaff',track:0,settings:saved()}).score;
   view.rerender(<TrackSettingsPanel score={two} selected={0} busy={false} onEdit={onEdit}/>);
   fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'3'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(inDialog('Keep fingering'));
-  expect(onEdit).not.toHaveBeenCalled();expect(await within(dialog()).findByRole('alert')).toHaveTextContent('one at a time');
-  fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 E2'}});fireEvent.click(inDialog('Keep fingering'));expect(lastSettings(onEdit).settings).toMatchObject({capo:3});
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(lastSettings(onEdit)).toEqual({type:'setStaffSettings',track:0,staff:0,settings:expect.objectContaining({capo:3,tuning:[64,59,55,50,45,38]})});
+  fireEvent.click(edit());fireEvent.change(within(dialog()).getByLabelText('Capo'),{target:{value:'3'}});fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});fireEvent.click(inDialog('Change string count'));
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(await within(dialog()).findByRole('alert')).toHaveTextContent('one at a time');
 });
 it('the capo goes on the staff under the cursor of a track with two staves',()=>{
   const onEdit=vi.fn(),two=previewEdit(blankProject(),{type:'addStaff',track:0,settings:saved()}).score;

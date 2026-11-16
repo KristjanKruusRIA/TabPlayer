@@ -1,15 +1,22 @@
 import { useI18n } from '../i18n';
-import { useState } from 'react';
+import { useState, type MutableRefObject } from 'react';
+import type { SettledDraft } from './PartialCapoControls';
 import type { model } from '@coderline/alphatab';
 import { maxDroneFret, standardDroneFret } from './banjo-drone';
 
 /** The short fifth string of a banjo. The fret is committed on blur or Enter, the checkbox at once. `onChange` only ever gets a valid value (0 for none), never one for a field nobody changed; `onInvalid` says whether the draft on screen is not valid, so the caller can hold back Apply and keep the last valid value. */
-export function BanjoDroneControls({staff,value,disabled,onChange,onInvalid}:{staff:model.Staff;value:number;disabled?:boolean;onChange:(value:number)=>void;onInvalid?:(invalid:boolean)=>void}) {
+export function BanjoDroneControls({staff,value,disabled,onChange,onInvalid,settleRef}:{staff:model.Staff;value:number;disabled?:boolean;onChange:(value:number)=>void;onInvalid?:(invalid:boolean)=>void;/** Filled with a function that settles a fret typed but not left, for a caller that submits from another control and needs the value at once. */settleRef?:MutableRefObject<(()=>SettledDraft<number>)|null>}) {
   const { t } = useI18n();
   const [on,setOn]=useState(value>0),[fretText,setFretText]=useState(String(value||standardDroneFret)),[dirty,setDirty]=useState(false);
   const fret=fretText.trim()===''?NaN:Number(fretText),valid=Number.isInteger(fret)&&fret>=1&&fret<=maxDroneFret;
   const commit=(enabled:boolean)=>{const good=!enabled||valid;onInvalid?.(!good);if(good)onChange(enabled?fret:0);};
   const fiveStrings=staff.tuning.length===5&&!staff.isPercussion;
+  if(settleRef)settleRef.current=()=>{
+    if(!dirty)return null;
+    const good=!on||valid;
+    commit(on);
+    return good?{value:on?fret:0}:{invalid:true};
+  };
   return <fieldset className="banjo-drone" disabled={disabled||!fiveStrings}>
     <legend>{t('editor.banjo_drone')}</legend>
     <label className="check"><input type="checkbox" checked={on} onChange={event=>{setOn(event.target.checked);setDirty(true);commit(event.target.checked);}}/>{t('editor.short_drone_string')}</label>

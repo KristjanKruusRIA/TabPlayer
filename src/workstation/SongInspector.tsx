@@ -46,14 +46,14 @@ export function SongInspector({ score, busy, locked, onEdit, styleGroups, master
     <section className="inspector-section" aria-labelledby="inspector-song-information">
       <h3 id="inspector-song-information">{t('inspector.information')}</h3>
       <BusyFieldset busy={busy} className="song-information">
-        <CommitField label={t('editor.title')} value={score.title} disabled={locked} onCommit={title => info({ title })} />
-        <CommitField label={t('editor.artist')} value={score.artist} disabled={locked} onCommit={artist => info({ artist })} />
+        <CommitField busy={busy} label={t('editor.title')} value={score.title} disabled={locked} onCommit={title => info({ title })} />
+        <CommitField busy={busy} label={t('editor.artist')} value={score.artist} disabled={locked} onCommit={artist => info({ artist })} />
         <details className="inspector-more">
           <summary>{t('inspector.more')}</summary>
-          <CommitField label={t('editor.initial_tempo')} type="number" min={1} value={String(score.tempo)} disabled={locked} onCommit={value => info({ tempo: Number(value) })} />
-          {metadataLabels.map(([key, label]) => <CommitField key={key} label={t(label)} value={fields[key]} disabled={locked} onCommit={value => metadata(key, value)} />)}
-          <CommitField label={t('editor.notices')} multiline value={fields.notices} disabled={locked} onCommit={value => metadata('notices', value)} />
-          <CommitField label={t('editor.instructions')} multiline value={fields.instructions} disabled={locked} onCommit={value => metadata('instructions', value)} />
+          <CommitField busy={busy} label={t('editor.initial_tempo')} type="number" min={1} value={String(score.tempo)} disabled={locked} onCommit={value => info({ tempo: Number(value) })} />
+          {metadataLabels.map(([key, label]) => <CommitField busy={busy} key={key} label={t(label)} value={fields[key]} disabled={locked} onCommit={value => metadata(key, value)} />)}
+          <CommitField busy={busy} label={t('editor.notices')} multiline value={fields.notices} disabled={locked} onCommit={value => metadata('notices', value)} />
+          <CommitField busy={busy} label={t('editor.instructions')} multiline value={fields.instructions} disabled={locked} onCommit={value => metadata('instructions', value)} />
           <button type="button" aria-haspopup="dialog" onClick={() => setDefaultsOpen(true)}>{t('song_inspector.new_score_defaults')}</button>
         </details>
       </BusyFieldset>

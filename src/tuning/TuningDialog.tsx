@@ -9,7 +9,7 @@ import { busyGuard } from '../ui/useBusyGuard';
 import { useI18n } from '../i18n';
 import { PlayGlyph } from '../shell/glyphs';
 import { SavedTuningsDialog } from './SavedTuningsDialog';
-import { PartialCapoControls } from '../editor/PartialCapoControls';
+import { PartialCapoControls, type SettledDraft } from '../editor/PartialCapoControls';
 import { BanjoDroneControls } from '../editor/BanjoDroneControls';
 import { getPartialCapo, noPartialCapo, type PartialCapo } from '../editor/partial-capo';
 import { getBanjoDrone } from '../editor/banjo-drone';
@@ -131,7 +131,10 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, busy = fals
   const [drone, setDrone] = useState(savedDrone);
   const [partialInvalid, setPartialInvalid] = useState(false), [droneInvalid, setDroneInvalid] = useState(false);
   const capoNumber = capoText.trim() === '' ? NaN : Number(capoText), capoValid = Number.isInteger(capoNumber) && capoNumber >= 0 && capoNumber <= 127;
-  const capoChoice = staff ? { capo: capoValid ? capoNumber : staff.capo, partialCapo: partial, droneFret: drone, changed: (capoValid && capoNumber !== staff.capo) || JSON.stringify(partial) !== JSON.stringify(savedPartial) || drone !== savedDrone } : undefined;
+  /** The partial capo and drone fret fields settle when they are left; at an apply they are asked for what they hold now, so a fret typed but not left is not dropped. */
+  const partialSettle = useRef<(() => SettledDraft<PartialCapo>) | null>(null), droneSettle = useRef<(() => SettledDraft<number>) | null>(null);
+  const capoChoiceFor = (partialNow: PartialCapo, droneNow: number) => staff ? { capo: capoValid ? capoNumber : staff.capo, partialCapo: partialNow, droneFret: droneNow, changed: (capoValid && capoNumber !== staff.capo) || JSON.stringify(partialNow) !== JSON.stringify(savedPartial) || droneNow !== savedDrone } : undefined;
+  const capoChoice = capoChoiceFor(partial, drone);
 
   const parsed = useMemo(() => { try { return parseTuning(notes); } catch { return null; } }, [notes]);
   const draft = parsed ?? [];
@@ -175,7 +178,14 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, busy = fals
   const apply = (keepPitch: boolean) => {
     if ((mode === 'track' && (busy || locked)) || pending.current) return;
     if (rowError) return;
-    if (staff && (!capoValid || partialInvalid || droneInvalid)) { setError(!capoValid ? t('tuning_dialog.capo_invalid') : t('tuning_dialog.capo_fix_first')); return; }
+    let choice = capoChoice, held = partialInvalid || droneInvalid;
+    if (staff) {
+      // A field typed in but not left answers for itself; the others keep what they last reported.
+      const typedPartial = partialSettle.current?.() ?? null, typedDrone = droneSettle.current?.() ?? null;
+      held = (typedPartial ? 'invalid' in typedPartial : partialInvalid) || (typedDrone ? 'invalid' in typedDrone : droneInvalid);
+      choice = capoChoiceFor(typedPartial && 'value' in typedPartial ? typedPartial.value : partial, typedDrone && 'value' in typedDrone ? typedDrone.value : drone);
+    }
+    if (staff && (!capoValid || held)) { setError(!capoValid ? t('tuning_dialog.capo_invalid') : t('tuning_dialog.capo_fix_first')); return; }
     let chosen: number[];
     try {
       chosen = parseTuning(notes);
@@ -185,7 +195,7 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, busy = fals
       return;
     }
     setError(null);
-    const result = onApply({ pitches: chosen, name: draftName, keepPitch: mode === 'track' && keepPitch && chosen.length === pitches.length, keep, ...(capoChoice ? { capo: capoChoice } : {}) });
+    const result = onApply({ pitches: chosen, name: draftName, keepPitch: mode === 'track' && keepPitch && chosen.length === pitches.length, keep, ...(choice ? { capo: choice } : {}) });
     if (result && typeof (result as Promise<unknown>).then === 'function') {
       pending.current = true;
       setRefused(false);
@@ -257,13 +267,13 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, busy = fals
           <legend>{t('tuning_dialog.capo_section')}</legend>
           <div className="tuning-capo-row">
             <label htmlFor="tuning-dialog-capo" className="tp-sr">{t('editor.capo')}</label>
-            <input id="tuning-dialog-capo" type="number" min={0} max={127} value={capoText} aria-invalid={!capoValid || undefined} onChange={event => { setCapoText(event.target.value); setError(null); setRefused(false); }} />
+            <input id="tuning-dialog-capo" type="number" min={0} max={127} value={capoText} aria-invalid={!capoValid || undefined} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} onChange={event => { setCapoText(event.target.value); setError(null); setRefused(false); }} />
             <span className="tuning-hint">{t('tuning_dialog.capo_fret')}</span>
           </div>
           <details className="tuning-capo-more" onKeyDown={event => { if (event.key === 'Enter' && event.target instanceof HTMLInputElement) event.preventDefault(); }}>
             <summary>{t('tuning_dialog.capo_more')}</summary>
-            <PartialCapoControls key={`partial/${staff.tuning.join()}`} staff={staff} value={partial} onChange={setPartial} onInvalid={setPartialInvalid} />
-            <BanjoDroneControls key={`drone/${staff.tuning.length}`} staff={staff} value={drone} onChange={setDrone} onInvalid={setDroneInvalid} />
+            <PartialCapoControls key={`partial/${staff.tuning.join()}`} staff={staff} value={partial} onChange={setPartial} onInvalid={setPartialInvalid} settleRef={partialSettle} />
+            <BanjoDroneControls key={`drone/${staff.tuning.length}`} staff={staff} value={drone} onChange={setDrone} onInvalid={setDroneInvalid} settleRef={droneSettle} />
           </details>
         </fieldset>}
         {recount && <fieldset className="string-count">

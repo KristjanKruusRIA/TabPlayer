@@ -97,3 +97,14 @@ it('a mastering switch refuses while disabled and keeps focus', () => {
   const eq = screen.getByRole('switch', { name: /EQ/ });eq.focus();fireEvent.click(eq);
   expect(onMaster).not.toHaveBeenCalled();expect(eq).toHaveFocus();expect(eq).not.toBeDisabled();expect(eq).toHaveAttribute('aria-disabled', 'true');
 });
+
+it('the initial tempo is compared as a number: 120.0 or a leading space over a tempo of 120 records nothing, and a real change is one edit', () => {
+  const { onEdit, score } = setup();
+  const tempo = screen.getByLabelText('Initial tempo');
+  const value = score.tempo;
+  fireEvent.change(tempo, { target: { value: `${value}.0` } });fireEvent.blur(tempo);
+  fireEvent.change(tempo, { target: { value: ` ${value}` } });fireEvent.blur(tempo);
+  expect(onEdit).not.toHaveBeenCalled();expect(tempo).toHaveValue(value);
+  fireEvent.change(tempo, { target: { value: String(value + 5) } });fireEvent.blur(tempo);
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'setScoreInfo', tempo: value + 5 }));
+});

@@ -384,6 +384,7 @@
         {
           "id": "virtuosity-kit",
           "name": "Virtuosity Drums",
+          "processing": "Programs/tabplayer-kit.processing.json",
           "maps": [
             {
               "path": "Programs/tabplayer-kit.sfz",

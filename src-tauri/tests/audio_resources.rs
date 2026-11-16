@@ -1,3 +1,5 @@
+mod kit_common;
+use kit_common::*;
 use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 use tabplayer_lib::audio::{
@@ -141,6 +143,7 @@ fn selected_requests_keep_all_variants_and_closest_key_fallback() {
         name: "Fixture".into(),
         source_id: "fixture".into(),
         regions,
+        ..Instrument::default()
     };
     let selected = eligible_regions(&instrument, 40, 50, "muted", "attack");
     assert_eq!(selected.len(), 2);
@@ -330,6 +333,7 @@ fn slap_and_pop_use_their_recordings_and_fall_back_to_the_ordinary_voice() {
             region("slap-d", "slap", 38),
             region("pop-a", "pop", 45),
         ],
+        ..Instrument::default()
     };
     let ids = |key, articulation| {
         eligible_regions(&bass, key, 100, articulation, "attack")
@@ -447,4 +451,266 @@ fn bundled_slap_and_pop_recordings_sound_at_their_root_keys() {
             }
         }
     }
+}
+#[test]
+fn a_kits_recordings_are_shaped_once_at_load_and_its_second_microphone_is_not_kept() {
+    let root = kit_root(kit_table(), true);
+    let raw = decode_audio(
+        &fs::read(root.path().join("main.wav")).unwrap(),
+        Some("wav"),
+    )
+    .unwrap();
+    let loaded = AudioResources::load(root.path()).unwrap();
+    assert!(loaded.manifest.notices.is_empty());
+    let kick = &loaded.samples["main"];
+    // The envelope ends it at 400 ms and the snare's at 250 ms; the companion is gone, the raw recording is not what plays.
+    assert_eq!(kick.frames.len(), 400 * 48);
+    assert_eq!(loaded.samples["snare"].frames.len(), 250 * 48);
+    assert!(!loaded.samples.contains_key("second"));
+    assert_ne!(kick.frames[..400 * 48], raw.frames[..400 * 48]);
+    // The two microphones were aligned (it arrives 3.2 ms later, inverted) and so added, not cancelled: the mix peaks near twice
+    // the main one alone.
+    let peak = |a: &[[f32; 2]]| a.iter().map(|f| f[0].abs()).fold(0.0, f32::max);
+    assert!(
+        peak(&kick.frames) > 1.6 * peak(&raw.frames[..400 * 48]),
+        "{} against {}",
+        peak(&kick.frames),
+        peak(&raw.frames)
+    );
+    // A request for the kick loads the companion it needs and shapes the same way, and the unrequested snare is not loaded.
+    let requested = AudioResources::load_for_requests(root.path(), &kick_request()).unwrap();
+    assert_eq!(requested.samples["main"].frames, kick.frames);
+    assert!(!requested.samples.contains_key("snare"));
+    assert!(!requested.samples.contains_key("second"));
+}
+
+/// Loads the folder both ways, in full and for the kit's kick and the other instrument's key, and checks the kit was set aside for
+/// `reason` (said in the notices) while the other instrument still loaded.
+fn assert_kit_set_aside(root: &tempfile::TempDir, reason: &str) {
+    let full = AudioResources::load(root.path()).unwrap();
+    let mut requests = kick_request();
+    requests.push(other_request());
+    let requested = AudioResources::load_for_requests(root.path(), &requests).unwrap();
+    // The kick alone, which the offending regions may not be part of.
+    let kick_only = AudioResources::load_for_requests(root.path(), &kick_request()).unwrap();
+    for (name, loaded) in [
+        ("full", &full),
+        ("by request", &requested),
+        ("kick only", &kick_only),
+    ] {
+        assert!(
+            loaded.manifest.instruments.iter().all(|i| i.id != KIT_ID),
+            "{name}: the kit is still there"
+        );
+        assert!(
+            loaded
+                .manifest
+                .notices
+                .iter()
+                .any(|n| n.contains(reason) && n.starts_with(&format!("{KIT_ID}:"))),
+            "{name}: {:?} lacks {reason}",
+            loaded.manifest.notices
+        );
+        assert!(!loaded.samples.contains_key("main"), "{name}");
+        assert!(!loaded.samples.contains_key("second"), "{name}");
+    }
+    assert!(full.samples.contains_key("other") && requested.samples.contains_key("other"));
+    assert!(full.manifest.instruments.iter().any(|i| i.id == "other"));
+}
+
+#[test]
+fn a_kit_whose_data_is_refused_is_set_aside_and_the_other_audio_still_loads() {
+    let table = |change: &dyn Fn(&mut serde_json::Value)| {
+        let mut table = kit_table();
+        change(&mut table);
+        kit_root(table, true)
+    };
+    // Out of range, an unknown profile, an unknown field.
+    assert_kit_set_aside(
+        &table(&|t| t["profiles"]["kick"]["envelope"]["endMs"] = 1.0e9.into()),
+        "envelope out of range",
+    );
+    assert_kit_set_aside(
+        &table(&|t| t["profiles"]["kick"]["eq"][0]["hz"] = 5.0.into()),
+        "equaliser band out of range",
+    );
+    assert_kit_set_aside(
+        &table(&|t| t["sounds"]["36"] = "missing".into()),
+        "Invalid kit processing sound",
+    );
+    assert_kit_set_aside(
+        &table(&|t| t["profiles"]["kick"]["extra"] = 1.into()),
+        "unknown field",
+    );
+    // A second microphone that arrives farther from the first than the alignment looks.
+    assert_kit_set_aside(
+        &table(&|t| t["profiles"]["kick"]["companion"]["maxOffsetMs"] = 0.5.into()),
+        "do not match",
+    );
+    // A profile that wants a companion for a sound that has none, and the reverse.
+    assert_kit_set_aside(&table(&|t| t["sounds"]["36"] = "snare".into()), "disagree");
+    assert_kit_set_aside(&table(&|t| t["sounds"]["38"] = "kick".into()), "disagree");
+    // A sound the table names that no region plays.
+    assert_kit_set_aside(
+        &table(&|t| t["sounds"]["99"] = "snare".into()),
+        "no recording",
+    );
+    // A companion in a kit that has no processing table is refused, not ignored.
+    let no_table = kit_root(kit_table(), true);
+    edit_manifest(&no_table, |m| {
+        m["instruments"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("processing");
+    });
+    assert_kit_set_aside(&no_table, "no kit processing");
+}
+
+#[test]
+fn inconsistent_regions_of_a_kit_are_refused_whatever_is_requested() {
+    // The regions that disagree are on key 37, which the request for the kick (key 36) leaves out.
+    let with = |change: &dyn Fn(&mut serde_json::Value)| {
+        let mut table = kit_table();
+        table["sounds"]["37"] = "kick".into();
+        let root = kit_root(table, true);
+        edit_manifest(&root, |m| {
+            let mut region = m["instruments"][0]["regions"][0].clone();
+            region["keyLow"] = 37.into();
+            region["keyHigh"] = 37.into();
+            region["rootKey"] = 37.into();
+            change(&mut region);
+            m["instruments"][0]["regions"]
+                .as_array_mut()
+                .unwrap()
+                .push(region);
+        });
+        root
+    };
+    // One recording with two different companions: the first used to win silently on a full load.
+    assert_kit_set_aside(
+        &with(&|r| r["companionId"] = "third".into()),
+        "two different companions",
+    );
+    // A recording with a companion that another region plays without one (key 37 is named in the table, so it is given a
+    // profile too: the one that wants a companion, which it lacks).
+    assert_kit_set_aside(
+        &with(&|r| {
+            r.as_object_mut().unwrap().remove("companionId");
+        }),
+        "disagree",
+    );
+    // A recording another, unnamed region plays without a companion.
+    let unnamed = kit_root(kit_table(), true);
+    edit_manifest(&unnamed, |m| {
+        let mut region = m["instruments"][0]["regions"][0].clone();
+        region["keyLow"] = 37.into();
+        region["keyHigh"] = 37.into();
+        region.as_object_mut().unwrap().remove("companionId");
+        m["instruments"][0]["regions"]
+            .as_array_mut()
+            .unwrap()
+            .push(region);
+    });
+    assert_kit_set_aside(&unnamed, "shaped differently");
+    // A looped region the processing would shorten under its end.
+    assert_kit_set_aside(
+        &with(&|r| {
+            r["loopStart"] = 0.into();
+            r["loopEnd"] = 60000.into();
+        }),
+        "is looped",
+    );
+    // The processed recording is also another instrument's.
+    let shared = kit_root(kit_table(), true);
+    edit_manifest(&shared, |m| {
+        m["instruments"][1]["regions"][0]["sampleId"] = "main".into()
+    });
+    let error = AudioResources::load(shared.path()).unwrap();
+    assert!(
+        error
+            .manifest
+            .notices
+            .iter()
+            .any(|n| n.contains("another instrument")),
+        "{:?}",
+        error.manifest.notices
+    );
+    assert!(error.manifest.instruments.iter().all(|i| i.id != KIT_ID));
+    // A sound in a region that spans keys.
+    let range = kit_root(kit_table(), true);
+    edit_manifest(&range, |m| {
+        m["instruments"][0]["regions"][1]["keyLow"] = 30.into();
+        m["instruments"][0]["regions"][1]["keyHigh"] = 40.into();
+    });
+    let loaded = AudioResources::load(range.path()).unwrap();
+    assert!(
+        loaded
+            .manifest
+            .notices
+            .iter()
+            .any(|n| n.contains("key range")),
+        "{:?}",
+        loaded.manifest.notices
+    );
+}
+
+#[test]
+fn a_kit_without_a_table_plays_as_recorded() {
+    let root = kit_root(kit_table(), false);
+    edit_manifest(&root, |m| {
+        m["instruments"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("processing");
+    });
+    let raw = decode_audio(
+        &fs::read(root.path().join("main.wav")).unwrap(),
+        Some("wav"),
+    )
+    .unwrap();
+    let loaded = AudioResources::load(root.path()).unwrap();
+    assert_eq!(loaded.samples["main"].frames, raw.frames);
+    assert!(loaded.manifest.notices.is_empty());
+}
+
+#[test]
+fn an_instrument_other_than_the_kit_with_bad_processing_data_still_fails_the_load() {
+    // Only the percussion kit has General MIDI to fall back to: the same bad table on any other instrument is a failed load.
+    let bad_table = kit_root(kit_table(), false);
+    edit_manifest(&bad_table, |m| {
+        m["instruments"][1]["processing"] =
+            serde_json::json!({"profiles": {}, "sounds": {"50": "missing"}});
+    });
+    let error = AudioResources::load(bad_table.path()).err().unwrap();
+    assert!(error.contains("other:"), "{error}");
+    assert!(AudioResources::load_for_requests(bad_table.path(), &[other_request()]).is_err());
+    // A companion in an instrument with no table.
+    let companion = kit_root(kit_table(), false);
+    edit_manifest(&companion, |m| {
+        m["instruments"][1]["regions"][0]["companionId"] = "third".into()
+    });
+    assert!(
+        AudioResources::load(companion.path())
+            .err()
+            .unwrap()
+            .contains("no kit processing")
+    );
+    // A table that fails only when the hits are processed (its second microphone does not match) fails the same way.
+    let mut table = serde_json::json!({
+        "profiles": {"kick": {"companion": {"gainDb": 0, "maxOffsetMs": 0.5, "minCorrelation": 0.99}}},
+        "sounds": {"50": "kick"}
+    });
+    table["profiles"]["kick"]["envelope"] =
+        serde_json::json!({"holdMs": 50, "decayDbPerSecond": 200, "endMs": 400});
+    let processing = kit_root(kit_table(), false);
+    edit_manifest(&processing, |m| {
+        m["instruments"][1]["processing"] = table.clone();
+        m["instruments"][1]["regions"][0]["companionId"] = "third".into();
+    });
+    assert!(
+        AudioResources::load(processing.path())
+            .err()
+            .unwrap()
+            .contains("other:")
+    );
 }

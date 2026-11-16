@@ -25,8 +25,10 @@ export function CommitSelect({ value, onCommit, target = '', busy = false, child
 }) {
   const [draft, setDraft] = useState(String(value));
   const field = useRef<HTMLSelectElement>(null);
-  const latest = useRef({ value: String(value), onCommit, busy });
-  latest.current = { value: String(value), onCommit, busy };
+  const latest = useRef({ value: String(value), onCommit, busy, target });
+  latest.current = { value: String(value), onCommit, busy, target };
+  /** The target the shown choice was made for: a choice is never recorded for another one, even before the reset below has run. */
+  const shownFor = useRef(target);
   const shown = useRef(String(value));
   const arrow = useRef(false);
   const show = (next: string) => { shown.current = next; setDraft(next); };
@@ -40,12 +42,14 @@ export function CommitSelect({ value, onCommit, target = '', busy = false, child
   }, []);
   const settle = () => {
     if (shown.current === latest.current.value || latest.current.busy) return;
+    if (shownFor.current !== latest.current.target) { show(latest.current.value); return; }
     // A refused choice (false, or a refused edit) is not kept on screen.
     const result = latest.current.onCommit(shown.current);
     if (result === false) show(latest.current.value);
     else if (result instanceof Promise) result.then(landed => { if (landed === false) show(latest.current.value); }, () => show(latest.current.value));
   };
   const change = (event: ChangeEvent<HTMLSelectElement>) => {
+    shownFor.current = latest.current.target;
     show(event.target.value);
     if (!arrow.current) settle();
   };

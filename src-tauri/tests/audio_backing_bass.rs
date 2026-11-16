@@ -32,9 +32,14 @@ fn voice(frames: Vec<[f32; 2]>, shift: i8) -> BackingVoice {
     voice_at(frames, RATE, shift)
 }
 
+thread_local! {
+    /// Whether the voices this thread builds are develop's stretcher: without the low band.
+    static DEVELOP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// A voice for a file at `rate`, played at the 48 kHz output rate.
 fn voice_at(frames: Vec<[f32; 2]>, rate: u32, shift: i8) -> BackingVoice {
-    BackingVoice::new_with_processing_shifted(
+    let voice = BackingVoice::new_with_processing_shifted(
         Arc::new(DecodedAudio {
             sample_rate: rate,
             channels: 2,
@@ -49,7 +54,12 @@ fn voice_at(frames: Vec<[f32; 2]>, rate: u32, shift: i8) -> BackingVoice {
         },
         shift,
     )
-    .unwrap()
+    .unwrap();
+    if DEVELOP.with(std::cell::Cell::get) {
+        voice.without_low_band()
+    } else {
+        voice
+    }
 }
 
 /// `frames` output frames with the score clock running at `speed`, from a seek to 0, the way the renderer drives it.
@@ -1048,81 +1058,102 @@ fn cost_of_a_second_of_audio() {
             384_000 => &at_384k,
             _ => &frames,
         };
-        let started = std::time::Instant::now();
-        let mut voice = voice_at(source.clone(), rate, shift);
-        let build_ms = started.elapsed().as_secs_f64() * 1e3;
-        let mut runs: Vec<f64> = (0..5)
-            .map(|_| {
-                voice.seek(1.0);
-                let started = std::time::Instant::now();
-                let mut sum = 0.0f32;
-                for n in 0..480_000 {
-                    sum += voice.next_frame(1.0 + n as f64 * speed / SR)[0];
-                }
-                std::hint::black_box(sum);
-                started.elapsed().as_secs_f64() * 1e3 / 10.0
-            })
-            .collect();
-        runs.sort_by(f64::total_cmp);
-        // The first 1024 output frames after a seek (four grains, 21 ms of audio, where the low band's first frames and
-        // its scan of the attacks are made), median of 41 seeks, against the same frames a second later; and the
-        // slowest of their eight 128-frame blocks (one device callback of 2.67 ms at 48 kHz), median and worst of 41.
-        // The seeks jump 4.8 s (or back 10.4 s), so that nothing the low band computed before is near: a cold start.
-        let mut after_seek = Vec::new();
-        let mut steady = Vec::new();
-        let mut block_after = Vec::new();
-        let mut block_later = Vec::new();
-        for k in 0..41 {
-            let at = 1.0 + f64::from((k * 13) % 41) * 0.37;
-            voice.seek(at);
-            let mut sum = 0.0f32;
-            let mut m = 0usize;
-            for (untimed, times, blocks) in [
-                (0usize, &mut after_seek, &mut block_after),
-                (47_000, &mut steady, &mut block_later),
-            ] {
-                for _ in 0..untimed {
-                    sum += voice.next_frame(at + m as f64 * speed / SR)[0];
-                    m += 1;
-                }
-                let (mut total, mut slowest) = (0.0f64, 0.0f64);
-                for _ in 0..8 {
+        // Each also on develop's stretcher (D), the same voice without the low band, in the same run.
+        for develop in [false, true] {
+            DEVELOP.with(|d| d.set(develop));
+            let started = std::time::Instant::now();
+            let mut voice = voice_at(source.clone(), rate, shift);
+            let build_ms = started.elapsed().as_secs_f64() * 1e3;
+            let mut runs: Vec<f64> = (0..5)
+                .map(|_| {
+                    voice.seek(1.0);
                     let started = std::time::Instant::now();
-                    for _ in 0..128 {
+                    let mut sum = 0.0f32;
+                    for n in 0..480_000 {
+                        sum += voice.next_frame(1.0 + n as f64 * speed / SR)[0];
+                    }
+                    std::hint::black_box(sum);
+                    started.elapsed().as_secs_f64() * 1e3 / 10.0
+                })
+                .collect();
+            runs.sort_by(f64::total_cmp);
+            // The first 8192 output frames after a seek (32 grains, 171 ms of audio: the low band's scan of the attacks
+            // catching up, its first frames, and the grain V comes in at, which is the 25th to 28th for the files at 192 and
+            // 384 kHz), median of 41 seeks, against the same frames a second later; and the slowest of their 64 128-frame
+            // blocks (one device callback of 2.67 ms at 48 kHz), median and worst of 41. The seeks jump 4.8 s (or back
+            // 10.4 s), so that nothing the low band computed before is near: a cold start. Also the most decimated samples
+            // of the low-pass and frames of V any one grain made, counted, in each window.
+            let mut after_seek = Vec::new();
+            let mut steady = Vec::new();
+            let mut block_after = Vec::new();
+            let mut block_later = Vec::new();
+            let mut work = [(0usize, 0usize); 2];
+            for k in 0..41 {
+                let at = 1.0 + f64::from((k * 13) % 41) * 0.37;
+                voice.seek(at);
+                voice.low_band_work();
+                let mut sum = 0.0f32;
+                let mut m = 0usize;
+                for (window, (untimed, times, blocks)) in [
+                    (0usize, &mut after_seek, &mut block_after),
+                    (47_000, &mut steady, &mut block_later),
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    for _ in 0..untimed {
                         sum += voice.next_frame(at + m as f64 * speed / SR)[0];
                         m += 1;
                     }
-                    let us = started.elapsed().as_secs_f64() * 1e6;
-                    total += us;
-                    slowest = slowest.max(us);
+                    voice.low_band_work();
+                    let (mut total, mut slowest) = (0.0f64, 0.0f64);
+                    for _ in 0..64 {
+                        let started = std::time::Instant::now();
+                        for _ in 0..128 {
+                            sum += voice.next_frame(at + m as f64 * speed / SR)[0];
+                            m += 1;
+                        }
+                        let us = started.elapsed().as_secs_f64() * 1e6;
+                        total += us;
+                        slowest = slowest.max(us);
+                    }
+                    times.push(total);
+                    blocks.push(slowest);
+                    if let Some((samples, frames)) = voice.low_band_work() {
+                        work[window] = (work[window].0.max(samples), work[window].1.max(frames));
+                    }
                 }
-                times.push(total);
-                blocks.push(slowest);
+                std::hint::black_box(sum);
             }
-            std::hint::black_box(sum);
+            for v in [
+                &mut after_seek,
+                &mut steady,
+                &mut block_after,
+                &mut block_later,
+            ] {
+                v.sort_by(f64::total_cmp);
+            }
+            let rate_khz = f64::from(rate) / 1e3;
+            eprintln!(
+                "{} {rate_khz} kHz {speed}x key {shift}: {:.2} ms per second of audio (median of 5; min {:.2}, max {:.2}); 8192 frames after a seek {:.0} us, later {:.0} us (medians); slowest 128-frame block after a seek {:.0} us (worst {:.0}), later {:.0} us (worst {:.0}); most in a grain after a seek {} samples and {} frames, later {} and {}; voice built in {build_ms:.1} ms",
+                if develop { "D" } else { "G" },
+                runs[2],
+                runs[0],
+                runs[4],
+                after_seek[20],
+                steady[20],
+                block_after[20],
+                block_after[40],
+                block_later[20],
+                block_later[40],
+                work[0].0,
+                work[0].1,
+                work[1].0,
+                work[1].1
+            );
         }
-        for v in [
-            &mut after_seek,
-            &mut steady,
-            &mut block_after,
-            &mut block_later,
-        ] {
-            v.sort_by(f64::total_cmp);
-        }
-        let rate_khz = f64::from(rate) / 1e3;
-        eprintln!(
-            "G {rate_khz} kHz {speed}x key {shift}: {:.2} ms per second of audio (median of 5; min {:.2}, max {:.2}); 1024 frames after a seek {:.0} us, later {:.0} us (medians); slowest 128-frame block after a seek {:.0} us (worst {:.0}), later {:.0} us (worst {:.0}); voice built in {build_ms:.1} ms",
-            runs[2],
-            runs[0],
-            runs[4],
-            after_seek[20],
-            steady[20],
-            block_after[20],
-            block_after[40],
-            block_later[20],
-            block_later[40]
-        );
     }
+    DEVELOP.with(|d| d.set(false));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1220,10 +1251,6 @@ const DEVELOP_HITS: [[(f64, f64, f64); 5]; 4] = [
 /// attack at most 0.5 ms slower and the onset within 0.5 ms of develop's.
 #[test]
 fn transients_are_no_worse_than_before() {
-    let (kick_src, kick_onsets) = kicks(8, 0.0);
-    let (over_src, over_onsets) = kicks(8, 0.15);
-    let (drum_src, drum_onsets) = hits(true);
-    let (pluck_src, pluck_onsets) = hits(false);
     let names = [
         "kick",
         "kick below 150 Hz",
@@ -1232,29 +1259,7 @@ fn transients_are_no_worse_than_before() {
         "pluck",
     ];
     for (row, &speed) in SPEEDS.iter().enumerate() {
-        let measured = [
-            hit(&kick_src, &kick_onsets, speed, 0, None, 10, 30),
-            hit(
-                &kick_src,
-                &kick_onsets,
-                speed,
-                0,
-                Some((150.0, false)),
-                20,
-                60,
-            ),
-            hit(
-                &over_src,
-                &over_onsets,
-                speed,
-                0,
-                Some((500.0, true)),
-                10,
-                30,
-            ),
-            hit(&drum_src, &drum_onsets, speed, 0, None, 10, 30),
-            hit(&pluck_src, &pluck_onsets, speed, 0, None, 10, 30),
-        ];
+        let measured = hit_row(speed);
         for ((m, &(pre, attack, lag)), name) in measured.iter().zip(&DEVELOP_HITS[row]).zip(names) {
             assert!(
                 m.pre_echo_db <= (pre + 1.0).max(-60.0)
@@ -1267,6 +1272,38 @@ fn transients_are_no_worse_than_before() {
             );
         }
     }
+}
+
+/// (c) The five hits of the transient row at one speed: the kick in the full band and below 150 Hz, the beater click
+/// over a note above 500 Hz, a drum hit and a plucked 82 Hz note.
+fn hit_row(speed: f64) -> [Hit; 5] {
+    let (kick_src, kick_onsets) = kicks(8, 0.0);
+    let (over_src, over_onsets) = kicks(8, 0.15);
+    let (drum_src, drum_onsets) = hits(true);
+    let (pluck_src, pluck_onsets) = hits(false);
+    [
+        hit(&kick_src, &kick_onsets, speed, 0, None, 10, 30),
+        hit(
+            &kick_src,
+            &kick_onsets,
+            speed,
+            0,
+            Some((150.0, false)),
+            20,
+            60,
+        ),
+        hit(
+            &over_src,
+            &over_onsets,
+            speed,
+            0,
+            Some((500.0, true)),
+            10,
+            30,
+        ),
+        hit(&drum_src, &drum_onsets, speed, 0, None, 10, 30),
+        hit(&pluck_src, &pluck_onsets, speed, 0, None, 10, 30),
+    ]
 }
 
 /// (d) Develop's noise row at 50, 60, 75 and 90% from 4 s of noise: band power against the source (dB) in 150-500,
@@ -1353,6 +1390,57 @@ fn the_stereo_image_and_the_mono_sum_are_kept() {
     }
 }
 
+/// Where the figures the tests above hold as develop's come from: the same measurements of develop's stretcher, the
+/// voice without the low band (`without_low_band`, which is develop's code path), equal to them to the precision they
+/// are written with. They were first measured on a build of this branch with the low band switched off, and re-derived
+/// this way.
+#[test]
+fn the_develop_figures_are_develops() {
+    DEVELOP.with(|d| d.set(true));
+    for (row, &speed) in SPEEDS.iter().enumerate() {
+        for (m, &(pre, attack, lag)) in hit_row(speed).iter().zip(&DEVELOP_HITS[row]) {
+            assert!(
+                (m.pre_echo_db - pre).abs() <= 0.05 + 1e-9
+                    && (m.attack_ms - attack).abs() <= 0.005 + 1e-9
+                    && (m.lag_ms - lag).abs() <= 0.005 + 1e-9,
+                "hits at {speed}: {:.2}, {:.3}, {:.3} against {pre}, {attack}, {lag}",
+                m.pre_echo_db,
+                m.attack_ms,
+                m.lag_ms
+            );
+        }
+        let (bands, flat) = noise_row(speed, 192_000);
+        let (noise, noise_flat) = DEVELOP_NOISE[row];
+        assert!(
+            bands[1..]
+                .iter()
+                .zip(noise)
+                .all(|(b, d)| (b - d).abs() <= 0.005 + 1e-9)
+                && (flat - noise_flat).abs() <= 0.005 + 1e-9,
+            "noise at {speed}: {bands:?}, {flat} against {noise:?}, {noise_flat}"
+        );
+        let bursts = [
+            worst(&burst_errors(speed, 1_000.0, 1_920, 8)),
+            worst(&burst_errors(speed, 1_000.0, 9_600, 6)),
+            worst(&burst_errors(speed, 0.0, 1_920, 8)),
+        ];
+        assert!(
+            bursts
+                .iter()
+                .zip(DEVELOP_BURSTS[row])
+                .all(|(b, d)| (b - d).abs() <= 0.005 + 1e-9),
+            "bursts at {speed}: {bursts:?} against {:?}",
+            DEVELOP_BURSTS[row]
+        );
+        let mid = stereo(speed, 0).mid_coherence;
+        assert!(
+            (mid - DEVELOP_MID_COHERENCE[row]).abs() <= 0.00005 + 1e-9,
+            "mid coherence at {speed}: {mid} against {}",
+            DEVELOP_MID_COHERENCE[row]
+        );
+    }
+}
+
 /// No level jump when the speed changes while playing: a steady 55 Hz sine at 75%, then 100%, then 75% again, then 100%,
 /// its level in every 20 ms within 1 dB of the source's. This branch stays within 0.05 dB; develop swings by 1.4 dB at 75%
 /// alone. Handing the low band from the vocoder back to the grains in the middle of a sustained tone would cancel it for a
@@ -1382,4 +1470,172 @@ fn changing_the_speed_while_playing_makes_no_level_jump() {
         .collect();
     let worst = worst(&levels);
     assert!(worst.abs() <= 1.0, "worst 20 ms level {worst:+.2} dB");
+}
+
+/// The level at hand-ins and hand-outs. Notes of one pitch every 0.37 s, each starting over 3 ms and dying away over
+/// 0.3 s, so that the next starts over the last one's tail; the speed changes every 1499 output frames as in
+/// `speed_changes_near_attacks_never_click` (20 to 100%, across the share below which V waits for whole windows). The
+/// note's level at its own pitch in every 10 ms window (outside the 20 ms after an attack) against what it is exactly in
+/// the source at the score clock. Tones the grains splice coherently (from 94 Hz at 48 kHz) are handed over without a
+/// dip: no window more than 0.25 dB under (this branch: 0.11 dB), except where develop's grains are too (one window, 5 ms
+/// before an attack, the same in both). Below that the grains cannot keep the tone, and V and the grains carry it at
+/// phases that disagree, so the hand-over dips for a moment: the deepest window and the windows more than 3 dB under, as
+/// measured on this branch (82.4 Hz: -2.89 dB, none; 55 Hz: -6.45 dB, 8 of 507) and develop (82.4 Hz: -0.78 dB, none;
+/// 55 Hz: -4.83 dB, 25 of 507). They fall where V leaves ahead of an attack under 40% of the speed (it needs whole
+/// windows there, so it leaves up to 96 ms of source ahead, in the last note's tail) and where it comes back after one.
+#[test]
+fn handing_the_low_band_over_and_back_keeps_the_level() {
+    // The deepest window allowed for each tone below the grains' reach, and how many windows more than 3 dB under.
+    let below_reach = [(82.4, -3.25, 0usize), (55.0, -7.0, 10)];
+    for hz in [110.0, 100.0, 82.4, 55.0] {
+        let envelope = |age: f64| {
+            if age < 0.0 {
+                0.0
+            } else {
+                0.4 * (age / 0.003).min(1.0) * (-age / 0.3).exp()
+            }
+        };
+        let source: Vec<[f32; 2]> = (0..6 * RATE as usize)
+            .map(|n| {
+                let t = n as f64 / SR;
+                let x: f64 = (0..17)
+                    .map(|k| {
+                        let age = t - k as f64 * 0.37;
+                        envelope(age) * (TAU * hz * age).sin()
+                    })
+                    .sum();
+                [x as f32; 2]
+            })
+            .collect();
+        // The amplitude of the one partial at source time c: the notes' phasors summed.
+        let amplitude = |c: f64| {
+            let (mut re, mut im) = (0.0, 0.0);
+            for k in 0..17 {
+                let phase = -TAU * hz * k as f64 * 0.37;
+                let a = envelope(c - k as f64 * 0.37);
+                re += a * phase.cos();
+                im += a * phase.sin();
+            }
+            re.hypot(im)
+        };
+        let mut levels = Vec::new();
+        for develop in [false, true] {
+            let mut voice = voice(source.clone(), 0);
+            if develop {
+                voice = voice.without_low_band();
+            }
+            voice.seek(0.0);
+            let mut clock = 0.0f64;
+            let mut out = Vec::new();
+            for round in 0..90 {
+                let speed = [0.5, 0.3, 0.9, 0.35, 1.0, 0.45, 0.2, 0.75][round % 8];
+                for _ in 0..1_499 {
+                    clock += speed / SR;
+                    out.push((clock, f64::from(voice.next_frame(clock)[0])));
+                }
+            }
+            let x: Vec<f64> = out.iter().map(|v| v.1).collect();
+            let mut windows = Vec::new();
+            for k in (0..x.len() - 480).step_by(240) {
+                let (c0, c1) = (out[k].0, out[k + 480].0);
+                let last = (c0 / 0.37).floor() * 0.37;
+                if c0 - last < 0.02 || (c1 / 0.37).floor() * 0.37 > last {
+                    continue;
+                }
+                let (c, _) = fit(&x[k..k + 480], &[hz]);
+                windows.push(20.0 * (c[0].0.hypot(c[0].1) / amplitude(out[k + 240].0)).log10());
+            }
+            levels.push(windows);
+        }
+        let (mine, develop) = (&levels[0], &levels[1]);
+        let deepest = |v: &[f64]| v.iter().copied().fold(f64::INFINITY, f64::min);
+        let under = |v: &[f64], l: f64| v.iter().filter(|&&w| w < l).count();
+        match below_reach.iter().find(|r| r.0 == hz) {
+            None => {
+                for (k, (m, d)) in mine.iter().zip(develop).enumerate() {
+                    assert!(
+                        *m >= d.min(0.0) - 0.25,
+                        "{hz} Hz, window {k}: {m:+.2} dB (develop {d:+.2} dB)"
+                    );
+                }
+            }
+            Some(&(_, floor, count)) => assert!(
+                deepest(mine) >= floor && under(mine, -3.0) <= count,
+                "{hz} Hz: deepest {:+.2} dB, {} windows under -3 dB (develop {:+.2} dB, {})",
+                deepest(mine),
+                under(mine, -3.0),
+                deepest(develop),
+                under(develop, -3.0)
+            ),
+        }
+    }
+}
+
+/// V leaving in one grain and coming back in the next (the speed crossing the share below which V waits for whole
+/// windows, on consecutive grains, shortly after an attack) makes no level dip: the frames it comes back from start from
+/// the grains' phases, the one carried into that grain too. A sustained tone at 100 and at 110 Hz (where the grains
+/// splice it coherently and V carries its phase itself), the speed at 45% and on single grains or every other grain at
+/// 35%, from 25 to 90 ms after the attack: its level in every 20 ms window within 0.05 dB (this branch: 0.02 dB). Below
+/// the grains' reach the grains' own low band, heard while V is out, sets the level there; see
+/// `handing_the_low_band_over_and_back_keeps_the_level`.
+#[test]
+fn leaving_and_coming_back_on_consecutive_grains_makes_no_level_dip() {
+    for hz in [100.0, 110.0] {
+        // A tone from 0.5 s on, starting over 3 ms, then steady at 0.4.
+        let source: Vec<[f32; 2]> = (0..96_000)
+            .map(|n| {
+                let age = n as f64 / SR - 0.5;
+                let x = if age < 0.0 {
+                    0.0
+                } else {
+                    0.4 * (age / 0.003).min(1.0) * (TAU * hz * age).sin()
+                };
+                [x as f32; 2]
+            })
+            .collect();
+        // Which grains (counted from 25 ms after the attack) play at 35%.
+        let patterns: [(&str, fn(usize) -> bool); 5] = [
+            ("every other grain", |g| g % 2 == 1),
+            ("one grain at 25 ms", |g| g == 0),
+            ("one grain at 45 ms", |g| g == 4),
+            ("one grain at 65 ms", |g| g == 8),
+            ("one grain at 85 ms", |g| g == 12),
+        ];
+        for (name, slow) in patterns {
+            let mut voice = voice(source.clone(), 0);
+            let mut clock = 0.45;
+            voice.seek(clock);
+            let mut out = Vec::new();
+            let mut speed = 0.45;
+            let mut first = None;
+            for n in 0..96_000usize {
+                if n % 256 == 0 {
+                    let after = clock - 0.5;
+                    if after > 0.025 && first.is_none() {
+                        first = Some(n / 256);
+                    }
+                    let grain = first.map(|f| n / 256 - f);
+                    speed = match grain {
+                        Some(g) if after < 0.09 && slow(g) => 0.35,
+                        _ => 0.45,
+                    };
+                }
+                clock += speed / SR;
+                out.push((clock, f64::from(voice.next_frame(clock)[0])));
+            }
+            let x: Vec<f64> = out.iter().map(|v| v.1).collect();
+            for k in (0..x.len() - 960).step_by(120) {
+                if !(out[k].0 > 0.52 && out[k + 960].0 < 0.64) {
+                    continue;
+                }
+                let (c, _) = fit(&x[k..k + 960], &[hz]);
+                let level = 20.0 * (c[0].0.hypot(c[0].1) / 0.4).log10();
+                assert!(
+                    level.abs() <= 0.05,
+                    "{hz} Hz, {name}: {level:+.3} dB at {:.0} ms after the attack",
+                    (out[k + 480].0 - 0.5) * 1e3
+                );
+            }
+        }
+    }
 }

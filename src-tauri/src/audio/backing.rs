@@ -596,6 +596,18 @@ impl BackingVoice {
             .partition_point(|t| t.score_seconds < seconds);
         self.previous_seconds = seconds - 1e-9;
     }
+    /// For tests: develop's stretcher, the voice without the low band.
+    #[doc(hidden)]
+    pub fn without_low_band(mut self) -> Self {
+        self.low = None;
+        self
+    }
+    /// For tests: the most decimated samples the low band's low-pass computed and the most of its frames made in any one
+    /// grain since the last call, or None without a low band.
+    #[doc(hidden)]
+    pub fn low_band_work(&mut self) -> Option<(usize, usize)> {
+        self.low.as_mut().map(|low| low.take_work())
+    }
     pub fn end_seconds(&self) -> f64 {
         if let Some(reference) = &self.map.reference {
             return reference.score_seconds(reference.exit_source_seconds());

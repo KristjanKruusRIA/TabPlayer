@@ -17,7 +17,7 @@ use tabplayer_lib::{
         decode::DecodedAudio,
         plan::PlaybackPlan,
     },
-    settings::{BackingFilter, BackingProcessing},
+    settings::{BackingFilter, BackingProcessing, SyncAnchor},
 };
 
 struct Counting;
@@ -161,13 +161,29 @@ fn voice(
     offset_ms: f64,
     shift: i8,
 ) -> BackingVoice {
+    mapped(
+        rate,
+        output_rate,
+        frames,
+        BackingMap::new(&[], offset_ms, &plan()).unwrap(),
+        shift,
+    )
+}
+
+fn mapped(
+    rate: u32,
+    output_rate: u32,
+    frames: Vec<[f32; 2]>,
+    map: BackingMap,
+    shift: i8,
+) -> BackingVoice {
     BackingVoice::new_with_processing_shifted(
         Arc::new(DecodedAudio {
             sample_rate: rate,
             channels: 2,
             frames: Arc::new(frames),
         }),
-        BackingMap::new(&[], offset_ms, &plan()).unwrap(),
+        map,
         output_rate,
         BackingProcessing {
             semitones: 0.0,
@@ -218,7 +234,8 @@ fn extreme_maps_and_rates_neither_stall_nor_panic() {
 
 /// Changing the speed while playing, a few times a second and mid-hop, across attacks and across the share of the speed
 /// below which V waits for whole windows, never makes the low band leave at once: no step from one output frame to the
-/// next is larger than a smooth low line has.
+/// next is larger than the largest develop's grains make of the same notes (and none reaches 0.008, where the notes'
+/// own steps are under 0.02). The level at those hand-overs is `handing_the_low_band_over_and_back_keeps_the_level`.
 #[test]
 fn speed_changes_near_attacks_never_click() {
     let rate = 48_000u32;
@@ -245,28 +262,234 @@ fn speed_changes_near_attacks_never_click() {
     assert!(largest < 0.02, "the source steps by {largest}");
     for shift in [0i8, 7] {
         let neutral = 2.0_f64.powf(f64::from(shift) / 12.0);
-        let mut voice = voice(rate, rate, frames.clone(), 0.0, shift);
-        voice.seek(0.0);
-        let mut clock = 0.0f64;
-        let mut last = [0.0f32; 2];
-        let mut worst = (0.0f32, 0usize);
-        let mut n = 0usize;
-        for round in 0..90 {
-            let speed = [0.5, 0.3, 0.9, 0.35, 1.0, 0.45, 0.2, 0.75][round % 8] * neutral;
-            for _ in 0..1_499 {
-                clock += speed / f64::from(rate);
-                let x = voice.next_frame(clock);
-                let step = (x[0] - last[0]).abs().max((x[1] - last[1]).abs());
-                if n > 0 && step > worst.0 {
-                    worst = (step, n);
+        let mut outputs = Vec::new();
+        for develop in [false, true] {
+            let mut voice = voice(rate, rate, frames.clone(), 0.0, shift);
+            if develop {
+                voice = voice.without_low_band();
+            }
+            voice.seek(0.0);
+            let mut clock = 0.0f64;
+            let mut out = Vec::with_capacity(90 * 1_499);
+            for round in 0..90 {
+                let speed = [0.5, 0.3, 0.9, 0.35, 1.0, 0.45, 0.2, 0.75][round % 8] * neutral;
+                for _ in 0..1_499 {
+                    clock += speed / f64::from(rate);
+                    out.push(voice.next_frame(clock));
                 }
-                last = x;
-                n += 1;
+            }
+            outputs.push(out);
+        }
+        let steps = |x: &[[f32; 2]]| -> (f32, usize) {
+            x.windows(2)
+                .enumerate()
+                .map(|(n, w)| {
+                    let step = (w[1][0] - w[0][0]).abs().max((w[1][1] - w[0][1]).abs());
+                    (step, n + 1)
+                })
+                .fold((0.0f32, 0usize), |a, b| if b.0 > a.0 { b } else { a })
+        };
+        let (worst, develop_worst) = (steps(&outputs[0]), steps(&outputs[1]));
+        // This branch: 0.0069 unshifted and 0.0072 at +7, the very steps develop's grains make at the same frames.
+        assert!(
+            worst.0 < 0.008 && worst.0 <= develop_worst.0,
+            "key shift {shift}: a step of {} at output frame {} (develop {} at {})",
+            worst.0,
+            worst.1,
+            develop_worst.0,
+            develop_worst.1
+        );
+    }
+}
+
+/// A clock that leaps while the vocoder is heard, without a seek (a sync map far steeper than any practice speed, which
+/// the anchors allow, or a jump) keeps every grain within the low band's budget: V leaves over one grain from what its
+/// last frame carries, making no frame at the new place, and comes back once the attack scan has caught up. At 48 kHz,
+/// and for files at 192 and 384 kHz an octave up, where the low-pass is longest. The work is counted, not timed: the most
+/// decimated samples of the low-pass computed and the most frames of V made in any one grain. No grain across the leap
+/// computes more than the worst grain after a cold seek, plus what a grain reads of the low band itself for its
+/// crossfade (twice 36 samples at most), nor makes more than two frames. Before this, the grain where the clock leapt
+/// computed everything up to the new place at once: 203 to 1508 samples here (0.36 to 9.7 million multiplies). The
+/// output stays finite, steps at most a quarter more than develop's grains do across the leap (this branch: 13% more at
+/// most), and the tone keeps its level at its own pitch before the leap and after.
+#[test]
+fn a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget() {
+    // Score 0 to 1 s plays source 0 to 1 s; the next 10 ms of score play a whole second of source (100 times the speed,
+    // 50 at half speed: far beyond the 8 times V follows); the score after that plays at two thirds.
+    let anchors = [
+        (0u32, 0.0, 0.0),
+        (0, 0.5, 1000.0),
+        (0, 0.505, 2000.0),
+        (1, 0.5, 4000.0),
+    ]
+    .map(|(bar, ratio, audio_ms)| SyncAnchor {
+        bar,
+        occurrence: 0,
+        ratio,
+        audio_ms,
+    });
+    let output = 48_000u32;
+    for (rate, shift) in [(48_000u32, 0i8), (192_000, 12), (384_000, 12)] {
+        let neutral = 2.0_f64.powf(f64::from(shift) / 12.0);
+        let frames: Vec<[f32; 2]> = (0..3 * rate as usize)
+            .map(|n| {
+                let x = 0.4 * (TAU * 55.0 * n as f64 / f64::from(rate)).sin();
+                [x as f32, (0.8 * x) as f32]
+            })
+            .collect();
+        for leap in ["steep map", "jump"] {
+            let mut runs = Vec::new();
+            for develop in [false, true] {
+                let map = if leap == "steep map" {
+                    BackingMap::new(&anchors, 0.0, &plan()).unwrap()
+                } else {
+                    BackingMap::new(&[], 0.0, &plan()).unwrap()
+                };
+                let mut voice = mapped(rate, output, frames.clone(), map, shift);
+                if develop {
+                    voice = voice.without_low_band();
+                }
+                let mut clock = 0.3f64;
+                voice.seek(clock);
+                let play = |voice: &mut BackingVoice, clock: &mut f64, count: usize| {
+                    (0..count)
+                        .map(|_| {
+                            *clock += 0.5 / f64::from(output);
+                            let x = voice.next_frame(*clock);
+                            assert!(x.iter().all(|v| v.is_finite()), "{leap} at {rate} Hz");
+                            x
+                        })
+                        .collect::<Vec<_>>()
+                };
+                // From a seek into audio the low band has not seen (a cold start) to just before the leap.
+                let before = play(&mut voice, &mut clock, 65_000);
+                let seek = voice.low_band_work();
+                if leap == "jump" {
+                    clock += 0.5;
+                }
+                let across = play(&mut voice, &mut clock, 24_000);
+                let crossing = voice.low_band_work();
+                let after = play(&mut voice, &mut clock, 24_000);
+                runs.push((before, across, after, seek, crossing));
+            }
+            let (before, across, after, seek, crossing) = &runs[0];
+            let ((seek_work, seek_frames), (leap_work, leap_frames)) =
+                (seek.unwrap(), crossing.unwrap());
+            let hz = 55.0 * neutral;
+            let level = |x: &[[f32; 2]]| {
+                let left: Vec<f32> = x.iter().map(|v| v[0]).collect();
+                20.0 * (tone(&left, hz, output) / 0.4).log10()
+            };
+            let largest = |x: &[[f32; 2]]| {
+                x.windows(2)
+                    .map(|w| (w[1][0] - w[0][0]).abs().max((w[1][1] - w[0][1]).abs()))
+                    .fold(0.0f32, f32::max)
+            };
+            let (level_before, level_after) =
+                (level(&before[before.len() - 24_000..]), level(after));
+            let (step, develop_step) = (largest(across), largest(&runs[1].1));
+            eprintln!(
+                "{leap} at {rate} Hz, key shift {shift}: worst grain after the seek {seek_work} samples, {seek_frames} frames; across the leap {leap_work} samples, {leap_frames} frames; level before {level_before:+.2} dB, after {level_after:+.2} dB; largest step across {step:.5} (develop {develop_step:.5})"
+            );
+            assert!(
+                leap_work <= seek_work + 72 && seek_frames <= 2 && leap_frames <= 2,
+                "{leap} at {rate} Hz: {leap_work} samples and {leap_frames} frames in a grain (after a seek {seek_work}, {seek_frames})"
+            );
+            assert!(
+                level_before.abs() <= 0.1 && level_after.abs() <= 0.1,
+                "{leap} at {rate} Hz: the tone at {level_before:+.2} dB before, {level_after:+.2} dB after"
+            );
+            assert!(
+                step <= 1.25 * develop_step,
+                "{leap} at {rate} Hz: a step of {step} across the leap (develop {develop_step})"
+            );
+        }
+    }
+}
+
+/// A damaged or hostile file may hold samples at the very top of what an f32 holds, or ones that are not numbers: sums of
+/// them overflow, and a finite one that large would be spread over every frame of V that spans it. The low band hears
+/// them clipped, so it carries nothing of them on: the output stays finite, it is out of range for no more output frames
+/// than develop's grains make of them (which play them as they are), and around them it keeps its level (no silence after
+/// them) and the low tone its level at its own pitch.
+#[test]
+fn samples_near_the_largest_float_leave_nothing_behind() {
+    let rate = 48_000u32;
+    let mut frames: Vec<[f32; 2]> = (0..4 * rate as usize)
+        .map(|n| {
+            let x = 0.4 * (TAU * 55.0 * n as f64 / f64::from(rate)).sin();
+            [x as f32, (0.8 * x) as f32]
+        })
+        .collect();
+    // At 1 s one sample of 3e38; at 1.6 s sixteen of plus and minus 3e38, whose sums in the low-pass overflow to infinity
+    // and NaN; at 2.2 s sixteen that are not numbers.
+    let second = rate as usize;
+    frames[second] = [3e38, 3e38];
+    for k in 0..16 {
+        let v = if k % 4 < 2 { 3e38f32 } else { -3e38 };
+        frames[second * 8 / 5 + k] = [v, v];
+        frames[second * 11 / 5 + k] = [f32::NAN, f32::NAN];
+    }
+    for shift in [0i8, 7] {
+        let neutral = 2.0_f64.powf(f64::from(shift) / 12.0);
+        let mut outputs = Vec::new();
+        for develop in [false, true] {
+            let mut voice = voice(rate, rate, frames.clone(), 0.0, shift);
+            if develop {
+                voice = voice.without_low_band();
+            }
+            voice.seek(0.8);
+            let mut clock = 0.8f64;
+            let out: Vec<[f32; 2]> = (0..160_000)
+                .map(|_| {
+                    clock += 0.5 * neutral / f64::from(rate);
+                    voice.next_frame(clock)
+                })
+                .collect();
+            assert!(
+                out.iter().flatten().all(|v| v.is_finite()),
+                "key shift {shift}"
+            );
+            outputs.push(out);
+        }
+        let loud = |x: &[[f32; 2]]| {
+            x.iter()
+                .filter(|v| v[0].abs().max(v[1].abs()) > 1.0)
+                .count()
+        };
+        let (mine_loud, develop_loud) = (loud(&outputs[0]), loud(&outputs[1]));
+        // Every 20 ms window in which develop is in range: its level, and the branch's.
+        let level = |w: &[[f32; 2]]| {
+            10.0 * (w.iter().map(|v| f64::from(v[0]).powi(2)).sum::<f64>() / w.len() as f64)
+                .max(1e-12)
+                .log10()
+        };
+        let source_level = 10.0 * (0.4f64 * 0.4 / 2.0).log10();
+        let mut worst = (0.0f64, 0usize);
+        for (k, (m, d)) in outputs[0]
+            .chunks_exact(960)
+            .zip(outputs[1].chunks_exact(960))
+            .enumerate()
+            .skip(10)
+        {
+            if d.iter().any(|v| v[0].abs().max(v[1].abs()) > 1.0) {
+                continue;
+            }
+            let error = level(m) - source_level;
+            if error.abs() > worst.0.abs() {
+                worst = (error, k);
             }
         }
+        let left: Vec<f32> = outputs[0][outputs[0].len() - 24_000..]
+            .iter()
+            .map(|v| v[0])
+            .collect();
+        let tone_level = 20.0 * (tone(&left, 55.0 * neutral, rate) / 0.4).log10();
+        // This branch: out of range for as many frames as develop (91 unshifted, 53 at +7), every window within 0.46 dB,
+        // the tone at 0.00 dB. Before the clip: 16 985 frames out of range (+710 dB), then silence.
         assert!(
-            worst.0 < 0.05,
-            "key shift {shift}: a step of {} at output frame {}",
+            mine_loud <= develop_loud && worst.0.abs() <= 1.0 && tone_level.abs() <= 0.1,
+            "key shift {shift}: out of range for {mine_loud} frames (develop {develop_loud}), a 20 ms window at {:+.2} dB (window {}), the tone at the end {tone_level:+.2} dB",
             worst.0,
             worst.1
         );

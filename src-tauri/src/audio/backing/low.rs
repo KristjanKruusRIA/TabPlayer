@@ -78,6 +78,11 @@ const MOST_READ: f64 = 32.0;
 /// instead: 1 to 5 grains later at 48 kHz (21 to 43 ms after a seek instead of 16), 22 to 25 grains later for files at
 /// 192 and 384 kHz an octave up (133 to 149 ms); the grains keep their own low band until then.
 const CATCH_UP: usize = 1 << 18;
+/// The low band hears the decoded audio clipped at this (+12 dBFS), far above what a decoder gives for real audio. A
+/// damaged or hostile file may hold samples up to the largest an f32 holds (or not numbers at all), which overflow the
+/// low-pass's sums or, finite, would put a pulse of that size into V's frames for as long as they span; clipped, such a
+/// sample is a loud click, which the low band handles like any other.
+const CLIP: f32 = 4.0;
 
 /// What the grains read: the decoded frames, the frames the sync map lets through, and the isolated impulses the voice
 /// takes out and adds back on the clock.
@@ -95,6 +100,8 @@ pub(super) struct LowBand {
     d: f64,
     /// Half of the symmetric low-pass, centre first.
     taps: Vec<f32>,
+    /// The largest the low-pass gives for audio clipped at CLIP: CLIP times the sum of the taps' magnitudes.
+    most: f32,
     /// Partials below this (radians per decimated sample) keep their own phase; above it they follow the grains.
     pass: f64,
     /// The highest bin V keeps.
@@ -111,9 +118,13 @@ pub(super) struct LowBand {
     synthesis: Vec<f64>,
     cache: Vec<[f32; 2]>,
     tags: Vec<i64>,
-    /// Decimated samples the low-pass computed during this grain, and how many the scan may compute while V is out.
+    /// Decimated samples the low-pass computed during this grain, and how many the scan may compute in one.
     spent: usize,
     catch_up: usize,
+    /// Frames made during this grain, and the most samples and frames any grain took since tests last asked.
+    frames: usize,
+    most_spent: usize,
+    most_frames: usize,
     onsets: [f64; ONSETS],
     onset_first: usize,
     onset_count: usize,
@@ -146,6 +157,9 @@ pub(super) struct LowBand {
     peaks: Vec<usize>,
     grain: Vec<[f64; 2]>,
     framed: bool,
+    /// Whether the last frame started over from the phases the grains read at (what it carries is then in step with
+    /// them), rather than carrying V's own phases on.
+    restarted: bool,
     segment: f64,
     carry: [[f32; 2]; HOP],
     next_carry: [[f32; 2]; HOP],
@@ -176,6 +190,7 @@ impl LowBand {
             return None;
         }
         let taps = lowpass(rate, 2.625 * lock, 2.75 * lock);
+        let most = CLIP * (taps[0].abs() + 2.0 * taps[1..].iter().map(|h| h.abs()).sum::<f32>());
         // A decimated sample costs a multiply per tap held and channel.
         let catch_up = CATCH_UP / (2 * taps.len());
         let window: Vec<f64> = (0..N)
@@ -196,6 +211,7 @@ impl LowBand {
             factor,
             d,
             taps,
+            most,
             pass: 2.0 * PI * 1.25 * lock * d / rate,
             top,
             hop: HOP as f64 * step / d,
@@ -214,6 +230,9 @@ impl LowBand {
             tags: vec![i64::MIN; CACHE],
             spent: 0,
             catch_up,
+            frames: 0,
+            most_spent: 0,
+            most_frames: 0,
             onsets: [0.0; ONSETS],
             onset_first: 0,
             onset_count: 0,
@@ -240,6 +259,7 @@ impl LowBand {
             peaks: Vec::with_capacity(N / 2 + 1),
             grain: vec![[0.0; 2]; N],
             framed: false,
+            restarted: true,
             segment: f64::NEG_INFINITY,
             carry: [[0.0; 2]; HOP],
             next_carry: [[0.0; 2]; HOP],
@@ -268,6 +288,31 @@ impl LowBand {
     /// `best`, and the previous one read from `previous` (None when there was none to crossfade from). Returns whether
     /// `delta` holds something to add to the grain.
     pub(super) fn grain(
+        &mut self,
+        source: &Source,
+        clock: f64,
+        rate: Option<f64>,
+        best: f64,
+        previous: Option<f64>,
+    ) -> bool {
+        self.spent = 0;
+        self.frames = 0;
+        let heard = self.prepare(source, clock, rate, best, previous);
+        self.most_spent = self.most_spent.max(self.spent);
+        self.most_frames = self.most_frames.max(self.frames);
+        heard
+    }
+
+    /// For tests: the most decimated samples the low-pass computed and the most frames made in any one grain since the
+    /// last call.
+    pub(super) fn take_work(&mut self) -> (usize, usize) {
+        let work = (self.most_spent, self.most_frames);
+        self.most_spent = 0;
+        self.most_frames = 0;
+        work
+    }
+
+    fn prepare(
         &mut self,
         source: &Source,
         clock: f64,
@@ -325,16 +370,12 @@ impl LowBand {
             (best + reach).min(aim - self.radius),
             (best + 2.0 * reach).max(aim + self.radius + reach),
         );
-        // The attacks are needed wherever the frames or the grains read, only while V may stay in. While V is out, the
-        // scan spreads its work over grains (see CATCH_UP) and V stays out until it has caught up; what the frames and
-        // the grains read then lies in what the scan has computed.
-        let limit = if self.alpha > 0.0 {
-            usize::MAX
-        } else {
-            self.catch_up
-                .max(2 * (HOP as f64 * self.rate / self.d).ceil() as usize + 16)
-        };
-        self.spent = 0;
+        // The attacks are needed wherever the frames or the grains read, only while V may stay in. The scan spreads its
+        // work over grains (see CATCH_UP), in every grain; what the frames and the grains read lies in what it has
+        // computed once it has caught up.
+        let limit = self
+            .catch_up
+            .max(2 * (HOP as f64 * self.rate / self.d).ceil() as usize + 16);
         let ready = if active {
             self.scan(
                 source,
@@ -345,13 +386,20 @@ impl LowBand {
         } else {
             self.scan(source, s0.min(s2) - span, s0.max(s2) + span, limit)
         };
-        if !ready && self.alpha == 0.0 {
-            self.framed = false;
-            self.tail_valid = false;
-            return false;
+        if !ready {
+            if self.alpha == 0.0 {
+                self.framed = false;
+                self.tail_valid = false;
+                return false;
+            }
+            // V is heard, but where it would read next is not scanned yet: the clock leapt without a seek (a map that
+            // steep, or a jump). V leaves over this grain from what its last frame carries into it, making no frame
+            // here, and comes back once the scan has caught up.
+            return self.leave(source, best, previous);
         }
-        if !self.framed {
-            // Nothing carries into this grain: its first half comes from a frame centred on its first output frame.
+        if !self.framed || (self.alpha == 0.0 && !self.restarted) {
+            // Nothing carries into this grain, or what carries holds V's own phases while V comes in from the grains'
+            // (it left in the last grain): its first half comes from a frame centred on its first output frame.
             self.frame(source, s0, best, true);
             self.synthesize(false);
         }
@@ -397,10 +445,38 @@ impl LowBand {
                 head
             };
             let a = a0 + (a1 - a0) * t;
-            self.delta[i] = std::array::from_fn(|c| a * (self.v[i][c] - heard[c]));
+            self.delta[i] = std::array::from_fn(|c| finite(a * (self.v[i][c] - heard[c])));
             self.tail[i] = self.read(source, best + (i + HOP) as f64 * self.step);
         }
         self.tail_valid = true;
+        true
+    }
+
+    /// V leaves over this grain from what the last frame carries into it (its second half, already faded out by its
+    /// window), while the grains' own low band fades in by the same window; no frame is made.
+    fn leave(&mut self, source: &Source, best: f64, previous: Option<f64>) -> bool {
+        if let Some(previous) = previous
+            && !self.tail_valid
+        {
+            for i in 0..HOP {
+                self.tail[i] = self.read(source, previous + (i + HOP) as f64 * self.step);
+            }
+        }
+        for i in 0..HOP {
+            let t = i as f32 / HOP as f32;
+            let head = self.read(source, best + i as f64 * self.step);
+            let heard: [f32; 2] = if previous.is_some() {
+                std::array::from_fn(|c| self.tail[i][c] * (1.0 - t) + head[c] * t)
+            } else {
+                head
+            };
+            let out = self.fade[HOP + i] as f32;
+            self.delta[i] = std::array::from_fn(|c| finite(self.carry[i][c] - out * heard[c]));
+        }
+        self.carry = [[0.0; 2]; HOP];
+        self.framed = false;
+        self.tail_valid = false;
+        self.alpha = 0.0;
         true
     }
 
@@ -454,7 +530,29 @@ impl LowBand {
             acc[0] -= w * t.sample[0];
             acc[1] -= w * t.sample[1];
         }
-        acc
+        if acc[0].abs() <= self.most && acc[1].abs() <= self.most {
+            acc
+        } else {
+            // A sample beyond CLIP (or not a number) is in reach: the same sum from the samples clipped, which is never
+            // larger than `most`. Real audio never comes here.
+            let mut acc = [0.0f32; 2];
+            for t in lo..hi {
+                let w = h[(t - c).unsigned_abs() as usize];
+                let s = x[t as usize];
+                acc[0] += w * clip(s[0]);
+                acc[1] += w * clip(s[1]);
+            }
+            for t in &source.transients[from..] {
+                let f = t.frame as i64;
+                if f >= hi {
+                    break;
+                }
+                let w = h[(f - c).unsigned_abs() as usize];
+                acc[0] -= w * clip(t.sample[0]);
+                acc[1] -= w * clip(t.sample[1]);
+            }
+            acc
+        }
     }
 
     /// The low band at a source position, from the decimated samples by four-point Lagrange interpolation.
@@ -606,7 +704,9 @@ impl LowBand {
         let (lo, lag, from, to) = self.layout(centre_index);
         let restart = restart || !self.framed || lo != self.segment;
         self.framed = true;
+        self.restarted = restart;
         self.segment = lo;
+        self.frames += 1;
         let start = centre_index - (N / 2) as i64;
         // Both frames take the same window positions (where both stay in the segment): they differ only by the delay,
         // which keeps the frequency estimate unbiased at a segment's edge.
@@ -730,6 +830,15 @@ impl LowBand {
             self.left[k] = [l[0] * c - l[1] * s, l[0] * s + l[1] * c];
             self.right[k] = [r[0] * c - r[1] * s, r[0] * s + r[1] * c];
         }
+        // The low band is bounded (see CLIP), so this cannot happen; if it ever did, nothing of it is carried on: the
+        // frame is silent and the next one starts over.
+        if !self.phase[..=top].iter().all(|p| p.is_finite()) {
+            self.phase.fill(0.0);
+            self.left.fill([0.0; 2]);
+            self.right.fill([0.0; 2]);
+            self.restarted = true;
+            self.framed = false;
+        }
         self.transform
             .inverse(&self.left, &self.synthesis, &mut self.grain, 0);
         self.transform
@@ -796,6 +905,24 @@ fn taper(t: f64, length: f64) -> f64 {
     } else {
         0.5 - 0.5 * (PI * t / length).cos()
     }
+}
+
+/// A decoded sample clipped at CLIP; zero for one that is not a number.
+fn clip(x: f32) -> f32 {
+    if x.abs() <= CLIP {
+        x
+    } else if x > 0.0 {
+        CLIP
+    } else if x < 0.0 {
+        -CLIP
+    } else {
+        0.0
+    }
+}
+
+/// Zero for what is not a finite number: what a grain adds is never anything else.
+fn finite(x: f32) -> f32 {
+    if x.is_finite() { x } else { 0.0 }
 }
 
 fn wrap(angle: f64) -> f64 {

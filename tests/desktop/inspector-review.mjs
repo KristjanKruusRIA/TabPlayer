@@ -8,36 +8,43 @@
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { openScore,settle,sleep,click } from './entry-mix-support.mjs';
+import { openScore,settle,sleep,click,centre } from './entry-mix-support.mjs';
 import { revealInspectorTab,openProperties,closeProperties,clickWorkstationButton } from './workstation-commands.mjs';
 
 const shots=resolve(process.argv[2]??'.analysis/desktop-smoke/inspector-review');mkdirSync(shots,{recursive:true});
 const session=await openScore('small'),{page,cdp}=session,report={checks:[]};
 const note=(name,evidence)=>{report.checks.push({name,evidence});console.log(`ok - ${name}`);};
-/** The first or the last fret number the score draws: the first lies on the first track, the last on the last one. */
+/** The topmost or the lowest fret number the score draws: with every track shown, the first lies on the first track and the last on the last one. */
 const numberAt=(which)=>page.evaluate(which=>{
   const numbers=[...document.querySelector('.score-paper-host').querySelectorAll('svg text')].filter(text=>/^\d{1,2}$/.test(text.textContent)&&text.getBoundingClientRect().width>0);
-  const r=numbers[which==='first'?0:numbers.length-1].getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
+  numbers.sort((a,b)=>a.getBoundingClientRect().y-b.getBoundingClientRect().y);
+  const node=numbers[which==='first'?0:numbers.length-1];node.scrollIntoView({block:'center',inline:'nearest'});
+  const r=node.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};
 },which);
 const clickNote=async which=>{const point=await numberAt(which);await click(cdp,point.x,point.y);await settle(page,500);};
+/** A real click on the name of track `index` in the overview: it makes that track the active one, which is what a click on its note does too (the selection moves before the focused field is left). */
+const clickTrack=async index=>{const spot=await centre(page,`[role=row][aria-rowindex="${index+2}"] button.score-overview-track-name`);await click(cdp,spot.x,spot.y);await settle(page,500);};
+const selectFirst=async()=>{await clickTrack(0);await clickNote('first');};
 const trackText=()=>page.locator('.statusbar-track').first().textContent();
 const undo=async()=>{await clickWorkstationButton(page,'Undo');await settle(page,400);};
 
 try{
-  await clickNote('first');
+  // The score shows only the selected track by default; show every track so a click can land on another one.
+  await page.getByRole('combobox',{name:/^Displayed tracks/}).selectOption('all');await settle(page,800);
+  await selectFirst();
   await revealInspectorTab(page,'Track');await settle(page,300);
   await page.locator('.track-notation-more summary').click();
   const first=await trackText();
 
-  // ---- 1. typed for one track, left by a click on another track's note ----
+  // ---- 1. typed for one track, left by a click that makes another track the active one ----
   for(const [label,field,text,pick] of [
     ['a track name','Track name','Renamed first track',edit=>({type:edit.type,track:edit.track,value:edit.name})],
     ['a sounding transposition','Sounding transposition','-12',edit=>({type:edit.type,track:edit.track,value:edit.settings.transposition})],
   ]) {
-    await clickNote('first');assert.equal(await trackText(),first,`${label}: the first note is on the first track`);
+    await selectFirst();assert.equal(await trackText(),first,`${label}: the first note is on the first track`);
     const before=(await session.edits()).length,input=page.getByLabel(field,{exact:true});
     await input.click();await input.fill(text);
-    await clickNote('last');
+    await clickTrack(2);
     const other=await trackText();assert.notEqual(other,first,`${label}: the click selected another track`);
     const made=(await session.edits()).slice(before);
     assert.equal(made.length,1,`${label}: exactly one edit (got ${made.map(edit=>edit.type)})`);
@@ -46,17 +53,18 @@ try{
     assert.equal(String(got.value),text);
     assert.notEqual(await page.getByLabel(field,{exact:true}).inputValue(),text,`${label}: the field now shows the other track`);
     await undo();assert.equal((await session.edits()).length,before,`${label}: Undo takes it back`);
-    note(`${label} typed for one track is recorded once, for that track, when a note of another track is clicked`,{edit:got});
+    note(`${label} typed for one track is recorded once, for that track, when another track is clicked`,{edit:got});
   }
 
   // ---- 2. staff selector and per-staff tuning ----
-  await clickNote('first');
+  await selectFirst();
   const count=(await session.edits()).length;
   await page.getByRole('button',{name:'Add staff',exact:true}).click();await settle(page,500);
   assert.equal((await session.edits()).length,count+1,'Add staff is one edit');
   const selector=page.getByRole('combobox',{name:'Staff',exact:true});
   await selector.waitFor();assert.equal(await selector.locator('option').count(),2,'two staves');
-  await selector.selectOption('1');await settle(page,500);
+  // By keyboard: the selector is the way to reach a second staff without the mouse.
+  await selector.focus();await page.keyboard.press('ArrowDown');await settle(page,500);
   assert.match(await trackText(),/Staff 2$/,'the staff selector moved the cursor to staff 2');
   const tuningButton=page.locator('.track-settings .track-tuning-button').first(),tuned=(await session.edits()).length;
   await tuningButton.click();const tuning=page.getByRole('dialog',{name:'Tuning',exact:true});await tuning.waitFor();
@@ -67,11 +75,11 @@ try{
   assert.equal(retuned.length,1,'one edit for the staff tuning');assert.equal(retuned[0].type,'setStaffSettings');assert.equal(retuned[0].staff,1,'the second staff was retuned');assert.equal(retuned[0].track,0);
   await undo();await undo();assert.equal((await session.edits()).length,count,'Undo takes both back');
   note('a track with several staves has a staff selector, and its tuning is one setStaffSettings on the selected staff',{retuned:retuned[0].settings.tuning});
-  await clickNote('first');
+  await selectFirst();
 
   // ---- 3. browsing a closed select with the arrow keys ----
   await page.locator('.track-info .inspector-more summary').click();
-  const program=page.getByLabel('Track MIDI instrument',{exact:true}),browsed=(await session.edits()).length;
+  const program=page.locator('label',{hasText:'Track MIDI instrument'}).locator('select'),browsed=(await session.edits()).length;
   await program.focus();for(let i=0;i<4;i++){await page.keyboard.press('ArrowDown');await sleep(60);}
   await settle(page,300);assert.equal((await session.edits()).length,browsed,'browsing the instrument with the arrow keys records nothing per key');
   await page.keyboard.press('Tab');await settle(page,500);
@@ -80,7 +88,7 @@ try{
   note('browsing the MIDI instrument with the arrow keys records one edit when the select is left',{program:chosen[0].program});
 
   // ---- 4. Properties dialog: opens on its selected tab; Apply keeps focus ----
-  await clickNote('first');await revealInspectorTab(page,'Track');
+  await selectFirst();await revealInspectorTab(page,'Track');
   const dialog=await openProperties(page,'note');
   assert.equal(await page.evaluate(()=>{const e=document.activeElement;return e?.getAttribute('role')==='tab'&&e.getAttribute('aria-selected')==='true'?e.textContent:null;}),'Note','the dialog opens with focus on the selected tab');
   await closeProperties(page);
@@ -112,4 +120,4 @@ try{
   note('a dialog opened from the inspector stays visible and uncovered when the window becomes short',{});
 
   console.log(JSON.stringify({passed:true,checks:report.checks.length}));
-}finally{await session.close();}
+}catch(error){try{await page.screenshot({path:resolve(shots,'failure.png')});}catch{ /* The page is gone. */ }throw error;}finally{await session.close();}

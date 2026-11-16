@@ -163,3 +163,31 @@ test('a_companion_recording_and_a_processing_table_are_pinned_and_carried_into_t
   await writeFile(join(root, 'Programs/main.sfz'), '<region> sample=../Samples/soft1.wav tp_pair=../../outside.wav');
   await assert.rejects(resolveSfz(root, 'Programs/main.sfz'), /escape|outside/i);
 });
+
+test('a_kit_processing_table_with_a_repeated_key_is_refused_and_a_valid_one_parses_as_json_does', async () => {
+  const { parseStrictJson } = await api();
+  const good = '{ "profiles": { "kick": { "eq": [ { "kind": "peak", "hz": 400, "db": -5.5, "q": 1e0 } ], "name": "a\\"b\u00e9" } }, "sounds": { "36": "kick" }, "n": null, "t": true, "list": [] , "o": {} }';
+  assert.deepEqual(parseStrictJson(good), JSON.parse(good));
+  assert.throws(() => parseStrictJson('{"profiles":{"kick":{},"kick":{}}}'), /Duplicate key "kick"/);
+  assert.throws(() => parseStrictJson('{"sounds":{"36":"kick","36":"snare"}}'), /Duplicate key "36"/);
+  assert.throws(() => parseStrictJson('{"a":[{"b":1,"b":2}]}'), /Duplicate key "b"/);
+  assert.throws(() => parseStrictJson('{"a":1,}'), /Invalid JSON/);
+  assert.throws(() => parseStrictJson('{"a":1} x'), /Invalid JSON/);
+  assert.throws(() => parseStrictJson('{"a" 1}'), /Invalid JSON/);
+  // A key that JSON.parse would turn into the prototype stays a plain property.
+  assert.deepEqual(Object.keys(parseStrictJson('{"__proto__":{"x":1}}')), ['__proto__']);
+});
+
+test('an_extension_cannot_carry_kit_processing_or_companion_recordings', async () => {
+  const { addInstrument } = await api();
+  const base = () => ({ instruments: [{ id: 'kit', regions: [{ sampleId: 'a' }] }] });
+  const manifest = base();
+  addInstrument(manifest, { id: 'kit', regions: [{ sampleId: 'b' }] }, { id: 'kit', extends: true }, 'extra');
+  assert.deepEqual(manifest.instruments[0].regions.map(r => r.sampleId), ['a', 'b']);
+  assert.throws(() => addInstrument(base(), { id: 'kit', regions: [], processing: { profiles: {}, sounds: {} } }, { id: 'kit', extends: true }, 'extra'), /extends kit but gives it kit processing/);
+  assert.throws(() => addInstrument(base(), { id: 'kit', regions: [{ sampleId: 'b', companionId: 'c' }] }, { id: 'kit', extends: true }, 'extra'), /kit processing/);
+  assert.throws(() => addInstrument(base(), { id: 'nope', regions: [] }, { id: 'nope', extends: true }, 'extra'), /unknown instrument/);
+  const plain = { instruments: [] };
+  addInstrument(plain, { id: 'kit', regions: [], processing: {} }, { id: 'kit' }, 'main');
+  assert.equal(plain.instruments.length, 1);
+});

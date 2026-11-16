@@ -149,6 +149,59 @@ function normalizeWave(original) {
   return bytes;
 }
 
+// JSON.parse keeps the last of two equal keys without a word. A kit's processing table is read by hand, so a repeated key (two
+// "kick" profiles, a sound named twice) is an error here instead of the second one quietly winning.
+export function parseStrictJson(text) {
+  let i=0;
+  const fail=message=>{throw new Error(`Invalid JSON at ${i}: ${message}`);};
+  const space=()=>{while(i<text.length&&' \t\r\n'.includes(text[i]))i++;};
+  const token=(pattern,message)=>{pattern.lastIndex=i;const found=pattern.exec(text);if(!found)fail(message);i=pattern.lastIndex;return JSON.parse(found[0]);};
+  const string=()=>token(/"(?:[^"\\\u0000-\u001f]|\\.)*"/y,'string');
+  function value() {
+    space();
+    const c=text[i];
+    if(c==='{') {
+      i++;const object={};space();
+      if(text[i]==='}') {i++;return object;}
+      for(;;) {
+        space();if(text[i]!=='"')fail('key');
+        const key=string();space();if(text[i++]!==':')fail('colon');
+        if(Object.hasOwn(object,key))throw new Error(`Duplicate key ${JSON.stringify(key)}`);
+        Object.defineProperty(object,key,{value:value(),enumerable:true,writable:true,configurable:true});
+        space();
+        if(text[i]===',') {i++;continue;}
+        if(text[i]==='}') {i++;return object;}
+        fail('comma or closing brace');
+      }
+    }
+    if(c==='[') {
+      i++;const list=[];space();
+      if(text[i]===']') {i++;return list;}
+      for(;;) {
+        list.push(value());space();
+        if(text[i]===',') {i++;continue;}
+        if(text[i]===']') {i++;return list;}
+        fail('comma or closing bracket');
+      }
+    }
+    if(c==='"')return string();
+    return token(/-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null/y,'value');
+  }
+  const result=value();space();
+  if(i!==text.length)fail('text after the value');
+  return result;
+}
+
+// An instrument of a source joins the manifest; one that extends another adds its regions to it and cannot carry a kit table or
+// companion recordings of its own, which the base instrument's table would not know.
+export function addInstrument(manifest, instrument, configured, sourceId='source') {
+  if(!configured.extends) {manifest.instruments.push(instrument);return;}
+  if(instrument.processing||instrument.regions.some(region=>region.companionId))throw new Error(`${sourceId} extends ${instrument.id} but gives it kit processing, which an extension cannot carry`);
+  const base=manifest.instruments.find(item=>item.id===instrument.id);
+  if(!base)throw new Error(`${sourceId} extends unknown instrument ${instrument.id}`);
+  base.regions.push(...instrument.regions);
+}
+
 export async function prepareLibrary({sourceRoot, outputRoot, source, instruments, inventory}) {
   const expected=inventory?new Map(inventory.map(item=>[item.path,item])):null;
   const observed=new Map(),samples=new Map(),parsed=[];
@@ -195,7 +248,7 @@ export async function prepareLibrary({sourceRoot, outputRoot, source, instrument
     // The kit's processing table is data beside its map: read as pinned, checked for shape here and strictly by the loader.
     let processing;
     if(instrument.processing) {
-      processing=JSON.parse((await verified(instrument.processing)).toString('utf8'));
+      processing=parseStrictJson((await verified(instrument.processing)).toString('utf8'));
       if(!processing||typeof processing!=='object'||Array.isArray(processing)||Object.keys(processing).some(key=>!['profiles','sounds'].includes(key)))throw new Error(`Invalid kit processing table: ${instrument.processing}`);
     }
     if(!processing&&regions.some(region=>region.companionId))throw new Error(`Companion recordings without a processing table: ${instrument.id}`);
@@ -345,13 +398,7 @@ ${path}
     if(recordInventory) {await mkdir(dirname(inventoryPath),{recursive:true});await writeFile(inventoryPath,JSON.stringify(result.inventory,null,2)+'\n');await mkdir(join(root,'assets/audio/licenses'),{recursive:true});await copyFile(confined(cacheRoot,source.licensePath),join(root,`assets/audio/licenses/${source.id}.txt`));}
     manifest.sources.push({id:source.id,repository:source.repository,revision:source.revision,license:source.license,licensePath:`licenses/${source.id}.txt`,licenseSha256:result.licenseSha256});
     // An extending source adds recorded layers to a voice another source already defines.
-    for(const instrument of result.instruments) {
-      const configured=source.instruments.find(item=>item.id===instrument.id);
-      if(!configured.extends) {manifest.instruments.push(instrument);continue;}
-      const base=manifest.instruments.find(item=>item.id===instrument.id);
-      if(!base)throw new Error(`${source.id} extends unknown instrument ${instrument.id}`);
-      base.regions.push(...instrument.regions);
-    }
+    for(const instrument of result.instruments)addInstrument(manifest,instrument,source.instruments.find(item=>item.id===instrument.id),source.id);
     manifest.samples.push(...result.samples);
     console.log(`${source.id}: ${result.instruments.reduce((n,i)=>n+i.regions.length,0)} regions, ${result.samples.length} recorded samples`);
   }

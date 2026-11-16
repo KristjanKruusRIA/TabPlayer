@@ -7,6 +7,8 @@ use super::{
 use crate::settings::{BackingFilter, BackingProcessing, BackingSettings, SyncAnchor};
 use std::sync::Arc;
 
+mod low;
+
 #[derive(Clone, Debug)]
 pub struct BackingMap {
     points: Vec<(f64, f64)>,
@@ -230,8 +232,13 @@ pub struct BackingVoice {
     previous_seconds: f64,
     /// Correlation of each coarse search position, kept so the search finds its peaks without allocating.
     scores: [f64; COARSE_POINTS],
-    /// Where the last grain was read from, in source frames (for tests of the search).
+    /// Where the last grain was read from, in source frames (also where the next grain's crossfade continues from).
     landed: f64,
+    /// The low band put back by a phase vocoder while stretching (see `low`), and the source frames the map lets
+    /// through, `first..end`.
+    low: Option<Box<low::LowBand>>,
+    first: i64,
+    end: i64,
 }
 impl BackingVoice {
     pub fn new(
@@ -321,7 +328,15 @@ impl BackingVoice {
         if pitch != 0.0 {
             step *= 2.0_f64.powf(pitch / 12.0);
         }
+        let (first, end) = match &map.reference {
+            Some(reference) => reference.frame_range(audio.frames.len(), audio.sample_rate),
+            None => (0, audio.frames.len()),
+        };
+        let radius = (HOP as f64 * step).ceil().min(MAX_RADIUS) as i32;
         Ok(Self {
+            low: low::LowBand::new(step, radius, audio.sample_rate),
+            first: first as i64,
+            end: end as i64,
             step,
             filter: BackingFilterDsp::new(processing.filter, sample_rate)?,
             processed: pitch != 0.0 || processing.filter != BackingFilter::None,
@@ -388,6 +403,17 @@ impl BackingVoice {
             return 0.0;
         }
         ((HOP as f64 - 0.5) * (rate - self.step)).clamp(-MAX_AIM, MAX_AIM)
+    }
+    /// Source frames the clock moved per output frame since the previous call, when that was the previous output frame.
+    fn clock_rate(&self, seconds: f64) -> Option<f64> {
+        let dt = seconds - self.previous_seconds;
+        if !self.primed || !(dt > 0.0 && dt < 0.05) {
+            return None;
+        }
+        let rate = (self.map.source_seconds(seconds)
+            - self.map.source_seconds(self.previous_seconds))
+            * self.audio.sample_rate as f64;
+        rate.is_finite().then_some(rate)
     }
     /// The normalised correlation between the previous grain's continuation and what a grain read from `position` would
     /// hold, from every fourth frame.
@@ -471,7 +497,24 @@ impl BackingVoice {
                 }
             }
         }
+        let previous = self.primed.then_some(self.landed);
+        let rate = self.clock_rate(seconds);
         self.landed = best;
+        let low = match &mut self.low {
+            Some(low) => low.grain(
+                &low::Source {
+                    frames: &self.audio.frames,
+                    first: self.first,
+                    end: self.end,
+                    transients: &self.transients,
+                },
+                natural,
+                rate,
+                best,
+                previous,
+            ),
+            None => false,
+        };
         for i in 0..HOP {
             let head = self.sample(best + i as f64 * self.step);
             let t = i as f32 / HOP as f32;
@@ -481,6 +524,12 @@ impl BackingVoice {
                 head
             };
             self.tail[i] = self.sample(best + (i + HOP) as f64 * self.step);
+        }
+        if let Some(band) = self.low.as_ref().filter(|_| low) {
+            for (out, delta) in self.output.iter_mut().zip(band.delta.iter()) {
+                out[0] += delta[0];
+                out[1] += delta[1];
+            }
         }
         self.cursor = 0;
         self.primed = true;
@@ -534,6 +583,9 @@ impl BackingVoice {
     }
     pub fn seek(&mut self, seconds: f64) {
         self.filter.reset();
+        if let Some(low) = &mut self.low {
+            low.reset();
+        }
         self.cursor = HOP;
         self.primed = false;
         self.output.fill([0.0; 2]);

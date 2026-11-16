@@ -37,26 +37,32 @@ try{
   await page.locator('.track-notation-more summary').click();
   const first=await trackText();
 
-  // ---- 1. typed for one track, left by a click that makes another track the active one ----
-  // The name is left by a click on a real note of the last track (its mouse down selects that note and so its track, and the same click takes focus from the field);
-  // the transposition is left by a click on the last track's name in the overview. Either way the edit must go to the first track, once.
-  for(const [label,field,text,pick,leave] of [
-    ['a track name','Track name','Renamed first track',edit=>({type:edit.type,track:edit.track,value:edit.name}),()=>clickNote('last')],
-    ['a sounding transposition','Sounding transposition','-12',edit=>({type:edit.type,track:edit.track,value:edit.settings.transposition}),()=>clickTrack(2)],
+  // ---- 1. typed for one track, left by a click ----
+  // A click on the name of another track in the overview makes that track the active one, so the selection moves while the field is being left:
+  // the edit must still go to the first track, once, and the field must then show the other track.
+  // A click on a real note of another track does NOT select it in this build (measured: the cursor and the active track stay where they were,
+  // and the build before this branch behaves the same), so that click only takes focus from the field: the edit goes to the first track, once,
+  // and the active track is unchanged.
+  for(const [label,field,text,pick,leave,changesTrack] of [
+    ['a track name, left by a click on a note of another track','Track name','Renamed first track',edit=>({type:edit.type,track:edit.track,value:edit.name}),()=>clickNote('last'),false],
+    ['a track name, left by a click on another track\'s name','Track name','Renamed first track',edit=>({type:edit.type,track:edit.track,value:edit.name}),()=>clickTrack(2),true],
+    ['a sounding transposition, left by a click on another track\'s name','Sounding transposition','-12',edit=>({type:edit.type,track:edit.track,value:edit.settings.transposition}),()=>clickTrack(2),true],
   ]) {
     await selectFirst();assert.equal(await trackText(),first,`${label}: the first note is on the first track`);
     const before=(await session.edits()).length,input=page.getByLabel(field,{exact:true});
     await input.click();await input.fill(text);
     await leave();
-    const other=await trackText();assert.notEqual(other,first,`${label}: the click selected another track (the selection's track changed from ${first} to ${other})`);
+    const after=await trackText();
+    if(changesTrack)assert.ok(after!==first&&after!==text,`${label}: the click made another track active (was ${first}, now ${after})`);
+    else assert.ok(after===first||after===text,`${label}: a note of another track does not change the active track (was ${first}, now ${after})`);
     const made=(await session.edits()).slice(before);
     assert.equal(made.length,1,`${label}: exactly one edit (got ${made.map(edit=>edit.type)})`);
     const got=pick(made[0]);
-    assert.equal(got.track,0,`${label}: recorded for the track it was typed for, not the one clicked`);
+    assert.equal(got.track,0,`${label}: recorded for the track it was typed for`);
     assert.equal(String(got.value),text);
-    assert.notEqual(await page.getByLabel(field,{exact:true}).inputValue(),text,`${label}: the field now shows the other track`);
+    if(changesTrack)assert.notEqual(await page.getByLabel(field,{exact:true}).inputValue(),text,`${label}: the field now shows the other track`);
     await undo();assert.equal((await session.edits()).length,before,`${label}: Undo takes it back`);
-    note(`${label} typed for one track is recorded once, for that track, when a click makes another track the active one`,{edit:got});
+    note(`${label}: recorded once, for the track it was typed for`,{edit:got});
   }
 
   // ---- 2. staff selector and per-staff tuning ----
@@ -70,7 +76,7 @@ try{
   await moveCursor(page,{bar:3,beat:2});
   await selector.focus();await page.keyboard.press('ArrowDown');await settle(page,500);
   assert.match(await trackText(),/Staff 2$/,'the staff selector moved the cursor to staff 2');
-  const at=await cursorPosition(page);assert.equal(at.bar,3,'the staff selector keeps the bar');assert.equal(at.beat,2,'and the beat, which the other staff has too');
+  const at=await cursorPosition(page);assert.equal(at.bar,3,'the staff selector keeps the bar');assert.equal(at.beat,1,'the new staff is empty (one rest per bar), so the cursor goes to its first beat, the nearest one it has');
   const tuningButton=page.locator('.track-settings .track-tuning-button').first(),tuned=(await session.edits()).length;
   await tuningButton.click();const tuning=page.getByRole('dialog',{name:'Tuning',exact:true});await tuning.waitFor();
   const notes=tuning.getByLabel('Notes, high to low',{exact:true});const was=await notes.inputValue();

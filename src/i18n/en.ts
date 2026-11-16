@@ -1573,6 +1573,7 @@ export const en = {
   'sound.sound_source': "Sound source",
   'sound.automatic_instrument': "Automatic instrument",
   'sound.recorded_drum_kit': "Recorded drum kit",
+  'sound.general_midi_drums': "General MIDI drums",
   'sound.sound_preset': "Sound preset",
   'sound.restore_preset': "Restore preset",
   'sound.factory_sound': "Factory sound",

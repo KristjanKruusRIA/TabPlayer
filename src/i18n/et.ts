@@ -1574,6 +1574,7 @@ export const et: MessageCatalog = {
   'sound.sound_source': "Heliallikas",
   'sound.automatic_instrument': "Automaatne instrument",
   'sound.recorded_drum_kit': "Salvestatud trummikomplekt",
+  'sound.general_midi_drums': "General MIDI trummid",
   'sound.sound_preset': "Helieelseadistus",
   'sound.restore_preset': "Taasta eelseadistus",
   'sound.factory_sound': "Tehaseheli",

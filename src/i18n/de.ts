@@ -1574,6 +1574,7 @@ export const de: MessageCatalog = {
   'sound.sound_source': "Sound-Quelle",
   'sound.automatic_instrument': "Automatisches Instrument",
   'sound.recorded_drum_kit': "Aufgenommenes Schlagzeug",
+  'sound.general_midi_drums': "General-MIDI-Schlagzeug",
   'sound.sound_preset': "Sound-Preset",
   'sound.restore_preset': "Preset wiederherstellen",
   'sound.factory_sound': "Werkssound",

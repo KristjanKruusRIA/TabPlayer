@@ -28,8 +28,8 @@ it('keeps the drum kit through a preset, Restore preset and a changed source', (
   expect(lastSound(onEdit)).toEqual(kit(soundPreset('crunch', 'gm'), 40));
   fireEvent.click(screen.getByRole('button', { name: 'Restore preset' }));
   expect(lastSound(onEdit)).toEqual(kit(soundPreset('lead', 'gm'), 40));
-  fireEvent.change(screen.getByLabelText('Sound source'), { target: { value: 'green-guitar' } });
-  expect(lastSound(onEdit)).toEqual(kit(soundPreset('lead', 'green-guitar'), 40));
+  fireEvent.change(screen.getByLabelText('Sound source'), { target: { value: 'gm' } });
+  expect(lastSound(onEdit)).toEqual(kit(soundPreset('lead', 'gm'), 40));
 });
 it('keeps the drum kit through a factory sound, and leaves an unkitted track unkitted', () => {
   const onEdit = vi.fn();

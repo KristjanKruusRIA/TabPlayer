@@ -29,9 +29,14 @@ fn plan() -> PlaybackPlan {
 }
 
 fn voice(frames: Vec<[f32; 2]>, shift: i8) -> BackingVoice {
+    voice_at(frames, RATE, shift)
+}
+
+/// A voice for a file at `rate`, played at the 48 kHz output rate.
+fn voice_at(frames: Vec<[f32; 2]>, rate: u32, shift: i8) -> BackingVoice {
     BackingVoice::new_with_processing_shifted(
         Arc::new(DecodedAudio {
-            sample_rate: RATE,
+            sample_rate: rate,
             channels: 2,
             frames: Arc::new(frames),
         }),
@@ -1004,22 +1009,47 @@ fn root_cause() {
 fn cost_of_a_second_of_audio() {
     // (g) Milliseconds of one thread per second of audio, median of five runs of ten seconds of output after a seek, for
     // a stereo mix (bass line, kicks, chord, hiss) at the speeds of the scorecard, at 100% and with key shifts; and what
-    // building the voice costs (once per backing and key shift, off the audio thread).
+    // building the voice costs (once per backing and key shift, off the audio thread). The last rows play the same mix
+    // from files at 192 and 384 kHz (linear interpolation of the 48 kHz mix) an octave up, the steepest reads the low
+    // band takes, where its first grains after a seek cost the most.
     let m = mix(48_000 * 40);
     let frames: Vec<[f32; 2]> = m.iter().map(|&v| [v as f32, (v * 0.9) as f32]).collect();
-    for (speed, shift) in [
-        (1.0, 0),
-        (0.5, 0),
-        (0.6, 0),
-        (0.75, 0),
-        (0.9, 0),
-        (0.5, 12),
-        (1.0, -12),
-        (3.0, 12),
-        (3.0, -12),
+    let upsampled = |k: usize| -> Vec<[f32; 2]> {
+        let short = &frames[..48_000 * 20];
+        (0..short.len() * k)
+            .map(|n| {
+                let (i, t) = (n / k, (n % k) as f32 / k as f32);
+                let next = short[(i + 1).min(short.len() - 1)];
+                [
+                    short[i][0] + (next[0] - short[i][0]) * t,
+                    short[i][1] + (next[1] - short[i][1]) * t,
+                ]
+            })
+            .collect()
+    };
+    let (at_192k, at_384k) = (upsampled(4), upsampled(8));
+    for (rate, speed, shift) in [
+        (RATE, 1.0, 0),
+        (RATE, 0.5, 0),
+        (RATE, 0.6, 0),
+        (RATE, 0.75, 0),
+        (RATE, 0.9, 0),
+        (RATE, 0.5, 12),
+        (RATE, 1.0, -12),
+        (RATE, 3.0, 12),
+        (RATE, 3.0, -12),
+        (192_000, 0.5, 12),
+        (192_000, 0.75, 12),
+        (384_000, 0.5, 12),
+        (384_000, 0.75, 12),
     ] {
+        let source = match rate {
+            192_000 => &at_192k,
+            384_000 => &at_384k,
+            _ => &frames,
+        };
         let started = std::time::Instant::now();
-        let mut voice = voice(frames.clone(), shift);
+        let mut voice = voice_at(source.clone(), rate, shift);
         let build_ms = started.elapsed().as_secs_f64() * 1e3;
         let mut runs: Vec<f64> = (0..5)
             .map(|_| {
@@ -1035,33 +1065,62 @@ fn cost_of_a_second_of_audio() {
             .collect();
         runs.sort_by(f64::total_cmp);
         // The first 1024 output frames after a seek (four grains, 21 ms of audio, where the low band's first frames and
-        // its scan of the attacks are made), median of 41 seeks, against the same frames a second later.
+        // its scan of the attacks are made), median of 41 seeks, against the same frames a second later; and the
+        // slowest of their eight 128-frame blocks (one device callback of 2.67 ms at 48 kHz), median and worst of 41.
+        // The seeks jump 4.8 s (or back 10.4 s), so that nothing the low band computed before is near: a cold start.
         let mut after_seek = Vec::new();
         let mut steady = Vec::new();
+        let mut block_after = Vec::new();
+        let mut block_later = Vec::new();
         for k in 0..41 {
-            let at = 1.0 + f64::from(k) * 0.37;
+            let at = 1.0 + f64::from((k * 13) % 41) * 0.37;
             voice.seek(at);
             let mut sum = 0.0f32;
             let mut m = 0usize;
-            for (untimed, times) in [(0usize, &mut after_seek), (47_000, &mut steady)] {
+            for (untimed, times, blocks) in [
+                (0usize, &mut after_seek, &mut block_after),
+                (47_000, &mut steady, &mut block_later),
+            ] {
                 for _ in 0..untimed {
                     sum += voice.next_frame(at + m as f64 * speed / SR)[0];
                     m += 1;
                 }
-                let started = std::time::Instant::now();
-                for _ in 0..1_024 {
-                    sum += voice.next_frame(at + m as f64 * speed / SR)[0];
-                    m += 1;
+                let (mut total, mut slowest) = (0.0f64, 0.0f64);
+                for _ in 0..8 {
+                    let started = std::time::Instant::now();
+                    for _ in 0..128 {
+                        sum += voice.next_frame(at + m as f64 * speed / SR)[0];
+                        m += 1;
+                    }
+                    let us = started.elapsed().as_secs_f64() * 1e6;
+                    total += us;
+                    slowest = slowest.max(us);
                 }
-                times.push(started.elapsed().as_secs_f64() * 1e6);
+                times.push(total);
+                blocks.push(slowest);
             }
             std::hint::black_box(sum);
         }
-        after_seek.sort_by(f64::total_cmp);
-        steady.sort_by(f64::total_cmp);
+        for v in [
+            &mut after_seek,
+            &mut steady,
+            &mut block_after,
+            &mut block_later,
+        ] {
+            v.sort_by(f64::total_cmp);
+        }
+        let rate_khz = f64::from(rate) / 1e3;
         eprintln!(
-            "G {speed}x key {shift}: {:.2} ms per second of audio (median of 5; min {:.2}, max {:.2}); 1024 frames after a seek {:.0} us, later {:.0} us (medians); voice built in {build_ms:.1} ms",
-            runs[2], runs[0], runs[4], after_seek[20], steady[20]
+            "G {rate_khz} kHz {speed}x key {shift}: {:.2} ms per second of audio (median of 5; min {:.2}, max {:.2}); 1024 frames after a seek {:.0} us, later {:.0} us (medians); slowest 128-frame block after a seek {:.0} us (worst {:.0}), later {:.0} us (worst {:.0}); voice built in {build_ms:.1} ms",
+            runs[2],
+            runs[0],
+            runs[4],
+            after_seek[20],
+            steady[20],
+            block_after[20],
+            block_after[40],
+            block_later[20],
+            block_later[40]
         );
     }
 }

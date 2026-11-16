@@ -375,7 +375,8 @@ impl BackingVoice {
         let i = position.floor() as i64;
         let f = (position - i as f64) as f32;
         let a = self.source_frame(i);
-        let b = self.source_frame(i + 1);
+        // Saturating: a position beyond what an i64 holds (a map with an absurd offset) floors to i64::MAX.
+        let b = self.source_frame(i.saturating_add(1));
         std::array::from_fn(|c| a[c] * (1.0 - f) + b[c] * f)
     }
     /// How far from the score's own source position a grain should start so that what is heard sits on the score

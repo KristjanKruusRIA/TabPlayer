@@ -27,7 +27,9 @@
 //! At the neutral speed V does not come in, so the voice's output is the grains' own, bit for bit; when the speed
 //! returns to it while V is heard, V keeps the low band until the next attack in it (or a seek), because handing it back
 //! in the middle of a sustained partial would cross-fade two versions of it whose phases disagree.
-//! Every buffer is made when the voice is built: nothing here allocates, locks or waits.
+//! Every buffer is made when the voice is built: nothing here allocates, locks or waits. Where the low band has to start
+//! afresh (after a seek, a loop or the neutral speed), its work is spread over grains and V comes in once it has caught
+//! up, so that no device callback carries all of it.
 
 use super::{HOP, MAX_AIM, NEUTRAL_RATE, Transient};
 use std::f64::consts::PI;
@@ -69,6 +71,13 @@ const MAX_RATIO: f64 = 8.0;
 /// V is made only where a grain reads at most this many decimated samples (twice what it reads with the grain search
 /// at its usual radius); further, the search radius is at its cap and a frame would not span what the grains read.
 const MOST_READ: f64 = 32.0;
+/// While V is out, the attack scan computes at most this many multiplies of the low-pass per grain (about 0.1 ms), and
+/// at least twice what the clock moves on over a grain. A seek, a loop or a return from the neutral speed into audio
+/// the low band has not seen needs some 850 decimated samples before V can come in, which at once take 0.5 ms of one
+/// device callback at 48 kHz and 2.3 ms for a 192 kHz file an octave up. V comes in once the scan has caught up
+/// instead: 1 to 5 grains later at 48 kHz (21 to 43 ms after a seek instead of 16), 22 to 25 grains later for files at
+/// 192 and 384 kHz an octave up (133 to 149 ms); the grains keep their own low band until then.
+const CATCH_UP: usize = 1 << 18;
 
 /// What the grains read: the decoded frames, the frames the sync map lets through, and the isolated impulses the voice
 /// takes out and adds back on the clock.
@@ -102,6 +111,9 @@ pub(super) struct LowBand {
     synthesis: Vec<f64>,
     cache: Vec<[f32; 2]>,
     tags: Vec<i64>,
+    /// Decimated samples the low-pass computed during this grain, and how many the scan may compute while V is out.
+    spent: usize,
+    catch_up: usize,
     onsets: [f64; ONSETS],
     onset_first: usize,
     onset_count: usize,
@@ -164,6 +176,8 @@ impl LowBand {
             return None;
         }
         let taps = lowpass(rate, 2.625 * lock, 2.75 * lock);
+        // A decimated sample costs a multiply per tap held and channel.
+        let catch_up = CATCH_UP / (2 * taps.len());
         let window: Vec<f64> = (0..N)
             .map(|n| 0.5 - 0.5 * (2.0 * PI * n as f64 / N as f64).cos())
             .collect();
@@ -198,6 +212,8 @@ impl LowBand {
                 .collect(),
             cache: vec![[0.0; 2]; CACHE],
             tags: vec![i64::MIN; CACHE],
+            spent: 0,
+            catch_up,
             onsets: [0.0; ONSETS],
             onset_first: 0,
             onset_count: 0,
@@ -259,8 +275,8 @@ impl LowBand {
         best: f64,
         previous: Option<f64>,
     ) -> bool {
-        // Far outside the source there is nothing to hear (the voice is silent there), and positions that far out need not
-        // even be whole numbers of decimated samples: V stays out, and starts over when it comes back in.
+        // Far outside the source there is nothing to hear (the voice is silent there), and a clock that far out may be
+        // beyond what a sample index can hold: V stays out, and starts over when it comes back in.
         let far = 2.0 * (N as f64) * self.d + MAX_AIM;
         if !(clock > source.first as f64 - far && clock < source.end as f64 + far) {
             self.framed = false;
@@ -309,15 +325,30 @@ impl LowBand {
             (best + reach).min(aim - self.radius),
             (best + 2.0 * reach).max(aim + self.radius + reach),
         );
-        // The attacks are needed wherever the frames or the grains read, only while V may stay in.
-        if active {
+        // The attacks are needed wherever the frames or the grains read, only while V may stay in. While V is out, the
+        // scan spreads its work over grains (see CATCH_UP) and V stays out until it has caught up; what the frames and
+        // the grains read then lies in what the scan has computed.
+        let limit = if self.alpha > 0.0 {
+            usize::MAX
+        } else {
+            self.catch_up
+                .max(2 * (HOP as f64 * self.rate / self.d).ceil() as usize + 16)
+        };
+        self.spent = 0;
+        let ready = if active {
             self.scan(
                 source,
                 (s0.min(s2) - span).min(now_lo.min(next_lo) - margin - hold),
                 (s0.max(s2) + span).max(now_hi.max(next_hi) + margin),
-            );
+                limit,
+            )
         } else {
-            self.scan(source, s0.min(s2) - span, s0.max(s2) + span);
+            self.scan(source, s0.min(s2) - span, s0.max(s2) + span, limit)
+        };
+        if !ready && self.alpha == 0.0 {
+            self.framed = false;
+            self.tail_valid = false;
+            return false;
         }
         if !self.framed {
             // Nothing carries into this grain: its first half comes from a frame centred on its first output frame.
@@ -379,6 +410,7 @@ impl LowBand {
         if self.tags[slot] != j {
             self.cache[slot] = self.filter(source, j);
             self.tags[slot] = j;
+            self.spent += 1;
         }
         self.cache[slot]
     }
@@ -464,27 +496,26 @@ impl LowBand {
         now > RISE * loudest + RISE_FLOOR
     }
 
-    /// Finds the attacks between source positions `from` and `to`, continuing from where the last call stopped.
-    fn scan(&mut self, source: &Source, from: f64, to: f64) {
+    /// Finds the attacks between source positions `from` and `to`, continuing from where the last call stopped, until
+    /// the low-pass has computed `limit` decimated samples during this grain. Returns whether it reached `to`.
+    fn scan(&mut self, source: &Source, from: f64, to: f64, limit: usize) -> bool {
         let lo = (from / self.d).floor() as i64;
         // A grain's range is at most about a quarter of the cache; this bounds the work of one call whatever it is given.
         let hi = ((to / self.d).ceil() as i64).min(lo.saturating_add((CACHE / 2) as i64));
         if !self.scanning || lo < self.scan_from || lo > self.scan_next + (CACHE / 4) as i64 {
+            // Start over at `lo`: the HISTORY samples before it first fill the history, without counting attacks, so
+            // that what is found from `lo` on is what a scan from further back would find.
             self.scanning = true;
             self.scan_from = lo;
-            self.scan_next = lo - 1;
-            for q in 0..HISTORY {
-                self.recent[q] = self.energy(source, lo - 1 - HISTORY as i64 + q as i64);
-            }
+            self.scan_next = lo - 1 - HISTORY as i64;
             self.recent_at = 0;
-            self.scan_last = self.rising(source);
-            self.scan_next = lo;
+            self.scan_last = false;
             self.onset_count = 0;
             self.dropped = f64::NEG_INFINITY;
         }
-        while self.scan_next <= hi {
+        while self.scan_next <= hi && self.spent < limit {
             let now = self.rising(source);
-            if now && !self.scan_last {
+            if now && !self.scan_last && self.scan_next >= self.scan_from {
                 let from = self.scan_next;
                 let peak = (0..ATTACK_SEARCH)
                     .map(|k| self.energy(source, from + k))
@@ -508,6 +539,7 @@ impl LowBand {
         while self.onset_count > 0 && self.onsets[self.onset_first] < from {
             self.forget();
         }
+        self.scan_next > hi
     }
 
     fn forget(&mut self) {

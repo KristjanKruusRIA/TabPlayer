@@ -2,22 +2,28 @@
 
 THE-212, branch `agy/the-212-bass-stretch-2` from `develop` 5940f19. **Nobody has listened to this yet.** Every number
 below is a headless render of `BackingVoice` alone (no device, no transport), with synthetic signals generated in the
-tests, at 48 kHz unless another rate is named, in the release profile. The desktop app, real music, macOS and Linux
-were not run. Before and after clips of the synthetic signals at 50% and 75% were rendered for listening outside the
-repository; they are not committed.
+tests, at a 48 kHz output and from 48 kHz files unless another rate is named, in the release profile. The desktop app,
+real music, macOS and Linux were not run. Before and after clips of the synthetic signals at 50% and 75% were rendered
+for listening outside the repository; they are not committed.
 
-"Develop" figures were measured with the same functions on develop's stretcher: the voice built without the new low
-band, which is develop's code path (the only other change in `prepare_grain` reads the clock rate and the previous
-grain's position for the low band).
+**Develop figures.** They were measured with the same functions on develop's stretcher: the voice built without the
+new low band (`BackingVoice::without_low_band`, a hidden hook for tests), which is develop's code path. The only other
+changes on it read the clock rate and the previous grain's position for the low band (unused without it), and make
+develop's grain read saturate past `i64::MAX`, which changes nothing below it. The develop columns of the scorecard
+come from `cargo test --release --test audio_backing_bass scorecard -- --ignored --nocapture` with the voices built
+that way. The develop figures written into the tests (`DEVELOP_HITS`, `DEVELOP_NOISE`, `DEVELOP_BURSTS` and
+`DEVELOP_MID_COHERENCE` in `audio_backing_bass.rs`) were printed by that run. `the_develop_figures_are_develops`
+measures them again from develop's code path on every run of the suite and checks they match to the precision they are
+written with; it passes on the final commit. Every other comparison with develop builds both voices in the same test.
 
 ## The defect, measured
 
 At practice speeds the backing's low bass loses weight and sustained low notes wobble or thin out, worst near 50%.
 
-The stretcher (`backing.rs`) cuts the source into grains of HOP = 256 output frames and splices each onto the
+The stretcher (`backing.rs`) cuts the source into grains of HOP = 256 output frames. It splices each grain onto the
 previous one where a correlation of the continuation peaks, within `radius = ceil(256 * step)` source frames of where
-it aims (256 at an unshifted 48 kHz file). The `root_cause` test fits, inside each grain, the phase of the tail and the
-head the grain crossfades, so it reads the phase step at every splice straight from the output:
+it aims (256 at an unshifted 48 kHz file). The `root_cause` test fits, inside each grain, the phase of the tail and
+the head the grain crossfades, so it reads the phase step at every splice straight from the output:
 
 | Tone, speed | Splice step (deg) | Drift per grain (deg) | Splices within 10 deg | A crossfade that far apart loses | Tone kept | Power at tone x speed |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -33,23 +39,29 @@ head the grain crossfades, so it reads the phase step at every splice straight f
 | 82.4 Hz, 90% | 15.8 | 15.8 | 0% | 0.06 dB | -46.8 dB | 98.5% (74.2 Hz) |
 | 110, 220, 440 Hz, all four speeds | 0.0 to 1.4 | 21 to 422 | 100% | 0.00 dB | 0.0 dB | 0% |
 
-**Root cause.** Where the splice step equals the drift per grain, the search did not find a lined-up splice: it landed
-on its aim, so each grain starts where the clock is, and the grains then play the source at the clock's own rate. A
-sustained low tone comes out at its frequency times the speed (98% of its power there). It is not cancellation in the
-crossfade: two equal sines that far apart lose at most 0.4 dB. A lined-up splice needs a correlation peak, a whole
-period away from the continuation, within the search window, and a match over 256 frames that tells it apart. Below
-about 94 Hz (a period over 512 frames, twice the radius; `f_lock = rate / (2 * radius)`) the window holds less than
-half a period and the search less than one, so whether a splice lines up depends on the speed: 41.2 Hz never does,
-55 Hz half the time at 50% only, 82.4 Hz everywhere except 90%. Every tone above that locks.
+**Root cause.**
+- **The search lands on its aim.** Where the splice step equals the drift per grain, the search did not find a
+  lined-up splice: it landed on its aim. Each grain then starts where the clock is, and the grains play the source at
+  the clock's own rate. A sustained low tone comes out at its frequency times the speed (98% of its power there).
+- **It is not cancellation in the crossfade.** Two equal sines that far apart lose at most 0.4 dB.
+- **Why it happens below about 94 Hz.** A lined-up splice needs a correlation peak, a whole period away from the
+  continuation, within the search window, and a match over 256 frames that tells it apart. Below about 94 Hz (a period
+  over 512 frames, twice the radius; `f_lock = rate / (2 * radius)`, which is the output rate / 512 heard at the
+  output) the window holds less than half a period and the search less than one.
+- **So locking depends on the speed.** 41.2 Hz never locks, 55 Hz locks half the time and only at 50%, and 82.4 Hz
+  locks everywhere except 90%. Every tone above 94 Hz locks.
 
-**Why the three low-band grain variations could not fix it.** The earlier passes (`9b85a08`, `b0759b1` and the first
-version) gave the low band its own, longer grain and search so that it could reach a period. A splice that lines up on
-a period places the low band only to within half a period of the clock (12 ms at 41 Hz) and moves it by that much at
-any splice; those passes measured bass notes arriving 8 to 13 ms early (first), notes after a ringing note 15 to 60 ms
-earlier than develop (third), and tones on the crossover slipping apart because two splice rules met there. Two low
-partials that are not harmonics of one short period (41.2 + 61.7 Hz repeat together only every 48 ms) need a splice
-that lines both up, which no grain search reaches without timing errors of that size. Any grain stretcher of the low
-band has these limits; a fourth variation was not tried.
+**Why the three low-band grain variations could not fix it.**
+- **What they tried.** The earlier passes (`9b85a08`, `b0759b1` and the first version) gave the low band its own,
+  longer grain and search, so that it could reach a period.
+- **Timing errors.** A splice that lines up on a period places the low band only to within half a period of the clock
+  (12 ms at 41 Hz), and moves it by that much at any splice. Those passes measured:
+  - bass notes arriving 8 to 13 ms early (first pass);
+  - notes after a ringing note 15 to 60 ms earlier than develop (third pass);
+  - tones on the crossover slipping apart, because two splice rules met there.
+- **Pairs of partials.** Two low partials that are not harmonics of one short period (41.2 + 61.7 Hz repeat together
+  only every 48 ms) need a splice that lines both up. No grain search reaches that without timing errors of this size.
+- **Conclusion.** Any grain stretcher of the low band has these limits, so a fourth variation was not tried.
 
 ## The method: the low band from a phase vocoder while the voice stretches
 
@@ -57,44 +69,102 @@ band has these limits; a fourth variation was not tried.
 
     out = W(x) - W(low) + V(low)
 
-- **W** is the grain stretcher, unchanged: the same search on the whole signal, the same splices, so everything above
-  the low band is develop's output.
-- **low** is a zero-phase low-pass of what the grains read (Kaiser, 70 dB): flat to 1.25 `f_lock` (117 Hz at 48 kHz),
-  stopped from 4 `f_lock` (375 Hz), decimated by `radius / 16` (to 3 kHz at 48 kHz), computed while playing, one
-  decimated sample at a time as the clock reaches it, into a cache of 4096. `W(low)` is that band read and crossfaded
-  exactly as the grains read and crossfade the source, so the subtraction takes out precisely the grains' low band.
-- **V** is a phase vocoder on `low`: frames of N = 512 decimated samples (170 ms at 48 kHz, partials 12 Hz apart
-  resolved), Hann window, one frame per grain centred on the score clock, the frequency of each spectral peak from a
-  second frame DELTA = 8 samples away, identity phase locking (every bin turns with the peak of its lobe). Below `pass`
-  = 1.25 `f_lock` a peak's phase is carried forward at its own frequency, so it keeps its pitch and level; above it,
-  where the two bands overlap, the peak is turned to the phase the grains read at, so both halves of the crossover add
-  up as before. Bins above 6 `f_lock` are zero. Both channels turn by one angle (from their sum, or from their
-  difference where the channels cancel), so proportional channels stay exactly proportional; each channel has its own
-  real transform for that reason.
-- **Attacks** in the low band (short-term power rising past twice the loudest of the previous 64 ms, above about
-  -60 dBFS) split it into segments. A frame sees only its own segment through a window that fades out over 32 decimated
-  samples (11 ms) towards the segment's edges (a cut edge spreads a low partial down to 0 Hz and its mirror image); the
-  window's own phase at each partial is taken out of what is carried forward. The grains keep their own low band where
-  a frame they hear would read across an attack, where they read within 8 ms after one, or where a frame's window has
-  faded at the point they read; a grain's ramp either side. Below 40% of the neutral speed the grains hear only frames
-  whose whole window lies inside their segment (a frame cut short has a small frequency error that adds up over a long
-  stretch). While V is not heard its frames start from the phases the grains read at, so it comes in in step with them.
-- **At the neutral speed** (100% with no key shift) V does not come in, and the output is develop's, bit for bit. When
-  the speed returns to neutral while V is heard, V keeps the low band until the next attack in it or a seek: handing
-  it back in the middle of a sustained partial cross-fades two versions of it whose phases disagree (measured: -9.4 dB
-  for 20 ms on a 55 Hz sine at 75% to 100%).
-- **Guards** (after an adversarial review): V stays out where the clock is far outside the source, when the clock moves
-  slower than 1/32 or faster than 8 times the neutral speed (a jump that is not a seek, or a map far too steep), and
-  where a grain reads more than 16 source frames per output frame (a file at over 16 times the output rate, or over 8
-  times with the key an octave up: the search radius is at its cap there). V always leaves over a grain's ramp, never
-  at once.
-- **Real time.** Every buffer is made when the voice is built. A grain's work is bounded: one frame (four forward real
-  transforms of 512 and two inverse), the newly reached decimated samples of the low-pass, and an attack scan over at
-  most half the cache. Starting afresh (a seek, a loop or a return from the neutral speed into audio the low band has
-  not computed) needs about 850 decimated samples before V can come in: 0.5 ms in one 128-frame callback at 48 kHz and
-  2.3 ms for a 192 or 384 kHz file an octave up, against the 2.67 ms the callback has. While V is out, the scan
-  therefore computes at most 2^18 multiplies of the low-pass per grain (and at least twice what the clock moves on),
-  and V comes in once it has caught up; until then the grains keep their own low band, as on develop.
+- **W** is the grain stretcher, unchanged: the same search on the whole signal and the same splices, so everything
+  above the low band is develop's output.
+- **low** is a zero-phase low-pass of what the grains read (Kaiser, 70 dB):
+  - flat to 1.25 `f_lock` and stopped from 4 `f_lock`;
+  - decimated by `radius / 16`;
+  - computed while playing, one decimated sample at a time as the clock reaches it, into a cache of 4096;
+  - `W(low)` is that band read and crossfaded exactly as the grains read and crossfade the source, so the subtraction
+    takes out precisely the grains' low band.
+- **V** is a phase vocoder on `low`:
+  - frames of N = 512 decimated samples, Hann window;
+  - one frame per grain centred on the score clock, and two in a grain where V starts afresh or comes back after it
+    handed the low band back;
+  - the frequency of each spectral peak comes from a second frame DELTA = 8 samples away;
+  - identity phase locking: every bin turns with the peak of its lobe;
+  - below `pass` = 1.25 `f_lock`, a peak's phase is carried forward at its own frequency, so it keeps its pitch and
+    level;
+  - above `pass`, where the two bands overlap, the peak is turned to the phase the grains read at, so both halves of
+    the crossover add up as before;
+  - bins above 6 `f_lock` are zero;
+  - both channels turn by one angle (taken from their sum, or from their difference where the channels cancel), and
+    each channel has its own real transform. So a channel that is a copy, a negative, or a power-of-two multiple of the
+    other stays exactly so; the tests use a right channel of exactly half the left. For other factors the channels
+    stay proportional to within float rounding.
+- **The frequencies scale with the output rate.** The figures below hold for a 48 kHz output, and are 8% lower for
+  44.1 kHz: everything scales with the output rate, since a frame spans 8192 output frames whatever the file's rate
+  or key shift.
+
+  | Figure | 48 kHz output | 96 kHz output |
+  | --- | --- | --- |
+  | `f_lock` | 94 Hz | 188 Hz |
+  | `pass` (1.25 `f_lock`) | 117 Hz | 234 Hz |
+  | Stop band (4 `f_lock`) | 375 Hz | 750 Hz |
+  | Decimated rate | 3 kHz | 6 kHz |
+  | Frame length | 170 ms | 85 ms |
+  | Partials resolved | 12 Hz apart | about 23 Hz apart |
+
+  There is no scorecard at a 44.1 or 96 kHz output.
+- **Attacks** in the low band split it into segments. An attack is short-term power rising past twice the loudest of
+  the previous 64 ms, above about -60 dBFS.
+  - A frame sees only its own segment, through a window that fades out over 32 decimated samples (11 ms) towards the
+    segment's edges. A cut edge would spread a low partial down to 0 Hz and its mirror image.
+  - The window's own phase at each partial is taken out of what is carried forward.
+  - The grains keep their own low band, with a grain's ramp either side:
+    - where a frame they hear would read across an attack;
+    - where they read within 8 ms after an attack;
+    - where a frame's window has faded at the point they read.
+  - Below 40% of the neutral speed the grains hear only frames whose whole window lies inside their segment. A frame
+    cut short has a small frequency error that adds up over a long stretch.
+  - While V is not heard, its frames start from the phases the grains read at, so it comes in in step with them. When
+    it comes back after handing the low band back, the frame that starts its grain is made again from those phases.
+- **At the neutral speed** (100% with no key shift) V does not come in, and the output is develop's, bit for bit.
+  - When the speed returns to neutral while V is heard, V keeps the low band until the next attack in it, or a seek.
+  - Handing it back in the middle of a sustained partial would cross-fade two versions of it whose phases disagree
+    (measured: -9.4 dB for 20 ms on a 55 Hz sine at 75% to 100%).
+- **Guards** (after two adversarial reviews). V stays out:
+  - where the clock is far outside the source, or the grain before was (a map steep enough before its first anchor
+    sends the clock beyond any index and back within a grain);
+  - when the clock moves slower than 1/32 or faster than 8 times the neutral speed (a jump that is not a seek, or a
+    map far too steep);
+  - where a grain reads more than 16 source frames per output frame: a file at over 16 times the output rate, or over
+    8 times with the key an octave up. The search radius is at its cap there.
+
+  V always leaves over a grain's ramp, never at once. Where it leaves because the clock leapt without a seek, it
+  leaves from what its last frame carries into that grain, and makes no frame at the new place. Where a low-pass sum
+  is larger than any sum of audio within +12 dBFS can be, or not a number, it is taken again from the samples clipped
+  at +12 dBFS. So a damaged file's sample near the largest float, or one that is not a number, leaves nothing behind
+  in V.
+- **Real time.** Every buffer is made when the voice is built. A grain's work is bounded by counts, not by where the
+  clock goes:
+  - **Frames:** at most two, each four forward real transforms of 512 and two inverse.
+  - **The attack scan's low-pass:** at most a budget of decimated samples. The budget is 2^18 multiplies of the
+    low-pass, or twice what the clock moves the scan on where that is more. While V is heard, it also covers what a
+    change of speed moves the scan on and one attack's search, so V never leaves for want of the scan at a speed it
+    follows (with at most one change of speed in a grain). Under the read guard the budget never exceeds 1096
+    samples; that is 7 million multiplies for the longest low-pass, reached only at 8 times the neutral speed with a
+    file at 16 times the output rate.
+  - **Beyond the budget:** one attack's search, and what the frames' and grains' reads still need.
+  - **The scan's steps:** over at most three quarters of the cache.
+
+  Starting afresh needs about 850 decimated samples before V can come in. That happens after a seek, a loop, or a
+  return from the neutral speed into audio the low band has not computed. Done at once, it would cost 0.5 ms in one
+  128-frame callback at 48 kHz and 2.3 ms for a 192 or 384 kHz file an octave up, against the 2.67 ms the callback
+  has. The budget spreads it over grains instead; until the scan has caught up, the grains keep their own low band, as
+  on develop. A clock that leaps without a seek while V is heard is handled the same way: V leaves over that grain
+  without a new frame, and comes back once the scan has caught up.
+
+  Counted in `cost_of_a_second_of_audio` and the tests: the most any one grain computed was:
+
+  | Case | Decimated samples | Multiplies |
+  | --- | --- | --- |
+  | 48 kHz | 370 | 0.30 million |
+  | 48 kHz, an octave down | 666 | 0.27 million |
+  | 192 kHz file, an octave up | 87 | 0.56 million |
+  | 384 kHz file, an octave up | 87 | 0.56 million |
+
+  Never more than two frames.
 
 ## Rejected alternatives
 
@@ -111,17 +181,20 @@ band has these limits; a fourth variation was not tried.
 | Carrying phases through frames while V is not heard | A -8 dB dip where V came in; V now starts from the grains' phases |
 | Handing the low band back to the grains as soon as the speed is neutral | -9.4 dB for 20 ms at the change |
 | Gliding V's phases to the grains' before handing back | Not built: up to half a turn per partial is a pitch bend on a bass note (about 23 Hz over 21 ms, or a semitone over 0.2 s) |
+| Making V's frames at the new place when the clock leaps without a seek | Unbounded work in one grain (203 to 1508 decimated samples, up to 9.7 million multiplies, in the leap test); V now leaves from what it carries |
+| Replacing only non-finite low-pass values | A finite sample near the largest float still put a pulse of +710 dB into every frame that spanned it; the sum is now taken from clipped samples |
 
 ## Scorecard
 
 One fixed scorecard (`audio_backing_bass.rs`, ignored tests `scorecard`, `root_cause` and
-`cost_of_a_second_of_audio`), every row at 50, 60, 75 and 90%, develop / this branch.
+`cost_of_a_second_of_audio`), every row at 50, 60, 75 and 90%, develop / this branch. Rows (a) to (f) were measured
+again on the final code and did not change by a digit from the first version of this note.
 
 ### (a) Low-band energy
 
-30-150 Hz power of the output against the unstretched source, and the share of the source's low spectrum the output
-has at the same frequencies ("at its pitch"; a bass moved to another pitch keeps its power and loses this). dB, power
-/ at its pitch.
+The 30-150 Hz power of the output against the unstretched source, and the share of the source's low spectrum the
+output has at the same frequencies ("at its pitch"; a bass moved to another pitch keeps its power and loses this).
+Cells are dB, power / at its pitch.
 
 | Signal | 50% | 60% | 75% | 90% |
 | --- | --- | --- | --- | --- |
@@ -137,8 +210,12 @@ has at the same frequencies ("at its pitch"; a bass moved to another pitch keeps
 
 ### (b) Amplitude modulation and flutter
 
-A sustained tone or pair: the largest slow swing of each tone's amplitude (100 ms windows every 10 ms, dB), the worst
-tone's level error (dB) and the energy off the tones over 0.5 s (dB, lower is purer). swing / level / off.
+A sustained tone or pair, measured three ways:
+- swing: the largest slow swing of each tone's amplitude (100 ms windows every 10 ms, dB);
+- level: the worst tone's level error (dB);
+- off: the energy off the tones over 0.5 s (dB, lower is purer).
+
+Cells are swing / level / off.
 
 | Signal | 50% | 60% | 75% | 90% |
 | --- | --- | --- | --- | --- |
@@ -152,10 +229,13 @@ At 100% both are the source (swing 0, off -150 dB).
 
 ### (c) Transients
 
-Medians over the hits: pre-echo (energy before the clock's onset against after it, dB; -300 is none), attack (10 to
-90% of the 1 ms envelope, ms) and onset against the clock (ms, negative is early). **Identical to develop in every cell
-except two**: the kick below 150 Hz at 60% (pre-echo -44.3 → -44.2 dB) and at 90% (none → -141 dB, far below
-hearing).
+Medians over the hits, three figures per cell:
+- pre-echo: energy before the clock's onset against after it, dB; -300 is none;
+- attack: 10 to 90% of the 1 ms envelope, ms;
+- onset against the clock: ms, negative is early.
+
+**Identical to develop in every cell except two:** the kick below 150 Hz at 60% (pre-echo -44.3 → -44.2 dB) and at
+90% (none → -141 dB, far below hearing).
 
 | Hit | 50% | 60% | 75% | 90% |
 | --- | --- | --- | --- | --- |
@@ -167,8 +247,8 @@ hearing).
 
 ### (d) Mid and high band energy and noise flatness
 
-White noise: band power against the source (dB) in 30-150, 150-500, 500-4000 and 4000-16000 Hz, and the change of
-spectral flatness over 100-16000 Hz (dB).
+White noise. Cells give the band power against the source (dB) in 30-150, 150-500, 500-4000 and 4000-16000 Hz, then
+the change of spectral flatness over 100-16000 Hz (dB).
 
 | Speed | develop | this branch |
 | --- | --- | --- |
@@ -179,8 +259,8 @@ spectral flatness over 100-16000 Hz (dB).
 
 ### (e) Alignment
 
-Worst energy-centroid error of Hann-windowed bursts against the score clock (ms, negative is early). Identical to
-develop for the 1 kHz and noise bursts; the 200 ms burst of 55 Hz moves onto the clock.
+The worst energy-centroid error of Hann-windowed bursts against the score clock (ms, negative is early). The 1 kHz and
+noise bursts are identical to develop. The 200 ms burst of 55 Hz moves onto the clock.
 
 | Speed | 1 kHz, 40 ms | 1 kHz, 200 ms | noise, 40 ms | 55 Hz, 200 ms: develop → this branch |
 | --- | --- | --- | --- | --- |
@@ -193,8 +273,13 @@ The existing alignment suite (`audio_backing_alignment`, 12 tests) passes unchan
 
 ### (f) Stereo coherence and mono
 
-A low pair the same in both channels (right 0.9 of left), noise correlated 0.6 between them, and a 55 Hz tone whose
-right channel lags 60 degrees. Source: low coherence 0.9997, mid (500-4000 Hz) coherence 0.3716, low mono sum -0.01 dB.
+The test signals:
+- a busy mix whose right channel is exactly half its left (proportional channels);
+- a low pair the same in both channels (right 0.9 of left);
+- noise correlated 0.6 between the channels;
+- a 55 Hz tone whose right channel lags 60 degrees.
+
+Source: low coherence 0.9997, mid (500-4000 Hz) coherence 0.3716, low mono sum -0.01 dB.
 
 | Speed | Proportional channels, largest error | Low coherence | Low mono sum | 55 Hz phase between channels, error | Mid coherence |
 | --- | --- | --- | --- | --- | --- |
@@ -205,135 +290,278 @@ right channel lags 60 degrees. Source: low coherence 0.9997, mid (500-4000 Hz) c
 
 ### (g) CPU
 
-One thread, release profile (`cost_of_a_second_of_audio`), a stereo mix (bass line, kicks, chord, hiss), a 48 kHz
-output: milliseconds per second of audio (median of five runs of 10 s); the slowest 128-frame block (one device callback
-of 2.67 ms) among the first 1024 output frames after a seek, microseconds, median and worst of 41 seeks; and the same a
-second later. The seeks jump 4.8 s forward or 10.4 s back, so nothing the low band computed before is near (a cold
-start, the costliest case). The last four rows play the mix from files at 192 and 384 kHz (interpolated), an octave up:
-the steepest reads V takes. Develop and this branch were measured one after the other in one session; this machine ran
-about 20% slower than for the earlier figures in this note's history (develop at 100%: 7.95 against 6.40 ms), so all
-of them were taken again. Single worst values above 700 us that also appear a second later (1108 us at 50%) are the
-operating system, not the stretcher.
+One thread, release profile (`cost_of_a_second_of_audio`): a stereo mix (bass line, kicks, chord, hiss) played to a
+48 kHz output. The last four rows play the mix from files at 192 and 384 kHz (interpolated) an octave up: the steepest
+reads V takes. The test measures:
+- **Milliseconds per second of audio:** the median of five runs of 10 s.
+- **The slowest 128-frame block after a seek** (one device callback of 2.67 ms): among the first 16384 output frames
+  after a seek, in microseconds, median and worst of 41 seeks. The 16384 frames are 64 grains, which hold the grain
+  where the scan catches up (the 3rd to 7th at 48 kHz, the 20th to 31st for the 192 and 384 kHz files) and V's first
+  frames. The seeks jump 4.8 s forward or 10.4 s back, so nothing the low band computed before is near: a cold start,
+  the costliest case.
+- **About a second later:** the same 16384 frames from 47 000 frames after the seek.
+- **The most work in one grain:** the low-pass's decimated samples and V's frames, counted in each window.
 
-| File, speed, key shift | ms per second: develop → this branch | Slowest block after a seek, median (worst): develop → this branch | A second later |
-| --- | --- | --- | --- |
-| 48 kHz, 100%, 0 | 7.95 → 7.81 | 41 (52) → 41 (59) | 41 → 41 |
-| 48 kHz, 50%, 0 | 7.88 → 13.40 | 41 (42) → 232 (377) | 41 → 71 |
-| 48 kHz, 60%, 0 | 7.85 → 13.52 | 41 (93) → 233 (288) | 41 → 72 |
-| 48 kHz, 75%, 0 | 7.84 → 13.82 | 41 (45) → 233 (259) | 41 → 73 |
-| 48 kHz, 90%, 0 | 8.01 → 14.14 | 41 (68) → 232 (264) | 41 → 75 |
-| 48 kHz, 50%, +12 | 8.30 → 13.09 | 44 (56) → 189 (311) | 44 → 70 |
-| 48 kHz, 100%, -12 | 4.51 → 11.65 | 23 (34) → 302 (327) | 23 → 60 |
-| 48 kHz, 300%, +12 | 8.35 → 17.18 | 44 (54) → 189 (1040) | 44 → 97 |
-| 48 kHz, 300%, -12 | 4.47 → 17.03 | 23 (31) → 300 (386) | 23 → 90 |
-| 192 kHz, 50%, +12 | 11.24 → 17.57 | 60 (204) → 168 (747) | 59 → 94 |
-| 192 kHz, 75%, +12 | 11.22 → 18.40 | 60 (93) → 168 (192) | 59 → 99 |
-| 384 kHz, 50%, +12 | 11.36 → 19.77 | 61 (117) → 168 (213) | 60 → 106 |
-| 384 kHz, 75%, +12 | 11.42 → 21.85 | 61 (65) → 170 (222) | 60 → 118 |
+Develop is the same voice without the low band, measured in the same run, row by row, on the final code. One row
+(192 kHz, 75%) was disturbed in that run: its five runs of 10 s spanned 19.05 to 30.15 ms. A repeat run of the whole
+test gave that row as 11.55 → 19.27 ms, with a block median of 63 → 261 us after a seek and 66 → 203 us later; the
+other rows of the repeat were within the noise of these.
 
-Before the scan was spread over grains (same session, same seeks), the slowest block after a cold seek was 517 to 522 us
-at 48 kHz and 50 to 90% (549 to 576 worst), 760 us at +12, 786 us at 300% +12, and 2256 to 2293 us for the 192 and
-384 kHz files (worst 5598): close to or over a whole 128-frame callback. The seek tests of the earlier commits did not
-show it, since their seeks landed where the low band had already been computed. Spreading the work delays V after a
-cold seek: in a probe (not committed) on a 41.2 Hz sine, V came in at the 5th grain after the seek instead of the 3rd
-at 48 kHz (27 ms instead of 16), the 8th at +12 and 50% (43 ms), the 4th at -12, and the 25th and 28th for the 192 and
-384 kHz files an octave up (133 and 149 ms). The scorecard's rows (a) to (f) did not change by a digit.
+| File, speed, key shift | ms per second: develop → this branch | Slowest block after a seek, median (worst): develop → this branch | About a second later, median (worst) | Most in one grain: after a seek / later |
+| --- | --- | --- | --- | --- |
+| 48 kHz, 100%, 0 | 7.98 → 7.99 | 49 (1006) → 48 (105) | 51 (137) → 49 (120) | none |
+| 48 kHz, 50%, 0 | 7.96 → 13.82 | 45 (97) → 226 (980) | 44 (1022) → 88 (943) | 370, 2 / 53, 2 |
+| 48 kHz, 60%, 0 | 7.85 → 14.01 | 44 (1361) → 228 (1213) | 44 (88) → 91 (891) | 369, 2 / 57, 2 |
+| 48 kHz, 75%, 0 | 7.93 → 14.40 | 44 (104) → 228 (1652) | 44 (67) → 92 (174) | 366, 2 / 59, 2 |
+| 48 kHz, 90%, 0 | 8.01 → 14.83 | 46 (1056) → 230 (1175) | 46 (137) → 95 (598) | 364, 2 / 62, 2 |
+| 48 kHz, 50%, +12 | 8.31 → 13.57 | 49 (121) → 193 (316) | 48 (116) → 96 (1049) | 207, 2 / 51, 2 |
+| 48 kHz, 100%, -12 | 4.42 → 12.18 | 28 (108) → 298 (895) | 28 (582) → 83 (103) | 659, 2 / 79, 2 |
+| 48 kHz, 300%, +12 | 8.26 → 17.73 | 50 (1407) → 204 (828) | 51 (242) → 120 (440) | 208, 2 / 71, 2 |
+| 48 kHz, 300%, -12 | 4.55 → 17.40 | 26 (42) → 299 (1363) | 26 (1547) → 114 (173) | 666, 2 / 142, 2 |
+| 192 kHz, 50%, +12 | 11.23 → 17.82 | 67 (152) → 252 (920) | 63 (1116) → 154 (217) | 87, 2 / 51, 2 |
+| 192 kHz, 75%, +12 (disturbed) | 12.65 → 20.50 | 64 (153) → 404 (1853) | 64 (1208) → 206 (899) | 85, 2 / 54, 2 |
+| 384 kHz, 50%, +12 | 11.27 → 20.40 | 67 (1474) → 219 (1544) | 68 (1593) → 168 (1529) | 87, 2 / 53, 2 |
+| 384 kHz, 75%, +12 | 11.39 → 22.56 | 72 (1434) → 269 (2254) | 72 (936) → 197 (299) | 87, 2 / 59, 2 |
 
-Building the voice takes 6 to 8 ms at 48 kHz on both, 12 to 25 ms for the 192 and 384 kHz files. The ignored
-`selected_real_100bar_fourtrack_resource_budget` test passes (1600 requests, 390 samples loaded in 0.42 s); it is a
-sample-pack load budget and does not run the backing stretcher.
+**Single worst blocks of 0.8 to 2.3 ms are not explained by the stretcher's work.** They were not traced to the
+operating system either: no system trace was taken. The evidence:
+- **Develop's own code has them.** In the same run, develop's code path had worst blocks of 936 to 1593 us on ten
+  rows, against medians of 26 to 72 us.
+- **So does the 100% row.** At 100% this branch runs develop's code, bit for bit; in the repeat run it had a worst
+  block of 1156 us.
+- **They move between runs.** In the repeat run, and in two earlier runs of the same test, they fell on other rows
+  each time.
+- **The work is counted.** The stretcher's own work per grain is bounded (the last column), and the block medians
+  show what it costs: 0.19 to 0.30 ms after a seek. A worst block of five times the median is not more of that work.
+
+Before the scan was spread over grains (same seeks, an earlier session), the slowest block after a cold seek was:
+- 517 to 522 us at 48 kHz and 50 to 90% (549 to 576 worst);
+- 760 us at +12 and 786 us at 300% +12;
+- 2256 to 2293 us for the 192 and 384 kHz files (5598 worst): close to or over a whole 128-frame callback.
+
+The seek tests of the earlier commits did not show it, since their seeks landed where the low band had already been
+computed. Spreading the work delays V after a cold seek. A probe (not committed) found the first grain after the seek
+in which V made frames, on a 55 Hz sine at 50, 75 and 90%:
+- the 3rd to 7th grain at 44.1 and 48 kHz (16 to 37 ms of output);
+- the 13th or 14th for a 96 kHz file an octave up (69 to 75 ms);
+- the 20th to 31st for the 192 and 384 kHz files an octave up (107 to 165 ms).
+
+Building the voice takes 7 to 9 ms at 48 kHz on both, about 13 ms for the 192 kHz file and 24 to 34 ms for the
+384 kHz file.
 
 ### Speed change while playing
 
-A steady 55 Hz sine at 75%, 100%, 75%, 100%: the worst level of any 20 ms against the source. Develop -1.39 dB (its
-wobble at 75%); this branch within 0.05 dB, through every change.
+A steady 55 Hz sine at 75%, 100%, 75%, 100%: the worst level of any 20 ms against the source. Develop is -1.39 dB (its
+wobble at 75%); this branch stays within 0.05 dB through every change.
 
 ## Tests
 
-New in `src-tauri/tests/audio_backing_bass.rs` (the bass rows fail on develop and pass here; the other rows hold
-develop's own figures, measured with these functions, within the margins stated in each test):
+New in `src-tauri/tests/audio_backing_bass.rs`. The bass rows fail on develop and pass here; the other rows hold
+develop's own figures, measured with these functions, within the margins stated in each test.
 
-- `sustained_low_tones_keep_their_pitch_level_and_steadiness` (a, b): per tone set, swing, level and off-tone limits
-  (sines 0.5 dB, 0.5 dB, -60 dB; 55 + 82.4 Hz 1.0, 0.5, -40; 41.2 + 61.7 Hz 2.5, 1.0, -20). Develop: the 41.2 Hz sine
-  is 14 dB down at 50%, the pairs swing 12 to 39 dB.
-- `the_low_band_keeps_its_power_at_its_own_pitch` (a): five signals at 50 and 75%, power within 1 dB and at least
+- `sustained_low_tones_keep_their_pitch_level_and_steadiness` (a, b): swing, level and off-tone limits per tone set.
+  - Sines: 0.5 dB, 0.5 dB, -60 dB.
+  - 55 + 82.4 Hz: 1.0, 0.5, -40.
+  - 41.2 + 61.7 Hz: 2.5, 1.0, -20.
+  - Develop: the 41.2 Hz sine is 14 dB down at 50%, and the pairs swing 12 to 39 dB.
+- `the_low_band_keeps_its_power_at_its_own_pitch` (a): five signals at 50 and 75%. Power within 1 dB, and at least
   -1 dB at its pitch. Develop: -33.7 dB for the 41.2 Hz sine.
 - `transients_are_no_worse_than_before` (c): pre-echo at most 1 dB more than develop (or under -60 dB), attack at most
   0.5 ms slower, onset within 0.5 ms. Passes on both.
 - `noise_keeps_its_bands_and_flatness` (d): the 150-16000 Hz bands within 0.25 dB of develop, flatness no more than
-  0.05 dB lower, the lowest band within 1 dB of the source. Develop loses up to 2 dB there.
+  0.05 dB lower, and the lowest band within 1 dB of the source. Develop loses up to 2 dB there.
 - `bursts_stay_on_the_score_clock` (e): within 0.25 ms of develop's errors, and the 55 Hz burst within 2.5 ms.
   Develop: 5.4 ms early.
-- `the_stereo_image_and_the_mono_sum_are_kept` (f): proportional channels exactly so, phase within 0.5 degrees, low
-  coherence within 0.002 of the source, mono within 0.1 dB, mid coherence within 0.005 of develop. Develop: -217.5
-  degrees at 60%.
+- `the_stereo_image_and_the_mono_sum_are_kept` (f). Develop: -217.5 degrees at 60%. The limits:
+  - proportional channels exactly so;
+  - phase within 0.5 degrees;
+  - low coherence within 0.002 of the source;
+  - mono within 0.1 dB;
+  - mid coherence within 0.005 of develop.
 - `changing_the_speed_while_playing_makes_no_level_jump`: every 20 ms within 1 dB. Develop: -1.39 dB.
+- `handing_the_low_band_over_and_back_keeps_the_level`: the level at V's hand-ins and hand-outs.
+  - The signal: notes of one pitch every 0.37 s, each starting over 3 ms and dying away over 0.3 s. The speed changes
+    every 1499 output frames, among 20 to 100%.
+  - The measure: the note's level at its own pitch in every 10 ms window, outside the 20 ms after an attack, against
+    the exact level in the source at the score clock.
+  - 110 and 100 Hz, which the grains splice coherently: no window more than 0.25 dB under (this branch: 0.11 dB),
+    except where develop's grains are too.
+  - Below the grains' reach the hand-over dips, because V and the grains carry the tone at phases that disagree. The
+    test holds the measured values as bounds:
+    - 82.4 Hz: the deepest window -2.89 dB, none under -3 dB (develop: -0.78 dB, none);
+    - 55 Hz: -6.45 dB, with 8 of 507 windows under -3 dB (develop: -4.83 dB, 25 of 507).
 
-New `src-tauri/tests/audio_backing_realtime.rs`:
+    These are honest bounds, not a pass against develop. See the limits.
+- `leaving_and_coming_back_on_consecutive_grains_makes_no_level_dip`: V leaves in one grain and comes back in the
+  next. The signal is a sustained tone at 100 and 110 Hz, with five patterns of 35% grains among 45%, from 25 to 90 ms
+  after the attack. Every 20 ms window is within 0.05 dB (measured: 0.02 dB).
+  - It passes on the code before the fix too. On a sustained tone at those pitches, V's own phase stays in step with
+    the grains', so there was no dip to see.
+  - The fix rebuilds V's start frame from the grains' phases whenever it comes back from a carry that kept its own.
+    In a probe (not committed) with V out for single grains on 82.4 and 55 Hz tones, the deepest window was -1.22 and
+    -3.09 dB before the fix and -0.69 and -2.27 dB after.
+- `the_develop_figures_are_develops`: develop's figures in the tests above, measured again from develop's code path.
 
-- `rendering_seeking_and_changing_speed_allocate_nothing`: a counting global allocator (with a check that it counts)
-  over rendering at 50, 100, 75, neutral, 300, 10, 90 and 100%, loop-wrap seeks, clock jumps that are not seeks, and
-  60 speed changes every 700 frames (mid-hop, to and from neutral), at 44.1, 48 and 96 kHz, key shifts 0, -5, +7 and
-  +12, on a sustained bass with clicks and on kicks and plucks from silence: no allocation; and the sustained 41.2 Hz
-  bass keeps its level within 1 dB at its own pitch (develop: -21 dB).
-- `extreme_maps_and_rates_neither_stall_nor_panic`: offsets of plus and minus 1e22 ms, and files at 6.144 MHz, 768 kHz
-  (+12 at a 22.05 kHz output) and 384 kHz (+12, the steepest read V still takes) at 10 to 300%. Without the read guard
-  the 6.144 MHz file panics (index out of bounds). Without the clock guards the review found that a 1e22 ms offset
-  makes the attack scan loop without end in release; that was not run, since it would hang the test. In the debug test
-  profile the 1e22 ms offset also hit develop's own grain read (`sample`: a position past what an i64 holds floors to
-  `i64::MAX`, and the next index overflowed; release wraps it to silence). That read now saturates, which changes
-  nothing below `i64::MAX`.
-- `speed_changes_near_attacks_never_click`: low notes every 0.37 s, the speed changing every 1499 frames among 20 to
-  100%, across the 40% line: no step from one output frame to the next above 0.05 (the source's largest is under
-  0.02). Before V always left over its ramp: a step of 0.51.
+`src-tauri/tests/audio_backing_realtime.rs`:
+
+- `rendering_seeking_and_changing_speed_allocate_nothing`: a counting global allocator, with a check that it counts.
+  - It covers:
+    - rendering at 50, 100, 75, neutral, 300, 10, 90 and 100%;
+    - loop-wrap seeks, and clock jumps that are not seeks;
+    - 60 speed changes every 700 frames, mid-hop, to and from neutral;
+    - 44.1, 48 and 96 kHz, with key shifts 0, -5, +7 and +12;
+    - a sustained bass with clicks, and kicks and plucks from silence.
+  - No allocation, and the sustained 41.2 Hz bass keeps its level within 1 dB at its own pitch (develop: -21 dB).
+- `extreme_maps_and_rates_neither_stall_nor_panic`. It covers offsets of plus and minus 1e22 ms, and these files at
+  10 to 300%:
+  - a file at 6.144 MHz;
+  - a file at 768 kHz, +12, at a 22.05 kHz output;
+  - a file at 384 kHz, +12, the steepest read V still takes.
+
+  What it catches:
+  - Without the read guard, the 6.144 MHz file panics (index out of bounds).
+  - Without the clock guards, the review found that a 1e22 ms offset makes the attack scan loop without end in
+    release. That was not run, since it would hang the test.
+  - In the debug test profile, the 1e22 ms offset also hit develop's own grain read (`sample`). A position past what
+    an i64 holds floors to `i64::MAX`, and the next index overflowed; release wraps it to silence. That read now
+    saturates, which changes nothing below `i64::MAX`.
+- `speed_changes_near_attacks_never_click`: low notes every 0.37 s, with the speed changing every 1499 frames among
+  20 to 100%, across the 40% line, unshifted and at +7. No step from one output frame to the next may be larger than
+  the largest develop's grains make of the same notes, nor reach 0.008. This branch: 0.0069 unshifted and 0.0072 at +7,
+  the same steps develop's grains make at the same frames; the source's largest is under 0.02. Before, V left over its
+  ramp only some of the time, and made a step of 0.51.
+- `a_clock_that_leaps_without_a_seek_stays_within_a_grains_budget`: a sync map 100 times steeper than the speed for
+  10 ms of score, and a jump of the clock, while V is heard. It runs at 48 kHz and for files at 192 and 384 kHz an
+  octave up. The work is counted, not timed.
+  - No grain across the leap computes more than the worst grain after a cold seek, plus one attack's search (56
+    samples, which a grain may always compute while V is heard), plus its own crossfade reads (72 at most). No grain
+    makes more than two frames, and V leaves once.
+  - The tone's level before and after is within 0.1 dB.
+  - The largest step across the leap is at most a quarter more than develop's (this branch: 13% more at most).
+  - Measured across the leap: 344 samples at 48 kHz (324 after a seek), 40 to 102 at 192 kHz (40 after a seek), and
+    76 to 126 at 384 kHz (40).
+  - On 0b3d7cc the grain where the clock leapt computed everything up to the new place at once: 203 to 1508 samples
+    (0.36 to 9.7 million multiplies). The test failed there.
+- `samples_near_the_largest_float_leave_nothing_behind`: one sample of 3e38, sixteen of plus and minus 3e38, and
+  sixteen that are not numbers, in a 55 Hz tone, unshifted and at +7.
+  - The output stays finite.
+  - It is out of range for no more frames than develop's (91 and 53, the same).
+  - Every 20 ms window where develop is in range is within 1 dB (measured: 0.46 dB), and the tone ends at 0.00 dB.
+  - On 0b3d7cc: 16 985 frames out of range at up to +710 dB, then silence.
+- `the_vocoder_never_leaves_for_want_of_the_scan_at_a_speed_it_follows`: plucked low notes at 48 kHz and from files
+  at 192 and 384 kHz, unshifted and an octave up. It plays at steady 50% and 75%, and with the speed jumping mid-grain
+  between 10 and 300% and between 25 and 200%. V must never leave because the scan ran out of a grain's budget.
+  - On 317b4d4, for the 192 kHz file an octave up at half speed, V left 8 times in 3 s of output, ahead of the notes.
+- `a_grain_after_one_beyond_any_index_does_not_overflow`: anchors 1e-30 of a bar apart make the slope before the first
+  one about 5e29.
+  - The clock passes from beyond any index onto the audio at half speed.
+  - No overflow in the debug profile, a finite output, and the tone within 0.1 dB afterwards.
+  - On 317b4d4 the debug build panicked (`attempt to subtract with overflow` in the scan).
 
 Unit tests in `low.rs`: the real transform against its definition and its inverse, and the low-pass's response.
 
-Existing suites, release and debug: `audio_backing` 6, `audio_backing_alignment` 12, `audio_backing_stretch` 9 (2
-ignored tables), `backing_processing` 14 (bit-identity at 100% and of proportional channels included),
-`backing_processing_protocol` 6, `backing_waveform` 5, library backing tests 41: all pass.
+Existing suites all pass, release and debug:
+- `audio_backing` 6;
+- `audio_backing_alignment` 12;
+- `audio_backing_stretch` 9 (2 ignored tables);
+- `backing_processing` 14, including bit-identity at 100% and of proportional channels;
+- `backing_processing_protocol` 6;
+- `backing_waveform` 5;
+- library backing tests 41.
 
-On the final code (67d7a34), in this worktree:
+## Final verification
 
-- `cargo test --locked --workspace --no-fail-fast` (debug test profile): 98 test targets, 2076 passed, 0 failed, 99
-  ignored. An earlier full run, before the last commit, failed only `extreme_maps_and_rates_neither_stall_nor_panic`
-  (the debug overflow above).
+Run on 87247e7. Its code is that of 864d396; 87247e7 changes only comments.
+
 - `cargo fmt --all -- --check`: clean.
-- `npm run typecheck`: exit 0.
-- `npm test -- --testTimeout=60000`: 430 files and 7434 tests passed, 5 files and 8 tests skipped. Nothing outside
-  `src-tauri` changed but this note; the performance snapshot it rewrites was restored afterwards.
-- A read-only adversarial review of the low band: four findings, fixed in cda6076 and approved; the spread cold start
-  and the saturating read were reviewed again and approved.
+- `cargo test --locked --workspace --no-fail-fast`, debug: 98 test programs; 2083 passed, 0 failed, 99 ignored.
+- `selected_real_100bar_fourtrack_resource_budget` (`audio_resources`, ignored, release): passed in 2.95 s.
+- The five `audio_backing*` suites in release, all passed:
+  - `audio_backing` 6;
+  - `audio_backing_alignment` 12;
+  - `audio_backing_bass` 10, with 3 ignored tables;
+  - `audio_backing_realtime` 7;
+  - `audio_backing_stretch` 9, with 2 ignored tables.
+- Two compiler warnings come from develop's code, not this branch: `list_inputs` is unused in a release build, and a
+  `mut` in `audio_backing_stretch.rs` is not needed.
+
+## Review
+
+A fresh-context, read-only reviewer was briefed to break the change.
+
+1. **0b3d7cc: changes needed.**
+   - One grain was unbudgeted when the clock leapt.
+   - One bad sample silenced the backing.
+   - The level dipped on a leave and a return.
+   - The click threshold was loose.
+   - The note needed corrections.
+
+   All fixed in 317b4d4.
+2. **317b4d4: changes needed.**
+   - The scan's budget fell short of a clock that V follows at high file rates.
+   - The check on the grain before could overflow in the debug profile.
+
+   Both fixed in 2659b65, with a failing-first test for each.
+3. **2659b65: changes needed.** A stale rate made the first grains after a seek compute more than they need. Fixed
+   in 864d396.
+4. **864d396: approved.** Its two nits are fixed in 87247e7: the ceiling is now stated as 1096 samples, and a comment
+   is rewrapped.
 
 ## Limits
 
-- **Nobody has listened.** The clips (sine 41.2 Hz, the two pairs, the bass line, kicks over a 55 Hz bed, the mix and
-  the stereo signal, before and after, 50% and 75%, level-matched) need the owner's ears. They were rendered before the
-  last two fix commits: the guards and the ramp leave fixed-speed renders the same to within 0.01 dB on the scorecard,
-  and the spread cold start brings V in about 11 ms later at the start of each clip.
-- **CPU 1.6 to 1.8 times develop's at practice speeds** (7.9 to 13.1-14.1 ms per second of audio at 48 kHz), twice at
-  300% an octave up, 2.6 to 3.8 times with the key an octave down (4.5 to 11.7-17.0), and 1.6 to 1.9 times for 192 and
-  384 kHz files an octave up (11.2-11.4 to 17.6-21.9). That is 1.3 to 2.2% of one core per backing. The slowest
-  128-frame callback after a cold seek carries 0.17 to 0.30 ms of the backing (develop 0.02 to 0.06 ms).
-- **After a seek into audio the low band has not computed** (or a loop that long, or the speed leaving 100% there), V
-  comes in later than it would with the work done at once: 21 to 43 ms after the seek at 48 kHz instead of 16 ms (1 to
-  5 grains later), 133 to 149 ms for 192 and 384 kHz files an octave up. Until then the bass is develop's. The scan
-  always takes at least twice what the clock moves on per grain, so it cannot fall behind for good; at 300% that floor
-  stays under about 0.7 million multiplies per grain for any file, and only clocks far faster than the practice speeds
-  (8 times the neutral speed with a 384 kHz file an octave up) could reach 6.8 million. A clock that leaps without a
-  seek while V is heard still makes its frames at the new place in one grain (V leaves over that grain's ramp); the
-  renderer moves the clock that way only by seeking, which takes V out first, and that case was not timed.
-- **Near attacks the low band is the grains'**: within about 8 ms after a low attack, where a frame they would hear
-  reads across one, and where its window has faded (about 17 to 20 ms of source from an attack at 40% and up). Below
-  40% of the speed the grains hear only whole windows, so for about 96 ms of source after each low attack (0.27 to
-  0.96 s of playing at 10 to 35%) the bass is develop's.
-- **The 41.2 + 61.7 Hz pair** keeps a swing of up to 1.24 dB and -26 to -32 dB off its tones: 20.5 Hz apart is close to
-  what a 170 ms frame separates. Develop swings 15 to 39 dB.
-- **After the speed returns to 100%** while V is heard, V keeps the low band until the next low attack or seek: the same
-  pitch and level, but not develop's samples. From a seek or the start at 100% the output is develop's, bit for bit.
-- **V carries each low partial at its own phase**, not the source's: the shape of a waveform below 117 Hz (the phase of
-  a fundamental against its harmonics across the crossover) is not kept. The scorecard measures power, pitch, level,
-  steadiness, timing and stereo, not waveform shape.
-- **Outside what V was made for** (a clock slower than 1/32 or faster than 8 times the neutral speed, a grain reading
-  more than 16 source frames per output frame) the backing behaves as on develop.
+- **Nobody has listened.** The clips need the owner's ears. They were rendered again from the final code: sine
+  41.2 Hz, the two pairs, the bass line, kicks over a 55 Hz bed, the mix and the stereo signal, before and after, at
+  50% and 75%, level-matched.
+- **CPU is higher than develop's:**
+  - 1.8 times at practice speeds (7.9 to 8.0 → 13.8 to 14.8 ms per second of audio at 48 kHz);
+  - twice at 300% an octave up;
+  - 2.8 to 3.8 times with the key an octave down (4.4 to 4.6 → 12.2 to 17.4);
+  - 1.6 to 2.0 times for 192 and 384 kHz files an octave up (11.2 to 11.6 → 17.8 to 22.6).
+
+  That is 1.2 to 2.3% of one core per backing. The slowest 128-frame callback after a cold seek carries 0.19 to
+  0.30 ms of the backing (develop: 0.03 to 0.07 ms), and 0.08 to 0.21 ms about a second later.
+- **After a seek into audio the low band has not computed**, V comes in later than it would with all the work done at
+  once. The same holds for a loop that long, or the speed leaving 100% there.
+  - When: the 3rd to 7th grain after the seek at 44.1 and 48 kHz (16 to 37 ms), the 13th or 14th for a 96 kHz file
+    an octave up (69 to 75 ms), and the 20th to 31st for 192 and 384 kHz files an octave up (107 to 165 ms).
+  - Until then the bass is develop's.
+  - The scan's budget always covers what a clock V follows needs, so it cannot fall behind for good.
+- **A clock that leaps without a seek while V is heard** makes V leave over that grain, from what its last frame
+  carries, and the bass is develop's until the scan has caught up. Such a leap is a sync map steeper than 8 times the
+  neutral speed, which the anchors allow, or a jump. The leap test covers a steep map and a jump; nothing else about
+  how often real maps do this was measured.
+- **Near attacks the low band is the grains'.** That covers:
+  - about 8 ms after a low attack;
+  - where a frame they would hear reads across one;
+  - where its window has faded (about 17 to 20 ms of source from an attack at 40% and up).
+
+  Below 40% of the speed the grains hear only whole windows, so the bass is develop's for about 96 ms of source after
+  each low attack (0.27 to 0.96 s of playing at 10 to 35%).
+- **Hand-overs below about 94 Hz dip for a moment.** Where V hands the low band to the grains, or takes it back, a tone
+  the grains cannot splice coherently is carried at phases that disagree. The hand-over test measured, in 10 ms
+  windows:
+  - 82.4 Hz: down to -2.89 dB (develop: -0.78 dB);
+  - 55 Hz: down to -6.45 dB, with 8 windows of 507 under -3 dB (develop: -4.83 dB, 25 windows).
+
+  Whether that is audible has not been checked.
+- **Not measured:**
+  - **Note changes without an attack.** A legato or slid bass note change, a hammer-on, or a sustained synth bass
+    changing note at a steady level never triggers the attack detector. V's 170 ms frame then spans both notes, so the
+    change may smear, or the old note may ring briefly into the new one.
+  - **Note releases.** A note that stops or is muted with no new attack, where V's frame spans the end, may fade
+    rather than stop.
+  - **Phasiness on low-band noise.** This covers the low rumble of drums and noise. Row (d) measures its power and
+    flatness, not how it sounds.
+- **The 41.2 + 61.7 Hz pair** keeps a swing of up to 1.24 dB, and -26 to -32 dB off its tones: 20.5 Hz apart is close
+  to what a 170 ms frame separates. Develop swings 15 to 39 dB.
+- **Other output rates.** At a 96 kHz output, V takes the band up to 234 Hz with 85 ms frames, so partials closer than
+  about 23 Hz are not separated. There is no scorecard at a 44.1 or 96 kHz output.
+- **After the speed returns to 100%** while V is heard, V keeps the low band until the next low attack or seek: the
+  same pitch and level, but not develop's samples. From a seek, or the start, at 100% the output is develop's, bit
+  for bit.
+- **V carries each low partial at its own phase**, not the source's, so the shape of a waveform below 117 Hz is not
+  kept: the phase of a fundamental against its harmonics across the crossover. The scorecard measures power, pitch,
+  level, steadiness, timing and stereo, not waveform shape.
+- **Outside what V was made for**, the backing behaves as on develop. That is a clock slower than 1/32 or faster than
+  8 times the neutral speed, or a grain reading more than 16 source frames per output frame.
 - Not run: the desktop app, real recordings, macOS and Linux, any listening.

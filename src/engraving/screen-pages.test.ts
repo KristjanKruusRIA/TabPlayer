@@ -2,7 +2,7 @@ import {beforeAll,describe,expect,it} from 'vitest';
 import {LayoutMode,Settings,SystemsLayoutMode,model,rendering} from '@coderline/alphatab';
 import type {PageLayout} from './types';
 import {passageBands} from './passage-bands';
-import {arrangeScreenPages,beatSpan,beatSpanOf,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,SCREEN_PAGE_GAP,unmapScreenPoint} from './screen-pages';
+import {arrangeScreenPages,beatSpan,beatSpanOf,hitTestBounds,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,SCREEN_PAGE_GAP,unmapScreenPoint} from './screen-pages';
 import type {ScreenPagination,ScreenRect,ScreenRenderChunk} from './screen-pages';
 
 const page:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1.13,profile:'document'};
@@ -483,5 +483,41 @@ describe('staff-gap band shift',()=>{
     // Pinned: top 175 and exclusive bottom 185 both land on 175, so the rect collapses to zero height at its top.
     const mapped=mapScreenRect(p,a,system,{x:0,y:175,w:10,h:10})!;
     expect(mapped.h).toBe(0);expect(mapped.y).toBeCloseTo(toScreen(0,175).y,9);
+  });
+});
+
+describe('hit test in the continuous layouts (THE-213)',()=>{
+  // Every staff's bar of the first master bar, with the note it holds on its first beat in voice 0.
+  const staffNotes=()=>fixture.bounds.staffSystems[0].bars[0].bars.map(bar=>{
+    const beat=bar.beats.find(b=>b.beat.voice.index===0&&b.beat.index===0)!,note=beat.notes![0];
+    return {bar,beat,note,staff:bar.bar.staff,point:center(note.noteHeadBounds)};
+  });
+  it('has the staves of both tracks lined up in x, which is what made alphaTab answer with the top staff',()=>{
+    const found=staffNotes();
+    expect(found.map(item=>`${item.staff.track.index}.${item.staff.index}`)).toEqual(['0.0','0.1','1.0']);
+    expect(new Set(found.map(item=>Math.round(item.beat.realBounds.x))).size).toBe(1);
+    // alphaTab's own lookup: y only picks the system, so every staff's click answers with a beat of the first staff.
+    for(const item of found)expect(fixture.bounds.getBeatAtPos(item.point.x,item.point.y)?.voice.bar.staff).toBe(found[0].staff);
+  });
+  it('answers with the beat and note of the staff the point is in: another track, or a second staff of one track',()=>{
+    for(const item of staffNotes()) {
+      const hit=hitTestBounds(fixture.bounds,item.point);
+      expect(hit?.beat).toBe(item.beat.beat);expect(hit?.note).toBe(item.note.note);
+      expect(hit?.beat.voice.bar.staff).toBe(item.staff);
+    }
+  });
+  it('answers on the staff for a point beside the notehead, and a preferred lane never moves it to another staff',()=>{
+    const [, , lower]=staffNotes(),box=lower.bar.realBounds,x=lower.beat.realBounds.x+1,y=box.y+box.h-1;
+    const hit=hitTestBounds(fixture.bounds,{x,y});
+    expect(hit?.beat.voice.bar.staff).toBe(lower.staff);
+    const lane={track:lower.staff.track.index,staff:lower.staff.index,voice:0};
+    expect(hitTestBounds(fixture.bounds,{x,y},lane)?.beat.voice.bar.staff).toBe(lower.staff);
+    // Preferring the first track's lane cannot move the answer into a staff the point is not in.
+    expect(hitTestBounds(fixture.bounds,{x,y},{track:0,staff:0,voice:0})?.beat.voice.bar.staff).toBe(lower.staff);
+  });
+  it('answers null outside every system and for a non-finite point',()=>{
+    const system=fixture.bounds.staffSystems[0].realBounds;
+    expect(hitTestBounds(fixture.bounds,{x:system.x+1,y:system.y-5})).toBeNull();
+    expect(hitTestBounds(fixture.bounds,{x:Number.NaN,y:system.y+1})).toBeNull();
   });
 });

@@ -40,11 +40,10 @@ try{
   // ---- 1. typed for one track, left by a click ----
   // A click on the name of another track in the overview makes that track the active one, so the selection moves while the field is being left:
   // the edit must still go to the first track, once, and the field must then show the other track.
-  // A click on a real note of another track does NOT select it in this build (measured: the cursor and the active track stay where they were,
-  // and the build before this branch behaves the same), so that click only takes focus from the field: the edit goes to the first track, once,
-  // and the active track is unchanged.
+  // A click on a real note of another track selects that note and makes its track the active one, like a click on its name: the edit must still
+  // go to the first track, once.
   for(const [label,field,text,pick,leave,changesTrack] of [
-    ['a track name, left by a click on a note of another track','Track name','Renamed first track',edit=>({type:edit.type,track:edit.track,value:edit.name}),()=>clickNote('last'),false],
+    ['a track name, left by a click on a note of another track','Track name','Renamed first track',edit=>({type:edit.type,track:edit.track,value:edit.name}),()=>clickNote('last'),true],
     ['a track name, left by a click on another track\'s name','Track name','Renamed first track',edit=>({type:edit.type,track:edit.track,value:edit.name}),()=>clickTrack(2),true],
     ['a sounding transposition, left by a click on another track\'s name','Sounding transposition','-12',edit=>({type:edit.type,track:edit.track,value:edit.settings.transposition}),()=>clickTrack(2),true],
   ]) {

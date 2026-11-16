@@ -212,7 +212,6 @@ fn a_drum_track_plays_general_midi_when_the_kits_processing_data_is_refused() {
     let mut table = kit_table();
     table["profiles"]["kick"]["companion"]["maxOffsetMs"] = 0.5.into();
     let root = kit_root(table, true);
-    edit_manifest(&root, |m| m["instruments"][0]["id"] = RECORDED_KIT.into());
     let hits = plan(&[(0.0, 480.0, 36, Some(36), false)]);
     let requests = resource_requests(&hits, &DocumentSettings::default());
     assert_eq!(requests[0].instrument_id, RECORDED_KIT);
@@ -2101,9 +2100,11 @@ fn recorded_kit_meets_its_produced_targets() {
     assert!(megabytes < 12.0, "{megabytes:.1} MB decoded");
 }
 
-/// What CI can check of the real kit: every kit sound loads by request at the velocities that open and close each recorded layer,
-/// through its processing, with nothing set aside, a decoded recording behind every region, no processed hit over half the peak
-/// ceiling, and the decoded size bounded. The load time is printed, not asserted: CI builds without optimisation, where it is about ten times the release figure. Needs the prepared audio. `cargo test --release --test audio_recorded_kit -- --ignored --nocapture recorded_kit_loads_every_sound_by_request`
+/// What CI can check of the real kit: every region of the kit loads by request, through its processing, with nothing set aside, a
+/// decoded recording behind it, no processed hit over half the peak ceiling, and the decoded size bounded. Each region is asked for
+/// at its own lowest and highest velocity, read from the manifest, so none can be missed by a choice of velocities. The load time
+/// is printed, not asserted: CI builds without optimisation, where it is about ten times the release figure. Needs the prepared
+/// audio. `cargo test --release --test audio_recorded_kit -- --ignored --nocapture recorded_kit_loads_every_sound_by_request`
 #[test]
 #[ignore = "needs the prepared bundled audio"]
 fn recorded_kit_loads_every_sound_by_request() {
@@ -2112,23 +2113,30 @@ fn recorded_kit_loads_every_sound_by_request() {
         resources::{SampleRequest, eligible_regions},
     };
     let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio");
-    let sounds: [u8; 43] = [
-        1, 2, 35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 56, 57, 58,
-        59, 60, 61, 62, 63, 64, 67, 68, 69, 70, 71, 72, 73, 74, 75, 80, 81, 82, 83, 84,
-    ];
-    let requests: Vec<SampleRequest> = sounds
+    let manifest: InstrumentManifest =
+        serde_json::from_slice(&std::fs::read(root.join("manifest.json")).unwrap()).unwrap();
+    let kit = manifest
+        .instruments
         .iter()
-        .flat_map(|&key| {
-            [1u8, 31, 32, 63, 64, 95, 96, 127]
-                .into_iter()
-                .map(move |velocity| SampleRequest {
-                    instrument_id: RECORDED_KIT.into(),
-                    key,
-                    velocity,
-                    articulation: "picked".into(),
-                })
-        })
-        .collect();
+        .find(|i| i.id == RECORDED_KIT)
+        .unwrap();
+    let mut requests: Vec<SampleRequest> = vec![];
+    for region in &kit.regions {
+        for velocity in [region.velocity_low, region.velocity_high] {
+            let request = SampleRequest {
+                instrument_id: RECORDED_KIT.into(),
+                key: region.key_low,
+                velocity,
+                articulation: region.articulation.clone(),
+            };
+            if !requests.iter().any(|r| {
+                (r.key, r.velocity, &r.articulation)
+                    == (request.key, request.velocity, &request.articulation)
+            }) {
+                requests.push(request);
+            }
+        }
+    }
     let started = std::time::Instant::now();
     let loaded = AudioResources::load_for_requests(&root, &requests).unwrap();
     let seconds = started.elapsed().as_secs_f64();
@@ -2138,6 +2146,19 @@ fn recorded_kit_loads_every_sound_by_request() {
         loaded.manifest.notices
     );
     let instrument = &loaded.manifest.instruments[0];
+    // Every region of the kit was selected, so every one was decoded and processed.
+    assert_eq!(
+        instrument.regions.len(),
+        kit.regions.len(),
+        "regions the requests did not reach"
+    );
+    assert!(
+        instrument
+            .regions
+            .iter()
+            .all(|r| loaded.samples.contains_key(&r.sample_id)),
+        "a region without its decoded recording"
+    );
     let table = instrument.kit_processing().unwrap().unwrap();
     let mut largest = (0.0f32, String::new());
     for request in &requests {

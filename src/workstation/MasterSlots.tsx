@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useI18n } from '../i18n';
 import type { MasterSettings } from '../edit-types';
 import { Dialog } from '../ui/Dialog';
@@ -33,8 +34,8 @@ export function MasterSlots({ master, disabled, onChange }: { master: MasterSett
         <button type="button" className="slot-edit" aria-haspopup="dialog" title={t('master_slots.edit', { name: name[effect] })} aria-label={t('master_slots.edit', { name: name[effect] })} onClick={() => setEditing(effect)}><SlidersGlyph /></button>
       </li>)}
     </ul>
-    {editing && <Dialog title={t('inspector.sound_mastering')} className="master-dialog" onClose={() => setEditing(null)} dismissOnBackdrop>
+    {editing && createPortal(<Dialog title={t('inspector.sound_mastering')} className="master-dialog" onClose={() => setEditing(null)} dismissOnBackdrop>
       <MasterPanel master={master} disabled={disabled} onChange={onChange} open={editing === 'all' ? undefined : editing} />
-    </Dialog>}
+    </Dialog>, document.body)}
   </div>;
 }

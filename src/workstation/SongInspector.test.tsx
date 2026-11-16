@@ -108,3 +108,15 @@ it('the initial tempo is compared as a number: 120.0 or a leading space over a t
   fireEvent.change(tempo, { target: { value: String(value + 5) } });fireEvent.blur(tempo);
   expect(onEdit).toHaveBeenCalledTimes(1);expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'setScoreInfo', tempo: value + 5 }));
 });
+
+it('the Score style, mastering and New score defaults dialogs are drawn on the document body, so hiding the inspector cannot hide an open dialog', () => {
+  const { view } = setup();
+  fireEvent.click(screen.getByRole('button', { name: 'Score style…' }));
+  expect(view.container.contains(screen.getByRole('dialog', { name: 'Score style' }))).toBe(false);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'New score defaults…' }));
+  expect(view.container.contains(screen.getByRole('dialog'))).toBe(false);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  fireEvent.click(document.querySelector<HTMLElement>('.slot-edit')!);
+  expect(view.container.contains(screen.getByRole('dialog', { name: 'Sound mastering' }))).toBe(false);
+});

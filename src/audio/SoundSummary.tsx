@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { EditCommand, EffectBlock, TrackSound } from '../edit-types';
 import type { AssetCandidate } from '../project';
 import { useI18n } from '../i18n';
@@ -37,8 +38,8 @@ export function SoundSummary(props: Props) {
       {active.map(block => <li key={block}><button type="button" aria-haspopup="dialog" title={t('sound_summary.edit_effect', { name: localizedBlockName(block, lang) })} aria-label={t('sound_summary.edit_effect', { name: localizedBlockName(block, lang) })} {...busyGuard({ className: 'effect-chip', onClick: () => setOpen({ block }) })}>{localizedBlockName(block, lang)}</button></li>)}
     </ul>
     <button type="button" aria-haspopup="dialog" {...busyGuard({ className: 'sound-editor-open', onClick: () => setOpen({}) })}><AmpGlyph />{t('sound_summary.open_editor')}</button>
-    {open && <Dialog title={t('sound_summary.dialog_title')} className="sound-dialog" onClose={() => setOpen(null)} dismissOnBackdrop>
+    {open && createPortal(<Dialog title={t('sound_summary.dialog_title')} className="sound-dialog" onClose={() => setOpen(null)} dismissOnBackdrop>
       <SoundPanel {...props} openBlock={open.block} shown />
-    </Dialog>}
+    </Dialog>, document.body)}
   </div>;
 }

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { model } from '@coderline/alphatab';
 import { useI18n } from '../i18n';
 import type { EditCommand, MasterSettings } from '../edit-types';
@@ -67,8 +68,8 @@ export function SongInspector({ score, busy, locked, onEdit, styleGroups, master
       <MasterSlots master={master} disabled={masterDisabled} onChange={onMaster} />
     </section>
     {styleOpen && <ScoreStyleDialog {...styleGroups} onClose={() => setStyleOpen(false)} />}
-    {defaultsOpen && <Dialog title={t('editor.author_defaults_title')} className="defaults-dialog" onClose={() => setDefaultsOpen(false)} dismissOnBackdrop>
+    {defaultsOpen && createPortal(<Dialog title={t('editor.author_defaults_title')} className="defaults-dialog" onClose={() => setDefaultsOpen(false)} dismissOnBackdrop>
       <AuthorDefaultsPanel score={score} load={newScoreDefaults} onSave={writeAuthorDefaults} open />
-    </Dialog>}
+    </Dialog>, document.body)}
   </>;
 }

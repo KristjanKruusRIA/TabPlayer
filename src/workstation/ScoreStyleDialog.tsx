@@ -1,4 +1,5 @@
 import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useI18n, type MessageKey } from '../i18n';
 import { Dialog } from '../ui/Dialog';
 import './inspector-compact.css';
@@ -23,7 +24,8 @@ export function ScoreStyleDialog({ style, layout, page, onClose }: { style: Reac
     setGroup(next);
     requestAnimationFrame(() => document.querySelector<HTMLElement>(`.score-style-dialog [data-style-group="${next}"]`)?.focus());
   };
-  return <Dialog title={t('score_style.title')} className="score-style-dialog" onClose={onClose} dismissOnBackdrop>
+  // On the document body, not inside the inspector: the inspector hides itself at short window heights, and a dialog inside it would go with it while the app stays inert.
+  return createPortal(<Dialog title={t('score_style.title')} className="score-style-dialog" onClose={onClose} dismissOnBackdrop>
     <div className="properties-tabs" role="tablist" aria-label={t('score_style.groups')} onKeyDown={keys}>
       {groups.map(item => <button key={item} type="button" role="tab" data-style-group={item} aria-selected={group === item} tabIndex={group === item ? 0 : -1} aria-controls="score-style-panel" onClick={() => setGroup(item)}>{t(labels[item])}</button>)}
     </div>
@@ -33,5 +35,5 @@ export function ScoreStyleDialog({ style, layout, page, onClose }: { style: Reac
       <div hidden={group !== 'layout'}>{layout}</div>
       <div hidden={group !== 'page'}>{page}</div>
     </div>
-  </Dialog>;
+  </Dialog>, document.body);
 }

@@ -58,3 +58,9 @@ it('while busy the selects keep focus and refuse, and the buttons that only open
   view.rerender(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={onEdit} busy />);
   expect(preset).toHaveFocus();expect(preset).not.toBeDisabled();fireEvent.change(preset, { target: { value: 'clean' } });expect(onEdit).not.toHaveBeenCalled();
 });
+
+it('the sound editor is drawn on the document body, not inside the inspector', () => {
+  const view = render(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Delay' }));
+  expect(view.container.contains(screen.getByRole('dialog', { name: 'Sound and pedalboard' }))).toBe(false);
+});

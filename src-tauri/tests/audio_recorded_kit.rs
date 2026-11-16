@@ -1958,6 +1958,10 @@ fn recorded_kit_meets_its_produced_targets() {
     // In the mix: the double kick stands over the rest of the metal pattern above 100 Hz by at least 2 dB (General MIDI 3.5, the
     // kit before it -0.2 or -2.7) and in 2 to 6 kHz is no more than 6 dB under it (General MIDI 5.9 under, the kit before 23).
     let (over, click) = metal_kick_presence(true);
+    let (gm_over, gm_click_over) = metal_kick_presence(false);
+    println!(
+        "kick presence in the metal pattern, above 100 Hz and in 2 to 6 kHz: kit {over:.1} and {click:.1} dB, General MIDI {gm_over:.1} and {gm_click_over:.1} dB"
+    );
     assert!(
         over >= 2.0,
         "the kick stands {over:.1} dB over the rest above 100 Hz"
@@ -1988,6 +1992,7 @@ fn recorded_kit_meets_its_produced_targets() {
             )
         };
         let ((kit_k, kit_peak), (gm_k, _)) = (level(true), level(false));
+        println!("{name}: {kit_k:.1} dB K, peak {kit_peak:.1} dBFS; General MIDI {gm_k:.1} dB K");
         assert!(
             (kit_k - gm_k).abs() <= 1.0,
             "{name}: {kit_k:.1} dB K against General MIDI's {gm_k:.1}"

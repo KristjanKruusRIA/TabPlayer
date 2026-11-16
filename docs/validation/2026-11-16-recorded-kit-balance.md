@@ -1,6 +1,6 @@
 # Recorded drum kit balance against General MIDI (2026-11-16)
 
-Date: 2026-11-16. Branch `agy/drum-kit-balance`, cut from `develop` at `e187ac9`. Candidates on `agy/drum-kit-balance-a`, `-b` and `-c`, and later (see the addendum at the end) `-d` to `-h`.
+Date: 2026-11-16. Branch `agy/drum-kit-balance`, cut from `develop` at `e187ac9`. Candidates on `agy/drum-kit-balance-a`, `-b` and `-c`, and later (see the addendum) `-d` to `-h`; the produced kit is on `agy/drum-kit-produced` (last section).
 
 Status: measured, not listened to. Nobody has heard the candidates; the owner chooses by ear. The shipped kit is unchanged on this branch.
 
@@ -473,3 +473,111 @@ Adopting one means: a new `sources.json` entry (repository, pinned revision, lic
 - The recorded `direct/late` for cymbals is a 1.5 s read, so the "-40 dB" times of cymbals and the open hi-hat are lower bounds.
 - Small-speaker figures are the energy above 100 Hz, not a speaker's real response; a laptop keeps less (it adds little under 150 Hz).
 - The library's licence statement for SM Drums and the audio licence of the Metal Kick Drum samples were not confirmed at the authors' own sites.
+
+## The produced kit (branch `agy/drum-kit-produced`)
+
+The owner listened to candidate H ("close and dry, with a click") and said it was "still distant or roomy" and "sounds raw"; they did not say the kick was weak. General MIDI drums sound normal to them, so General MIDI's tightness is the floor. They chose to process the kit in the app. The direction is a produced modern-metal kit: a short controlled tail, a kick with thump and click, a snare with crack, toms that stop, cymbals that do not wash over the mix. Candidates A to H above stay as the record of what a map alone can do; the branch carries the processing and the data below. Nobody has listened to it yet.
+
+### Design: bake once at load, in the Rust loader
+
+Nothing new runs in the audio callback. Each kit note is a one-shot recording, so tail shaping, equalising, compression and mixing two microphones are all done to the buffer once, when `AudioResources` decodes it on the preparation worker (`src-tauri/src/audio/kit_processing.rs`, called from `resources.rs`). Playing a processed hit is playing a buffer, as before; the renderer, the voices and `tone.rs` are unchanged.
+
+Why the loader and not the prepare script:
+
+- The prepare script has no FLAC decoder and may add no dependency, and its output is the pinned recordings, byte for byte (the manifest keeps each recording's source hash and the offline check compares it). Processing there would have to decode, process and re-encode, replacing the pinned FLAC files by WAV files or by a new FLAC encoder: the installer would grow (the kit's 605 recordings are 200 MB of FLAC; as 24-bit WAV they would be about three times that) and the pins would stop describing what ships.
+- The loader already decodes and verifies every recording, runs on a preparation worker, and is where the kit's data is validated. The processing there is unit-testable on synthetic buffers, on the manifest-level fixtures of `audio_resources.rs` and on the real kit.
+- Cost, measured (best of five, this machine, release build): the metal pattern's kit loads in 0.124 s against 0.091 s without the processing (the groove: 0.058 against 0.042), and what stays decoded in memory falls from 38.4 MB to 7.7 MB (the groove 17.5 to 2.7), because the tails are cut and a cut hit is a shorter buffer. Both figures are in `recorded_kit_load_cost` and bounded by `recorded_kit_meets_its_produced_targets` (under 12 MB, under 2 s).
+- Determinism: no random numbers, no clock, no threads; the same input gives the same output on the same platform (asserted bit for bit). The coefficient maths calls the platform's `sin`, `cos`, `exp` and `powf`, which may differ in the last bit across Windows, macOS and Linux, so the tests compare within tolerances (0.1 dB for filter responses, 1 dB for compression) and never against stored output. Not run on macOS or Linux here.
+
+### The data
+
+`assets/audio/drums/Programs/tabplayer-kit.processing.json` sits beside the kit map. `sources.json` names it on the instrument; the prepare script pins it (it is in the drums inventory), makes it part of the preparation fingerprint and embeds it in the manifest as `instrument.processing`; the loader validates it. A map region may also carry `tp_pair=<recording>`, the second microphone's recording of the same hit: the script fetches, pins, copies and lists it like any recording and links it as the region's `companionId`. The manifest stays at version 1 (both additions are optional fields; an old manifest loads as before). Kit id, keys, the project format and edit types are untouched.
+
+The table is not trusted. `KitProcessing::validate` and the manifest reader reject: unknown fields; more than 32 profiles, 128 sounds or 8 equaliser bands per profile; a profile name that is not 1 to 32 characters of `a-z`, digits and `-`; a sound key that is not a plain number 0 to 127 or names no profile; and any number outside its range (equaliser 20 Hz to 20 kHz, 0.2 to 10 Q, plus or minus 18 dB, a high-pass or low-pass with a gain; compressor threshold -60 to 0 dB, ratio 1 to 20, attack 0.1 to 100 ms, release 5 to 1000 ms, make-up -12 to 24 dB; envelope hold 0 to 5 s, decay 0 to 2000 dB/s, end 20 ms to 20 s; companion gain plus or minus 40 dB, offset 0.5 to 12 ms, correlation 0.1 to 0.99). The loader refuses, at load, a companion recording without its profile or a profile with a companion that the sound lacks, a companion serving two hits, two sounds that would shape one recording differently, a companion in a kit with no table, mismatched sample rates and a pair whose thumps do not correlate. A load error stops the kit, as a bad kit file should; a processed hit can only be shorter than its recording, so bad data cannot grow memory.
+
+### The processors (each in `kit_processing.rs`, in the order they run)
+
+1. Companion mix. The second recording is moved and its polarity set by correlating the two hits' low band (both low-passed at 250 Hz, 4th order, over the first 100 ms) at every offset within the profile's `maxOffsetMs`; the best of all offsets, positive or negative, gives the lag and the sign, and the mix is refused below `minCorrelation`. It is then added at `gainDb`. On the real kick pairs: the vintage microphone arrives 4.08 to 4.42 ms after the kick microphone (the 3 to 5 ms measured earlier by onset), none is inverted, the worst correlation is 0.646 (asserted in `recorded_kit_kick_pairs`).
+2. Equaliser: up to eight cookbook sections (high-pass, low-pass, low shelf, high shelf, peak), in double precision.
+3. Compressor: a feed-forward peak compressor (threshold, ratio, attack, release, make-up) on the stereo peak, with no look-ahead.
+4. Envelope: from `holdMs` after the hit's start (its first frame within 30 dB of its peak) the level falls a further `decayDbPerSecond`; the hit ends at `endMs` with a 15 ms fade. The buffer is cropped first, so the filters and the compressor never see the part that is cut (that took the metal pattern's load from 0.26 s to 0.12 s).
+
+Not built: saturation (a waveshaper needs oversampling to avoid aliasing; the other processors reach the targets without), a gate with its own detector (the envelope does the job on one-shots), and anything that runs per block. Nothing needed real time, so nothing is.
+
+### The profiles
+
+Mics: kick from the kick microphone plus the vintage-sounding microphone as companion; snare, cross stick, rim shot and toms from the snare microphone; hi-hats and cymbals from the overhead microphones (candidate H's choices, with the kick pair moved into the loader); percussion unchanged. Levels are set after the processing from the processed recordings, by the rule of the kit map header (General MIDI's K level at velocity 95 plus an offset: kick +1 dB, snare, cross stick and rim shot +2, hi-hats and cymbals -2, toms 0; then every kit sound -0.5 dB), so the three clips sit on General MIDI's loudness.
+
+| profile | keys | companion | equaliser | compressor | envelope |
+|---|---|---|---|---|---|
+| kick | 35, 36 | +14 dB | high-pass 35 Hz, -5 dB at 350 Hz, +3 at 180 Hz, +3 at 3.5 kHz | -14 dB, 3:1, 2/60 ms, +2 dB | hold 40 ms, 220 dB/s, end 350 ms |
+| snare | 37, 38, 1 | none | high-pass 90 Hz, +2 dB at 180 Hz, -3 at 450 Hz, +4 at 4.5 kHz | -16 dB, 3:1, 3/80 ms, +2 dB | hold 50 ms, 250 dB/s, end 300 ms |
+| tom | 41, 43, 45, 47, 48, 50 | none | high-pass 60 Hz, -3 dB at 350 Hz, +3 at 3.5 kHz | -18 dB, 2.5:1, 3/80 ms, +1 dB | hold 120 ms, 90 dB/s, end 800 ms |
+| hat-closed | 42, 44 | none | high-pass 300 Hz | none | hold 15 ms, 400 dB/s, end 200 ms |
+| hat-open | 46, 2 | none | high-pass 300 Hz | none | hold 200 ms, 45 dB/s, end 1400 ms |
+| crash | 49, 57, 55 | none | high-pass 250 Hz | none | hold 300 ms, 40 dB/s, end 2800 ms |
+| ride | 51, 53, 59 | none | high-pass 250 Hz | none | hold 300 ms, 28 dB/s, end 2500 ms |
+
+The values were set by measurement against the targets below (the first draft had the open hi-hat and ride too short, the kick under General MIDI's presence in the mix, the toms too choked), not by ear.
+
+### Targets, and where they came from
+
+Asserted by `recorded_kit_meets_its_produced_targets` (ignored: it reads the prepared audio; run with `--ignored`):
+
+- Time to fall 40 dB, one hit: kick 0.12 to 0.20 s, snare and rim shot 0.08 to 0.15, toms 0.20 to 0.45, closed hat 0.05 to 0.15, open hat 0.60 to 1.10, crash 0.80 to 1.60, ride 0.60 to 1.20. Ceilings are General MIDI's own, rounded up where a recording can reach them (snare 0.15 against 0.13, closed hat 0.15 against 0.13, open hat 1.10, crash 1.6 against more than 1.5), and above them for the kick (0.20 against 0.04: a kick should keep a few cycles of its 70 Hz thump) and the toms (0.45 against 0.8: toms that stop, not clicks); floors keep nothing choked.
+- Tail share (energy after 200 ms as a share of the first 1.5 s): under -30 dB for kick, snare, rim shot and closed hat, under -20 dB for the toms.
+- Kick: its above-100 Hz share and its 2 to 6 kHz share (re its own total, first 50 ms, velocity 95) each within 3 dB of General MIDI's; in the metal pattern its first 50 ms stand at least 2 dB over the rest of the mix above 100 Hz and at most 6 dB under it in 2 to 6 kHz.
+- Snare: its 2 to 6 kHz share within 2 dB of General MIDI's.
+- Density: crest factor (peak over RMS of the first 300 ms) of kick, snare, rim shot and toms within 8 dB of General MIDI's; no hit peaks above -9 dBFS.
+- Loudness: the three whole clips (K-weighted) within 1 dB of General MIDI's, peaks under -3 dBFS.
+- Load: under 12 MB decoded and 2 s for the metal pattern.
+
+### Before and after
+
+One hit at velocity 100 unless noted, 4 s render at channel volume 119, time from the hit's start (the recording's 3 to 13 ms lead-in is not counted). "Current" is the kit on `develop` (mid microphone, no processing); "H" is candidate H (close and dry, no processing); P1 is this branch; General MIDI is the reference.
+
+Time to fall 40 dB, s (1.50 means it had not by the end of the 1.5 s read):
+
+| element | General MIDI | current | H | P1 (committed) | P2 (natural, not committed) |
+|---|---:|---:|---:|---:|---:|
+| kick (95) | 0.04 | 0.86 | 1.22 | 0.17 | 0.25 |
+| snare (110) | 0.13 | 0.33 | 0.23 | 0.11 | 0.13 |
+| rim shot (110) | 0.13 | 0.43 | 0.41 | 0.12 | 0.16 |
+| low tom | 0.82 | 1.50 | 1.32 | 0.33 | 0.46 |
+| high tom | 0.74 | 0.70 | 0.84 | 0.31 | 0.37 |
+| closed hat | 0.13 | 0.40 | 0.34 | 0.09 | 0.12 |
+| open hat | 1.10 | 1.50 | 1.50 | 0.75 | 0.96 |
+| crash | 1.50 | 1.50 | 1.50 | 1.03 | 1.47 |
+| ride | 1.15 | 1.50 | 1.50 | 0.90 | 1.24 |
+
+Kick and snare, first 50 ms (dB under the hit's own total; velocity 95 kick, 110 snare):
+
+| | General MIDI | current | H | P1 |
+|---|---:|---:|---:|---:|
+| kick above 100 Hz | -5.9 | -4.4 | -0.8 | -6.6 |
+| kick 2 to 6 kHz | -24.0 | -32.5 | -12.6 | -21.8 |
+| snare 2 to 6 kHz | -16.8 | -20.0 | -17.5 | -15.3 |
+| kick tail share (after 200 ms) | none | -14.8 | -14.1 | -52.0 |
+| snare tail share | none | -24.7 | -32.6 | -76.0 |
+
+The kick presence in the metal pattern, first 50 ms of each of its 113 kicks against the rest of the mix: above 100 Hz General MIDI +3.6 dB, current -0.2, P1 +2.9; in 2 to 6 kHz General MIDI -5.9, current -23.2, P1 -2.1.
+
+Crest factor (peak over RMS, first 300 ms): the kick is 14.7 (velocity 95) and 16.7 (127) dB against General MIDI's 14.0, the current kit's 11.9 and 11.4 and H's 14.8 and 16.4; the snare 18.9 against 17.4, 18.0 and 18.5; the toms 14.2 and 14.3 against 17.2 and 20.2, 14.0 and 17.3, 14.0 and 14.3. Crest factor did not fall and is not the measure that shows the processing: cutting a tail removes the quiet part of the window the RMS is taken over, which raises the figure as much as the compressor lowers it. What shows it is the time to -40 dB and the tail share above, and the kick's weight and click.
+
+Whole clips (K-weighted level / peak): groove -35.8 / -12.1 against General MIDI's -35.7, groove at velocity 95 -36.5 / -12.6 against -36.6, metal -29.0 / -8.9 against -29.0.
+
+Load and memory (metal pattern's recordings; best of five): before 0.091 s, 22 recordings, 38.4 MB decoded; after 0.124 s, 7.7 MB. Groove: 0.042 s and 17.5 MB; 0.058 s and 2.7 MB. The kit's pinned recordings are 605 FLAC and WAV files, 200.4 MB (`develop`: 573 files, 219 MB): 32 vintage-microphone kick recordings (4.4 MB) are added; the kick, snare and toms from the close microphones and the hi-hats and cymbals from the overheads are smaller files than the mid-distance ones they replace.
+
+### P1 and P2
+
+P1 is the committed tuning: tight, the shortest tails that keep the kick a kick and the open hi-hat and cymbals open. P2 is the same recordings and levels with longer tails and gentler shaping, for if P1 turns out too gated: kick companion +12 dB, compressor 2:1 at -12 dB, hold 60 ms, 120 dB/s, end 500 ms; snare 2.5:1, hold 60 ms, 150 dB/s, end 450; toms hold 150, 50 dB/s, end 1200; closed hat hold 25, 250 dB/s, end 300; open hat hold 250, 28 dB/s, end 1800; crash hold 400, 22 dB/s, end 3500; ride hold 400, 16 dB/s, end 3200. P2 was re-levelled by the same rule (its clips are -35.8, -36.5 and -28.5 dB K, peaks -12.5, -12.6 and -9.1 dBFS) and it misses the ceilings of the targets above for the kick (0.25 s), the rim shot (0.16 s) and the low tom (0.46 s), by design. It is not in the repository.
+
+### What was and was not done; limits
+
+- Nothing here was listened to. The targets are General MIDI's numbers and a metal mix's needs, not an ear; the profile values are the first set that met them.
+- The kick's click depends on the vintage microphone's recording at a fixed +14 dB over the kick microphone's; the two microphones' layers differ by 13 to 16 dB, so the click's share varies by about 3 dB across velocity layers (not measured per layer).
+- General MIDI's kick falls 40 dB in 0.04 s; the processed kick takes 0.17 s. The 0.12 s floor is a judgment (a 70 Hz thump has a 14 ms period, so 0.12 s is about eight cycles), not a measured limit.
+- Crest factor does not show the change (see above); the compressor is gentle (3:1, a few dB of gain reduction on loud layers) and its effect on the dynamics within a hit was not measured separately from the envelope's.
+- The percussion keys are unprocessed and still on the mid-distance microphone; so is any key the table does not name. `AudioResources::load` (all samples, not requested ones) now processes every named kit hit; the app loads by request, and the full load was not timed.
+- Not run: macOS and Linux; the CI `prepare-audio` job (its steps were run locally: `--record-inventory` fetched the 32 new recordings and `--offline` verifies every pin); the desktop drivers; any real song.
+- A fresh reviewer should check: the alignment's window and reach, which treat the first 100 ms of a thump as the same performance on both microphones; that `process_kits` takes a companion out of the sample map only when no region names it; that the compressor's detector (instantaneous peak) is acceptable for one-shots; that kit sounds sharing recordings (the three low-tom keys, the three high-tom keys) are required to share a profile.

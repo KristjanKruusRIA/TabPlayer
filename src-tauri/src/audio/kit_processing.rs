@@ -24,6 +24,12 @@ const ALIGN_LOWPASS_HZ: f64 = 250.0;
 const ALIGN_WINDOW_MS: f64 = 100.0;
 /// The tail of a hit is faded to nothing over this long, so cutting it never clicks.
 const END_FADE_MS: f64 = 15.0;
+/// The sample rates a processed recording may have, as the voices accept them.
+const RATES: std::ops::RangeInclusive<u32> = 8_000..=192_000;
+/// The largest sample a processed hit may reach, where full scale is 1: 8 is 18 dB over it. The shipped kit's largest is far under.
+pub const MAX_PROCESSED_PEAK: f32 = 8.0;
+/// Values smaller than this are written as zero, so no subnormal number reaches a buffer (they cost a slow path on some CPUs).
+const FLUSH: f64 = 1e-30;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -294,6 +300,9 @@ pub struct Alignment {
     pub lag: isize,
     pub sign: f64,
     pub correlation: f64,
+    /// How far that correlation stands above the best any other alignment gets (a wrong cycle of the thump, or the inverted
+    /// microphone), which is not within 1.5 ms of the chosen one. Near 0 is ambiguous, near the correlation is unmistakable.
+    pub margin: f64,
 }
 
 /// Finds the time offset and polarity at which `companion` best matches `main` in the low band both microphones hear alike (the
@@ -307,6 +316,11 @@ pub fn align_companion(
     max_offset_ms: f64,
     min_correlation: f64,
 ) -> Result<Alignment, String> {
+    if !RATES.contains(&(rate as u32)) || ALIGN_LOWPASS_HZ >= 0.45 * rate {
+        return Err(format!(
+            "The sample rate {rate} Hz is not one the microphones can be aligned at"
+        ));
+    }
     let window = (ALIGN_WINDOW_MS / 1000.0 * rate) as usize;
     let reach = (max_offset_ms / 1000.0 * rate).ceil() as usize;
     let low = |frames: &[[f32; 2]], take: usize| {
@@ -340,6 +354,7 @@ pub fn align_companion(
         }
     };
     let mut best = (0isize, 0.0f64);
+    let mut all = Vec::with_capacity(2 * reach + 1);
     for lag in -(reach as isize)..=(reach as isize) {
         let (mut dot, mut energy_c) = (0.0, 0.0);
         for (t, x) in m.iter().enumerate() {
@@ -351,6 +366,7 @@ pub fn align_companion(
             continue;
         }
         let r = dot / (energy_m * energy_c).sqrt();
+        all.push((lag, r));
         if r.abs() > best.1.abs() + 1e-12 {
             best = (lag, r);
         }
@@ -361,10 +377,17 @@ pub fn align_companion(
             best.1.abs()
         ));
     }
+    let apart = (1.5 / 1000.0 * rate) as isize;
+    let runner_up = all
+        .iter()
+        .filter(|(lag, _)| (lag - best.0).abs() > apart)
+        .map(|(_, r)| r.abs())
+        .fold(0.0, f64::max);
     Ok(Alignment {
         lag: best.0,
         sign: best.1.signum(),
         correlation: best.1.abs(),
+        margin: best.1.abs() - runner_up,
     })
 }
 
@@ -415,6 +438,18 @@ pub fn onset(frames: &[[f64; 2]]) -> usize {
         .unwrap_or(0)
 }
 
+/// Fades the last `END_FADE_MS` of a hit to nothing.
+fn fade_out(frames: &mut [[f64; 2]], rate: f64) {
+    let end = frames.len();
+    let fade = ((END_FADE_MS / 1000.0 * rate) as usize).clamp(1, end.max(1));
+    for (i, frame) in frames.iter_mut().enumerate().skip(end.saturating_sub(fade)) {
+        let t = (end - i) as f64 / fade as f64;
+        let gain = 0.5 - 0.5 * (std::f64::consts::PI * t).cos();
+        frame[0] *= gain;
+        frame[1] *= gain;
+    }
+}
+
 fn shorten(frames: &mut Vec<[f64; 2]>, e: &Envelope, rate: f64) {
     let start = onset(frames);
     let end = ((e.end_ms / 1000.0 * rate) as usize).min(frames.len());
@@ -441,6 +476,11 @@ pub fn process_hit(
     companion: Option<&DecodedAudio>,
 ) -> Result<DecodedAudio, String> {
     let rate = main.sample_rate as f64;
+    if !RATES.contains(&main.sample_rate)
+        || companion.is_some_and(|c| !RATES.contains(&c.sample_rate))
+    {
+        return Err("A kit recording's sample rate is outside 8 to 192 kHz".into());
+    }
     profile.validate()?;
     if profile.eq.iter().any(|b| b.hz >= 0.45 * rate) {
         return Err("An equaliser band is above 0.45 of the sample rate".into());
@@ -491,14 +531,25 @@ pub fn process_hit(
     }
     if let Some(e) = &profile.envelope {
         shorten(&mut frames, e, rate);
+    } else if profile.companion.is_some() {
+        // No envelope ends the hit, and the companion may run on to where the main recording stops: fade out rather than cut.
+        fade_out(&mut frames, rate);
     }
+    let narrow = |v: f64| if v.abs() < FLUSH { 0.0 } else { v as f32 };
     let mut out = Vec::with_capacity(frames.len());
+    let mut peak = 0.0f32;
     for f in &frames {
-        let (l, r) = (f[0] as f32, f[1] as f32);
+        let (l, r) = (narrow(f[0]), narrow(f[1]));
         if !l.is_finite() || !r.is_finite() {
             return Err("Kit processing produced a value that is not a number".into());
         }
+        peak = peak.max(l.abs()).max(r.abs());
         out.push([l, r]);
+    }
+    if peak > MAX_PROCESSED_PEAK {
+        return Err(format!(
+            "Kit processing made a hit peak at {peak:.1}, over the {MAX_PROCESSED_PEAK} allowed"
+        ));
     }
     Ok(DecodedAudio {
         sample_rate: main.sample_rate,
@@ -694,6 +745,8 @@ mod tests {
             assert!((found.lag - 154).abs() <= 1, "lag {}", found.lag);
             assert_eq!(found.sign, sign as f64);
             assert!(found.correlation > 0.97, "{}", found.correlation);
+            // The right cycle and polarity stand clear of every other alignment.
+            assert!(found.margin > 0.1, "margin {}", found.margin);
         }
         // Mixed: aligned and in phase the two add (+6 dB for equal levels); summed blindly the inverted one would cancel.
         let profile = Profile {
@@ -808,6 +861,110 @@ mod tests {
             .validate()
             .is_err()
         );
+    }
+
+    #[test]
+    fn sample_rates_outside_the_supported_range_are_refused() {
+        for rate in [4_000u32, 200_000] {
+            let audio = DecodedAudio {
+                sample_rate: rate,
+                channels: 2,
+                frames: Arc::new(vec![[0.1, 0.1]; 4800]),
+            };
+            let error = process_hit(&Profile::default(), &audio, None)
+                .err()
+                .unwrap();
+            assert!(error.contains("sample rate"), "{error}");
+        }
+        // The alignment's low-pass has to sit well under half the rate.
+        let hit = thump(0.004, 0.4, 1.0);
+        assert!(align_companion(&hit, &hit, 400.0, 8.0, 0.5).is_err());
+        assert!(align_companion(&hit, &hit, 48_000.0, 8.0, 0.5).is_ok());
+    }
+
+    #[test]
+    fn no_subnormal_value_reaches_a_processed_buffer() {
+        // A tail falling 2000 dB a second passes through the subnormal range of a float on its way to nothing.
+        let profile = Profile {
+            envelope: Some(Envelope {
+                hold_ms: 0.0,
+                decay_db_per_second: 2000.0,
+                end_ms: 1400.0,
+            }),
+            ..Profile::default()
+        };
+        let out = process_hit(&profile, &audio(sine(200.0, 1.5, 0.5)), None).unwrap();
+        assert!(out.frames.iter().any(|f| f[0] != 0.0));
+        assert!(
+            out.frames
+                .iter()
+                .flatten()
+                .all(|v| *v == 0.0 || v.abs() >= 1e-30),
+            "a value under 1e-30 survived"
+        );
+        assert!(out.frames[(0.5 * RATE) as usize][0] == 0.0);
+    }
+
+    #[test]
+    fn a_result_over_the_peak_ceiling_is_refused() {
+        let loud = Profile {
+            compressor: Some(Compressor {
+                threshold_db: 0.0,
+                ratio: 1.0,
+                attack_ms: 1.0,
+                release_ms: 50.0,
+                makeup_db: 24.0,
+            }),
+            ..Profile::default()
+        };
+        // 0.9 at +24 dB is 14: over the ceiling of 8. At +12 dB it is 3.6.
+        let error = process_hit(&loud, &audio(sine(300.0, 0.2, 0.9)), None)
+            .err()
+            .unwrap();
+        assert!(error.contains("peak"), "{error}");
+        let fine = Profile {
+            compressor: Some(Compressor {
+                makeup_db: 12.0,
+                ..loud.compressor.clone().unwrap()
+            }),
+            ..loud
+        };
+        assert!(process_hit(&fine, &audio(sine(300.0, 0.2, 0.9)), None).is_ok());
+    }
+
+    #[test]
+    fn a_companion_without_an_envelope_is_faded_where_the_main_recording_ends() {
+        // Both run on at full level to the end of the main recording; the mix must not stop dead there.
+        let steady = sine(70.0, 0.4, 0.5);
+        let profile = Profile {
+            companion: Some(Companion {
+                gain_db: 0.0,
+                max_offset_ms: 8.0,
+                min_correlation: 0.5,
+            }),
+            ..Profile::default()
+        };
+        let faded = process_hit(
+            &profile,
+            &audio(steady.clone()),
+            Some(&audio(steady.clone())),
+        )
+        .unwrap();
+        let n = faded.frames.len();
+        assert_eq!(n, steady.len());
+        assert!(
+            faded.frames[n - 1][0].abs() < 1e-3,
+            "{}",
+            faded.frames[n - 1][0]
+        );
+        let before = faded.frames[n - (0.03 * RATE) as usize..n - (0.02 * RATE) as usize]
+            .iter()
+            .map(|f| f[0].abs())
+            .fold(0.0, f32::max);
+        assert!(before > 0.5, "{before}");
+        // With no companion the recording is left as it is.
+        let plain = process_hit(&Profile::default(), &audio(steady.clone()), None).unwrap();
+        assert_eq!(plain.frames[..], steady[..]);
     }
 
     #[test]

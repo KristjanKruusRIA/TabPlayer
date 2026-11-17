@@ -2176,6 +2176,46 @@
         "presets": {}
       },
       "error": true
+    },
+    {
+      "name": "a_revision_is_an_integer_when_present",
+      "file": {
+        "presets": [
+          {
+            "id": "a",
+            "revision": 3
+          },
+          {
+            "id": "b",
+            "revision": -1
+          },
+          {
+            "id": "c",
+            "revision": "1"
+          },
+          {
+            "id": "d",
+            "revision": 1.5
+          },
+          {
+            "id": "e"
+          },
+          {
+            "id": "f",
+            "revision": null
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "a",
+          "rows": []
+        },
+        {
+          "id": "e",
+          "rows": []
+        }
+      ]
     }
   ]
 }

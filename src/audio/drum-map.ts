@@ -48,11 +48,12 @@ export function validateDrumMap(map: unknown): asserts map is DrumMapRef {
 export interface ResolvedDrumMap { byId: Uint8Array; byKey: Uint8Array }
 type PresetRows = readonly (readonly [number, number | null])[];
 
-/** Why a presets-file entry is malformed, or null. The rules are those of `parse_preset` in `src-tauri/src/audio/drum_map.rs`: the id is a string, `rows` is absent or a list, and each row is `[id 0-255, key 0-127 or null]` of integers. */
+/** Why a presets-file entry is malformed, or null. The rules are those of `parse_preset` in `src-tauri/src/audio/drum_map.rs`: the id is a string, `revision` is absent or a non-negative integer, `rows` is absent or a list, and each row is `[id 0-255, key 0-127 or null]` of integers. */
 function presetProblem(entry: unknown): string | null {
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return 'a preset is not an object';
-  const { id, rows } = entry as { id?: unknown; rows?: unknown };
+  const { id, rows, revision } = entry as { id?: unknown; rows?: unknown; revision?: unknown };
   if (typeof id !== 'string') return 'a preset has no id';
+  if (Object.hasOwn(entry, 'revision') && (typeof revision !== 'number' || !Number.isInteger(revision) || revision < 0 || revision > 4294967295)) return `preset "${id}": revision is not a whole number`;
   if (!Object.hasOwn(entry, 'rows')) return null;
   if (!Array.isArray(rows)) return `preset "${id}": rows is not a list`;
   for (const row of rows as unknown[]) {
@@ -125,7 +126,8 @@ export function cleanDrumMap(map: DrumMapRef | undefined | null): DrumMapRef | u
 export function withDrumMap(mix: ChannelMix, map: DrumMapRef | undefined | null): ChannelMix {
   const cleaned = cleanDrumMap(map), { drumMap: _stored, ...rest } = mix;
   void _stored;
-  const same = JSON.stringify(cleaned ?? null) === JSON.stringify(mix.drumMap ?? null);
+  // Compared by what each means, not by how it is written: a stored map that is not canonical equals its canonical form.
+  const same = JSON.stringify(cleaned ?? null) === JSON.stringify(cleanDrumMap(mix.drumMap) ?? null);
   return same ? mix : cleaned ? { ...rest, drumMap: cleaned } : rest;
 }
 
@@ -147,7 +149,7 @@ export function mapArticulationId(track: model.Track, id: number): number | unde
 }
 
 /** One layout a drum map can start from, as `drum-maps.json` describes it. Only `id` is required: `state` says whether the layout was checked against the instrument it belongs to, `candidates` lists keys worth trying for a row, `[articulation id, [key, ...]]`. */
-export interface DrumMapPreset { id: string; name?: string; state?: 'verified' | 'unverified'; source?: string; checked?: string; rows?: PresetRows; candidates?: readonly (readonly [number, readonly number[]])[] }
+export interface DrumMapPreset { id: string; /** Counts changes to the preset's data, so a later edit of its rows is visible; resolution ignores it. */ revision?: number; name?: string; state?: 'verified' | 'unverified'; source?: string; checked?: string; rows?: PresetRows; candidates?: readonly (readonly [number, readonly number[]])[] }
 /** The layouts this build knows, General MIDI first. */
 export const drumMapPresets = (): readonly DrumMapPreset[] => loaded.presets;
 

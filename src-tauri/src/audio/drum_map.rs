@@ -194,6 +194,8 @@ fn is_output_key(key: u8) -> bool {
 /// A preset the player knows: its changed rows from General MIDI.
 struct Preset {
     id: String,
+    /// Counts changes to the preset's data, so a later edit of its rows is visible. Resolution ignores it.
+    revision: Option<u32>,
     rows: Vec<(u8, Option<u8>)>,
 }
 
@@ -207,6 +209,15 @@ fn parse_preset(entry: &serde_json::Value) -> Result<Preset, String> {
         .as_str()
         .ok_or("a preset has no id")?
         .to_string();
+    let revision = match entry.get("revision") {
+        None => None,
+        Some(value) => Some(
+            value
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .ok_or_else(|| format!("preset \"{id}\": revision is not a whole number"))?,
+        ),
+    };
     let mut rows = Vec::new();
     let listed = match entry.get("rows") {
         None => &[][..],
@@ -236,7 +247,7 @@ fn parse_preset(entry: &serde_json::Value) -> Result<Preset, String> {
         };
         rows.push((row_id, key));
     }
-    Ok(Preset { id, rows })
+    Ok(Preset { id, revision, rows })
 }
 
 /// The presets of a presets file and what was wrong with the ones left out: a malformed preset is dropped as a whole and the others
@@ -329,6 +340,7 @@ mod tests {
         let presets = parse_presets(FILE).unwrap();
         assert_eq!(presets.len(), 1);
         assert_eq!(presets[0].id, "gm");
+        assert_eq!(presets[0].revision, Some(1));
         assert!(presets[0].rows.is_empty());
         assert_eq!(super::presets().len(), 1);
         assert!(parse_presets("{").is_err());

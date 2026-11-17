@@ -7,7 +7,7 @@ import { buildDocument, previewEdit, trackIdentity } from '../engine';
 import { defaultMix, validateBackingSettings, validateMix } from '../document-settings';
 import { blankProject } from '../project';
 import fixture from '../../tests/drum-map-protocol.json';
-import { cleanDrumMap, drumMapProblem, isStandardArticulation, mapArticulationId, mappedKey, readPresets, resolveDrumMap, withDrumMap } from './drum-map';
+import { cleanDrumMap, drumMapPresets, drumMapProblem, isStandardArticulation, mapArticulationId, mappedKey, readPresets, resolveDrumMap, withDrumMap } from './drum-map';
 
 const table = () => [...new Map(standardPercussionCatalog.map(entry => [entry.id, entry.outputMidiNumber])).entries()].sort((a, b) => a[0] - b[0]);
 
@@ -16,7 +16,7 @@ it('holds the standard articulation catalogue, once, for the native side too', (
   expect(maps.sounds).toHaveLength(94);
   expect(new Set(maps.sounds.map(([, key]) => key)).size).toBe(51);
   expect(maps.sounds.every(([id, key], index) => Number.isInteger(id) && key >= 0 && key < 128 && (index === 0 || id > maps.sounds[index - 1][0]))).toBe(true);
-  expect(maps.presets).toEqual([{ id: 'gm', state: 'verified', source: 'General MIDI keys, as the built-in kit plays them.' }]);
+  expect(maps.presets).toEqual([{ id: 'gm', revision: 1, state: 'verified', source: 'General MIDI keys, as the built-in kit plays them.' }]);
 });
 
 it('knows exactly the standard ids', () => {
@@ -136,4 +136,24 @@ it('reads a number written as a float as the integer it is, so only the native l
     expect(problem, name).toBeNull();
   }
   expect(JSON.parse('[38.0, 3.8e1, 1e2, 4e1]')).toEqual([38, 38, 100, 40]);
+});
+
+it('compares a chosen map with the stored one by what they mean, so choosing an equivalent of a non-canonical stored map records nothing', () => {
+  // Stored by an older writer or by hand: a row equal to its preset's own, rows out of order, an empty row list's cousin.
+  const redundant = { ...defaultMix(), drumMap: { preset: 'gm', keys: [[38, 38]] } } as ChannelMix;
+  expect(withDrumMap(redundant, { preset: 'gm' })).toBe(redundant);
+  expect(withDrumMap(redundant, undefined)).toBe(redundant);
+  const unordered = { ...defaultMix(), drumMap: { preset: 'gm', keys: [[91, 40], [38, 40]] } } as unknown as ChannelMix;
+  expect(withDrumMap(unordered, { preset: 'gm', keys: [[38, 40], [91, 40]] })).toBe(unordered);
+  const noisy = { ...defaultMix(), drumMap: { preset: 'gm', keys: [[38, 40], [42, 42]] } } as ChannelMix;
+  expect(withDrumMap(noisy, { preset: 'gm', keys: [[38, 40]] })).toBe(noisy);
+  // A real change is still recorded, and writes the canonical map.
+  expect(withDrumMap(redundant, { preset: 'gm', keys: [[38, 41]] }).drumMap).toEqual({ preset: 'gm', keys: [[38, 41]] });
+});
+
+it('carries the revision of each preset, an integer, so a later change to the data is visible', () => {
+  expect(drumMapPresets().map(preset => [preset.id, preset.revision])).toEqual([['gm', 1]]);
+  const read = readPresets({ presets: [{ id: 'a', revision: 3 }, { id: 'b', revision: -1 }, { id: 'c', revision: 'x' }, { id: 'd', revision: 1.5 }, { id: 'e' }] });
+  expect(read.presets.map(preset => preset.id)).toEqual(['a', 'e']);
+  expect(read.problems).toHaveLength(3);
 });

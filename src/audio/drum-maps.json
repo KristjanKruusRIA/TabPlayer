@@ -96,6 +96,6 @@
     [127, 59]
   ],
   "presets": [
-    { "id": "gm", "state": "verified", "source": "General MIDI keys, as the built-in kit plays them." }
+    { "id": "gm", "revision": 1, "state": "verified", "source": "General MIDI keys, as the built-in kit plays them." }
   ]
 }

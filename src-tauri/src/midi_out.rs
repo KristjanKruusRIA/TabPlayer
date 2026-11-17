@@ -985,6 +985,11 @@ impl MidiOut {
                     let mix = settings.mixes.get(id).cloned().unwrap_or_default();
                     let mut spec = RouteSpec::lanes(slot, port_gen, pairs);
                     spec.knock = wants.iter().any(|w| w.track == *track && w.knock);
+                    // A percussion track's map is the port's key table for it; a knock lane (a guitar's golpe) never has one.
+                    spec = spec.with_drum_map(crate::audio::drum_map::resolve(
+                        mix.drum_map.as_ref(),
+                        plan.tracks[*track].percussion,
+                    ));
                     spec.audible = !mix.mute && (!any_solo || mix.solo);
                     spec.gain = mix.gain;
                     spec.pan = mix.pan;
@@ -2056,6 +2061,42 @@ mod tests {
         );
         let tap = rig.out.build_route(&plan, &solo, false).tap.unwrap();
         assert!(!tap.is_live(0) && !tap.is_live(1) && tap.is_live(2));
+    }
+
+    #[test]
+    fn a_percussion_tracks_drum_map_goes_into_its_route_and_a_melodic_tracks_never_does() {
+        use crate::audio::midi_out::MidiRecord;
+        let rig = rig(&["Synth"]);
+        let plan = plan_using(&[("a", false), ("p", true)], &[("a", 0), ("p", 9)]);
+        let mut document = settings(&[("a", "Synth"), ("p", "Synth")]);
+        let map = crate::settings::DrumMapRef {
+            preset: "gm".into(),
+            keys: vec![(38, Some(51))],
+        };
+        for id in ["a", "p"] {
+            document.mixes.get_mut(id).unwrap().drum_map = Some(map.clone());
+        }
+        rig.out
+            .ensure_ports(&MidiOut::port_names(&document), Ensure::Prepare);
+        rig.out.settle();
+        let mut tap = rig.out.build_route(&plan, &document, false).tap.unwrap();
+        let strike = |track: &str, channel: u8| {
+            serde_json::from_value::<crate::audio::plan::PlanMidiEvent>(serde_json::json!({
+                "type": "noteOn", "trackId": track, "tick": 0, "channel": channel, "key": 38, "velocity": 90
+            }))
+            .unwrap()
+        };
+        tap.event(0, &strike("a", 0));
+        tap.event(1, &strike("p", 9));
+        let keys: Vec<u8> = tap
+            .staged()
+            .iter()
+            .filter_map(|record| match record {
+                MidiRecord::Message { bytes, .. } if bytes[0] & 0xf0 == 0x90 => Some(bytes[1]),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(keys, vec![38, 51], "only the percussion track is mapped");
     }
 
     // ---- the sender's work, with a clock the test turns by hand ----

@@ -11,13 +11,14 @@ use std::{
 use tabplayer_lib::{
     audio::{
         device::{CallbackTransport, PracticeSettings, TransportCommand},
+        drum_map::{self, DrumMap},
         midi_out::{MidiOutShared, MidiRecord, MidiTap, RouteSpec},
         plan::PlaybackPlan,
         practice::{CountInSettings, MetronomeSettings, PracticeTempo},
         renderer::Renderer,
         resources::AudioResources,
     },
-    settings::{DocumentSettings, TrackSound},
+    settings::{DocumentSettings, DrumMapRef, TrackSound},
 };
 
 thread_local! {static COUNT_HEAP:Cell<bool>=const {Cell::new(false)};static HEAP_OPERATIONS:Cell<usize>=const {Cell::new(0)};}
@@ -1134,4 +1135,412 @@ fn a_shift_applied_while_playing_releases_the_old_keys_and_sounds_the_new_ones()
         held.contains(&(0, 0, 65)) && held.contains(&(0, 0, 67)),
         "{held:?}"
     );
+}
+// ---- per-track drum maps (THE-219) ----------------------------------------------------------------------------------------
+
+fn drum_event(kind: &str, tick: u32, key: u8, id: Option<u8>) -> Value {
+    let mut value = if kind == "on" {
+        on("drums", tick, 9, key)
+    } else {
+        off("drums", tick, 9, key)
+    };
+    if let Some(id) = id {
+        value["articulationId"] = json!(id);
+    }
+    value
+}
+
+/// The resolved table of a map on General MIDI with `rows` changed.
+fn map_of(rows: &[(u8, Option<u8>)]) -> DrumMap {
+    drum_map::resolve(
+        Some(&DrumMapRef {
+            preset: "gm".into(),
+            keys: rows.to_vec(),
+        }),
+        true,
+    )
+}
+
+/// The drums' route to channel 10 of slot 0, through a map of `rows`.
+fn drum_route(rows: &[(u8, Option<u8>)]) -> RouteSpec {
+    RouteSpec::lanes(0, 0, &[(9, 9)]).with_drum_map(map_of(rows))
+}
+
+/// The note messages among `messages`, in order, channel included.
+fn notes_of(messages: &[Message]) -> Vec<[u8; 3]> {
+    messages
+        .iter()
+        .filter(|m| matches!(m.bytes[0] & 0xf0, 0x80 | 0x90))
+        .map(|m| [m.bytes[0], m.bytes[1], m.bytes[2]])
+        .collect()
+}
+
+#[test]
+fn a_drum_map_sends_mapped_notes_on_channel_ten_and_silent_rows_send_nothing() {
+    let events = vec![
+        drum_event("on", 0, 36, None),
+        drum_event("off", 120, 36, None),
+        drum_event("on", 960, 38, None),
+        drum_event("off", 1080, 38, None),
+        // A rim shot is key 38 too; the id tells it from the snare.
+        drum_event("on", 1920, 38, Some(91)),
+        drum_event("off", 2040, 38, Some(91)),
+        // A silent row: neither the note nor its end is sent.
+        drum_event("on", 2400, 42, None),
+        drum_event("off", 2500, 42, None),
+    ];
+    let routes = [(
+        DRUMS,
+        drum_route(&[(36, Some(50)), (38, Some(51)), (42, None), (91, Some(52))]),
+    )];
+    let mut rig = Rig::with_plan(&routes, plan_with(1, events));
+    rig.play();
+    rig.run(3.5);
+    let messages = rig.messages();
+    assert_eq!(
+        notes_of(&messages),
+        vec![
+            [0x99, 50, 90],
+            [0x89, 50, 0],
+            [0x99, 51, 90],
+            [0x89, 51, 0],
+            [0x99, 52, 90],
+            [0x89, 52, 0],
+        ]
+    );
+    assert_eq!(sounding(&messages), vec![]);
+}
+
+#[test]
+fn a_seek_and_a_loop_wrap_strike_the_held_notes_again_on_their_mapped_keys() {
+    // A snare, a rim shot (the same key 38) and a silent hat are held from early on to the end.
+    let events = vec![
+        drum_event("on", 100, 38, None),
+        drum_event("on", 200, 38, Some(91)),
+        drum_event("on", 300, 42, None),
+        drum_event("off", 7000, 38, None),
+        drum_event("off", 7000, 38, Some(91)),
+        drum_event("off", 7000, 42, None),
+    ];
+    let routes = [(
+        DRUMS,
+        drum_route(&[(38, Some(51)), (42, None), (91, Some(52))]),
+    )];
+    let mut rig = Rig::with_plan(&routes, plan_with(1, events.clone()));
+    rig.play();
+    rig.run(0.5);
+    let mut all = rig.messages();
+    rig.command(TransportCommand::SeekTick {
+        generation: 1,
+        tick: 2500.0,
+    });
+    rig.run(0.2);
+    all.extend(rig.messages());
+    assert_eq!(
+        sounding(&all),
+        vec![(0, 9, 51), (0, 9, 52)],
+        "the seek struck what the score holds on the keys the map gives"
+    );
+    assert!(
+        notes_of(&all)
+            .iter()
+            .all(|n| n[1] != 38 && n[1] != 42 && n[1] != 0),
+        "no plan key reached the port"
+    );
+    rig.command(TransportCommand::Stop { generation: 1 });
+    rig.run(0.1);
+    all.extend(rig.messages());
+    assert_eq!(sounding(&all), vec![], "nothing is stuck after stop");
+
+    // A loop wrap states the position again, on the same keys.
+    let mut rig = Rig::with_plan(&routes, plan_with(1, events));
+    rig.command(TransportCommand::SetLoop {
+        generation: 1,
+        start_tick: 2200.0,
+        end_tick: 2400.0,
+    });
+    rig.play();
+    rig.run(0.6);
+    let looped = rig.messages();
+    let strikes = |key: u8| {
+        notes_of(&looped)
+            .iter()
+            .filter(|n| n[0] == 0x99 && n[1] == key)
+            .count()
+    };
+    assert!(
+        strikes(51) >= 2 && strikes(52) >= 2,
+        "{} {}",
+        strikes(51),
+        strikes(52)
+    );
+    assert_eq!(strikes(38) + strikes(42), 0);
+}
+
+#[test]
+fn a_map_changed_while_a_key_is_held_releases_the_old_key_and_strikes_the_new_one_and_nothing_sticks()
+ {
+    let events = vec![
+        drum_event("on", 100, 38, None),
+        drum_event("on", 100, 36, None),
+        drum_event("off", 7000, 38, None),
+        drum_event("off", 7000, 36, None),
+    ];
+    let mut rig = Rig::with_plan(
+        &[(DRUMS, drum_route(&[(38, Some(51))]))],
+        plan_with(1, events),
+    );
+    rig.play();
+    rig.run(0.5);
+    let mut all = rig.messages();
+    assert_eq!(sounding(&all), vec![(0, 9, 36), (0, 9, 51)]);
+
+    // The same map arriving again changes nothing: no note is released or struck.
+    let same = tap(&[(DRUMS, drum_route(&[(38, Some(51))]))]);
+    drop(rig.transport.replace_midi(same, 1));
+    rig.run(0.1);
+    let quiet = rig.messages();
+    assert!(
+        notes_of(&quiet).is_empty(),
+        "an unchanged map is left alone"
+    );
+    all.extend(quiet);
+
+    // Another key for the snare: the old key is let go first, then what the score holds is struck on the new one.
+    let changed = tap(&[(DRUMS, drum_route(&[(38, Some(52))]))]);
+    drop(rig.transport.replace_midi(changed, 1));
+    rig.run(0.1);
+    let after = rig.messages();
+    let notes = notes_of(&after);
+    let released = notes.iter().position(|n| *n == [0x89, 51, 0]).unwrap();
+    let struck = notes
+        .iter()
+        .position(|n| n[0] == 0x99 && n[1] == 52)
+        .unwrap();
+    assert!(released < struck, "{notes:?}");
+    all.extend(after);
+    assert_eq!(sounding(&all), vec![(0, 9, 36), (0, 9, 52)]);
+
+    // The map goes away: the key it sent is let go and the plan's own is struck.
+    drop(rig.transport.replace_midi(tap(&[(DRUMS, spec(0, 9))]), 1));
+    rig.run(0.1);
+    all.extend(rig.messages());
+    assert_eq!(sounding(&all), vec![(0, 9, 36), (0, 9, 38)]);
+    rig.command(TransportCommand::Stop { generation: 1 });
+    rig.run(0.1);
+    all.extend(rig.messages());
+    assert_eq!(sounding(&all), vec![], "nothing is stuck after stop");
+}
+
+/// Two drum tracks that share channel 10 of one port.
+fn two_drums(first: &[(u8, Option<u8>)], second: &[(u8, Option<u8>)], events: Vec<Value>) -> Rig {
+    let mut midi = events;
+    midi.sort_by_key(|e| e["tick"].as_u64().unwrap());
+    let plan: PlaybackPlan = serde_json::from_value(json!({
+        "generation": 1, "ppq": 960, "durationTick": 7680, "durationMs": 8000,
+        "tracks": [
+            {"id": "d1", "program": 0, "percussion": true},
+            {"id": "d2", "program": 0, "percussion": true}
+        ],
+        "tempos": [{"tick": 0, "bpm": 60}],
+        "occurrences": [
+            {"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":4000},
+            {"bar":1,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":4000,"endMs":8000}
+        ],
+        "notes": [], "midi": midi
+    }))
+    .unwrap();
+    let mut settings = DocumentSettings::default();
+    for track in ["d1", "d2"] {
+        settings.sounds.insert(
+            track.into(),
+            TrackSound {
+                voice_id: Some("gm".into()),
+                ..TrackSound::default()
+            },
+        );
+    }
+    let (mut transport, shared) = CallbackTransport::headless_with_midi(RATE);
+    let mut renderer =
+        Box::new(Renderer::new(Arc::new(plan), resources(), settings, RATE).unwrap());
+    renderer.replace_midi(MidiTap::new(
+        &[0, 0],
+        &[(0, drum_route(first)), (1, drum_route(second))],
+    ));
+    transport.install(renderer, 1, false);
+    Rig {
+        transport,
+        shared,
+        callback: vec![[0.0; 2]; 480],
+        heard: Vec::new(),
+    }
+}
+
+fn two_drum_event(kind: &str, track: &str, tick: u32, key: u8) -> Value {
+    let mut value = if kind == "on" {
+        on(track, tick, 9, key)
+    } else {
+        off(track, tick, 9, key)
+    };
+    value["trackId"] = json!(track);
+    value
+}
+
+#[test]
+fn two_drum_tracks_sharing_channel_ten_each_use_their_own_map() {
+    let events = vec![
+        two_drum_event("on", "d1", 100, 38),
+        two_drum_event("off", "d1", 200, 38),
+        two_drum_event("on", "d2", 300, 38),
+        two_drum_event("off", "d2", 400, 38),
+    ];
+    let mut rig = two_drums(&[(38, Some(51))], &[(38, Some(52))], events);
+    rig.play();
+    rig.run(1.0);
+    assert_eq!(
+        notes_of(&rig.messages()),
+        vec![[0x99, 51, 90], [0x89, 51, 0], [0x99, 52, 90], [0x89, 52, 0]]
+    );
+}
+
+#[test]
+fn two_tracks_that_send_the_same_key_each_keep_their_own_count_as_they_did_before_maps() {
+    // Track one holds snare 38 mapped to 60 from 100 to 500; track two's kick 36 is also mapped to 60, 200 to 300. Each track
+    // has a lane of its own, so each ends the key it struck: the second track's end cuts the first track's note on the port.
+    // That is what two tracks on one key have always done here, and a map does not change it.
+    let events = vec![
+        two_drum_event("on", "d1", 100, 38),
+        two_drum_event("off", "d1", 500, 38),
+        two_drum_event("on", "d2", 200, 36),
+        two_drum_event("off", "d2", 300, 36),
+    ];
+    let mut rig = two_drums(&[(38, Some(60))], &[(36, Some(60))], events);
+    rig.play();
+    rig.run(1.0);
+    assert_eq!(
+        notes_of(&rig.messages()),
+        vec![[0x99, 60, 90], [0x99, 60, 90], [0x89, 60, 0], [0x89, 60, 0]]
+    );
+}
+
+#[test]
+fn a_golpe_knock_stays_on_its_own_key_whatever_map_its_route_carries() {
+    let map = map_of(&[(38, Some(51)), (77, Some(52))]);
+    let routes = vec![
+        (
+            LEAD,
+            RouteSpec {
+                knock: true,
+                ..RouteSpec::lanes(0, 0, &[(0, 0), (9, 9)])
+            }
+            .with_drum_map(map),
+        ),
+        (BASS, spec(0, 1)),
+        (DRUMS, spec(0, 9)),
+    ];
+    let mut rig = Rig::with_plan(&routes, plan_with(1, knock_events()));
+    rig.play();
+    rig.run(1.5);
+    let notes = notes_of(&rig.messages());
+    assert!(notes.contains(&[0x99, 77, 90]) && notes.contains(&[0x89, 77, 0]));
+    assert!(notes.contains(&[0x99, 38, 90]));
+    assert!(notes.iter().all(|n| n[1] != 51 && n[1] != 52), "{notes:?}");
+}
+
+#[test]
+fn a_map_that_changes_nothing_leaves_the_port_log_exactly_as_it_was() {
+    let log = |routes: &[(usize, RouteSpec)]| {
+        let mut rig = Rig::new(routes);
+        rig.play();
+        rig.run(3.5);
+        rig.command(TransportCommand::SeekTick {
+            generation: 1,
+            tick: 2500.0,
+        });
+        rig.run(0.3);
+        rig.command(TransportCommand::Stop { generation: 1 });
+        rig.run(0.1);
+        rig.messages()
+    };
+    let plain = log(&all_routed());
+    assert!(plain.iter().any(|m| m.bytes == [0x99, 36, 90]));
+    let identity = vec![
+        (LEAD, spec(0, 0)),
+        (BASS, spec(0, 1)),
+        (DRUMS, drum_route(&[(36, Some(36))])),
+    ];
+    assert_eq!(plain, log(&identity));
+}
+
+#[test]
+fn the_audio_path_never_touches_the_heap_while_mapped_notes_are_routed_and_a_changed_map_is_adopted()
+ {
+    let mut events = default_events();
+    for (tick, key, id) in [(300, 38, None), (400, 38, Some(91)), (500, 42, None)] {
+        events.push(drum_event("on", tick, key, id));
+        events.push(drum_event("off", tick + 600, key, id));
+    }
+    let routed = |rows: &[(u8, Option<u8>)]| {
+        tap(&[
+            (LEAD, spec(0, 0)),
+            (BASS, spec(0, 1)),
+            (DRUMS, drum_route(rows)),
+        ])
+    };
+    let (mut transport, shared) = CallbackTransport::headless_with_midi(RATE);
+    let mut first = renderer_of(plan_with(1, events), DocumentSettings::default());
+    first.replace_midi(routed(&[
+        (36, Some(50)),
+        (38, Some(51)),
+        (42, None),
+        (91, Some(52)),
+    ]));
+    transport.install(first, 1, false);
+    let mut block = vec![[0.0f32; 2]; 1024];
+    let delivered = Cell::new(0usize);
+    let mut render = |transport: &mut CallbackTransport, callbacks: usize| {
+        for _ in 0..callbacks {
+            transport.render_callback(&mut block);
+            while shared.ring.pop().is_some() {
+                delivered.set(delivered.get() + 1);
+            }
+        }
+    };
+    let ((), operations) = counted(|| {
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        render(&mut transport, 60);
+        transport
+            .command(TransportCommand::SeekTick {
+                generation: 1,
+                tick: 800.0,
+            })
+            .unwrap();
+        render(&mut transport, 20);
+    });
+    assert_eq!(operations, 0, "playing and seeking through a map");
+    // Changed maps, each adopted while keys are held.
+    for rows in [
+        vec![(36, Some(53)), (38, Some(54)), (91, Some(55))],
+        vec![(38, Some(51))],
+        vec![(38, Some(51)), (42, Some(43))],
+    ] {
+        let next = routed(&rows);
+        let (old, operations) = counted(|| {
+            let old = transport.replace_midi(next, 1);
+            render(&mut transport, 10);
+            old
+        });
+        assert_eq!(operations, 0, "adopting the map {rows:?}");
+        drop(old);
+    }
+    let ((), operations) = counted(|| {
+        transport
+            .command(TransportCommand::Stop { generation: 1 })
+            .unwrap();
+        render(&mut transport, 5);
+    });
+    assert_eq!(operations, 0, "stopping");
+    assert!(delivered.get() > 50, "{}", delivered.get());
 }

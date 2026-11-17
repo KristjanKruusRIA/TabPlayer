@@ -93,7 +93,7 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
   const source = !known ? '' : presetId === 'gm' ? t('drum_map.source_gm') : preset.source ?? '';
   const status = !known ? t('drum_map.status_unknown')
     : preset.state === 'unverified' ? `${source} ${t('drum_map.status_unverified')}`.trim()
-    : preset.checked ? t('drum_map.status_checked', { source, date: preset.checked }).trim() : source;
+    : preset.checked ? t('drum_map.status_checked', { source, date: typeof preset.checked === 'string' ? preset.checked : preset.checked.date }).trim() : source;
 
   /** Stores `next` as the track's map as one edit; the current map, or a refusal while busy, records nothing. */
   const commit = (next: DrumMapRef | undefined): Promise<boolean> | false => {
@@ -187,6 +187,7 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
       <button type="button" {...busyGuard({ busy, onClick: importFile })}>{t('drum_map.import')}</button>
       <button type="button" {...busyGuard({ busy, onClick: exportFile })}>{t('drum_map.export')}</button>
     </div>
+    <p className="muted drum-map-disclaimer">{t('drum_map.disclaimer')}</p>
     {error && <p role="alert">{t('drum_map.change_failed', { error })}</p>}
     {fileError && <p role="alert">{fileError}</p>}
   </section>;

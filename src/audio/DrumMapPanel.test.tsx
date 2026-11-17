@@ -27,7 +27,7 @@ vi.mock('./drum-maps.json', async importOriginal => {
   const data = {
     ...real,
     presets: [
-      ...real.presets,
+      ...(real.presets as { id: string }[]).filter(preset => preset.id === 'gm'),
       { id: 'test-kit', name: 'Test kit', state: 'unverified', source: 'Notes from the maker of the test kit.', rows: [[91, 40], [42, null]], candidates: [[91, [40, 41]]] },
       { id: 'checked-kit', name: 'Checked kit', state: 'verified', source: 'Source.', checked: '2026-11-01' },
     ],

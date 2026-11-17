@@ -346,15 +346,17 @@ mod tests {
     }
 
     #[test]
-    fn the_embedded_presets_parse_and_hold_only_general_midi() {
+    fn the_embedded_presets_parse_and_general_midi_is_the_one_that_changes_nothing() {
         let presets = parse_presets(FILE).unwrap();
-        assert_eq!(presets.len(), 1);
+        // General MIDI, then the five library layouts (named in `drum-maps.json` and held by the TypeScript tests).
+        assert_eq!(presets.len(), 6);
         assert_eq!(presets[0].id, "gm");
-        assert_eq!(presets[0].revision, Some(1));
+        assert!(presets.iter().all(|preset| preset.revision == Some(1)));
         assert_eq!(preset_revision("gm"), Some(1));
+        assert_eq!(preset_revision(&presets[5].id), Some(1));
         assert_eq!(preset_revision("nothing"), None);
         assert!(presets[0].rows.is_empty());
-        assert_eq!(super::presets().len(), 1);
+        assert_eq!(super::presets().len(), presets.len());
         assert!(parse_presets("{").is_err());
         assert!(
             parse_presets("{\"presets\":[{\"id\":\"x\",\"rows\":[[1]]}]}")
@@ -362,6 +364,34 @@ mod tests {
                 .is_empty(),
             "a malformed preset is dropped, not the file"
         );
+    }
+
+    #[test]
+    fn every_library_layout_lists_each_sound_once_and_is_not_general_midi_under_another_name() {
+        let presets = parse_presets(FILE).unwrap();
+        for preset in presets.iter().skip(1) {
+            let listed: Vec<u8> = preset.rows.iter().map(|&(id, _)| id).collect();
+            let expected: Vec<u8> = SOUNDS.iter().map(|&(id, _)| id).collect();
+            assert_eq!(listed, expected, "{}", preset.id);
+            assert!(
+                preset
+                    .rows
+                    .iter()
+                    .zip(SOUNDS.iter())
+                    .any(|(&(_, key), &(_, gm))| key != Some(gm)),
+                "{}",
+                preset.id
+            );
+            // What the native side resolves for a layout is what its rows say, for every sound.
+            let map = DrumMapRef {
+                preset: preset.id.clone(),
+                keys: vec![],
+            };
+            let resolved = resolve(Some(&map), true);
+            for &(id, key) in &preset.rows {
+                assert_eq!(resolved.key(0, Some(id)), key, "{} {id}", preset.id);
+            }
+        }
     }
 
     #[test]

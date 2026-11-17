@@ -96,6 +96,140 @@
     [127, 59]
   ],
   "presets": [
-    { "id": "gm", "revision": 1, "state": "verified", "source": "General MIDI keys, as the built-in kit plays them." }
+    { "id": "gm", "revision": 1, "state": "verified", "source": "General MIDI keys, as the built-in kit plays them." },
+    {
+      "id": "ezdrummer-3",
+      "name": "Toontrack EZdrummer 3",
+      "state": "unverified",
+      "revision": 1,
+      "source": "Key numbers from three third-party sources: a General MIDI lookup table (MIT licence), a published note chart for the library and a guide that compared the library's own mapping layout with General MIDI. They are not from the maker's documentation and have not been checked against the library itself.",
+      "rows": [
+        [29, 54], [30, null], [31, 37], [33, null], [34, null], [35, 36], [36, 36], [37, 37],
+        [38, 38], [39, 1], [40, 38], [41, 41], [42, 42], [43, 43], [44, 21], [45, 45],
+        [46, 46], [47, 45], [48, 47], [49, 49], [50, 48], [51, 51], [52, 86], [53, 53],
+        [54, 3], [55, 55], [56, null], [57, 57], [58, null], [59, 59], [60, null], [61, null],
+        [62, null], [63, null], [64, null], [65, null], [66, null], [67, null], [68, null], [69, null],
+        [70, null], [71, null], [72, null], [73, null], [74, null], [75, null], [76, null], [77, null],
+        [78, null], [79, null], [80, null], [81, null], [82, 2], [83, null], [84, null], [85, null],
+        [86, null], [87, null], [91, 40], [92, 24], [93, 52], [94, 54], [95, 56], [96, null],
+        [97, 50], [98, 58], [99, null], [100, null], [101, null], [102, null], [103, null], [104, null],
+        [105, null], [106, null], [107, null], [108, null], [109, null], [110, null], [111, 3], [112, 3],
+        [113, 3], [114, null], [115, 49], [116, 49], [117, null], [118, null], [119, null], [120, null],
+        [122, 2], [123, null], [124, null], [125, null], [126, 51], [127, 53]
+      ],
+      "candidates": [
+        [29, [118]], [35, [35]], [36, [35]], [40, [40]],
+        [42, [22, 61]], [44, [44, 10]], [46, [24, 25, 26]], [47, [47]],
+        [48, [48]], [49, [86]], [55, [86]], [57, [49]],
+        [59, [52, 51]], [92, [25, 46]], [93, [59, 115]], [94, [118]],
+        [97, [94]], [115, [86]], [116, [86]]
+      ]
+    },
+    {
+      "id": "superior-drummer-3",
+      "name": "Toontrack Superior Drummer 3",
+      "state": "unverified",
+      "revision": 1,
+      "source": "Key numbers from four third-party sources: a General MIDI lookup table (MIT licence), a published note chart, a Studio One pitch list and a guide that quotes the maker's manual for a few keys. They are not from the maker's documentation as a whole and have not been checked against the library itself.",
+      "rows": [
+        [29, 118], [30, null], [31, 37], [33, null], [34, null], [35, 35], [36, 36], [37, 37],
+        [38, 38], [39, null], [40, 38], [41, 41], [42, 42], [43, 43], [44, 44], [45, 45],
+        [46, 46], [47, 45], [48, 47], [49, 49], [50, 48], [51, 51], [52, 52], [53, 53],
+        [54, null], [55, 52], [56, null], [57, 57], [58, null], [59, 59], [60, null], [61, null],
+        [62, null], [63, null], [64, null], [65, null], [66, null], [67, null], [68, null], [69, null],
+        [70, null], [71, null], [72, null], [73, null], [74, null], [75, null], [76, null], [77, null],
+        [78, null], [79, null], [80, null], [81, null], [82, null], [83, null], [84, null], [85, null],
+        [86, null], [87, null], [91, 40], [92, 24], [93, 59], [94, 118], [95, null], [96, 54],
+        [97, 50], [98, 58], [99, null], [100, null], [101, null], [102, null], [103, null], [104, null],
+        [105, null], [106, null], [107, null], [108, null], [109, null], [110, null], [111, null], [112, null],
+        [113, null], [114, null], [115, 49], [116, 49], [117, null], [118, null], [119, null], [120, null],
+        [122, null], [123, null], [124, null], [125, null], [126, 51], [127, 53]
+      ],
+      "candidates": [
+        [35, [36, 34]], [36, [35, 34]], [40, [40]], [42, [61, 22]],
+        [44, [21, 10]], [46, [24, 25, 26]], [47, [47]], [48, [48]],
+        [49, [86]], [51, [29, 113]], [52, [110]], [53, [30, 114]],
+        [55, [55]], [57, [49, 55]], [59, [115]], [92, [25, 64]],
+        [93, [115]], [96, [107]], [97, [94]], [98, [56]],
+        [115, [86]], [116, [86]], [126, [29, 113]], [127, [30, 114]]
+      ]
+    },
+    {
+      "id": "ggd-modern-and-massive",
+      "name": "GetGood Drums Modern & Massive",
+      "state": "unverified",
+      "revision": 1,
+      "source": "Key numbers from three third-party note lists for the library's default mapping (a Reaper note-name list, a Studio One pitch list and a published note chart) that agree with each other. They are not from the maker's documentation and have not been checked against the library itself.",
+      "rows": [
+        [29, null], [30, null], [31, 30], [33, null], [34, null], [35, 24], [36, 24], [37, 30],
+        [38, 26], [39, null], [40, 26], [41, 39], [42, 47], [43, 37], [44, 43], [45, 33],
+        [46, 54], [47, 33], [48, 33], [49, 62], [50, 33], [51, 72], [52, 76], [53, 74],
+        [54, null], [55, 83], [56, null], [57, 67], [58, null], [59, 73], [60, null], [61, null],
+        [62, null], [63, null], [64, null], [65, null], [66, null], [67, null], [68, null], [69, null],
+        [70, null], [71, null], [72, null], [73, null], [74, null], [75, null], [76, null], [77, null],
+        [78, null], [79, null], [80, null], [81, null], [82, null], [83, null], [84, null], [85, null],
+        [86, null], [87, null], [91, 26], [92, 53], [93, 73], [94, null], [95, 82], [96, 77],
+        [97, 64], [98, 69], [99, null], [100, null], [101, null], [102, null], [103, null], [104, null],
+        [105, null], [106, null], [107, null], [108, null], [109, null], [110, null], [111, null], [112, null],
+        [113, null], [114, null], [115, 62], [116, 62], [117, null], [118, null], [119, null], [120, null],
+        [122, null], [123, null], [124, null], [125, null], [126, 72], [127, 74]
+      ],
+      "candidates": [
+        [42, [45, 48]], [43, [35]], [44, [44]], [46, [53, 56, 58]],
+        [92, [54]]
+      ]
+    },
+    {
+      "id": "ggd-invasion",
+      "name": "GetGood Drums Invasion",
+      "state": "unverified",
+      "revision": 1,
+      "source": "Key numbers from a published note chart for the library's default mapping, cross-checked against a General MIDI lookup table (MIT licence) for the One Kit Wonder libraries, which share the layout. They are not from the maker's documentation and have not been checked against the library itself.",
+      "rows": [
+        [29, null], [30, null], [31, 30], [33, null], [34, null], [35, 24], [36, 24], [37, 30],
+        [38, 26], [39, null], [40, 26], [41, 38], [42, 43], [43, 37], [44, 48], [45, 36],
+        [46, 45], [47, 35], [48, 34], [49, 52], [50, 33], [51, 62], [52, 65], [53, 61],
+        [54, null], [55, 73], [56, null], [57, 54], [58, null], [59, 63], [60, null], [61, null],
+        [62, null], [63, null], [64, null], [65, null], [66, null], [67, null], [68, null], [69, null],
+        [70, null], [71, null], [72, null], [73, null], [74, null], [75, null], [76, null], [77, null],
+        [78, null], [79, null], [80, null], [81, null], [82, null], [83, null], [84, null], [85, null],
+        [86, null], [87, null], [91, 26], [92, 45], [93, 63], [94, null], [95, 74], [96, 66],
+        [97, 53], [98, 55], [99, null], [100, null], [101, null], [102, null], [103, null], [104, null],
+        [105, null], [106, null], [107, null], [108, null], [109, null], [110, null], [111, null], [112, null],
+        [113, null], [114, null], [115, 52], [116, 52], [117, null], [118, null], [119, null], [120, null],
+        [122, null], [123, null], [124, null], [125, null], [126, 62], [127, 61]
+      ],
+      "candidates": [
+        [29, [64]], [35, [22, 23]], [36, [22, 23]], [42, [44, 41, 42]],
+        [46, [46, 47]], [52, [67]], [55, [75]], [57, [56, 58]],
+        [92, [46]], [94, [64]], [95, [76]], [96, [68]],
+        [98, [57, 59]]
+      ]
+    },
+    {
+      "id": "ggd-okw-architects",
+      "name": "GetGood Drums One Kit Wonder: Architects",
+      "state": "unverified",
+      "revision": 1,
+      "source": "Key numbers from a published note chart for the library's default mapping and a General MIDI lookup table (MIT licence) that agree with each other. They are not from the maker's documentation and have not been checked against the library itself.",
+      "rows": [
+        [29, 64], [30, null], [31, 30], [33, null], [34, null], [35, 24], [36, 24], [37, 30],
+        [38, 26], [39, null], [40, 26], [41, 37], [42, 43], [43, 36], [44, 48], [45, 35],
+        [46, 45], [47, 35], [48, 35], [49, 52], [50, 35], [51, 62], [52, 67], [53, 61],
+        [54, null], [55, 73], [56, null], [57, 54], [58, null], [59, 63], [60, null], [61, null],
+        [62, null], [63, null], [64, null], [65, null], [66, null], [67, null], [68, null], [69, null],
+        [70, null], [71, null], [72, null], [73, null], [74, null], [75, null], [76, null], [77, null],
+        [78, null], [79, null], [80, null], [81, null], [82, null], [83, null], [84, null], [85, null],
+        [86, null], [87, null], [91, 26], [92, 45], [93, 63], [94, 64], [95, 74], [96, 68],
+        [97, 53], [98, 55], [99, null], [100, null], [101, null], [102, null], [103, null], [104, null],
+        [105, null], [106, null], [107, null], [108, null], [109, null], [110, null], [111, null], [112, null],
+        [113, null], [114, null], [115, 52], [116, 52], [117, null], [118, null], [119, null], [120, null],
+        [122, null], [123, null], [124, null], [125, null], [126, 62], [127, 61]
+      ],
+      "candidates": [
+        [42, [44, 41, 42]], [46, [46, 47]], [52, [65]], [57, [58]],
+        [92, [46]], [96, [66]], [98, [59]]
+      ]
+    }
   ]
 }

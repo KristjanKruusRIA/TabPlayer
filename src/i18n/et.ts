@@ -2167,6 +2167,7 @@ export const et: MessageCatalog = {
   'drum_map.file_bad_base': 'Failis nimetatud paigutus pole kirjutatud paigutuse tunnusena.',
   'drum_map.file_unreadable': 'Faili ei saanud lugeda. {detail}',
   'drum_map.file_unknown': 'Fail lükati tagasi. {detail}',
+  'drum_map.disclaimer': 'Paigutuste nimed näitavad ainult, millist paigutust kaart järgib. TabPlayer ei ole nende toodete ega nende tootjatega seotud.',
   'plugin.error.instrument_needs_drums': 'Instrumendiplugina saab kasutada ainult trummirajal.',
 
   // Plug-in statuses

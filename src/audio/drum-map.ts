@@ -149,7 +149,7 @@ export function mapArticulationId(track: model.Track, id: number): number | unde
 }
 
 /** One layout a drum map can start from, as `drum-maps.json` describes it. Only `id` is required: `state` says whether the layout was checked against the instrument it belongs to, `candidates` lists keys worth trying for a row, `[articulation id, [key, ...]]`. */
-export interface DrumMapPreset { id: string; /** Counts changes to the preset's data, so a later edit of its rows is visible; resolution ignores it. */ revision?: number; name?: string; state?: 'verified' | 'unverified'; source?: string; checked?: string; rows?: PresetRows; candidates?: readonly (readonly [number, readonly number[]])[] }
+export interface DrumMapPreset { id: string; /** Counts changes to the preset's data, so a later edit of its rows is visible; resolution ignores it. */ revision?: number; name?: string; state?: 'verified' | 'unverified'; source?: string; /** When and against what a layout was checked: a date, or `{ date, against }`; a verified layout of this build has the object. */ checked?: string | { date: string; against: string }; rows?: PresetRows; candidates?: readonly (readonly [number, readonly number[]])[] }
 /** The layouts this build knows, General MIDI first. */
 export const drumMapPresets = (): readonly DrumMapPreset[] => loaded.presets;
 

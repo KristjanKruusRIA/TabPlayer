@@ -1,3 +1,4 @@
+import { readdirSync, readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { model } from '@coderline/alphatab';
 import { standardPercussionCatalog } from '../editor/percussion-catalog';
@@ -16,7 +17,7 @@ it('holds the standard articulation catalogue, once, for the native side too', (
   expect(maps.sounds).toHaveLength(94);
   expect(new Set(maps.sounds.map(([, key]) => key)).size).toBe(51);
   expect(maps.sounds.every(([id, key], index) => Number.isInteger(id) && key >= 0 && key < 128 && (index === 0 || id > maps.sounds[index - 1][0]))).toBe(true);
-  expect(maps.presets).toEqual([{ id: 'gm', revision: 1, state: 'verified', source: 'General MIDI keys, as the built-in kit plays them.' }]);
+  expect(maps.presets[0]).toEqual({ id: 'gm', revision: 1, state: 'verified', source: 'General MIDI keys, as the built-in kit plays them.' });
 });
 
 it('knows exactly the standard ids', () => {
@@ -152,8 +153,101 @@ it('compares a chosen map with the stored one by what they mean, so choosing an 
 });
 
 it('carries the revision of each preset, an integer, so a later change to the data is visible', () => {
-  expect(drumMapPresets().map(preset => [preset.id, preset.revision])).toEqual([['gm', 1]]);
+  expect(drumMapPresets().map(preset => [preset.id, preset.revision])).toEqual([['gm', 1], ['ezdrummer-3', 1], ['superior-drummer-3', 1], ['ggd-modern-and-massive', 1], ['ggd-invasion', 1], ['ggd-okw-architects', 1]]);
   const read = readPresets({ presets: [{ id: 'a', revision: 3 }, { id: 'b', revision: -1 }, { id: 'c', revision: 'x' }, { id: 'd', revision: 1.5 }, { id: 'e' }] });
   expect(read.presets.map(preset => preset.id)).toEqual(['a', 'e']);
   expect(read.problems).toHaveLength(3);
+});
+
+// The five library layouts. Their names are compatibility labels, as the owner decided on 2026-11-17 for ticket THE-219; they say which layout a map
+// follows and claim no affiliation. The names are allowed in the presets file, its tests and the docs, and nowhere else in the app's sources.
+const LIBRARY_IDS = ['ezdrummer-3', 'superior-drummer-3', 'ggd-modern-and-massive', 'ggd-invasion', 'ggd-okw-architects'];
+const libraries = () => drumMapPresets().filter(preset => preset.id !== 'gm');
+const gmKey = new Map(maps.sounds as [number, number][]);
+
+it('ships these library layouts, each unverified and at revision 1', () => {
+  expect(libraries().map(preset => preset.id)).toEqual(LIBRARY_IDS);
+  expect(libraries().map(preset => preset.name)).toEqual(['Toontrack EZdrummer 3', 'Toontrack Superior Drummer 3', 'GetGood Drums Modern & Massive', 'GetGood Drums Invasion', 'GetGood Drums One Kit Wonder: Architects']);
+  for (const preset of libraries()) {
+    expect(preset.revision, preset.id).toBe(1);
+    expect(preset.state, preset.id).toBe('unverified');
+  }
+});
+
+it('holds, for every library layout, all 94 sounds once, keys in range, and a stated source', () => {
+  const ids = new Set<string>();
+  for (const preset of libraries()) {
+    expect(/^[a-z0-9]+(-[a-z0-9]+)*$/.test(preset.id) && preset.id.length <= 40, preset.id).toBe(true);
+    expect(ids.has(preset.id), `${preset.id} is unique`).toBe(false);
+    ids.add(preset.id);
+    expect(preset.name?.trim(), preset.id).toBeTruthy();
+    expect(preset.source?.trim(), `${preset.id} says where its numbers came from`).toBeTruthy();
+    expect(preset.source, `${preset.id} says it is not checked`).toMatch(/not been checked/);
+    expect(preset.rows?.map(([id]) => id), preset.id).toEqual(maps.sounds.map(([id]) => id));
+    for (const [, key] of preset.rows!) expect(key === null || (Number.isInteger(key) && key >= 0 && key <= 127), preset.id).toBe(true);
+    // A layout that says nothing it checked is unverified; one that did names the date and what it was checked against.
+    if (preset.state === 'verified') expect(preset.checked, preset.id).toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), against: expect.any(String) });
+    expect(preset.rows!.some(([id, key]) => key !== gmKey.get(id)), `${preset.id} is not General MIDI under another name`).toBe(true);
+  }
+});
+
+it('lists candidate keys that are other keys of known sounds, once each', () => {
+  for (const preset of libraries()) {
+    const own = new Map(preset.rows!);
+    const seen = new Set<number>();
+    expect(preset.candidates!.length, preset.id).toBeGreaterThan(2);
+    for (const [id, keys] of preset.candidates!) {
+      expect(own.has(id), `${preset.id}: candidates for a known sound`).toBe(true);
+      expect(seen.has(id), `${preset.id}: one list per sound`).toBe(false);
+      seen.add(id);
+      expect(keys.length, `${preset.id} ${id}`).toBeGreaterThan(0);
+      expect(new Set(keys).size, `${preset.id} ${id}: no repeats`).toBe(keys.length);
+      for (const key of keys) {
+        expect(Number.isInteger(key) && key >= 0 && key <= 127, `${preset.id} ${id}`).toBe(true);
+        expect(key, `${preset.id} ${id}: the row's own key is not a candidate`).not.toBe(own.get(id));
+      }
+    }
+  }
+});
+
+it('keeps what a drum kit needs apart: a kick, a snare that is not its side stick, and cymbals that are not each other', () => {
+  for (const preset of libraries()) {
+    const own = new Map(preset.rows!), key = (id: number) => own.get(id);
+    expect(key(36), `${preset.id} kick`).not.toBeNull();
+    expect(key(38), `${preset.id} snare`).not.toBeNull();
+    expect(key(38)).not.toBe(key(37));
+    expect(key(42)).not.toBe(key(46));
+    expect(key(42)).not.toBe(key(44));
+    expect(key(49)).not.toBe(key(57));
+    expect(key(36)).not.toBe(key(38));
+    // Percussion a library does not have is silent, not another library piece.
+    for (const id of [56, 60, 64, 73, 124]) expect(key(id), `${preset.id} ${id}`).toBeNull();
+  }
+});
+
+it('resolves each library layout alike here and on the native side, by the shared cases', () => {
+  for (const id of LIBRARY_IDS) {
+    const cases = protocol.resolution.filter(entry => entry.name.startsWith(`library_${id}`));
+    expect(cases.length, id).toBeGreaterThanOrEqual(2);
+    const full = cases.find(entry => entry.name === `library_${id}`)!;
+    // A silent row, a candidate row and the rim shot are among the rows.
+    expect(full.rows.some(row => row[2] === null), `${id} has a silent row`).toBe(true);
+    const tables = resolveDrumMap({ preset: id }, true);
+    const preset = drumMapPresets().find(entry => entry.id === id)!;
+    for (const [articulation, key] of preset.rows!) expect(mappedKey(tables, 0, articulation), `${id} ${articulation}`).toBe(key);
+  }
+});
+
+it('names the libraries nowhere in the app apart from the layouts file', () => {
+  const found: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory()) { if (entry.name !== 'node_modules' && entry.name !== 'gen') walk(path); continue; }
+      if (!/\.(ts|tsx|css|json|rs)$/.test(entry.name) || /\.test\./.test(entry.name) || path.endsWith('src/audio/drum-maps.json')) continue;
+      if (/ezdrummer|toontrack|superior drummer|getgood|\bggd\b/i.test(readFileSync(path, 'utf8'))) found.push(path);
+    }
+  };
+  walk('src'); walk('src-tauri/src');
+  expect(found).toEqual([]);
 });

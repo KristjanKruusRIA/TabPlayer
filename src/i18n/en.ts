@@ -2166,6 +2166,7 @@ export const en = {
   'drum_map.file_bad_base': 'The layout the file names is not written as a layout id.',
   'drum_map.file_unreadable': 'The file could not be read. {detail}',
   'drum_map.file_unknown': 'The file was refused. {detail}',
+  'drum_map.disclaimer': 'Layout names only say which layout a map follows. TabPlayer is not affiliated with these products or their makers.',
   'plugin.error.instrument_needs_drums': 'An instrument plug-in can only be used on a drum track.',
 
   // Plug-in statuses

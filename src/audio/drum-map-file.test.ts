@@ -9,7 +9,7 @@ import maps from './drum-maps.json';
 // Two layouts besides General MIDI, as the data will carry them.
 vi.mock('./drum-maps.json', async importOriginal => {
   const real = (await importOriginal<{ default: { sounds: unknown; presets: unknown[] } }>()).default;
-  const data = { ...real, presets: [...real.presets, { id: 'test-kit', name: 'Test kit', state: 'unverified', source: 'Notes.', rows: [[91, 40], [42, null], [36, 35]] }] };
+  const data = { ...real, presets: [...(real.presets as { id: string }[]).filter(preset => preset.id === 'gm'), { id: 'test-kit', name: 'Test kit', state: 'unverified', source: 'Notes.', rows: [[91, 40], [42, null], [36, 35]] }] };
   return { default: data, ...data };
 });
 

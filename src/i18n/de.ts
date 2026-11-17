@@ -2167,6 +2167,7 @@ export const de: MessageCatalog = {
   'drum_map.file_bad_base': 'Die in der Datei genannte Belegung ist keine gültige Belegungskennung.',
   'drum_map.file_unreadable': 'Die Datei konnte nicht gelesen werden. {detail}',
   'drum_map.file_unknown': 'Die Datei wurde abgelehnt. {detail}',
+  'drum_map.disclaimer': 'Die Namen der Belegungen geben nur an, welcher Belegung eine Zuordnung folgt. TabPlayer steht in keiner Verbindung zu diesen Produkten oder ihren Herstellern.',
   'plugin.error.instrument_needs_drums': 'Ein Instrument-Plugin kann nur auf einer Schlagzeugspur verwendet werden.',
 
   // Plug-in statuses

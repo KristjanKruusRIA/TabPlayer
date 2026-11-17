@@ -1,0 +1,1673 @@
+{
+  "version": 1,
+  "note": "Read by src-tauri/src/audio/drum_map.rs and src/audio/drum-map.test.ts so the Rust and TypeScript drum map rules cannot drift. `validity` cases say whether a mix carrying that `drumMap` must be accepted; `resolution` cases give, for a map and whether the track is percussion, the key each [key, articulation id or null] hit plays (null: no sound).",
+  "validity": [
+    {
+      "name": "unknown_preset_with_a_row",
+      "valid": true,
+      "drumMap": {
+        "preset": "studio-7",
+        "keys": [
+          [
+            38,
+            36
+          ]
+        ]
+      }
+    },
+    {
+      "name": "unknown_preset_without_rows",
+      "valid": true,
+      "drumMap": {
+        "preset": "other"
+      }
+    },
+    {
+      "name": "one_character_preset",
+      "valid": true,
+      "drumMap": {
+        "preset": "a",
+        "keys": [
+          [
+            91,
+            null
+          ]
+        ]
+      }
+    },
+    {
+      "name": "forty_character_preset",
+      "valid": true,
+      "drumMap": {
+        "preset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "keys": [
+          [
+            91,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "hyphenated_preset",
+      "valid": true,
+      "drumMap": {
+        "preset": "a-b-2",
+        "keys": [
+          [
+            91,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "general_midi_with_a_changed_row",
+      "valid": true,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            91,
+            40
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a_row_equal_to_the_presets_own_value",
+      "valid": true,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            38
+          ]
+        ]
+      }
+    },
+    {
+      "name": "a_row_with_no_sound",
+      "valid": true,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            null
+          ]
+        ]
+      }
+    },
+    {
+      "name": "keys_at_the_edges",
+      "valid": true,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            0
+          ],
+          [
+            91,
+            127
+          ]
+        ]
+      }
+    },
+    {
+      "name": "last_catalogue_id",
+      "valid": true,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            127,
+            59
+          ]
+        ]
+      }
+    },
+    {
+      "name": "all_94_rows",
+      "valid": true,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            29,
+            0
+          ],
+          [
+            30,
+            0
+          ],
+          [
+            31,
+            0
+          ],
+          [
+            33,
+            0
+          ],
+          [
+            34,
+            0
+          ],
+          [
+            35,
+            0
+          ],
+          [
+            36,
+            0
+          ],
+          [
+            37,
+            0
+          ],
+          [
+            38,
+            0
+          ],
+          [
+            39,
+            0
+          ],
+          [
+            40,
+            0
+          ],
+          [
+            41,
+            0
+          ],
+          [
+            42,
+            0
+          ],
+          [
+            43,
+            0
+          ],
+          [
+            44,
+            0
+          ],
+          [
+            45,
+            0
+          ],
+          [
+            46,
+            0
+          ],
+          [
+            47,
+            0
+          ],
+          [
+            48,
+            0
+          ],
+          [
+            49,
+            0
+          ],
+          [
+            50,
+            0
+          ],
+          [
+            51,
+            0
+          ],
+          [
+            52,
+            0
+          ],
+          [
+            53,
+            0
+          ],
+          [
+            54,
+            0
+          ],
+          [
+            55,
+            0
+          ],
+          [
+            56,
+            0
+          ],
+          [
+            57,
+            0
+          ],
+          [
+            58,
+            0
+          ],
+          [
+            59,
+            0
+          ],
+          [
+            60,
+            0
+          ],
+          [
+            61,
+            0
+          ],
+          [
+            62,
+            0
+          ],
+          [
+            63,
+            0
+          ],
+          [
+            64,
+            0
+          ],
+          [
+            65,
+            0
+          ],
+          [
+            66,
+            0
+          ],
+          [
+            67,
+            0
+          ],
+          [
+            68,
+            0
+          ],
+          [
+            69,
+            0
+          ],
+          [
+            70,
+            0
+          ],
+          [
+            71,
+            0
+          ],
+          [
+            72,
+            0
+          ],
+          [
+            73,
+            0
+          ],
+          [
+            74,
+            0
+          ],
+          [
+            75,
+            0
+          ],
+          [
+            76,
+            0
+          ],
+          [
+            77,
+            0
+          ],
+          [
+            78,
+            0
+          ],
+          [
+            79,
+            0
+          ],
+          [
+            80,
+            0
+          ],
+          [
+            81,
+            0
+          ],
+          [
+            82,
+            0
+          ],
+          [
+            83,
+            0
+          ],
+          [
+            84,
+            0
+          ],
+          [
+            85,
+            0
+          ],
+          [
+            86,
+            0
+          ],
+          [
+            87,
+            0
+          ],
+          [
+            91,
+            0
+          ],
+          [
+            92,
+            0
+          ],
+          [
+            93,
+            0
+          ],
+          [
+            94,
+            0
+          ],
+          [
+            95,
+            0
+          ],
+          [
+            96,
+            0
+          ],
+          [
+            97,
+            0
+          ],
+          [
+            98,
+            0
+          ],
+          [
+            99,
+            0
+          ],
+          [
+            100,
+            0
+          ],
+          [
+            101,
+            0
+          ],
+          [
+            102,
+            0
+          ],
+          [
+            103,
+            0
+          ],
+          [
+            104,
+            0
+          ],
+          [
+            105,
+            0
+          ],
+          [
+            106,
+            0
+          ],
+          [
+            107,
+            0
+          ],
+          [
+            108,
+            0
+          ],
+          [
+            109,
+            0
+          ],
+          [
+            110,
+            0
+          ],
+          [
+            111,
+            0
+          ],
+          [
+            112,
+            0
+          ],
+          [
+            113,
+            0
+          ],
+          [
+            114,
+            0
+          ],
+          [
+            115,
+            0
+          ],
+          [
+            116,
+            0
+          ],
+          [
+            117,
+            0
+          ],
+          [
+            118,
+            0
+          ],
+          [
+            119,
+            0
+          ],
+          [
+            120,
+            0
+          ],
+          [
+            122,
+            0
+          ],
+          [
+            123,
+            0
+          ],
+          [
+            124,
+            0
+          ],
+          [
+            125,
+            0
+          ],
+          [
+            126,
+            0
+          ],
+          [
+            127,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "empty_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "forty_one_character_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "upper_case_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "GM2",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "leading_hyphen_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "-a",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "trailing_hyphen_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "a-",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "double_hyphen_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "a--b",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "underscore_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "a_b",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "space_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "a b",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "non_ascii_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": "café",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "numeric_preset",
+      "valid": false,
+      "drumMap": {
+        "preset": 7,
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "no_preset",
+      "valid": false,
+      "drumMap": {
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "general_midi_with_no_rows",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm"
+      }
+    },
+    {
+      "name": "empty_keys_array",
+      "valid": false,
+      "drumMap": {
+        "preset": "studio",
+        "keys": []
+      }
+    },
+    {
+      "name": "empty_keys_array_on_general_midi",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": []
+      }
+    },
+    {
+      "name": "keys_not_an_array",
+      "valid": false,
+      "drumMap": {
+        "preset": "studio",
+        "keys": 5
+      }
+    },
+    {
+      "name": "keys_null",
+      "valid": false,
+      "drumMap": {
+        "preset": "studio",
+        "keys": null
+      }
+    },
+    {
+      "name": "unknown_id_zero",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            0,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "unknown_id_between_ranges",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            90,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "id_past_a_byte",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            300,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "negative_id",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            -1,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "fractional_id",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38.5,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "id_as_text",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            "38",
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "descending_rows",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            91,
+            1
+          ],
+          [
+            38,
+            1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "repeated_id",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            1
+          ],
+          [
+            38,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "key_128",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            128
+          ]
+        ]
+      }
+    },
+    {
+      "name": "key_255",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            255
+          ]
+        ]
+      }
+    },
+    {
+      "name": "negative_key",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            -1
+          ]
+        ]
+      }
+    },
+    {
+      "name": "fractional_key",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            1.5
+          ]
+        ]
+      }
+    },
+    {
+      "name": "key_as_text",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            "1"
+          ]
+        ]
+      }
+    },
+    {
+      "name": "short_row",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38
+          ]
+        ]
+      }
+    },
+    {
+      "name": "long_row",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            1,
+            2
+          ]
+        ]
+      }
+    },
+    {
+      "name": "row_as_object",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          {
+            "id": 38,
+            "key": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "ninety_five_rows",
+      "valid": false,
+      "drumMap": {
+        "preset": "gm",
+        "keys": [
+          [
+            29,
+            0
+          ],
+          [
+            30,
+            0
+          ],
+          [
+            31,
+            0
+          ],
+          [
+            33,
+            0
+          ],
+          [
+            34,
+            0
+          ],
+          [
+            35,
+            0
+          ],
+          [
+            36,
+            0
+          ],
+          [
+            37,
+            0
+          ],
+          [
+            38,
+            0
+          ],
+          [
+            39,
+            0
+          ],
+          [
+            40,
+            0
+          ],
+          [
+            41,
+            0
+          ],
+          [
+            42,
+            0
+          ],
+          [
+            43,
+            0
+          ],
+          [
+            44,
+            0
+          ],
+          [
+            45,
+            0
+          ],
+          [
+            46,
+            0
+          ],
+          [
+            47,
+            0
+          ],
+          [
+            48,
+            0
+          ],
+          [
+            49,
+            0
+          ],
+          [
+            50,
+            0
+          ],
+          [
+            51,
+            0
+          ],
+          [
+            52,
+            0
+          ],
+          [
+            53,
+            0
+          ],
+          [
+            54,
+            0
+          ],
+          [
+            55,
+            0
+          ],
+          [
+            56,
+            0
+          ],
+          [
+            57,
+            0
+          ],
+          [
+            58,
+            0
+          ],
+          [
+            59,
+            0
+          ],
+          [
+            60,
+            0
+          ],
+          [
+            61,
+            0
+          ],
+          [
+            62,
+            0
+          ],
+          [
+            63,
+            0
+          ],
+          [
+            64,
+            0
+          ],
+          [
+            65,
+            0
+          ],
+          [
+            66,
+            0
+          ],
+          [
+            67,
+            0
+          ],
+          [
+            68,
+            0
+          ],
+          [
+            69,
+            0
+          ],
+          [
+            70,
+            0
+          ],
+          [
+            71,
+            0
+          ],
+          [
+            72,
+            0
+          ],
+          [
+            73,
+            0
+          ],
+          [
+            74,
+            0
+          ],
+          [
+            75,
+            0
+          ],
+          [
+            76,
+            0
+          ],
+          [
+            77,
+            0
+          ],
+          [
+            78,
+            0
+          ],
+          [
+            79,
+            0
+          ],
+          [
+            80,
+            0
+          ],
+          [
+            81,
+            0
+          ],
+          [
+            82,
+            0
+          ],
+          [
+            83,
+            0
+          ],
+          [
+            84,
+            0
+          ],
+          [
+            85,
+            0
+          ],
+          [
+            86,
+            0
+          ],
+          [
+            87,
+            0
+          ],
+          [
+            91,
+            0
+          ],
+          [
+            92,
+            0
+          ],
+          [
+            93,
+            0
+          ],
+          [
+            94,
+            0
+          ],
+          [
+            95,
+            0
+          ],
+          [
+            96,
+            0
+          ],
+          [
+            97,
+            0
+          ],
+          [
+            98,
+            0
+          ],
+          [
+            99,
+            0
+          ],
+          [
+            100,
+            0
+          ],
+          [
+            101,
+            0
+          ],
+          [
+            102,
+            0
+          ],
+          [
+            103,
+            0
+          ],
+          [
+            104,
+            0
+          ],
+          [
+            105,
+            0
+          ],
+          [
+            106,
+            0
+          ],
+          [
+            107,
+            0
+          ],
+          [
+            108,
+            0
+          ],
+          [
+            109,
+            0
+          ],
+          [
+            110,
+            0
+          ],
+          [
+            111,
+            0
+          ],
+          [
+            112,
+            0
+          ],
+          [
+            113,
+            0
+          ],
+          [
+            114,
+            0
+          ],
+          [
+            115,
+            0
+          ],
+          [
+            116,
+            0
+          ],
+          [
+            117,
+            0
+          ],
+          [
+            118,
+            0
+          ],
+          [
+            119,
+            0
+          ],
+          [
+            120,
+            0
+          ],
+          [
+            122,
+            0
+          ],
+          [
+            123,
+            0
+          ],
+          [
+            124,
+            0
+          ],
+          [
+            125,
+            0
+          ],
+          [
+            126,
+            0
+          ],
+          [
+            127,
+            0
+          ],
+          [
+            128,
+            0
+          ]
+        ]
+      }
+    },
+    {
+      "name": "extra_field",
+      "valid": false,
+      "drumMap": {
+        "preset": "studio",
+        "keys": [
+          [
+            38,
+            1
+          ]
+        ],
+        "extra": true
+      }
+    },
+    {
+      "name": "null_map",
+      "valid": false,
+      "drumMap": null
+    },
+    {
+      "name": "string_map",
+      "valid": false,
+      "drumMap": "gm"
+    },
+    {
+      "name": "array_map",
+      "valid": false,
+      "drumMap": []
+    }
+  ],
+  "resolution": [
+    {
+      "name": "no_map_is_general_midi",
+      "map": null,
+      "percussion": true,
+      "rows": [
+        [
+          38,
+          null,
+          38
+        ],
+        [
+          38,
+          91,
+          38
+        ],
+        [
+          46,
+          92,
+          46
+        ],
+        [
+          51,
+          94,
+          51
+        ],
+        [
+          0,
+          null,
+          0
+        ],
+        [
+          127,
+          null,
+          127
+        ],
+        [
+          45,
+          null,
+          45
+        ],
+        [
+          38,
+          34,
+          38
+        ],
+        [
+          59,
+          29,
+          59
+        ],
+        [
+          62,
+          124,
+          62
+        ],
+        [
+          53,
+          84,
+          53
+        ],
+        [
+          38,
+          38,
+          38
+        ]
+      ]
+    },
+    {
+      "name": "a_changed_row_moves_only_its_own_articulation",
+      "map": {
+        "preset": "gm",
+        "keys": [
+          [
+            91,
+            40
+          ],
+          [
+            92,
+            null
+          ]
+        ]
+      },
+      "percussion": true,
+      "rows": [
+        [
+          38,
+          91,
+          40
+        ],
+        [
+          38,
+          null,
+          38
+        ],
+        [
+          38,
+          38,
+          38
+        ],
+        [
+          46,
+          92,
+          null
+        ],
+        [
+          46,
+          null,
+          46
+        ],
+        [
+          46,
+          46,
+          46
+        ],
+        [
+          0,
+          null,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "a_row_on_a_key_that_is_an_articulation_moves_its_plain_hits_too",
+      "map": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            40
+          ]
+        ]
+      },
+      "percussion": true,
+      "rows": [
+        [
+          38,
+          null,
+          40
+        ],
+        [
+          38,
+          38,
+          40
+        ],
+        [
+          38,
+          91,
+          38
+        ],
+        [
+          37,
+          null,
+          37
+        ],
+        [
+          38,
+          34,
+          38
+        ]
+      ]
+    },
+    {
+      "name": "an_unknown_preset_plays_general_midi_plus_its_rows",
+      "map": {
+        "preset": "no-such-preset",
+        "keys": [
+          [
+            36,
+            35
+          ],
+          [
+            91,
+            null
+          ]
+        ]
+      },
+      "percussion": true,
+      "rows": [
+        [
+          36,
+          null,
+          35
+        ],
+        [
+          36,
+          36,
+          35
+        ],
+        [
+          35,
+          35,
+          35
+        ],
+        [
+          38,
+          null,
+          38
+        ],
+        [
+          38,
+          91,
+          null
+        ],
+        [
+          38,
+          92,
+          46
+        ]
+      ]
+    },
+    {
+      "name": "an_unknown_preset_with_no_rows_is_general_midi",
+      "map": {
+        "preset": "no-such-preset"
+      },
+      "percussion": true,
+      "rows": [
+        [
+          38,
+          91,
+          38
+        ],
+        [
+          38,
+          null,
+          38
+        ]
+      ]
+    },
+    {
+      "name": "a_pitched_track_ignores_a_map",
+      "map": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            40
+          ],
+          [
+            91,
+            40
+          ]
+        ]
+      },
+      "percussion": false,
+      "rows": [
+        [
+          38,
+          91,
+          38
+        ],
+        [
+          38,
+          null,
+          38
+        ],
+        [
+          60,
+          null,
+          60
+        ]
+      ]
+    },
+    {
+      "name": "a_plain_hit_with_no_sound",
+      "map": {
+        "preset": "gm",
+        "keys": [
+          [
+            42,
+            null
+          ]
+        ]
+      },
+      "percussion": true,
+      "rows": [
+        [
+          42,
+          null,
+          null
+        ],
+        [
+          42,
+          42,
+          null
+        ],
+        [
+          44,
+          null,
+          44
+        ],
+        [
+          46,
+          92,
+          46
+        ]
+      ]
+    },
+    {
+      "name": "keys_at_the_edges",
+      "map": {
+        "preset": "gm",
+        "keys": [
+          [
+            38,
+            0
+          ],
+          [
+            91,
+            127
+          ]
+        ]
+      },
+      "percussion": true,
+      "rows": [
+        [
+          38,
+          null,
+          0
+        ],
+        [
+          38,
+          91,
+          127
+        ],
+        [
+          0,
+          null,
+          0
+        ],
+        [
+          127,
+          null,
+          127
+        ]
+      ]
+    }
+  ]
+}

@@ -31,6 +31,85 @@ pub struct ChannelMix {
         deserialize_with = "present"
     )]
     pub midi_port: Option<String>,
+    /// Which key each of the track's standard drum articulations sounds on a hosted instrument or an external MIDI output: a named
+    /// preset and the rows changed from it. Absent is General MIDI. The built-in kits never read it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub drum_map: Option<DrumMapRef>,
+}
+/// The longest preset name a drum map may carry.
+pub const MAX_DRUM_MAP_PRESET: usize = 40;
+/// The most rows a drum map may change: one for each standard articulation.
+pub const MAX_DRUM_MAP_ROWS: usize = 94;
+/// A drum map: a preset by its id and only the rows that differ from it. A row is `(articulation id, key)`, a key of `None` being
+/// no sound. A preset the player does not know plays as General MIDI plus the changed rows, so a project opens wherever it was saved.
+/// A map that is General MIDI and changes nothing is written as no field at all, and a changed row that equals the preset's own
+/// value is harmless; neither is looked at here, as validation never depends on what a preset holds.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DrumMapRef {
+    pub preset: String,
+    /// Written only when something changed. A `keys` that is present is never empty, so one way of writing it is read.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "non_empty_rows"
+    )]
+    pub keys: Vec<(u8, Option<u8>)>,
+}
+fn non_empty_rows<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<(u8, Option<u8>)>, D::Error> {
+    let rows = Vec::<(u8, Option<u8>)>::deserialize(deserializer)?;
+    if rows.is_empty() {
+        return Err(serde::de::Error::custom(
+            "drum map keys, when written, hold at least one row",
+        ));
+    }
+    Ok(rows)
+}
+/// Whether `id` is a preset id: 1 to 40 characters of lower-case letters and digits, in groups joined by single hyphens.
+pub fn valid_drum_map_preset(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_DRUM_MAP_PRESET
+        && id.split('-').all(|group| {
+            !group.is_empty()
+                && group
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+impl DrumMapRef {
+    pub fn validate(&self) -> Result<(), String> {
+        if !valid_drum_map_preset(&self.preset) {
+            return Err(
+                "A drum map preset id must be 1–40 lower-case letters, digits and single hyphens."
+                    .into(),
+            );
+        }
+        if self.keys.len() > MAX_DRUM_MAP_ROWS {
+            return Err("A drum map changes at most 94 rows.".into());
+        }
+        let mut previous: Option<u8> = None;
+        for &(id, key) in &self.keys {
+            if !crate::audio::drum_map::is_sound(id) || previous.is_some_and(|p| id <= p) {
+                return Err(
+                    "Drum map rows must be standard articulations in ascending order.".into(),
+                );
+            }
+            if key.is_some_and(|key| key > 127) {
+                return Err("A drum map key must be 0–127 or none.".into());
+            }
+            previous = Some(id);
+        }
+        if self.preset == "gm" && self.keys.is_empty() {
+            return Err("General MIDI with no changed rows is written as no drum map.".into());
+        }
+        Ok(())
+    }
 }
 /// The longest port name a mix may carry.
 pub const MAX_MIDI_PORT_NAME: usize = 256;
@@ -59,6 +138,7 @@ impl Default for ChannelMix {
             interpretation: None,
             drum_kit: None,
             midi_port: None,
+            drum_map: None,
         }
     }
 }
@@ -86,6 +166,9 @@ impl ChannelMix {
                 "A MIDI output port name must be 1–256 characters without control or format characters."
                     .into(),
             );
+        }
+        if let Some(drum_map) = &self.drum_map {
+            drum_map.validate()?;
         }
         Ok(())
     }
@@ -703,6 +786,9 @@ impl BackingSettings {
         if self.mix.midi_port.is_some() {
             return Err("A backing track cannot be sent to a MIDI output.".into());
         }
+        if self.mix.drum_map.is_some() {
+            return Err("A backing track has no drum map.".into());
+        }
         self.mix.validate()
     }
 }
@@ -974,5 +1060,113 @@ mod midi_port_tests {
         }))
         .unwrap();
         assert!(bad.validate().is_err());
+    }
+}
+
+#[cfg(test)]
+mod drum_map_tests {
+    use super::*;
+
+    const OLD: &str = r#"{"gain":0.5,"pan":-0.25,"mute":true,"solo":false}"#;
+
+    #[test]
+    fn a_mix_saved_before_drum_maps_loads_unchanged_and_saves_without_the_field() {
+        let mix: ChannelMix = serde_json::from_str(OLD).unwrap();
+        assert_eq!(mix.drum_map, None);
+        assert!(mix.validate().is_ok());
+        assert_eq!(serde_json::to_string(&mix).unwrap(), OLD);
+        let settings: DocumentSettings = serde_json::from_value(serde_json::json!({
+            "sounds": {}, "mixes": {"base/0": {"gain":1,"pan":0,"mute":false,"solo":false}},
+            "backing": null, "print": serde_json::to_value(PrintLayout::default()).unwrap()
+        }))
+        .unwrap();
+        assert_eq!(settings.mixes["base/0"].drum_map, None);
+        // An old setTrackMix edit replays and validates as it did.
+        let edit: crate::edit_types::EditCommand = serde_json::from_value(serde_json::json!({
+            "type":"setTrackMix","trackId":"base/0",
+            "mix":{"gain":1,"pan":0,"mute":false,"solo":false,"midiPort":"Synth"}
+        }))
+        .unwrap();
+        assert!(edit.validate().is_ok());
+    }
+
+    #[test]
+    fn a_drum_map_round_trips_and_an_empty_row_list_is_not_written() {
+        let text = r#"{"gain":1.0,"pan":0.0,"mute":false,"solo":false,"drumMap":{"preset":"studio-7","keys":[[38,40],[91,null]]}}"#;
+        let mix: ChannelMix = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            mix.drum_map,
+            Some(DrumMapRef {
+                preset: "studio-7".into(),
+                keys: vec![(38, Some(40)), (91, None)]
+            })
+        );
+        assert!(mix.validate().is_ok());
+        assert_eq!(serde_json::to_string(&mix).unwrap(), text);
+        let bare = ChannelMix {
+            drum_map: Some(DrumMapRef {
+                preset: "studio".into(),
+                keys: vec![],
+            }),
+            ..ChannelMix::default()
+        };
+        assert!(
+            serde_json::to_string(&bare)
+                .unwrap()
+                .ends_with(r#""drumMap":{"preset":"studio"}}"#)
+        );
+        // What it wrote reads back; an empty array does not, on either side.
+        let again: ChannelMix =
+            serde_json::from_str(&serde_json::to_string(&bare).unwrap()).unwrap();
+        assert_eq!(again, bare);
+        assert!(
+            serde_json::from_str::<ChannelMix>(
+                r#"{"gain":1,"pan":0,"mute":false,"solo":false,"drumMap":{"preset":"studio","keys":[]}}"#
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn an_explicit_null_is_refused_and_a_backing_track_has_no_drum_map() {
+        for text in [
+            r#"{"gain":1,"pan":0,"mute":false,"solo":false,"drumMap":null}"#,
+            r#"{"gain":1,"pan":0,"mute":false,"solo":false,"drumMap":{"preset":"x","keys":null}}"#,
+        ] {
+            assert!(serde_json::from_str::<ChannelMix>(text).is_err(), "{text}");
+        }
+        let mut backing: BackingSettings = serde_json::from_value(serde_json::json!({
+            "assetId":"a","offsetMs":0,"anchors":[],"mix":{"gain":1,"pan":0,"mute":false,"solo":false}
+        }))
+        .unwrap();
+        assert!(backing.validate().is_ok());
+        backing.mix.drum_map = Some(DrumMapRef {
+            preset: "studio".into(),
+            keys: vec![(38, Some(40))],
+        });
+        assert!(backing.validate().is_err());
+    }
+
+    #[test]
+    fn setting_a_drum_map_is_a_mix_edit_that_validates() {
+        use crate::edit_types::EditCommand;
+        let edit = |map: serde_json::Value| -> EditCommand {
+            serde_json::from_value(serde_json::json!({
+                "type":"setTrackMix","trackId":"base/0",
+                "mix":{"gain":1,"pan":0,"mute":false,"solo":false,"drumMap":map}
+            }))
+            .unwrap()
+        };
+        assert!(
+            edit(serde_json::json!({"preset":"gm","keys":[[91,40]]}))
+                .validate()
+                .is_ok()
+        );
+        assert!(edit(serde_json::json!({"preset":"gm"})).validate().is_err());
+        assert!(
+            edit(serde_json::json!({"preset":"gm","keys":[[91,128]]}))
+                .validate()
+                .is_err()
+        );
     }
 }

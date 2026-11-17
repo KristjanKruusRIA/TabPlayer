@@ -109,9 +109,9 @@ function gpIdMatch(track: model.Track, id: number): number | undefined {
   return standardPercussionCatalog.some(entry => entry.id === articulation.id && entry.element === articulation.elementType && entry.outputMidiNumber === articulation.outputMidiNumber) ? articulation.id : undefined;
 }
 
-/** The standard articulation a drum note's articulation is, by its shape in the track's table or else by the id the file gave it. */
+/** The standard articulation a drum note's articulation is: the id the file gave its table entry when that is a standard one of the same piece and sound (a China and its choke have one shape, so only the id tells them apart), else by its shape in the table. */
 export function mapArticulationId(track: model.Track, id: number): number | undefined {
-  return standardArticulationId(track, id) ?? gpIdMatch(track, id);
+  return gpIdMatch(track, id) ?? standardArticulationId(track, id);
 }
 
 /** One layout a drum map can start from, as `drum-maps.json` describes it. Only `id` is required: `state` says whether the layout was checked against the instrument it belongs to, `candidates` lists keys worth trying for a row, `[articulation id, [key, ...]]`. */

@@ -749,6 +749,20 @@ it("reads the id of a copy of a standard sound in the track's own table", () => 
   expect(idsOf(plan)).toEqual([['noteOn', 38, 91], ['noteOff', 38, 91], ['noteOn', 51, 93], ['noteOff', 51, 93]]);
 });
 
+it("tells the entries of a Guitar Pro 7 table apart that share one shape: China and its choke, golpe by thumb and by finger", () => {
+  // China (hit) 52 and its choke 96 are one shape, as are the golpe by thumb 124 and by finger 125; each entry carries its own id.
+  const plan = agree(drumScore([0, 1, 2, 3], [copyOf(52, 52), copyOf(96, 96), copyOf(124, 124), copyOf(125, 125)]));
+  expect(idsOf(plan)).toEqual([
+    // The hit is its own key, so it names nothing; the choke is told apart by its id.
+    ['noteOn', 52, undefined], ['noteOff', 52, undefined], ['noteOn', 52, 96], ['noteOff', 52, 96],
+    ['noteOn', 62, 124], ['noteOff', 62, 124], ['noteOn', 62, 125], ['noteOff', 62, 125],
+  ]);
+  validatePlaybackPlan(plan);
+  // The same table in the other order: the id follows the entry, not its place.
+  const swapped = agree(drumScore([0, 1], [copyOf(96, 96), copyOf(52, 52)]));
+  expect(idsOf(swapped)).toEqual([['noteOn', 52, 96], ['noteOff', 52, 96], ['noteOn', 52, undefined], ['noteOff', 52, undefined]]);
+});
+
 it("reads a custom notehead's own id when the catalogue has that id for the same piece and sound", () => {
   const symbol = model.MusicFontSymbol.NoteheadSlashedBlack1, none = model.MusicFontSymbol.None, outside = model.TechniqueSymbolPlacement.Outside;
   // The snare rim shot drawn with another notehead: it matches no standard shape, but the file gave it the rim shot's id.

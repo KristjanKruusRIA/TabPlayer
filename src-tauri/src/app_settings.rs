@@ -1,6 +1,6 @@
 //! The person's own application settings, kept in the app's config directory beside the other personal stores.
 //!
-//! Today the file holds the instrument view options. It is read from disk, so it is treated as untrusted: it is
+//! The file holds the instrument view options and the score error, new score and default view preferences. It is read from disk, so it is treated as untrusted: it is
 //! size-capped, each field is checked on its own, unknown fields are ignored (and kept when the file is written),
 //! and nothing in it names a path. A file that was read and is not settings at all is moved aside (never deleted)
 //! and the defaults apply. A file of a newer version is left exactly as it is.
@@ -75,12 +75,97 @@ impl Default for InstrumentViewSettings {
     }
 }
 
-/// What the front end sees. `instrument_view` is `None` until the person (or the one-time migration) has stored one.
+/// The longest new-score default (UTF-16 units, as the editor and `project::NEW_SCORE_DEFAULT_LIMIT` count them).
+pub const NEW_SCORE_LIMIT: usize = 1000;
+const ZOOM_MIN: f64 = 25.0;
+const ZOOM_MAX: f64 = 300.0;
+
+/// Whether measures that do not add up to their time signature are marked in the score. On unless turned off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScoreErrorSettings {
+    pub mark: bool,
+}
+
+impl Default for ScoreErrorSettings {
+    fn default() -> Self {
+        Self { mark: true }
+    }
+}
+
+/// The author details a new score starts with. Each is at most `NEW_SCORE_LIMIT` UTF-16 units.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewScoreSettings {
+    pub artist: String,
+    pub words: String,
+    pub music: String,
+    pub tab: String,
+    pub copyright: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ViewLayout {
+    VerticalPage,
+    HorizontalPage,
+    Grid,
+    Parchment,
+    VerticalScreen,
+    HorizontalScreen,
+}
+
+impl ViewLayout {
+    fn is_physical_page(self) -> bool {
+        matches!(self, Self::VerticalPage | Self::HorizontalPage | Self::Grid)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ViewZoomMode {
+    Manual,
+    FitWidth,
+    FitPage,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ViewTracks {
+    Selected,
+    All,
+}
+
+/// How a score first appears when it has no view of its own yet. Fit page needs a physical page layout.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewDefaultSettings {
+    pub layout: ViewLayout,
+    pub zoom_mode: ViewZoomMode,
+    pub zoom: f64,
+    pub tracks: ViewTracks,
+}
+
+impl Default for ViewDefaultSettings {
+    fn default() -> Self {
+        Self {
+            layout: ViewLayout::Parchment,
+            zoom_mode: ViewZoomMode::Manual,
+            zoom: 100.0,
+            tracks: ViewTracks::Selected,
+        }
+    }
+}
+
+/// What the front end sees. Each group is `None` until the person (or the one-time migration) has stored it.
 /// `read_only` is true while the file belongs to a newer build of the app: it is left as it is and changes are refused.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub instrument_view: Option<InstrumentViewSettings>,
+    pub score_errors: Option<ScoreErrorSettings>,
+    pub new_score: Option<NewScoreSettings>,
+    pub view_defaults: Option<ViewDefaultSettings>,
     pub read_only: bool,
 }
 
@@ -106,6 +191,54 @@ fn repaired(section: &Map<String, Value>) -> InstrumentViewSettings {
         neck: field(section, "neck", d.neck),
         expanded: field(section, "expanded", d.expanded),
         focus: field(section, "focus", d.focus),
+    }
+}
+
+fn score_errors_repaired(section: &Map<String, Value>) -> ScoreErrorSettings {
+    ScoreErrorSettings {
+        mark: field(section, "mark", true),
+    }
+}
+
+fn new_score_text(section: &Map<String, Value>, name: &str) -> String {
+    section
+        .get(name)
+        .and_then(Value::as_str)
+        .filter(|text| text.encode_utf16().count() <= NEW_SCORE_LIMIT)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn new_score_repaired(section: &Map<String, Value>) -> NewScoreSettings {
+    NewScoreSettings {
+        artist: new_score_text(section, "artist"),
+        words: new_score_text(section, "words"),
+        music: new_score_text(section, "music"),
+        tab: new_score_text(section, "tab"),
+        copyright: new_score_text(section, "copyright"),
+    }
+}
+
+fn valid_zoom(zoom: f64) -> bool {
+    zoom.is_finite() && (ZOOM_MIN..=ZOOM_MAX).contains(&zoom)
+}
+
+fn view_defaults_repaired(section: &Map<String, Value>) -> ViewDefaultSettings {
+    let d = ViewDefaultSettings::default();
+    let layout = field(section, "layout", d.layout);
+    let mut zoom_mode = field(section, "zoomMode", d.zoom_mode);
+    if zoom_mode == ViewZoomMode::FitPage && !layout.is_physical_page() {
+        zoom_mode = ViewZoomMode::FitWidth;
+    }
+    ViewDefaultSettings {
+        layout,
+        zoom_mode,
+        zoom: section
+            .get("zoom")
+            .and_then(Value::as_f64)
+            .filter(|zoom| valid_zoom(*zoom))
+            .unwrap_or(d.zoom),
+        tracks: field(section, "tracks", d.tracks),
     }
 }
 
@@ -202,11 +335,12 @@ fn load(directory: &Path) -> Result<Loaded, String> {
 }
 
 fn settings_of(root: &Map<String, Value>) -> AppSettings {
+    let section = |name: &str| root.get(name).and_then(Value::as_object);
     AppSettings {
-        instrument_view: root
-            .get("instrumentView")
-            .and_then(Value::as_object)
-            .map(repaired),
+        instrument_view: section("instrumentView").map(repaired),
+        score_errors: section("scoreErrors").map(score_errors_repaired),
+        new_score: section("newScore").map(new_score_repaired),
+        view_defaults: section("viewDefaults").map(view_defaults_repaired),
         read_only: false,
     }
 }
@@ -230,12 +364,74 @@ pub fn read_settings(directory: &Path) -> Result<AppSettings, String> {
     })
 }
 
-/// Stores the instrument view options. Choosing what is already stored writes nothing, and nothing is written
-/// until there is a choice to store. Fields this build does not know are kept as they were, in the file and inside
-/// the instrument view section. A file of a newer version is refused, untouched.
+/// Stores the instrument view options. See `put_section`.
 pub fn put_instrument_view(
     directory: &Path,
     value: InstrumentViewSettings,
+) -> Result<AppSettings, String> {
+    put_section(directory, "instrumentView", &OPTIONS, value)
+}
+
+/// Stores whether error measures are marked.
+pub fn put_score_errors(
+    directory: &Path,
+    value: ScoreErrorSettings,
+) -> Result<AppSettings, String> {
+    put_section(directory, "scoreErrors", &["mark"], value)
+}
+
+/// Stores the new-score defaults; a field over the limit is refused (the front end clips before sending).
+pub fn put_new_score(directory: &Path, value: NewScoreSettings) -> Result<AppSettings, String> {
+    let fields = [
+        &value.artist,
+        &value.words,
+        &value.music,
+        &value.tab,
+        &value.copyright,
+    ];
+    if fields
+        .iter()
+        .any(|text| text.encode_utf16().count() > NEW_SCORE_LIMIT)
+    {
+        return Err(format!(
+            "New score defaults must be at most {NEW_SCORE_LIMIT} characters each."
+        ));
+    }
+    put_section(
+        directory,
+        "newScore",
+        &["artist", "words", "music", "tab", "copyright"],
+        value,
+    )
+}
+
+/// Stores the default view; an out-of-range zoom or fit page on a screen layout is refused.
+pub fn put_view_defaults(
+    directory: &Path,
+    value: ViewDefaultSettings,
+) -> Result<AppSettings, String> {
+    if !valid_zoom(value.zoom) {
+        return Err("The default zoom must be between 25 and 300.".into());
+    }
+    if value.zoom_mode == ViewZoomMode::FitPage && !value.layout.is_physical_page() {
+        return Err("Fit page needs a page layout.".into());
+    }
+    put_section(
+        directory,
+        "viewDefaults",
+        &["layout", "zoomMode", "zoom", "tracks"],
+        value,
+    )
+}
+
+/// Stores one group of options. Choosing what is already stored writes nothing, and nothing is written until there
+/// is a choice to store. Fields this build does not know are kept as they were, in the file and inside the group.
+/// A file of a newer version is refused, untouched.
+fn put_section<T: Serialize>(
+    directory: &Path,
+    name: &str,
+    options: &[&str],
+    value: T,
 ) -> Result<AppSettings, String> {
     let _guard = lock();
     let mut root = match load(directory)? {
@@ -253,22 +449,23 @@ pub fn put_instrument_view(
         _ => return Err("Settings could not be encoded.".into()),
     };
     let mut section = root
-        .get("instrumentView")
+        .get(name)
         .and_then(Value::as_object)
         .cloned()
         .unwrap_or_default();
-    if OPTIONS
+    if options
         .iter()
-        .all(|name| section.get(*name) == wanted.get(*name))
+        .all(|option| section.get(*option) == wanted.get(*option))
     {
         return Ok(settings_of(&root));
     }
-    for name in OPTIONS {
-        if let Some(entry) = wanted.get(name) {
-            section.insert(name.into(), entry.clone());
+    for option in options {
+        if let Some(entry) = wanted.get(*option) {
+            section.insert((*option).into(), entry.clone());
         }
     }
-    root.insert("instrumentView".into(), Value::Object(section));
+    root.insert(name.into(), Value::Object(section));
+    let result = settings_of(&root);
     let root = Value::Object(root);
     // Pretty for a person who opens it; compact when that is what keeps it under the size the next start accepts.
     let mut bytes = serde_json::to_vec_pretty(&root).map_err(|error| error.to_string())?;
@@ -280,10 +477,7 @@ pub fn put_instrument_view(
     }
     std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
     crate::files::write_bytes(&directory.join(FILENAME), &bytes)?;
-    Ok(AppSettings {
-        instrument_view: Some(value),
-        read_only: false,
-    })
+    Ok(result)
 }
 
 #[cfg(test)]
@@ -552,5 +746,225 @@ mod tests {
         let root = tempdir().unwrap();
         read_settings(root.path()).unwrap();
         assert!(!file(root.path()).exists());
+    }
+
+    fn authored() -> NewScoreSettings {
+        NewScoreSettings {
+            artist: "A".into(),
+            words: "W".into(),
+            music: "M".into(),
+            tab: "T".into(),
+            copyright: "C".into(),
+        }
+    }
+    fn views() -> ViewDefaultSettings {
+        ViewDefaultSettings {
+            layout: ViewLayout::VerticalPage,
+            zoom_mode: ViewZoomMode::FitPage,
+            zoom: 125.0,
+            tracks: ViewTracks::All,
+        }
+    }
+
+    #[test]
+    fn a_file_written_by_the_previous_build_still_loads_and_keeps_its_section() {
+        let root = tempdir().unwrap();
+        let old = json!({"format":"tabplayer-settings","version":1,
+            "instrumentView":{"leftHanded":true,"noteNames":"letter","neck":"bass","expanded":true,"focus":"bar"}});
+        std::fs::write(file(root.path()), serde_json::to_vec(&old).unwrap()).unwrap();
+        let read = read_settings(root.path()).unwrap();
+        assert_eq!(read.instrument_view, Some(chosen()));
+        assert_eq!(read.score_errors, None);
+        assert_eq!(read.new_score, None);
+        assert_eq!(read.view_defaults, None);
+        assert!(!read.read_only);
+        // Reading changed nothing; the new groups join the file without touching the old section.
+        assert_eq!(stored(root.path()), old);
+        put_score_errors(root.path(), ScoreErrorSettings { mark: false }).unwrap();
+        put_new_score(root.path(), authored()).unwrap();
+        put_view_defaults(root.path(), views()).unwrap();
+        let after = stored(root.path());
+        assert_eq!(after["instrumentView"], old["instrumentView"]);
+        assert_eq!(after["scoreErrors"], json!({"mark":false}));
+        assert_eq!(
+            after["newScore"],
+            json!({"artist":"A","words":"W","music":"M","tab":"T","copyright":"C"})
+        );
+        assert_eq!(
+            after["viewDefaults"],
+            json!({"layout":"verticalPage","zoomMode":"fitPage","zoom":125.0,"tracks":"all"})
+        );
+        let read = read_settings(root.path()).unwrap();
+        assert_eq!(read.score_errors, Some(ScoreErrorSettings { mark: false }));
+        assert_eq!(read.new_score, Some(authored()));
+        assert_eq!(read.view_defaults, Some(views()));
+        assert_eq!(read.instrument_view, Some(chosen()));
+    }
+
+    #[test]
+    fn the_new_groups_write_nothing_for_the_stored_value_and_keep_unknown_fields() {
+        let root = tempdir().unwrap();
+        std::fs::write(
+            file(root.path()),
+            serde_json::to_vec(&json!({"format":"tabplayer-settings","version":1,"future":1,
+                "scoreErrors":{"mark":true,"extra":1},
+                "newScore":{"artist":"A","words":"W","music":"M","tab":"T","copyright":"C","extra":2},
+                "viewDefaults":{"layout":"verticalPage","zoomMode":"fitPage","zoom":125.0,"tracks":"all","extra":3}}))
+            .unwrap(),
+        )
+        .unwrap();
+        let before = std::fs::read(file(root.path())).unwrap();
+        put_score_errors(root.path(), ScoreErrorSettings { mark: true }).unwrap();
+        put_new_score(root.path(), authored()).unwrap();
+        put_view_defaults(root.path(), views()).unwrap();
+        assert_eq!(std::fs::read(file(root.path())).unwrap(), before);
+        put_score_errors(root.path(), ScoreErrorSettings { mark: false }).unwrap();
+        put_view_defaults(
+            root.path(),
+            ViewDefaultSettings {
+                zoom: 90.0,
+                ..views()
+            },
+        )
+        .unwrap();
+        let after = stored(root.path());
+        assert_eq!(after["future"], json!(1));
+        assert_eq!(after["scoreErrors"], json!({"mark":false,"extra":1}));
+        assert_eq!(after["newScore"]["extra"], json!(2));
+        assert_eq!(after["viewDefaults"]["extra"], json!(3));
+        assert_eq!(after["viewDefaults"]["zoom"], json!(90.0));
+    }
+
+    #[test]
+    fn each_bad_field_of_the_new_groups_repairs_alone() {
+        let root = tempdir().unwrap();
+        let long = "x".repeat(NEW_SCORE_LIMIT + 1);
+        std::fs::write(
+            file(root.path()),
+            serde_json::to_vec(&json!({"format":"tabplayer-settings","version":1,
+                "scoreErrors":{"mark":"no"},
+                "newScore":{"artist":"Kept","words":long,"music":7,"tab":null,"copyright":"Also"},
+                "viewDefaults":{"layout":"grid","zoomMode":"sideways","zoom":9000,"tracks":"all"}}))
+            .unwrap(),
+        )
+        .unwrap();
+        let read = read_settings(root.path()).unwrap();
+        assert_eq!(read.score_errors, Some(ScoreErrorSettings { mark: true }));
+        assert_eq!(
+            read.new_score,
+            Some(NewScoreSettings {
+                artist: "Kept".into(),
+                copyright: "Also".into(),
+                ..NewScoreSettings::default()
+            })
+        );
+        assert_eq!(
+            read.view_defaults,
+            Some(ViewDefaultSettings {
+                layout: ViewLayout::Grid,
+                zoom_mode: ViewZoomMode::Manual,
+                zoom: 100.0,
+                tracks: ViewTracks::All,
+            })
+        );
+        // A fit-page zoom on a screen layout is the fit-width the score view shows.
+        std::fs::write(
+            file(root.path()),
+            serde_json::to_vec(&json!({"format":"tabplayer-settings","version":1,
+                "viewDefaults":{"layout":"parchment","zoomMode":"fitPage","zoom":"x","tracks":3}}))
+            .unwrap(),
+        )
+        .unwrap();
+        let read = read_settings(root.path()).unwrap().view_defaults.unwrap();
+        assert_eq!(read.zoom_mode, ViewZoomMode::FitWidth);
+        assert_eq!(read.zoom, 100.0);
+        assert_eq!(read.tracks, ViewTracks::Selected);
+        // A string of exactly the limit is kept, counted in UTF-16 units like the editor counts them.
+        let edge = "\u{1F3B8}".repeat(NEW_SCORE_LIMIT / 2);
+        put_new_score(
+            root.path(),
+            NewScoreSettings {
+                artist: edge.clone(),
+                ..NewScoreSettings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            read_settings(root.path())
+                .unwrap()
+                .new_score
+                .unwrap()
+                .artist,
+            edge
+        );
+    }
+
+    #[test]
+    fn a_put_of_an_out_of_range_value_is_refused_and_writes_nothing() {
+        let root = tempdir().unwrap();
+        let long = NewScoreSettings {
+            tab: "x".repeat(NEW_SCORE_LIMIT + 1),
+            ..authored()
+        };
+        assert!(put_new_score(root.path(), long).is_err());
+        for zoom in [24.0, 301.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                put_view_defaults(root.path(), ViewDefaultSettings { zoom, ..views() }).is_err()
+            );
+        }
+        assert!(
+            put_view_defaults(
+                root.path(),
+                ViewDefaultSettings {
+                    layout: ViewLayout::Parchment,
+                    ..views()
+                }
+            )
+            .is_err(),
+            "fit page on a screen layout is not a stored choice"
+        );
+        assert!(!file(root.path()).exists());
+    }
+
+    #[test]
+    fn a_newer_file_refuses_every_group_and_stays_byte_for_byte() {
+        let root = tempdir().unwrap();
+        let newer = serde_json::to_vec(&json!({"format":"tabplayer-settings","version":2,
+            "scoreErrors":{"mark":false},"theirs":[1]}))
+        .unwrap();
+        std::fs::write(file(root.path()), &newer).unwrap();
+        let read = read_settings(root.path()).unwrap();
+        assert!(read.read_only);
+        assert_eq!(
+            (read.score_errors, read.new_score, read.view_defaults),
+            (None, None, None)
+        );
+        let refused = Err(NEWER_VERSION.to_string());
+        assert_eq!(
+            put_score_errors(root.path(), ScoreErrorSettings { mark: true }).map(|_| ()),
+            refused
+        );
+        assert_eq!(put_new_score(root.path(), authored()).map(|_| ()), refused);
+        assert_eq!(put_view_defaults(root.path(), views()).map(|_| ()), refused);
+        assert_eq!(std::fs::read(file(root.path())).unwrap(), newer);
+        assert!(!aside(root.path(), 1).exists());
+    }
+
+    #[test]
+    fn the_size_cap_covers_the_new_groups() {
+        let root = tempdir().unwrap();
+        put_new_score(root.path(), authored()).unwrap();
+        let mut near = stored(root.path());
+        near["pad"] = json!("");
+        let base = serde_json::to_vec(&near).unwrap().len();
+        near["pad"] = json!("y".repeat(MAX_BYTES as usize - base));
+        let edge = serde_json::to_vec(&near).unwrap();
+        assert_eq!(edge.len() as u64, MAX_BYTES);
+        std::fs::write(file(root.path()), &edge).unwrap();
+        assert_eq!(
+            put_score_errors(root.path(), ScoreErrorSettings { mark: false }).map(|_| ()),
+            Err(TOO_LARGE.to_string())
+        );
+        assert_eq!(std::fs::read(file(root.path())).unwrap(), edge);
     }
 }

@@ -182,6 +182,29 @@ function materializePhraseRests(score:model.Score) {
     if(voice.beats.length!==1||!voice.beats[0].isFullBarRest)continue;const beat=voice.beats[0],rests=restBeats(bar.masterBar.calculateDuration(false)),first=rests.shift()!;beat.duration=first.duration;beat.dots=first.dots;beat.tupletNumerator=-1;beat.tupletDenominator=-1;voice.beats=[beat,...rests];voice.beats.forEach((item,index)=>{item.voice=voice;item.index=index;});
   }
 }
+/**
+ * Ties that a clip's held-note marker asks for, once the paste is in place and relinked. A marked first note is tied to the note of the beat
+ * directly before it, a marked last note to the note of the beat directly after it, in the same voice (across a barline too), when that note
+ * has the same pitch on the same string and is not tied already. Anything else is left a plain attack, as a clip without a marker is.
+ */
+function heldTies(starts:model.Note[],ends:model.Note[],existing:NoteLinks):NoteLinks {
+  const used=new Set(existing.filter(link=>link.kind==='tie').flatMap(link=>[`from/${link.from}`,`to/${link.to}`])),ties:NoteLinks=[];
+  const neighbour=(beat:model.Beat,step:-1|1)=>{
+    const voice=beat.voice,inBar=voice.beats[beat.index+step];if(inBar)return inBar;
+    const bar=voice.bar.staff.bars[voice.bar.index+step],lane=bar?.voices[voice.index];
+    return step<0?lane?.beats.at(-1):lane?.beats[0];
+  };
+  const same=(a:model.Note,b:model.Note)=>!a.isDead&&!b.isDead&&a.isStringed===b.isStringed&&(!a.isStringed||a.string===b.string)&&a.realValue===b.realValue;
+  const add=(from:model.Note,to:model.Note)=>{
+    if(!same(from,to)||used.has(`from/${from.id}`)||used.has(`to/${to.id}`))return;
+    used.add(`from/${from.id}`);used.add(`to/${to.id}`);ties.push({from:from.id,to:to.id,kind:'tie'});
+  };
+  const plain=(beat:model.Beat|undefined)=>beat&&beat.graceType===model.GraceType.None?beat:undefined;
+  for(const note of starts){const origin=plain(neighbour(note.beat,-1))?.notes.find(item=>same(item,note));if(origin)add(origin,note);}
+  for(const note of ends){const next=plain(neighbour(note.beat,1))?.notes.find(item=>same(item,note));if(next)add(note,next);}
+  return ties;
+}
+
 function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command:ClipboardCommand,mappings:PasteDestination[]):PreparedMusicPaste {
   const {target,count,filters}=command.options,staff=score.tracks[target.track].staves[target.staff],firstVoice=staff.bars[target.bar].voices[target.voice];
   // The position just past the last beat stays valid: recorded pastes there replay into the next measure.
@@ -189,7 +212,7 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
   if(score.masterBars[target.bar].isFreeTime)throw new Error('Free-time phrase placement is not supported.');
   const voicesCount=source.tracks[0].staves[0].bars[0].voices.length;
   for(let v=0;v<voicesCount;v++){if(!staff.bars[target.bar].voices[target.voice+v])throw new Error('The destination must already contain every copied voice.');}
-  const allocate=reserveIds(score),links=captureNoteLinks(score),retainedLinks=protectedLinks(score,links),pastedLinks:NoteLinks=[],parts:model.Score[]=[],events:PhraseEvents[]=[],placements:Placement[]=[],changes=new Map<number,Set<model.AutomationType>>(),pedals=new Set<model.Staff>(),affected=new Set<number>();
+  const allocate=reserveIds(score),links=captureNoteLinks(score),retainedLinks=protectedLinks(score,links),pastedLinks:NoteLinks=[],parts:model.Score[]=[],events:PhraseEvents[]=[],placements:Placement[]=[],changes=new Map<number,Set<model.AutomationType>>(),pedals=new Set<model.Staff>(),affected=new Set<number>(),heldStarts:model.Note[]=[],heldEnds:model.Note[]=[];
   const targetTick=firstVoice.beats.slice(0,target.beat).reduce((sum,beat)=>sum+rhythmTicks(beat),0);
   let bar=target.bar,tick=targetTick,insertAt:number|null=null,insertCount=0;
   const inherited=(index:number)=>score.masterBars[Math.max(0,Math.min(index-1,score.masterBars.length-1))];
@@ -205,7 +228,12 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
     }
   };
   for(let repeat=0;repeat<count;repeat++){
-    const part=repeat===0?source:decode(clip);events.push(phraseEvents(part));materializePhraseRests(part);parts.push(part);const newLinks=allocate(part);links.push(...newLinks);pastedLinks.push(...newLinks);const from=part.tracks[0].staves[0];
+    const part=repeat===0?source:decode(clip);events.push(phraseEvents(part));materializePhraseRests(part);parts.push(part);
+    // Only the clip's first start and last end touch the destination; the notes are the ones that move into it, before their IDs are renewed.
+    const heldNotes=(ids:number[])=>{const wanted=new Set(ids);return allNotes(part).filter(item=>wanted.has(item.id));};
+    if(clip.held&&repeat===0)heldStarts.push(...heldNotes(clip.held.continues));
+    if(clip.held&&repeat===count-1)heldEnds.push(...heldNotes(clip.held.continued));
+    const newLinks=allocate(part);links.push(...newLinks);pastedLinks.push(...newLinks);const from=part.tracks[0].staves[0];
     if(voicesCount===1){
       let pending:model.Beat[]=[];
       for(const measure of from.bars)for(const beat of measure.voices[0].beats){
@@ -335,7 +363,8 @@ function pastePhrase(score:model.Score,clip:MusicClip,source:model.Score,command
       return false;
     }
   });
-  restoreNoteLinks(score,survivingLinks);
+  const restoredTies=heldTies(heldStarts,heldEnds,survivingLinks);
+  restoreNoteLinks(score,[...survivingLinks,...restoredTies]);
   validateLinks(score,survivingLinks.filter(l=>filteredRetained.includes(l)),false);
   validateLinks(score,pastedLinks);
   restoreSuffix(score,suffix,state,changes,pedals,false,suffixTick);

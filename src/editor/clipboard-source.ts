@@ -12,7 +12,7 @@ import type { MusicSelection } from './range-types';
 import { setNoteAudio } from './note-audio';
 import { directionProblem } from './clipboard-structure';
 import { subdivideRange } from './clipboard-subdivide';
-import type { ClipboardHarmony,ClipboardLink,ClipboardMode,MusicClip } from './clipboard-types';
+import type { ClipboardHarmony,ClipboardHeld,ClipboardLink,ClipboardMode,MusicClip } from './clipboard-types';
 
 type RecordValue=Record<string,unknown>;
 const object=(value:unknown):RecordValue=>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid clipboard model object.');return value as RecordValue;};
@@ -119,12 +119,24 @@ function validateModel(score:model.Score,clip:MusicClip) {
     if(link.kind==='tie'&&from.realValue!==to.realValue)throw new Error('Clipboard tie pitch must match.');if((link.kind==='hammerPull'||link.kind==='slide')&&!from.isStringed)throw new Error('Clipboard slide and hammer links require strings.');
   }
   for(const note of lookup.values())if(note.isContinuedBend&&!clip.links.some(link=>link.to===note.id&&link.kind==='tie'))throw new Error('Continued bend requires its internal origin.');
+  if(clip.held){
+    if(clip.kind!=='phrase')throw new Error('Only a phrase clipboard can continue a held note.');
+    // A note that carries on a held note across an edge has no tie to or from another note of the clip on that side.
+    for(const [ids,side] of [[clip.held.continues,'to'],[clip.held.continued,'from']] as const)for(const id of ids){
+      const held=lookup.get(id);if(!held)throw new Error('Clipboard held-note marker refers to a missing note.');
+      // Only a note of the first (or last) sounding beat of the first (or last) bar can carry on a held note across that edge.
+      const voice=held.beat.voice,bars=voice.bar.staff.bars,plain=voice.beats.filter(beat=>beat.graceType===model.GraceType.None&&!beat.isEmpty);
+      if(voice.bar!==(side==='to'?bars[0]:bars[bars.length-1])||plain[side==='to'?0:plain.length-1]!==held.beat)throw new Error('Clipboard held-note marker is not at the clip edge.');
+      if(held.isPercussion||clip.links.some(link=>link.kind==='tie'&&link[side]===id))throw new Error('Clipboard held-note marker contradicts the clip links.');
+    }
+  }
 }
 /** A validated, detached app snapshot; it contains no source document provenance. */
 export function readMusicClip(value:unknown):MusicClip {
   validateMusicClipEnvelope(value);const clip=value as MusicClip,raw=object(JSON.parse(clip.scoreJson));validateStructure(raw,clip);
   const score=scoreFromMusicClip(clip);knownFields(raw,JSON.parse(json(score)));validateModel(score,clip);
-  return clip.version===2?{...clip,links:clip.links.map(link=>({...link})),harmony:structuredClone(clip.harmony)}:{...clip,links:clip.links.map(link=>({...link}))};
+  const held=clip.held?{held:{continues:[...clip.held.continues],continued:[...clip.held.continued]}}:{};
+  return clip.version===2?{...clip,links:clip.links.map(link=>({...link})),harmony:structuredClone(clip.harmony),...held}:{...clip,links:clip.links.map(link=>({...link})),...held};
 }
 
 function installClipHarmony(score:model.Score,clip:MusicClip) {
@@ -171,6 +183,20 @@ export function musicClipSelection(score:model.Score,selection:MusicSelection,mo
   if(normalized.kind==='bars')return {...normalized,tracks};
   if(normalized.kind==='range')return {kind:'bars',tracks,firstBar:normalized.range.start.bar,lastBar:normalized.range.end.bar-(normalized.range.end.tick===0?1:0)};
   const bars=normalized.notes.map(note=>note.target.bar);return {kind:'bars',tracks,firstBar:Math.min(...bars),lastBar:Math.max(...bars)};
+}
+
+/**
+ * The notes at the two ends of a phrase that are tied to a note outside it, so a paste can restore the tie. `source` is the (possibly subdivided)
+ * score the clip was cut from; only the first and last sounding beat of each voice of the first and last bar count, and only a tie that is
+ * not inside the clip. Null when there is none.
+ */
+function heldNotes(source:model.Score,snapshot:model.Score,kept:Set<number>):ClipboardHeld|null {
+  const inSource=new Map(allNotes(source).map(note=>[note.id,note])),continues:number[]=[],continued:number[]=[];
+  const staff=snapshot.tracks[0].staves[0],plain=(voice:model.Voice)=>voice.beats.filter(beat=>beat.graceType===model.GraceType.None&&!beat.isEmpty);
+  const first=staff.bars[0],last=staff.bars[staff.bars.length-1];
+  for(const voice of first.voices){const beat=plain(voice)[0];if(!beat)continue;for(const note of beat.notes){const origin=inSource.get(note.id)?.tieOrigin;if(!note.isPercussion&&origin&&!kept.has(origin.id)&&!continues.includes(note.id))continues.push(note.id);}}
+  for(const voice of last.voices){const beat=plain(voice).at(-1);if(!beat)continue;for(const note of beat.notes){const next=inSource.get(note.id)?.tieDestination;if(!note.isPercussion&&next&&!kept.has(next.id)&&!continued.includes(note.id))continued.push(note.id);}}
+  return continues.length||continued.length?{continues,continued}:null;
 }
 
 /** Build a new selected-music score, never a document plus a selection mask. */
@@ -264,6 +290,7 @@ export function makeMusicClip(source:model.Score,selection:MusicSelection,mode:C
   restoreNoteLinks(snapshot,links.map(link=>({...link,slideOutType:link.slideOutType??undefined})));
   // A note that continues a tie takes its audio settings from the first note of the tie, so a cut piece still tied on keeps none of its own.
   for(const note of allNotes(snapshot))if(pieces.has(note.id)&&note.isTieDestination)setNoteAudio(note,null);
-  const base={format:'TabPlayerClip' as const,engineVersion:'1.8.4' as const,mode,kind:kind as MusicClip['kind'],scoreJson:json(snapshot),links};
+  const held=kind==='phrase'?heldNotes(score,snapshot,keptIds):null;
+  const base={format:'TabPlayerClip' as const,engineVersion:'1.8.4' as const,mode,kind:kind as MusicClip['kind'],scoreJson:json(snapshot),links,...held?{held}:{}};
   const clip:MusicClip=harmony.length?{...base,version:2,harmony}:{...base,version:1};return readMusicClip(clip);
 }

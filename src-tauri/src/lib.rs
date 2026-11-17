@@ -293,6 +293,39 @@ async fn app_settings_put_instrument_view(
 }
 
 #[tauri::command]
+async fn app_settings_put_score_errors(
+    app: AppHandle,
+    value: app_settings::ScoreErrorSettings,
+) -> Result<app_settings::AppSettings, String> {
+    let directory = personal_data_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || app_settings::put_score_errors(&directory, value))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn app_settings_put_new_score(
+    app: AppHandle,
+    value: app_settings::NewScoreSettings,
+) -> Result<app_settings::AppSettings, String> {
+    let directory = personal_data_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || app_settings::put_new_score(&directory, value))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn app_settings_put_view_defaults(
+    app: AppHandle,
+    value: app_settings::ViewDefaultSettings,
+) -> Result<app_settings::AppSettings, String> {
+    let directory = personal_data_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || app_settings::put_view_defaults(&directory, value))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 async fn tuning_library_read(app: AppHandle) -> Result<tuning_library::TuningLibrary, String> {
     let directory = personal_data_directory(&app)?;
     tauri::async_runtime::spawn_blocking(move || tuning_library::read_library(&directory))
@@ -1325,6 +1358,9 @@ pub fn run() {
         harmony_library_remove,
         app_settings_read,
         app_settings_put_instrument_view,
+        app_settings_put_score_errors,
+        app_settings_put_new_score,
+        app_settings_put_view_defaults,
         tuning_library_read,
         tuning_library_put,
         tuning_library_remove,
@@ -1454,6 +1490,9 @@ pub fn run() {
         harmony_library_remove,
         app_settings_read,
         app_settings_put_instrument_view,
+        app_settings_put_score_errors,
+        app_settings_put_new_score,
+        app_settings_put_view_defaults,
         tuning_library_read,
         tuning_library_put,
         tuning_library_remove,

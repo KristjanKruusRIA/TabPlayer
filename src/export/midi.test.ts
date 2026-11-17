@@ -134,6 +134,28 @@ describe('standard MIDI export',()=>{
       for(const channel of channels){expect(channel).not.toBe(9);expect(melodic.has(channel)).toBe(false);melodic.add(channel);}
     }
   });
+  describe('drum maps',()=>{
+    const kit=()=>{const s=manyTracks(4),drums=s.tracks[3];drums.staves[0].isPercussion=true;drums.staves[0].stringTuning.tunings=[];
+      for(const bar of drums.staves[0].bars)for(const beat of bar.voices[0].beats){beat.notes=[];const n=new model.Note();n.percussionArticulation=beat.index?42:38;beat.addNote(n);}
+      s.finish(new Settings());return s;};
+    const selection={tracks:[3],range:{first:0,last:0}};
+    const keys=(bytes:Uint8Array)=>decode(bytes).events.filter(e=>e.type===144).map(e=>[e.channel,e.data[0]]);
+    const maps=[undefined,undefined,undefined,{preset:'gm',keys:[[38,40],[42,null]] as [number,number|null][]}];
+    it('is byte-identical to today when the option is off or absent, even for a track with a map',()=>{
+      const s=kit(),plain=exportMidi(s,selection);
+      expect(Array.from(exportMidi(s,selection,{}))).toEqual(Array.from(plain));
+      expect(Array.from(exportMidi(s,selection,{drumMaps:undefined}))).toEqual(Array.from(plain));
+      expect(keys(plain)).toEqual([[9,38],[9,42]]);
+    });
+    it('writes a mapped hit on its mapped key and leaves out a hit the map silences',()=>{
+      expect(keys(exportMidi(kit(),selection,{drumMaps:maps}))).toEqual([[9,40]]);
+    });
+    it('leaves a track without a map, and a melodic track, as written',()=>{
+      const s=kit();expect(Array.from(exportMidi(s,selection,{drumMaps:[]}))).toEqual(Array.from(exportMidi(s,selection)));
+      const all={tracks:[0,3],range:{first:0,last:0}};
+      expect(decode(exportMidi(s,all,{drumMaps:maps})).events.filter(e=>e.type===144&&e.track===1).length).toBe(decode(exportMidi(s,all)).events.filter(e=>e.type===144&&e.track===1).length);
+    });
+  });
   it('rejects sixteen selected melodic tracks but exports a nonzero track alone with conductor tempo intact',()=>{
     const s=manyTracks(16),before=JSON.stringify(model.JsonConverter.scoreToJson(s));
     expect(()=>exportMidi(s,{tracks:s.tracks.map(t=>t.index),range:null})).toThrow(/15.*melodic.*select|select.*fewer.*tracks/i);

@@ -17,7 +17,7 @@ export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;cont
 export type ExportOptions = (
   | {format:'gp';selection:ExportSelection;backing?:boolean}
   | {format:'gp5';selection:ExportSelection}
-  | {format:'midi';selection:ExportSelection}
+  | {format:'midi';selection:ExportSelection;/** Write each percussion hit on the key its track's drum map gives it, and leave out hits the map silences. Absent is off. */drumMaps?:true}
   | {format:'musicxml';selection:ExportSelection}
   | {format:'ascii';selection:ExportSelection}
   | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;perTrack?:true}

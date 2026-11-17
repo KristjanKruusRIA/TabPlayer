@@ -91,11 +91,15 @@ function nonempty(value:unknown):unknown[] {
 }
 function unique(keys:unknown[]) {if(new Set(keys).size!==keys.length)throw new Error('Duplicate selection.');}
 export function validateMusicClipEnvelope(value:unknown):void {
-  const v2=object(value).version===2,clip=exact(value,['format','version','engineVersion','mode','kind','scoreJson','links',...v2?['harmony']:[]]);
+  const v2=object(value).version===2,held=Object.hasOwn(object(value),'held'),clip=exact(value,['format','version','engineVersion','mode','kind','scoreJson','links',...v2?['harmony']:[],...held?['held']:[]]);
   if(clip.format!=='TabPlayerClip'||![1,2].includes(clip.version as number)||clip.engineVersion!=='1.8.4'||!['singleTrack','multiTrack'].includes(clip.mode as string)||!['phrase','bars'].includes(clip.kind as string))throw new Error('Unsupported musical clipboard.');
   if(v2){
     if(!Array.isArray(clip.harmony))throw new Error('Invalid clipboard harmony records.');
     unique(Array.from(clip.harmony,value=>{const record=exact(value,['track','staff','chordId','chord']);integer(record.track);integer(record.staff);if(typeof record.chordId!=='string'||!record.chordId.length)throw new Error('Invalid clipboard chord identity.');validateHarmonyChord(record.chord);return JSON.stringify([record.track,record.staff,record.chordId]);}));
+  }
+  if(held){
+    const marker=exact(clip.held,['continues','continued']),lists=[marker.continues,marker.continued].map(list=>{if(!Array.isArray(list)||list.length>100000)throw new Error('Invalid clipboard held-note marker.');list.forEach(id=>integer(id));return list as number[];});
+    if(!lists[0].length&&!lists[1].length||lists.some(list=>new Set(list).size!==list.length))throw new Error('Invalid clipboard held-note marker.');
   }
   if(typeof clip.scoreJson!=='string'||new TextEncoder().encode(clip.scoreJson).byteLength>128000000)throw new Error('Invalid clipboard model size.');
   const json:unknown=JSON.parse(clip.scoreJson,(_key,value:unknown)=>{if(typeof value==='number'&&!Number.isFinite(value))throw new Error('Invalid clipboard number.');return value;});object(json);

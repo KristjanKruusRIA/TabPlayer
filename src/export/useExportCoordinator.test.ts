@@ -537,3 +537,17 @@ it('sends the practice count-in only for a mixed audio export that asks for it',
   expect(payloads[0].request.countIn).toEqual({bars:2,betweenLoops:true});expect(payloads[0].request.metronomeSound).toBe('cowbell');
   for(const later of payloads.slice(1)){expect(later.request).not.toHaveProperty('countIn');expect(later.request).not.toHaveProperty('metronomeSound');}
 });
+
+it('applies the stored drum map to the exported MIDI only when the option is on',async()=>{
+  const score=music(),drums=score.tracks[0];drums.staves[0].isPercussion=true;drums.staves[0].stringTuning.tunings=[];
+  for(const bar of drums.staves[0].bars)for(const beat of bar.voices[0].beats){beat.notes=[];const n=new model.Note();n.percussionArticulation=38;beat.addNote(n);beat.isEmpty=false;}
+  score.finish(new Settings());
+  const settings=defaultDocumentSettings();settings.mixes[trackIdentity(drums)]={gain:1,pan:0,mute:false,solo:false,drumMap:{preset:'gm',keys:[[38,40]]}};
+  const saved:Uint8Array[]=[],api=native();api.exportMidi=async bytes=>{saved.push(bytes);return true;};
+  const {result}=renderHook(()=>useExportCoordinator({revision:1,score,settings,currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+  const selection={tracks:[0],range:{first:0,last:0}};
+  await act(async()=>{await result.current.run({format:'midi',selection});await result.current.run({format:'midi',selection,drumMaps:true});});
+  const keys=(bytes:Uint8Array)=>{const out:number[]=[];for(let i=0;i<bytes.length-2;i++)if(bytes[i]===0x99)out.push(bytes[i+1]);return out;};
+  expect(keys(saved[0]).every(k=>k===38)&&keys(saved[0]).length>0).toBe(true);
+  expect(keys(saved[1]).length).toBe(keys(saved[0]).length);expect(keys(saved[1]).every(k=>k===40)).toBe(true);
+});

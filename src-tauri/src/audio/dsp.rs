@@ -1844,6 +1844,12 @@ pub struct TrackDsp {
     /// hand applied it at the plug-in.
     insert_pan: [f32; 2],
     insert_pan_applied: bool,
+    /// How much of `insert_pan` is applied at the input point (an instrument's) and how much at the Amp point (an effect's):
+    /// the factor raised to this power at the input, to one minus it at the Amp point, so the two multiply to the factor all
+    /// along. 1 or 0 while one kind of insert plays; while a slot changes between an effect and an instrument it glides to
+    /// where the arriving insert sits over the ramp, so a stage between the two points (a microphone that folds the sides, a
+    /// tone filter) is fed what it was fed the frame before instead of the pan moving past it in one frame.
+    pan_input_share: f32,
     /// Whether the leaving insert still runs: while it fades, and, with no insert arriving, until the built-in chain's
     /// input has glided back to the undelayed signal.
     leaving_live: bool,
@@ -1884,6 +1890,23 @@ struct InsertSlots<'a> {
     held: [f32; 2],
     scale: f32,
     ramp_frames: u32,
+}
+
+/// The smallest factor a side of the pan is split by: a side the score silences has factor 0, which no power splits, so the
+/// two parts of a split are taken from this instead (80 dB down, and their product is the floor rather than 0 for the 10 ms
+/// of a split).
+const PAN_SPLIT_FLOOR: f32 = 1.0e-4;
+
+/// `pan` raised to `share` on each side: all of it at 1, none at 0. `pan_share(pan, s)` times `pan_share(pan, 1 - s)` is
+/// `pan` for any side above the floor. Allocates nothing.
+fn pan_share(pan: [f32; 2], share: f32) -> [f32; 2] {
+    if share >= 1.0 {
+        pan
+    } else if share <= 0.0 {
+        [1.0; 2]
+    } else {
+        pan.map(|factor| factor.max(PAN_SPLIT_FLOOR).powf(share))
+    }
 }
 
 /// One frame through the inserts that sit at `point`: the arriving one, the leaving one and their crossfade. `x` is the
@@ -2000,6 +2023,7 @@ impl TrackDsp {
             plugin_fade: 0,
             insert_pan: [1.0; 2],
             insert_pan_applied: false,
+            pan_input_share: 1.0,
             leaving_live: false,
             leaving_held: [0.0; 2],
             leaving_scale: 1.0,
@@ -2384,6 +2408,13 @@ impl TrackDsp {
     fn plugin_from(&mut self, old: &mut Self) {
         self.built_in_live = old.built_in_live;
         self.sounding = old.sounding;
+        // Where the pan is applied carries on from where the old board had it, mid-glide included.
+        self.pan_input_share = old.pan_input_share;
+        let old_between_points = old.leaving_live
+            && match (&old.plugin, &old.plugin_leaving) {
+                (Some(arriving), Some(leaving)) => arriving.point() != leaving.point(),
+                _ => false,
+            };
         // One helper hosts one class, so a change of kind is a change of helper: the running insert fades out.
         let same_link = match (&self.plugin, &old.plugin) {
             (Some(arriving), Some(running)) => {
@@ -2445,6 +2476,15 @@ impl TrackDsp {
                         arriving.start_undelayed();
                     }
                     leaving.retime(0);
+                    // The pan was applied where the leaving insert sits, and glides from there to the arriving one's point,
+                    // unless the old board was already part-way through such a glide.
+                    if !old_between_points {
+                        self.pan_input_share = if leaving.point() == InsertPoint::Input {
+                            1.0
+                        } else {
+                            0.0
+                        };
+                    }
                 }
                 // Without one, the stand-in glides back to the undelayed signal (review I1).
                 None => leaving.retime(0),
@@ -2474,9 +2514,11 @@ impl TrackDsp {
         self.plugin = Some(insert);
     }
     /// Sets what the score's pan leaves to apply to what the plug-in makes: a factor for each side, which multiplies the
-    /// plug-in's output (or the built-in Drive, Amp and Cabinet standing in for it) before the stages after it, so they
-    /// and the second pedalboard hear the guitar as the pan places it. With no plug-in on the board, or at 1, it does
-    /// nothing; a board that has none at the point applies it to what the board makes. Allocates nothing.
+    /// plug-in's output (or the built-in Drive, Amp and Cabinet, or for an instrument the track's own sound, standing in
+    /// for it) before the stages after it, so they and the second pedalboard hear the track as the pan places it. With
+    /// no plug-in on the board, or at 1, it does nothing; a board that has none at the point applies it to what the board
+    /// makes. It is applied once, at the point the insert sits at (the Amp point for an effect, the input for an instrument); while
+    /// a slot changes between the two it is split between them, gliding from one to the other over the ramp. Allocates nothing.
     pub fn set_insert_pan(&mut self, pan: [f32; 2]) {
         self.insert_pan = pan;
     }
@@ -2706,6 +2748,10 @@ impl TrackDsp {
         // other two are skipped in place.
         let inserted = self.inserted_at(InsertPoint::Amp);
         let input_inserted = self.inserted_at(InsertPoint::Input);
+        // The score's pan is applied once, at the point the insert sits at: an instrument at the input is placed there, an
+        // effect at the Amp point. With an insert at each (a slot changing between the two) the pan is split between the
+        // points and moves from one to the other over the ramp, so an insert fading out beside the one that arrives is placed
+        // too and what stands between the points is fed no differently from one frame to the next.
         let leaving_anywhere = self.leaving_live && self.plugin_leaving.is_some();
         let mut three = [Stage::Drive, Stage::Amp, Stage::Cabinet];
         let mut found = 0;
@@ -2718,6 +2764,36 @@ impl TrackDsp {
         let mut built_in_live = self.built_in_live;
         let insert_pan = self.insert_pan;
         let mut insert_pan_applied = false;
+        // Where the pan is applied moves with the insert that arrives, not in one frame: with an insert at each point (a slot
+        // changing between an effect and an instrument) the factor is split between the two points by `pan_input_share`,
+        // so what stands between them (a mono microphone, a room's reflections) is fed what it was the frame before.
+        let both_points = input_inserted && inserted;
+        if both_points {
+            let arriving_at_input = self
+                .plugin
+                .as_ref()
+                .is_some_and(|insert| insert.point() == InsertPoint::Input);
+            let aim = if arriving_at_input { 1.0 } else { 0.0 };
+            let step = 1.0 / self.ramp_frames as f32;
+            let share = self.pan_input_share;
+            self.pan_input_share = if share < aim {
+                (share + step).min(aim)
+            } else {
+                (share - step).max(aim)
+            };
+        } else if inserted {
+            self.pan_input_share = 0.0;
+        } else if input_inserted {
+            self.pan_input_share = 1.0;
+        }
+        let (pan_at_input, pan_at_amp) = if both_points {
+            (
+                pan_share(insert_pan, self.pan_input_share),
+                pan_share(insert_pan, 1.0 - self.pan_input_share),
+            )
+        } else {
+            (insert_pan, insert_pan)
+        };
         let fresh = !inserted && !built_in_live;
         // Drive, Amp and Cabinet, as closures over their own state: they play in place, or behind a plug-in insert as
         // its built-in stand-in. `fresh` starts a stage from rest, after it stood still behind a plug-in.
@@ -3110,6 +3186,16 @@ impl TrackDsp {
                 ctx,
                 &mut |v| v,
             );
+            // The score's pan places what the instrument made, or the track's own sound that stands in for it, before the
+            // stages after it. It is the instrument's own sound that is placed, by the score's pan as it is: the voices of
+            // the built-in kit that stand in for it kept the level of the centre, 1 on both sides, so the louder side's
+            // factor above 1 is applied once (see `set_insert_pan` and `pan_pre` in the renderer).
+            if !inserted || both_points {
+                if pan_at_input != [1.0; 2] {
+                    x = std::array::from_fn(|c| x[c] * pan_at_input[c]);
+                }
+                insert_pan_applied = true;
+            }
         }
         for stage in self.chain {
             match stage {
@@ -3422,8 +3508,8 @@ impl TrackDsp {
                             built_in_live = false;
                         }
                         // The score's pan places what the plug-in made, or its stand-in, before the stages after it.
-                        if insert_pan != [1.0; 2] {
-                            x = std::array::from_fn(|c| x[c] * insert_pan[c]);
+                        if pan_at_amp != [1.0; 2] {
+                            x = std::array::from_fn(|c| x[c] * pan_at_amp[c]);
                         }
                         insert_pan_applied = true;
                     }
@@ -4027,6 +4113,44 @@ mod drive_shape_tests {
             assert!(off.circuit == tone::flat_shape(rate), "{model} ran");
             assert!(on.circuit != off.circuit, "{model} has no circuit");
             assert_eq!((off.tone, off.level), (on.tone, on.level), "{model}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod pan_share_tests {
+    use super::{PAN_SPLIT_FLOOR, pan_share};
+
+    #[test]
+    fn the_two_parts_of_a_split_pan_multiply_to_it_and_move_without_a_jump() {
+        for pan in [
+            [1.0, 1.0],
+            [0.5, 1.2],
+            [1.4142, 0.3],
+            [0.0, 1.4142],
+            [1.4142, 0.0],
+        ] {
+            let mut last = pan_share(pan, 1.0);
+            assert_eq!(last, pan, "all of it at 1");
+            assert_eq!(pan_share(pan, 0.0), [1.0; 2], "none at 0");
+            for step in 1..=480 {
+                let share = 1.0 - step as f32 / 480.0;
+                let at_input = pan_share(pan, share);
+                let at_amp = pan_share(pan, 1.0 - share);
+                for side in 0..2 {
+                    assert!(
+                        (at_input[side] * at_amp[side] - pan[side].max(PAN_SPLIT_FLOOR)).abs()
+                            <= 1e-4 + 1e-4 * pan[side],
+                        "pan {pan:?}, share {share}: {at_input:?} times {at_amp:?}"
+                    );
+                    // No side moves by more than 0.025 a frame (a side the score silences moves most, near the end where it is 1).
+                    assert!(
+                        (at_input[side] - last[side]).abs() <= 0.025,
+                        "pan {pan:?}, share {share}: side {side} jumps from {last:?} to {at_input:?}"
+                    );
+                }
+                last = at_input;
+            }
         }
     }
 }

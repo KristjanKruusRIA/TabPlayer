@@ -251,3 +251,37 @@ fn clipboard_v2_keeps_existing_links_and_score_json_validation() {
     bad_slide["clip"]["links"][0]["slideOutType"] = json!(2);
     accepted(&bad_slide);
 }
+
+#[test]
+fn clipboard_held_marker_is_optional_exact_and_written_back_only_when_present() {
+    // An old clip, with no marker key, keeps its exact wire shape (both versions) and gains no key.
+    for version in [1, 2] {
+        let old = command(version);
+        let encoded = serde_json::to_value(accepted(&old)).unwrap();
+        assert_eq!(encoded, old);
+        assert!(encoded["clip"].get("held").is_none());
+    }
+    let mut marked = command(1);
+    marked["clip"]["held"] = json!({"continues":[3],"continued":[7, 8]});
+    assert_eq!(serde_json::to_value(accepted(&marked)).unwrap(), marked);
+    let mut rich = command(2);
+    rich["clip"]["held"] = json!({"continues":[],"continued":[0]});
+    assert_eq!(serde_json::to_value(accepted(&rich)).unwrap(), rich);
+    for held in [
+        json!(null),
+        json!([]),
+        json!({"continues":[1]}),
+        json!({"continued":[1]}),
+        json!({"continues":[1],"continued":null}),
+        json!({"continues":[1],"continued":[],"extra":true}),
+        json!({"continues":[],"continued":[]}),
+        json!({"continues":[1,1],"continued":[]}),
+        json!({"continues":[-1],"continued":[]}),
+        json!({"continues":[4294967296u64],"continued":[]}),
+        json!({"continues":[1.5],"continued":[]}),
+    ] {
+        let mut bad = command(1);
+        bad["clip"]["held"] = held;
+        rejected(&bad);
+    }
+}

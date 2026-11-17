@@ -2,10 +2,12 @@ import { midi,model,Settings, type io } from '@coderline/alphatab';
 import '../tremolo-guard';
 import { validateSelection,type ExportSelection } from './types';
 import { selectStaves } from './selection';
-import { deadBrushMidiDurations,fadeRestoreLevels,noteAudioMidiAdjustments,prepareMidiScore,restoreVolumeAfterFades } from '../audio/plan';
+import { deadBrushMidiDurations,drumMidiHits,fadeRestoreLevels,noteAudioMidiAdjustments,prepareMidiScore,restoreVolumeAfterFades } from '../audio/plan';
 import { hasNoteAudio } from '../editor/note-audio';
 import { gpControllerEvents,prepareGpMidiScore } from '../interchange/automation';
 import { GOLPE_CHANNEL,golpeHits } from '../audio/golpe';
+import { mappedKey,resolveDrumMap } from '../audio/drum-map';
+import type { DrumMapRef } from '../edit-types';
 class TrackName extends midi.MidiEvent {
   constructor(track:number,readonly name:string){super(track,0,midi.MidiEventType.Meta);}
   writeTo(stream:io.IWriteable){const bytes=new TextEncoder().encode(this.name);stream.writeByte(255);stream.writeByte(3);midi.MidiFile.writeVariableInt(stream,bytes.length);stream.write(bytes,0,bytes.length);}
@@ -33,7 +35,9 @@ function shifted(event:midi.MidiEvent,tick:number,track:number):midi.MidiEvent {
   // Concrete event prototypes retain alphaTab's public binary encoding; source events stay immutable.
   return Object.assign(Object.create(Object.getPrototypeOf(event)),event,{tick,track});
 }
-export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Array {
+/** `drumMaps` is each track's stored drum map by track index; present, it is applied to percussion hits as playback applies it. Absent, nothing changes. */
+export interface MidiExportOptions { drumMaps?:ReadonlyArray<DrumMapRef|undefined> }
+export function exportMidi(score:model.Score,selection:ExportSelection,options:MidiExportOptions={}):Uint8Array {
   validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
   const source=new midi.MidiFile();source.format=midi.MidiFileFormat.MultiTrack;
   const prepared=prepareGpMidiScore(prepareMidiScore(selectStaves(score,selection)),new Settings());
@@ -48,6 +52,20 @@ export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Arr
   const settings=new Settings(),handler=new ExportMidiHandler(source,true);const generator=new midi.MidiFileGenerator(prepared,settings,handler);const restores=restoreVolumeAfterFades(generator,handler);
   generator.applyTranspositionPitches=true;generator.generate();
   const performed=generator.tickLookup.masterBars.map(bar=>({bar:bar.masterBar.index,startTick:bar.start+source.tickShift,endTick:bar.end+source.tickShift}));
+  if(options.drumMaps){
+    // Playback's own mapping: a silenced hit is left out, a mapped one moves to its key. A track without a map keeps its keys.
+    const tables=new Map<number,ReturnType<typeof resolveDrumMap>>();
+    for(const i of selection.tracks){const map=options.drumMaps[i];if(map&&prepared.tracks.find(t=>t.index===i)?.isPercussion)tables.set(i,resolveDrumMap(map,true));}
+    if(tables.size){
+      const hits=new Map(drumMidiHits(selectStaves(score,selection)).map(hit=>[`${hit.track}/${hit.attack}`,hit]));
+      handler.pairs=handler.pairs.filter(pair=>{
+        const table=tables.get(pair.on.track),hit=table&&hits.get(`${pair.on.track}/${pair.attack}`);
+        if(!table||!hit)return true;
+        const key=mappedKey(table,hit.key,hit.id);if(key===null)return false;
+        pair.on.noteKey=pair.off.noteKey=key;return true;
+      });
+    }
+  }
   // A golpe is written as a General MIDI percussion hit in its own track's events, as playback plays it.
   for(const hit of golpeHits(prepared,performed))handler.pairs.push({on:new midi.NoteOnEvent(hit.track,hit.tick,GOLPE_CHANNEL,hit.key,hit.velocity),off:new midi.NoteOffEvent(hit.track,hit.tick+hit.length,GOLPE_CHANNEL,hit.key,hit.velocity),attack:-1});
   const automated=gpControllerEvents(prepared,performed);

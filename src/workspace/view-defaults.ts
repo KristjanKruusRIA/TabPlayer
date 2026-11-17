@@ -1,5 +1,6 @@
 import { isPhysicalPageLayout,repairScoreDisplay,type ScoreDisplayPreferences,type ScoreLayoutMode,type ScoreZoomMode } from '../engraving/screen-view';
 import type { TrackView } from '../engraving/view';
+import { preferenceSaved,registerPreferenceGroup } from './native-preferences';
 import type { DocumentViewState } from './types';
 
 /** How a score first appears when it has no view of its own yet, like GP8's general display preferences. */
@@ -34,8 +35,20 @@ export const forgetSessionViewDefaults=()=>{session=null;};
 /** Returns false when storage refuses the write. */
 export function writeViewDefaults(defaults:ViewDefaults,storage:PreferenceStorage|undefined=browserStorage()):boolean {
   session=repair(defaults);
-  try{if(!storage)return false;storage.setItem(key,JSON.stringify(session));return true;}catch{return false;}
+  const kept=keepViewDefaults(session,storage);
+  preferenceSaved('viewDefaults',session,storage);
+  return kept;
 }
+function keepViewDefaults(value:ViewDefaults,storage:PreferenceStorage|undefined):boolean {
+  try{if(!storage)return false;storage.setItem(key,JSON.stringify(value));return true;}catch{return false;}
+}
+const isRecord=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value);
+/** The browser copy is the first paint; the app's native settings keep it across a reset of the browser profile. `null` while the user never saved a default. */
+registerPreferenceGroup<ViewDefaults>({name:'viewDefaults',
+  repair:value=>isRecord(value)?repair(value):null,
+  browser:(storage=browserStorage())=>{try{const value:unknown=JSON.parse(storage?.getItem(key)??'null');return isRecord(value)?repair(value):null;}catch{return null;}},
+  keep:(value,storage=browserStorage())=>{session=null;keepViewDefaults(repair(value),storage);},
+  same:(a,b)=>a.layout===b.layout&&a.zoomMode===b.zoomMode&&a.zoom===b.zoom&&a.tracks===b.tracks});
 /** A custom track list names one score's tracks, so it is saved as the selected-track view. */
 export function viewDefaultsFrom(view:{zoom:number;trackView:TrackView;scoreDisplay?:ScoreDisplayPreferences}):ViewDefaults {
   const display=repairScoreDisplay(view.scoreDisplay)??{layout:standardViewDefaults.layout,zoomMode:standardViewDefaults.zoomMode};

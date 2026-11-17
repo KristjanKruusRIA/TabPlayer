@@ -92,7 +92,7 @@ export function useExportCoordinator({score,settings,currentSpeed,metronomeSound
         if(!await bridge.confirmExport(gp5Warning(result.losses))||cancelled.current||!alive.current)return false;
         return await native.exportGp5(result.bytes,revision,name);
       }
-      if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision,name);}
+      if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection,frozenOptions.drumMaps?{drumMaps:ids.map(id=>frozenSettings.mixes[id]?.drumMap)}:{}),revision,name);}
       // Backing audio is left out; refusals throw here, before the native save dialog opens.
       if(frozenOptions.format==='musicxml'){clearBacking(copy);const bytes=exportMusicXml(copy,selection);if(cancelled.current)return false;return await native.exportMusicXml(bytes,revision,name);}
       // Refusals (no stringed track selected) throw before the save dialog opens.

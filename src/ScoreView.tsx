@@ -373,7 +373,9 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     for(const error of value.errors)if(value.tracks.includes(error.track)){const key=`${error.track}/${error.staff}/${error.bar}`;measures.set(key,[...measures.get(key)??[],error]);}
     setErrorBlocks([...measures.values()].flatMap(group=>{
       const {track,staff,bar:index,voice}=group[0],source=value.score.tracks[track]?.staves[staff]?.bars[index]?.voices[voice]?.beats[0],beat=source?renderedBeat(source):null;
-      const bounds=beat?(view.boundsLookup?.findBeats(beat)??[]).filter(bound=>bound.beat===beat&&bound.barBounds):[];
+      // A drum track drawn as standard + tab is two staves: its other staff's copy of the beat is shaded with the first, whichever was clicked last.
+      const pair=source&&value.projection?.beats.get(source.id),drawn=beat?[beat,...pair?.tab&&pair.tab!==beat?[pair.tab]:[],...pair?.tab&&pair.rendered!==beat?[pair.rendered]:[]]:[];
+      const bounds=drawn.flatMap(item=>(view.boundsLookup?.findBeats(item)??[]).filter(bound=>bound.beat===item&&bound.barBounds));
       const system=bounds[0]?.barBounds.masterBarBounds?.staffSystemBounds,boxes=bounds.filter(bound=>bound.barBounds.masterBarBounds?.staffSystemBounds===system).map(bound=>bound.barBounds.realBounds);
       if(!boxes.length)return [];
       const left=Math.min(...boxes.map(box=>box.x)),top=Math.min(...boxes.map(box=>box.y));

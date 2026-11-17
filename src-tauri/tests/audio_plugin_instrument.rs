@@ -4293,3 +4293,764 @@ fn a_renderer_frame_loop_that_maps_notes_to_an_instrument_and_installs_a_changed
         a_renderer_frame_loop_that_maps_notes_to_an_instrument_and_installs_a_changed_map_never_touches_the_heap_at(latency);
     }
 }
+
+// ---- the score's pan on a hosted instrument -----------------------------------------------------------------------------
+//
+// A drum track's built-in kit is panned where its voices are mixed; an instrument replaces that sound at the board's input,
+// so the score's pan is applied to what the instrument makes, as it is to the output of an effect plug-in. The built-in kit
+// that stands in for the instrument is placed by the same factor, so a track keeps its place while the instrument primes or
+// after it faults. The kit-element pans of the built-in kit stay with the built-in kit.
+
+fn pan_event(tick: u32, value: u8) -> Value {
+    json!({"type":"controller","trackId":"drums","tick":tick,"channel":9,"controller":10,"value":value})
+}
+
+/// The factors the renderer's pan law gives a controller 10 value: `[cos, sin]` of the pan angle times the square root of two.
+fn pan_law(value: u8) -> [f32; 2] {
+    let pan = (f64::from(value) - 64.0) / if value < 64 { 64.0 } else { 63.0 };
+    let angle = (pan + 1.0) * std::f64::consts::FRAC_PI_4;
+    [
+        (angle.cos() * std::f64::consts::SQRT_2) as f32,
+        (angle.sin() * std::f64::consts::SQRT_2) as f32,
+    ]
+}
+
+/// A drum plan whose track the score pans to `pan` (none: the plan has no pan event), with two hits.
+fn panned_plan(pan: Option<u8>) -> PlaybackPlan {
+    let mut midi = vec![
+        note_on(100, 36),
+        note_off(160, 36),
+        note_on(300, 38),
+        note_off(360, 38),
+    ];
+    midi.extend(pan.map(|value| pan_event(0, value)));
+    drum_plan(midi)
+}
+
+/// What the keyed instrument makes of `plan`, rendered by the renderer, `frames` long after the plug-in's delay.
+fn instrument_frames(plan: &PlaybackPlan, latency: u32, frames: usize) -> (Vec<[f32; 2]>, usize) {
+    let rig = rig_keyed_at(latency);
+    let mut renderer = instrument_renderer(&rig, plan);
+    let d = renderer.plugin_delay_frames();
+    (run(&mut renderer, Some(&rig), frames + d), d)
+}
+
+fn fingerprint(frames: &[[f32; 2]]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for frame in frames {
+        for side in frame {
+            for byte in side.to_bits().to_le_bytes() {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+    }
+    hash
+}
+
+/// What `centred` becomes when the score's pan moves as `moves` says: each entry is the frame the plug-in's input has when the
+/// pan takes its value, and the pan reaches the output `d` frames after that, because that is when what entered with the old
+/// pan comes out. Before the first move the output is placed by the centre.
+fn placed_by(centred: &[[f32; 2]], d: usize, moves: &[(usize, u8)]) -> Vec<[f32; 2]> {
+    centred
+        .iter()
+        .enumerate()
+        .map(|(m, frame)| {
+            let value = moves
+                .iter()
+                .rev()
+                .find(|(at, _)| m >= at + d)
+                .map_or(64, |(_, value)| *value);
+            let law = pan_law(value);
+            [frame[0] * law[0], frame[1] * law[1]]
+        })
+        .collect()
+}
+
+fn assert_frames_close(got: &[[f32; 2]], want: &[[f32; 2]], what: &str) {
+    assert_eq!(got.len(), want.len(), "{what}: the lengths");
+    for (m, (got, want)) in got.iter().zip(want).enumerate() {
+        for side in 0..2 {
+            assert!(
+                (got[side] - want[side]).abs() <= 1e-6 + want[side].abs() * 1e-5,
+                "{what}: frame {m} side {side}: {got:?} against {want:?}"
+            );
+        }
+    }
+}
+
+fn side_peaks(frames: &[[f32; 2]]) -> [f32; 2] {
+    [0, 1].map(|side| frames.iter().map(|f| f[side].abs()).fold(0.0, f32::max))
+}
+
+/// A hit held from tick 100 to 700 (frames 5,000 to 35,000), with the pan at `first` from the start and `then` from tick 200
+/// (frame 10,000) on.
+fn held_plan(first: Option<u8>, then: Option<u8>) -> PlaybackPlan {
+    let mut midi = vec![note_on(100, 36), note_off(700, 36)];
+    midi.extend(first.map(|value| pan_event(0, value)));
+    midi.extend(then.map(|value| pan_event(200, value)));
+    drum_plan(midi)
+}
+
+/// What a track panned by the score sounds like with an instrument is what it sounds like at the centre, placed by the pan
+/// law of the voices of the built-in kit.
+#[test]
+fn a_hosted_instrument_is_placed_by_the_scores_pan() {
+    for latency in [0u32, 64] {
+        let (centred, d) = instrument_frames(&panned_plan(None), latency, 12_000);
+        assert!(first_sound(&centred).is_some(), "the instrument sounds");
+        for value in [0u8, 16, 32, 48, 100, 127] {
+            let (out, same_d) = instrument_frames(&panned_plan(Some(value)), latency, 12_000);
+            assert_eq!(same_d, d);
+            assert_frames_close(
+                &out,
+                &placed_by(&centred, d, &[(0, value)]),
+                &format!("latency {latency}, pan {value}"),
+            );
+            let peaks = side_peaks(&out);
+            let law = pan_law(value);
+            let wanted = side_peaks(&centred);
+            assert!(
+                (peaks[0] - wanted[0] * law[0]).abs() <= 1e-6
+                    && (peaks[1] - wanted[1] * law[1]).abs() <= 1e-6,
+                "the peaks of the two sides are the centred track's scaled by the law: {peaks:?}"
+            );
+        }
+    }
+}
+
+/// A hard pan silences one side of the instrument entirely, as it silences the voices of the built-in kit.
+#[test]
+fn the_side_the_score_silences_is_silent_on_a_hosted_instrument() {
+    let (right, _) = instrument_frames(&panned_plan(Some(127)), 0, 12_000);
+    let peaks = side_peaks(&right);
+    assert!(peaks[1] > 0.05, "the hit is on the right: {peaks:?}");
+    assert!(
+        peaks[0] <= peaks[1] * 1e-6,
+        "and not on the left: {peaks:?}"
+    );
+    let (left, _) = instrument_frames(&panned_plan(Some(0)), 0, 12_000);
+    let peaks = side_peaks(&left);
+    assert!(peaks[0] > 0.05, "the hit is on the left: {peaks:?}");
+    assert!(
+        peaks[1] <= peaks[0] * 1e-6,
+        "and not on the right: {peaks:?}"
+    );
+}
+
+/// A track at the centre, with no pan event or with the controller at 64, renders what it rendered before the pan was
+/// applied to an instrument: the fingerprints below were taken from the code without it. The pan of such a track is `[1, 1]`
+/// exactly, so nothing is multiplied.
+#[test]
+fn a_centred_instrument_track_renders_as_it_did_before_the_pan_was_applied() {
+    const GOLDEN: [(u32, u64); 3] = [
+        (0, 4160387795917067365),
+        (64, 5185181848837618789),
+        (128, 2456173060890829925),
+    ];
+    for (latency, golden) in GOLDEN {
+        for pan in [None, Some(64u8)] {
+            let (out, d) = instrument_frames(&panned_plan(pan), latency, 12_000);
+            assert_eq!(out.len(), 12_000 + d);
+            assert_eq!(
+                fingerprint(&out),
+                golden,
+                "latency {latency}, pan {pan:?}: the frames of a centred track changed"
+            );
+        }
+    }
+}
+
+/// The score moves the pan while a hit rings: what the instrument made before the move is placed by the old pan and what it
+/// made after by the new one, where the plug-in's delay puts them.
+#[test]
+fn a_pan_moved_while_a_hosted_instrument_rings_places_each_part_where_its_delay_puts_it() {
+    for latency in [0u32, 64, 480] {
+        let (centred, d) = instrument_frames(&held_plan(None, None), latency, 40_000);
+        let (out, _) = instrument_frames(&held_plan(Some(0), Some(127)), latency, 40_000);
+        assert!(d >= 256 + latency as usize);
+        assert_frames_close(
+            &out,
+            &placed_by(&centred, d, &[(0, 0), (10_000, 127)]),
+            &format!("latency {latency}"),
+        );
+        let before = side_peaks(&out[5_000 + d..10_000 + d]);
+        let after = side_peaks(&out[10_000 + d..35_000 + d]);
+        assert!(
+            before[0] > 0.05 && before[1] <= before[0] * 1e-6,
+            "left before the move: {before:?}"
+        );
+        assert!(
+            after[1] > 0.05 && after[0] <= after[1] * 1e-6,
+            "right after it: {after:?}"
+        );
+    }
+}
+
+/// A seek into the held hit, with the pan the score has set by then: the instrument is struck again and placed by that pan.
+#[test]
+fn a_seek_leaves_a_hosted_instrument_where_the_score_has_the_pan() {
+    for latency in [0u32, 64] {
+        let seek_run = |plan: &PlaybackPlan| {
+            let rig = rig_keyed_at(latency);
+            let mut renderer = instrument_renderer(&rig, plan);
+            let d = renderer.plugin_delay_frames();
+            run(&mut renderer, Some(&rig), 15_000);
+            // The pan moved to the right at tick 200; the seek point, tick 300, is inside the held hit.
+            renderer.seek_tick(300.0);
+            (run(&mut renderer, Some(&rig), 20_000), d)
+        };
+        let (centred, d) = seek_run(&held_plan(None, None));
+        let (out, _) = seek_run(&held_plan(Some(0), Some(127)));
+        assert!(first_sound(&centred).is_some());
+        assert_frames_close(
+            &out,
+            &placed_by(&centred, d, &[(0, 127)]),
+            &format!("latency {latency}"),
+        );
+        let peaks = side_peaks(&out);
+        assert!(peaks[1] > 0.05 && peaks[0] <= peaks[1] * 1e-6, "{peaks:?}");
+    }
+}
+
+/// A loop that wraps from the right-panned end to the left-panned start, inside the held hit: what entered the plug-in before
+/// the wrap is placed by the old pan, and what enters after it by the new one.
+#[test]
+fn a_loop_wrap_leaves_a_hosted_instrument_where_the_score_has_the_pan() {
+    for latency in [0u32, 64] {
+        let wrap_run = |plan: &PlaybackPlan| {
+            let rig = rig_keyed_at(latency);
+            let mut renderer = instrument_renderer(&rig, plan);
+            let d = renderer.plugin_delay_frames();
+            let mut out = Vec::new();
+            // The loop ends at tick 400 (frame 20,000) and starts at tick 150, where the pan the score has set is the left.
+            run_to(&mut renderer, &rig, 400.0, &mut out);
+            let wrapped = out.len();
+            renderer.wrap_to_tick(150.0);
+            out.extend(run(&mut renderer, Some(&rig), 12_000));
+            (out, d, wrapped)
+        };
+        let (centred, d, wrapped) = wrap_run(&held_plan(None, None));
+        let (out, _, same) = wrap_run(&held_plan(Some(0), Some(127)));
+        assert_eq!(wrapped, same);
+        assert_eq!(wrapped, 20_000);
+        assert_frames_close(
+            &out,
+            &placed_by(
+                &centred,
+                d,
+                // The score reaches its move to the right again 50 ticks (2,500 frames) after the loop's start.
+                &[(0, 0), (10_000, 127), (wrapped, 0), (wrapped + 2_500, 127)],
+            ),
+            &format!("latency {latency}"),
+        );
+    }
+}
+
+/// An edit while the track plays: the new renderer carries on with the pan the old one had, the moves its plug-in's delay
+/// still holds back included.
+#[test]
+fn an_edit_hand_over_leaves_a_hosted_instrument_where_the_score_has_the_pan() {
+    for latency in [0u32, 64] {
+        let handed = |plan: &PlaybackPlan| {
+            let rig = rig_keyed_at(latency);
+            let mut old = instrument_renderer(&rig, plan);
+            let d = old.plugin_delay_frames();
+            // Some frames after the move at frame 10,000, while the plug-in's delay still holds it back.
+            let mut out = run(&mut old, Some(&rig), 10_100);
+            let mut new = instrument_renderer(&rig, plan);
+            hand_over(&mut new, &mut old);
+            out.extend(run(&mut new, Some(&rig), 12_000));
+            (out, d)
+        };
+        let (centred, d) = handed(&held_plan(None, None));
+        let (out, _) = handed(&held_plan(Some(0), Some(127)));
+        assert_frames_close(
+            &out,
+            &placed_by(&centred, d, &[(0, 0), (10_000, 127)]),
+            &format!("latency {latency}"),
+        );
+    }
+}
+
+/// The kit mix of the built-in kit (its elements' gains and pans) is not applied to an instrument, which has a mixer of its own:
+/// the track renders the same with a kit mix as without one.
+#[test]
+fn the_kit_mix_of_the_built_in_kit_does_not_reach_a_hosted_instrument() {
+    use tabplayer_lib::settings::{DrumElementMix, DrumKitMix};
+    let plan = panned_plan(Some(100));
+    let render = |kit: Option<DrumKitMix>| {
+        let rig = rig_keyed();
+        let mut settings = gm(DocumentSettings::default());
+        settings.mixes.insert(
+            "drums".into(),
+            ChannelMix {
+                drum_kit: kit,
+                ..ChannelMix::default()
+            },
+        );
+        let mix = instrument_mix(&rig, &plan, &settings);
+        let mut renderer =
+            Renderer::new_with_mix(Arc::new(plan.clone()), resources(), mix, settings, RATE)
+                .unwrap();
+        run(&mut renderer, Some(&rig), 12_000)
+    };
+    let kit = DrumKitMix {
+        kick: Some(DrumElementMix {
+            gain: 0.3,
+            pan: -1.0,
+            ..DrumElementMix::default()
+        }),
+        snare: Some(DrumElementMix {
+            gain: 0.5,
+            pan: 1.0,
+            ..DrumElementMix::default()
+        }),
+        ..DrumKitMix::default()
+    };
+    let without = render(None);
+    let with = render(Some(kit));
+    assert!(first_sound(&without).is_some());
+    assert_eq!(
+        fingerprint(&with),
+        fingerprint(&without),
+        "a kit mix leaves what the instrument makes as it was"
+    );
+}
+
+/// The built-in kit that plays while the instrument is silent for good (its helper stopped answering) is placed by the same
+/// factor, so the track does not jump from one place to another when the instrument fails.
+#[test]
+fn the_built_in_kit_that_stands_in_for_a_hosted_instrument_is_placed_like_the_instrument() {
+    let rig = rig_keyed();
+    rig.helper.paused.store(true, Ordering::Relaxed);
+    let plan = panned_plan(Some(127));
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let out = run(&mut renderer, Some(&rig), 14_000);
+    let peaks = side_peaks(&out[5_000..]);
+    assert!(peaks[1] > 0.01, "the built-in kit plays: {peaks:?}");
+    assert!(
+        peaks[0] <= peaks[1] * 1e-4,
+        "and only on the right, as the voices are: {peaks:?}"
+    );
+}
+
+/// The side the score silences stays silent while an instrument is added to a panned track, plays, and is removed again.
+#[test]
+fn the_side_the_score_silences_stays_silent_while_a_hosted_instrument_comes_and_goes() {
+    for pan in [127u8, 0] {
+        let mut midi = vec![pan_event(0, pan)];
+        for hit in 0..16u32 {
+            midi.push(note_on(100 + hit * 200, 36));
+            midi.push(note_off(200 + hit * 200, 36));
+        }
+        let plan = drum_plan(midi);
+        let settings = gm(DocumentSettings::default());
+        let rig = rig_keyed();
+        let mut renderer = plain_renderer(&plan);
+        let mut out = run(&mut renderer, None, 24_000);
+        renderer.set_mix(instrument_mix(&rig, &plan, &settings));
+        out.extend(run(&mut renderer, Some(&rig), 40_000));
+        renderer.set_mix(PreparedMix::prepare(&settings, &plan, RATE).unwrap());
+        out.extend(run(&mut renderer, Some(&rig), 40_000));
+        let sides = |peaks: [f32; 2]| {
+            if pan == 127 {
+                (peaks[0], peaks[1])
+            } else {
+                (peaks[1], peaks[0])
+            }
+        };
+        let (silent, loud) = sides(side_peaks(&out));
+        assert!(loud > 0.03, "pan {pan}: the hits sound: {loud}");
+        // The synthesizer of the built-in kit leaks about 1.3% into the side its own pan silences; nothing else may.
+        assert!(
+            silent <= loud * 0.03,
+            "pan {pan}: the side the score silences reaches {silent} against {loud}"
+        );
+        // While the instrument plays, nothing at all reaches it.
+        let (silent, loud) = sides(side_peaks(&out[24_000 + 1_000..24_000 + 40_000]));
+        assert!(loud > 0.03, "pan {pan}: the instrument sounds: {loud}");
+        assert!(
+            silent <= loud * 1e-4,
+            "pan {pan}: the instrument reaches the silenced side: {silent} against {loud}"
+        );
+    }
+}
+
+/// An export renders the instrument placed by the score's pan too, from its first sample.
+#[test]
+fn an_export_places_a_hosted_instrument_by_the_scores_pan() {
+    let render = |pan: Option<u8>| {
+        let mut midi = vec![
+            note_on(0, 36),
+            note_off(60, 36),
+            note_on(480, 38),
+            note_off(540, 38),
+        ];
+        midi.extend(pan.map(|value| pan_event(0, value)));
+        let plan = short_plan(midi);
+        let rig = rig_keyed();
+        let mut export = export_of(&rig, &plan, 0.1);
+        export_mix(&mut export).unwrap()
+    };
+    let centred = render(None);
+    let right = render(Some(127));
+    assert_eq!(first_sound(&centred), Some(0));
+    assert_eq!(first_sound(&right), Some(0), "the first hit is on sample 0");
+    assert_frames_close(&right, &placed_by(&centred, 0, &[(0, 127)]), "pan 127");
+    let peaks = side_peaks(&right);
+    assert!(peaks[1] > 0.05 && peaks[0] <= peaks[1] * 1e-6, "{peaks:?}");
+}
+
+/// The board places what its instrument makes with the factor it was given, before the stages after it, and places its
+/// stand-in with the same factor when the instrument is gone.
+#[test]
+fn a_board_places_what_its_instrument_makes_and_its_stand_in_by_the_factor_it_is_given() {
+    let pan = [0.5, 0.25];
+    let rig = rig();
+    let mut track = board(FxSettings::default());
+    track.attach_plugin(Box::new(rig.instrument()));
+    let d = track.plugin_delay();
+    let mut out = Vec::new();
+    play(
+        &mut track,
+        &[&rig],
+        0,
+        3_000,
+        &|_| [0.0; 2],
+        &mut |m, track| {
+            track.set_insert_pan(pan);
+            if m == 0 {
+                track.stage_note(true, 0, 36, 100);
+            }
+        },
+        &mut out,
+    );
+    assert_close(
+        out[2_999],
+        [LEVEL * pan[0], LEVEL * pan[1]],
+        1e-6,
+        "the instrument",
+    );
+    assert_close(
+        out[d - 1],
+        [0.0; 2],
+        1e-6,
+        "before the instrument's first frame",
+    );
+
+    // The instrument stops answering: the track's own sound plays, placed by the same factor.
+    rig.helper.paused.store(true, Ordering::Relaxed);
+    play(
+        &mut track,
+        &[&rig],
+        3_000,
+        6_000,
+        &signal,
+        &mut |_, track| track.set_insert_pan(pan),
+        &mut out,
+    );
+    assert_eq!(
+        track.plugin().unwrap().faulted(),
+        Some(FaultReason::Underrun)
+    );
+    for m in 8_000..9_000 {
+        let own = signal(m - d);
+        assert_close(
+            out[m],
+            [own[0] * pan[0], own[1] * pan[1]],
+            1e-5,
+            &format!("frame {m}"),
+        );
+    }
+}
+
+/// A slot that changes from an effect to an instrument, or back, while the track is panned places the track once: the
+/// settled sound at either end is the plug-in's, placed once, and the change is no sharper than the unpanned one.
+#[test]
+fn switching_between_an_effect_and_an_instrument_places_the_track_once() {
+    let pan = [0.5, 0.5];
+    for effect_first in [true, false] {
+        let effect_rig = rig_with(Some(0.5));
+        let instrument_rig = rig();
+        let make = |kind: SlotKind| {
+            let mut track = board(FxSettings::default());
+            let insert = match kind {
+                SlotKind::Effect => effect_rig.make(SlotKind::Effect, 0),
+                SlotKind::Instrument => instrument_rig.instrument(),
+            };
+            track.attach_plugin(Box::new(insert));
+            track
+        };
+        let rigs = [&effect_rig, &instrument_rig];
+        let (first_kind, second_kind) = if effect_first {
+            (SlotKind::Effect, SlotKind::Instrument)
+        } else {
+            (SlotKind::Instrument, SlotKind::Effect)
+        };
+        let (mut first, mut second) = (make(first_kind), make(second_kind));
+        let d = first.plugin_delay();
+        let swap_at = 24_037;
+        let mut out = Vec::new();
+        play(
+            &mut first,
+            &rigs,
+            0,
+            swap_at,
+            &signal,
+            &mut |m, track| {
+                track.set_insert_pan(pan);
+                if m == 0 {
+                    track.stage_note(true, 0, 36, 100);
+                }
+            },
+            &mut out,
+        );
+        second.transition_from(&mut first);
+        play(
+            &mut second,
+            &rigs,
+            swap_at,
+            6_000,
+            &signal,
+            &mut |m, track| {
+                track.set_insert_pan(pan);
+                if m == swap_at {
+                    track.stage_note(true, 0, 36, 100);
+                }
+            },
+            &mut out,
+        );
+        let end = out.len() - 1;
+        let effect = |m: usize| signal(m - d).map(|v| v * 0.5 * 0.5);
+        if effect_first {
+            assert_close(
+                out[swap_at - 1],
+                effect(swap_at - 1),
+                1e-5,
+                "the effect before",
+            );
+            assert_close(out[end], [LEVEL * 0.5; 2], 1e-5, "the instrument after");
+        } else {
+            assert_close(
+                out[swap_at - 1],
+                [LEVEL * 0.5; 2],
+                1e-5,
+                "the instrument before",
+            );
+            assert_close(out[end], effect(end), 1e-5, "the effect after");
+        }
+        // With the pan halving everything, no step is sharper than the unpanned switch's 0.03.
+        let around = max_step(&out[swap_at - 100..swap_at + d + 3 * 480]);
+        assert!(around <= 0.03, "effect first {effect_first}: step {around}");
+    }
+}
+
+/// [`run`] for a renderer whose plug-ins sit on more than one helper.
+fn run_rigs(renderer: &mut Renderer, rigs: &[&Rig], frames: usize) -> Vec<[f32; 2]> {
+    let mut out = Vec::with_capacity(frames);
+    let mut buffer = [[0.0f32; 2]; BLOCK_FRAMES];
+    let mut left = frames;
+    while left > 0 {
+        let n = left.min(BLOCK_FRAMES);
+        renderer.render_into(&mut buffer[..n]);
+        out.extend_from_slice(&buffer[..n]);
+        rigs.iter().for_each(|rig| rig.settle());
+        left -= n;
+    }
+    out
+}
+
+/// The largest step between two frames of either side, from `from` on for `frames`.
+fn step_within(out: &[[f32; 2]], from: usize, frames: usize) -> f32 {
+    max_step(&out[from..from + frames])
+}
+
+/// A hosted instrument removed from a track the score pans while it rings leaves what it still plays where it was and fades it
+/// over the same 10 ms as on an unpanned track: the factor that places it does not jump to that of a track with no instrument.
+#[test]
+fn removing_a_hosted_instrument_from_a_panned_track_does_not_step_what_it_still_plays() {
+    let removed_at = 157 * BLOCK_FRAMES;
+    for pan in [127u8, 96, 0] {
+        let plan = held_plan(Some(pan), None);
+        let settings = gm(DocumentSettings::default());
+        let rig = rig_keyed();
+        let mut renderer = instrument_renderer(&rig, &plan);
+        let mut out = run(&mut renderer, Some(&rig), removed_at);
+        let law = pan_law(pan);
+        let ringing = side_peaks(&out[removed_at - 2_000..removed_at]);
+        // The centred track plays the key's level over the square root of two (the equal-power centre).
+        let wanted = key_signal(36) * law[0].max(law[1]) / std::f32::consts::SQRT_2;
+        assert!(
+            (ringing[0].max(ringing[1]) - wanted).abs() <= 1e-4,
+            "pan {pan}: the instrument rings at {ringing:?}, wanted {wanted}"
+        );
+        renderer.set_mix(PreparedMix::prepare(&settings, &plan, RATE).unwrap());
+        out.extend(run(&mut renderer, Some(&rig), 3_000));
+        let step = step_within(&out, removed_at - 200, 2_000);
+        assert!(
+            step <= 0.004,
+            "pan {pan}: removing the instrument steps its sound by {step}"
+        );
+    }
+}
+
+/// A slot that changes from an instrument to an effect on a panned track, while the instrument rings, places what the
+/// instrument still plays by the factor it had until it has faded.
+#[test]
+fn changing_a_hosted_instrument_to_an_effect_on_a_panned_track_does_not_step_what_it_still_plays() {
+    let switched_at = 157 * BLOCK_FRAMES;
+    for pan in [127u8, 96] {
+        let plan = held_plan(Some(pan), None);
+        let settings = gm(DocumentSettings::default());
+        let instrument = rig_keyed();
+        let effect = rig_with(Some(1.0));
+        let mut renderer = instrument_renderer(&instrument, &plan);
+        let mut out = run_rigs(&mut renderer, &[&instrument, &effect], switched_at);
+        let mix = PreparedMix::prepare(&settings, &plan, RATE)
+            .unwrap()
+            .with_inserts(vec![Some(Box::new(effect.make(SlotKind::Effect, 0)))]);
+        renderer.set_mix(mix);
+        out.extend(run_rigs(&mut renderer, &[&instrument, &effect], 3_000));
+        let step = step_within(&out, switched_at - 200, 2_000);
+        assert!(
+            step <= 0.004,
+            "pan {pan}: changing the instrument to an effect steps its sound by {step}"
+        );
+    }
+}
+
+/// The settings of [`gm`] with the microphone on the drum track's board switched on, at `placement` and with `output`.
+fn gm_with_microphone(placement: &str, output: &str) -> DocumentSettings {
+    let mut settings = gm(DocumentSettings::default());
+    let microphone = &mut settings
+        .sounds
+        .get_mut("drums")
+        .expect("the drum track's sound")
+        .effects
+        .microphone;
+    microphone.enabled = true;
+    microphone.placement = placement.into();
+    microphone.output = output.into();
+    settings
+}
+
+/// A slot that changes from an instrument to an effect on a hard-panned track whose board has a microphone before the
+/// plug-in's point does not move the place where the score's pan is applied in one frame: a mono microphone folds the sides
+/// and a room one adds reflections, so a pan applied before it and then after it makes a different sound from one frame to the
+/// next.
+#[test]
+fn changing_a_hosted_instrument_to_an_effect_does_not_move_the_pan_past_a_microphone_in_one_frame()
+{
+    let switched_at = 157 * BLOCK_FRAMES;
+    for (placement, output) in [("standard", "mono"), ("room", "stereo"), ("room", "mono")] {
+        for pan in [127u8, 96, 0] {
+            let plan = held_plan(Some(pan), None);
+            let settings = gm_with_microphone(placement, output);
+            let instrument = rig_keyed();
+            let effect = rig_with(Some(1.0));
+            let mix = instrument_mix(&instrument, &plan, &settings);
+            let mut renderer = Renderer::new_with_mix(
+                Arc::new(plan.clone()),
+                resources(),
+                mix,
+                settings.clone(),
+                RATE,
+            )
+            .unwrap();
+            let mut out = run_rigs(&mut renderer, &[&instrument, &effect], switched_at);
+            let mix = PreparedMix::prepare(&settings, &plan, RATE)
+                .unwrap()
+                .with_inserts(vec![Some(Box::new(effect.make(SlotKind::Effect, 0)))]);
+            renderer.set_mix(mix);
+            out.extend(run_rigs(&mut renderer, &[&instrument, &effect], 3_000));
+            let step = step_within(&out, switched_at - 200, 2_000);
+            assert!(
+                step <= 0.002,
+                "{placement} {output}, pan {pan}: changing the instrument to an effect steps its sound by {step}"
+            );
+        }
+    }
+}
+
+/// [`switch`] on a board that has `settings`, with the score's pan `pan` held through it.
+fn panned_switch(
+    effect_first: bool,
+    settings: &FxSettings,
+    pan: [f32; 2],
+) -> (Vec<[f32; 2]>, usize, usize) {
+    let effect_rig = rig_with(Some(0.5));
+    let instrument_rig = rig();
+    let make = |kind: SlotKind| {
+        let mut track = board(settings.clone());
+        let insert = match kind {
+            SlotKind::Effect => effect_rig.make(SlotKind::Effect, 0),
+            SlotKind::Instrument => instrument_rig.instrument(),
+        };
+        track.attach_plugin(Box::new(insert));
+        track
+    };
+    let rigs = [&effect_rig, &instrument_rig];
+    let (first_kind, second_kind) = if effect_first {
+        (SlotKind::Effect, SlotKind::Instrument)
+    } else {
+        (SlotKind::Instrument, SlotKind::Effect)
+    };
+    let (mut first, mut second) = (make(first_kind), make(second_kind));
+    let d = first.plugin_delay();
+    let swap_at = 24_037;
+    let mut out = Vec::new();
+    play(
+        &mut first,
+        &rigs,
+        0,
+        swap_at,
+        &signal,
+        &mut |m, track| {
+            track.set_insert_pan(pan);
+            if m == 0 {
+                track.stage_note(true, 0, 36, 100);
+            }
+        },
+        &mut out,
+    );
+    second.transition_from(&mut first);
+    play(
+        &mut second,
+        &rigs,
+        swap_at,
+        6_000,
+        &signal,
+        &mut |m, track| {
+            track.set_insert_pan(pan);
+            if m == swap_at {
+                track.stage_note(true, 0, 36, 100);
+            }
+        },
+        &mut out,
+    );
+    (out, swap_at, d)
+}
+
+/// The board alone, in both directions and with the pan held: the place where the pan is applied glides over the 10 ms the
+/// insert takes to change instead of moving at once, so a microphone that folds the sides, or adds a room's reflections, is
+/// fed what it was fed the frame before.
+#[test]
+fn a_switch_between_an_effect_and_an_instrument_moves_the_pan_past_a_microphone_over_the_fade() {
+    let hard = [0.0, std::f32::consts::SQRT_2];
+    for (placement, output) in [("standard", "mono"), ("room", "stereo"), ("room", "mono")] {
+        let mut fx = FxSettings::default();
+        fx.microphone.enabled = true;
+        fx.microphone.placement = placement.into();
+        fx.microphone.output = output.into();
+        for effect_first in [true, false] {
+            let (out, at, d) = panned_switch(effect_first, &fx, hard);
+            let around = max_step(&out[at - 100..at + d + 3 * 480]);
+            // No step is sharper than the unpanned switch's 0.03 (a mono microphone gave 0.24 and 0.18 before the pan glided
+            // between the points).
+            assert!(
+                around <= 0.03,
+                "{placement} {output}, effect first {effect_first}: step {around}"
+            );
+        }
+    }
+}

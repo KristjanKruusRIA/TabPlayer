@@ -346,3 +346,13 @@ it('says an export is starting before any progress exists',()=>{
   view.rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy onExport={()=>{}} onCancel={()=>{}}/>);
   expect(screen.getByRole('status')).toHaveTextContent('Preparing the export…');
 });
+
+it('offers Apply drum maps for MIDI only, off by default, and sends it only when checked',()=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  expect(screen.queryByLabelText('Apply drum maps')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'midi'}});
+  expect(screen.getByLabelText('Apply drum maps')).not.toBeChecked();
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit.mock.calls[0][0]).not.toHaveProperty('drumMaps');
+  fireEvent.click(screen.getByLabelText('Apply drum maps'));fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit.mock.calls[1][0]).toMatchObject({format:'midi',drumMaps:true});
+});

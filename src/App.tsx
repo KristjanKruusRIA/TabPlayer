@@ -90,6 +90,7 @@ import { ViewDefaultsPanel } from './workspace/ViewDefaultsPanel';
 import { currentViewDefaults,hasSavedViewDefaults,standardViewDefaults,writeViewDefaults,type ViewDefaults } from './workspace/view-defaults';
 import { compactWindowHeight } from './shell/small-window';
 import { findScoreErrors,readScoreErrorDisplay,writeScoreErrorDisplay } from './editor/score-errors';
+import { currentPreferenceSettingsProblem,subscribeNativePreferences,subscribePreferenceSettingsProblem,syncNativePreferences } from './workspace/native-preferences';
 import { withShortening } from './editor/fit-shorten';
 import { editAudition,readAuditionWhileEditing,tuningAudition,writeAuditionWhileEditing,type TuningAudition } from './audio/audition';
 import { musicClipSelection,scoreFromMusicClip } from './editor/clipboard-source';
@@ -182,6 +183,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{const playback=new NativePlaybackController({quietMs:PLAN_QUIET_MS,bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
   // The person's instrument view options live in the app's native settings; the browser copy only serves the first paint. Read them once, whichever document is open.
   useEffect(()=>{void syncInstrumentViewPreferencesFromNative();},[]);
+  // So do the score error, new score and default view preferences; the browser copy serves the first paint, the native settings follow it.
+  useEffect(()=>{void syncNativePreferences();},[]);
+  const preferenceProblem=useSyncExternalStore(subscribePreferenceSettingsProblem,currentPreferenceSettingsProblem);
   useEffect(()=>{controller.setBeforeChange(bars=>player?.beforeScoreChange(true,bars));return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   // The idle comparison with a rebuild waits for playback to stop: a swap would stop it, and the check's slices would stall the moving cursor.
   const playbackRunning=!!(playbackState?.playing||playbackState?.practice.phase==='countIn');
@@ -256,6 +260,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   },[]);
   // A page layout wider than the score area fits its width while nothing chose a zoom: no view default was saved, this score's view has no display or zoom of its own.
   // It is never saved. Choosing any zoom or display ends it; an explicit 100% is saved as a manual display, because 100% alone cannot be told from never having chosen.
+  useEffect(()=>subscribeNativePreferences(name=>{if(name==='scoreErrors')setMarkErrors(readScoreErrorDisplay());if(name==='viewDefaults')setSavedViewDefaults(hasSavedViewDefaults());}),[]);
   const [savedViewDefaults,setSavedViewDefaults]=useState(hasSavedViewDefaults),autoFit=scoreDisplay===undefined&&zoom===standardViewDefaults.zoom&&!savedViewDefaults,[autoFitted,setAutoFitted]=useState(false);
   const shownDisplay=autoFit&&autoFitted&&display.zoomMode==='manual'?{...display,zoomMode:'fitWidth' as const}:display;
   // Saving a default view ends automatic fit in this score too, as it does in the others. A fit that is showing at that moment is kept as this score's own choice, so nothing on screen changes.
@@ -1388,6 +1393,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     />
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
+    {preferenceProblem&&<div className="notice" role="status">{t(preferenceProblem==='newer'?'instruments.settings_newer':'preferences.settings_not_saved')}</div>}
     {!!state.takenBack && <div className="notice" role="status">{t(state.takenBack===1?'document.taken_back_one':'document.taken_back_other',{count:state.takenBack})}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label={t('workspace.score_workspace')} tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>

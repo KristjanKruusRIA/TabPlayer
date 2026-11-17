@@ -122,10 +122,15 @@ struct PreparedChannel {
     /// The track's drum map, resolved where the mix is prepared (off the audio thread): General MIDI for a track with none
     /// and for any track that is not percussion. Only an instrument reads it, so the built-in sounds never do.
     drum_map: DrumMap,
-    /// Whether the track's board has an effect plug-in, so the score's pan is applied after the board and not before it.
+    /// Whether the track's board has a plug-in, so the score's pan is applied to what the plug-in makes and not before it.
     /// An amp simulation is made for a guitar as it is played, and one that reads only its left input is silent for a track
-    /// the score pans to the right. The plug-in hears the recorded voices without their pan, and the pan places its output.
+    /// the score pans to the right: an effect hears the recorded voices without their pan, and the pan places its output.
+    /// An instrument's sound replaces the voices altogether, so the pan has to be applied to what it makes; the built-in
+    /// kit that stands in for it is placed by the same factor.
     pan_after: bool,
+    /// Whether that plug-in is an instrument, so the voices that stand in for it keep the centre's level, not the louder
+    /// side's (see [`pan_pre`]).
+    pan_flat: bool,
 }
 impl PreparedChannel {
     /// Puts `insert` on the channel and says whether the plan's notes go to it.
@@ -133,7 +138,8 @@ impl PreparedChannel {
         if insert.kind() == SlotKind::Instrument && !self.percussion {
             return Err(InsertError::NotAPercussionTrack);
         }
-        self.pan_after = insert.kind() == SlotKind::Effect;
+        self.pan_after = true;
+        self.pan_flat = insert.kind() == SlotKind::Instrument;
         self.notes =
             (insert.kind() == SlotKind::Instrument).then(|| NoteMap::with_drum_map(self.drum_map));
         self.dsp.attach_plugin(insert);
@@ -239,6 +245,7 @@ impl PreparedMix {
             dsp.set_ir_index(index);
             let mut notes = None;
             let mut pan_after = false;
+            let mut pan_flat = false;
             let drum_map = drum_map::resolve(mix.drum_map.as_ref(), track.percussion);
 
             if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
@@ -259,7 +266,8 @@ impl PreparedMix {
                         Ok(insert) => {
                             notes = (plan.kind == SlotKind::Instrument)
                                 .then(|| NoteMap::with_drum_map(drum_map));
-                            pan_after = plan.kind == SlotKind::Effect;
+                            pan_after = true;
+                            pan_flat = plan.kind == SlotKind::Instrument;
                             dsp.attach_plugin(Box::new(insert));
                         }
                         Err(error) => refused.push((track.id.clone(), error)),
@@ -278,6 +286,7 @@ impl PreparedMix {
                 notes,
                 drum_map,
                 pan_after,
+                pan_flat,
                 mix,
             });
         }
@@ -483,10 +492,10 @@ impl MidiChannel {
         std::array::from_fn(|c| sample[c] * self.volume * self.expression * self.pan[c])
     }
     /// [`process`](Self::process) with the score's pan moved out of the voices by `blend` (see [`pan_pre`]): 0 is the pan as
-    /// the score has it, 1 the same level on both sides, that of the louder side. A track whose pan is applied after its
-    /// board plays its voices at 1.
-    fn process_blended(&self, sample: [f32; 2], blend: f32) -> [f32; 2] {
-        let pre = pan_pre(self.pan, blend);
+    /// the score has it, 1 the same level on both sides, that of the louder side for an effect's track and the centre's for an
+    /// instrument's (`flat`, 0 to 1 between the two).
+    fn process_blended(&self, sample: [f32; 2], blend: f32, flat: f32) -> [f32; 2] {
+        let pre = pan_pre(self.pan, blend, flat);
         std::array::from_fn(|c| sample[c] * self.volume * self.expression * pre[c])
     }
 }
@@ -494,17 +503,28 @@ impl MidiChannel {
 /// none). A guitar amp simulation is made for a guitar as it is played, and one that reads only its left input is silent for
 /// a track the score pans to the right, so what enters the board is the same on both sides, at the level of the louder one.
 /// That is the level the board's amp saw before, and what a stage that measures a level (a gate, a compressor) measured.
-/// The pan after the board ([`pan_post`]) is the rest, so the two multiply to `pan` all along a glide between them.
-fn pan_pre(pan: [f32; 2], blend: f32) -> [f32; 2] {
-    let loud = pan[0].max(pan[1]);
+/// The voices that stand in for an instrument (`flat` 1) keep the level of the centre, 1 on both sides, because the pan is
+/// applied to the instrument's output as it is, the louder side's factor above 1 included, and the stand-in is placed by
+/// the same factor. `flat` moves between the two (0 the louder side's level) over the 10 ms a plug-in of the other kind
+/// takes to replace one, so what the leaving plug-in still plays is not placed by a different factor from one frame to the
+/// next. The pan after the board ([`pan_post`]) is the rest, so the two multiply to `pan` all along a glide between them.
+fn pan_pre(pan: [f32; 2], blend: f32, flat: f32) -> [f32; 2] {
+    let louder = pan[0].max(pan[1]);
+    let loud = if flat <= 0.0 {
+        louder
+    } else if flat >= 1.0 {
+        1.0
+    } else {
+        louder + (1.0 - louder) * flat
+    };
     std::array::from_fn(|c| pan[c] + (loud - pan[c]) * blend)
 }
 /// What is left of the score's `pan` to apply after the board when the voices kept [`pan_pre`] of it.
-fn pan_post(pan: [f32; 2], blend: f32) -> [f32; 2] {
+fn pan_post(pan: [f32; 2], blend: f32, flat: f32) -> [f32; 2] {
     if blend == 0.0 {
         return [1.0; 2];
     }
-    let pre = pan_pre(pan, blend);
+    let pre = pan_pre(pan, blend, flat);
     std::array::from_fn(|c| if pre[c] > 0.0 { pan[c] / pre[c] } else { 1.0 })
 }
 /// Moves of the pan after the board that the board's delay still holds back (see `Track::pan_queue`).
@@ -534,12 +554,19 @@ struct Track {
     /// value each channel was last given. See `pan_after`.
     pan: [f32; 2],
     pan_cc: [u8; 16],
-    /// Whether the track's board has an effect plug-in (`PreparedChannel::pan_after`), so the score's pan is applied after
-    /// the plug-in, to what it makes, and not before it: the recorded voices play without their pan (`pan_pre`), the General
+    /// Whether the track's board has a plug-in (`PreparedChannel::pan_after`), so the score's pan is applied after the
+    /// plug-in, to what it makes, and not before it: the recorded voices play without their pan (`pan_pre`), the General
     /// MIDI synthesizers are told the centre, and the pan places the plug-in's output (`pan_post`). An amp simulation is
     /// made for a guitar as it is played, and one that reads only its left input is silent for a track the score pans to
-    /// the right.
+    /// the right; an instrument replaces the voices, so what it makes is placed and the built-in kit that stands in for it
+    /// is placed the same.
     pan_after: bool,
+    /// Whether that plug-in is an instrument (`PreparedChannel::pan_flat`). It keeps its value while the plug-in goes, so the
+    /// leaving plug-in is placed as it was until it has faded.
+    pan_flat: bool,
+    /// Where `pan_pre` has the level the voices keep between the louder side's (0) and the centre's (1): it glides to
+    /// `pan_flat` over 10 ms, as `pan_blend` does to `pan_after`.
+    pan_flat_mix: f32,
     /// How far the pan has moved from before the board (0) to after it (1). It glides over 10 ms when `pan_after` changes,
     /// so adding or removing a plug-in on a panned track does not step.
     pan_blend: f32,
@@ -561,38 +588,51 @@ struct Track {
 impl Track {
     /// Moves the score's pan before or after the board (see `pan_after`). The synthesizers are given the pan they should
     /// play with now: the centre while it is applied after the board, the score's own otherwise. Allocates nothing.
-    fn set_pan_after(&mut self, after: bool) {
+    fn set_pan_after(&mut self, after: bool, flat: bool) {
         self.pan_after = after;
+        // A plug-in that goes leaves `flat` as it was: the plug-in is still in its 10 ms fade, placed by the factor it had,
+        // and the glide to the pan before the board (where `flat` makes no difference) is what moves it.
+        if after {
+            self.pan_flat = flat;
+        }
         self.sync_synth_pan();
     }
     /// What the plug-in's output is multiplied by to place it: the part of the score's pan the voices did not keep.
     fn pan_after_factors(&self) -> [f32; 2] {
-        pan_post(self.pan_late, self.pan_blend)
+        pan_post(self.pan_late, self.pan_blend, self.pan_flat_mix)
     }
     /// What a General MIDI synthesizer told the centre is multiplied by, so it plays the pan the voices keep. 1 for a
     /// synthesizer that pans itself.
     fn synth_factors(&self) -> [f32; 2] {
         if self.synth_centred {
-            pan_pre(self.pan, self.pan_blend)
+            pan_pre(self.pan, self.pan_blend, self.pan_flat_mix)
         } else {
             [1.0; 2]
         }
     }
-    /// Moves `pan_blend` a step (`1 / 10 ms`) toward where `pan_after` says it should be.
+    /// Moves `pan_blend` and `pan_flat_mix` a step (`1 / 10 ms`) toward where `pan_after` and `pan_flat` say they should be.
     fn glide_pan(&mut self, step: f32) {
         let aim = if self.pan_after { 1.0 } else { 0.0 };
+        let flat_aim = if self.pan_flat { 1.0 } else { 0.0 };
+        if self.pan_blend == aim && self.pan_flat_mix == flat_aim {
+            return;
+        }
         if self.pan_blend < aim {
             self.pan_blend = (self.pan_blend + step).min(aim);
         } else if self.pan_blend > aim {
             self.pan_blend = (self.pan_blend - step).max(aim);
-        } else {
-            return;
+        }
+        if self.pan_flat_mix < flat_aim {
+            self.pan_flat_mix = (self.pan_flat_mix + step).min(flat_aim);
+        } else if self.pan_flat_mix > flat_aim {
+            self.pan_flat_mix = (self.pan_flat_mix - step).max(flat_aim);
         }
         self.sync_synth_pan();
     }
     /// Puts `pan_blend` where `pan_after` says it should be at once, and the synthesizers with it.
     fn settle_pan(&mut self) {
         self.pan_blend = if self.pan_after { 1.0 } else { 0.0 };
+        self.pan_flat_mix = if self.pan_flat { 1.0 } else { 0.0 };
         if self.synth_centred != self.pan_after {
             self.synth_centred = self.pan_after;
             for channel in 0..16 {
@@ -953,6 +993,8 @@ impl Renderer {
                 pan: [1.0; 2],
                 pan_cc: [64; 16],
                 pan_after: false,
+                pan_flat: false,
+                pan_flat_mix: 0.0,
                 pan_blend: 0.0,
                 synth_centred: false,
                 pan_late: [1.0; 2],
@@ -1194,6 +1236,8 @@ impl Renderer {
         let track_count = plan.tracks.len();
         for (track, channel) in tracks.iter_mut().zip(&mix.channels) {
             track.pan_after = channel.pan_after;
+            track.pan_flat = channel.pan_flat;
+            track.pan_flat_mix = if channel.pan_flat { 1.0 } else { 0.0 };
             track.pan_blend = if channel.pan_after { 1.0 } else { 0.0 };
             track.synth_centred = channel.pan_after;
         }
@@ -1666,12 +1710,12 @@ impl Renderer {
             };
             let frame = voice.voice.next_frame(pitch);
             let channel = &self.tracks[voice.track].channels[voice.channel as usize];
-            // A track with an effect plug-in is panned after its board.
+            // A track with a plug-in is panned after its board.
             let blend = self.tracks[voice.track].pan_blend;
             let sample = if blend == 0.0 {
                 channel.process(frame)
             } else {
-                channel.process_blended(frame, blend)
+                channel.process_blended(frame, blend, self.tracks[voice.track].pan_flat_mix)
             };
             let out = match voice.drum {
                 Some(drum) => &mut self.kit_scratch[voice.track][drum.element],
@@ -2486,6 +2530,7 @@ impl Renderer {
         // stood, glide and moves held back by the plug-in's delay included.
         for (new, old) in self.tracks.iter_mut().zip(&old.tracks) {
             new.pan_blend = old.pan_blend;
+            new.pan_flat_mix = old.pan_flat_mix;
             new.pan_late = old.pan_late;
             new.pan_seen = old.pan_seen;
             new.pan_queue = old.pan_queue;
@@ -2526,7 +2571,7 @@ impl Renderer {
         if let (Some(channel), Some(track)) =
             (self.mix.channels.get(track), self.tracks.get_mut(track))
         {
-            track.set_pan_after(channel.pan_after);
+            track.set_pan_after(channel.pan_after, channel.pan_flat);
             track.settle_pan();
         }
     }
@@ -2731,7 +2776,7 @@ impl Renderer {
         );
         for (track, channel) in self.tracks.iter_mut().zip(&settings.channels) {
             track.kit_active = channel.kit_active;
-            track.set_pan_after(channel.pan_after);
+            track.set_pan_after(channel.pan_after, channel.pan_flat);
         }
         let d_max = settings.compensation.as_ref().map_or(0, |c| c.d_max()) as u64;
         if let Some(tap) = &mut self.midi {
@@ -3167,6 +3212,63 @@ mod selection_tests {
                 repeated.iter().all(|sample| *sample == [0.0; 2]),
                 "no held voice or historical delay after seeking past its end"
             );
+        }
+    }
+
+    /// What the plug-in's output is placed by never steps when the track's plug-in comes, goes or changes kind on a track the
+    /// score pans hard, and the voices that stand in for it together with that factor are always the score's pan. The step
+    /// is looked for from the frame the change is made, where the output still in flight is placed by the leaving kind.
+    #[test]
+    fn the_pan_that_places_a_plug_in_moves_without_a_step_when_the_plug_in_comes_goes_or_changes_kind()
+     {
+        const NONE: (bool, bool) = (false, false);
+        const EFFECT: (bool, bool) = (true, false);
+        const INSTRUMENT: (bool, bool) = (true, true);
+        let cases = [
+            ("add an instrument", NONE, INSTRUMENT),
+            ("add an effect", NONE, EFFECT),
+            ("remove an instrument", INSTRUMENT, NONE),
+            ("remove an effect", EFFECT, NONE),
+            ("effect to instrument", EFFECT, INSTRUMENT),
+            ("instrument to effect", INSTRUMENT, EFFECT),
+        ];
+        for pan in [[0.0, std::f32::consts::SQRT_2], [0.8, 1.2]] {
+            for (what, from, to) in cases {
+                let mut renderer = held_renderer(48_000, 960.0, false, false);
+                let track = &mut renderer.tracks[0];
+                track.pan = pan;
+                track.pan_late = pan;
+                track.pan_seen = pan;
+                track.set_pan_after(from.0, from.1);
+                track.settle_pan();
+                let placed = |track: &Track| track.pan_after_factors();
+                let louder = usize::from(pan[1] > pan[0]);
+                let mut last = placed(track);
+                track.set_pan_after(to.0, to.1);
+                let step = 100.0 / 48_000.0;
+                for frame in 0..600 {
+                    let now = placed(track);
+                    for side in 0..2 {
+                        // The quieter side's factor moves fast near the unity end of a glide (as an effect's always did), but
+                        // what it places there is the quieter side of the score's pan, and the product below is what is held.
+                        assert!(
+                            side != louder || (now[side] - last[side]).abs() <= 0.004,
+                            "{what}, pan {pan:?}: the factor of side {side} steps from {} to {} at frame {frame}",
+                            last[side],
+                            now[side]
+                        );
+                        // What the voices keep and what is left to apply after the plug-in make the score's pan.
+                        let kept = track.synth_factors();
+                        assert!(
+                            (kept[side] * now[side] - pan[side]).abs() <= 1e-5
+                                || now[side] == 1.0 && kept[side] == pan[side],
+                            "{what}, pan {pan:?}: side {side} at frame {frame}"
+                        );
+                    }
+                    last = now;
+                    track.glide_pan(step);
+                }
+            }
         }
     }
 }

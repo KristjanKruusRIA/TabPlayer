@@ -24,7 +24,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));
   const [print,setPrint]=useState({...layout});const [audio,setAudio]=useState<AudioExportOptions>({sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true});
   const [countIn,setCountIn]=useState(false);const [normalize,setNormalize]=useState(false),[normalizeLevel,setNormalizeLevel]=useState(-16);
-  const [gpBacking,setGpBacking]=useState(true),[transparent,setTransparent]=useState(false),[perTrack,setPerTrack]=useState(false),[dpi,setDpi]=useState<PngResolution>(300);
+  const [gpBacking,setGpBacking]=useState(true),[midiDrumMaps,setMidiDrumMaps]=useState(false),[transparent,setTransparent]=useState(false),[perTrack,setPerTrack]=useState(false),[dpi,setDpi]=useState<PngResolution>(300);
   const paged=format==='pdf'||format==='print'||format==='svg'||format==='png';
   const splittable=format==='pdf'||format==='svg'||format==='png';
   const [fileName,setFileName]=useState(DEFAULT_FILE_NAME),[now,setNow]=useState(()=>new Date());
@@ -63,7 +63,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       if(paged&&!customPage&&(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3))throw new Error(t('export.err_margin'));
       if(paged&&customPage)validatePageLayout(customPage);
       const named={...(format!=='print'&&fileName!==DEFAULT_FILE_NAME?{fileName}:{}),...(splittable&&perTrack?{perTrack:true}:{})};
-      setError('');onExport({...(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'?{format,selection,audio:{...audio,...(normalize?{normalizeRmsDb:normalizeLevel}:{}),...(countIn&&countInBars>0?{countIn:true}:{})}}:format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection}),...named} as ExportOptions);
+      setError('');onExport({...(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'?{format,selection,audio:{...audio,...(normalize?{normalizeRmsDb:normalizeLevel}:{}),...(countIn&&countInBars>0?{countIn:true}:{})}}:format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:format==='midi'?{format,selection,...(midiDrumMaps?{drumMaps:true}:{})}:{format,selection}),...named} as ExportOptions);
     }catch(e){setError((e as Error).message);}
   }
   return <Dialog title={t('export.title')} onClose={onCancel} closeLabel={busy?t('dialog.cancel'):t('dialog.close')} busy={busy} className="export-dialog" actions={<><button type="button" {...busyGuard({busy,unavailable:Boolean(backingIssue)||Boolean(gp5Issue),className:'tp-primary export-submit',onClick:submit})}>{t('export.submit')}</button><button type="button" onClick={onCancel}>{busy?t('export.cancel_export'):t('dialog.cancel')}</button></>}>
@@ -99,7 +99,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       {format==='ascii'&&<p>{t('export.ascii_note')}</p>}
       {format==='gp5'&&<><p>{t('export.gp5_note')}</p>
         {gp5&&'losses' in gp5&&(gp5.losses.length?<div role="status"><p>{t('export.gp5_losses')}</p><ul>{gp5.losses.map(item=><li key={item}>{item}</li>)}</ul></div>:<p role="status">{t('export.gp5_no_losses')}</p>)}</>}
-      {format==='midi'&&<p>{t('export.midi_note')}</p>}
+      {format==='midi'&&<><p>{t('export.midi_note')}</p><label className="export-check"><input type="checkbox" checked={midiDrumMaps} onChange={e=>setMidiDrumMaps(e.target.checked)}/>{t('export.midi_drum_maps')}</label>{midiDrumMaps&&<p className="muted">{t('export.midi_drum_maps_note')}</p>}</>}
       {(format==='wav'||format==='stems')&&<fieldset className="export-audio"><legend>{t('export.audio')}</legend><div className="export-audio-options">
         <div className="export-field"><span className="export-field-label" aria-hidden="true">{t('export.file_type')}</span><Segmented label={t('export.file_type')} value={audio.container??'wav'} disabled={busy} options={[{value:'wav' as const,label:'WAV'},{value:'aiff' as const,label:'AIFF'},{value:'flac' as const,label:t('export.flac')},{value:'ogg' as const,label:t('export.ogg')},{value:'mp3' as const,label:t('export.mp3')}]} onChange={value=>{const {container:_,...rest}=audio;setAudio(value==='wav'?rest:{...rest,container:value});}}/></div>
         {audio.container==='ogg'&&<p>{t('export.ogg_note')}</p>}

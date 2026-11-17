@@ -299,7 +299,7 @@ function pitchCurve(note: RawNote, destination: RawNote, events: PlanMidiEvent[]
 }
 
 /** `interpretations` is by track identity; a track missing from it, or any track when it is absent, plays as written. */
-function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void, interpretations?: Record<string, TrackInterpretation>): PlaybackPlan {
+function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void, interpretations?: Record<string, TrackInterpretation>, drumHit?: (track: number, attack: number, key: number, id: number | undefined) => void): PlaybackPlan {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid playback generation.');
   if (original.masterBars.some(bar=>!validMeter(bar.timeSignatureNumerator,bar.timeSignatureDenominator))) throw new Error('Invalid score meter.');
   const score = prepareGpMidiScore(prepareMidiScore(original),settings);
@@ -422,7 +422,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           corrected?.(actual.track, actual.trackAttack, actual.end - actual.start);
         }
         // A drum note is mixed with the piece its articulation belongs to; the player knows only its pitch, and so is told wherever that is another piece.
-        if (source.note.isPercussion) { const kit = planKitElement(ownerOf(score.tracks[source.track], source.note.percussionArticulation), actual.key); if (kit) actual.kit = kit; const standard = mapArticulationId(score.tracks[source.track], source.note.percussionArticulation); if (standard !== undefined && standard !== actual.key) actual.articulationId = standard; }
+        if (source.note.isPercussion) { const kit = planKitElement(ownerOf(score.tracks[source.track], source.note.percussionArticulation), actual.key); if (kit) actual.kit = kit; const standard = mapArticulationId(score.tracks[source.track], source.note.percussionArticulation); if (standard !== undefined && standard !== actual.key) actual.articulationId = standard; drumHit?.(actual.track, actual.trackAttack, actual.key, actual.articulationId); }
         let origin = source.note.hammerPullOrigin ?? (source.note.slideOrigin?.slideOutType === model.SlideOutType.Legato ? source.note.slideOrigin : null) ?? source.note.slurOrigin;
         while (origin?.tieOrigin) origin = origin.tieOrigin;
         const from = origin && !source.note.beat.deadSlapped ? [...(played.get(origin) ?? [])].reverse().find(n => n.startTick < actual.start && n.source.target.track === source.track && n.source.target.staff === source.staff && n.source.target.voice === source.voice && n.source.string === Math.max(0, source.note.string)) : undefined;
@@ -489,6 +489,13 @@ export function deadBrushMidiDurations(score: model.Score): { track: number; att
   const corrections: { track: number; attack: number; length: number }[] = [];
   buildWithIdentities(score, 0, score.tracks.map(trackIdentity), (track, attack, length) => corrections.push({ track, attack, length }));
   return corrections;
+}
+
+/** Each drum note's key and standard articulation id as playback reads them, by the zero-based addNote ordinal per track that `deadBrushMidiDurations` uses, so a drum map can be applied to an exported MIDI file as it is to playback. */
+export function drumMidiHits(score: model.Score): { track: number; attack: number; key: number; id: number | undefined }[] {
+  const hits: { track: number; attack: number; key: number; id: number | undefined }[] = [];
+  buildWithIdentities(score, 0, score.tracks.map(trackIdentity), undefined, undefined, (track, attack, key, id) => hits.push({ track, attack, key, id }));
+  return hits;
 }
 
 export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConverter.scoreToJson>, identities: string[], generation: number, interpretations?: Record<string, TrackInterpretation>): PlaybackPlan {

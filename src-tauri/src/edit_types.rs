@@ -295,6 +295,30 @@ pub struct ClipboardHarmony {
     pub chord: HarmonyChord,
 }
 
+/// Notes of a phrase clip that carry on a held note across a clip edge, by clip note ID: `continues` were tied from a
+/// note before the clip, `continued` are tied to a note after it. A clip made before this field existed has no such key.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardHeld {
+    pub continues: Vec<u32>,
+    pub continued: Vec<u32>,
+}
+
+impl ClipboardHeld {
+    fn validate(&self) -> Result<(), String> {
+        let distinct = |ids: &[u32]| ids.iter().collect::<HashSet<_>>().len() == ids.len();
+        if (self.continues.is_empty() && self.continued.is_empty())
+            || self.continues.len() > 100_000
+            || self.continued.len() > 100_000
+            || !distinct(&self.continues)
+            || !distinct(&self.continued)
+        {
+            return Err("Invalid clipboard held-note marker.".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MusicClip {
@@ -311,6 +335,12 @@ pub struct MusicClip {
         skip_serializing_if = "Option::is_none"
     )]
     pub harmony: Option<Vec<ClipboardHarmony>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub held: Option<ClipboardHeld>,
 }
 
 impl MusicClip {
@@ -344,6 +374,9 @@ impl MusicClip {
             if !seen.insert((link.from, link.to, &link.kind, link.slide_out_type)) {
                 return Err("Clipboard links must be distinct.".into());
             }
+        }
+        if let Some(held) = &self.held {
+            held.validate()?;
         }
         if let Some(harmony) = &self.harmony {
             let mut records = HashSet::new();

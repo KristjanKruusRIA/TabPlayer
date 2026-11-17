@@ -81,7 +81,7 @@ function liveTracks(score:model.Score,ids:readonly string[],value:EngravingOverr
   if(ids.length!==score.tracks.length||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!id.trim()))throw new Error('Invalid source track identities.');
   for(const entry of value.profiles){const index=ids.indexOf(entry.trackId);if(index<0){if(requireLive)throw new Error('Engraving profile refers to a missing track.');continue;}
     const staves=score.tracks[index].staves;
-    if(entry.profile==='tablature'&&!tablatureAllowed(score.tracks[index]))throw new Error(getMessage(getResolvedLanguage(),'engraving.tablature_refused'));
+    if(entry.profile==='tablature'&&!tablatureAllowed(score.tracks[index]))throw new Error(getMessage(getResolvedLanguage(),staves.length>1&&staves.some(staff=>staff.isPercussion)?'engraving.drum_tab_one_staff':'engraving.tablature_refused'));
     if(entry.profile==='numbered'&&staves.some(staff=>staff.isPercussion))throw new Error(getMessage(getResolvedLanguage(),'engraving.numbered_refused'));
   }
 }

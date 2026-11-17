@@ -50,8 +50,8 @@ describe('a score without a drum tab profile projects exactly as it did',()=>{
     expect(jsonOf(result.score)).toBe(oracle(score,{1:[true,false,false,false]}));expect(result.drumTab).toBeUndefined();
     expect(drumTabModes(score,ids,engraving(ids,'standardTab')).size).toBe(0);
     // Tablature stays refused for it, as for a track that mixes percussion with strings.
-    expect(()=>validateEngravingTracks(score,ids,engraving(ids,'tablature'))).toThrow(/Tablature requires/);
-    expect(()=>projectEngraving(score,ids,engraving(ids,'tablature'))).toThrow(/Tablature requires/);
+    expect(()=>validateEngravingTracks(score,ids,engraving(ids,'tablature'))).toThrow(/Drum tab needs a track of one percussion staff/);
+    expect(()=>projectEngraving(score,ids,engraving(ids,'tablature'))).toThrow(/Drum tab needs a track of one percussion staff/);
   });
 });
 

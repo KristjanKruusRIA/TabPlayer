@@ -7,8 +7,14 @@ import type { HarmonyChord } from './harmony-types';
 export type ClipboardMode='singleTrack'|'multiTrack';
 export interface ClipboardLink {from:number;to:number;kind:'tie'|'slur'|'slide'|'hammerPull';slideOutType:number|null}
 export interface ClipboardHarmony {track:number;staff:number;chordId:string;chord:HarmonyChord}
+/**
+ * Optional: notes of the clip (by clip note ID) that carry on a held note across a clip edge. `continues` are notes of the first beat that were tied
+ * from a note before the clip; `continued` are notes of the last beat that were tied to a note after it. Absent in clips made before; such a clip pastes
+ * as it always did.
+ */
+export interface ClipboardHeld {continues:number[];continued:number[]}
 interface MusicClipBase {
-  format:'TabPlayerClip';engineVersion:'1.8.4';mode:ClipboardMode;kind:'phrase'|'bars';scoreJson:string;links:ClipboardLink[];
+  format:'TabPlayerClip';engineVersion:'1.8.4';mode:ClipboardMode;kind:'phrase'|'bars';scoreJson:string;links:ClipboardLink[];held?:ClipboardHeld;
 }
 export type MusicClip=MusicClipBase&({version:1}|{version:2;harmony:ClipboardHarmony[]});
 export interface PasteFilters {diagrams:boolean;texts:boolean;timers:boolean;trackAutomations:boolean;masterAutomations:boolean;sections:boolean}

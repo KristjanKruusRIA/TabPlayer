@@ -64,7 +64,7 @@ describe('the Export dialog and the Page layout panel speak the interface langua
 
   it('gives the tablature refusal a catalogue text in the interface language', () => {
     const score = new model.Score(); score.addMasterBar(new model.MasterBar());
-    const track = new model.Track(); const staff = new model.Staff(); staff.isPercussion = true; track.addStaff(staff); const second = new model.Staff(); track.addStaff(second);
+    const track = new model.Track(); const staff = new model.Staff(); track.addStaff(staff); const second = new model.Staff(); track.addStaff(second);
     score.addTrack(track);
     const overrides = { ...defaultEngraving(), profiles: [{ trackId: 'a', profile: 'tablature' as const }] };
     expect(() => validateEngravingTracks(score, ['a'], overrides)).toThrow(en['engraving.tablature_refused']);

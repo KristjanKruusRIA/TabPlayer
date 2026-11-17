@@ -1,4 +1,5 @@
 import { model } from '@coderline/alphatab';
+import { preferenceSaved,registerPreferenceGroup } from '../workspace/native-preferences';
 
 /** A voice whose rhythm does not fill its measure: too short (incomplete) or too long (overfull). */
 export interface ScoreError {track:number;staff:number;bar:number;voice:number;
@@ -83,6 +84,15 @@ const browserStorage=():PreferenceStorage|undefined=>{try{return globalThis.loca
 export function readScoreErrorDisplay(storage:PreferenceStorage|undefined=browserStorage()):boolean {
   try{return storage?.getItem(key)!=='off';}catch{return true;}
 }
-export function writeScoreErrorDisplay(mark:boolean,storage:PreferenceStorage|undefined=browserStorage()):void {
+function keepScoreErrorDisplay(mark:boolean,storage:PreferenceStorage|undefined):void {
   try{storage?.setItem(key,mark?'on':'off');}catch{/* Storage can be unavailable; the choice then lasts for this session only. */}
 }
+export function writeScoreErrorDisplay(mark:boolean,storage:PreferenceStorage|undefined=browserStorage()):void {
+  keepScoreErrorDisplay(mark,storage);preferenceSaved('scoreErrors',{mark},storage);
+}
+/** The browser copy is the first paint; the app's native settings keep it across a reset of the browser profile. `null` while nothing was ever chosen. */
+registerPreferenceGroup<{mark:boolean}>({name:'scoreErrors',
+  repair:value=>value&&typeof value==='object'&&!Array.isArray(value)?{mark:(value as Record<string,unknown>).mark!==false}:null,
+  browser:(storage=browserStorage())=>{try{const stored=storage?.getItem(key);return stored==='on'||stored==='off'?{mark:stored==='on'}:null;}catch{return null;}},
+  keep:(value,storage=browserStorage())=>keepScoreErrorDisplay(value.mark,storage),
+  same:(a,b)=>a.mark===b.mark});

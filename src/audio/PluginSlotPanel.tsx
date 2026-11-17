@@ -29,6 +29,8 @@ export interface PluginSlotPanelProps {
   documentId?: string;
   /** A drum track: the only kind of track that may take an instrument, so only it lists instruments. */
   percussion?: boolean;
+  /** Asked for (the sidebar's Plug-in row, Sound > VST3 plug-in…): the section is open, scrolled into view and its plug-in choice has focus when the dialog opens. */
+  reveal?: boolean;
   onChange: (slot: PluginSlot | undefined, assetToken?: string) => void;
   /** May return a promise; a rejection is shown here. */
   onAllow?: () => void | Promise<unknown>;
@@ -56,6 +58,7 @@ export function PluginSlotPanel({
   busy = false,
   documentId = '',
   percussion = false,
+  reveal = false,
   onChange,
   onAllow,
   onRetry,
@@ -65,6 +68,8 @@ export function PluginSlotPanel({
   const [error, setError] = useState<string | null>(null);
   const [replacedNotes, setReplacedNotes] = useState<string[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
+  const section = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { if (reveal) section.current?.scrollIntoView?.({ block: 'nearest' }); }, [reveal]);
 
   // Local state for trims while typing before committing on blur or Enter
   const [inputVal, setInputVal] = useState<string>(() => String(slot?.inputDb ?? 0));
@@ -294,7 +299,7 @@ export function PluginSlotPanel({
   );
 
   return (
-    <details className="sound-plugin-slot" open>
+    <details className="sound-plugin-slot" open ref={section}>
       <summary>
         <span className="sound-plugin-name">{t('plugin.slot_label')}</span>
         <span className="sound-block-state">
@@ -307,6 +312,7 @@ export function PluginSlotPanel({
             {t('plugin.slot_label')}
             <select
               aria-label={t('plugin.slot_label')}
+              data-autofocus={reveal || undefined}
               value={slot?.classId ?? ''}
               {...busySelect(busy)}
               onChange={e => handleSelect(e.target.value)}

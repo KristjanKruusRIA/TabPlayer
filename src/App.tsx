@@ -312,6 +312,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const openProperties=(tab:PropertiesTab,focus?:PropertiesRequest['focus'])=>{closeCommands();setProperties(current=>({tab,focus,nonce:(current?.nonce??0)+1}));};
   // The dock's + and Track > Add track… open the Add track dialog.
   const [addTrackOpen,setAddTrackOpen]=useState(false);
+  // Sound > VST3 plug-in… asks the Track tab's sound summary to open the sound dialog at the plug-in slot of the selected track.
+  const [soundRequest,setSoundRequest]=useState<'plugin'|null>(null);
   const startAddTrack=()=>{closeCommands();if(controlsBusy)return;setAddTrackOpen(true);};
   const showInspector=()=>openInspector();
   const chooseDock=(mode:'overview'|'mixer'|'instrument'|'keyboard'|'backing')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');setKeyboardVisible(mode==='keyboard');if(mode!=='instrument'&&mode!=='keyboard')setDockMode(mode);if(mode==='backing')setWaveformOpened(true);};
@@ -1321,6 +1323,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <button type="button" onClick={()=>{setView('sound');}}>{t('menu.show_sound')}</button>
         <button type="button" onClick={()=>{setView('mixer');}}>{t('menu.show_mixer')}</button>
         <button type="button" onClick={()=>{openInspector('track');}}>{t('menu.track_sound')}</button>
+        <button type="button" aria-haspopup="dialog" onClick={()=>{setView('score');openInspector('track');setSoundRequest('plugin');}}>{t('menu.vst_plugin')}</button>
         <button type="button" onClick={()=>{openInspector('song');}}>{t('menu.sound_mastering')}</button>
       </section></details>
       <details ref={viewMenu} className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.view')}</summary><section aria-label={t('menu.workspace_view')}>
@@ -1406,7 +1409,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
         <TrackSettingsPanel staff={target.staff} bar={target.bar} key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} refusal={state.error} onEdit={edit} onAudition={auditionTuning} onStepTrack={stepTrack} onSelectStaff={staff=>{const bar=state.score.tracks[target.track].staves[staff]?.bars[target.bar],voice=bar?.voices[target.voice]?target.voice:0,beat=bar?.voices[voice]?.beats[target.beat]?target.beat:0;select({...target,staff,voice,beat});}}
-          sounds={view==='score'&&<SoundSummary trackId={trackId} percussion={selectedTrack.isPercussion} mix={state.settings.mixes[trackId]} usedDrumSounds={drumSounds} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}
+          sounds={view==='score'&&<SoundSummary request={soundRequest} onRequestHandled={()=>setSoundRequest(null)} trackId={trackId} percussion={selectedTrack.isPercussion} mix={state.settings.mixes[trackId]} usedDrumSounds={drumSounds} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}
           interpretation={selectedTrack.staves.some(staff=>staff.isStringed)&&<section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>}
           midi={<section className="inspector-section"><details className="inspector-more midi-out-more"><summary>{t('inspector.midi_out')}</summary><MidiOutPanel key={trackId} percussion={selectedTrack.isPercussion} usedDrumSounds={drumSounds} keyShift={playbackState?.practice.settings.tonality??0} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></details></section>}/>
       </div>

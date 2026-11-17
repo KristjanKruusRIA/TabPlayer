@@ -70,6 +70,7 @@ export const en = {
   'menu.show_sound': 'Sound rig view',
   'menu.show_mixer': 'Mixer view',
   'menu.track_sound': 'Track sound settings…',
+  'menu.vst_plugin': 'VST3 plug-in…',
   'menu.sound_mastering': 'Sound mastering…',
   'menu.dock_overview': 'Global view: tracks',
   'menu.dock_mixer_window': 'Global view: mixer',
@@ -2730,6 +2731,9 @@ export const en = {
   'sound_summary.edit_effect': 'Edit {name}',
   'sound_summary.open_editor': 'Sound and pedalboard…',
   'sound_summary.dialog_title': 'Sound and pedalboard',
+  'sound_summary.plugin_label': 'Plug-in',
+  'sound_summary.plugin_none': 'None',
+  'sound_summary.plugin_open': 'Plug-in…',
 } as const;
 
 export type MessageKey = keyof typeof en;

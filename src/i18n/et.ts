@@ -71,6 +71,7 @@ export const et: MessageCatalog = {
   'menu.show_sound': 'Helirakise vaade',
   'menu.show_mixer': 'Mikseri vaade',
   'menu.track_sound': 'Raja heli seaded…',
+  'menu.vst_plugin': 'VST3 plugin…',
   'menu.sound_mastering': 'Heli masterdamine…',
   'menu.dock_overview': 'Üldvaade: rajad',
   'menu.dock_mixer_window': 'Üldvaade: mikser',
@@ -2730,5 +2731,8 @@ export const et: MessageCatalog = {
   'sound_summary.edit_effect': 'Muuda: {name}',
   'sound_summary.open_editor': 'Heli ja pedaalilaud…',
   'sound_summary.dialog_title': 'Heli ja pedaalilaud',
+  'sound_summary.plugin_label': 'Plugin',
+  'sound_summary.plugin_none': 'Puudub',
+  'sound_summary.plugin_open': 'Plugin…',
   ...helpEt,
 };

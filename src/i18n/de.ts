@@ -71,6 +71,7 @@ export const de: MessageCatalog = {
   'menu.show_sound': 'Klangrig-Ansicht',
   'menu.show_mixer': 'Mischpultansicht',
   'menu.track_sound': 'Spurklang-Einstellungen…',
+  'menu.vst_plugin': 'VST3-Plugin…',
   'menu.sound_mastering': 'Klang-Mastering…',
   'menu.dock_overview': 'Gesamtansicht: Spuren',
   'menu.dock_mixer_window': 'Gesamtansicht: Mischpult',
@@ -2730,5 +2731,8 @@ export const de: MessageCatalog = {
   'sound_summary.edit_effect': '{name} bearbeiten',
   'sound_summary.open_editor': 'Klang und Pedalboard…',
   'sound_summary.dialog_title': 'Klang und Pedalboard',
+  'sound_summary.plugin_label': 'Plugin',
+  'sound_summary.plugin_none': 'Keines',
+  'sound_summary.plugin_open': 'Plugin…',
   ...helpDe,
 };

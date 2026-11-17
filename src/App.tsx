@@ -29,6 +29,7 @@ import { Segmented } from './ui';
 import { AmpGlyph,ExportGlyph,FretboardGlyph,MarkGlyph,MixerGlyph,NoteEntryGlyph,PaletteGlyph,PanelBottomGlyph,PanelRightGlyph,PracticeGlyph,RedoGlyph,ScoreGlyph,UndoGlyph } from './shell/glyphs';
 import { InterpretationPanel } from './audio/InterpretationPanel';
 import { MidiOutPanel } from './audio/MidiOutPanel';
+import { usedDrumSounds } from './audio/drum-map';
 import { nativeMidiOut } from './audio/midi-out';
 import { readMidiOutDelay } from './audio/midi-out-preferences';
 import { CabinetNotices } from './audio/CabinetNotices';
@@ -527,6 +528,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const cancelExport=()=>{exportCancelled.current=true;const running=exportRunning.current;act((async()=>{let failed=false;try{await exports.cancel();}catch(error){failed=true;setExportError(String(error));}await running;if(!failed)closeModal();})());};
   const backingEdit=(command:EditCommand,candidate?:BackingCandidate)=>controller.edit(command,candidate);
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
+  const drumSounds=useMemo(()=>selectedTrack.isPercussion?usedDrumSounds(selectedTrack):[],[state.score,selectedTrack]);
   const transportScore=state.score,transportTrack=`${target.track+1}. ${selectedTrack.name||`Track ${target.track+1}`}`;
   const transportColor=trackColorHex(selectedTrack.color);
   const transportTracks=useMemo(()=>transportScore.tracks.map((track,index)=>`${index+1}. ${track.name||t('track_display.track_fallback',{index:index+1})}`),[transportScore]);
@@ -1396,9 +1398,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
         <TrackSettingsPanel staff={target.staff} bar={target.bar} key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} refusal={state.error} onEdit={edit} onAudition={auditionTuning} onSelectStaff={staff=>{const bar=state.score.tracks[target.track].staves[staff]?.bars[target.bar],voice=bar?.voices[target.voice]?target.voice:0,beat=bar?.voices[voice]?.beats[target.beat]?target.beat:0;select({...target,staff,voice,beat});}}
-          sounds={view==='score'&&<SoundSummary trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}
+          sounds={view==='score'&&<SoundSummary trackId={trackId} percussion={selectedTrack.isPercussion} mix={state.settings.mixes[trackId]} usedDrumSounds={drumSounds} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}
           interpretation={selectedTrack.staves.some(staff=>staff.isStringed)&&<section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>}
-          midi={<section className="inspector-section"><details className="inspector-more midi-out-more"><summary>{t('inspector.midi_out')}</summary><MidiOutPanel key={trackId} keyShift={playbackState?.practice.settings.tonality??0} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></details></section>}/>
+          midi={<section className="inspector-section"><details className="inspector-more midi-out-more"><summary>{t('inspector.midi_out')}</summary><MidiOutPanel key={trackId} percussion={selectedTrack.isPercussion} usedDrumSounds={drumSounds} keyShift={playbackState?.practice.settings.tonality??0} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></details></section>}/>
       </div>
       
       

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { EditCommand, EffectBlock, TrackSound } from '../edit-types';
+import type { ChannelMix, EditCommand, EffectBlock, TrackSound } from '../edit-types';
 import type { AssetCandidate } from '../project';
 import { useI18n } from '../i18n';
 import { Dialog } from '../ui/Dialog';
@@ -14,7 +14,7 @@ import { playsRecordedKit, sourceChoices, presetIds, soundPreset, localizedBlock
 import type { NativePlaybackController } from './NativePlaybackController';
 import type { PluginStatus } from './plugin-host';
 
-type Props = { trackId: string; percussion?: boolean; sound?: TrackSound; onEdit: (edit: EditCommand, asset?: AssetCandidate) => void | Promise<void>; playback?: NativePlaybackController | null; busy?: boolean; shown?: boolean; documentId?: string; status?: PluginStatus; onAllowConsent?: () => void | Promise<unknown>; onRetrySlot?: () => void | Promise<unknown> };
+type Props = { trackId: string; percussion?: boolean; sound?: TrackSound; onEdit: (edit: EditCommand, asset?: AssetCandidate) => void | Promise<void>; playback?: NativePlaybackController | null; busy?: boolean; shown?: boolean; documentId?: string; status?: PluginStatus; onAllowConsent?: () => void | Promise<unknown>; onRetrySlot?: () => void | Promise<unknown>; mix?: ChannelMix; usedDrumSounds?: readonly number[] };
 
 /**
  * The Sounds section of the Track tab as one row of choices and a strip: the sound source and preset (each one undoable change),

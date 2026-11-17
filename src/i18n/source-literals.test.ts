@@ -21,6 +21,7 @@ export const sweepFiles = [
   'src/audio/BackingWaveform.tsx',
   'src/audio/CabinetNotices.tsx',
   'src/audio/CabinetResponse.tsx',
+  'src/audio/DrumMapPanel.tsx',
   'src/audio/InterpretationPanel.tsx',
   'src/audio/PracticePanel.tsx',
   'src/audio/SelectionPlaybackControls.tsx',

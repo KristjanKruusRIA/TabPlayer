@@ -1,5 +1,6 @@
 import { useEffect,useState } from 'react';
 import { defaultMix } from '../document-settings';
+import { DrumMapPanel } from './DrumMapPanel';
 import type { ChannelMix,EditCommand } from '../edit-types';
 import { useI18n } from '../i18n';
 import { busyGuard,busySelect } from '../ui/useBusyGuard';
@@ -13,6 +14,10 @@ export interface MidiOutPanelProps {
   /** The open score, so Refresh also moves its tracks back onto a port that has come back. */
   owner?:MidiOutOwner;
   mix?:ChannelMix;
+  /** A drum track, whose chosen port plays the keys of its drum map. */
+  percussion?:boolean;
+  /** The standard drum sounds the track's notes play. */
+  usedDrumSounds?:readonly number[];
   busy?:boolean;
   onEdit:(edit:EditCommand)=>void|Promise<void>;
   bridge?:MidiOutBridge;
@@ -28,7 +33,7 @@ const portCache=new WeakMap<MidiOutBridge,MidiOutPort[]>();
  * track's mix, so choosing it is one undoable edit and travels with the score; a port that is not connected on this
  * computer leaves the track on the internal sound until it is.
  */
-export function MidiOutPanel({keyShift=0,trackId,owner,mix,busy=false,onEdit,bridge=nativeMidiOut,interval=1000}:MidiOutPanelProps):React.JSX.Element {
+export function MidiOutPanel({keyShift=0,trackId,owner,mix,percussion=false,usedDrumSounds=[],busy=false,onEdit,bridge=nativeMidiOut,interval=1000}:MidiOutPanelProps):React.JSX.Element {
   const {t}=useI18n();
   const [ports,setPorts]=useState<MidiOutPort[]|null>(()=>portCache.get(bridge)??null),[listError,setListError]=useState('');
   const [status,setStatus]=useState<MidiOutStatus|null>(null),[error,setError]=useState('');
@@ -69,6 +74,7 @@ export function MidiOutPanel({keyShift=0,trackId,owner,mix,busy=false,onEdit,bri
     {current&&<label>{t('midi_out.delay')}<input type="range" min={0} max={MIDI_OUT_DELAY_MAX} step={5} value={delay} aria-valuetext={t('midi_out.delay_ms',{ms:delay})} onChange={event=>changeDelay(Number(event.target.value))}/><output>{t('midi_out.delay_ms',{ms:delay})}</output></label>}
     {current&&<p className="hint">{t('midi_out.delay_hint')}</p>}
     {notice&&<p className="hint" role="status">{notice}</p>}
+    {current&&percussion&&<DrumMapPanel trackId={trackId} mix={mix} used={usedDrumSounds} busy={busy} onEdit={onEdit}/>}
     <p className="hint">{t('midi_out.hint')}</p>
     {keyShift!==0&&<p className="hint">{t('midi_out.key_shift')}</p>}
     {problem&&<p role="alert">{problem}</p>}

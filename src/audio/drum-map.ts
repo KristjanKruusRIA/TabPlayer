@@ -113,3 +113,24 @@ function gpIdMatch(track: model.Track, id: number): number | undefined {
 export function mapArticulationId(track: model.Track, id: number): number | undefined {
   return standardArticulationId(track, id) ?? gpIdMatch(track, id);
 }
+
+/** One layout a drum map can start from, as `drum-maps.json` describes it. Only `id` is required: `state` says whether the layout was checked against the instrument it belongs to, `candidates` lists keys worth trying for a row, `[articulation id, [key, ...]]`. */
+export interface DrumMapPreset { id: string; name?: string; state?: 'verified' | 'unverified'; source?: string; checked?: string; rows?: PresetRows; candidates?: readonly (readonly [number, readonly number[]])[] }
+/** The layouts this build knows, General MIDI first. */
+export const drumMapPresets = (): readonly DrumMapPreset[] => maps.presets as unknown as readonly DrumMapPreset[];
+
+/**
+ * The standard articulations a track's notes play, ascending: a note's own articulation by the standard one it is, and a plain hit
+ * (whose articulation the track's table does not match) by the standard articulation numbered as the key it sounds.
+ */
+export function usedDrumSounds(track: model.Track): number[] {
+  const used = new Set<number>();
+  for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
+    if (!note.isPercussion) continue;
+    const id = mapArticulationId(track, note.percussionArticulation);
+    if (id !== undefined) { used.add(id); continue; }
+    const key = resolvePercussionArticulation(track, note.percussionArticulation)?.outputMidiNumber;
+    if (key !== undefined && standardIds.has(key)) used.add(key);
+  }
+  return [...used].sort((a, b) => a - b);
+}

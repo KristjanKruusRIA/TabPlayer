@@ -20,7 +20,7 @@ async function openDisclosure(locator) {
 }
 
 /** The modal dialogs the inspector's controls open (Properties, Score style, Sound and pedalboard, Sound mastering). Each makes the rest of the app inert while it is open. */
-const inspectorDialogs=page=>[page.getByRole('dialog',{name:'Properties',exact:true}),page.locator('.score-style-dialog'),page.locator('.sound-dialog'),page.locator('.master-dialog')];
+const inspectorDialogs=page=>[page.getByRole('dialog',{name:'Properties',exact:true}),page.getByRole('dialog',{name:'Add track',exact:true}),page.locator('.score-style-dialog'),page.locator('.sound-dialog'),page.locator('.master-dialog')];
 async function dismiss(page,dialog) {
   if(await dialog.isVisible()){await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});}
 }
@@ -251,12 +251,17 @@ export async function setTrackField(page,label,value) {
   if(!await field.first().isVisible()){const more=page.locator('.track-notation-more .inspector-more');if(!await more.evaluate(node=>node.open))await more.locator('summary').click();field=page.getByLabel(label,{exact:true});}
   await field.fill(String(value));await field.blur();await waitForWorkspaceIdle(page);
 }
-/** Opens the Track tab's 'Add instrument' disclosure (the new track name, instrument and tuning rows and the add buttons) and returns it. */
-export async function openAddInstrument(page) {
-  await revealInspectorTab(page,'Track');
-  const details=page.locator('details.track-add');
-  if(!await details.evaluate(node=>node.open))await details.locator(':scope>summary').click();
-  return details;
+/** Opens the Add track dialog (the new track name, instrument and tuning rows, the add button and the notation tracks) from Track > Add track… and returns it.
+ * The dialog is modal and closes itself when a track is added; Escape leaves it with nothing added. */
+export async function openAddTrackDialog(page) {
+  const dialog=page.getByRole('dialog',{name:'Add track',exact:true});
+  if(!await dialog.isVisible()){await closeInspectorDialogs(page);await clickTrackMenuItem(page,'Add track…');await dialog.waitFor({state:'visible'});}
+  return dialog;
+}
+/** Clicks an item of the Track menu in the command bar ('Add track…', 'Move track up', 'Move track down'). */
+export async function clickTrackMenuItem(page,name) {
+  await openDisclosure(summary(page,/^Track$/));
+  await page.getByRole('button',{name,exact:true}).click();
 }
 
 /** Opens the 'Sound and pedalboard' dialog from the Track tab (optionally at a pedal's chip: 'Edit Drive') and returns the 'Track sound' panel inside it.
@@ -337,7 +342,9 @@ const paletteCommands={'Insert beat':'insert beat','Delete beat':'delete beat','
 // The Selection tab's chord and scale buttons are the edition palette's Chords and Scale diagram buttons; they open the same dialogs.
 const paletteButtons={'Edit chord diagram':'Chords','Browse scales':'Scale diagram'};
 const addTrackActions=new Set(['Add track','Add pitched track','Add percussion track']);
-const trackActions=new Set(['Add track','Remove track','Move track up','Move track down','Duplicate track','Add pitched track','Add percussion track']);
+// Reordering is in the Track menu; the Information row's arrows choose the previous and next track.
+const trackMenuActions=new Set(['Move track up','Move track down']);
+const trackActions=new Set(['Remove track','Duplicate track','Previous track','Next track']);
 const backingActions=new Set(['Import backing','Remove backing']);
 const playbackActions=new Set(['Seek','Loop','Clear loop','Play from cursor','Play selection','Loop selection']);
 
@@ -359,7 +366,8 @@ export async function clickWorkstationButton(page,name,{waitForIdle=true}={}) {
   if(/^Track \d+: /.test(name))await selectWorkspaceTrack(page,name);
   else {
     if(trackActions.has(name))await revealLeftTask(page,'Track');
-    if(addTrackActions.has(name))await openAddInstrument(page);
+    if(addTrackActions.has(name))await openAddTrackDialog(page);
+    if(trackMenuActions.has(name)){await closeInspectorDialogs(page);await clickTrackMenuItem(page,name);if(waitForIdle)await waitForWorkspaceIdle(page);return;}
     if(backingActions.has(name))await revealLeftTask(page,'Backing');
     if(playbackActions.has(name))await revealPlaybackControls(page);
     // Edit, Practice and Presentation were inspector task buttons; Edit (the Selection tab) is gone, Practice is the toolbar popover and Presentation is the Song tab.

@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
+import { AddTrackDialog } from './workstation/AddTrackDialog';
 import { SavedTuningsDialog } from './tuning/SavedTuningsDialog';
 import { buildScore, trackIdentity } from './engine';
 import { blankProject } from './project';
@@ -24,8 +25,8 @@ it('auditions the addressed track for its tuning and the default sound of the ch
   fireEvent.click(tuningDialog.getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({trackId:id},standard,true);
   fireEvent.click(tuningDialog.getByRole('button',{name:'Cancel'}));
   fireEvent.click(screen.getAllByRole('button',{name:'Play tuning'})[0]);expect(onAudition).toHaveBeenLastCalledWith({trackId:id},standard,true);
-  fireEvent.click(screen.getByText('Add instrument'));fireEvent.change(screen.getByLabelText('MIDI instrument'),{target:{value:'33'}});
-  const newRow=document.querySelectorAll('.track-tuning-row')[1] as HTMLElement;
+  render(<AddTrackDialog busy={false} onAdd={vi.fn()} onAudition={onAudition} onClose={vi.fn()}/>);fireEvent.change(screen.getByLabelText('MIDI instrument'),{target:{value:'33'}});
+  const newRow=screen.getByRole('dialog',{name:'Add track'}).querySelector('.track-tuning-row') as HTMLElement;
   fireEvent.click(within(newRow).getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[43,38,33,28],true);
   fireEvent.click(within(newRow).getByRole('button',{name:/^Edit new track tuning/}));const newDialog=within(screen.getByRole('dialog',{name:'Tuning'}));
   fireEvent.click(newDialog.getByRole('button',{name:'Play string 4 (E1)'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[28],false);

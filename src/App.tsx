@@ -129,6 +129,7 @@ import { readHarmonyLibrary,putHarmonyLibraryEntry,removeHarmonyLibraryEntry } f
 import type { HarmonyLibrary } from './editor/harmony-types';
 import { HarmonyTransposePanel } from './harmony/HarmonyTransposePanel';
 import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
+import { AddTrackDialog } from './workstation/AddTrackDialog';
 import './workstation/workstation-shell.css';
 import './workstation/gp-shell.css';
 const noPlaybackSubscribe=()=>()=>{};
@@ -309,15 +310,16 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const openInspector=(tab:InspectorTab=inspectorTab)=>{closeCommands();setInspectorVisible(true);setInspectorTab(tab);requestPaneFocus(tab);};
   /** Opens the Properties dialog (what the inspector's Selection tab held) on a tab, optionally opening one of its disclosures. */
   const openProperties=(tab:PropertiesTab,focus?:PropertiesRequest['focus'])=>{closeCommands();setProperties(current=>({tab,focus,nonce:(current?.nonce??0)+1}));};
-  // The dock's + opens the Track tab with Add instrument unfolded and its name field focused.
-  const startAddTrack=()=>{openInspector('track');setTimeout(()=>{const details=document.querySelector<HTMLDetailsElement>('.workstation-inspector details.track-add');if(!details)return;details.open=true;details.scrollIntoView?.({block:'nearest'});details.querySelector<HTMLInputElement>('input')?.focus();},0);};
+  // The dock's + and Track > Add track… open the Add track dialog.
+  const [addTrackOpen,setAddTrackOpen]=useState(false);
+  const startAddTrack=()=>{closeCommands();if(controlsBusy)return;setAddTrackOpen(true);};
   const showInspector=()=>openInspector();
   const chooseDock=(mode:'overview'|'mixer'|'instrument'|'keyboard'|'backing')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');setKeyboardVisible(mode==='keyboard');if(mode!=='instrument'&&mode!=='keyboard')setDockMode(mode);if(mode==='backing')setWaveformOpened(true);};
   const hideDock=()=>{setDockVisible(false);viewMenu.current?.querySelector('summary')?.focus();};
   const [harmonyOpen,setHarmonyOpen]=useState(false),[scaleOpen,setScaleOpen]=useState(false),[libraryLoading,setLibraryLoading]=useState(false),[libraryError,setLibraryError]=useState<string|null>(null);
   const [library,setLibrary]=useState<HarmonyLibrary>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]});
   const libraryRevision=useRef(0);
-  useEffect(()=>{setHarmonyOpen(false);setScaleOpen(false);},[state.documentEpoch]);
+  useEffect(()=>{setHarmonyOpen(false);setScaleOpen(false);setAddTrackOpen(false);},[state.documentEpoch]);
   useEffect(()=>{
     if(!harmonyOpen)return;let active=true;const revision=++libraryRevision.current;setLibraryLoading(true);setLibraryError(null);
     void readHarmonyLibrary().then(value=>{if(active&&revision===libraryRevision.current)setLibrary(value);}).catch(error=>{if(active&&revision===libraryRevision.current)setLibraryError(t('app.chord_library_error',{error:error instanceof Error?error.message:String(error)}));}).finally(()=>{if(active&&revision===libraryRevision.current)setLibraryLoading(false);});
@@ -630,6 +632,15 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** A selection the user made: it also drops any keys still waiting, which were typed for the old cursor. Entry itself moves the cursor with `moveTo`. */
   const select=(next:BeatTarget,s=string,index?:number)=>{userMoves.current++;clearEntryQueue();moveTo(next,s,index);};
+  /** Selects the previous (-1) or next (+1) track, keeping the cursor's bar, voice and beat as far as that track has them (Ctrl+Up, Ctrl+Down and the Track tab's arrows). It records no edit. */
+  const stepTrack=(direction:-1|1)=>{
+    const nextTrackIndex=Math.max(0,Math.min(state.score.tracks.length-1,target.track+direction));
+    if(nextTrackIndex===target.track)return;
+    const newTrack=state.score.tracks[nextTrackIndex],newStaff=Math.min(target.staff,newTrack.staves.length-1);
+    const newBar=newTrack.staves[newStaff].bars[target.bar],newVoice=Math.min(target.voice,newBar.voices.length-1);
+    const newBeat=Math.min(target.beat,Math.max(0,newBar.voices[newVoice].beats.length-1));
+    editorSelection(null);select({track:nextTrackIndex,staff:newStaff,bar:target.bar,voice:newVoice,beat:newBeat},newTrack.staves[newStaff].tuning.length);
+  };
   /**
    * A plain single left click on a beat in the score also makes that beat the playback position (stopped, paused or playing). A shift, ctrl, cmd or alt click, a double or triple click, a right click, a click while MIDI capture runs,
    * and any click the player must leave alone (a count-in, a loop or played selection the beat is not in) only move the cursor. Navigation: nothing is recorded. Which occurrence of a repeated beat it means is decided at once (Play and Space
@@ -1077,13 +1088,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
     if(gp8?.kind==='track'){
       event.preventDefault();if(event.repeat)return;
-      const nextTrackIndex=Math.max(0,Math.min(state.score.tracks.length-1,target.track+gp8.direction));
-      if(nextTrackIndex!==target.track){
-        const newTrack=state.score.tracks[nextTrackIndex],newStaff=Math.min(target.staff,newTrack.staves.length-1);
-        const newBar=newTrack.staves[newStaff].bars[target.bar],newVoice=Math.min(target.voice,newBar.voices.length-1);
-        const newBeat=Math.min(target.beat,Math.max(0,newBar.voices[newVoice].beats.length-1));
-        editorSelection(null);select({track:nextTrackIndex,staff:newStaff,bar:target.bar,voice:newVoice,beat:newBeat},newTrack.staves[newStaff].tuning.length);
-      }
+      stepTrack(gp8.direction);
       return;
     }
     if(gp8?.kind==='bar'){
@@ -1287,6 +1292,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.track')}</summary><section aria-label={t('menu.track')}>
         <button type="button" onClick={()=>{openInspector('track');}}>{t('menu.track_properties')}</button>
+        <button type="button" aria-haspopup="dialog" {...busyGuard({busy:controlsBusy,unavailable:editLocked,onClick:startAddTrack})}>{t('menu.add_track')}</button>
+        <button type="button" {...busyGuard({busy:editBusy,unavailable:editLocked||target.track===0,onClick:()=>{closeCommands();act(edit({type:'moveTrack',track:target.track,to:target.track-1}));}})}>{t('track_settings.move_track_up')}</button>
+        <button type="button" {...busyGuard({busy:editBusy,unavailable:editLocked||target.track===state.score.tracks.length-1,onClick:()=>{closeCommands();act(edit({type:'moveTrack',track:target.track,to:target.track+1}));}})}>{t('track_settings.move_track_down')}</button>
         <button type="button" onClick={()=>{chooseDock('mixer');}}>{t('menu.dock_mixer')}</button>
         <button type="button" onClick={()=>{chooseDock('instrument');}}>{t('menu.dock_instrument')}</button>
       </section></details>
@@ -1397,7 +1405,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
             page:<><BusyFieldset busy={controlsBusy} disabled={editLocked} className="style-group"><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></BusyFieldset><BusyFieldset busy={controlsBusy} className="style-group"><ViewDefaultsPanel current={{zoom,trackView,scoreDisplay:shownDisplay}} load={currentViewDefaults} onSave={saveViewDefaults}/></BusyFieldset></>}}/>
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
-        <TrackSettingsPanel staff={target.staff} bar={target.bar} key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} refusal={state.error} onEdit={edit} onAudition={auditionTuning} onSelectStaff={staff=>{const bar=state.score.tracks[target.track].staves[staff]?.bars[target.bar],voice=bar?.voices[target.voice]?target.voice:0,beat=bar?.voices[voice]?.beats[target.beat]?target.beat:0;select({...target,staff,voice,beat});}}
+        <TrackSettingsPanel staff={target.staff} bar={target.bar} key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} refusal={state.error} onEdit={edit} onAudition={auditionTuning} onStepTrack={stepTrack} onSelectStaff={staff=>{const bar=state.score.tracks[target.track].staves[staff]?.bars[target.bar],voice=bar?.voices[target.voice]?target.voice:0,beat=bar?.voices[voice]?.beats[target.beat]?target.beat:0;select({...target,staff,voice,beat});}}
           sounds={view==='score'&&<SoundSummary trackId={trackId} percussion={selectedTrack.isPercussion} mix={state.settings.mixes[trackId]} usedDrumSounds={drumSounds} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}
           interpretation={selectedTrack.staves.some(staff=>staff.isStringed)&&<section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>}
           midi={<section className="inspector-section"><details className="inspector-more midi-out-more"><summary>{t('inspector.midi_out')}</summary><MidiOutPanel key={trackId} percussion={selectedTrack.isPercussion} usedDrumSounds={drumSounds} keyShift={playbackState?.practice.settings.tonality??0} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></details></section>}/>
@@ -1428,6 +1436,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     </div>
     {exportOpen&&<ExportDialog layoutLocked={editLocked} layoutLockedNote={finalized?undefined:t('export.layout_locked_note')} plainNote={state.snapshot.protection&&(state.snapshot.protection.open||state.snapshot.protection.edit!=='none')?t('export.plain_protection_note'):undefined} sounds={state.settings.sounds} trackNames={trackNames} pluginWarnings={pluginStatuses} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
+    {addTrackOpen&&<AddTrackDialog busy={controlsBusy} locked={editLocked} onAudition={auditionTuning} onAdd={command=>edit(command,score=>{const last=score.tracks.length-1;if(last>=0)select({track:last,staff:0,bar:target.bar,voice:0,beat:0},score.tracks[last].staves[0].tuning.length);})} onClose={()=>setAddTrackOpen(false)}/>}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} initialSection={helpSection} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}
     {batchOpen&&<BatchConvertDialog busy={controlsBusy} onClose={closeBatch}/>}

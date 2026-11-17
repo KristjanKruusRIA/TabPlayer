@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { openScore,settle,sleep } from './entry-mix-support.mjs';
-import { revealInspectorTab,clickWorkstationButton } from './workstation-commands.mjs';
+import { revealInspectorTab,clickWorkstationButton,openAddTrackDialog } from './workstation-commands.mjs';
 
 const shots=resolve(process.argv[2]??'.analysis/desktop-smoke/tuning-dialog');mkdirSync(shots,{recursive:true});
 const session=await openScore('small'),{page}=session,report={checks:[],shots};
@@ -37,7 +37,7 @@ try{
   assert.match(await row.textContent(),/E4 B3 G3 D3 A2 E2/);
   assert.equal(await page.locator('.track-settings .track-tuning-row').locator('select,input[type=text]').count(),0,'the sidebar row has no select or text field');
   const actions=await page.locator('.track-actions button').evaluateAll(list=>list.map(b=>({label:b.getAttribute('aria-label'),title:b.getAttribute('title'),w:Math.round(b.getBoundingClientRect().width),h:Math.round(b.getBoundingClientRect().height)})));
-  assert.deepEqual(actions.map(a=>a.label),['Move track up','Move track down','Duplicate track','Remove track']);
+  assert.deepEqual(actions.map(a=>a.label),['Previous track','Next track','Duplicate track','Remove track']);
   note('four track actions are one row of named icon buttons',actions);
   report.trackTab=await panelHeights();
   await page.screenshot({path:resolve(shots,'after-track-tab.png')});
@@ -102,17 +102,18 @@ try{
   await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
   note('Saved tunings nests: Escape closes only the top dialog',{});
 
-  // Add instrument uses the same row and dialog: Use tuning fills the draft for the new track and records nothing.
-  await page.locator('details.track-add>summary').click();
+  // The Add track dialog uses the same row and dialog: Use tuning fills the draft for the new track and records nothing.
+  const addDialog=await openAddTrackDialog(page);
   const newRow=page.getByRole('button',{name:/^Edit new track tuning/});await newRow.click();await dialog.waitFor();
   assert.equal(await dialog.getByRole('button',{name:'Keep fingering'}).count(),0,'a new track has no fingering to keep');
   await dialog.getByLabel('Instrument',{exact:true}).selectOption('bass');await dialog.getByLabel('Number of strings').selectOption('5');await dialog.getByLabel('Preset',{exact:true}).selectOption('bass-5-standard-b');
   await dialog.getByRole('button',{name:'Use tuning',exact:true}).click();await dialog.waitFor({state:'hidden'});
   assert.match(await newRow.textContent(),/G2 D2 A1 E1 B0/);assert.equal((await session.edits()).length,base.length,'Use tuning records nothing');
   assert.equal((await focused()).label.includes('Edit new track tuning'),true,'focus returns to the new-track row');
-  const added=await uncovered('.track-settings');assert.deepEqual(added.bad,[],'Add instrument: no control covered');
-  await page.screenshot({path:resolve(shots,'after-add-instrument.png')});
-  note('Add instrument uses the same dialog in draft mode',{row:await newRow.textContent()});
+  const added=await uncovered('.add-track-dialog');assert.deepEqual(added.bad,[],'Add track dialog: no control covered');
+  await page.screenshot({path:resolve(shots,'after-add-track.png')});
+  note('The Add track dialog uses the same dialog in draft mode',{row:await newRow.textContent()});
+  await addDialog.getByRole('button',{name:'Cancel',exact:true}).click();await addDialog.waitFor({state:'hidden'});assert.equal((await session.edits()).length,base.length,'Cancel adds nothing');
 
   // The play button plays the saved tuning without recording anything.
   const before=(await session.edits()).length;await page.locator('.track-settings .track-tuning-play').first().click();await sleep(300);assert.equal((await session.edits()).length,before);

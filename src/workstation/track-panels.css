@@ -56,3 +56,9 @@
 .track-settings .track-tuning-notes { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums; letter-spacing:.02em; }
 .track-settings .track-tuning-play { width:30px; padding:0; display:inline-grid; place-items:center; border-radius:0 3px 3px 0; }
 .track-settings .track-tuning-row:not(:has(.track-tuning-play)) .track-tuning-button { border-radius:3px; border-right-width:1px; }
+/* The Add track dialog reuses the Track tab's field styles inside a dialog, whose panel colour and width are its own. */
+.tp-dialog.add-track-dialog { width:min(460px,100%); }
+.add-track-body { display:grid; gap:14px; background:transparent; font-size:13px; }
+.add-track-body fieldset { min-width:0; }
+.add-track-body .pair { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+.add-track-body h3 { margin:2px 0 6px; padding-top:10px; border-top:1px solid var(--tp-line-subtle); }

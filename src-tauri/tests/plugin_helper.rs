@@ -1191,17 +1191,40 @@ mod windows_tests {
     #[test]
     fn a_request_when_the_app_ended_the_helper_says_so_and_is_not_a_crash() {
         let job = HelperJob::new().unwrap();
-        let helper = fake_helper(&job, "Start-Sleep 60");
+        // The fake helper creates this file once it has read the request, so the request is known to be in flight.
+        let received = std::env::temp_dir().join(format!(
+            "tabplayer-ended-request-{}-{}.flag",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let _ = std::fs::remove_file(&received);
+        let helper = fake_helper(
+            &job,
+            &format!(
+                "Wait-Request; New-Item -ItemType File -Path '{}' | Out-Null; Start-Sleep 60",
+                received.display()
+            ),
+        );
         // One request in flight while the app ends the helper, and one made afterwards.
         let helper = Arc::new(helper);
         let waiting = {
             let helper = helper.clone();
             std::thread::spawn(move || {
-                helper.request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
+                helper.request_with_timeout(HostMessage::GetState, Duration::from_secs(120))
             })
         };
-        std::thread::sleep(Duration::from_millis(300));
+        let deadline = std::time::Instant::now() + Duration::from_secs(90);
+        while !received.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the helper never read the request"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
         helper.kill();
+        let _ = std::fs::remove_file(&received);
         let error = waiting.join().unwrap().expect_err("the helper was ended");
         assert_eq!(error, HelperError::Ended);
         assert_eq!(
@@ -1210,7 +1233,7 @@ mod windows_tests {
             "the app's own decision says nothing about the plug-in"
         );
         let later = helper
-            .request_with_timeout(HostMessage::GetState, Duration::from_secs(20))
+            .request_with_timeout(HostMessage::GetState, Duration::from_secs(120))
             .expect_err("and it stays ended");
         assert_eq!(later, HelperError::Ended);
     }

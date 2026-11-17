@@ -1,4 +1,4 @@
-import { describe,expect,it } from 'vitest';
+import { beforeAll,describe,expect,it } from 'vitest';
 import { midi,model,Settings } from '@coderline/alphatab';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
@@ -7,6 +7,9 @@ import { kitScore,KIT_BAR_1 } from './drum-tab-fixtures';
 import { DRUM_TAB_TUNING } from './drum-tab';
 import { defaultEngraving,drumTabModes,mapProjection,projectEngraving,validateEngravingTracks } from './projection';
 import type { TrackProfile } from './types';
+import { setLanguagePreference } from '../i18n';
+
+beforeAll(()=>setLanguagePreference('en'));
 
 /**
  * THE-220 slice 2: a drum track's engraving profile ('tablature' or 'standardTab') draws drum tab on the display copy. The source score is never touched.

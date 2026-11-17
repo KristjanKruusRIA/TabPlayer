@@ -157,11 +157,37 @@ describe('ASCII tablature export',()=>{
     expect(lines.slice(4,6)).toEqual(['E4|-3--3--3--3--|','B3|-------------|']);expect(lines[10]).toBe('B1|-------------|');
   });
 
-  it('leaves out percussion and refuses a selection without strings',()=>{
+  const withDrums=(hits:number[][])=>{
     const score=music(),drums=new model.Track();drums.name='Drums';const staff=new model.Staff();staff.isPercussion=true;drums.addStaff(staff);
-    for(const _ of score.masterBars){const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);bar.addVoice(voice);staff.addBar(bar);}
-    score.addTrack(drums);score.finish(new Settings());
-    expect(text(score,{tracks:[0,1],range:null})).not.toContain('Drums');
-    expect(()=>exportAsciiTab(score,{tracks:[1],range:null})).toThrow('ASCII tablature needs a selected track with strings.');
+    for(const [barIndex] of score.masterBars.entries()){
+      const bar=new model.Bar(),voice=new model.Voice();
+      if(barIndex===0)for(const ids of hits){const beat=new model.Beat();beat.duration=4;beat.isEmpty=false;for(const id of ids){const note=new model.Note();note.percussionArticulation=id;beat.addNote(note);}voice.addBeat(beat);}
+      else{const beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);}
+      bar.addVoice(voice);staff.addBar(bar);
+    }
+    score.addTrack(drums);score.finish(new Settings());return score;
+  };
+
+  it('writes a percussion track as a six-line drum tab with the screen numbers',()=>{
+    const out=text(withDrums([[36,42],[38,42],[36,42],[38,42]]),{tracks:[1],range:{first:0,last:0}}).split('\n');
+    expect(out.slice(2)).toEqual([
+      'Drums [drum tab Cr Rd HH Tm Sn Bd]','',
+      'Cr|-----------------|','Rd|-----------------|','HH|-42--42--42--42--|','Tm|-----------------|','Sn|-----38------38--|','Bd|-36------36------|','',
+    ]);
+  });
+
+  it('leaves off drum hits beyond six at one moment and says how many',()=>{
+    const out=text(withDrums([[36,38,42,49,51,41,45,47]]),{tracks:[1],range:{first:0,last:0}});
+    expect(out).toContain('Note: ');
+    expect(out).toMatch(/Note: \d+ drum hits? beyond six at one moment/);
+  });
+
+  it('keeps guitar output the same beside a drum track, and refuses a selection without strings',()=>{
+    const score=withDrums([[36]]);
+    expect(text(score,{tracks:[0,1],range:null}).split('\n\nDrums')[0]+'\n').toBe(text(music()));
+    const bare=music(),none=new model.Track(),staff=new model.Staff();none.addStaff(staff);
+    for(const _ of bare.masterBars){const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);bar.addVoice(voice);staff.addBar(bar);}
+    bare.addTrack(none);bare.finish(new Settings());
+    expect(()=>exportAsciiTab(bare,{tracks:[1],range:null})).toThrow('ASCII tablature needs a selected track with strings.');
   });
 });

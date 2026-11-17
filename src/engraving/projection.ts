@@ -9,6 +9,7 @@ import { validateSystemGaps } from './system-gaps';
 import { configureRoleFonts,validateFonts } from './fonts';
 import type { MusicFontData } from './font-loading';
 import { validateStaffGaps,validateStaffGroups } from './staff-groups';
+import { getMessage,getResolvedLanguage } from '../i18n';
 import { registerDrumTabCompanion } from './drum-tab-guard';
 import { convertDrumTabJson,hideDrumTabTuning,type DrumTabMode,type DrumTabReport } from './drum-tab';
 
@@ -80,8 +81,8 @@ function liveTracks(score:model.Score,ids:readonly string[],value:EngravingOverr
   if(ids.length!==score.tracks.length||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!id.trim()))throw new Error('Invalid source track identities.');
   for(const entry of value.profiles){const index=ids.indexOf(entry.trackId);if(index<0){if(requireLive)throw new Error('Engraving profile refers to a missing track.');continue;}
     const staves=score.tracks[index].staves;
-    if(entry.profile==='tablature'&&!tablatureAllowed(score.tracks[index]))throw new Error('Tablature requires tuned nonpercussion staves, or a track of one percussion staff.');
-    if(entry.profile==='numbered'&&staves.some(staff=>staff.isPercussion))throw new Error('Numbered notation is unavailable for percussion.');
+    if(entry.profile==='tablature'&&!tablatureAllowed(score.tracks[index]))throw new Error(getMessage(getResolvedLanguage(),'engraving.tablature_refused'));
+    if(entry.profile==='numbered'&&staves.some(staff=>staff.isPercussion))throw new Error(getMessage(getResolvedLanguage(),'engraving.numbered_refused'));
   }
 }
 export function validateEngravingTracks(score:model.Score,ids:readonly string[],value:EngravingOverrides):void {validateEngraving(value);liveTracks(score,ids,value,true);}

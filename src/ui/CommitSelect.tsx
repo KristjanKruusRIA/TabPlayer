@@ -5,7 +5,7 @@ const browsing = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Ho
 
 /**
  * A select that records one change per choice. A choice made with the pointer (or from the open list) is recorded at once.
- * Arrow, Home, End and Page keys on the closed select change its value once per key press, so those are only browsing: the
+ * Arrow, Home, End and Page keys, and type-ahead keys (letters and digits; not Space, which opens the list), on the closed select change its value once per key press, so those are only browsing: the
  * value shown follows them, and the choice is recorded when the select is left or Enter is pressed. Escape puts the recorded
  * value back.
  *
@@ -60,7 +60,8 @@ export function CommitSelect({ value, onCommit, target = '', busy = false, child
     onChange={change}
     onBlur={event => { arrow.current = false; settle(); onBlur?.(event); }}
     onKeyDown={(event: KeyboardEvent<HTMLSelectElement>) => {
-      if (browsing.has(event.key) && !event.altKey) arrow.current = true;
+      const typeAhead = event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey;
+      if ((browsing.has(event.key) && !event.altKey) || typeAhead) arrow.current = true;
       else if (event.key === 'Enter') { event.preventDefault(); settle(); }
       else if (event.key === 'Escape' && shown.current !== latest.current.value) { event.preventDefault(); event.stopPropagation(); show(latest.current.value); }
       onKeyDown?.(event);

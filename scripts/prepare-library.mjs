@@ -1,4 +1,4 @@
-import {lstat,mkdir,readFile,writeFile} from 'node:fs/promises';
+import {lstat,mkdir,readFile,realpath,writeFile} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {dirname,isAbsolute,join,parse,relative,resolve,sep} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -47,6 +47,18 @@ async function inspect(path,directory,allowMissing=false){
   return true;
 }
 
+// A worktree may reach its prepared output through a directory junction to the main checkout.
+// Such a destination is only ever verified, never written, repaired or deleted through.
+async function throughLink(path){
+  const absolute=resolve(path),root=parse(absolute).root;let current=root;
+  for(const part of absolute.slice(root.length).split(sep).filter(Boolean)){
+    current=join(current,part);let info;
+    try{info=await lstat(current);}catch(error){if(error.code==='ENOENT')return false;throw error;}
+    if(info.isSymbolicLink())return true;
+  }
+  return false;
+}
+
 const contains=(parent,child)=>{const path=relative(parent,child);return !path||(!isAbsolute(path)&&path!=='..'&&!path.startsWith(`..${sep}`));};
 
 export async function prepareLibrary({source=fileURLToPath(new URL('../assets/library/',import.meta.url)),destination,checkOnly=false}={}){
@@ -54,7 +66,13 @@ export async function prepareLibrary({source=fileURLToPath(new URL('../assets/li
   if(typeof source!=='string'||!source||typeof checkOnly!=='boolean')throw new Error('Invalid library preparation options.');
   source=resolve(source);destination=resolve(destination);
   if(contains(source,destination)||contains(destination,source))throw new Error('Library source and destination must not overlap.');
-  await inspect(source,true);await inspect(destination,true,true);
+  await inspect(source,true);
+  const verifiedThroughLink=await throughLink(destination);
+  if(verifiedThroughLink){
+    destination=await realpath(destination);checkOnly=true;
+    if(contains(source,destination)||contains(destination,source))throw new Error('Library destination symlink target must not overlap the source.');
+  }
+  await inspect(destination,true,true);
   const manifestPath=join(source,'manifest.json');await inspect(manifestPath,false);
   const manifestBytes=await readFile(manifestPath),manifest=JSON.parse(manifestBytes.toString('utf8')),entries=validateManifest(manifest),resources=[];
   // Validate the entire input and every output path before the first write.
@@ -66,12 +84,12 @@ export async function prepareLibrary({source=fileURLToPath(new URL('../assets/li
   }else{
     for(const item of resources){const path=join(destination,item.path);await mkdir(dirname(path),{recursive:true});await writeFile(path,item.bytes);}
   }
-  return {manifest,files:resources.map(item=>item.path)};
+  return {manifest,files:resources.map(item=>item.path),verifiedThroughLink};
 }
 
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
   const args=process.argv.slice(2),options={};
   while(args.length){const arg=args.shift();if(arg==='--check')options.checkOnly=true;else if(arg==='--source'||arg==='--destination'){const value=args.shift();if(!value||value.startsWith('--'))throw new Error(`Missing value for ${arg}`);options[arg==='--source'?'source':'destination']=value;}else throw new Error(`Unknown library preparation argument: ${arg}`);}
-  if(options.destination){const result=await prepareLibrary(options);console.log(`${options.checkOnly?'Verified':'Prepared'} offline library: ${result.files.length} files`);}
-  else for(const path of ['../public/library/','../src-tauri/resources/library/']){const result=await prepareLibrary({...options,destination:fileURLToPath(new URL(path,import.meta.url))});console.log(`${options.checkOnly?'Verified':'Prepared'} offline library: ${result.files.length} files`);}
+  if(options.destination){const result=await prepareLibrary(options);console.log(`${options.checkOnly||result.verifiedThroughLink?'Verified':'Prepared'} offline library: ${result.files.length} files`);}
+  else for(const path of ['../public/library/','../src-tauri/resources/library/']){const result=await prepareLibrary({...options,destination:fileURLToPath(new URL(path,import.meta.url))});console.log(`${options.checkOnly||result.verifiedThroughLink?'Verified':'Prepared'} offline library: ${result.files.length} files`);}
 }

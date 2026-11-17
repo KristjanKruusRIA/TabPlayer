@@ -4,7 +4,11 @@ import { getPartialCapo } from '../editor/partial-capo';
 import { describeBanjoDrone, getBanjoDrone } from '../editor/banjo-drone';
 /** ", partial capo 5 on strings 1, 2" for a staff with one; string numbers count from the lowest string. */
 const partialLabel=(staff:model.Staff)=>{const partial=getPartialCapo(staff);return partial?`${staff.capo?',':''} partial capo ${partial.fret} on string${partial.strings.length>1?'s':''} ${partial.strings.join(', ')}`:'';};
+import { assignDrumTabLines, drumTabLine, drumTabNumber } from '../engraving/drum-tab';
 import type { ExportSelection } from './types';
+
+/** Line labels of a drum tab, top to bottom: crash, ride and other metal, hi-hat, toms, snare, kick. */
+const DRUM_LABELS=['Cr','Rd','HH','Tm','Sn','Bd'];
 
 const NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const LINE_WIDTH=80;
@@ -73,7 +77,7 @@ type BarText={rows:string[];header:string;count:string};
 
 /** One bar as text per string (top string first), with its header label (endings, section and
  * directions) and repeat count, which the system lays out above it. */
-function barText(bar:model.Bar,strings:number,where:string,used:Set<string>):BarText {
+function barText(bar:model.Bar,strings:number,where:string,used:Set<string>,drums?:{track:model.Track;left:{off:number}}):BarText {
   const master=bar.masterBar,length=master.calculateDuration(),source=soundingBar(bar);
   const onsets=new Map<number,model.Note[]>();
   for(const voice of source.voices)for(const beat of voice.beats){
@@ -83,7 +87,12 @@ function barText(bar:model.Bar,strings:number,where:string,used:Set<string>):Bar
   const starts=[...onsets.keys()].sort((a,b)=>a-b),rows=Array.from({length:strings},()=>'-');
   for(const [index,start] of starts.entries()){
     const next=starts[index+1]??length,cells=Array.from({length:strings},()=>''),claimed=new Set<number>();
-    for(const note of onsets.get(start)!){
+    if(drums){
+      // A drum hit is written as its number on the line of its kit piece, as on the screen's drum tab; hits beyond six are left off and counted.
+      const hits=onsets.get(start)!.flatMap(note=>{const number=drumTabNumber(drums.track,note),line=drumTabLine(drums.track,note);return number===null||line===null?[]:[{number,line}];});
+      const placed=assignDrumTabLines(hits);drums.left.off+=placed.surplus;
+      placed.lines.forEach((line,hit)=>{if(line!==null)cells[line-1]=cells[line-1]||String(hits[hit].number);});
+    }else for(const note of onsets.get(start)!){
       if(note.string<1||note.string>strings)throw new Error(`ASCII tablature needs every note on a string; ${where} has a note without one.`);
       // Voices sharing a string at one moment keep the first voice's note, even a tied one.
       const row=strings-note.string;if(!claimed.has(row)){claimed.add(row);cells[row]=label(note,used);}
@@ -120,7 +129,8 @@ function headerLines(labels:{start:number;end:number;text:string;count:string}[]
 }
 
 /** Plain-text tablature for the selected stringed tracks and measures, systems wrapped near
- * 80 columns. Percussion and staves without strings have no tablature and are left out. */
+ * 80 columns. A percussion staff is written as a six-line drum tab (the screen's lines and numbers);
+ * staves without strings have no tablature and are left out. */
 export function exportAsciiTab(score:model.Score,selection:ExportSelection):Uint8Array {
   const selected=selectScore(score,selection),lines:string[]=[],used=new Set<string>();
   lines.push([flat(selected.title),flat(selected.artist)].filter(Boolean).join(' - ')||'Untitled');
@@ -129,11 +139,13 @@ export function exportAsciiTab(score:model.Score,selection:ExportSelection):Uint
     // Labels use the score's own track and staff numbers, as the export dialog shows them.
     const original=selection.tracks[position],staffCount=score.tracks[original].staves.length;
     for(const [index,staff] of track.staves.entries()){
-      if(staff.isPercussion||!staff.tuning.length)continue;
+      const drummed=staff.isPercussion;
+      if(!drummed&&!staff.tuning.length)continue;
       written++;
-      const names=stringNames(staff.tuning),low=names.map(name=>name.trim()).reverse().join(' ');
+      const names=drummed?DRUM_LABELS:stringNames(staff.tuning),low=names.map(name=>name.trim()).reverse().join(' ');
       const name=flat(track.name)||`Track ${original+1}`,staffNumber=(selection.staves?.[original]?.[index]??index)+1;
-      lines.push('',`${name}${staffCount>1?` (staff ${staffNumber})`:''} [${low}]${staff.capo?` capo ${staff.capo}`:''}${partialLabel(staff)}${getBanjoDrone(staff)?`, ${describeBanjoDrone(getBanjoDrone(staff)).toLowerCase()}`:''}`);
+      const drums=drummed?{track,left:{off:0}}:undefined,rowCount=drummed?DRUM_LABELS.length:staff.tuning.length;
+      lines.push('',drummed?`${name}${staffCount>1?` (staff ${staffNumber})`:''} [drum tab ${names.join(' ')}]`:`${name}${staffCount>1?` (staff ${staffNumber})`:''} [${low}]${staff.capo?` capo ${staff.capo}`:''}${partialLabel(staff)}${getBanjoDrone(staff)?`, ${describeBanjoDrone(getBanjoDrone(staff)).toLowerCase()}`:''}`);
       const fresh=()=>({rows:names.map(label=>`${label}|`),labels:[] as {start:number;end:number;text:string;count:string}[]});
       let system=fresh();
       const flush=()=>{
@@ -141,13 +153,14 @@ export function exportAsciiTab(score:model.Score,selection:ExportSelection):Uint
         lines.push('',...headerLines(system.labels),...system.rows);system=fresh();
       };
       for(const bar of staff.bars){
-        const text=barText(bar,staff.tuning.length,`measure ${bar.masterBar.index+1+(selection.range?.first??0)} of ${name}`,used);
+        const text=barText(bar,rowCount,`measure ${bar.masterBar.index+1+(selection.range?.first??0)} of ${name}`,used,drums);
         if(system.labels.length&&system.rows[0].length+text.rows[0].length+1>LINE_WIDTH)flush();
         const start=system.rows[0].length;
         system.rows=system.rows.map((row,line)=>`${row}${text.rows[line]}|`);
         system.labels.push({start,end:start+text.rows[0].length,text:text.header,count:text.count});
       }
       flush();
+      if(drums?.left.off)lines.push('',`Note: ${drums.left.off} drum hit${drums.left.off>1?'s':''} beyond six at one moment ${drums.left.off>1?'are':'is'} left off ${name}'s tab.`);
     }
   }
   if(!written)throw new Error('ASCII tablature needs a selected track with strings.');

@@ -46,6 +46,24 @@ it('Escape puts the recorded value back, and a pointer choice after browsing is 
   expect(onCommit).toHaveBeenCalledTimes(1);
 });
 
+it('type-ahead letters and digits are browsing: one edit on blur, one on Enter, none when the final value is the start', () => {
+  const { onCommit, select } = setup();
+  press(select, 'b', 'b');press(select, 'c', 'c');press(select, 'b', 'b');press(select, '2', 'c');
+  expect(onCommit).not.toHaveBeenCalled();expect(select).toHaveValue('c');
+  fireEvent.blur(select);
+  expect(onCommit).toHaveBeenCalledTimes(1);expect(onCommit).toHaveBeenLastCalledWith('c');
+  cleanup();
+  const entered = setup();
+  press(entered.select, 'b', 'b');fireEvent.keyDown(entered.select, { key: 'Enter' });
+  expect(entered.onCommit).toHaveBeenCalledTimes(1);expect(entered.onCommit).toHaveBeenLastCalledWith('b');
+  cleanup();
+  const back = setup();
+  press(back.select, 'b', 'b');press(back.select, 'a', 'a');fireEvent.blur(back.select);
+  expect(back.onCommit).not.toHaveBeenCalled();
+  fireEvent.change(back.select, { target: { value: 'c' } });
+  expect(back.onCommit).toHaveBeenCalledTimes(1);
+});
+
 it('follows the value it is given', () => {
   const { select, view, onCommit } = setup();
   press(select, 'ArrowDown', 'b');

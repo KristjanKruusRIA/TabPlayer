@@ -113,7 +113,8 @@ import { selectedGapBar } from './engraving/selected-gap-bar';
 import type { SystemSpan } from './engraving/system-gaps';
 import { barScaleOf,sourceWeight,withBarScale } from './engraving/bar-widths';
 import { TrackDisplayControls } from './engraving/TrackDisplayControls';
-import { projectEngraving } from './engraving/projection';
+import { drumTabModes,projectEngraving } from './engraving/projection';
+import { stepDrumTabNote } from './engraving/drum-tab-cursor';
 import { drumTabLeftOff } from './engraving/drum-tab-status';
 import { followProjection,type ProjectionBasis } from './engraving/follow';
 import { engravingRenderKey } from './engraving/system-gaps';
@@ -1138,7 +1139,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       else if(next.bar>0) {next.bar--;next.beat=state.score.tracks[next.track].staves[next.staff].bars[next.bar].voices[next.voice].beats.length-1;}
     } else if(event.key==='ArrowDown'||event.key==='ArrowUp') {
       setPendingAccidental(null);clearEntryQueue();
-      if(indexed)setNoteIndex(Math.max(0,Math.min((location.beat?.notes.length??1)-1,(noteIndex??0)+(event.key==='ArrowUp'?1:-1))));
+      if(indexed)setNoteIndex(location.beat&&drumTabModes(state.score,trackIds,state.settings.engraving).has(target.track)?stepDrumTabNote(state.score.tracks[target.track],location.beat,noteIndex??0,event.key==='ArrowUp'?'up':'down'):Math.max(0,Math.min((location.beat?.notes.length??1)-1,(noteIndex??0)+(event.key==='ArrowUp'?1:-1))));
       else select(next,string+(event.key==='ArrowUp'?1:-1));event.preventDefault();return;
     }
     else return;

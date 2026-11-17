@@ -17,7 +17,7 @@ vi.mock('./engine',async importOriginal=>{
 
 // The sampled check (every 25th edit in development) verifies and makes checkpoints of its own: off here, so that what these tests see does not depend on how many edits other tests made.
 const sampledDefault=editCheck.every;
-beforeEach(()=>{editCheck.every=0;});afterEach(()=>{editCheck.every=sampledDefault;});
+beforeEach(()=>{editCheck.every=0;});afterEach(()=>{editCheck.every=sampledDefault;vi.useRealTimers();});
 
 function makeBridge(project:Project) {
   let current:ProjectSnapshot={project,canUndo:project.edits.length>0,canRedo:false,dirty:false,path:null};
@@ -182,8 +182,12 @@ describe('a check only ever means: equal to a rebuild from the file and the hist
   });
 });
 
+// Waits that depended on how fast the machine was are done on simulated time (fake timers advance by exact amounts, so what happens "within 120 ms" is exact)
+// or on an event (the check's first step was taken).
 describe('what the check does around the queue, the window and a failed rebuild',()=>{
   const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+  /** Moves simulated time on, 10 ms at a time, until `done()` holds; a hang ends at the cap (simulated time, so it costs no real waiting). */
+  const advanceUntil=async(done:()=>boolean,capMs=60000)=>{for(let elapsed=0;!done()&&elapsed<capMs;elapsed+=10)await vi.advanceTimersByTimeAsync(10);};
   const fretOf=(controller:DocumentController,bar:number,beat:number)=>controller.getState().score.tracks[0].staves[0].bars[bar].voices[0].beats[beat].notes[0];
   const writesWrong=(wrong:number)=>vi.mocked(engine.editInPlace).mockImplementationOnce((current,command,index)=>engineActual.editInPlace(current,{...command,fret:wrong} as EditCommand,index));
   it('is made once for an export while other actions are queued behind it, and not by a timer while actions wait',async()=>{
@@ -192,9 +196,12 @@ describe('what the check does around the queue, the window and a failed rebuild'
       const controller=await DocumentController.create(makeBridge(blank()));
       await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
       const calls=vi.mocked(engine.verifyEditStepwise).mock.calls.length;
+      // The check is under way when the others are queued: it has taken its first step.
+      let began!:()=>void;const begun=new Promise<void>(resolve=>{began=resolve;});
+      const stepwise=vi.mocked(engine.verifyEditStepwise).getMockImplementation()!;
+      vi.mocked(engine.verifyEditStepwise).mockImplementationOnce((...args)=>{began();return stepwise(...args);});
       const checking=controller.verified();
-      // The check is under way (it works in slices that let other work go first) when the others are queued.
-      await wait(3);
+      await begun;
       const queued=[controller.edit({type:'setNote',target:at(1),string:2,fret:6}),controller.edit({type:'setNote',target:at(2),string:2,fret:7}),controller.edit({type:'setNote',target:at(3),string:2,fret:8})];
       await Promise.all([checking,...queued]);
       expect(vi.mocked(engine.verifyEditStepwise).mock.calls.length-calls,'the check an action asked for ran once, not again for every action queued behind it').toBe(1);
@@ -203,6 +210,7 @@ describe('what the check does around the queue, the window and a failed rebuild'
   it('does not run on a timer while another action is queued, and runs when the queue is empty',async()=>{
     const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
     const afterMs=idleVerification.afterMs;
+    vi.useFakeTimers();
     try {
       idleVerification.afterMs=40;
       const bridge=makeBridge(blank());
@@ -212,23 +220,27 @@ describe('what the check does around the queue, the window and a failed rebuild'
       const counted=editStats.verified;
       // The second edit is queued while the first runs: the first one finishing must not arm a check that could swap in the middle of the second.
       const first=controller.edit({type:'setNote',target:at(0),string:2,fret:5}),second=controller.edit({type:'setNote',target:at(1),string:2,fret:6});
-      await first;await wait(120);
+      await vi.advanceTimersByTimeAsync(250);await first;await vi.advanceTimersByTimeAsync(120);
       expect(editStats.verified-counted,'no check while the second edit is queued').toBe(0);
-      await second;await wait(400);
+      await vi.advanceTimersByTimeAsync(130);await second;
+      await advanceUntil(()=>editStats.verified-counted>0);
       expect(editStats.verified-counted,'a check once the queue is empty').toBe(1);expect(controller.isVerified()).toBe(true);
-    } finally {idleVerification.afterMs=afterMs;errors.mockRestore();}
+      await vi.advanceTimersByTimeAsync(400);
+      expect(editStats.verified-counted,'and only one').toBe(1);
+    } finally {vi.useRealTimers();idleVerification.afterMs=afterMs;errors.mockRestore();}
   },60000);
   it('makes no check for a document that was closed, and does not arm one',async()=>{
     const afterMs=idleVerification.afterMs;
+    vi.useFakeTimers();
     try {
       idleVerification.afterMs=30;
       const controller=await DocumentController.create(makeBridge(blank()));
       await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
       const counted=editStats.verified;controller.dispose();
-      await wait(200);
+      await vi.advanceTimersByTimeAsync(200);
       expect(editStats.verified-counted).toBe(0);expect(controller.isVerified()).toBe(false);
       expect(await controller.verifyNow(),'a closed document is not checked').toBe(false);
-    } finally {idleVerification.afterMs=afterMs;}
+    } finally {vi.useRealTimers();idleVerification.afterMs=afterMs;}
   });
   it('checks in one go for an export when the window is hidden, where timers are throttled',async()=>{
     const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
@@ -512,24 +524,29 @@ describe('a document that cannot be rebuilt from what native holds',()=>{
 
 describe('the idle check and playback, and a document that closes while it is waited for',()=>{
   const wait=(ms:number)=>new Promise(resolve=>setTimeout(resolve,ms));
+  const advanceUntil=async(done:()=>boolean,capMs=60000)=>{for(let elapsed=0;!done()&&elapsed<capMs;elapsed+=10)await vi.advanceTimersByTimeAsync(10);};
   it('stops a check that started before playback, and starts again when playback ends',async()=>{
     const errors=vi.spyOn(console,'error').mockImplementation(()=>{});
     const afterMs=idleVerification.afterMs;
+    vi.useFakeTimers();
     try {
       idleVerification.afterMs=20;
       const controller=await DocumentController.create(makeBridge(blank()));
       await controller.edit({type:'setNote',target:at(0),string:2,fret:5});
       // The timer fires and the check is running (each of its steps takes a while) when playback starts.
       const slowStep=vi.mocked(engine.verifyEditStepwise).getMockImplementation()!;
-      vi.mocked(engine.verifyEditStepwise).mockImplementationOnce(async(project,built,canRedo,pause,cancelled,from)=>slowStep(project,built,canRedo,async()=>{await wait(15);},cancelled,from));
+      let steps=0;
+      vi.mocked(engine.verifyEditStepwise).mockImplementationOnce(async(project,built,canRedo,pause,cancelled,from)=>slowStep(project,built,canRedo,async()=>{steps++;await wait(15);},cancelled,from));
       const counted=editStats.verified;
-      await wait(60);controller.holdVerification(true);
-      await wait(400);
+      await advanceUntil(()=>steps>0);
+      expect(steps,'the check was running when playback started').toBeGreaterThan(0);expect(controller.isVerified()).toBe(false);
+      controller.holdVerification(true);
+      await vi.advanceTimersByTimeAsync(400);
       expect(controller.isVerified(),'the check that was running was stopped').toBe(false);expect(editStats.verified-counted).toBe(0);
       controller.holdVerification(false);
-      await wait(500);
+      await advanceUntil(()=>controller.isVerified());
       expect(controller.isVerified(),'it ran when playback ended').toBe(true);
-    } finally {idleVerification.afterMs=afterMs;errors.mockRestore();}
+    } finally {vi.useRealTimers();idleVerification.afterMs=afterMs;errors.mockRestore();}
   },60000);
   it('rejects Copy and export with a closed-document error, not a state it did not check, when the document is closed while they wait',async()=>{
     const errors=vi.spyOn(console,'error').mockImplementation(()=>{});

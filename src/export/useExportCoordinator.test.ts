@@ -203,7 +203,7 @@ it('writes ASCII tablature for the selected measures only',async()=>{
   expect(new TextDecoder().decode(save.mock.calls[0][0]).split('\n').find(line=>line.startsWith('e|'))).toBe('e|-9--3--3--3--|');
 });
 it('refuses ASCII tablature without stringed tracks before the save dialog opens',async()=>{
-  const score=music();score.tracks[0].staves[0].isPercussion=true;const api=native(),save=vi.fn(async()=>true);api.exportAsciiTab=save;
+  const score=music();score.tracks[0].staves[0].stringTuning.tunings=[];const api=native(),save=vi.fn(async()=>true);api.exportAsciiTab=save;
   const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true},native:api}));
   await act(async()=>{await expect(result.current.run({format:'ascii',selection:{tracks:[0],range:null}})).rejects.toThrow('ASCII tablature needs a selected track with strings.');});
   expect(save).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);

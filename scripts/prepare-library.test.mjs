@@ -84,3 +84,17 @@ test('prepares and verifies the authored source inventory into a new temporary d
   const result=await prepareLibrary({source,destination});assert.equal(result.files.length,16);assert.equal(result.manifest.templates.length,10);assert.equal(result.manifest.examples.length,3);await prepareLibrary({source,destination,checkOnly:true});
   for(const entry of [...result.manifest.templates,...result.manifest.examples,...result.manifest.documents])assert.equal(hash(await readFile(join(destination,entry.path))),entry.sha256);
 });
+
+test('a destination reached through a junction is verified read-only, never written or repaired',async t=>{
+  const f=await fixture(t);await prepareLibrary(f);
+  const alias=join(f.directory,'linked');if(!await link(t,f.destination,alias,'junction'))return;
+  const result=await prepareLibrary({...f,destination:alias});assert.equal(result.files.length,16);assert.equal(result.verifiedThroughLink,true);
+  const stale=join(f.destination,f.manifest.examples[0].path);await writeFile(stale,'stale');
+  await assert.rejects(prepareLibrary({...f,destination:alias}),/stale|hash/i);assert.equal(await readFile(stale,'utf8'),'stale');
+  await writeFile(stale,'original example-windowline\n');await rm(join(f.destination,'manifest.json'));await assert.rejects(prepareLibrary({...f,destination:alias}),/missing/i);await assert.rejects(lstat(join(f.destination,'manifest.json')),/ENOENT/);
+});
+
+test('a junction destination is still refused when its target overlaps the source or a link sits inside it',async t=>{
+  const f=await fixture(t),alias=join(f.directory,'to-source');if(!await link(t,f.source,alias,'junction'))return;
+  await assert.rejects(prepareLibrary({...f,destination:alias}),/symlink/i);
+});

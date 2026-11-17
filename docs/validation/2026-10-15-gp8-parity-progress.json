@@ -11045,7 +11045,7 @@
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
       "current_behavior": "The View menu holds keypad durations, auto-duration, note preview and the diagram paste default. Keypad keys set duration as one undoable edit only when enabled, and choices survive a restart.",
-      "remaining_gap": "Plus/Minus Keys Behavior is not implemented; a paste carrying diagrams is not driven on the desktop; a webview reload strands the app on the recovery screen.",
+      "remaining_gap": "A paste carrying diagrams is not driven on the desktop; a webview reload strands the app on the recovery screen.",
       "current_evidence": [
         "input_preferences_behavior",
         "input_preferences_evidence",

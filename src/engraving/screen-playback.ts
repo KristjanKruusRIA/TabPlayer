@@ -2,7 +2,9 @@ import type {AlphaTabApi,model} from '@coderline/alphatab';
 import {mapScreenRect,type ScreenPagination,type ScreenPageArrangement,type ScreenRect,type ScreenBounds} from './screen-pages';
 export type ScreenPlaybackContext={renderedScore:model.Score;wrapper:HTMLElement|null;scrollHost:HTMLElement|null;physical:{pagination:ScreenPagination;arrangement:ScreenPageArrangement;roots:ReadonlyMap<string,HTMLElement>}|null;barElement:HTMLElement|null;beatElement:HTMLElement|null;
  /** Paints the system that holds this master bar when it is empty. alphaTab moves its cursor inside an animation frame: it places the bar cursor, highlights the sounding beats in the system's drawing and then scrolls, so a system that is not painted yet has to be painted at the first of these. */
- ensurePainted?:(masterBarIndex:number)=>void};
+ ensurePainted?:(masterBarIndex:number)=>void;
+ /** The rendered track the player has selected, or null when it is not drawn. When a system is taller than the score area (many stacked staves), following the playback scrolls to this track's staff instead of the system's top staff. */
+ selectedTrack?:model.Track|null};
 type CursorHandler=NonNullable<AlphaTabApi['customCursorHandler']>;
 type BeatBounds=Parameters<CursorHandler['placeBeatCursor']>[1];
 type Container=Parameters<CursorHandler['placeBeatCursor']>[0];
@@ -72,14 +74,25 @@ export function installScreenPlayback(api:AlphaTabApi,getContext:()=>ScreenPlayb
  };
  const reveal=(bounds:BeatBounds)=>{
   if(!valid(bounds))return;const c=getContext(),host=c.scrollHost;if(!host||!c.wrapper)return;
-  const source=bounds.barBounds.masterBarBounds.visualBounds;
-  let rect=map(bounds,source);
-  if(!c.physical){const canvas=facade.getOffset(null,api.canvasElement),wrapper=c.wrapper.getBoundingClientRect();rect={...source,x:source.x+canvas.x-wrapper.left-window.scrollX,y:source.y+canvas.y-wrapper.top-window.scrollY};}
+  const masterBar=bounds.barBounds.masterBarBounds,source=masterBar.visualBounds;
+  const place=(box:ScreenRect)=>{
+   if(c.physical)return map(bounds,box);
+   const canvas=facade.getOffset(null,api.canvasElement),wrapper=c.wrapper!.getBoundingClientRect();return {...box,x:box.x+canvas.x-wrapper.left-window.scrollX,y:box.y+canvas.y-wrapper.top-window.scrollY};
+  };
+  const rect=place(source);
   if(!rect)return;
   const outer=host.getBoundingClientRect(),inner=c.wrapper.getBoundingClientRect();
-  const x=rect.x+inner.left-outer.left-host.clientLeft+host.scrollLeft,y=rect.y+inner.top-outer.top-host.clientTop+host.scrollTop;
+  const x=rect.x+inner.left-outer.left-host.clientLeft+host.scrollLeft;let y=rect.y+inner.top-outer.top-host.clientTop+host.scrollTop,height=rect.h;
+  // A system taller than the score area (a stack of staves) cannot be shown whole: follow the selected track's staff in it, so the track being played stays in view rather than the system's top staff.
+  if(rect.h>host.clientHeight&&c.selectedTrack){
+   const own=(masterBar.bars??[]).filter(item=>item.bar?.staff?.track===c.selectedTrack).map(item=>item.realBounds).filter(Boolean);
+   if(own.length){
+    const top=Math.min(...own.map(box=>box.y)),bottom=Math.max(...own.map(box=>box.y+box.h)),staff=place({x:source.x,y:top,w:source.w,h:bottom-top});
+    if(staff&&Number.isFinite(staff.y)&&staff.h>0){y=staff.y+inner.top-outer.top-host.clientTop+host.scrollTop;height=staff.h;}
+   }
+  }
   const scroll=(start:number,size:number,current:number,viewport:number)=>size>viewport?(current<start||current>start+size-viewport?start:current):start<current?start:start+size>current+viewport?start+size-viewport:current;
-  host.scrollLeft=scroll(x,rect.w,host.scrollLeft,host.clientWidth);host.scrollTop=scroll(y,rect.h,host.scrollTop,host.clientHeight);
+  host.scrollLeft=scroll(x,rect.w,host.scrollLeft,host.clientWidth);host.scrollTop=scroll(y,height,host.scrollTop,host.clientHeight);
  };
  const scroll:NonNullable<AlphaTabApi['customScrollHandler']>={forceScrollTo:reveal,onBeatCursorUpdating:reveal,[Symbol.dispose](){}};
  api.customCursorHandler=cursor;api.customScrollHandler=scroll;

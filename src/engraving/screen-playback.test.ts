@@ -98,3 +98,33 @@ it('puts the highlight of the sounding beat back on a system that was painted ag
  expect(f.originalHighlight.mock.calls).toEqual([['beat-a',0],['beat-b',0]]);
  f.api.uiFacade.removeHighlights();f.originalHighlight.mockClear();f.adapter.rehighlight();expect(f.originalHighlight).not.toHaveBeenCalled();
 });
+
+function tall(system:{y:number;h:number},viewport:number){
+ const f=fixture(),host=f.context().scrollHost!,master=f.bounds.barBounds.masterBarBounds,track=f.context().renderedScore.tracks[0];
+ Object.defineProperty(host,'clientHeight',{value:viewport});Object.defineProperty(host,'clientWidth',{value:300});
+ vi.spyOn(f.context().wrapper!,'getBoundingClientRect').mockImplementation(()=>({left:-host.scrollLeft,top:-host.scrollTop} as DOMRect));
+ master.visualBounds=new rendering.Bounds(10,system.y,200,system.h);
+ const bar=(owner:unknown,y:number)=>({bar:{staff:{track:owner}},realBounds:new rendering.Bounds(10,y,200,60)}) as unknown as rendering.BarBounds;
+ master.bars=[bar({},system.y),bar(track,system.y+300)];
+ f.api.uiFacade.getOffset=(()=>({x:-host.scrollLeft,y:-host.scrollTop})) as never;
+ return {f,host,track};
+}
+it('follows the selected track staff when the system is taller than the score area',()=>{
+ const {f,host,track}=tall({y:0,h:400},100);
+ Object.assign(f.context(),{selectedTrack:track});
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(260);
+ // The staff is in view now, so a further update does not move the area (a manual scroll within the system is left alone).
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(260);
+ host.scrollTop=290;f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(290);
+});
+it('keeps scrolling to the top of a tall system when no track is selected or the selected one is not in it',()=>{
+ const {f,host}=tall({y:0,h:400},100);
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(0);
+ host.scrollTop=350;f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(0);
+ Object.assign(f.context(),{selectedTrack:music().tracks[0]});host.scrollTop=350;f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(0);
+});
+it('reveals the whole bar of a system that fits the score area, whatever track is selected',()=>{
+ const {f,host,track}=tall({y:300,h:100},200);
+ Object.assign(f.context(),{selectedTrack:track});
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(200);
+});

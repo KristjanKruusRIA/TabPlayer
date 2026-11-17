@@ -277,6 +277,11 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     const value=current.current,pair=value.projection?.beats.get(beat.id);
     return value.projection?(pair?.source===beat?pair.rendered:null):beat;
   };
+  /** The rendered track of the selected track, or null when it is not one of the drawn tracks (the playback scroll then keeps following the system). */
+  const selectedRenderedTrack=()=>{
+    const value=current.current,source=value.tracks.includes(value.track)?value.score.tracks[value.track]?.staves[0]?.bars[0]?.voices[0]?.beats[0]:null,beat=source?renderedBeat(source):null;
+    return beat?.voice.bar.staff.track??null;
+  };
   const renderedNote=(note:model.Note)=>{
     const value=current.current,pair=value.projection?.notes.get(note.id);
     return value.projection?(pair?.source===note?pair.rendered:null):note;
@@ -455,7 +460,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
       if(view.settings.core.enableLazyLoading&&records.some(record=>record.removedNodes.length>0&&record.addedNodes.length===0&&record.target.parentElement===surface))areaChanged.current();
     }):null;
     if(surface)emptied?.observe(surface,{childList:true,subtree:true});
-    const adapter=installScreenPlayback(view,()=>({...presentation.current,wrapper:wrapper.current,scrollHost:scrollHost.current,barElement:barElement.current,beatElement:beatElement.current,ensurePainted:index=>ensurePaintedRef.current(index)}));playbackPresentation.current=adapter;
+    const adapter=installScreenPlayback(view,()=>({...presentation.current,wrapper:wrapper.current,scrollHost:scrollHost.current,barElement:barElement.current,beatElement:beatElement.current,selectedTrack:selectedRenderedTrack(),ensurePainted:index=>ensurePaintedRef.current(index)}));playbackPresentation.current=adapter;
     view.settings.player.enableCursor=true;
     // Reuse the facade's public DOM surface classes so its instance-specific font CSS also applies to copied SVGs.
     setSurfaceClass(container.current?.querySelector('.at-surface')?.className??'');
@@ -527,7 +532,9 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   useEffect(()=>{anchor.current=null;drag.current=null;},[score,track,projection,visibleTracks]);
   // A selection this view did not publish (an instrument pick, say) ends the click that anchored Shift selection.
   useEffect(()=>{if(!editorSelection||editorSelection!==published.current)anchor.current=null;refresh.current();},[editorSelection,score,track,zoom,profile,projection,visibleTracks]);
-  useEffect(()=>{revealCaret.current=true;},[score,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
+  // A pick of another track (the Overview, the header picker, the mixer, Ctrl+Up/Down) centres that track's staff in the score area; moving inside a track only keeps the target box in view.
+  const lastEditTrack=useRef(editTarget?.track),centreTrack=useRef(false);
+  useEffect(()=>{revealCaret.current=true;if(lastEditTrack.current!==editTarget?.track){lastEditTrack.current=editTarget?.track;centreTrack.current=true;}},[score,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
   // The page is centred in the score area, so a change of its width (the window, or a panel opened or closed beside it) moves a live page
   // without alphaTab drawing it again, and everything placed from the canvas offset has to follow: nothing else says the page moved.
   // Paged layouts place their marks from the arrangement, which is rebuilt for the new width and refreshes them below. While a render is
@@ -541,7 +548,24 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     const base=symbolOffset.current;if(symbolOpen.current&&base){const now=offset();if(Math.abs(now.x-base.x)>1||Math.abs(now.y-base.y)>1)closeSymbol(!!wrapper.current?.querySelector('.score-symbol-popover')?.contains(document.activeElement));}
   },[available.width]);
   useEffect(()=>{refreshCaret.current();},[score,track,zoom,profile,projection,visibleTracks,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
-  useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){const host=scrollHost.current;if(host){const box=caretElement.current.getBoundingClientRect(),viewport=host.getBoundingClientRect();if(box.top<viewport.top)host.scrollTop+=box.top-viewport.top;else if(box.bottom>viewport.bottom)host.scrollTop+=box.bottom-viewport.bottom;if(box.left<viewport.left)host.scrollLeft+=box.left-viewport.left;else if(box.right>viewport.right)host.scrollLeft+=box.right-viewport.right;}revealCaret.current=false;}},[caret]);
+  /** Where the edit target's track has its staves in the system that holds the target beat, in client coordinates; null when the track is not drawn there. */
+  const trackStaffClientBox=():{top:number;height:number}|null=>{
+    const value=current.current,point=value.editTarget,view=api.current,root=wrapper.current;
+    const source=point&&value.tracks.includes(point.track)?value.score.tracks[point.track]?.staves[point.staff]?.bars[point.bar]?.voices[point.voice]?.beats[point.beat]:null,beat=source?renderedBeat(source):null;
+    if(!view||!root||!beat)return null;
+    const bound=(view.boundsLookup?.findBeats(beat)??[]).find(item=>item.beat===beat),master=bound?.barBounds?.masterBarBounds,system=master?.staffSystemBounds;
+    const own=(master?.bars??[]).filter(item=>item.bar?.staff?.track===beat.voice.bar.staff.track).map(item=>item.realBounds).filter(Boolean);
+    if(!own.length||!system)return null;
+    const top=Math.min(...own.map(box=>box.y)),bottom=Math.max(...own.map(box=>box.y+box.h)),left=own[0].x;
+    const rect=mapped({x:left,y:top,w:Math.max(1,own[0].w),h:bottom-top},system);if(!rect||![rect.y,rect.h].every(Number.isFinite)||rect.h<=0)return null;
+    return {top:root.getBoundingClientRect().top+rect.y,height:rect.h};
+  };
+  /** Scrolls the score area so the staff is centred in it (its top at the top when it is taller than the area); the browser clamps the other end of the scroll range. */
+  const centreStaff=(host:HTMLElement,staff:{top:number;height:number})=>{
+    const viewport=host.getBoundingClientRect(),delta=staff.height>=viewport.height?staff.top-viewport.top:staff.top+staff.height/2-(viewport.top+viewport.height/2);
+    host.scrollTop=Math.max(0,host.scrollTop+delta);
+  };
+  useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){const host=scrollHost.current;const staff=host&&centreTrack.current?trackStaffClientBox():null;centreTrack.current=false;if(host&&staff)centreStaff(host,staff);if(host){const box=caretElement.current.getBoundingClientRect(),viewport=host.getBoundingClientRect();if(!staff){if(box.top<viewport.top)host.scrollTop+=box.top-viewport.top;else if(box.bottom>viewport.bottom)host.scrollTop+=box.bottom-viewport.bottom;}if(box.left<viewport.left)host.scrollLeft+=box.left-viewport.left;else if(box.right>viewport.right)host.scrollLeft+=box.right-viewport.right;}revealCaret.current=false;}},[caret]);
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
   const loaded=useRef<{score:model.Score;tracks:string}|null>(null),layoutPartials=useRef<LayoutPartial[]>([]),failedPieces=useRef(new Set<string>()),paintedPieces=useRef(new Set<string>());
   // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.

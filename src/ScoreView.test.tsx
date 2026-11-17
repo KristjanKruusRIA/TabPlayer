@@ -99,6 +99,40 @@ it('reveals moved edit targets only in the score host and waits for current boun
   api.boundsLookup.findBeats=beat=>[beatBounds(beat)];act(()=>api.postRenderFinished.emit());expect(host.scrollTop).toBe(100);
   act(()=>api.postRenderFinished.emit());expect(host.scrollTop).toBe(100);expect(windowScroll).not.toHaveBeenCalled();scroll.mockRestore();windowScroll.mockRestore();
 });
+/** A score area 100 px high over a page 1000 px high whose second track has its staff at y 300..300+staffHeight; every rect follows the area's scroll position. */
+function trackReveal(staffHeight:number){
+  const {score,projection,engraving}=twoTrackProjection(),props={score,track:0,zoom:100,profile:'Default',projection,engraving,visibleTracks:[0,1],playback:null,onSelect:vi.fn(),editNoteIndex:0};
+  const rect=(top:number,height:number)=>({x:0,y:top,left:0,top,right:100,bottom:top+height,width:100,height,toJSON(){}});
+  const tree=(editTarget:typeof target)=><div className="paper-scroll"><ScoreView {...props} editTarget={editTarget}/></div>;
+  const rendered=render(tree(target)),api=view.api as FakeView&{uiFacade:{getOffset:()=>{x:number;y:number;w:number;h:number}}},host=rendered.container.firstElementChild as HTMLElement;
+  const spy=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){
+    if(this===host)return rect(0,100) as DOMRect;
+    return (this.classList.contains('score-edit-target')?rect(340-host.scrollTop,20):rect(-host.scrollTop,1000)) as DOMRect;
+  });
+  api.uiFacade.getOffset=()=>({x:30,y:40-host.scrollTop,w:600,h:300});
+  api.boundsLookup.findBeats=beat=>{
+    const bounds=beatBounds(beat),master=new rendering.MasterBarBounds(),bar=new rendering.BarBounds();
+    bar.bar=beat.voice.bar;bar.realBounds=new rendering.Bounds(0,300,200,staffHeight);bar.masterBarBounds=master;master.bars=[bar];master.staffSystemBounds=new rendering.StaffSystemBounds();bounds.barBounds=bar;bounds.realBounds=new rendering.Bounds(beat.index*50,300,50,20);
+    return [bounds];
+  };
+  const move=(next:typeof target)=>{rendered.rerender(tree(next));act(()=>api.postRenderFinished.emit());};
+  act(()=>api.postRenderFinished.emit());
+  return {host,move,done:()=>spy.mockRestore()};
+}
+it('centres the staff of a newly picked track in the score area, and only keeps the target in view for arrow keys',()=>{
+  const {host,move,done}=trackReveal(60);
+  host.scrollTop=0;move({...target,track:1});expect(host.scrollTop).toBe(320);
+  // Another beat of the same track: the staff stays where it is while the target box is in view...
+  move({...target,track:1,beat:1});expect(host.scrollTop).toBe(320);
+  // ...and when it is not, only the nearest edge is brought in (the box is 20 px high, so its bottom edge ends at the area's).
+  host.scrollTop=0;move({...target,track:1,beat:2});expect(host.scrollTop).toBe(260);
+  // Picking the first track again centres its staff too.
+  move({...target,track:0});expect(host.scrollTop).toBe(320);done();
+});
+it('puts the top of a staff taller than the score area at the top when its track is picked',()=>{
+  const {host,move,done}=trackReveal(200);
+  host.scrollTop=0;move({...target,track:1});expect(host.scrollTop).toBe(340);done();
+});
 it('waits for a layout in progress before reusing edit bounds for a moved target',()=>{
   const score=music(),props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
   const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;expect(screen.getByLabelText('Edit target')).toBeTruthy();

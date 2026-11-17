@@ -543,6 +543,9 @@ enum SlotEntry {
     Faulted {
         status: PluginStatus,
         state_asset_id: String,
+        /// The kind the helper was asked to load. A slot that now names the class as another kind is launched again, as one
+        /// with a new state is.
+        kind: crate::settings::SlotKind,
     },
 }
 
@@ -625,7 +628,7 @@ fn fault_status_of(session: &Arc<dyn HelperSession>) -> Option<PluginStatus> {
 enum Found {
     Nothing,
     Loading,
-    Faulted(PluginStatus, String),
+    Faulted(PluginStatus, String, crate::settings::SlotKind),
     Ready {
         session: Arc<dyn HelperSession>,
         kind: crate::settings::SlotKind,
@@ -795,17 +798,22 @@ impl PluginService {
         let mut retired = Vec::new();
         {
             let mut inner = lock(&self.inner);
-            let state_asset_id = match inner.slots.remove(&key) {
+            let (state_asset_id, kind) = match inner.slots.remove(&key) {
                 Some(SlotEntry::Ready {
                     session,
                     state_asset_id,
+                    kind,
                     ..
                 }) => {
                     self.supervisor.unwatch(&key);
                     retired.push(session);
-                    state_asset_id
+                    (state_asset_id, kind)
                 }
-                Some(SlotEntry::Faulted { state_asset_id, .. }) => state_asset_id,
+                Some(SlotEntry::Faulted {
+                    state_asset_id,
+                    kind,
+                    ..
+                }) => (state_asset_id, kind),
                 other => {
                     // A report about a helper that is no longer the slot's (a newer launch is under way, or the slot
                     // went): it changes nothing.
@@ -820,6 +828,7 @@ impl PluginService {
                 SlotEntry::Faulted {
                     status,
                     state_asset_id,
+                    kind,
                 },
             );
             if let Some(t_status) = inner
@@ -1016,7 +1025,8 @@ impl PluginService {
                 Some(SlotEntry::Faulted {
                     status,
                     state_asset_id,
-                }) => Found::Faulted(*status, state_asset_id.clone()),
+                    kind,
+                }) => Found::Faulted(*status, state_asset_id.clone(), *kind),
                 Some(SlotEntry::Ready {
                     session,
                     kind,
@@ -1048,8 +1058,12 @@ impl PluginService {
                     results.push((track_id, Err(PluginStatus::Loading)));
                     continue;
                 }
-                Found::Faulted(status, state_asset_id) => {
-                    if is_runtime_fault(status) {
+                Found::Faulted(status, state_asset_id, kind) => {
+                    if kind != slot.kind {
+                        // The slot now names the class as the other kind, which is what the failure may have been about:
+                        // launched again, and the old helper's end is not a crash of the new one.
+                        true
+                    } else if is_runtime_fault(status) {
                         let crashes = inner.crash_counts.entry(key.clone()).or_insert(0);
                         if *crashes >= MAX_CRASH_RETRIES {
                             Self::record_status_inner(
@@ -1092,6 +1106,7 @@ impl PluginService {
                                 SlotEntry::Faulted {
                                     status: fault_status,
                                     state_asset_id,
+                                    kind,
                                 },
                             );
                             Self::record_status_inner(
@@ -1232,6 +1247,7 @@ impl PluginService {
                                     SlotEntry::Faulted {
                                         status,
                                         state_asset_id: state_id,
+                                        kind,
                                     },
                                 );
                                 Self::record_status_inner(
@@ -1505,6 +1521,7 @@ impl PluginService {
                                 SlotEntry::Faulted {
                                     status,
                                     state_asset_id: slot.state.clone(),
+                                    kind: slot.kind,
                                 },
                             );
                             Self::record_status_inner(
@@ -3878,6 +3895,82 @@ mod tests {
             wait_for_slot(&rig.service, "doc1", "track_0"),
             PluginStatus::Ready
         );
+    }
+
+    #[test]
+    fn a_slot_that_failed_as_the_wrong_kind_is_launched_again_when_its_kind_is_corrected() {
+        let rig = test_rig();
+        // An instrument class named as an effect: the helper refuses it, and the slot is faulted.
+        *rig.launcher.fail_next.lock().unwrap() =
+            Some(HelperError::Misbehaved("not an effect".into()));
+        let as_effect = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];
+        rig.service.ensure("doc1", Some(48_000), &as_effect);
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Unreadable
+        );
+        // The same state, until the user retries: still faulted, nothing launched.
+        let plans = rig.service.ensure("doc1", Some(48_000), &as_effect);
+        assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Unreadable));
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 1);
+        // The kind is corrected with the same state: launched again, as the other kind.
+        let as_instrument = vec![instrument_on("track_0", &rig.class_id, &rig.state_id, true)];
+        let plans = rig.service.ensure("doc1", Some(48_000), &as_instrument);
+        assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Loading));
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            *rig.launcher.kinds.lock().unwrap(),
+            vec![
+                tabplayer_plugin_protocol::control::PluginKind::Effect,
+                tabplayer_plugin_protocol::control::PluginKind::Instrument
+            ]
+        );
+    }
+
+    #[test]
+    fn replacing_a_faulted_helper_of_another_kind_is_not_a_crash() {
+        let rig = test_rig();
+        let key = HelperKey {
+            document_id: "doc1".into(),
+            track_id: "track_0".into(),
+            class_id: rig.class_id.clone(),
+        };
+        let as_effect = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];
+        let as_instrument = vec![instrument_on("track_0", &rig.class_id, &rig.state_id, true)];
+        ready(&rig, 48_000, &as_effect);
+        // Two crashes, each relaunched: the cap is three.
+        for launches in 2..=3 {
+            rig.service
+                .on_supervisor_report(key.clone(), PluginStatus::Crashed);
+            rig.service.ensure("doc1", Some(48_000), &as_effect);
+            assert_eq!(
+                wait_for_slot(&rig.service, "doc1", "track_0"),
+                PluginStatus::Ready
+            );
+            assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), launches);
+        }
+        // A crash, and the kind is corrected: the new helper is a replacement, which does not use up a retry.
+        rig.service
+            .on_supervisor_report(key.clone(), PluginStatus::Crashed);
+        rig.service.ensure("doc1", Some(48_000), &as_instrument);
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 4);
+        // The next crash of the corrected slot still has its third retry.
+        rig.service.on_supervisor_report(key, PluginStatus::Crashed);
+        let plans = rig.service.ensure("doc1", Some(48_000), &as_instrument);
+        assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Loading));
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 5);
     }
 
     fn status_changes(events: &[PluginEvent]) -> usize {

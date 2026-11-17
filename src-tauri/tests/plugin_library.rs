@@ -67,7 +67,8 @@ mod windows_tests {
         let entries = library
             .add(&bundle, |path| probe(&exe, path, Duration::from_secs(60)))
             .expect("the test plug-in is added");
-        assert_eq!(entries.len(), 1);
+        // The test bundle holds an effect and a drum instrument; effects are listed first.
+        assert_eq!(entries.len(), 2);
         let entry = &entries[0];
         assert_eq!(entry.class_id, TEST_CLASS_ID);
         assert!(!entry.name.is_empty());
@@ -92,7 +93,7 @@ mod windows_tests {
         let again = reopened
             .add(&inner, |path| probe(&exe, path, Duration::from_secs(60)))
             .expect("the inner module is added");
-        assert_eq!(again, entries, "one class from one bundle, replaced");
+        assert_eq!(again, entries, "the same classes from one bundle, replaced");
 
         // A path that is not there is refused before any helper starts.
         let missing = reopened.add(&dir.path().join("Missing.vst3"), |_| unreachable!());

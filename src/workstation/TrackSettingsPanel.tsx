@@ -1,5 +1,5 @@
 import { useI18n } from '../i18n';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { model } from '@coderline/alphatab';
 import type { EditCommand } from '../project';
 import { midiPrograms } from '../midi-programs';
@@ -17,6 +17,8 @@ import { readStaffSettings, staffSettingsUnchanged } from '../editor/staff-setti
 import { getBanjoDrone } from '../editor/banjo-drone';
 import { getPartialCapo, noPartialCapo } from '../editor/partial-capo';
 import { trackColorHex } from '../track-color';
+import { defaultEngraving, isDrumTrack } from '../engraving/projection';
+import type { EngravingOverrides, TrackProfile } from '../engraving/types';
 import './track-panels.css';
 import './inspector-compact.css';
 
@@ -69,10 +71,11 @@ function TrackInfoRow({ score, selected, busy, locked, onEdit }: { score: model.
 }
 
 /** Tab and standard notation as two toggles, the tuning as one row that opens the Tuning dialog (with its Capo section), and the rest of the staff's settings behind More. */
-function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, refusal, onEdit, onAudition, onSelectStaff }: {
-  score: model.Score; selected: number; staffIndex: number; barIndex: number; busy: boolean; locked: boolean; refusal: string | null; onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition; onSelectStaff?: (staff: number) => void;
+function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, refusal, engraving, drumTabLeftOff, onEdit, onAudition, onSelectStaff }: {
+  score: model.Score; selected: number; staffIndex: number; barIndex: number; busy: boolean; locked: boolean; refusal: string | null; engraving: EngravingOverrides; drumTabLeftOff: number; onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition; onSelectStaff?: (staff: number) => void;
 }) {
   const { t } = useI18n();
+  const noteId = useId();
   const current = score.tracks[selected];
   const staffAt = Math.min(staffIndex, current.staves.length - 1), staff = current.staves[staffAt];
   const clef = staff.bars[barIndex]?.clef ?? staff.bars[0]?.clef ?? model.Clef.G2;
@@ -137,17 +140,46 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
     return onEdit({ type: 'setTuning', track: dialogIndex, tuning: notes, tuningName, ...(keepPitch ? { keepPitch: true } : {}) });
   };
   const audition = (list: number[], strum: boolean) => onAudition?.({ trackId: trackIdentity(current) }, list, strum);
-  const toggle = (label: string, pressed: boolean, disabled: boolean, onClick: () => void, content: ReactNode) =>
-    <button type="button" aria-pressed={pressed} title={label} aria-label={label} {...busyGuard({ busy, disabled: disabled || locked, className: 'notation-toggle', onClick })}>{content}</button>;
+  const toggle = (label: string, pressed: boolean, disabled: boolean, onClick: () => void, content: ReactNode, drum?: { unavailable: boolean; describedBy: string; title: string }) =>
+    <button type="button" aria-pressed={pressed} title={drum?.title ?? label} aria-label={label} aria-describedby={drum?.describedBy} {...busyGuard({ busy, disabled: disabled || locked, unavailable: drum?.unavailable, className: 'notation-toggle', onClick })}>{content}</button>;
+  // A drum track (one percussion staff) shows what its engraving profile says: standard (today), tablature (the drum tab alone) or both. The staff's own flags are not touched: alphaTab resets them for percussion, so an edit there changed nothing.
+  const drum = isDrumTrack(current);
+  const drumProfile = engraving.profiles.find(entry => entry.trackId === trackIdentity(current))?.profile ?? 'source';
+  const drumTab = drumProfile === 'tablature' || drumProfile === 'standardTab', drumStandard = drumProfile !== 'tablature';
+  const drumStateName = t(drumProfile === 'tablature' ? 'engraving.profile_tablature' : drumTab ? 'engraving.profile_standard_tab' : 'engraving.profile_standard');
+  /** One setEngraving edit for the track's profile; nothing is recorded when the profile would stay what it is. The neutral state removes the track's entry, as the style panel does for Source. */
+  const setDrumProfile = (tab: boolean, standard: boolean) => {
+    if (locked || busy || (!tab && !standard)) return false;
+    const next: TrackProfile = tab && standard ? 'standardTab' : tab ? 'tablature' : 'source';
+    if (next === drumProfile || (next === 'source' && drumProfile === 'standard')) return false;
+    const id = trackIdentity(current);
+    return onEdit({ type: 'setEngraving', engraving: { ...engraving, profiles: [...engraving.profiles.filter(entry => entry.trackId !== id), ...(next === 'source' ? [] : [{ trackId: id, profile: next }])] } });
+  };
+  const drumToggle = (label: string, pressed: boolean, other: boolean, click: () => void, content: ReactNode) => {
+    const inert = pressed && !other;
+    return toggle(label, pressed, false, click, content, { unavailable: inert, describedBy: `${noteId}-${inert ? 'only' : 'hint'}`, title: inert ? `${label}. ${t('track_settings.drum_notation_last')}` : label });
+  };
   return <div className="track-notation">
     <div className="notation-toggles" role="group" aria-label={t('track_settings.notation_toggles')}>
       <span className="notation-toggles-label">{t('track_settings.notation')}</span>
-      {toggle(t('editor.show_tablature'), staff.showTablature, !editable && !staff.isPercussion, () => applySettings({ showTab: !staff.showTablature }), <span className="notation-toggle-tab" aria-hidden="true">TAB</span>)}
-      {toggle(t('editor.show_notation'), staff.showStandardNotation, false, () => applySettings({ showNotation: !staff.showStandardNotation }), <ScoreGlyph />)}
+      {drum
+        ? <>
+          {drumToggle(t('editor.show_tablature'), drumTab, drumStandard, () => setDrumProfile(!drumTab, drumStandard), <span className="notation-toggle-tab" aria-hidden="true">TAB</span>)}
+          {drumToggle(t('editor.show_notation'), drumStandard, drumTab, () => setDrumProfile(drumTab, !drumStandard), <ScoreGlyph />)}
+        </>
+        : <>
+          {toggle(t('editor.show_tablature'), staff.showTablature, !editable && !staff.isPercussion, () => applySettings({ showTab: !staff.showTablature }), <span className="notation-toggle-tab" aria-hidden="true">TAB</span>)}
+          {toggle(t('editor.show_notation'), staff.showStandardNotation, false, () => applySettings({ showNotation: !staff.showStandardNotation }), <ScoreGlyph />)}
+        </>}
       {several && (onSelectStaff
         ? <label className="notation-staff">{t('track_settings.staff_select')}<select value={staffAt} onChange={event => onSelectStaff(Number(event.target.value))}>{current.staves.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}</select></label>
         : <span className="notation-staff">{t('editor.staff_n', { staff: staffAt + 1 })}</span>)}
     </div>
+    {drum && <>
+      <span id={`${noteId}-hint`} className="track-sr-only">{t('track_settings.drum_notation_state', { style: drumStateName })} {t('track_settings.drum_tab_hint')}</span>
+      <span id={`${noteId}-only`} className="track-sr-only">{t('track_settings.drum_notation_state', { style: drumStateName })} {t('track_settings.drum_notation_last')}</span>
+      {drumTabLeftOff > 0 && <p className="notation-note" role="note">{t('track_settings.drum_tab_left_off', { count: drumTabLeftOff })}</p>}
+    </>}
     <TuningRow label={t('track_settings.tuning_row')} notes={pitches} title={savedName ? `${savedName}: ${pitches}` : pitches} unavailable={tuningUnavailable} busy={busy} locked={locked} onOpen={() => { setCapoRefusal(null); setTuningFor(trackIdentity(current)); }} onPlay={onAudition && (() => audition([...tuned.tuning], true))} playDisabled={strings > 12} />
     {dialogTrack && <TuningDialog pitches={dialogBase!.tuning} name={dialogBase!.stringTuning.name} staff={dialogTrack.staves[dialogStaffIndex]} staffCount={dialogTrack.staves.length} busy={busy} locked={locked} refusal={capoRefusal ?? refusal} onApply={applyTuning} onClose={() => setTuningFor(null)} onAudition={onAudition && ((list, strum) => onAudition({ trackId: trackIdentity(dialogTrack) }, list, strum))} />}
     <BusyFieldset busy={busy} className="track-notation-more">
@@ -169,11 +201,13 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
  * The Track tab in the manner of Guitar Pro's track inspector: the track actions and one Information row, Musical notation
  * (two toggles, the tuning row, More), then whatever the app puts under Sounds and Interpretation and MIDI output. The Information row's arrows select the previous and next track; adding and moving tracks are in the Track menu.
  */
-export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, locked = false, refusal = null, onEdit, onAudition, onSelectStaff, onStepTrack, sounds, interpretation, midi }: {
+export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, locked = false, refusal = null, engraving, drumTabLeftOff = 0, onEdit, onAudition, onSelectStaff, onStepTrack, sounds, interpretation, midi }: {
   score: model.Score; selected: number;
   /** The staff and bar under the cursor: the toggles, clef and transposition act on that staff. */
   staff?: number; bar?: number;
   busy: boolean; /** Finalized: edits are disabled, but tuning audition is not. */ locked?: boolean; /** The app's message for the edit it last refused, shown in the Tuning dialog. */ refusal?: string | null;
+  /** The document's engraving: a drum track's TAB and notation toggles read and write its profile there. Without it the default (no profiles) is assumed. */ engraving?: EngravingOverrides;
+  /** How many of the selected drum track's hits the drum tab leaves off (more than six sounds on one beat); shown only when above zero. */ drumTabLeftOff?: number;
   onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition;
   /** Moves the cursor to another staff of the selected track; the staff selector (shown for a track with several staves) uses it. */
   onSelectStaff?: (staff: number) => void;
@@ -202,7 +236,7 @@ export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, 
       <TrackInfoRow score={score} selected={selected} busy={busy} locked={locked} onEdit={onEdit} />
     </section>
     <section className="inspector-section" aria-labelledby="inspector-track-notation"><h3 id="inspector-track-notation">{t('inspector.musical_notation')}</h3>
-      <NotationSection score={score} selected={selected} staffIndex={staff} barIndex={bar} busy={busy} locked={locked} refusal={refusal} onEdit={onEdit} onAudition={onAudition} onSelectStaff={onSelectStaff} />
+      <NotationSection score={score} selected={selected} staffIndex={staff} barIndex={bar} busy={busy} locked={locked} refusal={refusal} engraving={engraving ?? defaultEngraving()} drumTabLeftOff={drumTabLeftOff} onEdit={onEdit} onAudition={onAudition} onSelectStaff={onSelectStaff} />
     </section>
     {sounds && <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{sounds}</section>}
     {interpretation}

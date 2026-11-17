@@ -2859,6 +2859,128 @@ fn an_edit_hand_over_that_changes_the_map_releases_what_the_old_keys_held() {
     assert_eq!(rig.helper.sounding(), 0);
 }
 
+// ---- a NoteOff for a note that was never sent ----
+
+/// A rim shot (id 91, key 38) that the first map leaves silent, and a snare on key 38 struck while it is held.
+fn unsent_rim_plan() -> PlaybackPlan {
+    drum_plan(vec![
+        id_on(100, 38, 91),
+        note_on(150, 38),
+        id_off(900, 38, 91),
+        note_off(1500, 38),
+        note_on(1800, 38),
+        note_off(1900, 38),
+    ])
+}
+
+fn a_note_off_for_a_note_that_was_never_sent_cannot_end_another_note_early_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
+    let plan = unsent_rim_plan();
+    // The rim shot is silent: its NoteOn is not sent. The snare is, and holds key 38.
+    let mut renderer = mapped_renderer(&rig, &plan, &map_settings(&[(91, None)]));
+    run(&mut renderer, Some(&rig), 15_000);
+    assert_eq!(kinds_of(&rig), vec![('n', 38)]);
+    // The rim now means key 38 as well, and the plan holds two strikes of it: the instrument holds one.
+    renderer.set_mix(instrument_mix(
+        &rig,
+        &plan,
+        &gm(DocumentSettings::default()),
+    ));
+    run(&mut renderer, Some(&rig), 90_000);
+    // The rim's NoteOff at tick 900 is for a note that was never sent: it does not end the snare, which ends at tick 1500.
+    assert_eq!(
+        heard(&rig),
+        vec![
+            (7_500, 'n', 38),
+            (75_000, 'f', 38),
+            (90_000, 'n', 38),
+            (95_000, 'f', 38)
+        ],
+        "latency {latency}"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn a_note_off_for_a_note_that_was_never_sent_cannot_end_another_note_early() {
+    for latency in LATENCIES {
+        a_note_off_for_a_note_that_was_never_sent_cannot_end_another_note_early_at(latency);
+    }
+}
+
+fn an_edit_hand_over_that_makes_the_plan_hold_an_unsent_note_does_not_let_its_end_cut_another_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
+    let old_plan = drum_plan(vec![note_on(150, 38), note_off(1500, 38)]);
+    // The edit adds a rim shot (key 38) that began before the hand-over, which the old plan never sent.
+    let new_plan = drum_plan(vec![
+        id_on(100, 38, 91),
+        note_on(150, 38),
+        id_off(900, 38, 91),
+        note_off(1500, 38),
+    ]);
+    let mut old = instrument_renderer(&rig, &old_plan);
+    run(&mut old, Some(&rig), 15_000);
+    let mut new = instrument_renderer(&rig, &new_plan);
+    hand_over(&mut new, &mut old);
+    run(&mut new, Some(&rig), 70_000);
+    assert_eq!(
+        heard(&rig),
+        vec![(7_500, 'n', 38), (75_000, 'f', 38)],
+        "latency {latency}"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn an_edit_hand_over_that_makes_the_plan_hold_an_unsent_note_does_not_let_its_end_cut_another() {
+    for latency in LATENCIES {
+        an_edit_hand_over_that_makes_the_plan_hold_an_unsent_note_does_not_let_its_end_cut_another_at(latency);
+    }
+}
+
+#[test]
+fn what_a_note_off_still_owes_is_forgotten_wherever_the_held_counts_are() {
+    for latency in LATENCIES {
+        for how in ["seek", "wrap", "flush"] {
+            let rig = rig_keyed_at(latency);
+            let plan = unsent_rim_plan();
+            let mut renderer = mapped_renderer(&rig, &plan, &map_settings(&[(91, None)]));
+            run(&mut renderer, Some(&rig), 15_000);
+            renderer.set_mix(instrument_mix(
+                &rig,
+                &plan,
+                &gm(DocumentSettings::default()),
+            ));
+            run(&mut renderer, Some(&rig), 1_000);
+            match how {
+                "seek" => renderer.seek_tick(1700.0),
+                "wrap" => renderer.wrap_to_tick(1700.0),
+                _ => {
+                    renderer.seek_tick(1700.0);
+                    renderer.wrap_to_tick(1700.0);
+                }
+            }
+            run(&mut renderer, Some(&rig), 20_000);
+            // The strike after the jump is ended by its own NoteOff: nothing a stale count could swallow is left.
+            let heard = kinds_of(&rig);
+            assert_eq!(
+                heard
+                    .iter()
+                    .rev()
+                    .take(2)
+                    .rev()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                vec![('n', 38), ('f', 38)],
+                "latency {latency} {how}: {heard:?}"
+            );
+            assert_eq!(rig.helper.sounding(), 0, "latency {latency} {how}");
+        }
+    }
+}
+
 fn export_with(rig: &Rig, plan: &PlaybackPlan, settings: &DocumentSettings) -> AudioExportRender {
     let mut renderer =
         Renderer::new(Arc::new(plan.clone()), resources(), settings.clone(), RATE).unwrap();

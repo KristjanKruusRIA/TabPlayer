@@ -97,7 +97,7 @@ const measurePage=([source,{names,credit,count}])=>{
 
 let id=launch({TABPLAYER_TEST_OPEN:fixturePath,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported}),browser,page;
 try{
-  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
+  browser=await connect();page=browser.contexts()[0].pages()[0];
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const closeLibrary=async()=>{const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});};
   await closeLibrary();
@@ -633,7 +633,7 @@ try{
   await check('no page errors',async()=>{assert.deepEqual(errors,[]);});
   await browser.close();browser=null;stop(id);
 
-  id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await closeLibrary();await button('Open');
+  id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await closeLibrary();await waitForWorkspaceIdle(page);await button('Open');
   await check('reopen: the project (history, group, gaps and names) is identical',async()=>{assert.deepEqual((await snapshot()).project,stored.project);});
   await button('Presentation');await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');
   await check('reopen: the saved group, gap and names are on screen and in the export pages',async()=>{

@@ -71,7 +71,7 @@ await author();
 let id = launch({ TABPLAYER_TEST_OPEN: fixture, TABPLAYER_TEST_SAVE: saved, TABPLAYER_TEST_EXPORT: exported }), browser, page;
 const notes = [];
 try {
-  browser = await connect(); page = browser.contexts()[0].pages()[0]; await waitForWorkspaceIdle(page);
+  browser = await connect(); page = browser.contexts()[0].pages()[0];
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   const closeLibrary = async () => { const library = page.getByRole('dialog', { name: 'Library', exact: true }); await library.getByRole('heading', { name: 'Welcome to TabPlayer', exact: true }).waitFor(); await library.getByRole('button', { name: 'Close', exact: true }).click(); await library.waitFor({ state: 'hidden' }); };
   const idle = async () => { await waitForWorkspaceIdle(page); assert.deepEqual(await page.getByRole('alert').allTextContents(), []); };
@@ -89,7 +89,7 @@ try {
     // The pages' SVG as the app hands it to the test hook (one array of pages per export, the latest last): the numbers are text elements in it.
     return page.evaluate(lastExportTexts);
   };
-  await closeLibrary(); await button('Open'); await score().first().waitFor();
+  await closeLibrary(); await waitForWorkspaceIdle(page); await button('Open'); await score().first().waitFor();
   await selectWorkspaceTrack(page, 'Track 2: Drums'); await idle();
 
   // 1. Standard only to begin with; the Tuning row is unavailable on a drum track.
@@ -117,9 +117,9 @@ try {
   // The one that is on does nothing: no edit, still focusable, and it says why.
   {
     const before = (await edits()).length, { tab } = await toggles();
-    await tab.focus(); await tab.click(); await page.keyboard.press('Enter'); await idle();
+    await tab.focus(); await tab.click({ force: true }); await page.keyboard.press('Enter'); await idle();
     assert.equal((await edits()).length, before, 'the only notation shown cannot be turned off');
-    assert.equal(await tab.getAttribute('aria-disabled'), 'true'); assert.equal(await tab.isDisabled(), false);
+    assert.equal(await tab.getAttribute('aria-disabled'), 'true'); assert.equal(await tab.evaluate(element => element.disabled), false);
     assert.match((await tab.getAttribute('title')) ?? '', /always stays on/i);
   }
   await page.screenshot({ path: resolve(directory, 'drum-tab-only-en.png') });
@@ -138,11 +138,13 @@ try {
   const clicked = await cursorPosition(page);
   assert.equal(clicked.bar, 1); assert.equal(clicked.beat, 3);
   await moveCursor(page, { bar: 2 }); await moveCursor(page, { bar: 1, beat: 1 });
-  await moveCursor(page, { beat: clicked.beat, string: clicked.string });
-  assert.equal((await cursorPosition(page)).text, clicked.text, 'the click and the keyboard name the same note');
+  // A drum beat's notes are numbered in the status bar ("Note 2", not a string), so the keyboard walks until the text is the clicked one.
+  await moveCursor(page, { beat: clicked.beat });
+  const reach = async wanted => { for (let press = 0; press < 12 && (await cursorPosition(page)).text !== wanted; press++) { await page.keyboard.press('ArrowUp'); await page.waitForTimeout(80); } return (await cursorPosition(page)).text; };
+  assert.equal(await reach(clicked.text), clicked.text, 'the click and the keyboard name the same note');
   // Arrow keys step between the notes of a drum beat; none of it edits.
-  const walked = new Set(); await scoreWorkspace(page).focus();
-  for (let press = 0; press < 3; press++) { await page.keyboard.press('ArrowUp'); await page.waitForTimeout(80); walked.add((await cursorPosition(page)).string); }
+  const walked = new Set([(await cursorPosition(page)).text]); await scoreWorkspace(page).focus();
+  for (let press = 0; press < 3; press++) { await page.keyboard.press('ArrowUp'); await page.waitForTimeout(80); walked.add((await cursorPosition(page)).text); }
   assert.ok(walked.size >= 2, `arrow keys move between the notes of the beat: ${[...walked]}`);
   const logAfterWalk = (await edits()).length;
 
@@ -150,8 +152,9 @@ try {
   await moveCursor(page, { bar: 1, beat: 1 });
   const beforeAdd = digitsOf(await texts());
   await button('Show instrument');
-  const kitView = page.locator('.instrument-view'); await kitView.getByRole('group', { name: 'Drum kit', exact: true }).waitFor();
+  const kitView = page.locator('.instrument-view');
   const editing = kitView.getByRole('checkbox', { name: 'Click to edit notes', exact: true }); if (!(await editing.isChecked())) await editing.check();
+  await kitView.getByRole('group', { name: 'Drum kit', exact: true }).waitFor();
   await kitView.getByRole('button', { name: 'Snare', exact: true }).first().click(); await idle(); await page.waitForTimeout(300);
   assert.equal((await edits()).length, logAfterWalk + 1, 'one edit for the added note');
   assert.deepEqual(without(digitsOf(await texts()), beforeAdd), ['38'], 'the new snare is a 38 on the tab');
@@ -161,7 +164,7 @@ try {
 
   // 5. The playback cursor moves across the tab, and a track pick centres the track's staff.
   const status = () => page.evaluate(() => window.__TAURI_INTERNALS__.invoke('audio_status'));
-  const beatBox = () => page.evaluate(() => { const element = document.querySelector('.score-playback-beat'); if (!element || element.hidden) return null; const r = element.getBoundingClientRect(); return { x: r.left, top: r.top, bottom: r.bottom }; });
+  const beatBox = () => page.evaluate(() => { const element = document.querySelector('.score-playback-beat:not([hidden]), .score-live-paper .at-cursor-beat'); if (!element) return null; const r = element.getBoundingClientRect(); return { x: r.left, top: r.top, bottom: r.bottom }; });
   const tabRows = () => page.evaluate(() => [...document.querySelectorAll('[aria-label="Music notation"] svg text')].filter(text => /^(36|38|42|92|46|49|51|91|50|48|47|45|55)$/.test(text.textContent.trim())).map(text => { const r = text.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; }));
   await moveCursor(page, { bar: 1, beat: 1 }); await button('Play');
   const seen = [];
@@ -185,7 +188,7 @@ try {
   await button('Save'); const stored = await readActiveDocument(page); assert.equal(stored.dirty, false);
   assert.deepEqual(errors, []);
   await browser.close(); browser = null; stop(id);
-  id = launch({ TABPLAYER_TEST_OPEN: saved, TABPLAYER_TEST_EXPORT: exported }); browser = await connect(); page = browser.contexts()[0].pages()[0]; await waitForWorkspaceIdle(page); await closeLibrary();
+  id = launch({ TABPLAYER_TEST_OPEN: saved, TABPLAYER_TEST_EXPORT: exported }); browser = await connect(); page = browser.contexts()[0].pages()[0]; await closeLibrary(); await waitForWorkspaceIdle(page);
   await button('Open'); await score().first().waitFor(); await selectWorkspaceTrack(page, 'Track 2: Drums'); await idle();
   assert.deepEqual((await readActiveDocument(page)).project, stored.project);
   assert.deepEqual(await pressed(), ['true', 'true']);
@@ -196,7 +199,8 @@ try {
   // by what is the same in every language: the mixer strip's "2. Drums" text, the inspector's tabs by position, and the toggles' class.
   const reloadApp = async () => { await page.reload(); await page.locator('.app-shell').waitFor(); await idle(); await page.waitForTimeout(400); };
   const setLanguage = async language => { await page.evaluate(value => window.localStorage.setItem('tabplayer.language', value), language); await reloadApp(); };
-  const setTrackView = async tracks => { await page.evaluate(value => window.localStorage.setItem('tabplayer.viewDefaults', JSON.stringify({ layout: 'parchment', zoomMode: 'manual', zoom: 100, tracks: value })), tracks); await reloadApp(); };
+  // The toolbar's own track picker (a saved per-document view would override localStorage defaults): the guitar track's staves join the drums'.
+  const setTrackView = async value => { await page.locator('select:has(option[value="all"])').first().selectOption(value); await idle(); await page.waitForTimeout(400); };
   const showDrumTrack = async language => {
     if (language === 'en') { await selectWorkspaceTrack(page, 'Track 2: Drums'); await idle(); await revealInspectorTab(page, 'Track'); return; }
     const strip = page.locator('button.track-channel-select:has-text("2. Drums")').first();
@@ -214,10 +218,9 @@ try {
     await shoot('both', language);
     await press(1); await shoot('tab-only', language);
     await press(1);
-    await setTrackView('all'); await showDrumTrack(language); await shoot('multi-track', language);
-    await setTrackView('selected');
+    const before = (await texts()).length; await setTrackView('all'); assert.ok((await texts()).length > before, 'All tracks draws the guitar track as well'); await shoot('multi-track', language);
+    await setTrackView('selected'); await showDrumTrack(language);
   }
-  await page.evaluate(() => window.localStorage.removeItem('tabplayer.viewDefaults'));
   await page.evaluate(() => window.localStorage.setItem('tabplayer.language', 'en'));
   console.log(`drum-tab: ${kit.length} numbers drawn on the tab, ${notes.length ? notes.join(' ') : 'all checks ran'}; PDF numbers read from the export hook; screenshots under ${directory}.`);
 } catch (error) { if (page) await page.screenshot({ path: resolve(directory, 'drum-tab-failure.png') }).catch(() => {}); throw error; }

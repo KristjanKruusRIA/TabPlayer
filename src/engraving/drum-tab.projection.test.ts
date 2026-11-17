@@ -1,5 +1,5 @@
 import { describe,expect,it } from 'vitest';
-import { model,Settings } from '@coderline/alphatab';
+import { midi,model,Settings } from '@coderline/alphatab';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { kitScore,KIT_BAR_1 } from './drum-tab-fixtures';
@@ -156,6 +156,17 @@ describe('a drum track shown as standard notation and tablature',()=>{
     expect(()=>mapProjection(score,result.score,ids,value)).toThrow(/conversion report/);
     expect(mapProjection(score,result.score,ids,value,result.drumTab).notes.size).toBe(result.notes.size);
     expect(()=>mapProjection(score,projectEngraving(score,ids,engraving(ids,'standard')).score,ids,value,result.drumTab)).toThrow(/lacks its drum tab staff/);
+  });
+});
+
+describe('playback and MIDI read the source, never the display copy',()=>{
+  const smf=(score:model.Score)=>{const file=new midi.MidiFile();new midi.MidiFileGenerator(score,new Settings(),new midi.AlphaSynthMidiFileHandler(file,true)).generate();return Buffer.from(file.toBinary());};
+  it('leaves the source MIDI as it was, and the display copy can still be turned into MIDI (alphaTab does it for its cursor) without error',()=>{
+    for(const profile of ['tablature','standardTab'] as const){
+      const {score,ids}=kitScore(),before=smf(score),result=projectEngraving(score,ids,engraving(ids,profile));
+      expect(smf(score).equals(before),profile).toBe(true);
+      expect(()=>smf(result.score)).not.toThrow();
+    }
   });
 });
 

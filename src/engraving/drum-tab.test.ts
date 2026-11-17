@@ -158,6 +158,17 @@ describe('convertDrumTabJson',()=>{
     convertDrumTabJson(alone,source,new Map([[0,'tab']]));
     expect(alone.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBe('fill');
   });
+  it('does not repeat tremolo picking or a fade on the second staff, and keeps them in tab mode',()=>{
+    const source=drumSource([[36,38]]),json=jsonOf(source);
+    const beat=json.tracks[0].staves[0].bars[0].voices[0].beats[0];beat.tremolopicking={marks:3,style:0};beat.fade=1;
+    const alone=JSON.parse(JSON.stringify(json)) as J;
+    convertDrumTabJson(json,source,new Map([[0,'both']]));
+    const tab=json.tracks[0].staves[1].bars[0].voices[0].beats[0];
+    expect(tab.tremolopicking).toBeUndefined();expect(tab.fade).toBe(0);
+    expect(json.tracks[0].staves[0].bars[0].voices[0].beats[0]).toMatchObject({tremolopicking:{marks:3},fade:1});
+    convertDrumTabJson(alone,source,new Map([[0,'tab']]));
+    expect(alone.tracks[0].staves[0].bars[0].voices[0].beats[0]).toMatchObject({tremolopicking:{marks:3},fade:1});
+  });
   it('is deterministic and leaves the source score and its JSON untouched',()=>{
     const source=drumSource(beats),sourceJson=model.JsonConverter.scoreToJson(source);
     const run=(mode:'tab'|'both')=>{const json=JSON.parse(sourceJson) as J;const report=convertDrumTabJson(json,source,new Map([[0,mode]]));return JSON.stringify([json,[...report.notes],[...report.beats],report.surplusNotes]);};

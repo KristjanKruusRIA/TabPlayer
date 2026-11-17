@@ -106,7 +106,7 @@ const beatDefaults:Json={whammystyle:0,islegatoorigin:false,pop:false,slap:false
 /** The JSON keys that name another note by id. A tab note starts without them: the ties it keeps are listed in the report, by the ids the tab notes got; the other links mean nothing on a drum hit. */
 const noteLinkKeys=['tiedestinationnoteid','tieoriginnoteid','slurdestinationnoteid','sluroriginnoteid','hammerpulldestinationnoteid','hammerpulloriginnoteid','slidetargetnoteid','slideoriginnoteid'];
 /** Things printed once per beat that the second staff of a track must not repeat. */
-const beatRepeats:Json={text:null,lyrics:null,chordid:null,crescendo:0};
+const beatRepeats:Json={text:null,lyrics:null,chordid:null,crescendo:0,fade:0};
 
 /**
  * What the tab staff does with each thing a drum note can carry:
@@ -116,9 +116,10 @@ const beatRepeats:Json={text:null,lyrics:null,chordid:null,crescendo:0};
  * - accents: kept on the note;
  * - dead notes, staccato, palm mute, let ring, bends, slides, harmonics, vibrato, fingering, trills, ornaments: dropped (the drum staff has no use for them and tab would draw them as "x", slides, and the like);
  * - beat techniques (slap, pop, tap, brush, pick stroke, golpe, wah, rasgueado, whammy, timer): dropped;
- * - dynamics (the number only): kept so that nothing about the velocity changes; a tab staff draws no dynamics sign;
- * - tremolo picking and the beat's own automations: kept as is (tab draws neither);
- * - text, lyrics, chord diagrams, crescendo wedges and sustain pedal marks: kept in 'tab' mode and left off the second staff in 'both' mode, where the percussion staff already shows them.
+ * - dynamics (the number only): kept so that nothing about the velocity changes; the dynamics sign itself, like the fermata, volta, direction and triplet-feel marks, is a band alphaTab hands to a staff with no score renderer, so `drum-tab-guard` leaves them off the second staff in 'both' mode;
+ * - the beat's own automations: kept as is (tab draws none);
+ * - text, lyrics, chord diagrams, crescendo and fade wedges, tremolo picking and sustain pedal marks: kept in 'tab' mode and left off the second staff in 'both' mode, where the percussion staff already shows them;
+ * - what 'both' mode cannot remove: the tab staff is a tab-only staff for alphaTab, so it also draws its own time signature, its rests and the rhythm (stems and beams) under the percussion staff.
  */
 function tabNote(note:Json,line:number,number:number,id:number):Json {
   const copy={...note};for(const key of noteLinkKeys)delete copy[key];
@@ -220,7 +221,9 @@ function convertStaff(staff:Json,track:model.Track,sourceStaff:model.Staff|undef
         report.beats.set(beatId,beatJson.id as number);
         // Notes are written top line first, as the renderer sorts them anyway; the order is fixed so the output is deterministic.
         notes.sort((a,b)=>(b.string as number)-(a.string as number)||(a.id as number)-(b.id as number));
-        return {...beatJson,...beatDefaults,...copyIds?beatRepeats:{},id:beatId,notes};
+        const tabBeat:Json={...beatJson,...beatDefaults,...copyIds?beatRepeats:{},id:beatId,notes};
+        if(copyIds)delete tabBeat.tremolopicking;
+        return tabBeat;
       });
       return voice;
     });

@@ -9,6 +9,7 @@ import { validateSystemGaps } from './system-gaps';
 import { configureRoleFonts,validateFonts } from './fonts';
 import type { MusicFontData } from './font-loading';
 import { validateStaffGaps,validateStaffGroups } from './staff-groups';
+import { registerDrumTabCompanion } from './drum-tab-guard';
 import { convertDrumTabJson,hideDrumTabTuning,type DrumTabMode,type DrumTabReport } from './drum-tab';
 
 export interface EngravingProjection {
@@ -126,6 +127,7 @@ export function projectEngraving(source:model.Score,ids:readonly string[],value:
   for(const [key,mapping]of Object.entries(styleEnums)){const override=overrides[key as keyof typeof styleEnums];if(override!=='inherit')Object.assign(style,{[mapping.field]:(mapping.values as Record<string,number>)[override]});}
   if(overrides.tuning!==null)style.perTrackDisplayTuning?.clear();
   if(report)hideDrumTabTuning(score,report.hiddenTuningTracks);
+  for(const [index,mode] of modes)if(mode==='both')for(const staff of score.tracks[index].staves.slice(1))registerDrumTabCompanion(staff);
   if(overrides.chords!=='inherit'){style.globalDisplayChordDiagramsOnTop=overrides.chords==='top'||overrides.chords==='both';style.globalDisplayChordDiagramsInScore=overrides.chords==='inline'||overrides.chords==='both';style.perTrackChordDiagramsOnTop?.clear();}
   if(overrides.barNumbers!=='inherit')for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)bar.barNumberDisplay=undefined;
   if(overrides.multiRests!=='inherit'){style.multiTrackMultiBarRest=overrides.multiRests==='on';style.perTrackMultiBarRest=new Set(overrides.multiRests==='on'?score.tracks.map((_,i)=>i):[]);}

@@ -105,6 +105,9 @@ impl Gain {
     }
 }
 struct PreparedChannel {
+    /// The plan track's id and whether it is a percussion track: an instrument plug-in is for a percussion track only.
+    track_id: String,
+    percussion: bool,
     dsp: TrackDsp,
     gain: Gain,
     mix: ChannelMix,
@@ -118,9 +121,13 @@ struct PreparedChannel {
 }
 impl PreparedChannel {
     /// Puts `insert` on the channel and says whether the plan's notes go to it.
-    fn attach(&mut self, insert: Box<PluginInsert>) {
+    fn attach(&mut self, insert: Box<PluginInsert>) -> Result<(), InsertError> {
+        if insert.kind() == SlotKind::Instrument && !self.percussion {
+            return Err(InsertError::NotAPercussionTrack);
+        }
         self.notes = (insert.kind() == SlotKind::Instrument).then(NoteMap::identity);
         self.dsp.attach_plugin(insert);
+        Ok(())
     }
 }
 /// Hands the compensation over from the mix or renderer that is playing (`old`) to the one taking over (`new`).
@@ -224,26 +231,32 @@ impl PreparedMix {
 
             if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
                 // A refusal leaves the track on its built-in sound and is named, so the slot can say why.
-                match PluginInsert::new_of_kind(
-                    plan.kind,
-                    plan.link.clone(),
-                    crate::audio::plugin_insert::InsertMode::Realtime { pipeline_frames },
-                    plan.latency,
-                    plan.input_db,
-                    plan.output_db,
-                    sample_rate,
-                    plan.shared.clone(),
-                ) {
-                    Ok(insert) => {
-                        notes = (plan.kind == SlotKind::Instrument).then(NoteMap::identity);
-                        dsp.attach_plugin(Box::new(insert));
+                if plan.kind == SlotKind::Instrument && !track.percussion {
+                    refused.push((track.id.clone(), InsertError::NotAPercussionTrack));
+                } else {
+                    match PluginInsert::new_of_kind(
+                        plan.kind,
+                        plan.link.clone(),
+                        crate::audio::plugin_insert::InsertMode::Realtime { pipeline_frames },
+                        plan.latency,
+                        plan.input_db,
+                        plan.output_db,
+                        sample_rate,
+                        plan.shared.clone(),
+                    ) {
+                        Ok(insert) => {
+                            notes = (plan.kind == SlotKind::Instrument).then(NoteMap::identity);
+                            dsp.attach_plugin(Box::new(insert));
+                        }
+                        Err(error) => refused.push((track.id.clone(), error)),
                     }
-                    Err(error) => refused.push((track.id.clone(), error)),
                 }
             }
 
             let kit = mix.drum_kit.as_ref().filter(|kit| !kit.is_neutral());
             channels.push(PreparedChannel {
+                track_id: track.id.clone(),
+                percussion: track.percussion,
                 dsp,
                 gain: Gain::new(&mix, !mix.mute && (!any_solo || mix.solo)),
                 kit: KitGain::new(kit),
@@ -286,7 +299,7 @@ impl PreparedMix {
         for (i, insert) in inserts.into_iter().enumerate() {
             if let Some(insert) = insert {
                 if i < self.channels.len() {
-                    self.channels[i].attach(insert);
+                    self.attach(i, insert);
                 }
             }
         }
@@ -296,8 +309,15 @@ impl PreparedMix {
     /// Attaches an insert to track `track` and updates delay compensation.
     pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
         if track < self.channels.len() {
-            self.channels[track].attach(insert);
+            self.attach(track, insert);
             self.update_compensation();
+        }
+    }
+    /// Puts `insert` on channel `track`, or refuses it, with the reason named for the slot, where the track cannot take it.
+    fn attach(&mut self, track: usize, insert: Box<PluginInsert>) {
+        if let Err(error) = self.channels[track].attach(insert) {
+            self.refused
+                .push((self.channels[track].track_id.clone(), error));
         }
     }
     fn update_compensation(&mut self) {

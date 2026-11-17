@@ -323,6 +323,9 @@ pub enum InsertError {
     PipelineTooLong,
     /// The helper runs at another sample rate than the device: it must be started again at the device's rate.
     RateMismatch,
+    /// An instrument plays a drum track's notes, and the track is not a percussion track: a crafted or hand-edited
+    /// project can still carry such a slot, and a pitched track's notes are not a drum instrument's to play.
+    NotAPercussionTrack,
 }
 
 impl std::fmt::Display for InsertError {
@@ -333,6 +336,9 @@ impl std::fmt::Display for InsertError {
                 "the audio device's callbacks are too long for a plug-in"
             }
             InsertError::RateMismatch => "the plug-in runs at another sample rate than the device",
+            InsertError::NotAPercussionTrack => {
+                "an instrument plug-in can only be used on a drum track"
+            }
         })
     }
 }

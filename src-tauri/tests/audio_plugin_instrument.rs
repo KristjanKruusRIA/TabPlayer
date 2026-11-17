@@ -21,7 +21,7 @@ use tabplayer_lib::{
         dsp::{FrameContext, FxSettings, TrackDsp},
         midi_out::{MidiTap, RouteSpec},
         plan::PlaybackPlan,
-        plugin_insert::{FaultReason, InsertMode, PluginInsert},
+        plugin_insert::{FaultReason, InsertError, InsertMode, PluginInsert},
         renderer::{PreparedMix, Renderer},
         resources::AudioResources,
     },
@@ -1892,6 +1892,63 @@ fn a_hand_over_never_worsens_the_built_in_kit_and_keeps_a_ports_notes_paired() {
         assert!(
             alternates && !sent.is_empty() && sent.len() % 2 == 0,
             "the port after {at} frames: {sent:x?}"
+        );
+    }
+}
+
+/// The drum plan with its one track not a percussion track: a crafted or hand-edited project can still hold an instrument
+/// slot on it.
+fn pitched_plan(midi: Vec<Value>) -> PlaybackPlan {
+    let mut plan = serde_json::to_value(drum_plan(midi)).unwrap();
+    plan["tracks"][0]["percussion"] = json!(false);
+    serde_json::from_value(plan).unwrap()
+}
+
+#[test]
+fn an_instrument_slot_on_a_track_that_is_not_percussion_is_refused_and_the_built_in_sound_plays() {
+    let plan = pitched_plan(vec![note_on(100, 40), note_off(300, 40)]);
+    let settings = gm(DocumentSettings::default());
+    let settings_with = |rig: &Rig| {
+        // The prepare path, as the app takes it: a ready plan for the track's slot.
+        let plans = vec![(
+            "drums".to_string(),
+            Ok(tabplayer_lib::plugins::service::InsertPlan {
+                link: rig.link.clone(),
+                latency: 0,
+                input_db: 0.0,
+                output_db: 0.0,
+                shared: rig.shared.clone(),
+                kind: SlotKind::Instrument,
+            }),
+        )];
+        PreparedMix::prepare_with_plugins(&settings, &plan, RATE, &plans, 128).unwrap()
+    };
+    let attach_path = |rig: &Rig| instrument_mix(rig, &plan, &settings);
+    for (path, build) in [
+        ("prepare", &settings_with as &dyn Fn(&Rig) -> PreparedMix),
+        ("attach", &attach_path),
+    ] {
+        let rig = rig_keyed();
+        let mix = build(&rig);
+        assert_eq!(
+            mix.plugin_refusals(),
+            [("drums".to_string(), InsertError::NotAPercussionTrack)],
+            "{path}: the slot is refused, and said so"
+        );
+        assert_eq!(mix.plugin_delay_frames(), 0, "{path}: nothing is attached");
+        let mut renderer = Renderer::new_with_mix(
+            Arc::new(plan.clone()),
+            resources(),
+            mix,
+            settings.clone(),
+            RATE,
+        )
+        .unwrap();
+        let out = run(&mut renderer, Some(&rig), 20_000);
+        assert_eq!(rig.helper.events(), vec![], "{path}: no note reaches it");
+        assert!(
+            first_sound(&out).is_some(),
+            "{path}: the built-in sound plays the track"
         );
     }
 }

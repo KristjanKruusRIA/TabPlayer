@@ -230,6 +230,10 @@ impl NativeAudio {
                                 );
                                 Err(PluginStatus::TooMuchLatency)
                             }
+                            Err(InsertError::NotAPercussionTrack) => {
+                                // Only the mix's build knows the track, so `check` never says this: kept for the match.
+                                Ok(plan)
+                            }
                             Err(InsertError::PipelineTooLong) => {
                                 // The device's callback is longer than any pipeline the insert can keep up with.
                                 plugins.record_refusal(
@@ -269,6 +273,10 @@ impl NativeAudio {
                 }
                 InsertError::PipelineTooLong => {
                     plugins.record_refusal(document_id, &track_id, PluginStatus::Underrun)
+                }
+                // The slot reads as one that is not usable here, the closest status there is.
+                InsertError::NotAPercussionTrack => {
+                    plugins.record_refusal(document_id, &track_id, PluginStatus::Unreadable)
                 }
             }
         }
@@ -1941,6 +1949,15 @@ mod plugin_tick_tests {
         assert_eq!(
             tick.rig.service.statuses(&document_id)[0].status,
             PluginStatus::Underrun
+        );
+        // An instrument slot on a track that is not a drum track plays the built-in sound, and the slot reads as unusable.
+        tick.audio.report_insert_refusals(
+            &document_id,
+            vec![("base/0".to_string(), InsertError::NotAPercussionTrack)],
+        );
+        assert_eq!(
+            tick.rig.service.statuses(&document_id)[0].status,
+            PluginStatus::Unreadable
         );
         // A helper at another rate is not the plug-in's fault: the mix is built again at the device's rate.
         tick.rig.service.take_reprepare(&document_id);

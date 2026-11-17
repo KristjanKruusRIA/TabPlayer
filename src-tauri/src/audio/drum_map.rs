@@ -265,6 +265,7 @@ fn parse_presets_reporting(text: &str) -> Result<(Vec<Preset>, Vec<String>), Str
     Ok((presets, problems))
 }
 
+#[cfg(test)]
 fn parse_presets(text: &str) -> Result<Vec<Preset>, String> {
     parse_presets_reporting(text).map(|(presets, _)| presets)
 }
@@ -286,6 +287,15 @@ fn presets() -> &'static [Preset] {
             Vec::new()
         }
     })
+}
+
+/// The revision a built-in preset's data is at, so a later change to it is visible; `None` for a preset this build does not know or that
+/// carries none. Resolution never reads it.
+pub fn preset_revision(id: &str) -> Option<u32> {
+    presets()
+        .iter()
+        .find(|preset| preset.id == id)
+        .and_then(|preset| preset.revision)
 }
 
 /// The tables for a track. Only a percussion track has a map, and none at all is General MIDI, as is a preset this build does not
@@ -341,6 +351,8 @@ mod tests {
         assert_eq!(presets.len(), 1);
         assert_eq!(presets[0].id, "gm");
         assert_eq!(presets[0].revision, Some(1));
+        assert_eq!(preset_revision("gm"), Some(1));
+        assert_eq!(preset_revision("nothing"), None);
         assert!(presets[0].rows.is_empty());
         assert_eq!(super::presets().len(), 1);
         assert!(parse_presets("{").is_err());

@@ -2445,6 +2445,7 @@ export const et: MessageCatalog = {
   'engraving.profile_standard_tab': 'Standard + tabulatuur',
   'engraving.profile_slash': 'Kaldkriipsud',
   'engraving.profile_numbered': 'Nummerdatud',
+  'engraving.drum_tab_hint': 'Trummitabulatuur kirjutab iga löögi tema standardse heli numbrina (36 bassitromm, 38 haaratrumm, 42 suletud hi-hat) ühele kuuest joonest: krahhid ülal, siis ride ja kellad, hi-hat, tomid, haaratrumm ja all bassitromm. Löögi kohta kuvatakse kuni kuus lööki; ülejäänud jäävad tabulatuurist välja, noodistik ja esitus säilitavad need.',
   'engraving.style.hideDynamics': 'Peida dünaamika',
   'engraving.style.extendBarLines': 'Pikenda taktijooni',
   'engraving.style.systemSeparators': 'Süsteemieraldajad',

@@ -93,12 +93,16 @@ export interface DrumTabReport {
   unresolvedNotes:number[];
   /** Track indexes whose per-track tuning label was hidden in the JSON stylesheet. */
   hiddenTuningTracks:number[];
+  /** The highest bar, voice, beat and note id the converted JSON uses (the fresh ids of 'both' mode included), so the caller can keep alphaTab's id counters above them. */
+  highestIds:{note:number;beat:number;voice:number;bar:number};
 }
 
 /** Defaults every effect field of a tab note takes; only what tab can show survives (see `tabNote`). */
 const noteDefaults:Json={accentuated:0,bendtype:0,bendstyle:0,iscontinuedbend:false,showstringnumber:false,octave:-1,tone:-1,isvisible:true,islefthandtapped:false,ishammerpullorigin:false,isslurdestination:false,harmonictype:0,harmonicvalue:0,isletring:false,ispalmmute:false,isdead:false,isstaccato:false,slideintype:0,slideouttype:0,vibrato:0,lefthandfinger:-2,righthandfinger:-2,trillvalue:-1,trillspeed:32,durationpercent:1,accidentalmode:0,ornament:0};
 /** Beat effects of the drum staff that tab would draw wrongly (or twice): back to their defaults on the copy. */
 const beatDefaults:Json={whammystyle:0,islegatoorigin:false,pop:false,slap:false,tap:false,slashed:false,deadslapped:false,brushtype:0,brushduration:0,iscontinuedwhammy:false,whammybartype:0,vibrato:0,pickstroke:0,golpe:0,wahpedal:0,barrefret:-1,barreshape:0,rasgueado:0,showtimer:false,timer:null};
+/** The JSON keys that name another note by id. A tab note starts without them: ties are written back afterwards, by the ids the tab notes got; the other links mean nothing on a drum hit. */
+const noteLinkKeys=['tiedestinationnoteid','tieoriginnoteid','slurdestinationnoteid','sluroriginnoteid','hammerpulldestinationnoteid','hammerpulloriginnoteid','slidetargetnoteid','slideoriginnoteid'];
 /** Things printed once per beat that the second staff of a track must not repeat. */
 const beatRepeats:Json={text:null,lyrics:null,chordid:null,crescendo:0};
 
@@ -115,7 +119,8 @@ const beatRepeats:Json={text:null,lyrics:null,chordid:null,crescendo:0};
  * - text, lyrics, chord diagrams, crescendo wedges and sustain pedal marks: kept in 'tab' mode and left off the second staff in 'both' mode, where the percussion staff already shows them.
  */
 function tabNote(note:Json,line:number,number:number,id:number):Json {
-  return {...note,...noteDefaults,accentuated:note.accentuated,isvisible:note.isvisible,id,string:DRUM_TAB_LINES+1-line,fret:number,percussionarticulation:-1,isghost:note.isghost,istiedestination:note.istiedestination,dynamics:note.dynamics};
+  const copy={...note};for(const key of noteLinkKeys)delete copy[key];
+  return {...copy,...noteDefaults,accentuated:note.accentuated,isvisible:note.isvisible,id,string:DRUM_TAB_LINES+1-line,fret:number,percussionarticulation:-1,isghost:note.isghost,istiedestination:note.istiedestination,dynamics:note.dynamics};
 }
 
 interface Ids {note:number;beat:number;voice:number;bar:number}
@@ -138,8 +143,9 @@ function maxIds(tracks:readonly Json[]):Ids {
  * Staves other than percussion ones are left alone.
  */
 export function convertDrumTabJson(json:Json,source:model.Score,modes:ReadonlyMap<number,DrumTabMode>):DrumTabReport {
-  const tracks=json.tracks as Json[],report:DrumTabReport={notes:new Map(),beats:new Map(),surplusNotes:[],unresolvedNotes:[],hiddenTuningTracks:[]};
-  const next=maxIds(tracks);
+  const tracks=json.tracks as Json[],report:DrumTabReport={notes:new Map(),beats:new Map(),surplusNotes:[],unresolvedNotes:[],hiddenTuningTracks:[],highestIds:{note:-1,beat:-1,voice:-1,bar:-1}};
+  const next=maxIds(tracks);report.highestIds=next;
+  const written:Array<{tab:Json;origin:Json}>=[];
   const fresh=(key:keyof Ids)=>++next[key];
   tracks.forEach((trackJson,trackIndex)=>{
     const mode=modes.get(trackIndex),track=source.tracks[trackIndex];
@@ -148,7 +154,7 @@ export function convertDrumTabJson(json:Json,source:model.Score,modes:ReadonlyMa
     for(const staffJson of staves){
       if(staffJson.ispercussion!==true){out.push(staffJson);continue;}
       converted=true;
-      const both=mode==='both',tab=convertStaff(staffJson,track,both,fresh,report);
+      const both=mode==='both',tab=convertStaff(staffJson,track,both,fresh,report,written);
       if(both){out.push(staffJson,tab);}else out.push(tab);
     }
     trackJson.staves=out;
@@ -158,10 +164,18 @@ export function convertDrumTabJson(json:Json,source:model.Score,modes:ReadonlyMa
       map[String(trackIndex)]=false;report.hiddenTuningTracks.push(trackIndex);
     }
   });
+  // A tie is kept between two hits that are both written: each end names the other by its tab note's id, which alphaTab then finishes as a tie (the destination takes the origin's number).
+  // A tied hit whose origin was left off the tab is an ordinary hit.
+  const tabOf=new Map(written.map(({tab,origin})=>[origin.id as number,tab]));
+  for(const {tab,origin} of written){
+    const from=typeof origin.tieoriginnoteid==='number'?tabOf.get(origin.tieoriginnoteid):undefined,to=typeof origin.tiedestinationnoteid==='number'?tabOf.get(origin.tiedestinationnoteid):undefined;
+    if(from)tab.tieoriginnoteid=from.id;else tab.istiedestination=false;
+    if(to)tab.tiedestinationnoteid=to.id;
+  }
   return report;
 }
 
-function convertStaff(staff:Json,track:model.Track,fresh_:boolean,fresh:(key:keyof Ids)=>number,report:DrumTabReport):Json {
+function convertStaff(staff:Json,track:model.Track,fresh_:boolean,fresh:(key:keyof Ids)=>number,report:DrumTabReport,written:Array<{tab:Json;origin:Json}>):Json {
   const copyIds=fresh_;
   const bars=(staff.bars as Json[]).map(barJson=>{
     const bar:Json={...barJson,id:copyIds?fresh('bar'):barJson.id,...copyIds?{sustainpedals:[]}:{}};
@@ -182,7 +196,7 @@ function convertStaff(staff:Json,track:model.Track,fresh_:boolean,fresh:(key:key
           const note=sourceNotes[back[at]];
           if(line===null){report.surplusNotes.push(note.id as number);return;}
           const id=copyIds?fresh('note'):note.id as number;
-          notes.push(tabNote(note,line,candidates[at].number,id));report.notes.set(id,note.id as number);
+          const tab=tabNote(note,line,candidates[at].number,id);notes.push(tab);written.push({tab,origin:note});report.notes.set(id,note.id as number);
         });
         void surplus;
         report.beats.set(beatId,beatJson.id as number);

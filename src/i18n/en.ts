@@ -2444,6 +2444,7 @@ export const en = {
   'engraving.profile_standard_tab': 'Standard + tablature',
   'engraving.profile_slash': 'Slash',
   'engraving.profile_numbered': 'Numbered',
+  'engraving.drum_tab_hint': 'Drum tab writes each hit as its standard sound number (36 kick, 38 snare, 42 closed hi-hat) on one of six lines: crashes on top, then ride and bells, hi-hat, toms, snare and kick at the bottom. A beat shows at most six hits; any more are left off the tab, and the score and playback keep them.',
   'engraving.style.hideDynamics': 'Hide dynamics',
   'engraving.style.extendBarLines': 'Extend bar lines',
   'engraving.style.systemSeparators': 'System separators',

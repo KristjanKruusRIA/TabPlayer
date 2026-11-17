@@ -2445,6 +2445,7 @@ export const de: MessageCatalog = {
   'engraving.profile_standard_tab': 'Standard + Tabulatur',
   'engraving.profile_slash': 'Slash-Notation',
   'engraving.profile_numbered': 'Nummeriert',
+  'engraving.drum_tab_hint': 'Die Schlagzeugtabulatur schreibt jeden Schlag als seine Standard-Klangnummer (36 Bassdrum, 38 Snare, 42 geschlossene Hi-Hat) auf eine von sechs Linien: Crash oben, dann Ride und Glocken, Hi-Hat, Toms, Snare und unten die Bassdrum. Ein Schlag zeigt höchstens sechs Anschläge; weitere fehlen in der Tabulatur, Notenbild und Wiedergabe behalten sie.',
   'engraving.style.hideDynamics': 'Dynamik ausblenden',
   'engraving.style.extendBarLines': 'Taktstriche verlängern',
   'engraving.style.systemSeparators': 'Systemtrenner',

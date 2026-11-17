@@ -4,7 +4,7 @@ import { buildDocument, buildScore, effectiveAudioSettings, previewEdit, replayD
 import { blankProject, type EditCommand } from './project';
 import type { SyncAnchor } from './edit-types';
 import { buildPlaybackPlan } from './audio/plan';
-import { completeSound, defaultEffects, laterFields, soundProblem } from './document-settings';
+import { completeSound, defaultEffects, laterFields, normalizePluginSlot, soundProblem } from './document-settings';
 import { soundPreset } from './audio/sound-model';
 import type { TrackSound } from './edit-types';
 import pluginProtocol from '../tests/plugin-slot-protocol.json';
@@ -170,6 +170,25 @@ it('holds plug-in slots to the rules the native player holds them to, case for c
     const problem=soundProblem(withPlugin(slot));
     expect(problem===null,`${name}: ${problem}`).toBe(valid);
   }
+});
+it('keeps an instrument slot whole, writes no kind for an effect, and holds the project to the state asset of the slot',()=>{
+  const instrument={...pluginProtocol.base,kind:'instrument'};
+  expect(soundProblem(withPlugin(instrument))).toBeNull();
+  expect(completeSound(withPlugin(instrument)).plugin).toEqual(instrument);
+  // An effect is the absence of the key; `'effect'` is refused by the player, so the interface normalises it away.
+  expect(soundProblem(withPlugin({...pluginProtocol.base,kind:'effect'}))).toBe('Invalid plug-in.');
+  const chosen={...pluginProtocol.base,kind:'effect'};
+  expect(normalizePluginSlot(chosen)).toEqual(pluginProtocol.base);
+  expect('kind' in normalizePluginSlot(chosen)).toBe(false);
+  expect(normalizePluginSlot(instrument)).toBe(instrument);
+  expect(normalizePluginSlot(pluginProtocol.base)).toBe(pluginProtocol.base);
+  expect(soundProblem(withPlugin(normalizePluginSlot(chosen)))).toBeNull();
+  // The state of an instrument slot is referenced as an effect's is, so a project without it is refused and one with it is kept.
+  const project=blankProject();
+  project.edits=[{type:'setTrackSound',trackId:'base/0',sound:withPlugin(instrument)}] as unknown as EditCommand[];
+  expect(()=>validateProject(project)).toThrow('Plug-in state asset is missing.');
+  project.assets[instrument.state]={filename:'plugin-state.tpstate',mediaType:'application/x-tabplayer-plugin-state',byteLength:30};
+  expect(validateProject(project).edits).toHaveLength(1);
 });
 it('refuses a malformed plug-in slot and an unknown key beside it',()=>{
   for(const bad of [null,'vst3',[],{},{...pluginProtocol.base,extra:true},{...pluginProtocol.base,inputDb:Number.NaN},{...pluginProtocol.base,outputDb:Infinity},{...pluginProtocol.base,outputDb:-Infinity}])

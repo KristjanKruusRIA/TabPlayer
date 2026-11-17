@@ -228,6 +228,7 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         })}
       </div>
       <p className="mixer-kit-note">Heard as you drag and in the export. Notes belong to the piece their articulation plays on.</p>
+      {sounds?.[trackIdentity(kitTrack)]?.plugin?.kind==='instrument'&&<p className="mixer-kit-note">{t('plugin.kit_note')}</p>}
     </section>}
     <MasterPanel master={player?.master?.()} disabled={busy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/>
   </section>;

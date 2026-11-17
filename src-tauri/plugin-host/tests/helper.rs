@@ -17,17 +17,19 @@ mod windows_helper {
     use std::process::{Child, ChildStdin, Command, Stdio};
     use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
     use std::time::{Duration, Instant};
+    use tabplayer_plugin_protocol::event::MidiEvent;
     use tabplayer_plugin_protocol::{
         control::{
-            ClassInfo, ErrorCode, FrameError, HelperMessage, HostMessage, Mode, read_frame,
-            write_frame,
+            ClassInfo, ErrorCode, FrameError, HelperMessage, HostMessage, Mode, PluginKind,
+            read_frame, write_frame,
         },
         limits::{BLOCK_FRAMES, MAX_STATE_BYTES},
-        ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, HostRing, RING_BYTES},
+        ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, EventWords, HostRing, RING_BYTES},
         state::STATE_OVERHEAD,
     };
     use tabplayer_test_plugin::{
-        TEST_CLASS_ID, TestMode, TestState, decode_test_state, encode_test_state,
+        DRUM_CLASS_ID, TEST_CLASS_ID, TestMode, TestState, decode_test_state, drum_amplitude,
+        encode_test_state,
     };
     use windows_sys::Win32::Foundation::{
         CloseHandle, DuplicateHandle, HANDLE, INVALID_HANDLE_VALUE,
@@ -130,8 +132,18 @@ mod windows_helper {
 
         /// Sends the next block, stamped with `meta`, and signals the helper.
         fn send(&mut self, block: &Block, meta: &BlockMeta) -> u64 {
+            self.send_events(block, meta, &[])
+        }
+
+        /// Sends the next block with event words.
+        fn send_events(&mut self, block: &Block, meta: &BlockMeta, events: &[u64]) -> u64 {
             let seq = self.next;
-            assert!(self.host.send_input(seq, block, meta));
+            assert!(self.host.send_input(
+                seq,
+                block,
+                meta,
+                EventWords::new(events).expect("at most a block of events"),
+            ));
             self.next += 1;
             // SAFETY: an event handle this struct owns.
             unsafe { SetEvent(self.input_event) };
@@ -152,8 +164,12 @@ mod windows_helper {
 
         /// Sends a block and waits for its answer (in the current epoch).
         fn round_trip(&mut self, block: &Block, meta: &BlockMeta) -> Block {
+            self.round_trip_events(block, meta, &[])
+        }
+
+        fn round_trip_events(&mut self, block: &Block, meta: &BlockMeta, events: &[u64]) -> Block {
             let epoch = self.host.epoch();
-            let seq = self.send(block, meta);
+            let seq = self.send_events(block, meta, events);
             self.recv(seq, epoch)
         }
     }
@@ -184,6 +200,7 @@ mod windows_helper {
         _dir: tempfile::TempDir,
         bundle: PathBuf,
         class_id: String,
+        kind: PluginKind,
     }
 
     impl Helper {
@@ -226,7 +243,16 @@ mod windows_helper {
                 _dir: dir,
                 bundle,
                 class_id: TEST_CLASS_ID.into(),
+                kind: PluginKind::Effect,
             }
+        }
+
+        /// A helper that will load the instrument class.
+        fn spawn_drum(env: &[(&str, &str)]) -> Helper {
+            let mut helper = Helper::spawn(env);
+            helper.class_id = DRUM_CLASS_ID.into();
+            helper.kind = PluginKind::Instrument;
+            helper
         }
 
         fn send(&mut self, message: &HostMessage) {
@@ -280,6 +306,7 @@ mod windows_helper {
                 class_id: self.class_id.clone(),
                 sample_rate: RATE,
                 mode,
+                kind: self.kind,
                 ring: self.give(ring.mapping),
                 input_event: self.give(ring.input_event),
                 output_event: self.give(ring.output_event),
@@ -422,7 +449,7 @@ mod windows_helper {
     }
 
     e2e! {
-        fn probe_lists_test_class() {
+        fn probe_lists_the_effect_and_the_instrument() {
             let mut helper = Helper::spawn(&[]);
             let bundle = helper.bundle.to_str().unwrap().to_string();
             helper.send(&HostMessage::Probe { bundle });
@@ -436,13 +463,24 @@ mod windows_helper {
                     assert_eq!(build_id, tabplayer_plugin_protocol::limits::BUILD_ID);
                     assert_eq!(
                         classes,
-                        [ClassInfo {
-                            class_id: TEST_CLASS_ID.into(),
-                            name: "TabPlayer Test Gain".into(),
-                            vendor: "TabPlayer".into(),
-                            version: "1.0.0".into(),
-                            subcategories: "Fx".into(),
-                        }]
+                        [
+                            ClassInfo {
+                                class_id: TEST_CLASS_ID.into(),
+                                name: "TabPlayer Test Gain".into(),
+                                vendor: "TabPlayer".into(),
+                                version: "1.0.0".into(),
+                                subcategories: "Fx".into(),
+                                kind: PluginKind::Effect,
+                            },
+                            ClassInfo {
+                                class_id: DRUM_CLASS_ID.into(),
+                                name: "TabPlayer Test Drum".into(),
+                                vendor: "TabPlayer".into(),
+                                version: "1.0.0".into(),
+                                subcategories: "Instrument|Drum".into(),
+                                kind: PluginKind::Instrument,
+                            },
+                        ]
                     );
                 }
                 other => panic!("expected Probed, got {other:?}"),
@@ -501,6 +539,7 @@ mod windows_helper {
                 class_id: "00000000000000000000000000000001".into(),
                 sample_rate: RATE,
                 mode: Mode::Realtime,
+                kind: PluginKind::Effect,
                 ring: helper.give(ring.mapping),
                 input_event: helper.give(ring.input_event),
                 output_event: helper.give(ring.output_event),
@@ -517,6 +556,7 @@ mod windows_helper {
                 class_id: TEST_CLASS_ID.into(),
                 sample_rate: RATE,
                 mode: Mode::Realtime,
+                kind: PluginKind::Effect,
                 ring: 0xDEAD_BEE0,
                 input_event: 0xDEAD_BEE4,
                 output_event: 0xDEAD_BEE8,
@@ -1116,6 +1156,140 @@ mod windows_helper {
             drop(helper.stdin.take());
             let status = helper.wait_exit(Duration::from_secs(10)).expect("exits");
             assert_eq!(status.code(), Some(0));
+        }
+
+        fn the_instrument_loads_and_reports_its_class() {
+            let mut helper = Helper::spawn_drum(&[]);
+            match helper.load(state(1.0, 0, TestMode::Normal), Mode::Realtime) {
+                HelperMessage::Loaded { latency, class, mono, .. } => {
+                    assert_eq!(latency, 0);
+                    assert_eq!(class.class_id, DRUM_CLASS_ID);
+                    assert_eq!(class.name, "TabPlayer Test Drum");
+                    assert_eq!(class.kind, PluginKind::Instrument);
+                    assert!(!mono, "stereo output");
+                }
+                other => panic!("expected Loaded, got {other:?}"),
+            }
+        }
+
+        fn a_mono_instrument_is_loaded_and_its_output_duplicated() {
+            let mut helper = Helper::spawn_drum(&[("TABPLAYER_TEST_PLUGIN_DRUM_MONO", "1")]);
+            match helper.load(state(1.0, 0, TestMode::Normal), Mode::Realtime) {
+                HelperMessage::Loaded { mono, .. } => assert!(mono),
+                other => panic!("expected Loaded, got {other:?}"),
+            }
+            let on = MidiEvent::NoteOn { offset: 3, channel: 0, key: 50, velocity: 64 }.encode().unwrap();
+            let out = helper.ring().round_trip_events(&block_of(0.0), &meta(), &[on]);
+            let a = drum_amplitude(50, 64);
+            assert_eq!(out[2], [0.0, 0.0]);
+            assert_eq!(out[3], [a, a], "the one channel is on both");
+            assert_eq!(out[5], [-a, -a]);
+        }
+
+        fn a_note_on_sounds_from_exactly_its_frame_and_a_note_off_silences_it() {
+            let latency = 130usize;
+            let mut helper = Helper::spawn_drum(&[]);
+            assert_eq!(helper.loaded(state(1.0, latency as u32, TestMode::Normal)), 130);
+            let a = drum_amplitude(40, 100);
+            let on = MidiEvent::NoteOn { offset: 37, channel: 0, key: 40, velocity: 100 }.encode().unwrap();
+            let off = MidiEvent::NoteOff { offset: 10, channel: 0, key: 40 }.encode().unwrap();
+            let mut output = Vec::new();
+            for index in 0..6 {
+                let events: &[u64] = match index {
+                    0 => &[on],
+                    2 => &[off],
+                    _ => &[],
+                };
+                let out = helper.ring().round_trip_events(&block_of(0.0), &meta(), events);
+                output.extend_from_slice(&out);
+            }
+            // The NoteOn is at frame 37 of block 0 and the NoteOff at frame 10 of block 2; the plug-in delays both by its latency.
+            let starts = 37 + latency;
+            let ends = 2 * BLOCK_FRAMES + 10 + latency;
+            for (n, frame) in output.iter().enumerate() {
+                let expected = if n < starts || n >= ends {
+                    0.0
+                } else if (n - starts) % 4 < 2 {
+                    a
+                } else {
+                    -a
+                };
+                assert_eq!(*frame, [expected, expected], "frame {n}");
+            }
+        }
+
+        fn events_the_helper_must_not_forward_never_reach_the_instrument() {
+            let mut helper = Helper::spawn_drum(&[]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            let stray_off = MidiEvent::NoteOff { offset: 0, channel: 0, key: 60 }.encode().unwrap();
+            let controller = MidiEvent::Controller { offset: 1, channel: 0, controller: 64, value: 127 }.encode().unwrap();
+            let garbage = [u64::MAX, 0, 1 << 63, stray_off, controller, 0x0000_0001_0000_7F7F];
+            for _ in 0..4 {
+                let out = helper.ring().round_trip_events(&block_of(0.0), &meta(), &garbage);
+                assert!(out.iter().all(|f| *f == [0.0, 0.0]), "nothing sounded");
+            }
+            // And it still plays what is valid afterwards.
+            let on = MidiEvent::NoteOn { offset: 0, channel: 0, key: 33, velocity: 7 }.encode().unwrap();
+            let out = helper.ring().round_trip_events(&block_of(0.0), &meta(), &[on]);
+            assert_eq!(out[0], [drum_amplitude(33, 7); 2]);
+        }
+
+        fn a_flush_does_not_leave_a_note_stuck() {
+            let mut helper = Helper::spawn_drum(&[]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            let on = MidiEvent::NoteOn { offset: 0, channel: 0, key: 60, velocity: 90 }.encode().unwrap();
+            let out = helper.ring().round_trip_events(&block_of(0.0), &meta(), &[on]);
+            assert_ne!(out[0], [0.0, 0.0], "the note sounds");
+            let out = helper.ring().round_trip(&block_of(0.0), &meta());
+            assert_ne!(out[BLOCK_FRAMES - 1], [0.0, 0.0], "and goes on sounding");
+            // A seek: the app flushes, and the NoteOff it would have sent is lost with the old epoch.
+            helper.ring().host.begin_flush();
+            let out = helper.ring().round_trip(&block_of(0.0), &meta());
+            assert!(out.iter().all(|f| *f == [0.0, 0.0]), "the helper stopped it");
+        }
+
+        fn a_retriggered_note_is_ended_by_one_note_off() {
+            let mut helper = Helper::spawn_drum(&[]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            let on = MidiEvent::NoteOn { offset: 0, channel: 0, key: 60, velocity: 90 }.encode().unwrap();
+            let again = MidiEvent::NoteOn { offset: 20, channel: 0, key: 60, velocity: 30 }.encode().unwrap();
+            let off = MidiEvent::NoteOff { offset: 5, channel: 0, key: 60 }.encode().unwrap();
+            let out = helper.ring().round_trip_events(&block_of(0.0), &meta(), &[on, again]);
+            assert_eq!(out[0], [drum_amplitude(60, 90); 2]);
+            // The helper sent a NoteOff before the second NoteOn, at the same frame: the first voice sounds up to frame 19 and
+            // the key is held again, with the new velocity, from frame 20.
+            assert_eq!(out[19].map(f32::abs), [drum_amplitude(60, 90); 2]);
+            assert_eq!(out[20], [drum_amplitude(60, 30); 2]);
+            let out = helper.ring().round_trip_events(&block_of(0.0), &meta(), &[off]);
+            assert_ne!(out[4], [0.0, 0.0]);
+            assert!(out[5..].iter().all(|f| *f == [0.0, 0.0]), "one NoteOff ends it");
+        }
+
+        fn an_effect_is_given_no_events() {
+            let mut helper = Helper::spawn(&[]);
+            helper.loaded(state(1.0, 0, TestMode::Normal));
+            let on = MidiEvent::NoteOn { offset: 0, channel: 0, key: 60, velocity: 90 }.encode().unwrap();
+            let out = helper.ring().round_trip_events(&block_of(0.5), &meta(), &[on; 64]);
+            assert!(out.iter().all(|f| *f == [0.5, 0.5]), "the effect only processed its audio");
+        }
+
+        fn loading_a_class_as_the_other_kind_is_refused() {
+            // The instrument asked for as an effect.
+            let mut helper = Helper::spawn_drum(&[]);
+            helper.kind = PluginKind::Effect;
+            expect_error(
+                helper.load(state(1.0, 0, TestMode::Normal), Mode::Realtime),
+                ErrorCode::UnsupportedLayout,
+            );
+            assert_eq!(helper.wait_exit(WAIT).expect("it exits").code(), Some(1));
+            // The effect asked for as an instrument.
+            let mut helper = Helper::spawn(&[]);
+            helper.kind = PluginKind::Instrument;
+            expect_error(
+                helper.load(state(1.0, 0, TestMode::Normal), Mode::Realtime),
+                ErrorCode::UnsupportedLayout,
+            );
+            assert_eq!(helper.wait_exit(WAIT).expect("it exits").code(), Some(1));
         }
 
         fn a_nan_plugin_is_passed_through_for_the_app_to_judge() {

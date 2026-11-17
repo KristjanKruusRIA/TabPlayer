@@ -436,6 +436,9 @@ pub struct InsertShared {
     /// Set by the supervisor once the helper is gone (exited, hung or killed), so the insert faults as disconnected at the
     /// next block (preflight ruling P32).
     pub disconnected: AtomicBool,
+    /// Written by the audio thread: note-ons an instrument insert could not stage (a full block, a sealed one after an
+    /// overflow, a key held 255 times, or a note that does not encode). Only ever counts up; a later slice surfaces it.
+    pub dropped_notes: AtomicU64,
 }
 
 #[cfg(test)]
@@ -443,7 +446,7 @@ mod tests {
     use super::*;
     use tabplayer_plugin_protocol::{
         limits::BLOCK_FRAMES,
-        ring::{Block, BlockMeta},
+        ring::{Block, BlockMeta, EventWords},
     };
 
     #[test]
@@ -457,7 +460,7 @@ mod tests {
         let block: Block = [[0.25; 2]; BLOCK_FRAMES];
         let sent = link.with_host(|host| {
             let seq = host.next_input();
-            host.send_input(seq, &block, &BlockMeta::default())
+            host.send_input(seq, &block, &BlockMeta::default(), EventWords::NONE)
         });
         assert_eq!(sent, Some(true));
         link.signal_input();
@@ -466,7 +469,14 @@ mod tests {
         // The fake helper wakes, reads the block and answers it.
         assert!(link.input_event().wait(Duration::from_secs(1)));
         let mut scratch: Block = [[0.0; 2]; BLOCK_FRAMES];
-        let input = helper.read_input(0, &mut scratch).block().expect("a block");
+        let input = helper
+            .read_input(
+                0,
+                &mut scratch,
+                &mut [0; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK],
+            )
+            .block()
+            .expect("a block");
         assert_eq!(scratch[0], [0.25, 0.25]);
         assert!(helper.publish_output(0, input.epoch, &scratch, &input.meta));
         assert!(!link.ring().blocks_pending(), "answered");

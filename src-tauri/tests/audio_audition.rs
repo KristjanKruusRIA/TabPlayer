@@ -481,6 +481,7 @@ fn eviction_and_wrong_rate_paths_do_not_touch_the_heap() {
 fn audition_ignores_plugin_slot() {
     let mut req = request(24, false, &[(40, 0), (45, 60)], 500);
     req.voice.plugin = Some(tabplayer_lib::settings::PluginSlot {
+        kind: tabplayer_lib::settings::SlotKind::Effect,
         format: tabplayer_lib::settings::PluginFormat::Vst3,
         class_id: "0123456789ABCDEF0123456789ABCDEF".into(),
         name: "Test".into(),

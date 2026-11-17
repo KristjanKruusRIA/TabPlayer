@@ -8,7 +8,7 @@ use std::{
 };
 use tabplayer_plugin_protocol::{
     BLOCK_FRAMES, RING_BLOCKS,
-    ring::{BlockMeta, InputRead, OwnedRing},
+    ring::{BlockMeta, EventWords, InputRead, OwnedRing},
 };
 
 thread_local! {
@@ -69,6 +69,7 @@ fn host_side_never_allocates() {
         // The fake helper: doubles every block and answers it, in order. It allocates freely.
         scope.spawn(|| {
             let mut input = [[0.0f32; 2]; BLOCK_FRAMES];
+            let mut events = [0u64; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK];
             let mut seq = 0u64;
             while !stop.load(Ordering::Relaxed) {
                 if helper.input_available(seq) == 0 {
@@ -76,7 +77,8 @@ fn host_side_never_allocates() {
                     std::thread::yield_now();
                     continue;
                 }
-                let InputRead::Ready(block) = helper.read_input(seq, &mut input) else {
+                let InputRead::Ready(block) = helper.read_input(seq, &mut input, &mut events)
+                else {
                     std::thread::yield_now();
                     continue;
                 };
@@ -92,6 +94,8 @@ fn host_side_never_allocates() {
 
         let mut scratch = [[0.0f32; 2]; BLOCK_FRAMES];
         let mut block = [[0.0f32; 2]; BLOCK_FRAMES];
+        // A full block of events goes through the allocation-free path too.
+        let events_out = [1u64; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK];
         let meta = BlockMeta {
             tempo: 120.0,
             sig_num: 4,
@@ -105,7 +109,7 @@ fn host_side_never_allocates() {
                 for (i, frame) in block.iter_mut().enumerate() {
                     *frame = [seq as f32 + i as f32, -(seq as f32)];
                 }
-                assert!(host.send_input(seq, &block, &meta));
+                assert!(host.send_input(seq, &block, &meta, EventWords::new(&events_out).unwrap()));
             }
             if seq >= IN_FLIGHT {
                 let wanted = seq - IN_FLIGHT;

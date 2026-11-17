@@ -109,7 +109,11 @@ impl FakeHelper {
                 input.wait(Duration::from_millis(2));
                 while !c.paused.load(Ordering::Relaxed) {
                     let seq = ring.next_output();
-                    match ring.read_input(seq, &mut block) {
+                    match ring.read_input(
+                        seq,
+                        &mut block,
+                        &mut [0; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK],
+                    ) {
                         InputRead::Ready(info) => {
                             c.received.lock().unwrap().push((seq, info.meta, block[0]));
                             // A new epoch resets the plug-in, as the real helper does.
@@ -540,7 +544,11 @@ fn hostile_indices_never_index_out_of_bounds() {
     let header_bytes = 64;
     let out_headers = header_bytes + RING_BLOCKS * 64;
     let out_data = header_bytes + 2 * RING_BLOCKS * 64 + RING_BLOCKS * BLOCK_FRAMES * 8;
-    assert_eq!(out_data + RING_BLOCKS * BLOCK_FRAMES * 8, RING_BYTES);
+    let events = tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK;
+    assert_eq!(
+        out_data + RING_BLOCKS * BLOCK_FRAMES * 8 + RING_BLOCKS * events * 8,
+        RING_BYTES
+    );
     let output_write = 32 / 8;
     let mut state = 0x9E37_79B9_7F4A_7C15u64;
     let mut random = move || {

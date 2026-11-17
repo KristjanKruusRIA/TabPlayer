@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { normalizePluginSlot } from '../document-settings';
 import type { PluginSlot } from '../edit-types';
 import { useI18n } from '../i18n';
-import { BusyFieldset, busyGuard } from '../ui';
+import { BusyFieldset, busyGuard, busySelect } from '../ui';
 import {
   localizePluginError,
   noticeMessageKey,
@@ -26,6 +27,8 @@ export interface PluginSlotPanelProps {
   status?: PluginStatus;
   busy?: boolean;
   documentId?: string;
+  /** A drum track: the only kind of track that may take an instrument, so only it lists instruments. */
+  percussion?: boolean;
   onChange: (slot: PluginSlot | undefined, assetToken?: string) => void;
   /** May return a promise; a rejection is shown here. */
   onAllow?: () => void | Promise<unknown>;
@@ -43,7 +46,7 @@ function parseTrim(text: string): number | null {
 }
 
 /**
- * The plug-in slot in the sound panel: chooses a VST3 effect from the library,
+ * The plug-in slot in the sound panel: chooses a VST3 effect (or, on a drum track, an instrument) from the library,
  * tweaks trims and active state, opens the editor, and displays fallback notices.
  */
 export function PluginSlotPanel({
@@ -52,6 +55,7 @@ export function PluginSlotPanel({
   status,
   busy = false,
   documentId = '',
+  percussion = false,
   onChange,
   onAllow,
   onRetry,
@@ -145,9 +149,9 @@ export function PluginSlotPanel({
       onChange(undefined);
       return;
     }
-    pluginChoose(documentId, trackId, classId)
+    pluginChoose(documentId, trackId, classId, percussion)
       .then(res => {
-        onChange(res.slot, res.assetToken);
+        onChange(normalizePluginSlot(res.slot), res.assetToken);
         setError(null);
       })
       .catch(err => {
@@ -277,6 +281,17 @@ export function PluginSlotPanel({
 
   const currentEntry = slot ? entries.find(e => e.classId === slot.classId) : undefined;
   const showNotice = status && status !== 'ready' && status !== 'loading';
+  const instrumentSlot = slot?.kind === 'instrument';
+  // A drum track lists instruments and effects; any other track lists effects only.
+  const instruments = percussion ? entries.filter(e => e.kind === 'instrument') : [];
+  const effects = entries.filter(e => e.kind !== 'instrument');
+  const listed = [...instruments, ...effects];
+  const optionFor = (entry: PluginLibraryEntry) => (
+    <option key={entry.classId} value={entry.classId}>
+      {entry.name}
+      {entry.vendor ? ` (${entry.vendor})` : ''}
+    </option>
+  );
 
   return (
     <details className="sound-plugin-slot" open>
@@ -293,21 +308,26 @@ export function PluginSlotPanel({
             <select
               aria-label={t('plugin.slot_label')}
               value={slot?.classId ?? ''}
+              {...busySelect(busy)}
               onChange={e => handleSelect(e.target.value)}
             >
               <option value="">{t('plugin.builtin_tone')}</option>
-              {slot && !entries.some(e => e.classId === slot.classId) && (
+              {slot && !listed.some(e => e.classId === slot.classId) && (
                 <option value={slot.classId}>
                   {slot.name}
                   {slot.vendor ? ` (${slot.vendor})` : ''}
                 </option>
               )}
-              {entries.map(entry => (
-                <option key={entry.classId} value={entry.classId}>
-                  {entry.name}
-                  {entry.vendor ? ` (${entry.vendor})` : ''}
-                </option>
-              ))}
+              {percussion ? (
+                <>
+                  {instruments.length > 0 && (
+                    <optgroup label={t('plugin.group_instruments')}>{instruments.map(optionFor)}</optgroup>
+                  )}
+                  {effects.length > 0 && <optgroup label={t('plugin.group_effects')}>{effects.map(optionFor)}</optgroup>}
+                </>
+              ) : (
+                effects.map(optionFor)
+              )}
             </select>
           </label>
 
@@ -346,24 +366,27 @@ export function PluginSlotPanel({
                 {t('plugin.active')}
               </label>
 
-              <label>
-                {t('plugin.input_trim')}
-                <input
-                  type="number"
-                  aria-label={t('plugin.input_trim')}
-                  min={-12}
-                  max={12}
-                  step={0.1}
-                  value={inputVal}
-                  onChange={e => setInputVal(e.target.value)}
-                  onBlur={commitInputTrim}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      commitInputTrim();
-                    }
-                  }}
-                />
-              </label>
+              {/* An instrument has no audio input; its stored input trim is kept as it is. */}
+              {!instrumentSlot && (
+                <label>
+                  {t('plugin.input_trim')}
+                  <input
+                    type="number"
+                    aria-label={t('plugin.input_trim')}
+                    min={-12}
+                    max={12}
+                    step={0.1}
+                    value={inputVal}
+                    onChange={e => setInputVal(e.target.value)}
+                    onBlur={commitInputTrim}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        commitInputTrim();
+                      }
+                    }}
+                  />
+                </label>
+              )}
 
               <label>
                 {t('plugin.output_trim')}
@@ -410,7 +433,7 @@ export function PluginSlotPanel({
                 <span className="plugin-status-badge">{t(statusLabelKey(status))}</span>
                 {showNotice && (
                   <div className="plugin-status-notice">
-                    <p>{t(noticeMessageKey(status), { name: slot?.name ?? '' })}</p>
+                    <p>{t(noticeMessageKey(status, instrumentSlot), { name: slot?.name ?? '' })}</p>
                   </div>
                 )}
               </div>
@@ -446,6 +469,9 @@ export function PluginSlotPanel({
                     <span>
                       {entry.name}
                       {entry.vendor ? ` (${entry.vendor})` : ''}
+                    </span>
+                    <span className="muted plugin-kind-label">
+                      {t(entry.kind === 'instrument' ? 'plugin.kind_instrument' : 'plugin.kind_effect')}
                     </span>
                     <button
                       type="button"

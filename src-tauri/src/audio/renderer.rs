@@ -4,6 +4,7 @@ use super::{
     compensation::{Compensation, compensation_capacity},
     decode::DecodedAudio,
     dsp::{FrameContext, FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
+    instrument::NoteMap,
     master::MasterBus,
     midi_out::MidiTap,
     plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
@@ -19,7 +20,8 @@ use super::{
     },
 };
 use crate::settings::{
-    BackingProcessing, ChannelMix, DocumentSettings, DrumKitMix, KitElement, gm_kit_element,
+    BackingProcessing, ChannelMix, DocumentSettings, DrumKitMix, KitElement, SlotKind,
+    gm_kit_element,
 };
 use rustysynth::{Synthesizer, SynthesizerSettings};
 use std::{
@@ -103,12 +105,30 @@ impl Gain {
     }
 }
 struct PreparedChannel {
+    /// The plan track's id and whether it is a percussion track: an instrument plug-in is for a percussion track only.
+    track_id: String,
+    percussion: bool,
     dsp: TrackDsp,
     gain: Gain,
     mix: ChannelMix,
     kit: KitGain,
     /// Whether the kit mix changes anything. A kit of elements all at their defaults sounds as the track does without one.
     kit_active: bool,
+    /// What the plan's notes become for the track's instrument plug-in: `Some` while the channel's insert is an
+    /// instrument. Held by the mix, so a change of slot or of map is a mix change with no renderer rebuilt. The kit mix
+    /// above shapes only the built-in stand-in; a hosted instrument has its own mixer.
+    notes: Option<NoteMap>,
+}
+impl PreparedChannel {
+    /// Puts `insert` on the channel and says whether the plan's notes go to it.
+    fn attach(&mut self, insert: Box<PluginInsert>) -> Result<(), InsertError> {
+        if insert.kind() == SlotKind::Instrument && !self.percussion {
+            return Err(InsertError::NotAPercussionTrack);
+        }
+        self.notes = (insert.kind() == SlotKind::Instrument).then(NoteMap::identity);
+        self.dsp.attach_plugin(insert);
+        Ok(())
+    }
 }
 /// Hands the compensation over from the mix or renderer that is playing (`old`) to the one taking over (`new`).
 /// - Both delay: the new lines take over the old history and crossfade to their own taps.
@@ -207,29 +227,41 @@ impl PreparedMix {
                 .unwrap_or_else(FxSettings::default);
             let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             dsp.set_ir_index(index);
+            let mut notes = None;
 
             if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
                 // A refusal leaves the track on its built-in sound and is named, so the slot can say why.
-                match PluginInsert::new(
-                    plan.link.clone(),
-                    crate::audio::plugin_insert::InsertMode::Realtime { pipeline_frames },
-                    plan.latency,
-                    plan.input_db,
-                    plan.output_db,
-                    sample_rate,
-                    plan.shared.clone(),
-                ) {
-                    Ok(insert) => dsp.attach_plugin(Box::new(insert)),
-                    Err(error) => refused.push((track.id.clone(), error)),
+                if plan.kind == SlotKind::Instrument && !track.percussion {
+                    refused.push((track.id.clone(), InsertError::NotAPercussionTrack));
+                } else {
+                    match PluginInsert::new_of_kind(
+                        plan.kind,
+                        plan.link.clone(),
+                        crate::audio::plugin_insert::InsertMode::Realtime { pipeline_frames },
+                        plan.latency,
+                        plan.input_db,
+                        plan.output_db,
+                        sample_rate,
+                        plan.shared.clone(),
+                    ) {
+                        Ok(insert) => {
+                            notes = (plan.kind == SlotKind::Instrument).then(NoteMap::identity);
+                            dsp.attach_plugin(Box::new(insert));
+                        }
+                        Err(error) => refused.push((track.id.clone(), error)),
+                    }
                 }
             }
 
             let kit = mix.drum_kit.as_ref().filter(|kit| !kit.is_neutral());
             channels.push(PreparedChannel {
+                track_id: track.id.clone(),
+                percussion: track.percussion,
                 dsp,
                 gain: Gain::new(&mix, !mix.mute && (!any_solo || mix.solo)),
                 kit: KitGain::new(kit),
                 kit_active: kit.is_some(),
+                notes,
                 mix,
             });
         }
@@ -267,7 +299,7 @@ impl PreparedMix {
         for (i, insert) in inserts.into_iter().enumerate() {
             if let Some(insert) = insert {
                 if i < self.channels.len() {
-                    self.channels[i].dsp.attach_plugin(insert);
+                    self.attach(i, insert);
                 }
             }
         }
@@ -277,8 +309,15 @@ impl PreparedMix {
     /// Attaches an insert to track `track` and updates delay compensation.
     pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
         if track < self.channels.len() {
-            self.channels[track].dsp.attach_plugin(insert);
+            self.attach(track, insert);
             self.update_compensation();
+        }
+    }
+    /// Puts `insert` on channel `track`, or refuses it, with the reason named for the slot, where the track cannot take it.
+    fn attach(&mut self, track: usize, insert: Box<PluginInsert>) {
+        if let Err(error) = self.channels[track].attach(insert) {
+            self.refused
+                .push((self.channels[track].track_id.clone(), error));
         }
     }
     fn update_compensation(&mut self) {
@@ -580,6 +619,9 @@ pub struct Renderer {
     active: Vec<usize>,
     next_note: usize,
     next_midi: usize,
+    /// The tick of the last frame whose notes and MIDI events were dispatched, `None` after a seek. An edit hand-over
+    /// starts the new renderer's cursors from it, so an event between that frame and the next is dispatched once.
+    dispatched_through: Option<f64>,
     /// The plan track of each MIDI event, to find a track's events without comparing names.
     midi_track: Vec<u16>,
     /// External MIDI output: the tracks routed to a port. Offline exports never have one, so they render every track.
@@ -999,6 +1041,7 @@ impl Renderer {
             slots,
             active: Vec::with_capacity(capacity),
             next_note: 0,
+            dispatched_through: None,
             next_midi: 0,
             midi_track,
             midi: None,
@@ -1355,6 +1398,7 @@ impl Renderer {
             }
         }
         if !self.tail {
+            self.dispatched_through = Some(tick);
             while self.next_note < self.plan.notes.len()
                 && self.plan.notes[self.next_note].start_tick <= tick + 1e-7
                 && self.plan.notes[self.next_note].start_tick < end_tick
@@ -1387,6 +1431,23 @@ impl Renderer {
                             event,
                             self.midi_attacks[self.next_midi],
                         );
+                    }
+                    // A track whose slot holds an instrument plays the plan's notes there, through the one seam
+                    // (`NoteMap`). It follows the built-in sound: a track a port is playing strikes no note, here or on
+                    // its instrument, and still releases the ones it has (a NoteOff the instrument does not hold is
+                    // ignored by the insert). Mute and solo are gain after the board, so a muted track's instrument keeps
+                    // its notes and is right at unmute. The kit mix shapes only the built-in stand-in.
+                    if let Some(channel) = self.mix.channels.get_mut(index) {
+                        if let Some(note) = channel.notes.and_then(|map| map.note(event)) {
+                            if !(silenced && note.on) {
+                                channel.dsp.stage_note(
+                                    note.on,
+                                    note.channel,
+                                    note.key,
+                                    note.velocity,
+                                );
+                            }
+                        }
                     }
                 }
                 self.next_midi += 1;
@@ -1703,13 +1764,22 @@ impl Renderer {
         self.status(frames, pulse_count, last_pulse)
     }
     pub fn seek_tick(&mut self, tick: f64) {
-        self.seek_tick_internal(tick, false);
+        self.seek_tick_internal(tick, false, None);
     }
     /// A loop wrap: repositions playback, but keeps inserts, compensation lines and master bus continuous.
     pub fn wrap_to_tick(&mut self, tick: f64) {
-        self.seek_tick_internal(tick, true);
+        self.seek_tick_internal(tick, true, None);
     }
-    fn seek_tick_internal(&mut self, tick: f64, is_wrap: bool) {
+    /// An edit while playing: this renderer takes over from `old` at `tick`, the tick of the next frame to render, as
+    /// [`wrap_to_tick`](Self::wrap_to_tick) and [`continue_from`](Self::continue_from) do, and also dispatches what
+    /// `old` has not: an event after `old`'s last frame and before `tick` is dispatched here, on the first frame,
+    /// instead of by neither (a note or MIDI event is struck once across the hand-over). What `old` dispatched is
+    /// reconstructed as before.
+    pub fn hand_over_from(&mut self, tick: f64, old: &mut Renderer) {
+        self.seek_tick_internal(tick, true, old.dispatched_through);
+        self.continue_from(old);
+    }
+    fn seek_tick_internal(&mut self, tick: f64, is_wrap: bool, through: Option<f64>) {
         // With no plug-in, a wrap is the seek it was before plug-ins, so playback and export stay bit-identical.
         let is_wrap = is_wrap && self.plugins_active();
         let tick = if tick.is_finite() {
@@ -1730,6 +1800,10 @@ impl Renderer {
         for channel in &mut self.mix.channels {
             if is_wrap {
                 channel.dsp.reset_for_wrap();
+                // The insert keeps streaming through a wrap, so what an instrument holds would ring on into the next pass.
+                if channel.notes.is_some() {
+                    channel.dsp.all_notes_off();
+                }
             } else {
                 channel.dsp.reset();
             }
@@ -1746,8 +1820,27 @@ impl Renderer {
                 comp.flush();
             }
         }
-        self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);
-        self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
+        // A hand-over starts after what the old renderer dispatched, not at `tick`: the frames it rendered saw events up to
+        // its last frame's tick, and the first frame here sees those up to `tick`.
+        let through = through.filter(|through| through.is_finite() && *through < tick);
+        // Carried on, so a second hand-over before any frame is rendered still starts after what the first renderer
+        // dispatched: this renderer has dispatched nothing since, and the gap after that frame is still open. A plain seek
+        // or a wrap passes none and resets it.
+        self.dispatched_through = through;
+        self.next_note = match through {
+            Some(through) => self
+                .plan
+                .notes
+                .partition_point(|n| n.start_tick <= through + 1e-7),
+            None => self.plan.notes.partition_point(|n| n.start_tick < tick),
+        };
+        self.next_midi = match through {
+            Some(through) => self
+                .plan
+                .midi
+                .partition_point(|m| m.tick() <= through + 1e-7),
+            None => self.plan.midi.partition_point(|m| m.tick() < tick),
+        };
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
             let start_programs = track.start_programs;
             track.channels = std::array::from_fn(|c| MidiChannel::new(start_programs[c]));
@@ -2040,6 +2133,43 @@ impl Renderer {
         let old_sounding = old.mix.channels.iter().any(|c| c.dsp.sounding());
         for (new, old) in self.mix.channels.iter_mut().zip(&mut old.mix.channels) {
             new.dsp.continue_plugin_from(&mut old.dsp);
+        }
+        // The running instrument comes with the notes the old plan had it hold. The edit may have deleted, moved or
+        // re-pitched one of them, whose NoteOff would then never come: the instrument keeps exactly the keys the new
+        // plan holds at this tick (those struck before it and not ended), and ends the rest.
+        let track_count = self.plan.tracks.len();
+        for (track_index, channel) in self.mix.channels.iter_mut().enumerate().take(track_count) {
+            let Some(map) = channel.notes else {
+                continue;
+            };
+            let mut wanted = [[0u8; 128]; 16];
+            // The events of this track, by the track index the renderer worked out for each event at build time: no
+            // string is compared on the audio thread.
+            for event in self
+                .plan
+                .midi
+                .iter()
+                .zip(&self.midi_track)
+                .take(self.next_midi)
+                .filter(|(_, owner)| usize::from(**owner) == track_index)
+                .map(|(event, _)| event)
+            {
+                let Some(note) = map.note(event) else {
+                    continue;
+                };
+                let Some(count) = wanted
+                    .get_mut(usize::from(note.channel))
+                    .and_then(|row| row.get_mut(usize::from(note.key)))
+                else {
+                    continue;
+                };
+                if note.on && note.velocity > 0 {
+                    *count = count.saturating_add(1);
+                } else {
+                    *count = count.saturating_sub(1);
+                }
+            }
+            channel.dsp.retain_notes(&wanted);
         }
         carry_compensation(
             &mut self.mix.compensation,
@@ -2345,6 +2475,12 @@ impl Renderer {
         for slot in &self.active {
             if let Some(voice) = &mut self.slots[*slot] {
                 voice.end_tick = tick;
+            }
+        }
+        // No note starts or ends from here on, so an instrument is told to let go of what it holds.
+        for channel in &mut self.mix.channels {
+            if channel.notes.is_some() {
+                channel.dsp.all_notes_off();
             }
         }
         for track in &mut self.tracks {

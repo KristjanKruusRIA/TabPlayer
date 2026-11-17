@@ -34,7 +34,7 @@ mod windows_tests {
     use tabplayer_plugin_protocol::{
         control::{ErrorCode, HostMessage, Mode},
         limits::BLOCK_FRAMES,
-        ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta},
+        ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, EventWords},
     };
     use tabplayer_test_plugin::{
         TEST_CLASS_ID, TestMode, TestState, decode_test_state, encode_test_state,
@@ -104,6 +104,7 @@ mod windows_tests {
 
     fn request(bundle: &Path, component: Vec<u8>) -> LoadRequest {
         LoadRequest {
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             bundle: bundle.to_path_buf(),
             class_id: TEST_CLASS_ID.into(),
             sample_rate: RATE,
@@ -181,7 +182,7 @@ mod windows_tests {
         let seq = link
             .with_host(|host| {
                 let seq = host.next_input();
-                assert!(host.send_input(seq, &block, &meta()));
+                assert!(host.send_input(seq, &block, &meta(), EventWords::NONE));
                 seq
             })
             .expect("the host end is free");
@@ -276,7 +277,7 @@ mod windows_tests {
     fn loaded_json(latency: u32) -> String {
         format!(
             "{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":{latency},\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\"name\":\"X\",\
-             \"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}",
+             \"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\",\"kind\":\"effect\"}},\"mono\":false}}}}",
             tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
             tabplayer_plugin_protocol::limits::BUILD_ID
         )
@@ -802,11 +803,15 @@ mod windows_tests {
             assert!(report.recv_timeout(Duration::from_millis(300)).is_err(), "asked, so not a crash");
         }
 
-        fn probe_lists_the_test_class() {
+        fn probe_lists_the_test_classes() {
             let fixture = Fixture::new();
             let classes = probe(&helper_exe(), &fixture.bundle, Duration::from_secs(60)).expect("a probe");
-            assert_eq!(classes.len(), 1);
+            // The helper lists the instrument too; it is the library that keeps only the effects for now.
+            assert_eq!(classes.len(), 2);
             assert_eq!(classes[0].class_id, TEST_CLASS_ID);
+            assert_eq!(classes[0].kind, tabplayer_plugin_protocol::control::PluginKind::Effect);
+            assert_eq!(classes[1].class_id, tabplayer_test_plugin::DRUM_CLASS_ID);
+            assert_eq!(classes[1].kind, tabplayer_plugin_protocol::control::PluginKind::Instrument);
 
             let error = probe(&helper_exe(), &fixture._dir.path().join("Missing.vst3"), Duration::from_secs(60))
                 .expect_err("no such bundle");
@@ -855,6 +860,7 @@ mod windows_tests {
         let job = HelperJob::new().unwrap();
         let helper = fake_helper(&job, "Start-Sleep 30");
         let relative = LoadRequest {
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             bundle: PathBuf::from("x.vst3"),
             class_id: TEST_CLASS_ID.into(),
             sample_rate: RATE,
@@ -999,12 +1005,13 @@ mod windows_tests {
         let job = HelperJob::new().unwrap();
         let script = format!(
             "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":0,\"class\":{{\"classId\":\"00000000000000000000000000000001\",\
-             \"name\":\"Other\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+             \"name\":\"Other\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\",\"kind\":\"effect\"}},\"mono\":false}}}}'; Start-Sleep 30",
             tabplayer_plugin_protocol::limits::PROTOCOL_VERSION,
             tabplayer_plugin_protocol::limits::BUILD_ID
         );
         let helper = fake_helper(&job, &script);
         let load = LoadRequest {
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             bundle: std::env::temp_dir().join("x.vst3"),
             class_id: TEST_CLASS_ID.into(),
             sample_rate: RATE,
@@ -1359,7 +1366,7 @@ mod windows_tests {
         let job = HelperJob::new().unwrap();
         let script = format!(
             "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"stale-build-id\",\"latency\":0,\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\
-             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\",\"kind\":\"effect\"}},\"mono\":false}}}}'; Start-Sleep 30",
             tabplayer_plugin_protocol::limits::PROTOCOL_VERSION
         );
         let helper = fake_helper(&job, &script);
@@ -1374,11 +1381,55 @@ mod windows_tests {
     }
 
     #[test]
+    fn a_loaded_class_of_the_other_kind_is_refused() {
+        use tabplayer_plugin_protocol::control::PluginKind;
+        for (asked, answered) in [
+            (PluginKind::Effect, "instrument"),
+            (PluginKind::Instrument, "effect"),
+        ] {
+            let job = HelperJob::new().unwrap();
+            let reply =
+                loaded_json(0).replace("\"kind\":\"effect\"", &format!("\"kind\":\"{answered}\""));
+            assert!(reply.contains(answered), "{reply}");
+            let helper = fake_helper(
+                &job,
+                &format!("Wait-Request; Send '{reply}'; Start-Sleep 30"),
+            );
+            let error = helper
+                .load(LoadRequest {
+                    kind: asked,
+                    ..fake_load()
+                })
+                .expect_err("a class of the other kind must be refused");
+            assert!(
+                matches!(error, HelperError::Misbehaved(_)),
+                "{asked:?} answered {answered}: {error:?}"
+            );
+            assert_eq!(error.status(), Some(PluginStatus::Unreadable));
+            assert!(helper.link().is_none(), "no link after a refused load");
+        }
+        // The same kind is accepted.
+        let job = HelperJob::new().unwrap();
+        let reply = loaded_json(0).replace("\"kind\":\"effect\"", "\"kind\":\"instrument\"");
+        let helper = fake_helper(
+            &job,
+            &format!("Wait-Request; Send '{reply}'; Start-Sleep 30"),
+        );
+        let loaded = helper
+            .load(LoadRequest {
+                kind: PluginKind::Instrument,
+                ..fake_load()
+            })
+            .expect("an instrument asked for and answered loads");
+        assert_eq!(loaded.class.kind, PluginKind::Instrument);
+    }
+
+    #[test]
     fn mismatched_protocol_version_is_refused() {
         let job = HelperJob::new().unwrap();
         let script = format!(
             "Wait-Request; Send '{{\"loaded\":{{\"protocolVersion\":{},\"buildId\":\"{}\",\"latency\":0,\"class\":{{\"classId\":\"{TEST_CLASS_ID}\",\
-             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\"}},\"mono\":false}}}}'; Start-Sleep 30",
+             \"name\":\"X\",\"vendor\":\"\",\"version\":\"\",\"subcategories\":\"\",\"kind\":\"effect\"}},\"mono\":false}}}}'; Start-Sleep 30",
             tabplayer_plugin_protocol::limits::PROTOCOL_VERSION + 99,
             tabplayer_plugin_protocol::limits::BUILD_ID
         );

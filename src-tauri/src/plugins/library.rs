@@ -19,6 +19,7 @@
 //!
 //! [`add`]: PluginLibrary::add
 use crate::plugins::helper::HelperError;
+use crate::settings::SlotKind;
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -48,10 +49,14 @@ pub const MAX_ENTRIES: usize = 256;
 pub const MAX_BUNDLE_JSON_BYTES: usize = 3200;
 /// What a class without a usable name is called, as the helper calls it.
 const UNNAMED: &str = "Unnamed plug-in";
-/// The file format version.
+/// The file format version of a library that holds only effects: what every library written before instruments was, and
+/// still is while it has no instrument.
 const FORMAT_VERSION: u32 = 1;
+/// The version of a library that holds an instrument. An older TabPlayer, which does not know the kind key, would read
+/// an instrument as an effect and offer it; it reads this version as a newer library and leaves it alone.
+const INSTRUMENT_FORMAT_VERSION: u32 = 2;
 
-/// One effect class the user can put on a track.
+/// One plug-in class the library holds. Whether the user is offered it is [`OFFERED_KINDS`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LibraryEntry {
@@ -69,6 +74,10 @@ pub struct LibraryEntry {
     /// If this class was previously located in a different bundle on this computer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub previous_bundle: Option<PathBuf>,
+    /// What the class is. Left out for an effect, so a library file from before instruments reads and writes unchanged; see
+    /// [`SlotKind`] for what else is refused (an entry that fails to read is dropped, as for any other bad field).
+    #[serde(default, skip_serializing_if = "SlotKind::is_effect")]
+    pub kind: SlotKind,
 }
 
 /// The length of `text` as JSON writes it inside its quotes.
@@ -96,6 +105,10 @@ fn valid_bundle(path: &Path) -> bool {
 }
 
 impl LibraryEntry {
+    /// Whether the app offers this class to the user ([`OFFERED_KINDS`]).
+    pub fn is_offered(&self) -> bool {
+        OFFERED_KINDS.contains(&self.kind)
+    }
     /// Whether an entry read from the library file is one the app could have written.
     fn is_valid(&self) -> bool {
         valid_class_id(&self.class_id)
@@ -106,6 +119,15 @@ impl LibraryEntry {
             // The library file is untrusted: a previous bundle passes the same checks as the bundle (review 16-6).
             && self.previous_bundle.as_deref().is_none_or(valid_bundle)
     }
+}
+
+/// The entries of `entries` that are of an offered kind.
+pub fn offered(entries: &[LibraryEntry]) -> Vec<LibraryEntry> {
+    entries
+        .iter()
+        .filter(|entry| entry.is_offered())
+        .cloned()
+        .collect()
 }
 
 /// What the library knows of a class right now.
@@ -160,7 +182,8 @@ impl std::fmt::Display for LibraryError {
             LibraryError::BadPath => {
                 f.write_str("The plug-in's location is too long or is not valid text.")
             }
-            LibraryError::NoEffects => f.write_str("This file holds no audio effect."),
+            // Also what a bundle with no hosted class at all comes to; the text is the UI's key (`plugin.error.no_effects`).
+            LibraryError::NoEffects => f.write_str("This file holds no effect or instrument."),
             LibraryError::TooMany => {
                 write!(
                     f,
@@ -234,10 +257,10 @@ fn parse(bytes: &[u8]) -> Stored {
     let Ok(head) = serde_json::from_slice::<Head>(bytes) else {
         return Stored::Damaged;
     };
-    if head.version > FORMAT_VERSION {
+    if head.version > INSTRUMENT_FORMAT_VERSION {
         return Stored::Newer;
     }
-    if head.version != FORMAT_VERSION {
+    if head.version < FORMAT_VERSION {
         return Stored::Damaged;
     }
     let Ok(file) = serde_json::from_slice::<FileIn>(bytes) else {
@@ -303,11 +326,15 @@ fn remove_temporaries(folder: &Path) {
 fn write_entries(file: &Path, entries: &[LibraryEntry]) -> Result<(), LibraryError> {
     let io = |error: io::Error| LibraryError::Io(error.to_string());
     let encode = |entries: &[LibraryEntry]| {
-        serde_json::to_vec(&FileOut {
-            version: FORMAT_VERSION,
-            entries,
-        })
-        .map_err(|error| LibraryError::Io(error.to_string()))
+        // A library with an instrument is a newer format to an older TabPlayer (see [`INSTRUMENT_FORMAT_VERSION`]); one
+        // without is written as it always was.
+        let version = if entries.iter().any(|entry| !entry.kind.is_effect()) {
+            INSTRUMENT_FORMAT_VERSION
+        } else {
+            FORMAT_VERSION
+        };
+        serde_json::to_vec(&FileOut { version, entries })
+            .map_err(|error| LibraryError::Io(error.to_string()))
     };
     let mut bytes = encode(entries)?;
     if bytes.len() > MAX_FILE_BYTES {
@@ -499,9 +526,14 @@ fn locate(picked: &Path) -> Result<Located, LibraryError> {
 
 // ---- probe results -----------------------------------------------------------------------------------------------
 
-/// The classes of a probe result as the library keeps them: cleaned with the protocol's own cleaner (the helper's too),
-/// valid, each class ID once, at most [`MAX_CLASSES`]. The helper cleans, but this result crosses a process boundary, so
-/// it is not taken on trust.
+/// The kinds of plug-in the user is offered: every kind the library keeps, effects and instruments. This is the one place
+/// that decides what the user sees ([`PluginLibrary::offered`]) and can choose (`plugin_choose`); which track may take an
+/// instrument is `plugin_choose`'s own check (a drum track only).
+const OFFERED_KINDS: &[SlotKind] = &[SlotKind::Effect, SlotKind::Instrument];
+
+/// The classes of a probe result as the library keeps them: of a hosted kind (every kind the protocol has), cleaned with the
+/// protocol's own cleaner (the helper's too), valid, each class ID once, at most [`MAX_CLASSES`]. The helper cleans, but
+/// this result crosses a process boundary, so it is not taken on trust.
 fn clean_classes(raw: Vec<ClassInfo>) -> Vec<ClassInfo> {
     let mut out: Vec<ClassInfo> = Vec::new();
     for class in raw {
@@ -515,6 +547,7 @@ fn clean_classes(raw: Vec<ClassInfo>) -> Vec<ClassInfo> {
             vendor: clean_text(&class.vendor, MAX_NAME_CHARS),
             version: clean_text(&class.version, MAX_VERSION_CHARS),
             subcategories: clean_text(&class.subcategories, MAX_SUBCATEGORIES_CHARS),
+            kind: class.kind,
         };
         if clean.validate().is_ok() && out.iter().all(|seen| seen.class_id != clean.class_id) {
             out.push(clean);
@@ -548,8 +581,14 @@ impl PluginLibrary {
         Ok(PluginLibrary { file, entries })
     }
 
+    /// Everything the library holds, instruments included.
     pub fn entries(&self) -> &[LibraryEntry] {
         &self.entries
+    }
+
+    /// What the user is offered: the entries of an offered kind ([`OFFERED_KINDS`]).
+    pub fn offered(&self) -> Vec<LibraryEntry> {
+        offered(&self.entries)
     }
 
     /// Applies `change` to the file's current entries and writes the result, when it differs. The file is read again under
@@ -617,6 +656,7 @@ impl PluginLibrary {
                 module_len,
                 module_modified,
                 previous_bundle: None,
+                kind: class.kind.into(),
             })
             .collect();
         self.commit(true, |entries| {
@@ -710,7 +750,7 @@ impl PluginLibrary {
 mod tests {
     use super::*;
     use std::cell::Cell;
-    use tabplayer_plugin_protocol::bundle::own_arch_dirs;
+    use tabplayer_plugin_protocol::{bundle::own_arch_dirs, control::PluginKind};
 
     fn class(id: char, name: &str) -> ClassInfo {
         ClassInfo {
@@ -719,6 +759,7 @@ mod tests {
             vendor: "Vendor".into(),
             version: "1.0".into(),
             subcategories: "Fx".into(),
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
         }
     }
 
@@ -729,6 +770,7 @@ mod tests {
             vendor: String::new(),
             version: String::new(),
             subcategories: "Fx".into(),
+            kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
         }
     }
 
@@ -757,6 +799,122 @@ mod tests {
         move |_| Ok(classes)
     }
 
+    fn instrument(id: char, name: &str) -> ClassInfo {
+        ClassInfo {
+            subcategories: "Instrument|Synth".into(),
+            kind: PluginKind::Instrument,
+            ..class(id, name)
+        }
+    }
+
+    #[test]
+    fn instruments_are_kept_and_offered_after_the_effects() {
+        let kept = clean_classes(vec![
+            class('A', "Amp"),
+            instrument('B', "Synth"),
+            class('C', "Cab"),
+        ]);
+        let kinds: Vec<_> = kept.iter().map(|c| (c.name.as_str(), c.kind)).collect();
+        assert_eq!(
+            kinds,
+            [
+                ("Amp", PluginKind::Effect),
+                ("Synth", PluginKind::Instrument),
+                ("Cab", PluginKind::Effect)
+            ]
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let root = bundle(dir.path(), "Mixed", b"module");
+        let mut library = PluginLibrary::open(dir.path().join("data")).unwrap();
+        let all = library
+            .add(&root, ok(vec![class('A', "Amp"), instrument('B', "Synth")]))
+            .unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].kind, SlotKind::Effect);
+        assert_eq!(all[1].kind, SlotKind::Instrument);
+        // The user is offered both, and the library holds both.
+        assert_eq!(library.entries().len(), 2);
+        let offered = library.offered();
+        assert_eq!(offered.len(), 2);
+        assert_eq!(offered[0].name, "Amp");
+        assert_eq!(offered[1].name, "Synth");
+        assert!(all[0].is_offered() && all[1].is_offered());
+    }
+
+    #[test]
+    fn a_bundle_of_only_instruments_is_added_and_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        let root = bundle(dir.path(), "Synths", b"module");
+        let mut library = PluginLibrary::open(&data).unwrap();
+        let all = library
+            .add(&root, ok(vec![instrument('D', "Only Synth")]))
+            .unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].kind, SlotKind::Instrument);
+        // The user is offered it, so adding the bundle visibly succeeds.
+        assert_eq!(library.offered(), all);
+        // It is in the file, which an older TabPlayer reads as a newer library; a slot can find it again.
+        let reopened = PluginLibrary::open(&data).unwrap();
+        assert_eq!(reopened.entries(), all.as_slice());
+        let written = std::fs::read_to_string(data.join(LIBRARY_FILE)).unwrap();
+        assert!(written.starts_with(r#"{"version":2,"#), "{written}");
+        assert!(written.contains(r#""kind":"instrument""#), "{written}");
+        assert!(matches!(
+            reopened.resolve(&"D".repeat(32)),
+            Resolved::Found(entry) if entry.kind == SlotKind::Instrument
+        ));
+        // Removing it leaves a library of the old format.
+        let mut reopened = reopened;
+        reopened.remove(&"D".repeat(32)).unwrap();
+        let written = std::fs::read_to_string(data.join(LIBRARY_FILE)).unwrap();
+        assert!(written.starts_with(r#"{"version":1,"#), "{written}");
+        // A bundle with no class the helper can host has nothing to add.
+        let other = bundle(dir.path(), "Nothing", b"module2");
+        assert!(matches!(
+            reopened.add(&other, ok(vec![])),
+            Err(LibraryError::NoEffects)
+        ));
+    }
+
+    #[test]
+    fn an_old_library_file_reads_unchanged_and_an_effect_writes_no_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = dir.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let bundle_path = canon(&bundle(dir.path(), "Old", b"module"));
+        let (len, modified) = stat(&bundle_binary(&bundle_path).unwrap()).unwrap();
+        let old = serde_json::json!({"version": 1, "entries": [{
+            "classId": "A".repeat(32), "name": "Amp", "vendor": "V", "version": "1",
+            "bundle": bundle_path, "moduleLen": len, "moduleModified": modified
+        }]});
+        let bytes = serde_json::to_vec(&old).unwrap();
+        std::fs::write(data.join(LIBRARY_FILE), &bytes).unwrap();
+        let library = PluginLibrary::open(&data).unwrap();
+        assert_eq!(library.entries().len(), 1);
+        assert_eq!(library.entries()[0].kind, SlotKind::Effect);
+        assert_eq!(library.offered().len(), 1);
+        // An effect entry serializes with no kind key, so the old file's keys are all there is.
+        let value = serde_json::to_value(&library.entries()[0]).unwrap();
+        assert!(value.get("kind").is_none(), "{value}");
+        // An instrument entry spells it, and an explicit effect, null or unknown kind drops the entry.
+        let mut synth = library.entries()[0].clone();
+        synth.kind = SlotKind::Instrument;
+        assert_eq!(serde_json::to_value(&synth).unwrap()["kind"], "instrument");
+        for bad in [
+            serde_json::json!("effect"),
+            serde_json::json!(null),
+            serde_json::json!("drum"),
+        ] {
+            let mut entry = old["entries"][0].clone();
+            entry["kind"] = bad;
+            let file = serde_json::json!({"version": 2, "entries": [entry]});
+            assert_eq!(
+                parse(&serde_json::to_vec(&file).unwrap()),
+                Stored::Entries(vec![])
+            );
+        }
+    }
     #[test]
     fn resolves_inner_module_to_bundle_root() {
         let dir = tempfile::tempdir().unwrap();
@@ -908,6 +1066,7 @@ mod tests {
             }
             path.push_str("a.vst3");
             let longest = LibraryEntry {
+                kind: SlotKind::Effect,
                 class_id: "F".repeat(32),
                 name: "\u{1F600}".repeat(MAX_NAME_CHARS),
                 vendor: "\"".repeat(MAX_NAME_CHARS).replace('"', "\u{1F600}"),
@@ -1237,6 +1396,7 @@ mod tests {
                 vendor: "\u{202E}\u{2066}".into(),
                 version: "v\u{0}1 ".repeat(40),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             },
             ClassInfo {
                 name: "\u{1}\u{202E}".into(),
@@ -1323,6 +1483,7 @@ mod tests {
         }
         path.push_str("a.vst3");
         LibraryEntry {
+            kind: SlotKind::Effect,
             class_id: class.to_string().repeat(32),
             name: "\u{1F600}".repeat(MAX_NAME_CHARS),
             vendor: "\u{1F600}".repeat(MAX_NAME_CHARS),
@@ -1337,6 +1498,7 @@ mod tests {
     #[test]
     fn previous_bundle_is_checked_as_untrusted_file_data() {
         let mut entry = LibraryEntry {
+            kind: SlotKind::Effect,
             class_id: "A".repeat(32),
             name: "Amp".into(),
             vendor: "Vendor".into(),
@@ -1554,7 +1716,7 @@ mod tests {
         std::fs::create_dir_all(&data).unwrap();
         let file = data.join(LIBRARY_FILE);
         let root = bundle(dir.path(), "Amp", b"x");
-        let newer = br#"{"version":2,"entries":[{"somethingNew":true}],"extra":1}"#;
+        let newer = br#"{"version":3,"entries":[{"somethingNew":true}],"extra":1}"#;
         // Opened before the newer version wrote it.
         let mut library = PluginLibrary::open(&data).unwrap();
         std::fs::write(&file, newer).unwrap();

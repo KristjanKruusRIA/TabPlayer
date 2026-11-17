@@ -246,6 +246,7 @@ mod windows_tests {
 
     fn test_slot(class_id: &str, state_id: &str) -> PluginSlot {
         PluginSlot {
+            kind: tabplayer_lib::settings::SlotKind::Effect,
             active: true,
             format: PluginFormat::Vst3,
             class_id: class_id.to_string(),
@@ -328,6 +329,7 @@ mod windows_tests {
 
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -403,6 +405,7 @@ mod windows_tests {
             // The dry track t2 starts with t1, so the mix's onset holds even with t1 misplaced. The plug-in track's own
             // stem must match the same track rendered without the plug-in, frame for frame.
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot: test_slot(TEST_CLASS_ID, &state_id),
                 state: encode_state(&comp, &[]).unwrap().into(),
@@ -451,6 +454,7 @@ mod windows_tests {
 
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -526,6 +530,7 @@ mod windows_tests {
             let expected = render_all_mix(&mut baseline);
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: encode_state(&comp, &[]).unwrap().into(),
@@ -573,6 +578,7 @@ mod windows_tests {
 
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -636,6 +642,7 @@ mod windows_tests {
             let render_once = || {
                 let slot = test_slot(TEST_CLASS_ID, &state_id);
                 let req = SlotRequest {
+                    percussion: true,
                     track_id: "t1".into(),
                     slot,
                     state: state_bytes.clone(),
@@ -688,6 +695,7 @@ mod windows_tests {
 
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -730,6 +738,7 @@ mod windows_tests {
             let rig = Rig::new();
             let slot = test_slot("missing-class-id", "state");
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: Arc::new([]),
@@ -773,6 +782,7 @@ mod windows_tests {
             let state_id = "unconsented".to_string();
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: Arc::new([]),
@@ -829,6 +839,7 @@ mod windows_tests {
 
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -870,6 +881,7 @@ mod windows_tests {
             let ids = ["t1", "t2"];
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: encode_state(&comp, &[]).unwrap().into(),
@@ -919,6 +931,7 @@ mod windows_tests {
 
             let slot = test_slot(TEST_CLASS_ID, &state_id);
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot: slot.clone(),
                 state: state_bytes.clone(),

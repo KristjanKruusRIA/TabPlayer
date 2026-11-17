@@ -80,6 +80,18 @@ pub struct Rect {
     pub height: u32,
 }
 
+/// What a plug-in does with the stream: an effect processes the audio it is sent, an instrument makes audio from the
+/// events it is sent. The field that carries it is required on the wire (no serde default): the app and the helper are
+/// built together and refuse each other on [`PROTOCOL_VERSION`] and the build ID, so a peer that omits it is a peer from
+/// another protocol, and is refused as an unknown message rather than guessed to be an effect.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PluginKind {
+    #[default]
+    Effect,
+    Instrument,
+}
+
 /// A plug-in class a bundle offers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -90,6 +102,7 @@ pub struct ClassInfo {
     pub vendor: String,
     pub version: String,
     pub subcategories: String,
+    pub kind: PluginKind,
 }
 
 impl ClassInfo {
@@ -157,6 +170,7 @@ pub enum HostMessage {
         class_id: String,
         sample_rate: u32,
         mode: Mode,
+        kind: PluginKind,
         /// The duplicated handle of the ring's file mapping, as it is valid inside the helper.
         ring: u64,
         /// The duplicated auto-reset events: the app signals `input_event` after each published block and the helper
@@ -539,6 +553,7 @@ mod tests {
             vendor: "Vendor".into(),
             version: "1.2.3".into(),
             subcategories: "Fx|Distortion".into(),
+            kind: PluginKind::Effect,
         }
     }
 
@@ -552,6 +567,7 @@ mod tests {
                 class_id: CLASS.into(),
                 sample_rate: 48_000,
                 mode: Mode::Realtime,
+                kind: PluginKind::Instrument,
                 ring: 0x1c4,
                 input_event: 0x1c8,
                 output_event: u64::MAX >> 1,
@@ -737,7 +753,7 @@ mod tests {
         }
         let class_json = |extra: &str| {
             format!(
-                r#"{{"loaded":{{"protocolVersion":{PROTOCOL_VERSION},"buildId":"{BUILD_ID}","latency":0,"mono":false,"class":{{"classId":"{CLASS}","name":"A","vendor":"","version":"","subcategories":""{extra}}}}}}}"#
+                r#"{{"loaded":{{"protocolVersion":{PROTOCOL_VERSION},"buildId":"{BUILD_ID}","latency":0,"mono":false,"class":{{"classId":"{CLASS}","name":"A","vendor":"","version":"","subcategories":"","kind":"effect"{extra}}}}}}}"#
             )
         };
         assert!(serde_json::from_str::<HelperMessage>(&class_json("")).is_ok());
@@ -1104,5 +1120,67 @@ mod tests {
             *build_id = "mismatched-build-id".into();
         }
         assert!(loaded.validate().is_err());
+    }
+
+    #[test]
+    fn plugin_kind_serializes_as_camel_case_and_refuses_unknown_values() {
+        assert_eq!(
+            serde_json::to_string(&PluginKind::Effect).unwrap(),
+            "\"effect\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PluginKind::Instrument).unwrap(),
+            "\"instrument\""
+        );
+        assert_eq!(
+            serde_json::from_str::<PluginKind>("\"instrument\"").unwrap(),
+            PluginKind::Instrument
+        );
+        assert_eq!(PluginKind::default(), PluginKind::Effect);
+        for bad in ["\"Effect\"", "\"synth\"", "\"\"", "1", "null"] {
+            assert!(serde_json::from_str::<PluginKind>(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_kind_field_is_required_on_a_class_and_on_load() {
+        let with = format!(
+            r#"{{"classId":"{CLASS}","name":"A","vendor":"","version":"","subcategories":"","kind":"instrument"}}"#
+        );
+        let class: ClassInfo = serde_json::from_str(&with).unwrap();
+        assert_eq!(class.kind, PluginKind::Instrument);
+        let without = with.replace(r#","kind":"instrument""#, "");
+        assert!(serde_json::from_str::<ClassInfo>(&without).is_err());
+        let bad = with.replace("instrument", "drum");
+        assert!(serde_json::from_str::<ClassInfo>(&bad).is_err());
+
+        let load = serde_json::to_string(&host_messages()[1]).unwrap();
+        assert!(load.contains(r#""kind":"instrument""#), "{load}");
+        let stripped = load.replace(r#""kind":"instrument","#, "");
+        assert_ne!(stripped, load);
+        assert!(serde_json::from_str::<HostMessage>(&stripped).is_err());
+        assert_eq!(
+            serde_json::from_str::<HostMessage>(&load).unwrap(),
+            host_messages()[1]
+        );
+    }
+
+    #[test]
+    fn a_version_1_peer_is_refused() {
+        assert_eq!(PROTOCOL_VERSION, 2);
+        let probed = HelperMessage::Probed {
+            protocol_version: 1,
+            build_id: BUILD_ID.into(),
+            classes: vec![class()],
+        };
+        assert!(probed.validate().unwrap_err().contains("protocol version"));
+        let loaded = HelperMessage::Loaded {
+            protocol_version: 1,
+            build_id: BUILD_ID.into(),
+            latency: 0,
+            class: class(),
+            mono: false,
+        };
+        assert!(loaded.validate().unwrap_err().contains("protocol version"));
     }
 }

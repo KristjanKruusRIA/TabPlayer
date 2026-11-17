@@ -98,7 +98,11 @@ impl FakeHelper {
                 input.wait(Duration::from_millis(2));
                 while !c.stop.load(Ordering::Relaxed) {
                     let seq = ring.next_output();
-                    match ring.read_input(seq, &mut block) {
+                    match ring.read_input(
+                        seq,
+                        &mut block,
+                        &mut [0; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK],
+                    ) {
                         InputRead::Ready(info) => {
                             if epoch != Some(info.epoch) {
                                 line.iter_mut().for_each(|f| *f = [0.0; 2]);

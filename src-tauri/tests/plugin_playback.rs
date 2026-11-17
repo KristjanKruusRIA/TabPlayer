@@ -183,6 +183,7 @@ mod windows_tests {
 
     fn test_slot(class_id: &str, state_id: &str) -> PluginSlot {
         PluginSlot {
+            kind: tabplayer_lib::settings::SlotKind::Effect,
             active: true,
             format: PluginFormat::Vst3,
             class_id: class_id.to_string(),
@@ -222,6 +223,7 @@ mod windows_tests {
             );
 
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -285,6 +287,7 @@ mod windows_tests {
             );
 
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -358,6 +361,7 @@ mod windows_tests {
             );
 
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -433,6 +437,7 @@ mod windows_tests {
                 },
             );
             let requests = [SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -513,6 +518,7 @@ mod windows_tests {
                 .unwrap();
             let corrupt_slot = test_slot(TEST_CLASS_ID, &corrupt_state_id);
             let req_corrupt = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot: corrupt_slot,
                 state: Arc::new([0xDE, 0xAD, 0xBE, 0xEF]),
@@ -536,6 +542,7 @@ mod windows_tests {
             });
             let valid_container: Arc<[u8]> = encode_state(&comp, &[]).unwrap().into();
             let req_reject = SlotRequest {
+                percussion: true,
                 track_id: "t2".into(),
                 slot: reject_slot,
                 state: valid_container,
@@ -574,6 +581,7 @@ mod windows_tests {
             );
 
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -618,6 +626,7 @@ mod windows_tests {
             let settings_before = settings.clone();
 
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -659,6 +668,7 @@ mod windows_tests {
             );
 
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: state_bytes,
@@ -722,6 +732,7 @@ mod windows_tests {
             );
 
             let req_1 = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot: slot_1,
                 state: state_bytes_1,
@@ -747,6 +758,7 @@ mod windows_tests {
             );
 
             let req_2 = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot: slot_2,
                 state: state_bytes_2,
@@ -787,6 +799,7 @@ mod windows_tests {
                 },
             );
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot,
                 state: encode_state(&comp, &[]).unwrap().into(),
@@ -833,6 +846,7 @@ mod windows_tests {
                 .grant_consent("doc1", &[(TEST_CLASS_ID.to_string(), state_id.clone())])
                 .unwrap();
             let req = SlotRequest {
+                percussion: true,
                 track_id: "t1".into(),
                 slot: test_slot(TEST_CLASS_ID, &state_id),
                 state: encode_state(&comp, &[]).unwrap().into(),

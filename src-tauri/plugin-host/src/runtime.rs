@@ -361,6 +361,7 @@ pub fn main() -> i32 {
             class_id,
             sample_rate,
             mode,
+            kind,
             ring,
             input_event,
             output_event,
@@ -375,6 +376,7 @@ pub fn main() -> i32 {
                 class_id,
                 sample_rate,
                 mode,
+                kind,
                 ring,
                 input_event,
                 output_event,
@@ -412,6 +414,7 @@ struct Params {
     class_id: String,
     sample_rate: u32,
     mode: tabplayer_plugin_protocol::control::Mode,
+    kind: tabplayer_plugin_protocol::control::PluginKind,
     ring: u64,
     input_event: u64,
     output_event: u64,
@@ -447,6 +450,7 @@ fn run_session(out: &Arc<ControlOut>, input: File, params: Params) -> i32 {
             &params.class_id,
             params.sample_rate,
             params.mode,
+            params.kind,
         )
     }) {
         Ok(core) => core,
@@ -479,6 +483,7 @@ fn run_session(out: &Arc<ControlOut>, input: File, params: Params) -> i32 {
         output: Box::new(output_event),
         gate: gate.clone(),
         stop: stop.clone(),
+        kind: core.class().kind,
         idle_timeout: audio::IDLE_TIMEOUT,
         pause_beat_limit: PAUSE_BEAT_LIMIT,
     };

@@ -741,6 +741,7 @@ mod tests {
             _exe: &std::path::Path,
             _bundle: &std::path::Path,
             _class_id: &str,
+            _kind: tabplayer_plugin_protocol::control::PluginKind,
             _rate: u32,
             _state: crate::plugins::helper::StateParts,
             _supervisor: &crate::plugins::supervisor::Supervisor,
@@ -757,6 +758,7 @@ mod tests {
             _exe: &std::path::Path,
             _bundle: &std::path::Path,
             _class_id: &str,
+            _kind: tabplayer_plugin_protocol::control::PluginKind,
             _rate: u32,
             _state: crate::plugins::helper::StateParts,
         ) -> Result<
@@ -804,8 +806,10 @@ mod tests {
         };
 
         let req = SlotRequest {
+            percussion: true,
             track_id: "t1".into(),
             slot: PluginSlot {
+                kind: crate::settings::SlotKind::Effect,
                 active: true,
                 format: PluginFormat::Vst3,
                 class_id: "missing-class-id".into(),
@@ -875,6 +879,7 @@ mod tests {
                 vendor: "Vendor".into(),
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             }])
         })
         .unwrap();
@@ -886,6 +891,7 @@ mod tests {
                 _exe: &std::path::Path,
                 _bundle: &std::path::Path,
                 _class_id: &str,
+                _kind: tabplayer_plugin_protocol::control::PluginKind,
                 _rate: u32,
                 _state: StateParts,
                 _supervisor: &Supervisor,
@@ -900,6 +906,7 @@ mod tests {
                 _exe: &std::path::Path,
                 _bundle: &std::path::Path,
                 _class_id: &str,
+                _kind: tabplayer_plugin_protocol::control::PluginKind,
                 _rate: u32,
                 _state: StateParts,
             ) -> Result<Arc<dyn HelperSession>, HelperError> {
@@ -934,8 +941,10 @@ mod tests {
         );
 
         let req = SlotRequest {
+            percussion: true,
             track_id: "t1".into(),
             slot: PluginSlot {
+                kind: crate::settings::SlotKind::Effect,
                 active: true,
                 format: PluginFormat::Vst3,
                 class_id: class_id.clone(),
@@ -1017,7 +1026,14 @@ mod tests {
             let mut seq = 0;
             while !stop_clone.load(Ordering::Relaxed) {
                 thread_input_ev.wait(Duration::from_millis(2));
-                while let Some(input) = helper.read_input(seq, &mut block).block() {
+                while let Some(input) = helper
+                    .read_input(
+                        seq,
+                        &mut block,
+                        &mut [0; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK],
+                    )
+                    .block()
+                {
                     helper.publish_output(seq, input.epoch, &block, &input.meta);
                     output_ev.signal();
                     seq = seq.wrapping_add(1);
@@ -1196,7 +1212,14 @@ mod tests {
             let mut seq = 0;
             while !stop_clone.load(Ordering::Relaxed) {
                 thread_input_ev.wait(Duration::from_millis(2));
-                while let Some(input) = helper.read_input(seq, &mut block).block() {
+                while let Some(input) = helper
+                    .read_input(
+                        seq,
+                        &mut block,
+                        &mut [0; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK],
+                    )
+                    .block()
+                {
                     if epoch != Some(input.epoch) {
                         line.iter_mut().for_each(|f| *f = [0.0; 2]);
                         epoch = Some(input.epoch);

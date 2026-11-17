@@ -7,6 +7,7 @@ pub mod device;
 #[cfg(test)]
 mod drum_kit_tests;
 pub mod dsp;
+pub mod instrument;
 pub mod ir_convolver;
 pub mod kit_processing;
 pub mod line_in;

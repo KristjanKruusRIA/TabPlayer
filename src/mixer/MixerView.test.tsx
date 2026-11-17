@@ -575,3 +575,16 @@ it('drops a kit wheel turn when another track is selected before it is committed
     expect(kitPlayer.setDrumElement).not.toHaveBeenCalled();
   } finally { vi.useRealTimers(); }
 });
+
+it('says under the kit mix that it applies to the built-in kit when the track holds an instrument plug-in',()=>{
+  const withDrums=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0}).score;
+  const {player}=livePlayer(withDrums);
+  const kitPlayer={...player,mix:vi.fn(()=>({mute:false,solo:false,volume:1,pan:0})),setDrumElement:vi.fn(async()=>{}),previewDrumElement:vi.fn(async()=>{})};
+  const note='The kit and its mix apply to the built-in kit, which plays only when the plug-in is unavailable.';
+  const slot={format:'vst3' as const,classId:'B'.repeat(32),name:'Big Drums',vendor:'',active:true,inputDb:0,outputDb:0,state:'s'.repeat(64)};
+  const id=trackIdentity(withDrums.tracks[1]);
+  const view=render(<MixerView {...props(withDrums,{[id]:{...soundPreset('gm'),plugin:slot}})} selected={1} player={kitPlayer}/>);
+  expect(screen.queryByText(note)).not.toBeInTheDocument();
+  view.rerender(<MixerView {...props(withDrums,{[id]:{...soundPreset('gm'),plugin:{...slot,kind:'instrument'}}})} selected={1} player={kitPlayer}/>);
+  expect(screen.getByText(note)).toBeInTheDocument();
+});

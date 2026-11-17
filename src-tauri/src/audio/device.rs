@@ -1093,12 +1093,13 @@ impl CallbackTransport {
         }
         renderer.set_metronome_settings(accepted.metronome);
         if preserve && generation == self.generation {
-            // An edit while playing: the new renderer carries on where the old one is. With a plug-in it keeps the
-            // old compensation lines streaming (a wrap, and the lines handed over); with none it is the plain seek
-            // it always was.
-            renderer.wrap_to_tick(self.tick);
-            if let Some(old) = self.renderer.as_mut() {
-                renderer.continue_from(old);
+            // An edit while playing: the new renderer carries on where the old one is. It starts after the last tick
+            // the old one dispatched, so a note or MIDI event in the gap after that frame is struck once, here. A
+            // built-in or port NoteOff falling in the gap is re-struck at the seek and released one frame later. With a
+            // plug-in the old compensation lines keep streaming (a wrap, and the lines handed over).
+            match self.renderer.as_mut() {
+                Some(old) => renderer.hand_over_from(self.tick, old),
+                None => renderer.wrap_to_tick(self.tick),
             }
             // The renderer sounds the key shift its document carries; the echo says the same from here on.
             self.practice.tonality = practice.tonality;
@@ -2555,13 +2556,21 @@ impl AudioService {
             .map(|document| document.plan.generation)
     }
     /// Track IDs of the prepared document in track order.
-    pub fn prepared_track_ids(&self) -> Option<Vec<String>> {
+    /// The prepared plan's tracks, each with whether it is a percussion track.
+    pub fn prepared_tracks(&self) -> Option<Vec<(String, bool)>> {
         self.control
             .lock()
             .unwrap()
             .document
             .as_ref()
-            .map(|document| document.plan.tracks.iter().map(|t| t.id.clone()).collect())
+            .map(|document| {
+                document
+                    .plan
+                    .tracks
+                    .iter()
+                    .map(|t| (t.id.clone(), t.percussion))
+                    .collect()
+            })
     }
     pub fn prepare(
         &self,
@@ -4163,6 +4172,7 @@ mod reference_tests {
                 input_db: 0.0,
                 output_db: 0.0,
                 shared: Arc::new(crate::plugins::bridge::InsertShared::default()),
+                kind: crate::settings::SlotKind::Effect,
             }),
         )]
     }

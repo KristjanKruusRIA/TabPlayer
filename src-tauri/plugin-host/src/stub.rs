@@ -40,7 +40,7 @@ pub fn main() -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tabplayer_plugin_protocol::control::Mode;
+    use tabplayer_plugin_protocol::control::{Mode, PluginKind};
 
     #[test]
     fn every_request_gets_unsupported_platform_until_the_pipe_closes() {
@@ -54,6 +54,7 @@ mod tests {
                 class_id: "0123456789ABCDEF0123456789ABCDEF".into(),
                 sample_rate: 48_000,
                 mode: Mode::Realtime,
+                kind: PluginKind::Effect,
                 ring: 1,
                 input_event: 2,
                 output_event: 3,

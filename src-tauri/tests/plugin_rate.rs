@@ -48,6 +48,7 @@ fn insert_plan(ring_rate: u32, latency: u32) -> InsertPlan {
         input_db: 0.0,
         output_db: 0.0,
         shared: Arc::new(InsertShared::default()),
+        kind: tabplayer_lib::settings::SlotKind::Effect,
     }
 }
 

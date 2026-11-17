@@ -123,9 +123,20 @@ export const PLUGIN_TRIM_DB=12;
 // The rule of `tabplayer-plugin-protocol::validate::valid_text`, which `tests/plugin-slot-protocol.json` holds both sides to: XML-safe, no control character
 // (Rust's `char::is_control`: C0, DEL and C1) and no bidi control, equal to its own trim, and U+0085 and U+FEFF refused at either end because Rust's trim and JavaScript's differ on exactly those two.
 const pluginText=(text:unknown,allowEmpty:boolean):boolean=>typeof text==='string'&&(allowEmpty||text.length>0)&&text===text.trim()&&!/^[\u0085\uFEFF]|[\u0085\uFEFF]$/.test(text)&&[...text].length<=MAX_PLUGIN_TEXT_LENGTH&&irText(text)&&!/[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/.test(text);
+/** A plug-in slot as the document stores it: an effect's `kind` is left out, never written as `'effect'`, so choosing the current value records nothing and an effect slot is byte-identical to one from before instruments. */
+export function normalizePluginSlot<T extends object>(slot:T):T {
+  if((slot as {kind?:unknown}).kind!=='effect')return slot;
+  const {kind:_effect,...rest}=slot as T&{kind?:unknown};
+  return rest as T;
+}
 /** Why a plug-in slot cannot be applied, or null. It accepts what the native `PluginSlot::validate` accepts and refuses the rest. */
 export function pluginSlotProblem(value:unknown):string|null {
-  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join()!=='active,classId,format,inputDb,name,outputDb,state,vendor')return 'Invalid plug-in.';
+  if(!value||typeof value!=='object'||Array.isArray(value))return 'Invalid plug-in.';
+  // `kind` is the one optional key, and only an instrument has it: the native player refuses `'effect'` written out, `null` and any other value.
+
+  const keys=Object.keys(value).filter(key=>key!=='kind').sort().join();
+  if(keys!=='active,classId,format,inputDb,name,outputDb,state,vendor')return 'Invalid plug-in.';
+  if(Object.hasOwn(value,'kind')&&(value as {kind?:unknown}).kind!=='instrument')return 'Invalid plug-in.';
   const slot=value as Record<string,unknown>;
   if(slot.format!=='vst3')return 'Invalid plug-in.';
   if(typeof slot.active!=='boolean')return 'Invalid plug-in.';

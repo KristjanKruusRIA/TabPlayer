@@ -194,6 +194,30 @@ describe('PluginSlotPanel', () => {
     });
   });
 
+  it('choosing a class writes no kind for an effect and the kind for an instrument', async () => {
+    const instrumentEntry: PluginLibraryEntry = { ...mockEntry, classId: 'B'.repeat(32), name: 'Synth', kind: 'instrument' };
+    const answers: Record<string, PluginSlot> = {
+      [mockEntry.classId]: { ...mockSlot, kind: 'effect' } as unknown as PluginSlot,
+      [instrumentEntry.classId]: { ...mockSlot, classId: instrumentEntry.classId, name: 'Synth', kind: 'instrument' },
+    };
+    invokeHandler = async (command: string, args: any) => {
+      if (command === 'plugin_library_list') return [mockEntry, instrumentEntry];
+      if (command === 'plugin_choose') return { slot: answers[args.classId], assetToken: 'token' };
+      return null;
+    };
+    const onChange = vi.fn();
+    render(<PluginSlotPanel trackId="track-1" slot={undefined} percussion onChange={onChange} />);
+    await waitFor(() => expect(screen.getByRole('option', { name: /Super Amp/i })).toBeInTheDocument());
+    const select = screen.getByLabelText(/plug-in/i);
+    fireEvent.change(select, { target: { value: mockEntry.classId } });
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(onChange.mock.calls[0][0]).toEqual(mockSlot);
+    expect('kind' in onChange.mock.calls[0][0]).toBe(false);
+    fireEvent.change(select, { target: { value: instrumentEntry.classId } });
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(2));
+    expect(onChange.mock.calls[1][0].kind).toBe('instrument');
+  });
+
   it('choosing the current plug-in records nothing', async () => {
     const onChange = vi.fn();
     render(<PluginSlotPanel trackId="track-1" slot={mockSlot} onChange={onChange} />);
@@ -433,6 +457,22 @@ describe('Sound editing preserves plug-in', () => {
         plugin: mockSlot,
       }),
     });
+  });
+
+  it('applying a preset or a factory sound keeps an instrument slot with its kind', async () => {
+    const onEdit = vi.fn();
+    const instrumentSlot: PluginSlot = { ...mockSlot, kind: 'instrument' };
+    const { result } = renderHook(() =>
+      useSoundEditing({ trackId: 'track-1', sound: { ...soundPreset('lead'), plugin: instrumentSlot }, onEdit })
+    );
+    await act(async () => {
+      await result.current.applyPreset('clean');
+    });
+    expect(onEdit.mock.lastCall![0].sound.plugin).toEqual(instrumentSlot);
+    await act(async () => {
+      result.current.applyFactoryId('acoustic-strum');
+    });
+    expect(onEdit.mock.lastCall![0].sound.plugin).toEqual(instrumentSlot);
   });
 
   it('copySound strips plug-in across documents or clipboard carries only tone', () => {

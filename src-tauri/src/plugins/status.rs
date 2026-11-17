@@ -33,6 +33,8 @@ pub enum PluginStatus {
     TooMany,
     /// The helper program is not where the app expects it.
     HostMissing,
+    /// An instrument plug-in on a track that is not a drum track: it plays drum notes only, so the track's own sound plays.
+    InstrumentNeedsDrums,
 }
 
 #[cfg(test)]
@@ -56,6 +58,7 @@ mod tests {
             (PluginStatus::NonFinite, "nonFinite"),
             (PluginStatus::TooMany, "tooMany"),
             (PluginStatus::HostMissing, "hostMissing"),
+            (PluginStatus::InstrumentNeedsDrums, "instrumentNeedsDrums"),
         ];
         for (status, text) in all {
             assert_eq!(

@@ -14,6 +14,10 @@ use super::{
     IConnectionPointTrait, IEditControllerTrait, IPluginBaseTrait, MAX_BUS_CHANNELS, MAX_BUSES,
     MAX_PARAMS, PARAM_QUEUE_CAP, Transport, Vst3Error, ok, sb, sv,
 };
+use tabplayer_plugin_protocol::event::MidiEvent;
+
+// TabPlayer: one block never hands the plug-in more events than its list holds (see `notes::NoteGuard`).
+const _: () = assert!(crate::notes::MAX_BLOCK_EVENTS <= EVENT_CAP);
 
 // ---- instances -----------------------------------------------------------------------------
 
@@ -21,6 +25,16 @@ use super::{
 #[derive(Debug, Clone)]
 pub(crate) struct RawParam {
     pub id: u32,
+}
+
+/// The pointer `setBusArrangements` takes for a list of arrangements: null for none (an instrument with no audio input),
+/// which is what the VST3 SDK's own hosts pass with a count of zero.
+fn arrangement_ptr(list: &mut [sv::SpeakerArrangement]) -> *mut sv::SpeakerArrangement {
+    if list.is_empty() {
+        std::ptr::null_mut()
+    } else {
+        list.as_mut_ptr()
+    }
 }
 
 /// The audio bus layout chosen by [`Instance::configure`].
@@ -63,6 +77,51 @@ pub(super) fn apply_transport(c: &mut sv::ProcessContext, t: &Transport) {
     c.projectTimeSamples = t.samples;
     c.projectTimeMusic = t.quarters;
     c.barPositionMusic = t.bar_start;
+}
+
+/// The VST3 event for a note event, or `None` for any other kind (the guard never lets one through). Bus 0, no note ID
+/// (-1: the plug-in pairs a NoteOff with its NoteOn by channel and pitch), velocity as a fraction of 127, no tuning, and
+/// a length of 0 (the NoteOff ends the note).
+fn vst_event(event: &MidiEvent) -> Option<sv::Event> {
+    // SAFETY: `Event` is plain data (numbers and a union of plain structs); all-zero is valid.
+    let mut out: sv::Event = unsafe { std::mem::zeroed() };
+    out.busIndex = 0;
+    match *event {
+        MidiEvent::NoteOn {
+            offset,
+            channel,
+            key,
+            velocity,
+        } => {
+            out.sampleOffset = i32::from(offset);
+            out.r#type = sv::Event_::EventTypes_::kNoteOnEvent as u16;
+            out.__field0.noteOn = sv::NoteOnEvent {
+                channel: i16::from(channel),
+                pitch: i16::from(key),
+                tuning: 0.0,
+                velocity: f32::from(velocity) / 127.0,
+                length: 0,
+                noteId: -1,
+            };
+        }
+        MidiEvent::NoteOff {
+            offset,
+            channel,
+            key,
+        } => {
+            out.sampleOffset = i32::from(offset);
+            out.r#type = sv::Event_::EventTypes_::kNoteOffEvent as u16;
+            out.__field0.noteOff = sv::NoteOffEvent {
+                channel: i16::from(channel),
+                pitch: i16::from(key),
+                velocity: 0.0,
+                noteId: -1,
+                tuning: 0.0,
+            };
+        }
+        MidiEvent::Controller { .. } | MidiEvent::AllNotesOff { .. } => return None,
+    }
+    Some(out)
 }
 
 /// A live plugin on the main thread: component + edit controller + the host objects. The processor side is
@@ -315,8 +374,16 @@ impl Instance {
                 *a = main;
             }
             // SAFETY: valid processor; the arrays hold exactly `nin`/`nout` arrangements and
-            // outlive the call.
-            if ok(unsafe { p.setBusArrangements(ins.as_mut_ptr(), nin, outs.as_mut_ptr(), nout) }) {
+            // outlive the call. A direction with no bus gets a null pointer and a count of zero, not the dangling
+            // pointer of an empty vector.
+            if ok(unsafe {
+                p.setBusArrangements(
+                    arrangement_ptr(&mut ins),
+                    nin,
+                    arrangement_ptr(&mut outs),
+                    nout,
+                )
+            }) {
                 tried_ok = true;
                 break;
             }
@@ -399,6 +466,7 @@ impl Instance {
         sample_rate: f64,
         max_frames: usize,
         mono: bool,
+        instrument: bool,
     ) -> Result<AudioPart, Vst3Error> {
         let processor = self
             .processor
@@ -420,6 +488,7 @@ impl Instance {
             max_frames,
             processing: false,
             mono,
+            instrument,
             continuous: 0,
             host: self.host.clone(),
         })
@@ -441,6 +510,8 @@ pub(crate) struct AudioPart {
     processing: bool,
     /// The main bus is mono: the input is downmixed and the output duplicated.
     mono: bool,
+    /// The plugin makes its sound from the events: its audio inputs (it may have none) are fed silence.
+    instrument: bool,
     /// Samples processed since the part was made, never reset by a seek (`continousTimeSamples`).
     continuous: i64,
     host: ComWrapper<HostContext>,
@@ -467,13 +538,15 @@ impl AudioPart {
     /// Runs one `process` call over `input.len()` frames (at most the configured maximum). The output is silence when the
     /// call fails.
     ///
-    /// Parameter edits the main thread queued become points of this block, in order. Never allocates (the errors are
-    /// static strings) and never takes a lock.
+    /// Parameter edits the main thread queued become points of this block, in order. `events` (note events, for an
+    /// instrument) become the block's input events, at their offsets, up to the list's capacity. Never allocates (the
+    /// errors are static strings) and never takes a lock.
     pub fn process(
         &mut self,
         input: &[[f32; 2]],
         output: &mut [[f32; 2]],
         transport: &Transport,
+        events: &[MidiEvent],
     ) -> Result<(), &'static str> {
         let frames = input.len();
         let silence = |output: &mut [[f32; 2]]| output.iter_mut().for_each(|f| *f = [0.0; 2]);
@@ -496,10 +569,34 @@ impl AudioPart {
             self.in_params.add_point(id, value, last_offset);
         }
         self.out_params.clear();
-        self.in_events.with(Vec::clear);
+        // TabPlayer: the events are pushed inside the list's preallocated capacity, so this never allocates. If the list
+        // is busy it still holds the previous block's events, which must not be played again, and this block's cannot be
+        // delivered: the block is not processed, and the caller hears that it failed.
+        let delivered = self.in_events.with(|list| {
+            list.clear();
+            for event in events {
+                if list.len() >= EVENT_CAP {
+                    break;
+                }
+                if let Some(event) = vst_event(event) {
+                    list.push(event);
+                }
+            }
+        });
+        if delivered.is_none() {
+            silence(output);
+            return Err("the event list was busy");
+        }
         self.out_events.with(Vec::clear);
         // The main buses carry the signal; aux buses stay silent (their buffers are zeroed once and never written).
-        if let Some(left) = self.inputs.channel_mut(0, 0) {
+        if self.instrument {
+            // An instrument makes its own sound: whatever audio inputs it has are silence.
+            for channel in 0..self.inputs.channels(0) {
+                if let Some(buffer) = self.inputs.channel_mut(0, channel) {
+                    buffer.fill(0.0);
+                }
+            }
+        } else if let Some(left) = self.inputs.channel_mut(0, 0) {
             if self.mono {
                 for (dst, src) in left.iter_mut().zip(input) {
                     *dst = 0.5 * (src[0] + src[1]);
@@ -510,7 +607,8 @@ impl AudioPart {
                 }
             }
         }
-        if !self.mono
+        if !self.instrument
+            && !self.mono
             && let Some(right) = self.inputs.channel_mut(0, 1)
         {
             for (dst, src) in right.iter_mut().zip(input) {
@@ -624,5 +722,19 @@ impl Drop for Instance {
             unsafe { self.component.terminate() };
             self.component_initialized = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_direction_with_no_bus_is_passed_as_null_and_one_with_buses_as_its_list() {
+        let mut none: Vec<sv::SpeakerArrangement> = Vec::new();
+        assert!(arrangement_ptr(&mut none).is_null());
+        let mut two = vec![sv::SpeakerArr::kStereo, sv::SpeakerArr::kMono];
+        let first = two.as_mut_ptr();
+        assert_eq!(arrangement_ptr(&mut two), first);
     }
 }

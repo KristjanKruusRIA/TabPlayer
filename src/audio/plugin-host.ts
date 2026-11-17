@@ -34,7 +34,8 @@ export type PluginStatus =
   | 'nonFinite'
   | 'rejectedState'
   | 'stateTooLarge'
-  | 'hostMissing';
+  | 'hostMissing'
+  | 'instrumentNeedsDrums';
 
 /** An audio-effect class in the user's plug-in library, as the native app describes it. `classId` is 32 uppercase hex characters. */
 export interface PluginLibraryEntry {
@@ -50,6 +51,8 @@ export interface PluginLibraryEntry {
   moduleModified: number;
   /** Set when this class moved from another bundle file. */
   previousBundle?: string;
+  /** Present only for an instrument, as for the slot that is made from the entry. */
+  kind?: 'instrument';
 }
 
 export interface TrackPluginStatus {
@@ -87,8 +90,9 @@ export const pluginLibrary = {
   remove: (classId: string) => invoke<void>('plugin_library_remove', { classId }),
 };
 
-export const pluginChoose = (documentId: string, trackId: string, classId: string) =>
-  invoke<PluginChooseResult>('plugin_choose', { documentId, trackId, classId });
+/** `percussion` is whether the track is a drum track, which the native side needs to refuse an instrument anywhere else. */
+export const pluginChoose = (documentId: string, trackId: string, classId: string, percussion = false) =>
+  invoke<PluginChooseResult>('plugin_choose', { documentId, trackId, classId, percussion });
 
 export const pluginStatus = (documentId: string) =>
   invoke<TrackPluginStatus[]>('plugin_status', { documentId });
@@ -277,11 +281,13 @@ export function statusLabelKey(status: PluginStatus): MessageKey {
     case 'rejectedState': return 'plugin.status.rejected_state';
     case 'stateTooLarge': return 'plugin.status.state_too_large';
     case 'hostMissing': return 'plugin.status.host_missing';
+    case 'instrumentNeedsDrums': return 'plugin.status.instrument_needs_drums';
   }
 }
 
 /** Maps non-ready status to its notice message key. */
-export function noticeMessageKey(status: PluginStatus): MessageKey {
+export function noticeMessageKey(status: PluginStatus, instrument = false): MessageKey {
+  if (instrument) return instrumentNoticeKey(status);
   switch (status) {
     case 'needsConsent': return 'plugin.notice.needs_consent';
     case 'missing': return 'plugin.notice.missing';
@@ -298,7 +304,31 @@ export function noticeMessageKey(status: PluginStatus): MessageKey {
     case 'rejectedState': return 'plugin.notice.rejected_state';
     case 'stateTooLarge': return 'plugin.notice.state_too_large';
     case 'hostMissing': return 'plugin.notice.host_missing';
+    // Only an instrument slot can be in this state, so there is one text.
+    case 'instrumentNeedsDrums': return 'plugin.notice_instrument.instrument_needs_drums';
     default: return 'plugin.notice.unreadable';
+  }
+}
+
+/** The notice for an instrument slot: the same cause, ending in the built-in kit playing instead. */
+function instrumentNoticeKey(status: PluginStatus): MessageKey {
+  switch (status) {
+    case 'needsConsent': return 'plugin.notice_instrument.needs_consent';
+    case 'missing': return 'plugin.notice_instrument.missing';
+    case 'unsupportedFormat': return 'plugin.notice_instrument.unsupported_format';
+    case 'unsupportedPlatform': return 'plugin.notice_instrument.unsupported_platform';
+    case 'unsupportedLayout': return 'plugin.notice_instrument.unsupported_layout';
+    case 'tooMuchLatency': return 'plugin.notice_instrument.too_much_latency';
+    case 'tooMany': return 'plugin.notice_instrument.too_many';
+    case 'crashed': return 'plugin.notice_instrument.crashed';
+    case 'hung': return 'plugin.notice_instrument.hung';
+    case 'underrun': return 'plugin.notice_instrument.underrun';
+    case 'nonFinite': return 'plugin.notice_instrument.non_finite';
+    case 'rejectedState': return 'plugin.notice_instrument.rejected_state';
+    case 'stateTooLarge': return 'plugin.notice_instrument.state_too_large';
+    case 'hostMissing': return 'plugin.notice_instrument.host_missing';
+    case 'instrumentNeedsDrums': return 'plugin.notice_instrument.instrument_needs_drums';
+    default: return 'plugin.notice_instrument.unreadable';
   }
 }
 
@@ -317,7 +347,8 @@ export function localizePluginError(
   if (msg.includes('This .vst3 folder holds no plug-in for this computer.')) return t('plugin.error.no_module');
   if (msg.includes("This file is not the plug-in's main file")) return t('plugin.error.not_main_module');
   if (msg.includes("location is too long or is not valid text")) return t('plugin.error.bad_path');
-  if (msg.includes('This file holds no audio effect.')) return t('plugin.error.no_effects');
+  if (msg.includes('This file holds no effect or instrument.') || msg.includes('This file holds no audio effect.')) return t('plugin.error.no_effects');
+  if (msg.includes('An instrument plug-in can only be used on a drum track.')) return t('plugin.error.instrument_needs_drums');
   if (msg.includes('The plug-in library is full')) return t('plugin.error.too_many');
   if (msg.includes('plug-in library file is damaged')) return t('plugin.error.damaged');
   if (msg.includes('newer TabPlayer')) return t('plugin.error.newer_version');

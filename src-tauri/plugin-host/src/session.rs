@@ -218,7 +218,8 @@ mod tests {
     use std::path::Path;
     use std::rc::Rc;
     use tabplayer_plugin_protocol::{
-        control::{ClassInfo, Mode, Rect},
+        control::{ClassInfo, Mode, PluginKind, Rect},
+        event::MidiEvent,
         limits::MAX_STATE_BYTES,
         ring::BlockMeta,
     };
@@ -234,8 +235,15 @@ mod tests {
     struct Silent;
     impl BlockProcessor for Silent {
         fn reset(&mut self) {}
-        fn process(&mut self, _: &[[f32; 2]], out: &mut [[f32; 2]], _: &BlockMeta) {
+        fn process(
+            &mut self,
+            _: &[[f32; 2]],
+            out: &mut [[f32; 2]],
+            _: &BlockMeta,
+            _: &[MidiEvent],
+        ) -> bool {
             out.iter_mut().for_each(|f| *f = [0.0; 2]);
+            true
         }
     }
 
@@ -254,7 +262,7 @@ mod tests {
         fn probe(_: &Path) -> Result<Vec<ClassInfo>, CoreError> {
             Ok(Vec::new())
         }
-        fn load(_: &Path, _: &str, _: u32, _: Mode) -> Result<Self, CoreError> {
+        fn load(_: &Path, _: &str, _: u32, _: Mode, _: PluginKind) -> Result<Self, CoreError> {
             Ok(Fake::default())
         }
         fn class(&self) -> &ClassInfo {

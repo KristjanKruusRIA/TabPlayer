@@ -1366,6 +1366,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       notices={pluginNoticeList}
       onDismiss={pluginNotices.dismiss}
       trackNames={trackNames}
+      instrumentTracks={Object.keys(state.settings.sounds).filter(id=>state.settings.sounds[id]?.plugin?.kind==='instrument')}
       onAllow={() => pluginConsentGrant(state.documentId)}
       onRetry={retryTrackId => pluginRetry(state.documentId, retryTrackId)}
     />

@@ -2,7 +2,7 @@ use super::cabinet_ir;
 use super::ir_convolver::{IrEngine, IrKernel};
 use super::nam::CaptureStage;
 use super::nam_library;
-use super::plugin_insert::PluginInsert;
+use super::plugin_insert::{InsertPoint, PluginInsert};
 use super::tone;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -1859,6 +1859,96 @@ pub struct TrackDsp {
     non_finite: u32,
     max_delay_seconds: f64,
 }
+/// What `run_inserts` reads and writes of a board's plug-in inserts: the arriving and the leaving one, and the crossfade
+/// between them. Borrowed field by field, so the board's other stages stay free to borrow the rest of the board.
+struct InsertSlots<'a> {
+    plugin: &'a mut Option<Box<PluginInsert>>,
+    leaving: &'a mut Option<Box<PluginInsert>>,
+    /// Whether the leaving insert still runs.
+    live: &'a mut bool,
+    /// Whether an insert was leaving, at either point, when the frame began. Decided once, before either call: the call at
+    /// the leaving insert's point can end the fade and clear `live`, and the call at the other point must still find the
+    /// crossfade state to be the leaving call's.
+    leaving_anywhere: bool,
+    /// Frames of the crossfade left.
+    fade: &'a mut u32,
+    /// How far the crossfade was on the last frame, and what all but the arriving sound added up to.
+    fade_s: &'a mut f32,
+    part: &'a mut [f32; 2],
+    /// What a crossfade cut short by another change was still playing, and how much of the leaving insert's output was
+    /// heard when it began to leave.
+    held: [f32; 2],
+    scale: f32,
+    ramp_frames: u32,
+}
+
+/// One frame through the inserts that sit at `point`: the arriving one, the leaving one and their crossfade. `x` is the
+/// signal where they sit and `stand_in` the built-in sound they stand in for, run on the input an insert asks for: at
+/// the `Amp` point the built-in Drive, Amp and Cabinet, at the `Input` point the track's own sound as it is.
+///
+/// The crossfade state (`fade`, `fade_s`, `part`, `live`) is written only here, by the call whose point is the leaving
+/// insert's, or, when nothing is leaving, by the call of the arriving insert. A switch between an effect and an
+/// instrument leaves the two at different points: the leaving one fades out into its own stand-in where it sits, the
+/// arriving one plays in its own place, and no insert, and no stage, runs twice a frame.
+fn run_inserts(
+    slots: InsertSlots<'_>,
+    point: InsertPoint,
+    x: [f32; 2],
+    ctx: &FrameContext,
+    stand_in: &mut dyn FnMut([f32; 2]) -> [f32; 2],
+) -> [f32; 2] {
+    // The arriving insert runs first, so the stand-in plays on its input; with none arriving here, the leaving one runs
+    // first and the stand-in plays on the input it glides back.
+    let live = *slots.live;
+    let leaving_anywhere = slots.leaving_anywhere;
+    let leaving = slots
+        .leaving
+        .as_mut()
+        .filter(|insert| live && insert.point() == point);
+    let arriving = slots
+        .plugin
+        .as_mut()
+        .filter(|insert| insert.point() == point);
+    let (arriving, leaving_out) = match (arriving, leaving) {
+        (Some(insert), leaving) => {
+            let arriving = insert.process(x, ctx, &mut *stand_in);
+            (
+                arriving,
+                leaving.map(|l| (l.process(x, ctx, &mut *stand_in), false)),
+            )
+        }
+        (None, Some(leaving)) => {
+            let out = leaving.process(x, ctx, &mut *stand_in);
+            let gliding = leaving.gliding();
+            (stand_in(leaving.built_in_input()), Some((out, gliding)))
+        }
+        (None, None) => (stand_in(x), None),
+    };
+    match leaving_out {
+        Some((out, gliding)) => {
+            let fading = *slots.fade;
+            let s = 1.0 - fading as f32 / slots.ramp_frames as f32;
+            *slots.fade = fading.saturating_sub(1);
+            if *slots.fade == 0 && !gliding {
+                *slots.live = false;
+            }
+            let (scale, held) = (slots.scale, slots.held);
+            let part: [f32; 2] = std::array::from_fn(|c| (out[c] * scale + held[c]) * (1.0 - s));
+            *slots.fade_s = s;
+            *slots.part = part;
+            std::array::from_fn(|c| arriving[c] * s + part[c])
+        }
+        None => {
+            // An insert leaving at the other point owns the crossfade.
+            if !leaving_anywhere {
+                *slots.fade_s = 1.0;
+                *slots.part = [0.0; 2];
+            }
+            arriving
+        }
+    }
+}
+
 impl TrackDsp {
     pub fn new(
         settings: FxSettings,
@@ -2288,8 +2378,11 @@ impl TrackDsp {
     fn plugin_from(&mut self, old: &mut Self) {
         self.built_in_live = old.built_in_live;
         self.sounding = old.sounding;
+        // One helper hosts one class, so a change of kind is a change of helper: the running insert fades out.
         let same_link = match (&self.plugin, &old.plugin) {
-            (Some(arriving), Some(running)) => arriving.same_link(running),
+            (Some(arriving), Some(running)) => {
+                arriving.same_link(running) && arriving.kind() == running.kind()
+            }
             _ => false,
         };
         if same_link {
@@ -2335,7 +2428,18 @@ impl TrackDsp {
         if let Some(leaving) = self.plugin_leaving.as_mut().filter(|_| live) {
             match self.plugin.as_mut() {
                 // The arriving insert's stand-in starts on the timing the track was playing (review C1).
-                Some(arriving) => arriving.seed_from(leaving),
+                Some(arriving) if arriving.point() == leaving.point() => {
+                    arriving.seed_from(leaving)
+                }
+                // An effect and an instrument sit at different points of the board, so the leaving insert's history is
+                // another signal than the one the arriving insert's stand-in plays. The arriving one starts on what
+                // its own point plays now, and the leaving one glides back to the undelayed signal where it sits.
+                Some(arriving) => {
+                    if self.sounding {
+                        arriving.start_undelayed();
+                    }
+                    leaving.retime(0);
+                }
                 // Without one, the stand-in glides back to the undelayed signal (review I1).
                 None => leaving.retime(0),
             }
@@ -2377,6 +2481,11 @@ impl TrackDsp {
     pub fn plugin_faulted(&self) -> bool {
         self.plugin.as_ref().is_some_and(|p| p.faulted().is_some())
     }
+    /// How far the plug-in crossfade was on the last frame (1 when none runs) and what all but the arriving sound added
+    /// up to: the state a configuration taking over carries on from. For tests.
+    pub fn crossfade_state(&self) -> (f32, [f32; 2]) {
+        (self.fade_s, self.leaving_part)
+    }
     /// Whether the board has rendered since it was built, reset or paused (see the field).
     pub fn sounding(&self) -> bool {
         self.sounding
@@ -2390,6 +2499,36 @@ impl TrackDsp {
     /// Whether a plug-in plays on this board, or is still fading out.
     pub fn has_plugin(&self) -> bool {
         self.plugin.is_some() || self.leaving_live
+    }
+    /// Whether an insert that sits at `point` plays on this board or is still fading out.
+    fn inserted_at(&self, point: InsertPoint) -> bool {
+        self.plugin.as_ref().is_some_and(|p| p.point() == point)
+            || (self.leaving_live
+                && self
+                    .plugin_leaving
+                    .as_ref()
+                    .is_some_and(|p| p.point() == point))
+    }
+    /// Stages a note event for the instrument plug-in, if the board has one: see `PluginInsert::stage_note`. Call it
+    /// before `process_at` of the frame the note belongs to. Nothing happens without an instrument.
+    pub fn stage_note(&mut self, on: bool, channel: u8, key: u8, velocity: u8) {
+        if let Some(insert) = self.plugin.as_mut() {
+            insert.stage_note(on, channel, key, velocity);
+        }
+    }
+    /// Releases every key the board's instrument holds (a loop wrap keeps the insert streaming, so the notes it holds
+    /// would otherwise ring on): see `PluginInsert::all_notes_off`. Nothing happens without an instrument.
+    pub fn all_notes_off(&mut self) {
+        if let Some(insert) = self.plugin.as_mut() {
+            insert.all_notes_off();
+        }
+    }
+    /// After an edit hand-over: ends the keys the board's instrument holds that the new plan does not hold, see
+    /// `PluginInsert::retain_notes`. Nothing happens without an instrument.
+    pub fn retain_notes(&mut self, wanted: &[[u8; 128]; 16]) {
+        if let Some(insert) = self.plugin.as_mut() {
+            insert.retain_notes(wanted);
+        }
     }
     /// Readies a board that starts from silence while the track already sounds, as a block switched on mid-play
     /// is: the room microphone's reflections fade in rather than arriving at full level.
@@ -2541,7 +2680,9 @@ impl TrackDsp {
         };
         // With a plug-in, the board splits at the first of Drive, Amp and Cabinet: the plug-in stands there, and the
         // other two are skipped in place.
-        let inserted = self.has_plugin();
+        let inserted = self.inserted_at(InsertPoint::Amp);
+        let input_inserted = self.inserted_at(InsertPoint::Input);
+        let leaving_anywhere = self.leaving_live && self.plugin_leaving.is_some();
         let mut three = [Stage::Drive, Stage::Amp, Stage::Cabinet];
         let mut found = 0;
         for stage in self.chain {
@@ -2921,6 +3062,29 @@ impl TrackDsp {
             }
             x
         };
+        // An instrument replaces the track's own sound where it enters the board, so everything after it, the built-in
+        // Drive, Amp and Cabinet included, plays the instrument. The stand-in for a plug-in that is not live is that
+        // sound itself.
+        if input_inserted {
+            x = run_inserts(
+                InsertSlots {
+                    plugin: &mut self.plugin,
+                    leaving: &mut self.plugin_leaving,
+                    live: &mut self.leaving_live,
+                    leaving_anywhere,
+                    fade: &mut self.plugin_fade,
+                    fade_s: &mut self.fade_s,
+                    part: &mut self.leaving_part,
+                    held: self.leaving_held,
+                    scale: self.leaving_scale,
+                    ramp_frames: self.ramp_frames,
+                },
+                InsertPoint::Input,
+                x,
+                ctx,
+                &mut |v| v,
+            );
+        }
         for stage in self.chain {
             match stage {
                 Stage::Microphone => {
@@ -3210,46 +3374,24 @@ impl TrackDsp {
                             cache = Some(y);
                             y
                         };
-                        // The arriving insert runs first, so the built-in chain plays on its input; with none
-                        // arriving, the leaving one runs first and the chain plays on the input it glides back.
-                        let live = self.leaving_live;
-                        let leaving = self.plugin_leaving.as_mut().filter(|_| live);
-                        let (arriving, leaving_out) = match (self.plugin.as_mut(), leaving) {
-                            (Some(insert), leaving) => {
-                                let arriving = insert.process(x, ctx, &mut run);
-                                (
-                                    arriving,
-                                    leaving.map(|l| (l.process(x, ctx, &mut run), false)),
-                                )
-                            }
-                            (None, Some(leaving)) => {
-                                let out = leaving.process(x, ctx, &mut run);
-                                let gliding = leaving.gliding();
-                                (run(leaving.built_in_input()), Some((out, gliding)))
-                            }
-                            (None, None) => (run(x), None),
-                        };
-                        x = match leaving_out {
-                            Some((out, gliding)) => {
-                                let fading = self.plugin_fade;
-                                let s = 1.0 - fading as f32 / self.ramp_frames as f32;
-                                self.plugin_fade = fading.saturating_sub(1);
-                                if self.plugin_fade == 0 && !gliding {
-                                    self.leaving_live = false;
-                                }
-                                let (scale, held) = (self.leaving_scale, self.leaving_held);
-                                let part: [f32; 2] =
-                                    std::array::from_fn(|c| (out[c] * scale + held[c]) * (1.0 - s));
-                                self.fade_s = s;
-                                self.leaving_part = part;
-                                std::array::from_fn(|c| arriving[c] * s + part[c])
-                            }
-                            None => {
-                                self.fade_s = 1.0;
-                                self.leaving_part = [0.0; 2];
-                                arriving
-                            }
-                        };
+                        x = run_inserts(
+                            InsertSlots {
+                                plugin: &mut self.plugin,
+                                leaving: &mut self.plugin_leaving,
+                                live: &mut self.leaving_live,
+                                leaving_anywhere,
+                                fade: &mut self.plugin_fade,
+                                fade_s: &mut self.fade_s,
+                                part: &mut self.leaving_part,
+                                held: self.leaving_held,
+                                scale: self.leaving_scale,
+                                ramp_frames: self.ramp_frames,
+                            },
+                            InsertPoint::Amp,
+                            x,
+                            ctx,
+                            &mut run,
+                        );
                         if !ran {
                             built_in_live = false;
                         }

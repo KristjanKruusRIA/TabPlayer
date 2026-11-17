@@ -230,6 +230,10 @@ impl NativeAudio {
                                 );
                                 Err(PluginStatus::TooMuchLatency)
                             }
+                            Err(InsertError::NotAPercussionTrack) => {
+                                // Only the mix's build knows the track, so `check` never says this: kept for the match.
+                                Ok(plan)
+                            }
                             Err(InsertError::PipelineTooLong) => {
                                 // The device's callback is longer than any pipeline the insert can keep up with.
                                 plugins.record_refusal(
@@ -270,6 +274,12 @@ impl NativeAudio {
                 InsertError::PipelineTooLong => {
                     plugins.record_refusal(document_id, &track_id, PluginStatus::Underrun)
                 }
+                // `ensure` refuses such a slot first; this is the same status for a mix built from a plan it did not see.
+                InsertError::NotAPercussionTrack => plugins.record_refusal(
+                    document_id,
+                    &track_id,
+                    PluginStatus::InstrumentNeedsDrums,
+                ),
             }
         }
     }
@@ -430,6 +440,7 @@ impl NativeAudio {
                         .asset_bytes(&owner.document_id, &slot.state)
                         .unwrap_or_default();
                     Some(crate::plugins::service::SlotRequest {
+                        percussion: t.percussion,
                         track_id: t.id.clone(),
                         slot,
                         state: bytes.into(),
@@ -518,16 +529,17 @@ impl NativeAudio {
     ) -> Result<(), String> {
         let slot_requests: Vec<crate::plugins::service::SlotRequest> = {
             let ws = workspace.lock().map_err(|e| e.to_string())?;
-            if let Some(track_ids) = self.service.prepared_track_ids() {
-                track_ids
+            if let Some(tracks) = self.service.prepared_tracks() {
+                tracks
                     .iter()
-                    .filter_map(|track_id| {
+                    .filter_map(|(track_id, percussion)| {
                         let sound = settings.sounds.get(track_id)?;
                         let slot = sound.plugin.clone()?;
                         let bytes = ws
                             .asset_bytes(&owner.document_id, &slot.state)
                             .unwrap_or_default();
                         Some(crate::plugins::service::SlotRequest {
+                            percussion: *percussion,
                             track_id: track_id.clone(),
                             slot,
                             state: bytes.into(),
@@ -544,6 +556,7 @@ impl NativeAudio {
                             .asset_bytes(&owner.document_id, &slot.state)
                             .unwrap_or_default();
                         Some(crate::plugins::service::SlotRequest {
+                            percussion: true,
                             track_id: track_id.clone(),
                             slot,
                             state: bytes.into(),
@@ -1463,6 +1476,7 @@ pub async fn export_audio(
                         .asset_bytes(&document_id, &slot.state)
                         .unwrap_or_default();
                     Some(crate::plugins::service::SlotRequest {
+                        percussion: track.percussion,
                         track_id: track.id.clone(),
                         slot,
                         state: bytes.into(),
@@ -1765,6 +1779,7 @@ mod plugin_tick_tests {
             let ws = self.workspace.lock().unwrap();
             let slot = self.sound.plugin.clone().unwrap();
             vec![crate::plugins::service::SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 state: ws
                     .asset_bytes(&self.owner.document_id, &slot.state)
@@ -1941,6 +1956,15 @@ mod plugin_tick_tests {
         assert_eq!(
             tick.rig.service.statuses(&document_id)[0].status,
             PluginStatus::Underrun
+        );
+        // An instrument slot on a track that is not a drum track plays the built-in sound, and the slot reads as unusable.
+        tick.audio.report_insert_refusals(
+            &document_id,
+            vec![("base/0".to_string(), InsertError::NotAPercussionTrack)],
+        );
+        assert_eq!(
+            tick.rig.service.statuses(&document_id)[0].status,
+            PluginStatus::InstrumentNeedsDrums
         );
         // A helper at another rate is not the plug-in's fault: the mix is built again at the device's rate.
         tick.rig.service.take_reprepare(&document_id);

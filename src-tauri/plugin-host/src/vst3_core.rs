@@ -15,7 +15,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tabplayer_plugin_protocol::{
-    control::{ClassInfo, ErrorCode, Mode, Rect},
+    control::{ClassInfo, ErrorCode, Mode, PluginKind, Rect},
+    event::MidiEvent,
     limits::BLOCK_FRAMES,
     ring::BlockMeta,
 };
@@ -135,6 +136,51 @@ fn main_layout(layout: &Layout) -> Result<bool, CoreError> {
     }
 }
 
+/// The audio-layout rule for an instrument: it has an event input bus (it takes notes) and its main audio output is
+/// stereo or mono (then the helper duplicates it). Any audio input it has is fed silence, so inputs are not looked at.
+/// Returns whether the plug-in is mono.
+fn instrument_layout(layout: &Layout) -> Result<bool, CoreError> {
+    if !layout.event_input {
+        return Err(CoreError::new(
+            ErrorCode::UnsupportedLayout,
+            "This plug-in takes no notes: it has no event input.",
+        ));
+    }
+    match layout.outputs.first() {
+        Some(2) => Ok(false),
+        Some(1) => Ok(true),
+        None => Err(CoreError::new(
+            ErrorCode::UnsupportedLayout,
+            "This plug-in is not an instrument: it has no audio output.",
+        )),
+        Some(_) => Err(CoreError::new(
+            ErrorCode::UnsupportedLayout,
+            "This plug-in does not make a stereo or mono signal.",
+        )),
+    }
+}
+
+/// The layout of an instrument, with the mono retry: `layout` is what the plug-in settled on when asked for stereo. When
+/// its main output is neither stereo nor mono (and it takes notes and has an output at all), `retry_mono` asks it again
+/// with mono first, and what that gives is judged by the same rule. A failed retry reports the first complaint, which is
+/// the one that describes what the plug-in does by default. Returns the layout in force and whether it is mono.
+fn instrument_layout_with_retry(
+    layout: Layout,
+    retry_mono: impl FnOnce() -> Result<Layout, CoreError>,
+) -> Result<(Layout, bool), CoreError> {
+    match instrument_layout(&layout) {
+        Ok(mono) => Ok((layout, mono)),
+        Err(first) if layout.event_input && layout.outputs.first().is_some() => {
+            let layout = retry_mono()?;
+            match instrument_layout(&layout) {
+                Ok(mono) => Ok((layout, mono)),
+                Err(_) => Err(first),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub struct Vst3Core {
     class: ClassInfo,
     instance: Instance,
@@ -183,10 +229,16 @@ impl PluginCore for Vst3Core {
                 sub_categories: c.sub_categories,
             })
             .collect();
-        Ok(probe::effect_classes(&raw))
+        Ok(probe::listed_classes(&raw))
     }
 
-    fn load(bundle: &Path, class_id: &str, rate: u32, mode: Mode) -> Result<Vst3Core, CoreError> {
+    fn load(
+        bundle: &Path,
+        class_id: &str,
+        rate: u32,
+        mode: Mode,
+        kind: PluginKind,
+    ) -> Result<Vst3Core, CoreError> {
         let cid = probe::class_id_bytes(class_id)
             .ok_or_else(|| CoreError::new(ErrorCode::BadRequest, "Invalid plug-in class ID."))?;
         let module = open_bundle(bundle)?;
@@ -202,26 +254,50 @@ impl PluginCore for Vst3Core {
                 version: c.version,
                 sub_categories: c.sub_categories,
             })
-            .filter(probe::is_audio_effect)
+            .and_then(|c| probe::raw_kind(&c).map(|found| (c, found)))
             .ok_or_else(|| {
                 CoreError::new(
                     ErrorCode::NotFound,
-                    "The plug-in file has no such audio effect.",
+                    "The plug-in file has no such audio effect or instrument.",
                 )
             })?;
+        let (class, found) = class;
+        // The app asked for one kind and the class is the other. By now the module is loaded and its factory has been
+        // listed (the plug-in's own code has run, as it does for a probe), but nothing is instantiated.
+        if found != kind {
+            return Err(CoreError::new(
+                ErrorCode::UnsupportedLayout,
+                match found {
+                    PluginKind::Effect => "This plug-in is an effect, not an instrument.",
+                    PluginKind::Instrument => "This plug-in is an instrument, not an effect.",
+                },
+            ));
+        }
         let mut instance = module
             .instantiate(&cid, crate::runtime::wake_main)
             .map_err(unreadable)?;
         instance.set_offline(mode == Mode::Offline);
-        let layout = instance
+        let mut layout = instance
             .configure(f64::from(rate), BLOCK_FRAMES, false)
             .map_err(unreadable)?;
-        let mono = main_layout(&layout)?;
+        let mono = match kind {
+            PluginKind::Effect => main_layout(&layout)?,
+            PluginKind::Instrument => {
+                // The stereo attempt may leave an output that is neither: then one more try, asking for mono first.
+                let (settled, mono) = instrument_layout_with_retry(layout, || {
+                    instance
+                        .configure(f64::from(rate), BLOCK_FRAMES, true)
+                        .map_err(unreadable)
+                })?;
+                layout = settled;
+                mono
+            }
+        };
         let editor = instance.state_link();
         let params = instance.params().into_iter().map(|p| p.id).collect();
         let reported_latency = instance.latency();
         Ok(Vst3Core {
-            class: probe::clean_class(&class),
+            class: probe::clean_class(&class, kind),
             instance,
             editor,
             sample_rate: rate,
@@ -336,6 +412,7 @@ impl PluginCore for Vst3Core {
                 f64::from(self.sample_rate),
                 BLOCK_FRAMES,
                 self.mono,
+                self.class.kind == PluginKind::Instrument,
             )
             .map_err(unreadable)?;
         Ok(Box::new(Vst3Processor { part }))
@@ -460,10 +537,17 @@ impl BlockProcessor for Vst3Processor {
         self.part.reset();
     }
 
-    fn process(&mut self, input: &[[f32; 2]], output: &mut [[f32; 2]], ctx: &BlockMeta) {
+    fn process(
+        &mut self,
+        input: &[[f32; 2]],
+        output: &mut [[f32; 2]],
+        ctx: &BlockMeta,
+        events: &[MidiEvent],
+    ) -> bool {
         let transport: Transport = sanitize(ctx);
-        // A failure leaves silence in `output`; the app hears the fallback when the block is late or non-finite.
-        let _ = self.part.process(input, output, &transport);
+        // A failure leaves silence in `output`; the app hears the fallback when the block is late or non-finite. The
+        // caller is told, so it can release the notes the failed block was to carry.
+        self.part.process(input, output, &transport, events).is_ok()
     }
 }
 
@@ -577,6 +661,82 @@ mod tests {
     }
 
     #[test]
+    fn only_stereo_and_mono_instruments_with_an_event_input_are_accepted() {
+        let layout = |inputs: &[u32], outputs: &[u32], event_input: bool| Layout {
+            inputs: inputs.to_vec(),
+            outputs: outputs.to_vec(),
+            event_input,
+        };
+        assert_eq!(instrument_layout(&layout(&[], &[2], true)), Ok(false));
+        assert_eq!(instrument_layout(&layout(&[], &[1], true)), Ok(true));
+        assert_eq!(
+            instrument_layout(&layout(&[2], &[2, 2, 2], true)),
+            Ok(false),
+            "an audio input and aux outputs are fine: the input is fed silence"
+        );
+        assert_eq!(instrument_layout(&layout(&[6], &[1], true)), Ok(true));
+        for bad in [
+            layout(&[], &[2], false),
+            layout(&[], &[], true),
+            layout(&[], &[6], true),
+            layout(&[2], &[0], true),
+        ] {
+            assert_eq!(
+                instrument_layout(&bad).unwrap_err().code,
+                ErrorCode::UnsupportedLayout
+            );
+        }
+        assert!(
+            instrument_layout(&layout(&[], &[2], false))
+                .unwrap_err()
+                .detail
+                .contains("takes no notes")
+        );
+    }
+
+    #[test]
+    fn an_instrument_that_settles_on_neither_is_asked_again_for_mono() {
+        let layout = |outputs: &[u32], event_input: bool| Layout {
+            inputs: Vec::new(),
+            outputs: outputs.to_vec(),
+            event_input,
+        };
+        let never = || -> Result<Layout, CoreError> { panic!("no retry wanted") };
+        // Settled on the first try: the retry is not taken.
+        assert_eq!(
+            instrument_layout_with_retry(layout(&[2], true), never),
+            Ok((layout(&[2], true), false))
+        );
+        // Neither stereo nor mono: the retry runs once, and a mono answer is taken.
+        let mut asked = 0;
+        let got = instrument_layout_with_retry(layout(&[6], true), || {
+            asked += 1;
+            Ok(layout(&[1], true))
+        });
+        assert_eq!(got, Ok((layout(&[1], true), true)));
+        assert_eq!(asked, 1, "the retry was taken");
+        // A stereo answer after the retry is taken too.
+        assert_eq!(
+            instrument_layout_with_retry(layout(&[6], true), || Ok(layout(&[2], true))),
+            Ok((layout(&[2], true), false))
+        );
+        // Still neither: the first complaint is reported, not the retry's.
+        let error =
+            instrument_layout_with_retry(layout(&[6], true), || Ok(layout(&[], true))).unwrap_err();
+        assert!(error.detail.contains("stereo or mono"), "{}", error.detail);
+        // The retry itself failing is its error.
+        let failed = CoreError::new(ErrorCode::Unreadable, "gone");
+        assert_eq!(
+            instrument_layout_with_retry(layout(&[6], true), || Err(failed.clone())),
+            Err(failed)
+        );
+        // No retry for a plug-in that takes no notes, or has no output at all.
+        for bad in [layout(&[6], false), layout(&[], true)] {
+            assert!(instrument_layout_with_retry(bad, never).is_err());
+        }
+    }
+
+    #[test]
     fn only_stereo_and_mono_effects_are_accepted() {
         let layout = |inputs: &[u32], outputs: &[u32]| Layout {
             inputs: inputs.to_vec(),
@@ -605,61 +765,7 @@ mod tests {
 
     // ---- the audio thread never allocates ------------------------------------------------------------------------
 
-    use std::alloc::{GlobalAlloc, Layout as AllocLayout, System};
-    use std::cell::Cell;
-
-    thread_local! {
-        static COUNT_HEAP: Cell<bool> = const { Cell::new(false) };
-        static HEAP_OPERATIONS: Cell<usize> = const { Cell::new(0) };
-    }
-
-    /// Counts heap operations on the threads that switch counting on, and no others.
-    struct CountAllocator;
-    unsafe impl GlobalAlloc for CountAllocator {
-        unsafe fn alloc(&self, layout: AllocLayout) -> *mut u8 {
-            count();
-            unsafe { System.alloc(layout) }
-        }
-        unsafe fn dealloc(&self, pointer: *mut u8, layout: AllocLayout) {
-            count();
-            unsafe { System.dealloc(pointer, layout) }
-        }
-        unsafe fn realloc(
-            &self,
-            pointer: *mut u8,
-            layout: AllocLayout,
-            new_size: usize,
-        ) -> *mut u8 {
-            count();
-            unsafe { System.realloc(pointer, layout, new_size) }
-        }
-    }
-    fn count() {
-        // `try_with`: the thread-local may be gone while a thread exits.
-        let _ = COUNT_HEAP.try_with(|flag| {
-            if flag.get() {
-                let _ = HEAP_OPERATIONS.try_with(|n| n.set(n.get() + 1));
-            }
-        });
-    }
-    #[global_allocator]
-    static ALLOCATOR: CountAllocator = CountAllocator;
-
-    /// The heap operations `f` makes on this thread. The plug-in's own allocations are not counted: it is a separate
-    /// Rust library with its own allocator.
-    fn heap_operations(f: impl FnOnce()) -> usize {
-        HEAP_OPERATIONS.with(|n| n.set(0));
-        COUNT_HEAP.with(|flag| flag.set(true));
-        f();
-        COUNT_HEAP.with(|flag| flag.set(false));
-        HEAP_OPERATIONS.with(Cell::get)
-    }
-
-    #[test]
-    fn the_counting_allocator_counts() {
-        let operations = heap_operations(|| drop(std::hint::black_box(vec![1u8; 16])));
-        assert!(operations >= 2, "a count of zero below would prove nothing");
-    }
+    use crate::test_alloc::heap_operations;
 
     /// `AudioPart::process`, through the real processor and the real test plug-in, makes no heap operation: not for a
     /// block it processes, not for a block the plug-in fails (`kResultFalse` on every call, which a bypassed or
@@ -674,11 +780,11 @@ mod tests {
         let mut output = [[0.0f32; 2]; BLOCK_FRAMES];
         let meta = BlockMeta::default();
         // Warm up, so one-off set-up is not counted.
-        processor.process(&input, &mut output, &meta);
+        assert!(processor.process(&input, &mut output, &meta, &[]));
 
         let working = heap_operations(|| {
             for _ in 0..200 {
-                processor.process(&input, &mut output, &meta);
+                assert!(processor.process(&input, &mut output, &meta, &[]));
             }
         });
         assert_eq!(working, 0, "processing blocks allocated");
@@ -690,11 +796,11 @@ mod tests {
             ..TestState::default()
         });
         core.set_state(&failing, &[]).unwrap();
-        processor.process(&input, &mut output, &meta);
+        assert!(!processor.process(&input, &mut output, &meta, &[]));
         assert_eq!(output[0], [0.0, 0.0], "a failed block is silence");
         let failing_blocks = heap_operations(|| {
             for _ in 0..200 {
-                processor.process(&input, &mut output, &meta);
+                assert!(!processor.process(&input, &mut output, &meta, &[]));
             }
         });
         assert_eq!(failing_blocks, 0, "failing blocks allocated");
@@ -704,10 +810,85 @@ mod tests {
         let mut big_out = vec![[0.0f32; 2]; BLOCK_FRAMES + 1];
         let too_large = heap_operations(|| {
             for _ in 0..200 {
-                processor.process(&big, &mut big_out, &meta);
+                assert!(!processor.process(&big, &mut big_out, &meta, &[]));
             }
         });
         assert_eq!(too_large, 0, "refused blocks allocated");
+    }
+
+    /// The instrument's block path, from the raw event words to the plug-in: the guard admits a full block of 64 words
+    /// (notes, retriggers, an AllNotesOff, controllers and invalid words) and the processor hands the events to the
+    /// plug-in. It makes no heap operation, and the plug-in sounds what it was given.
+    #[test]
+    #[ignore = "needs: cargo build --locked --manifest-path src-tauri/Cargo.toml -p tabplayer-plugin-host -p tabplayer-test-plugin"]
+    fn the_instrument_block_path_never_allocates_with_a_full_block_of_events() {
+        use crate::notes::{MAX_BLOCK_EVENTS, NoteGuard};
+        use tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK;
+        use tabplayer_test_plugin::DRUM_CLASS_ID;
+        let (_guard, _dir, mut core) = load_plugin(DRUM_CLASS_ID, PluginKind::Instrument);
+        let mut processor = core.processor().unwrap();
+        let input = [[0.0f32; 2]; BLOCK_FRAMES];
+        let mut output = [[0.0f32; 2]; BLOCK_FRAMES];
+        let meta = BlockMeta::default();
+        let words: Vec<u64> = (0..EVENTS_PER_BLOCK as u8)
+            .map(|i| {
+                let event = match i % 8 {
+                    0..=3 => MidiEvent::NoteOn {
+                        offset: 127 - i,
+                        channel: i % 3,
+                        key: 36 + i % 5,
+                        velocity: 1 + i,
+                    },
+                    4 => MidiEvent::NoteOff {
+                        offset: i,
+                        channel: i % 3,
+                        key: 36 + i % 5,
+                    },
+                    5 => MidiEvent::Controller {
+                        offset: i,
+                        channel: 0,
+                        controller: 1,
+                        value: 5,
+                    },
+                    6 => MidiEvent::AllNotesOff {
+                        offset: i,
+                        channel: i % 3,
+                    },
+                    _ => return u64::MAX,
+                };
+                event.encode().unwrap()
+            })
+            .collect();
+        let mut notes = NoteGuard::new();
+        let mut admitted = [MidiEvent::AllNotesOff {
+            offset: 0,
+            channel: 0,
+        }; MAX_BLOCK_EVENTS];
+        let mut block = |notes: &mut NoteGuard, words: &[u64]| {
+            let mut count = 0;
+            notes.admit(words, &mut |event| {
+                if let Some(slot) = admitted.get_mut(count) {
+                    *slot = event;
+                    count += 1;
+                }
+            });
+            assert!(processor.process(&input, &mut output, &meta, &admitted[..count]));
+        };
+        // Warm up, so one-off set-up is not counted.
+        block(&mut notes, &words);
+        let working = heap_operations(|| {
+            for round in 0..200 {
+                block(&mut notes, &words);
+                if round % 5 == 0 {
+                    notes.release_all();
+                }
+            }
+        });
+        assert_eq!(working, 0, "a full block of events allocated");
+        assert!(
+            output.iter().any(|frame| frame[0] != 0.0),
+            "the plug-in sounded"
+        );
     }
 
     /// The plug-in is loaded into the test process, which has one "main thread" at a time: the tests that do it take turns.
@@ -718,7 +899,17 @@ mod tests {
         tempfile::TempDir,
         Vst3Core,
     ) {
-        use tabplayer_test_plugin::TEST_CLASS_ID;
+        load_plugin(tabplayer_test_plugin::TEST_CLASS_ID, PluginKind::Effect)
+    }
+
+    fn load_plugin(
+        class_id: &str,
+        kind: PluginKind,
+    ) -> (
+        std::sync::MutexGuard<'static, ()>,
+        tempfile::TempDir,
+        Vst3Core,
+    ) {
         let guard = IN_PROCESS.lock().unwrap_or_else(|e| e.into_inner());
         crate::vst3::set_main_thread();
         let dll = std::env::current_exe()
@@ -735,7 +926,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bundle = dir.path().join("TestGain.vst3");
         std::fs::copy(&dll, &bundle).unwrap();
-        let core = Vst3Core::load(&bundle, TEST_CLASS_ID, 48_000, Mode::Realtime).unwrap();
+        let core = Vst3Core::load(&bundle, class_id, 48_000, Mode::Realtime, kind).unwrap();
         (guard, dir, core)
     }
 

@@ -1,11 +1,11 @@
-//! What a probe reports: the audio-effect classes of a bundle, with names the protocol accepts.
+//! What a probe reports: the audio-effect and instrument classes of a bundle, with names the protocol accepts.
 //!
 //! A plug-in's names arrive raw from third-party code, and the protocol's validators refuse control and bidirectional
 //! characters (`tabplayer_plugin_protocol::validate`). So names are cleaned here, the way `cabinet_ir::display_name`
 //! cleans a file name, before they are sent: control, format and non-characters are dropped, white space is trimmed and
 //! the text is cut to its cap.
 use tabplayer_plugin_protocol::{
-    control::ClassInfo,
+    control::{ClassInfo, PluginKind},
     limits::{MAX_CLASSES, MAX_NAME_CHARS, MAX_SUBCATEGORIES_CHARS, MAX_VERSION_CHARS},
     validate::clean_text,
 };
@@ -43,25 +43,33 @@ pub fn class_id_bytes(text: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
-/// Whether a class is an audio effect: a processor class whose sub-categories name `Fx` and not `Instrument`. A class
-/// without sub-categories (a version 1 factory) is not offered, since it could just as well be a synthesizer.
-pub fn is_audio_effect(class: &RawClassInfo) -> bool {
-    if class.category != AUDIO_CLASS {
-        return false;
-    }
+/// What a class does, from its sub-categories (`|`-separated tokens, compared without regard to case): any `Instrument`
+/// token makes it an instrument, which includes `Fx|Instrument` (a class that makes sound from notes and may also be an
+/// effect is hosted as an instrument); `Fx` without `Instrument` makes it an effect. Anything else, including no
+/// sub-categories at all (a version 1 factory, which could just as well be either), is not offered.
+pub fn class_kind(sub_categories: &str) -> Option<PluginKind> {
     let mut fx = false;
-    for token in class.sub_categories.split('|') {
+    for token in sub_categories.split('|') {
         let token = token.trim();
         if token.eq_ignore_ascii_case("Instrument") {
-            return false;
+            return Some(PluginKind::Instrument);
         }
         fx |= token.eq_ignore_ascii_case("Fx");
     }
-    fx
+    fx.then_some(PluginKind::Effect)
 }
 
-/// One class as the protocol sends it.
-pub fn clean_class(class: &RawClassInfo) -> ClassInfo {
+/// What a class is, or `None` when it is not a processor class the helper hosts: the category must be an audio module and
+/// the sub-categories must name a kind (see [`class_kind`]).
+pub fn raw_kind(class: &RawClassInfo) -> Option<PluginKind> {
+    if class.category != AUDIO_CLASS {
+        return None;
+    }
+    class_kind(&class.sub_categories)
+}
+
+/// One class as the protocol sends it, of the `kind` [`raw_kind`] found.
+pub fn clean_class(class: &RawClassInfo, kind: PluginKind) -> ClassInfo {
     let mut name = clean_text(&class.name, MAX_NAME_CHARS);
     if name.is_empty() {
         name = UNNAMED.into();
@@ -72,19 +80,27 @@ pub fn clean_class(class: &RawClassInfo) -> ClassInfo {
         vendor: clean_text(&class.vendor, MAX_NAME_CHARS),
         version: clean_text(&class.version, MAX_VERSION_CHARS),
         subcategories: clean_text(&class.sub_categories, MAX_SUBCATEGORIES_CHARS),
+        kind,
     }
 }
 
-/// The audio-effect classes of a bundle, cleaned, at most [`MAX_CLASSES`], each class ID once.
-pub fn effect_classes(raw: &[RawClassInfo]) -> Vec<ClassInfo> {
+/// The effect and instrument classes of a bundle, cleaned, at most [`MAX_CLASSES`] across both kinds, each class ID once.
+/// Effects come first, then instruments, each in the factory's order, so the cap never costs an effect to an instrument: the
+/// effects listed are exactly those listed before instruments were hosted, and instruments only fill what is left.
+pub fn listed_classes(raw: &[RawClassInfo]) -> Vec<ClassInfo> {
     let mut out: Vec<ClassInfo> = Vec::new();
-    for class in raw.iter().filter(|c| is_audio_effect(c)) {
-        let info = clean_class(class);
-        if out.iter().all(|seen| seen.class_id != info.class_id) {
-            out.push(info);
-        }
-        if out.len() == MAX_CLASSES {
-            break;
+    for wanted in [PluginKind::Effect, PluginKind::Instrument] {
+        for (class, kind) in raw.iter().filter_map(|c| raw_kind(c).map(|k| (c, k))) {
+            if out.len() == MAX_CLASSES {
+                return out;
+            }
+            if kind != wanted {
+                continue;
+            }
+            let info = clean_class(class, kind);
+            if out.iter().all(|seen| seen.class_id != info.class_id) {
+                out.push(info);
+            }
         }
     }
     out
@@ -139,21 +155,54 @@ mod tests {
                 "{text:?} became {name:?}"
             );
             assert!(name.chars().count() <= MAX_NAME_CHARS);
-            let class = clean_class(&raw(text, AUDIO_CLASS, "Fx"));
+            let class = clean_class(&raw(text, AUDIO_CLASS, "Fx"), PluginKind::Effect);
             assert!(class.validate().is_ok(), "{text:?}: {class:?}");
         }
         assert_eq!(clean_text("Tab\tand\nbreak", 64), "Tab and break");
         assert_eq!(clean_text("  Amp  ", 64), "Amp");
-        assert_eq!(clean_class(&raw("", AUDIO_CLASS, "Fx")).name, UNNAMED);
+        assert_eq!(
+            clean_class(&raw("", AUDIO_CLASS, "Fx"), PluginKind::Effect).name,
+            UNNAMED
+        );
     }
 
     #[test]
-    fn only_audio_effects_are_listed() {
+    fn the_kind_comes_from_the_sub_categories() {
+        use PluginKind::{Effect, Instrument};
+        let table: [(&str, Option<PluginKind>); 20] = [
+            ("Fx", Some(Effect)),
+            ("fx", Some(Effect)),
+            ("FX", Some(Effect)),
+            ("Fx|Distortion", Some(Effect)),
+            ("Distortion|Fx", Some(Effect)),
+            (" Fx | Dynamics ", Some(Effect)),
+            ("Instrument", Some(Instrument)),
+            ("instrument", Some(Instrument)),
+            ("Instrument|Synth", Some(Instrument)),
+            ("Instrument|Drum", Some(Instrument)),
+            ("Synth|Instrument", Some(Instrument)),
+            ("Fx|Instrument", Some(Instrument)),
+            ("Instrument|Fx", Some(Instrument)),
+            ("", None),
+            ("   ", None),
+            ("Spatial", None),
+            ("Analyzer", None),
+            ("Fxx", None),
+            ("Instruments", None),
+            ("|", None),
+        ];
+        for (text, kind) in table {
+            assert_eq!(class_kind(text), kind, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn effects_and_instruments_are_listed_and_the_rest_are_not() {
         let mut effect = raw("Amp", AUDIO_CLASS, "Fx|Distortion");
         effect.cid = [1; 16];
         let mut synth = raw("Synth", AUDIO_CLASS, "Instrument|Synth");
         synth.cid = [2; 16];
-        let mut controller = raw("Amp", "Component Controller Class", "");
+        let mut controller = raw("Amp", "Component Controller Class", "Fx");
         controller.cid = [3; 16];
         let mut plain = raw("Old", AUDIO_CLASS, "");
         plain.cid = [4; 16];
@@ -161,22 +210,34 @@ mod tests {
         both.cid = [5; 16];
         let mut lower = raw("Lower", AUDIO_CLASS, "fx");
         lower.cid = [6; 16];
-        let listed = effect_classes(&[
+        let mut analyzer = raw("Meter", AUDIO_CLASS, "Analyzer");
+        analyzer.cid = [7; 16];
+        let mut duplicate_synth = synth.clone();
+        duplicate_synth.name = "Synth again".into();
+        let listed = listed_classes(&[
             effect.clone(),
             synth,
             controller,
             plain,
             both,
             lower,
+            analyzer,
             effect,
+            duplicate_synth,
         ]);
-        let names: Vec<_> = listed.iter().map(|c| c.name.as_str()).collect();
+        let seen: Vec<_> = listed.iter().map(|c| (c.name.as_str(), c.kind)).collect();
         assert_eq!(
-            names,
-            ["Amp", "Lower"],
-            "duplicates and non-effects are dropped"
+            seen,
+            [
+                ("Amp", PluginKind::Effect),
+                ("Lower", PluginKind::Effect),
+                ("Synth", PluginKind::Instrument),
+                ("Odd", PluginKind::Instrument),
+            ],
+            "duplicates and classes of no kind are dropped; effects first, then instruments, each in the factory's order"
         );
         assert_eq!(listed[0].class_id, "01".repeat(16));
+        assert!(listed.iter().all(|c| c.validate().is_ok()));
     }
 
     #[test]
@@ -188,6 +249,47 @@ mod tests {
                 c
             })
             .collect();
-        assert_eq!(effect_classes(&many).len(), MAX_CLASSES);
+        assert_eq!(listed_classes(&many).len(), MAX_CLASSES);
+        // The cap is across both kinds, but instruments never take a place from an effect.
+        let mixed = |effects: u8, instruments: u8| -> Vec<RawClassInfo> {
+            // Interleaved: one effect, one instrument, ... until one kind runs out, then the rest.
+            let mut out = Vec::new();
+            let (mut e, mut i) = (0u8, 0u8);
+            while e < effects || i < instruments {
+                if e < effects {
+                    let mut c = raw(&format!("Fx {e}"), AUDIO_CLASS, "Fx");
+                    c.cid = [e; 16];
+                    out.push(c);
+                    e += 1;
+                }
+                if i < instruments {
+                    let mut c = raw(&format!("Inst {i}"), AUDIO_CLASS, "Instrument");
+                    c.cid = [100 + i; 16];
+                    out.push(c);
+                    i += 1;
+                }
+            }
+            out
+        };
+        let listed = listed_classes(&mixed(64, 64));
+        assert_eq!(listed.len(), MAX_CLASSES);
+        assert!(
+            listed.iter().all(|c| c.kind == PluginKind::Effect),
+            "64 effects interleaved with instruments list all 64 effects and no instrument"
+        );
+        let names: Vec<_> = listed.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(
+            names,
+            (0..64).map(|n| format!("Fx {n}")).collect::<Vec<_>>()
+        );
+        let listed = listed_classes(&mixed(40, 64));
+        assert_eq!(listed.len(), MAX_CLASSES);
+        let effects = listed
+            .iter()
+            .filter(|c| c.kind == PluginKind::Effect)
+            .count();
+        assert_eq!(effects, 40, "every effect is listed");
+        assert_eq!(listed.len() - effects, 24, "instruments fill what is left");
+        assert!(listed[..40].iter().all(|c| c.kind == PluginKind::Effect));
     }
 }

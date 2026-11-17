@@ -781,6 +781,7 @@ fn the_output_callback_itself_does_not_touch_the_heap_at_large_sizes() {
 fn line_in_ignores_plugin_slot() {
     let mut settings = LineInSettings::default();
     settings.sound.plugin = Some(tabplayer_lib::settings::PluginSlot {
+        kind: tabplayer_lib::settings::SlotKind::Effect,
         format: tabplayer_lib::settings::PluginFormat::Vst3,
         class_id: "0123456789ABCDEF0123456789ABCDEF".into(),
         name: "Test".into(),

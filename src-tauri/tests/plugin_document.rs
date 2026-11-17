@@ -9,7 +9,7 @@ use tabplayer_lib::{
         decode_state, encode_state,
     },
     project::{EditCommand, Project, ProjectSession},
-    settings::{PluginFormat, PluginSlot, TrackSound},
+    settings::{PluginFormat, PluginSlot, SlotKind, TrackSound},
 };
 
 const PROTOCOL: &str = include_str!("../../tests/plugin-slot-protocol.json");
@@ -308,4 +308,114 @@ fn save_keeps_plugin_state_assets() {
     assert_eq!(read_project(&path).unwrap_err(), MISSING_MESSAGE);
     // The container's own refusals reach here unchanged.
     assert_eq!(decode_state(&bytes[..5]), Err(StateError::Truncated));
+}
+
+fn instrument_json() -> Value {
+    let mut slot = slot_json();
+    slot["kind"] = json!("instrument");
+    slot
+}
+
+#[test]
+fn effect_slot_has_no_kind_and_is_byte_identical() {
+    // A slot as every build before instruments wrote it: this exact text, in this key order.
+    let old = r#"{"format":"vst3","classId":"0123456789ABCDEF0123456789ABCDEF","name":"Amped ML5","vendor":"Amped Audio","active":true,"inputDb":1.5,"outputDb":-3.5,"state":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}"#;
+    let slot: PluginSlot = serde_json::from_str(old).unwrap();
+    assert_eq!(slot.kind, SlotKind::Effect);
+    slot.validate().unwrap();
+    assert_eq!(serde_json::to_string(&slot).unwrap(), old);
+    // The same through a whole sound and an edit.
+    let sound: TrackSound = serde_json::from_value(sound_json(Some(slot_json()))).unwrap();
+    assert!(!serde_json::to_string(&sound).unwrap().contains("kind"));
+    let edit = EditCommand::SetTrackSound {
+        track_id: "base/0".into(),
+        sound,
+    };
+    let text = serde_json::to_string(&edit).unwrap();
+    assert!(text.contains(old), "{text}");
+    assert_eq!(
+        serde_json::to_string(&serde_json::from_str::<EditCommand>(&text).unwrap()).unwrap(),
+        text
+    );
+}
+
+#[test]
+fn instrument_slot_round_trips_and_is_refused_in_other_spellings() {
+    let slot: PluginSlot = serde_json::from_value(instrument_json()).unwrap();
+    assert_eq!(slot.kind, SlotKind::Instrument);
+    slot.validate().unwrap();
+    assert_eq!(serde_json::to_value(&slot).unwrap(), instrument_json());
+    let sound: TrackSound = serde_json::from_value(sound_json(Some(instrument_json()))).unwrap();
+    sound.validate().unwrap();
+    let edit = EditCommand::SetTrackSound {
+        track_id: "base/0".into(),
+        sound,
+    };
+    let text = serde_json::to_string(&edit).unwrap();
+    assert!(text.contains(r#""kind":"instrument""#), "{text}");
+    assert_eq!(serde_json::from_str::<EditCommand>(&text).unwrap(), edit);
+    // One spelling each: an effect is the absence of the key.
+    for bad in [json!("effect"), Value::Null, json!("Instrument"), json!(1)] {
+        let mut slot = slot_json();
+        slot["kind"] = bad.clone();
+        assert!(accepted(slot).is_err(), "{bad}");
+    }
+    // The protocol's kind is reached by a mapping, not by the persisted spelling.
+    use tabplayer_plugin_protocol::control::PluginKind;
+    assert_eq!(PluginKind::from(SlotKind::Effect), PluginKind::Effect);
+    assert_eq!(
+        PluginKind::from(SlotKind::Instrument),
+        PluginKind::Instrument
+    );
+    assert_eq!(SlotKind::from(PluginKind::Instrument), SlotKind::Instrument);
+}
+
+#[test]
+fn old_plugin_edit_log_replays_unchanged_and_an_instrument_slot_keeps_its_state() {
+    // An effect slot saved and read back is the same file, with no `kind` key anywhere.
+    let (id, asset) = state_asset(b"component");
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    session
+        .apply_edit_with_asset(slot_edit(&id), Some((id.clone(), asset.clone())))
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first.tabplayer");
+    write_project(&first, &session.stored_project()).unwrap();
+    let text = std::fs::read_to_string(&first).unwrap();
+    assert!(!text.contains("\"instrument\""), "{text}");
+    let reread = read_project(&first).unwrap();
+    let second = directory.path().join("second.tabplayer");
+    write_project(&second, &reread).unwrap();
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), text);
+    // Replayed into a session, the edit is the same edit and names the same state.
+    let replayed = ProjectSession::new(reread, Some(first)).unwrap();
+    let EditCommand::SetTrackSound { sound, .. } = &replayed.stored_project().edits[0] else {
+        panic!("expected the sound edit");
+    };
+    assert_eq!(sound.plugin.as_ref().unwrap().kind, SlotKind::Effect);
+
+    // An instrument slot is one edit that names its state asset, which is saved and kept.
+    let (id, asset) = state_asset(b"synth component");
+    let mut slot = slot_json();
+    slot["state"] = json!(id);
+    slot["kind"] = json!("instrument");
+    let edit = EditCommand::SetTrackSound {
+        track_id: "base/0".into(),
+        sound: serde_json::from_value(sound_json(Some(slot))).unwrap(),
+    };
+    assert_eq!(edit.plugin_state_id(), Some(id.as_str()));
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    session
+        .apply_edit_with_asset(edit, Some((id.clone(), asset.clone())))
+        .unwrap();
+    let path = directory.path().join("instrument.tabplayer");
+    write_project(&path, &session.stored_project()).unwrap();
+    let written = std::fs::read_to_string(&path).unwrap();
+    assert!(written.contains(r#""kind": "instrument""#), "{written}");
+    let reopened = read_project(&path).unwrap();
+    assert_eq!(reopened.assets.get(&id), Some(&asset));
+    let EditCommand::SetTrackSound { sound, .. } = &reopened.edits[0] else {
+        panic!("expected the sound edit");
+    };
+    assert_eq!(sound.plugin.as_ref().unwrap().kind, SlotKind::Instrument);
 }

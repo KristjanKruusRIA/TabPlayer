@@ -121,6 +121,9 @@ pub enum PluginEvent {
 #[derive(Clone)]
 pub struct SlotRequest {
     pub track_id: String,
+    /// Whether the plan's track is a percussion track. An instrument slot can only play one: on another track the slot is
+    /// refused ([`PluginStatus::InstrumentNeedsDrums`]) before any helper is started for it.
+    pub percussion: bool,
     pub slot: PluginSlot,
     pub state: Arc<[u8]>,
 }
@@ -132,6 +135,8 @@ pub struct InsertPlan {
     pub input_db: f64,
     pub output_db: f64,
     pub shared: Arc<InsertShared>,
+    /// What the slot holds: an instrument sits at the board's input, an effect in place of Drive, Amp and Cabinet.
+    pub kind: crate::settings::SlotKind,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -254,6 +259,7 @@ pub trait Launcher: Send + Sync {
         exe: &Path,
         bundle: &Path,
         class_id: &str,
+        kind: tabplayer_plugin_protocol::control::PluginKind,
         rate: u32,
         state: StateParts,
         supervisor: &Supervisor,
@@ -265,6 +271,7 @@ pub trait Launcher: Send + Sync {
         exe: &Path,
         bundle: &Path,
         class_id: &str,
+        kind: tabplayer_plugin_protocol::control::PluginKind,
         rate: u32,
         state: StateParts,
     ) -> Result<Arc<dyn HelperSession>, HelperError>;
@@ -396,6 +403,7 @@ impl Launcher for RealLauncher {
         exe: &Path,
         bundle: &Path,
         class_id: &str,
+        kind: tabplayer_plugin_protocol::control::PluginKind,
         rate: u32,
         state: StateParts,
         supervisor: &Supervisor,
@@ -407,6 +415,7 @@ impl Launcher for RealLauncher {
             class_id: class_id.to_string(),
             sample_rate: rate,
             mode: Mode::Realtime,
+            kind,
             component: state.component,
             controller: state.controller,
         };
@@ -428,6 +437,7 @@ impl Launcher for RealLauncher {
         exe: &Path,
         bundle: &Path,
         class_id: &str,
+        kind: tabplayer_plugin_protocol::control::PluginKind,
         rate: u32,
         state: StateParts,
     ) -> Result<Arc<dyn HelperSession>, HelperError> {
@@ -437,6 +447,7 @@ impl Launcher for RealLauncher {
             class_id: class_id.to_string(),
             sample_rate: rate,
             mode: Mode::Offline,
+            kind,
             component: state.component,
             controller: state.controller,
         };
@@ -507,6 +518,9 @@ enum SlotEntry {
     },
     Ready {
         session: Arc<dyn HelperSession>,
+        /// What the helper was asked to load. One helper hosts one class as one kind, so a slot that names the class as
+        /// another kind never takes this helper.
+        kind: crate::settings::SlotKind,
         /// The state the helper holds that the document named: the one `ensure` applied, or the last one saved from
         /// the editor.
         state_asset_id: String,
@@ -529,6 +543,9 @@ enum SlotEntry {
     Faulted {
         status: PluginStatus,
         state_asset_id: String,
+        /// The kind the helper was asked to load. A slot that now names the class as another kind is launched again, as one
+        /// with a new state is.
+        kind: crate::settings::SlotKind,
     },
 }
 
@@ -590,6 +607,7 @@ fn plan_of(session: &Arc<dyn HelperSession>, slot: &PluginSlot) -> InsertPlan {
         input_db: slot.input_db,
         output_db: slot.output_db,
         shared: session.shared(),
+        kind: slot.kind,
     }
 }
 
@@ -610,9 +628,10 @@ fn fault_status_of(session: &Arc<dyn HelperSession>) -> Option<PluginStatus> {
 enum Found {
     Nothing,
     Loading,
-    Faulted(PluginStatus, String),
+    Faulted(PluginStatus, String, crate::settings::SlotKind),
     Ready {
         session: Arc<dyn HelperSession>,
+        kind: crate::settings::SlotKind,
         state_asset_id: String,
         saved_state_id: Option<String>,
         busy: bool,
@@ -779,17 +798,22 @@ impl PluginService {
         let mut retired = Vec::new();
         {
             let mut inner = lock(&self.inner);
-            let state_asset_id = match inner.slots.remove(&key) {
+            let (state_asset_id, kind) = match inner.slots.remove(&key) {
                 Some(SlotEntry::Ready {
                     session,
                     state_asset_id,
+                    kind,
                     ..
                 }) => {
                     self.supervisor.unwatch(&key);
                     retired.push(session);
-                    state_asset_id
+                    (state_asset_id, kind)
                 }
-                Some(SlotEntry::Faulted { state_asset_id, .. }) => state_asset_id,
+                Some(SlotEntry::Faulted {
+                    state_asset_id,
+                    kind,
+                    ..
+                }) => (state_asset_id, kind),
                 other => {
                     // A report about a helper that is no longer the slot's (a newer launch is under way, or the slot
                     // went): it changes nothing.
@@ -804,6 +828,7 @@ impl PluginService {
                 SlotEntry::Faulted {
                     status,
                     state_asset_id,
+                    kind,
                 },
             );
             if let Some(t_status) = inner
@@ -856,8 +881,23 @@ impl PluginService {
                 continue;
             }
 
-            active_count += 1;
             active_tracks.insert(track_id.clone(), slot.class_id.clone());
+
+            // An instrument plays a drum track's notes. On any other track nothing could be played, so no helper is
+            // started, a helper the slot had is shut down below, and the slot does not count toward the limit. The refusal
+            // is recorded here, once (a status is told only when it changes), instead of after a launch.
+            if slot.kind == crate::settings::SlotKind::Instrument && !request.percussion {
+                self.record_status(
+                    document_id,
+                    &track_id,
+                    slot,
+                    PluginStatus::InstrumentNeedsDrums,
+                );
+                results.push((track_id, Err(PluginStatus::InstrumentNeedsDrums)));
+                continue;
+            }
+
+            active_count += 1;
 
             // 2. not Windows: UnsupportedPlatform. The launcher says so ([`Launcher::hosts_plugins`]): a run-time test, so the
             // rest of the loop is reachable code off Windows too, and the tests' fake launcher hosts everywhere (final
@@ -985,9 +1025,11 @@ impl PluginService {
                 Some(SlotEntry::Faulted {
                     status,
                     state_asset_id,
-                }) => Found::Faulted(*status, state_asset_id.clone()),
+                    kind,
+                }) => Found::Faulted(*status, state_asset_id.clone(), *kind),
                 Some(SlotEntry::Ready {
                     session,
+                    kind,
                     state_asset_id,
                     saved_state_id,
                     busy,
@@ -995,6 +1037,7 @@ impl PluginService {
                     ..
                 }) => Found::Ready {
                     session: session.clone(),
+                    kind: *kind,
                     state_asset_id: state_asset_id.clone(),
                     saved_state_id: saved_state_id.clone(),
                     busy: *busy,
@@ -1015,8 +1058,12 @@ impl PluginService {
                     results.push((track_id, Err(PluginStatus::Loading)));
                     continue;
                 }
-                Found::Faulted(status, state_asset_id) => {
-                    if is_runtime_fault(status) {
+                Found::Faulted(status, state_asset_id, kind) => {
+                    if kind != slot.kind {
+                        // The slot now names the class as the other kind, which is what the failure may have been about:
+                        // launched again, and the old helper's end is not a crash of the new one.
+                        true
+                    } else if is_runtime_fault(status) {
                         let crashes = inner.crash_counts.entry(key.clone()).or_insert(0);
                         if *crashes >= MAX_CRASH_RETRIES {
                             Self::record_status_inner(
@@ -1042,6 +1089,7 @@ impl PluginService {
                 }
                 Found::Ready {
                     session,
+                    kind,
                     state_asset_id,
                     saved_state_id,
                     busy,
@@ -1058,6 +1106,7 @@ impl PluginService {
                                 SlotEntry::Faulted {
                                     status: fault_status,
                                     state_asset_id,
+                                    kind,
                                 },
                             );
                             Self::record_status_inner(
@@ -1071,6 +1120,12 @@ impl PluginService {
                             continue;
                         }
                         *crashes += 1;
+                        true
+                    } else if kind != slot.kind {
+                        // Loaded as the other kind of plug-in: replaced, which is not a crash.
+                        inner.slots.remove(&key);
+                        self.supervisor.unwatch(&key);
+                        retired.push(session);
                         true
                     } else if session.link().sample_rate() != rate {
                         // Started for another device rate (review C1): replaced, which is not a crash.
@@ -1192,6 +1247,7 @@ impl PluginService {
                                     SlotEntry::Faulted {
                                         status,
                                         state_asset_id: state_id,
+                                        kind,
                                     },
                                 );
                                 Self::record_status_inner(
@@ -1401,6 +1457,7 @@ impl PluginService {
                     &exe,
                     &bundle,
                     &slot.class_id,
+                    slot.kind.into(),
                     rate,
                     state_parts,
                     &supervisor,
@@ -1429,6 +1486,7 @@ impl PluginService {
                             key,
                             SlotEntry::Ready {
                                 session,
+                                kind: slot.kind,
                                 state_asset_id: slot.state.clone(),
                                 last_latency: latency,
                                 editor_open: false,
@@ -1463,6 +1521,7 @@ impl PluginService {
                                 SlotEntry::Faulted {
                                     status,
                                     state_asset_id: slot.state.clone(),
+                                    kind: slot.kind,
                                 },
                             );
                             Self::record_status_inner(
@@ -1622,6 +1681,7 @@ impl PluginService {
                 &self.paths.helper,
                 &entry.bundle,
                 class_id,
+                entry.kind.into(),
                 rate,
                 empty_state,
                 &self.supervisor,
@@ -1660,6 +1720,19 @@ impl PluginService {
         for request in slots {
             let slot = &request.slot;
             if !slot.active {
+                continue;
+            }
+
+            // As in `ensure`: an instrument on a track that is not a drum track plays nothing, so it is told to the user
+            // and no helper is started for it.
+            if slot.kind == crate::settings::SlotKind::Instrument && !request.percussion {
+                warnings.push(TrackPluginStatus {
+                    track_id: request.track_id.clone(),
+                    class_id: slot.class_id.clone(),
+                    name: slot.name.clone(),
+                    vendor: slot.vendor.clone(),
+                    status: PluginStatus::InstrumentNeedsDrums,
+                });
                 continue;
             }
             active_count += 1;
@@ -1758,6 +1831,7 @@ impl PluginService {
                 &self.paths.helper,
                 &bundle,
                 &slot.class_id,
+                slot.kind.into(),
                 rate,
                 state_parts,
             ) {
@@ -1772,7 +1846,8 @@ impl PluginService {
             let latency = session.latency();
             let shared = session.shared();
             sessions.push(session.clone());
-            let insert = match crate::audio::plugin_insert::PluginInsert::new(
+            let insert = match crate::audio::plugin_insert::PluginInsert::new_of_kind(
+                slot.kind,
                 link,
                 OFFLINE_INSERT_MODE,
                 latency,
@@ -2544,6 +2619,8 @@ pub(crate) mod fakes {
         pub last_session: Mutex<Option<Arc<FakeSession>>>,
         pub sessions: Mutex<Vec<Arc<FakeSession>>>,
         pub rates: Mutex<Vec<u32>>,
+        /// The kind each launch was asked for, in order.
+        pub kinds: Mutex<Vec<tabplayer_plugin_protocol::control::PluginKind>>,
         /// Every probe fails.
         pub fail_probe: AtomicBool,
         /// Whether it hosts plug-ins. It runs no process, so it does on every platform unless a test says otherwise.
@@ -2560,6 +2637,7 @@ pub(crate) mod fakes {
                 last_session: Mutex::new(None),
                 sessions: Mutex::new(Vec::new()),
                 rates: Mutex::new(Vec::new()),
+                kinds: Mutex::new(Vec::new()),
                 fail_probe: AtomicBool::new(false),
                 hosts: AtomicBool::new(true),
             }
@@ -2588,11 +2666,13 @@ pub(crate) mod fakes {
             _exe: &Path,
             _bundle: &Path,
             _class_id: &str,
+            kind: tabplayer_plugin_protocol::control::PluginKind,
             rate: u32,
             _state: StateParts,
             _supervisor: &Supervisor,
             _key: HelperKey,
         ) -> Result<Arc<dyn HelperSession>, HelperError> {
+            self.kinds.lock().unwrap().push(kind);
             self.start(rate)
         }
 
@@ -2601,9 +2681,11 @@ pub(crate) mod fakes {
             _exe: &Path,
             _bundle: &Path,
             _class_id: &str,
+            kind: tabplayer_plugin_protocol::control::PluginKind,
             rate: u32,
             _state: StateParts,
         ) -> Result<Arc<dyn HelperSession>, HelperError> {
+            self.kinds.lock().unwrap().push(kind);
             self.start(rate)
         }
 
@@ -2623,6 +2705,7 @@ pub(crate) mod fakes {
                 vendor: "Vendor".into(),
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             }])
         }
 
@@ -2633,6 +2716,7 @@ pub(crate) mod fakes {
 
     pub(crate) fn test_slot(class_id: &str, state_id: &str) -> PluginSlot {
         PluginSlot {
+            kind: Default::default(),
             active: true,
             format: PluginFormat::Vst3,
             class_id: class_id.to_string(),
@@ -2657,6 +2741,7 @@ pub(crate) mod fakes {
                 vendor: "Vendor".into(),
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             }])
         })
         .unwrap();
@@ -2701,6 +2786,7 @@ pub(crate) mod fakes {
                 vendor: "Vendor".into(),
                 version: "1.0".into(),
                 subcategories: "Fx".into(),
+                kind: tabplayer_plugin_protocol::control::PluginKind::Effect,
             }])
         })
         .unwrap();
@@ -2781,6 +2867,7 @@ mod tests {
 
         let requests: Vec<SlotRequest> = (0..9)
             .map(|i| SlotRequest {
+                percussion: true,
                 track_id: format!("track_{i}"),
                 slot: test_slot(&class_id, &state_id),
                 state: state_bytes.clone(),
@@ -2805,6 +2892,7 @@ mod tests {
         slot.active = false;
 
         let requests = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot,
             state: state_bytes,
@@ -2822,6 +2910,7 @@ mod tests {
         let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
 
         let requests = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &foreign_state_id),
             state: state_bytes,
@@ -2840,6 +2929,7 @@ mod tests {
         let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
 
         let requests = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&missing_class_id, &state_id),
             state: state_bytes,
@@ -2857,6 +2947,7 @@ mod tests {
         let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
 
         let requests = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes.clone(),
@@ -2887,6 +2978,7 @@ mod tests {
             .unwrap();
 
         let req1 = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes1,
@@ -2899,6 +2991,7 @@ mod tests {
         assert_eq!(launcher.launch_count.load(Ordering::SeqCst), 1);
 
         let req2 = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id2),
             state: state_bytes2,
@@ -2917,6 +3010,7 @@ mod tests {
         let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
 
         let req = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes,
@@ -2941,6 +3035,7 @@ mod tests {
         let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
 
         let req = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes.clone(),
@@ -3021,6 +3116,7 @@ mod tests {
         launcher.launch_delay_ms.store(80, Ordering::SeqCst);
 
         let req = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes,
@@ -3052,6 +3148,7 @@ mod tests {
 
         let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
         let req = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes.clone(),
@@ -3083,6 +3180,7 @@ mod tests {
         let (service, launcher, _dir, class_id, state_id) = test_service();
         let state_bytes: Arc<[u8]> = encode_state(b"c", b"d").unwrap().into();
         let req = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes.clone(),
@@ -3141,6 +3239,7 @@ mod tests {
             .unwrap();
 
         let req1 = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes1,
@@ -3156,6 +3255,7 @@ mod tests {
         *session.fail_set_state.lock().unwrap() = Some(HelperError::Timeout);
 
         let req2 = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id2),
             state: state_bytes2,
@@ -3176,6 +3276,7 @@ mod tests {
         assert!(err.is_err());
 
         let req = vec![SlotRequest {
+            percussion: true,
             track_id: "track_0".into(),
             slot: test_slot(&class_id, &state_id),
             state: state_bytes,
@@ -3196,6 +3297,7 @@ mod tests {
 
     fn request(track_id: &str, slot: PluginSlot) -> SlotRequest {
         SlotRequest {
+            percussion: true,
             track_id: track_id.into(),
             slot,
             state: encode_state(b"c", b"d").unwrap().into(),
@@ -3225,6 +3327,85 @@ mod tests {
         let plan = plans[0].1.as_ref().ok().expect("a ready plan");
         assert_eq!(plan.link.sample_rate(), 44_100);
         assert_eq!(session.rate, 44_100);
+    }
+
+    #[test]
+    fn the_slot_decides_the_kind_a_helper_is_asked_to_load() {
+        use tabplayer_plugin_protocol::control::PluginKind;
+        let rig = test_rig();
+        let effect = test_slot(&rig.class_id, &rig.state_id);
+        assert_eq!(effect.kind, crate::settings::SlotKind::Effect);
+        let mut synth = effect.clone();
+        synth.kind = crate::settings::SlotKind::Instrument;
+        let req = vec![request("track_0", effect), request("track_1", synth)];
+        let _ = ready(&rig, 48_000, &req);
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_1"),
+            PluginStatus::Ready
+        );
+        let mut kinds = rig.launcher.kinds.lock().unwrap().clone();
+        kinds.sort_by_key(|kind| *kind == PluginKind::Instrument);
+        assert_eq!(kinds, vec![PluginKind::Effect, PluginKind::Instrument]);
+    }
+    #[test]
+    fn a_slot_whose_kind_changed_never_reuses_the_helper_of_the_other_kind() {
+        use crate::settings::SlotKind;
+        use tabplayer_plugin_protocol::control::PluginKind;
+        let rig = test_rig();
+        let effect = test_slot(&rig.class_id, &rig.state_id);
+        let _ = ready(&rig, 48_000, &[request("track_0", effect.clone())]);
+        // The same class named by a slot of the other kind: the running helper loaded an effect, so it is not handed out.
+        let mut synth = effect;
+        synth.kind = SlotKind::Instrument;
+        let plans = rig
+            .service
+            .ensure("doc1", Some(48_000), &[request("track_0", synth)]);
+        assert_eq!(
+            plans[0].1.as_ref().err(),
+            Some(&PluginStatus::Loading),
+            "a helper of the other kind is replaced, not reused"
+        );
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(
+            *rig.launcher.kinds.lock().unwrap(),
+            vec![PluginKind::Effect, PluginKind::Instrument]
+        );
+        // A change of kind is not a crash.
+        assert!(lock(&rig.service.inner).crash_counts.is_empty());
+    }
+
+    #[test]
+    fn an_export_builds_an_instrument_insert_for_an_instrument_slot_and_leaves_a_missing_one_to_the_built_in_sound()
+     {
+        use crate::settings::SlotKind;
+        let rig = test_rig();
+        let mut synth = test_slot(&rig.class_id, &rig.state_id);
+        synth.kind = SlotKind::Instrument;
+        let req = vec![request("track_0", synth.clone())];
+        let offline = rig.service.offline_inserts("doc1", &req, 48_000).unwrap();
+        assert!(offline.warnings.is_empty());
+        assert_eq!(offline.inserts.len(), 1);
+        let insert = &offline.inserts[0].1;
+        assert_eq!(insert.kind(), SlotKind::Instrument);
+        assert_eq!(
+            insert.delay_frames(),
+            tabplayer_plugin_protocol::limits::BLOCK_FRAMES + insert.pipeline_and_latency().1
+        );
+        drop(offline);
+
+        // As for an effect: a class the library does not have is a warning, and the track keeps its built-in sound.
+        let mut gone = synth;
+        gone.class_id = "99999999999999999999999999999999".into();
+        let offline = rig
+            .service
+            .offline_inserts("doc1", &[request("track_0", gone)], 48_000)
+            .unwrap();
+        assert!(offline.inserts.is_empty());
+        assert_eq!(offline.warnings.len(), 1);
+        assert_eq!(offline.warnings[0].status, PluginStatus::Missing);
     }
 
     #[test]
@@ -3364,6 +3545,7 @@ mod tests {
     /// A request whose state's component is `component`, so the helper's state tells which request reached it.
     fn request_holding(track_id: &str, slot: PluginSlot, component: &[u8]) -> SlotRequest {
         SlotRequest {
+            percussion: true,
             track_id: track_id.into(),
             slot,
             state: encode_state(component, b"d").unwrap().into(),
@@ -3715,6 +3897,82 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_slot_that_failed_as_the_wrong_kind_is_launched_again_when_its_kind_is_corrected() {
+        let rig = test_rig();
+        // An instrument class named as an effect: the helper refuses it, and the slot is faulted.
+        *rig.launcher.fail_next.lock().unwrap() =
+            Some(HelperError::Misbehaved("not an effect".into()));
+        let as_effect = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];
+        rig.service.ensure("doc1", Some(48_000), &as_effect);
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Unreadable
+        );
+        // The same state, until the user retries: still faulted, nothing launched.
+        let plans = rig.service.ensure("doc1", Some(48_000), &as_effect);
+        assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Unreadable));
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 1);
+        // The kind is corrected with the same state: launched again, as the other kind.
+        let as_instrument = vec![instrument_on("track_0", &rig.class_id, &rig.state_id, true)];
+        let plans = rig.service.ensure("doc1", Some(48_000), &as_instrument);
+        assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Loading));
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            *rig.launcher.kinds.lock().unwrap(),
+            vec![
+                tabplayer_plugin_protocol::control::PluginKind::Effect,
+                tabplayer_plugin_protocol::control::PluginKind::Instrument
+            ]
+        );
+    }
+
+    #[test]
+    fn replacing_a_faulted_helper_of_another_kind_is_not_a_crash() {
+        let rig = test_rig();
+        let key = HelperKey {
+            document_id: "doc1".into(),
+            track_id: "track_0".into(),
+            class_id: rig.class_id.clone(),
+        };
+        let as_effect = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];
+        let as_instrument = vec![instrument_on("track_0", &rig.class_id, &rig.state_id, true)];
+        ready(&rig, 48_000, &as_effect);
+        // Two crashes, each relaunched: the cap is three.
+        for launches in 2..=3 {
+            rig.service
+                .on_supervisor_report(key.clone(), PluginStatus::Crashed);
+            rig.service.ensure("doc1", Some(48_000), &as_effect);
+            assert_eq!(
+                wait_for_slot(&rig.service, "doc1", "track_0"),
+                PluginStatus::Ready
+            );
+            assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), launches);
+        }
+        // A crash, and the kind is corrected: the new helper is a replacement, which does not use up a retry.
+        rig.service
+            .on_supervisor_report(key.clone(), PluginStatus::Crashed);
+        rig.service.ensure("doc1", Some(48_000), &as_instrument);
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 4);
+        // The next crash of the corrected slot still has its third retry.
+        rig.service.on_supervisor_report(key, PluginStatus::Crashed);
+        let plans = rig.service.ensure("doc1", Some(48_000), &as_instrument);
+        assert_eq!(plans[0].1.as_ref().err(), Some(&PluginStatus::Loading));
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 5);
+    }
+
     fn status_changes(events: &[PluginEvent]) -> usize {
         events
             .iter()
@@ -3744,6 +4002,110 @@ mod tests {
             rig.service.statuses("doc1")[0].status,
             PluginStatus::Missing
         );
+    }
+
+    fn instrument_on(
+        track_id: &str,
+        class_id: &str,
+        state_id: &str,
+        percussion: bool,
+    ) -> SlotRequest {
+        let mut slot = test_slot(class_id, state_id);
+        slot.kind = crate::settings::SlotKind::Instrument;
+        SlotRequest {
+            percussion,
+            ..request(track_id, slot)
+        }
+    }
+
+    #[test]
+    fn an_instrument_slot_on_a_track_that_is_not_percussion_is_refused_before_any_helper_starts() {
+        let rig = test_rig();
+        rig.take_events();
+        let req = vec![instrument_on(
+            "track_0",
+            &rig.class_id,
+            &rig.state_id,
+            false,
+        )];
+        for round in 0..3 {
+            let plans = rig.service.ensure("doc1", Some(48_000), &req);
+            assert_eq!(
+                plans[0].1.as_ref().err(),
+                Some(&PluginStatus::InstrumentNeedsDrums),
+                "round {round}"
+            );
+        }
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            rig.service.statuses("doc1")[0].status,
+            PluginStatus::InstrumentNeedsDrums
+        );
+        // One event for the change, none for the same status again, and no Loading -> Ready -> refused flicker.
+        assert_eq!(status_changes(&rig.take_events()), 1);
+        // The same slot on a drum track does launch.
+        let on_drums = vec![instrument_on("track_0", &rig.class_id, &rig.state_id, true)];
+        rig.service.ensure("doc1", Some(48_000), &on_drums);
+        wait_for_slot(&rig.service, "doc1", "track_0");
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_refused_instrument_slot_does_not_count_toward_the_limit_or_keep_its_helper() {
+        let rig = test_rig();
+        // The track had a ready helper as an instrument on a drum track; it then became a pitched track.
+        let drums = vec![instrument_on("t_i", &rig.class_id, &rig.state_id, true)];
+        rig.service.ensure("doc1", Some(48_000), &drums);
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "t_i"),
+            PluginStatus::Ready
+        );
+        let session = rig.launcher.last_session.lock().unwrap().clone().unwrap();
+        let mut requests = vec![instrument_on("t_i", &rig.class_id, &rig.state_id, false)];
+        requests.extend((0..8).map(|i| {
+            request(
+                &format!("track_{i}"),
+                test_slot(&rig.class_id, &rig.state_id),
+            )
+        }));
+        let plans = rig.service.ensure("doc1", Some(48_000), &requests);
+        assert_eq!(plans.len(), 9);
+        assert!(
+            plans
+                .iter()
+                .all(|(_, plan)| plan.as_ref().err() != Some(&PluginStatus::TooMany)),
+            "the refused slot takes none of the 8 places"
+        );
+        assert_eq!(
+            plans[0].1.as_ref().err(),
+            Some(&PluginStatus::InstrumentNeedsDrums)
+        );
+        // Its helper is shut down, not kept.
+        let start = Instant::now();
+        while session.is_alive() && start.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!session.is_alive(), "the refused slot's helper was kept");
+    }
+
+    #[test]
+    fn an_export_warns_about_an_instrument_slot_on_a_track_that_is_not_percussion() {
+        let rig = test_rig();
+        let req = vec![instrument_on(
+            "track_0",
+            &rig.class_id,
+            &rig.state_id,
+            false,
+        )];
+        let offline = rig.service.offline_inserts("doc1", &req, 48_000).unwrap();
+        assert!(offline.inserts.is_empty());
+        assert_eq!(offline.warnings.len(), 1);
+        assert_eq!(offline.warnings[0].track_id, "track_0");
+        assert_eq!(
+            offline.warnings[0].status,
+            PluginStatus::InstrumentNeedsDrums
+        );
+        assert_eq!(rig.launcher.launch_count.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -4019,6 +4381,7 @@ mod tests {
                 .grant_consent(&document_id, &[(rig.class_id.clone(), state_id.clone())])
                 .unwrap();
             let req = SlotRequest {
+                percussion: true,
                 track_id: track.into(),
                 slot: test_slot(&rig.class_id, &state_id),
                 state: state_bytes.into(),
@@ -4072,6 +4435,7 @@ mod tests {
                 .grant_consent(&document_id, &[(rig.class_id.clone(), state_id.clone())])
                 .unwrap();
             let req = SlotRequest {
+                percussion: true,
                 track_id: track.into(),
                 slot: test_slot(&rig.class_id, &state_id),
                 state: state_bytes.clone().into(),
@@ -4146,6 +4510,7 @@ mod tests {
                 .grant_consent(&document_id, &[(rig.class_id.clone(), state_id.clone())])
                 .unwrap();
             let req = SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 slot: test_slot(&rig.class_id, &state_id),
                 state: state_bytes.clone().into(),
@@ -4270,6 +4635,7 @@ mod tests {
                 .asset_bytes(&document_id, &saved.state)
                 .unwrap();
             let req = SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 slot: test_slot(&rig.class_id, &saved.state),
                 state: bytes.into(),
@@ -4297,6 +4663,7 @@ mod tests {
             }
             session.last_state.lock().unwrap().take();
             let req = SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 slot: test_slot(&rig.class_id, &state_id),
                 state: state_bytes.clone().into(),
@@ -4322,6 +4689,7 @@ mod tests {
                 .unwrap();
             let duplicate = "added/0/{}";
             let req = SlotRequest {
+                percussion: true,
                 track_id: duplicate.into(),
                 slot: test_slot(&rig.class_id, &state_id),
                 state: state_bytes.clone().into(),

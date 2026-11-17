@@ -2,7 +2,7 @@
 use std::time::Duration;
 
 /// Version of the control messages and of the ring layout. Both sides refuse anything else.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Build identifier of the helper and the host, written by `build.rs`: `<crate version>+<hash of the protocol and helper
 /// sources and Cargo.lock>`. The app and the helper must match (preflight ruling P33). Both link this crate, so a helper built
@@ -12,6 +12,9 @@ pub const BUILD_ID: &str = env!("TABPLAYER_PLUGIN_BUILD_ID");
 /// Frames in one ring block. Measured in Spike 2 (`docs/validation/2026-11-08-vst-spikes.md`): the p99 hand-off at
 /// this size is 2.31 ms with a real amp plug-in in eight helpers, against a 10.67 ms callback.
 pub const BLOCK_FRAMES: usize = 128;
+
+/// Events one input block carries into an instrument plug-in. A sender clamps to this; a reader clamps what it reads.
+pub const EVENTS_PER_BLOCK: usize = 64;
 
 /// The largest pipeline `P`, in frames: how far the output trails the input.
 pub const MAX_PIPELINE_FRAMES: usize = 8192;

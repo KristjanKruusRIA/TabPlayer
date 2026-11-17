@@ -2725,6 +2725,7 @@ export const en = {
   'track_settings.drum_tab_hint': 'Tab numbers are the sound numbers (36 kick, 38 snare, 42 closed hi-hat).',
   'track_settings.drum_notation_last': 'One of the two always stays on: turn the other on first.',
   'track_settings.drum_tab_left_off': 'Hits left off the drum tab: {count}. A beat shows at most six sounds; the score and playback keep them.',
+  'track_settings.drum_tab_staves': 'Drum tab needs a track of one percussion staff.',
   'track_settings.notation': 'Notation',
   'tuning_dialog.capo_section': 'Capo',
   'tuning_dialog.capo_fret': 'fret, 0 for none',

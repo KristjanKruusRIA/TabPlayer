@@ -172,3 +172,30 @@ it('a profile left behind by a removed track does not make the next drum toggle 
   expect(last.settings.engraving.profiles).toEqual([{ trackId: trackIdentity(kit), profile: 'standardTab' }]);
   expect(pressed()).toEqual(['true', 'true']);
 });
+
+it('a track with two percussion staves has no drum tab, so its TAB toggle does nothing and says why instead of piling up no-op edits', () => {
+  const { score } = kitScore({ secondStaff: true }), onEdit = vi.fn();
+  render(<TrackSettingsPanel score={score} selected={1} busy={false} onEdit={onEdit} engraving={defaultEngraving()} />);
+  const tab = tabButton();
+  tab.focus();
+  fireEvent.click(tab);
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(tab).toHaveAttribute('aria-disabled', 'true');
+  expect(tab).not.toBeDisabled();
+  expect(tab).toHaveFocus();
+  expect(document.getElementById(tab.getAttribute('aria-describedby')!)).toHaveTextContent('Drum tab needs a track of one percussion staff.');
+});
+
+it('a drum track drawn as slash shows neither toggle on, and either one switches it to what it names, in one edit', () => {
+  const built = authored(), id = trackIdentity(built.score.tracks[drumIndex(built.score)]), onEdit = vi.fn();
+  render(<TrackSettingsPanel score={built.score} selected={drumIndex(built.score)} busy={false} onEdit={onEdit} engraving={{ ...defaultEngraving(), profiles: [{ trackId: id, profile: 'slash' }] }} />);
+  expect(pressed()).toEqual(['false', 'false']);
+  expect(standardButton()).not.toHaveAttribute('aria-disabled', 'true');
+  expect(document.getElementById(tabButton().getAttribute('aria-describedby')!)).toHaveTextContent('Shown: Slash.');
+  fireEvent.click(standardButton());
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit.mock.calls[0][0]).toMatchObject({ type: 'setEngraving', engraving: { profiles: [] } });
+  fireEvent.click(tabButton());
+  expect(onEdit).toHaveBeenCalledTimes(2);
+  expect(onEdit.mock.calls[1][0]).toMatchObject({ type: 'setEngraving', engraving: { profiles: [{ trackId: id, profile: 'tablature' }] } });
+});

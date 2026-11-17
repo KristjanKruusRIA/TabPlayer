@@ -145,8 +145,9 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
   // A drum track (one percussion staff) shows what its engraving profile says: standard (today), tablature (the drum tab alone) or both. The staff's own flags are not touched: alphaTab resets them for percussion, so an edit there changed nothing.
   const drum = isDrumTrack(current);
   const drumProfile = engraving.profiles.find(entry => entry.trackId === trackIdentity(current))?.profile ?? 'source';
-  const drumTab = drumProfile === 'tablature' || drumProfile === 'standardTab', drumStandard = drumProfile !== 'tablature';
-  const drumStateName = t(drumProfile === 'tablature' ? 'engraving.profile_tablature' : drumTab ? 'engraving.profile_standard_tab' : 'engraving.profile_standard');
+  // Slash (a style a drum track may be given in Score style) is neither of the two: both toggles are off, and either one switches to what it names.
+  const drumTab = drumProfile === 'tablature' || drumProfile === 'standardTab', drumStandard = drumProfile !== 'tablature' && drumProfile !== 'slash';
+  const drumStateName = t(drumProfile === 'tablature' ? 'engraving.profile_tablature' : drumTab ? 'engraving.profile_standard_tab' : drumProfile === 'slash' ? 'engraving.profile_slash' : 'engraving.profile_standard');
   /** One setEngraving edit for the track's profile; nothing is recorded when the profile would stay what it is. The neutral state removes the track's entry, as the style panel does for Source. */
   const setDrumProfile = (tab: boolean, standard: boolean) => {
     if (locked || busy || (!tab && !standard)) return false;
@@ -169,13 +170,14 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
           {drumToggle(t('editor.show_notation'), drumStandard, drumTab, () => setDrumProfile(drumTab, !drumStandard), <ScoreGlyph />)}
         </>
         : <>
-          {toggle(t('editor.show_tablature'), staff.showTablature, !editable && !staff.isPercussion, () => applySettings({ showTab: !staff.showTablature }), <span className="notation-toggle-tab" aria-hidden="true">TAB</span>)}
+          {toggle(t('editor.show_tablature'), staff.showTablature, !editable && !staff.isPercussion, () => applySettings({ showTab: !staff.showTablature }), <span className="notation-toggle-tab" aria-hidden="true">TAB</span>, staff.isPercussion ? { unavailable: true, describedBy: `${noteId}-staves`, title: `${t('editor.show_tablature')}. ${t('track_settings.drum_tab_staves')}` } : undefined)}
           {toggle(t('editor.show_notation'), staff.showStandardNotation, false, () => applySettings({ showNotation: !staff.showStandardNotation }), <ScoreGlyph />)}
         </>}
       {several && (onSelectStaff
         ? <label className="notation-staff">{t('track_settings.staff_select')}<select value={staffAt} onChange={event => onSelectStaff(Number(event.target.value))}>{current.staves.map((_, index) => <option key={index} value={index}>{index + 1}</option>)}</select></label>
         : <span className="notation-staff">{t('editor.staff_n', { staff: staffAt + 1 })}</span>)}
     </div>
+    {!drum && staff.isPercussion && <span id={`${noteId}-staves`} className="track-sr-only">{t('track_settings.drum_tab_staves')}</span>}
     {drum && <>
       <span id={`${noteId}-hint`} className="track-sr-only">{t('track_settings.drum_notation_state', { style: drumStateName })} {t('track_settings.drum_tab_hint')}</span>
       <span id={`${noteId}-only`} className="track-sr-only">{t('track_settings.drum_notation_state', { style: drumStateName })} {t('track_settings.drum_notation_last')}</span>

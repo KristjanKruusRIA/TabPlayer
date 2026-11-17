@@ -2725,6 +2725,7 @@ export const de: MessageCatalog = {
   'track_settings.drum_tab_hint': 'Die Tabulaturzahlen sind die Klangnummern (36 Bassdrum, 38 Snare, 42 geschlossene Hi-Hat).',
   'track_settings.drum_notation_last': 'Eines von beiden bleibt immer an: schalte zuerst das andere ein.',
   'track_settings.drum_tab_left_off': 'In der Schlagzeugtabulatur fehlende Anschläge: {count}. Ein Schlag zeigt höchstens sechs Klänge; Notenbild und Wiedergabe behalten sie.',
+  'track_settings.drum_tab_staves': 'Die Schlagzeugtabulatur braucht eine Spur mit genau einem Schlagzeug-Notensystem.',
   'track_settings.notation': 'Notation',
   'tuning_dialog.capo_section': 'Kapodaster',
   'tuning_dialog.capo_fret': 'Bund, 0 = keiner',

@@ -155,3 +155,20 @@ it('counts the hits the tab leaves off from the conversion report: none for a be
   }
   expect(drumTabLeftOff(kitScore().score.tracks[1], undefined)).toBe(0);
 });
+
+it('a profile left behind by a removed track does not make the next drum toggle refuse', () => {
+  let built = previewEdit(blankProject(), { type: 'addPercussionTrack', name: 'Kit A', program: 0 });
+  built = previewEdit(built.project, { type: 'addPercussionTrack', name: 'Kit B', program: 0 }, built);
+  const first = built.score.tracks.findIndex(track => track.name === 'Kit A'), firstId = trackIdentity(built.score.tracks[first]);
+  built = previewEdit(built.project, { type: 'setEngraving', engraving: { ...built.settings.engraving, profiles: [{ trackId: firstId, profile: 'tablature' }] } }, built);
+  built = previewEdit(built.project, { type: 'removeTrack', track: first }, built);
+  // The removed track's entry stays in the settings until something drops it.
+  expect(built.settings.engraving.profiles.map(entry => entry.trackId)).toEqual([firstId]);
+  const log = { edits: [] as EditCommand[], documents: [] as Doc[] };
+  render(<Harness start={built} log={log} />);
+  expect(() => fireEvent.click(tabButton())).not.toThrow();
+  expect(log.edits).toHaveLength(1);
+  const last = log.documents.at(-1)!, kit = last.score.tracks[drumIndex(last.score)];
+  expect(last.settings.engraving.profiles).toEqual([{ trackId: trackIdentity(kit), profile: 'standardTab' }]);
+  expect(pressed()).toEqual(['true', 'true']);
+});

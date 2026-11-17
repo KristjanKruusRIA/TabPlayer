@@ -152,8 +152,9 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
     if (locked || busy || (!tab && !standard)) return false;
     const next: TrackProfile = tab && standard ? 'standardTab' : tab ? 'tablature' : 'source';
     if (next === drumProfile || (next === 'source' && drumProfile === 'standard')) return false;
-    const id = trackIdentity(current);
-    return onEdit({ type: 'setEngraving', engraving: { ...engraving, profiles: [...engraving.profiles.filter(entry => entry.trackId !== id), ...(next === 'source' ? [] : [{ trackId: id, profile: next }])] } });
+    // Entries of tracks that were removed stay in the settings; the new edit drops them, as the style panels do, or it would be refused for naming a missing track.
+    const id = trackIdentity(current), live = new Set(score.tracks.map(trackIdentity));
+    return onEdit({ type: 'setEngraving', engraving: { ...engraving, profiles: [...engraving.profiles.filter(entry => entry.trackId !== id && live.has(entry.trackId)), ...(next === 'source' ? [] : [{ trackId: id, profile: next }])] } });
   };
   const drumToggle = (label: string, pressed: boolean, other: boolean, click: () => void, content: ReactNode) => {
     const inert = pressed && !other;

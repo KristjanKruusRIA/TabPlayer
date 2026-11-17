@@ -443,7 +443,7 @@ mod tests {
     use super::*;
     use tabplayer_plugin_protocol::{
         limits::BLOCK_FRAMES,
-        ring::{Block, BlockMeta},
+        ring::{Block, BlockMeta, EventWords},
     };
 
     #[test]
@@ -457,7 +457,7 @@ mod tests {
         let block: Block = [[0.25; 2]; BLOCK_FRAMES];
         let sent = link.with_host(|host| {
             let seq = host.next_input();
-            host.send_input(seq, &block, &BlockMeta::default(), &[])
+            host.send_input(seq, &block, &BlockMeta::default(), EventWords::NONE)
         });
         assert_eq!(sent, Some(true));
         link.signal_input();

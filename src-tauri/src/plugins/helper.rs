@@ -1081,6 +1081,13 @@ impl HelperProcess {
                 "the helper loaded a different class than the one asked for".into(),
             ));
         }
+        // The helper checks the kind too, but it is not trusted to: an instrument loaded into an effect slot (or the other
+        // way) would be given blocks it does not treat as the slot expects.
+        if loaded.class.kind != request.kind {
+            return Err(HelperError::Misbehaved(
+                "the helper loaded a class of a different kind than the one asked for".into(),
+            ));
+        }
         if loaded.latency > limit {
             return Err(HelperError::TooMuchLatency {
                 latency: loaded.latency,

@@ -34,7 +34,7 @@ mod windows_tests {
     use tabplayer_plugin_protocol::{
         control::{ErrorCode, HostMessage, Mode},
         limits::BLOCK_FRAMES,
-        ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta},
+        ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, EventWords},
     };
     use tabplayer_test_plugin::{
         TEST_CLASS_ID, TestMode, TestState, decode_test_state, encode_test_state,
@@ -182,7 +182,7 @@ mod windows_tests {
         let seq = link
             .with_host(|host| {
                 let seq = host.next_input();
-                assert!(host.send_input(seq, &block, &meta(), &[]));
+                assert!(host.send_input(seq, &block, &meta(), EventWords::NONE));
                 seq
             })
             .expect("the host end is free");
@@ -1378,6 +1378,50 @@ mod windows_tests {
             "expected Misbehaved, got {error:?}"
         );
         assert_eq!(helper.violation(), Some(PluginStatus::Unreadable));
+    }
+
+    #[test]
+    fn a_loaded_class_of_the_other_kind_is_refused() {
+        use tabplayer_plugin_protocol::control::PluginKind;
+        for (asked, answered) in [
+            (PluginKind::Effect, "instrument"),
+            (PluginKind::Instrument, "effect"),
+        ] {
+            let job = HelperJob::new().unwrap();
+            let reply =
+                loaded_json(0).replace("\"kind\":\"effect\"", &format!("\"kind\":\"{answered}\""));
+            assert!(reply.contains(answered), "{reply}");
+            let helper = fake_helper(
+                &job,
+                &format!("Wait-Request; Send '{reply}'; Start-Sleep 30"),
+            );
+            let error = helper
+                .load(LoadRequest {
+                    kind: asked,
+                    ..fake_load()
+                })
+                .expect_err("a class of the other kind must be refused");
+            assert!(
+                matches!(error, HelperError::Misbehaved(_)),
+                "{asked:?} answered {answered}: {error:?}"
+            );
+            assert_eq!(error.status(), Some(PluginStatus::Unreadable));
+            assert!(helper.link().is_none(), "no link after a refused load");
+        }
+        // The same kind is accepted.
+        let job = HelperJob::new().unwrap();
+        let reply = loaded_json(0).replace("\"kind\":\"effect\"", "\"kind\":\"instrument\"");
+        let helper = fake_helper(
+            &job,
+            &format!("Wait-Request; Send '{reply}'; Start-Sleep 30"),
+        );
+        let loaded = helper
+            .load(LoadRequest {
+                kind: PluginKind::Instrument,
+                ..fake_load()
+            })
+            .expect("an instrument asked for and answered loads");
+        assert_eq!(loaded.class.kind, PluginKind::Instrument);
     }
 
     #[test]

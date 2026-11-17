@@ -49,7 +49,7 @@ use std::time::{Duration, Instant};
 
 use tabplayer_plugin_protocol::{
     limits::{BLOCK_FRAMES, MAX_PIPELINE_FRAMES, max_latency_frames},
-    ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, OutputRead},
+    ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, EventWords, OutputRead},
 };
 
 use super::dsp::FrameContext;
@@ -628,7 +628,7 @@ impl PluginInsert {
         let (seq, block, meta) = (self.next_send, &self.in_block, &self.in_meta);
         let sent = self
             .link
-            .with_host(|host| host.send_input(seq, block, meta, &[]))
+            .with_host(|host| host.send_input(seq, block, meta, EventWords::NONE))
             .unwrap_or(false);
         self.next_send = self.next_send.wrapping_add(1);
         if sent {

@@ -27,6 +27,16 @@ pub(crate) struct RawParam {
     pub id: u32,
 }
 
+/// The pointer `setBusArrangements` takes for a list of arrangements: null for none (an instrument with no audio input),
+/// which is what the VST3 SDK's own hosts pass with a count of zero.
+fn arrangement_ptr(list: &mut [sv::SpeakerArrangement]) -> *mut sv::SpeakerArrangement {
+    if list.is_empty() {
+        std::ptr::null_mut()
+    } else {
+        list.as_mut_ptr()
+    }
+}
+
 /// The audio bus layout chosen by [`Instance::configure`].
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Layout {
@@ -364,8 +374,16 @@ impl Instance {
                 *a = main;
             }
             // SAFETY: valid processor; the arrays hold exactly `nin`/`nout` arrangements and
-            // outlive the call.
-            if ok(unsafe { p.setBusArrangements(ins.as_mut_ptr(), nin, outs.as_mut_ptr(), nout) }) {
+            // outlive the call. A direction with no bus gets a null pointer and a count of zero, not the dangling
+            // pointer of an empty vector.
+            if ok(unsafe {
+                p.setBusArrangements(
+                    arrangement_ptr(&mut ins),
+                    nin,
+                    arrangement_ptr(&mut outs),
+                    nout,
+                )
+            }) {
                 tried_ok = true;
                 break;
             }
@@ -551,8 +569,10 @@ impl AudioPart {
             self.in_params.add_point(id, value, last_offset);
         }
         self.out_params.clear();
-        // TabPlayer: the events are pushed inside the list's preallocated capacity, so this never allocates.
-        self.in_events.with(|list| {
+        // TabPlayer: the events are pushed inside the list's preallocated capacity, so this never allocates. If the list
+        // is busy it still holds the previous block's events, which must not be played again, and this block's cannot be
+        // delivered: the block is not processed, and the caller hears that it failed.
+        let delivered = self.in_events.with(|list| {
             list.clear();
             for event in events {
                 if list.len() >= EVENT_CAP {
@@ -563,6 +583,10 @@ impl AudioPart {
                 }
             }
         });
+        if delivered.is_none() {
+            silence(output);
+            return Err("the event list was busy");
+        }
         self.out_events.with(Vec::clear);
         // The main buses carry the signal; aux buses stay silent (their buffers are zeroed once and never written).
         if self.instrument {
@@ -698,5 +722,19 @@ impl Drop for Instance {
             unsafe { self.component.terminate() };
             self.component_initialized = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_direction_with_no_bus_is_passed_as_null_and_one_with_buses_as_its_list() {
+        let mut none: Vec<sv::SpeakerArrangement> = Vec::new();
+        assert!(arrangement_ptr(&mut none).is_null());
+        let mut two = vec![sv::SpeakerArr::kStereo, sv::SpeakerArr::kMono];
+        let first = two.as_mut_ptr();
+        assert_eq!(arrangement_ptr(&mut two), first);
     }
 }

@@ -241,8 +241,9 @@ mod tests {
             out: &mut [[f32; 2]],
             _: &BlockMeta,
             _: &[MidiEvent],
-        ) {
+        ) -> bool {
             out.iter_mut().for_each(|f| *f = [0.0; 2]);
+            true
         }
     }
 

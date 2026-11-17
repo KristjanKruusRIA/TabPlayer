@@ -13,6 +13,14 @@
 //! any bit that the kind does not use makes the whole word invalid (`None`), and it never panics. A field a kind ignores
 //! must be zero (NoteOff has no release velocity, AllNotesOff has no key or value), so each event has exactly one
 //! encoding and `decode` followed by `encode` returns the same word.
+//!
+//! What the sender (the app side, a later slice) must honour:
+//! - `AllNotesOff` is per channel. "Everything off" is not an event: it is the flush, a new epoch, which makes the helper
+//!   release every key it believes sounding.
+//! - A NoteOn with velocity 0 is invalid. Convert it to a NoteOff before encoding, and never discard an
+//!   [`MidiEvent::encode`] `None` silently: a lost NoteOff leaves a note sounding.
+//! - A NoteOff must use the channel of the NoteOn it ends; the helper matches them by channel and key.
+//! - `Controller` words decode, but the helper currently drops them.
 use crate::limits::BLOCK_FRAMES;
 
 pub const KIND_NOTE_ON: u8 = 1;
@@ -65,7 +73,9 @@ impl MidiEvent {
         }
     }
 
-    /// The word for this event, or `None` when a field is out of range (see the module comment).
+    /// The word for this event, or `None` when a field is out of range (see the module comment). A caller must not treat
+    /// `None` as "nothing to send": a NoteOff that fails to encode is a note that never stops. NoteOn with velocity 0 is
+    /// out of range: send the NoteOff instead.
     pub fn encode(&self) -> Option<u64> {
         let word = match *self {
             Self::NoteOn {
@@ -300,18 +310,68 @@ mod tests {
         assert_eq!(MidiEvent::decode(u64::MAX), None);
     }
 
+    /// A xorshift64 generator, so the sweep below is the same on every run.
+    fn next(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
+    }
+
     #[test]
     fn decoding_never_panics_on_any_word() {
         let mut state = 0x9E37_79B9_7F4A_7C15u64;
         for _ in 0..200_000 {
-            state ^= state << 13;
-            state ^= state >> 7;
-            state ^= state << 17;
-            if let Some(event) = MidiEvent::decode(state) {
-                // Whatever decodes is canonical: it encodes back to the same word.
-                assert_eq!(event.encode(), Some(state));
+            let word = next(&mut state);
+            if let Some(event) = MidiEvent::decode(word) {
+                assert_eq!(event.encode(), Some(word));
             }
         }
+    }
+
+    #[test]
+    fn whatever_decodes_encodes_back_to_the_same_word() {
+        // Arbitrary 64-bit words almost never have bits 40..64 clear, so they almost never decode: they only show that
+        // nothing panics. Words with each field drawn from a range wider than the valid one reach the round trip.
+        let mut state = 0xD1B5_4A32_D192_ED03u64;
+        let (mut decoded, mut refused) = (0u32, 0u32);
+        let mut kinds = [0u32; 5];
+        for _ in 0..200_000 {
+            let r = next(&mut state);
+            let word = word(
+                (r & 0xFF) % 160,
+                1 + ((r >> 8) & 0xFF) % 5,
+                ((r >> 16) & 0xFF) % 20,
+                // Zero too, for AllNotesOff's key.
+                if (r >> 62) & 1 == 0 {
+                    ((r >> 24) & 0xFF) % 140
+                } else {
+                    0
+                },
+                // Zero is common enough to reach NoteOff and AllNotesOff, 128 and over to be refused.
+                if (r >> 63) & 1 == 0 {
+                    ((r >> 32) & 0xFF) % 140
+                } else {
+                    0
+                },
+                0,
+            );
+            match MidiEvent::decode(word) {
+                Some(event) => {
+                    decoded += 1;
+                    kinds[((word >> 8) & 0xFF) as usize] += 1;
+                    assert_eq!(event.encode(), Some(word), "{event:?}");
+                    assert_eq!(event.offset() as u64, word & 0xFF);
+                }
+                None => refused += 1,
+            }
+        }
+        assert!(decoded > 20_000, "only {decoded} words decoded");
+        assert!(refused > 20_000, "only {refused} words were refused");
+        assert!(
+            kinds[1..].iter().all(|&n| n > 1_000),
+            "every kind is reached: {kinds:?}"
+        );
     }
 
     #[test]

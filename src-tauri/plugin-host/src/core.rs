@@ -59,13 +59,18 @@ pub trait BlockProcessor {
     /// block carries and the note events the guard admitted for it (`NoteGuard`: only NoteOn and NoteOff, in offset order,
     /// at most `MAX_BLOCK_EVENTS`; empty for an effect, which ignores them whatever they are). An instrument ignores
     /// `input`. The output is silence when the plug-in fails. Nothing here may allocate or take a lock.
+    ///
+    /// Returns whether the plug-in processed the block and was given `events`. False means it did not (it returned a
+    /// failure, or the host could not hand it the events): none of `events` can be counted as delivered, and the caller
+    /// must release every note it believes sounding. `events` of an earlier block are never given again.
+    #[must_use = "a failed block did not deliver its events: release the notes"]
     fn process(
         &mut self,
         input: &[[f32; 2]],
         output: &mut [[f32; 2]],
         ctx: &BlockMeta,
         events: &[MidiEvent],
-    );
+    ) -> bool;
 }
 
 /// One plug-in, loaded. The helper holds exactly one.

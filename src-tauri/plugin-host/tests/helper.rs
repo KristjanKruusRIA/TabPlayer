@@ -24,7 +24,7 @@ mod windows_helper {
             read_frame, write_frame,
         },
         limits::{BLOCK_FRAMES, MAX_STATE_BYTES},
-        ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, HostRing, RING_BYTES},
+        ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, EventWords, HostRing, RING_BYTES},
         state::STATE_OVERHEAD,
     };
     use tabplayer_test_plugin::{
@@ -138,7 +138,12 @@ mod windows_helper {
         /// Sends the next block with event words.
         fn send_events(&mut self, block: &Block, meta: &BlockMeta, events: &[u64]) -> u64 {
             let seq = self.next;
-            assert!(self.host.send_input(seq, block, meta, events));
+            assert!(self.host.send_input(
+                seq,
+                block,
+                meta,
+                EventWords::new(events).expect("at most a block of events"),
+            ));
             self.next += 1;
             // SAFETY: an event handle this struct owns.
             unsafe { SetEvent(self.input_event) };

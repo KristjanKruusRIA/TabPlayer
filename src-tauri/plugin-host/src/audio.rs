@@ -27,7 +27,7 @@ use std::time::Duration;
 use tabplayer_plugin_protocol::{
     control::PluginKind,
     event::MidiEvent,
-    limits::{BLOCK_FRAMES, RING_BLOCKS},
+    limits::{BLOCK_FRAMES, EVENTS_PER_BLOCK, RING_BLOCKS},
     ring::{BlockMeta, HelperRing, InputRead},
 };
 
@@ -104,7 +104,7 @@ const NO_EVENT: MidiEvent = MidiEvent::AllNotesOff {
 pub fn run(mut audio: AudioLoop) {
     let mut input: Frames = [[0.0; 2]; BLOCK_FRAMES];
     // Read with every block; an instrument is given the ones the guard admits.
-    let mut events = [0u64; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK];
+    let mut events = [0u64; EVENTS_PER_BLOCK];
     let mut notes = NoteGuard::new();
     let mut admitted = [NO_EVENT; MAX_BLOCK_EVENTS];
     let mut output: Frames = [[0.0; 2]; BLOCK_FRAMES];
@@ -165,8 +165,12 @@ pub fn run(mut audio: AudioLoop) {
                             epoch = block.epoch;
                         }
                         let mut count = 0;
+                        // What the plug-in has been told so far, to go back to if this block fails.
+                        let before = notes.clone();
                         if audio.kind == PluginKind::Instrument {
-                            let words = &events[..usize::from(block.event_count)];
+                            // The ring never reports more than a block's worth, but the slice is not trusted to say so.
+                            let words =
+                                &events[..usize::from(block.event_count).min(EVENTS_PER_BLOCK)];
                             notes.admit(words, &mut |event| {
                                 if let Some(slot) = admitted.get_mut(count) {
                                     *slot = event;
@@ -174,12 +178,17 @@ pub fn run(mut audio: AudioLoop) {
                                 }
                             });
                         }
-                        audio.processor.process(
+                        let processed = audio.processor.process(
                             &input,
                             &mut output,
                             &block.meta,
                             &admitted[..count],
                         );
+                        if !processed {
+                            // The plug-in did not get this block's events: what the guard has just counted as started or
+                            // stopped never happened. Every key it was sounding before is released, in the next block.
+                            notes.release_all_since(&before);
+                        }
                         publish(&mut audio, next, block.epoch, &output, &block.meta);
                     }
                     next += 1;
@@ -224,7 +233,7 @@ mod tests {
     use super::*;
     use std::sync::{Condvar, Mutex, atomic::AtomicUsize};
     use std::time::Instant;
-    use tabplayer_plugin_protocol::ring::{Block, HostRing, OwnedRing};
+    use tabplayer_plugin_protocol::ring::{Block, EventWords, HostRing, OwnedRing};
 
     /// What the fake processor saw, in order.
     #[derive(Clone, Debug, PartialEq)]
@@ -283,6 +292,8 @@ mod tests {
         calls: Arc<AtomicUsize>,
         log: Log,
         hold: Arc<AtomicBool>,
+        /// While set, `process` reports that the plug-in failed the block.
+        fail: Arc<AtomicBool>,
     }
     impl BlockProcessor for Doubler {
         fn reset(&mut self) {
@@ -295,7 +306,7 @@ mod tests {
             output: &mut [[f32; 2]],
             _: &BlockMeta,
             events: &[MidiEvent],
-        ) {
+        ) -> bool {
             self.log.lock().unwrap().push(Seen::Block(events.to_vec()));
             self.calls.fetch_add(1, Ordering::SeqCst);
             while self.hold.load(Ordering::SeqCst) {
@@ -304,6 +315,7 @@ mod tests {
             for (o, i) in output.iter_mut().zip(input) {
                 *o = [i[0] * 2.0, i[1] * 2.0];
             }
+            !self.fail.load(Ordering::SeqCst)
         }
     }
 
@@ -318,6 +330,7 @@ mod tests {
         calls: Arc<AtomicUsize>,
         log: Log,
         hold: Arc<AtomicBool>,
+        fail: Arc<AtomicBool>,
         kind: PluginKind,
         pause_beat_limit: Duration,
         thread: Option<std::thread::JoinHandle<()>>,
@@ -338,6 +351,7 @@ mod tests {
                 calls: Arc::new(AtomicUsize::new(0)),
                 log: Log::default(),
                 hold: Arc::new(AtomicBool::new(false)),
+                fail: Arc::new(AtomicBool::new(false)),
                 kind: PluginKind::Effect,
                 pause_beat_limit: Duration::from_secs(60),
                 thread: None,
@@ -352,6 +366,7 @@ mod tests {
                     calls: self.calls.clone(),
                     log: self.log.clone(),
                     hold: self.hold.clone(),
+                    fail: self.fail.clone(),
                 }),
                 input: Box::new(self.input.clone()),
                 output: Box::new(self.output.clone()),
@@ -374,7 +389,12 @@ mod tests {
                 tempo: 90.0 + seq as f64,
                 ..BlockMeta::default()
             };
-            assert!(self.host.send_input(seq, &block, &meta, words));
+            assert!(self.host.send_input(
+                seq,
+                &block,
+                &meta,
+                EventWords::new(words).expect("at most a block of events"),
+            ));
             self.input.signal();
         }
 
@@ -760,6 +780,69 @@ mod tests {
                 Seen::Reset => true,
             }),
             "{seen:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_block_is_followed_by_a_release_of_every_key_the_guard_believed_sounding() {
+        let mut rig = Rig::new();
+        rig.kind = PluginKind::Instrument;
+        rig.start();
+        rig.send_events(0, 1.0, &[on(5, 60), on(6, 61)]);
+        rig.wait_for_output(0, 0);
+        // The plug-in fails block 1, which carries a NoteOff for 60 and a NoteOn for 62: neither reaches it.
+        rig.fail.store(true, Ordering::SeqCst);
+        rig.send_events(1, 1.0, &[off(3, 60), on(4, 62)]);
+        rig.wait_for_output(1, 0);
+        rig.fail.store(false, Ordering::SeqCst);
+        rig.send(2, 1.0);
+        rig.wait_for_output(2, 0);
+        rig.send(3, 1.0);
+        rig.wait_for_output(3, 0);
+        rig.stop();
+        assert_eq!(
+            rig.seen(),
+            [
+                Seen::Block(vec![note_on(5, 60), note_on(6, 61)]),
+                Seen::Block(vec![note_off(3, 60), note_on(4, 62)]),
+                // 60 and 61 are stopped: 60's NoteOff was in the failed block, so the plug-in is still sounding it. 62
+                // was never started, so it is not stopped.
+                Seen::Block(vec![note_off(0, 60), note_off(0, 61)]),
+                Seen::Block(vec![]),
+                Seen::Reset,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_block_with_a_release_in_it_still_stops_those_keys_once() {
+        let mut rig = Rig::new();
+        rig.kind = PluginKind::Instrument;
+        rig.start();
+        rig.send_events(0, 1.0, &[on(5, 60)]);
+        rig.wait_for_output(0, 0);
+        assert_eq!(rig.host.begin_flush(), 1);
+        // The first block of the new epoch would release 60 and is the one that fails.
+        rig.fail.store(true, Ordering::SeqCst);
+        rig.send_events(1, 1.0, &[on(9, 70)]);
+        rig.wait_for_output(1, 1);
+        rig.fail.store(false, Ordering::SeqCst);
+        rig.send(2, 1.0);
+        rig.wait_for_output(2, 1);
+        rig.send(3, 1.0);
+        rig.wait_for_output(3, 1);
+        rig.stop();
+        assert_eq!(
+            rig.seen(),
+            [
+                Seen::Block(vec![note_on(5, 60)]),
+                Seen::Reset,
+                Seen::Block(vec![note_off(0, 60), note_on(9, 70)]),
+                Seen::Block(vec![note_off(0, 60)]),
+                Seen::Block(vec![]),
+                Seen::Reset,
+            ],
+            "the NoteOff the failed block carried is owed again, the NoteOn it carried is forgotten"
         );
     }
 

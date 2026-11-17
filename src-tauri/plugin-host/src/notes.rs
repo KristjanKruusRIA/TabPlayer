@@ -70,6 +70,22 @@ impl NoteGuard {
         }
     }
 
+    /// Undoes a block that did not reach the plug-in and releases everything: `before` is this guard as it was before
+    /// [`NoteGuard::admit`] of that block. The plug-in's notes are those `before` counted as started (sounding, or
+    /// waiting for a release that was in that block), whatever the block said, so each of them gets a NoteOff at offset 0
+    /// of the next block. Nothing the failed block started is kept: the plug-in never heard it.
+    pub fn release_all_since(&mut self, before: &NoteGuard) {
+        for ((release, sounding), (was_release, was_sounding)) in self
+            .release
+            .iter_mut()
+            .zip(&mut self.sounding)
+            .zip(before.release.iter().zip(&before.sounding))
+        {
+            *release = *was_release | *was_sounding;
+            *sounding = 0;
+        }
+    }
+
     /// Keys the plug-in has been told to start and not to stop.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn sounding_count(&self) -> u32 {
@@ -472,6 +488,29 @@ mod tests {
     }
 
     #[test]
+    fn a_block_that_did_not_reach_the_plug_in_is_undone_and_everything_it_was_sounding_is_released()
+    {
+        let mut guard = NoteGuard::new();
+        run(&mut guard, &[on(0, 0, 60), on(0, 0, 61), on(0, 2, 5)]);
+        guard.release_all();
+        run(&mut guard, &[on(0, 1, 9)]); // delivers the release of the three; 1/9 sounds
+        run(&mut guard, &[on(0, 0, 60), on(0, 0, 61)]);
+        let before = guard.clone();
+        // The block stops 60, starts 70 and retriggers 61; the plug-in never hears any of it.
+        let out = run(&mut guard, &[off(1, 0, 60), on(2, 0, 70), on(3, 0, 61)]);
+        assert!(!out.is_empty());
+        guard.release_all_since(&before);
+        assert_eq!(guard.sounding_count(), 0);
+        let out = run(&mut guard, &[]);
+        assert_eq!(
+            out,
+            [note_off(0, 0, 60), note_off(0, 0, 61), note_off(0, 1, 9)],
+            "what the plug-in was sounding, and not 70, which it never heard"
+        );
+        assert_eq!(guard.pending_count(), 0);
+    }
+
+    #[test]
     fn release_all_with_nothing_sounding_does_nothing() {
         let mut guard = NoteGuard::new();
         guard.release_all();
@@ -499,7 +538,9 @@ mod tests {
         let mut blocks = 0;
         let mut worst = 0;
         while guard.pending_count() > 0 {
-            // Each block also carries 64 notes on the same keys it is releasing, so the retrigger rule is in play too.
+            // Each block also carries 64 NoteOffs for keys on channel 7. They are sounding as far as the app knows, but the
+            // guard has moved them to the release, which owes the plug-in the only NoteOff for each: these are dropped,
+            // so no key is stopped twice. (The retrigger rule is tested below.)
             let incoming: Vec<u64> = (0..EVENTS_PER_BLOCK as u8)
                 .map(|i| off(1 + i % 100, 7, i))
                 .collect();
@@ -540,13 +581,16 @@ mod tests {
             run(&mut guard, chunk);
         }
         guard.release_all();
-        // 64 NoteOns for keys whose releases wait, each a retrigger of a waiting release, and then an AllNotesOff.
-        let mut words: Vec<u64> = (0..EVENTS_PER_BLOCK as u8 - 1)
-            .map(|i| on(i, 0, i))
-            .collect();
-        words.push(all_off(120, 1));
+        // 64 NoteOns on channel 15, whose releases come last and so are still waiting after the block's 256 NoteOffs
+        // (channels 0 to 1 go first): each is a retrigger of a waiting release, a NoteOff and then the NoteOn.
+        let words: Vec<u64> = (0..EVENTS_PER_BLOCK as u8).map(|i| on(i, 15, i)).collect();
         let out = run(&mut guard, &words);
-        assert!(out.len() <= MAX_BLOCK_EVENTS);
+        assert_eq!(
+            out.len(),
+            MAX_BLOCK_EVENTS,
+            "256 releases and 64 retriggers of two events each reach the documented maximum"
+        );
+        assert_eq!(MAX_BLOCK_EVENTS, RELEASE_PER_BLOCK + 2 * EVENTS_PER_BLOCK);
         assert!(MAX_BLOCK_EVENTS <= 1024, "below the plug-in's event list");
         // Offsets never go backwards, so the plug-in's list is in order.
         for pair in out.windows(2) {
@@ -568,10 +612,10 @@ mod tests {
             }
         }
         assert_eq!(guard.pending_count(), 0);
-        // The 63 retriggered keys of channel 0 were stopped for the retrigger, started again and stopped again.
+        // The 64 retriggered keys of channel 15 were stopped for the retrigger, started again and stopped again.
         for channel in 0..16u8 {
             for key in 0..128u8 {
-                let expected = if channel == 0 && key < EVENTS_PER_BLOCK as u8 - 1 {
+                let expected = if channel == 15 && key < EVENTS_PER_BLOCK as u8 {
                     2
                 } else {
                     1

@@ -160,6 +160,27 @@ fn instrument_layout(layout: &Layout) -> Result<bool, CoreError> {
     }
 }
 
+/// The layout of an instrument, with the mono retry: `layout` is what the plug-in settled on when asked for stereo. When
+/// its main output is neither stereo nor mono (and it takes notes and has an output at all), `retry_mono` asks it again
+/// with mono first, and what that gives is judged by the same rule. A failed retry reports the first complaint, which is
+/// the one that describes what the plug-in does by default. Returns the layout in force and whether it is mono.
+fn instrument_layout_with_retry(
+    layout: Layout,
+    retry_mono: impl FnOnce() -> Result<Layout, CoreError>,
+) -> Result<(Layout, bool), CoreError> {
+    match instrument_layout(&layout) {
+        Ok(mono) => Ok((layout, mono)),
+        Err(first) if layout.event_input && layout.outputs.first().is_some() => {
+            let layout = retry_mono()?;
+            match instrument_layout(&layout) {
+                Ok(mono) => Ok((layout, mono)),
+                Err(_) => Err(first),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub struct Vst3Core {
     class: ClassInfo,
     instance: Instance,
@@ -241,7 +262,8 @@ impl PluginCore for Vst3Core {
                 )
             })?;
         let (class, found) = class;
-        // The app asked for one kind and the class is the other: nothing is instantiated.
+        // The app asked for one kind and the class is the other. By now the module is loaded and its factory has been
+        // listed (the plug-in's own code has run, as it does for a probe), but nothing is instantiated.
         if found != kind {
             return Err(CoreError::new(
                 ErrorCode::UnsupportedLayout,
@@ -260,17 +282,16 @@ impl PluginCore for Vst3Core {
             .map_err(unreadable)?;
         let mono = match kind {
             PluginKind::Effect => main_layout(&layout)?,
-            PluginKind::Instrument => match instrument_layout(&layout) {
-                Ok(mono) => mono,
-                // The stereo attempt left an output that is neither: one more try, asking for mono first.
-                Err(first) if layout.event_input && layout.outputs.first().is_some() => {
-                    layout = instance
+            PluginKind::Instrument => {
+                // The stereo attempt may leave an output that is neither: then one more try, asking for mono first.
+                let (settled, mono) = instrument_layout_with_retry(layout, || {
+                    instance
                         .configure(f64::from(rate), BLOCK_FRAMES, true)
-                        .map_err(unreadable)?;
-                    instrument_layout(&layout).map_err(|_| first)?
-                }
-                Err(error) => return Err(error),
-            },
+                        .map_err(unreadable)
+                })?;
+                layout = settled;
+                mono
+            }
         };
         let editor = instance.state_link();
         let params = instance.params().into_iter().map(|p| p.id).collect();
@@ -522,10 +543,11 @@ impl BlockProcessor for Vst3Processor {
         output: &mut [[f32; 2]],
         ctx: &BlockMeta,
         events: &[MidiEvent],
-    ) {
+    ) -> bool {
         let transport: Transport = sanitize(ctx);
-        // A failure leaves silence in `output`; the app hears the fallback when the block is late or non-finite.
-        let _ = self.part.process(input, output, &transport, events);
+        // A failure leaves silence in `output`; the app hears the fallback when the block is late or non-finite. The
+        // caller is told, so it can release the notes the failed block was to carry.
+        self.part.process(input, output, &transport, events).is_ok()
     }
 }
 
@@ -673,6 +695,48 @@ mod tests {
     }
 
     #[test]
+    fn an_instrument_that_settles_on_neither_is_asked_again_for_mono() {
+        let layout = |outputs: &[u32], event_input: bool| Layout {
+            inputs: Vec::new(),
+            outputs: outputs.to_vec(),
+            event_input,
+        };
+        let never = || -> Result<Layout, CoreError> { panic!("no retry wanted") };
+        // Settled on the first try: the retry is not taken.
+        assert_eq!(
+            instrument_layout_with_retry(layout(&[2], true), never),
+            Ok((layout(&[2], true), false))
+        );
+        // Neither stereo nor mono: the retry runs once, and a mono answer is taken.
+        let mut asked = 0;
+        let got = instrument_layout_with_retry(layout(&[6], true), || {
+            asked += 1;
+            Ok(layout(&[1], true))
+        });
+        assert_eq!(got, Ok((layout(&[1], true), true)));
+        assert_eq!(asked, 1, "the retry was taken");
+        // A stereo answer after the retry is taken too.
+        assert_eq!(
+            instrument_layout_with_retry(layout(&[6], true), || Ok(layout(&[2], true))),
+            Ok((layout(&[2], true), false))
+        );
+        // Still neither: the first complaint is reported, not the retry's.
+        let error =
+            instrument_layout_with_retry(layout(&[6], true), || Ok(layout(&[], true))).unwrap_err();
+        assert!(error.detail.contains("stereo or mono"), "{}", error.detail);
+        // The retry itself failing is its error.
+        let failed = CoreError::new(ErrorCode::Unreadable, "gone");
+        assert_eq!(
+            instrument_layout_with_retry(layout(&[6], true), || Err(failed.clone())),
+            Err(failed)
+        );
+        // No retry for a plug-in that takes no notes, or has no output at all.
+        for bad in [layout(&[6], false), layout(&[], true)] {
+            assert!(instrument_layout_with_retry(bad, never).is_err());
+        }
+    }
+
+    #[test]
     fn only_stereo_and_mono_effects_are_accepted() {
         let layout = |inputs: &[u32], outputs: &[u32]| Layout {
             inputs: inputs.to_vec(),
@@ -716,11 +780,11 @@ mod tests {
         let mut output = [[0.0f32; 2]; BLOCK_FRAMES];
         let meta = BlockMeta::default();
         // Warm up, so one-off set-up is not counted.
-        processor.process(&input, &mut output, &meta, &[]);
+        assert!(processor.process(&input, &mut output, &meta, &[]));
 
         let working = heap_operations(|| {
             for _ in 0..200 {
-                processor.process(&input, &mut output, &meta, &[]);
+                assert!(processor.process(&input, &mut output, &meta, &[]));
             }
         });
         assert_eq!(working, 0, "processing blocks allocated");
@@ -732,11 +796,11 @@ mod tests {
             ..TestState::default()
         });
         core.set_state(&failing, &[]).unwrap();
-        processor.process(&input, &mut output, &meta, &[]);
+        assert!(!processor.process(&input, &mut output, &meta, &[]));
         assert_eq!(output[0], [0.0, 0.0], "a failed block is silence");
         let failing_blocks = heap_operations(|| {
             for _ in 0..200 {
-                processor.process(&input, &mut output, &meta, &[]);
+                assert!(!processor.process(&input, &mut output, &meta, &[]));
             }
         });
         assert_eq!(failing_blocks, 0, "failing blocks allocated");
@@ -746,7 +810,7 @@ mod tests {
         let mut big_out = vec![[0.0f32; 2]; BLOCK_FRAMES + 1];
         let too_large = heap_operations(|| {
             for _ in 0..200 {
-                processor.process(&big, &mut big_out, &meta, &[]);
+                assert!(!processor.process(&big, &mut big_out, &meta, &[]));
             }
         });
         assert_eq!(too_large, 0, "refused blocks allocated");
@@ -808,7 +872,7 @@ mod tests {
                     count += 1;
                 }
             });
-            processor.process(&input, &mut output, &meta, &admitted[..count]);
+            assert!(processor.process(&input, &mut output, &meta, &admitted[..count]));
         };
         // Warm up, so one-off set-up is not counted.
         block(&mut notes, &words);

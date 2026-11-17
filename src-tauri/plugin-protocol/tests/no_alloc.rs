@@ -8,7 +8,7 @@ use std::{
 };
 use tabplayer_plugin_protocol::{
     BLOCK_FRAMES, RING_BLOCKS,
-    ring::{BlockMeta, InputRead, OwnedRing},
+    ring::{BlockMeta, EventWords, InputRead, OwnedRing},
 };
 
 thread_local! {
@@ -109,7 +109,7 @@ fn host_side_never_allocates() {
                 for (i, frame) in block.iter_mut().enumerate() {
                     *frame = [seq as f32 + i as f32, -(seq as f32)];
                 }
-                assert!(host.send_input(seq, &block, &meta, &events_out));
+                assert!(host.send_input(seq, &block, &meta, EventWords::new(&events_out).unwrap()));
             }
             if seq >= IN_FLIGHT {
                 let wanted = seq - IN_FLIGHT;

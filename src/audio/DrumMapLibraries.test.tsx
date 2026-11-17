@@ -41,7 +41,9 @@ describe('the library layouts in the panel', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Drum map' }), { target: { value: 'ggd-modern-and-massive' } });
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect((onEdit.mock.calls[0][0] as { mix: ChannelMix }).mix.drumMap).toEqual({ preset: 'ggd-modern-and-massive' });
-    expect(screen.getByText(/Not yet checked\.$/)).toHaveTextContent(/third-party note lists.*have not been checked against the library itself\. Not yet checked\./);
+    expect(screen.getByText(/If a sound plays wrong/)).toHaveTextContent('These key numbers come from third-party notes and have not been checked against the library. If a sound plays wrong, change its key under Keys.');
+    // What the layout's own data says about its numbers stays one disclosure away.
+    expect(screen.getByText(/have not been checked against the library itself\./).closest('details')).toHaveClass('drum-map-source');
     expect(keyField('Snare hit')).toHaveValue('26');
     expect(keyField('Snare rim shot')).toHaveValue('26');
     expect(screen.getByRole('status')).not.toHaveTextContent('changed');

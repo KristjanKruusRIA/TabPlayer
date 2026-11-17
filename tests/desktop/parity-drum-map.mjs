@@ -561,7 +561,8 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     await idle();
     assert.equal(await editCount(), before + 1, 'Choosing a layout is one edit');
     const lines1 = await statusLines();
-    assert.ok(lines1.some(text => /Not yet checked\./.test(text)), `unverified status: ${lines1}`);
+    assert.ok(lines1.some(text => /have not been checked against the library\. If a sound plays wrong/.test(text)), `unverified status: ${lines1}`);
+    assert.equal(await section().locator('details.drum-map-source > summary').count(), 1, 'the layout\'s own source sits in a disclosure');
     result.observations.layoutStatus = lines1;
     await button('Undo');
     await openSound();

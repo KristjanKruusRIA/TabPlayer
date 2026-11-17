@@ -49,6 +49,7 @@ function Harness({ initial = base, used = [38, 91, 42], busy = false, onEdit }: 
 }
 const keyField = (sound: string) => screen.getByLabelText(new RegExp(`^Key for ${sound}( \\(|$)`)) as HTMLInputElement;
 const type = (field: HTMLInputElement, text: string) => { fireEvent.change(field, { target: { value: text } }); fireEvent.blur(field); };
+const SHORT_STATUS = 'These key numbers come from third-party notes and have not been checked against the library. If a sound plays wrong, change its key under Keys.';
 const rowCount = () => document.querySelectorAll('.drum-map-table li').length;
 
 describe('editing keys', () => {
@@ -143,7 +144,8 @@ describe('editing keys', () => {
     keyField('Snare hit').focus();
     const visited: string[] = [];
     for (let step = 0; step < 4; step++) { await user.tab(); visited.push(document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent ?? ''); }
-    expect(visited).toEqual(['Key for Snare side stick', 'Key for Snare rim shot', 'Hi-hat', 'Key for Hi-hat closed']);
+    // The rows follow one another with no group heading between them, and the next stop after the last key is Reset all.
+    expect(visited).toEqual(['Key for Snare side stick', 'Key for Snare rim shot', 'Key for Hi-hat closed', 'Reset all to preset']);
   });
 });
 
@@ -154,7 +156,7 @@ describe('the layout', () => {
     expect([...select.querySelectorAll('option')].map(option => option.textContent)).toEqual(['General MIDI (built-in kit keys)', 'Test kit — not yet checked', 'Checked kit']);
     expect(select.querySelector('optgroup')).toHaveAttribute('label', 'Other layouts');
     expect(select).toHaveValue('test-kit');
-    expect(screen.getByText('Notes from the maker of the test kit. Not yet checked.')).toBeInTheDocument();
+    expect(screen.getByText(SHORT_STATUS)).toBeInTheDocument();
     // Its own rows come from the layout, so the track has changed nothing.
     expect(keyField('Snare rim shot')).toHaveValue('40');
     expect(screen.getByRole('status')).not.toHaveTextContent('changed');
@@ -238,17 +240,19 @@ describe('which sounds are listed', () => {
   it('opens the groups of the drum kit and folds the other percussion, and says when the track plays nothing', async () => {
     const user = userEvent.setup();
     const { rerender } = render(<DrumMapPanel trackId="t" mix={base} used={[38, 60]} onEdit={vi.fn()} />);
+    await user.click(screen.getByRole('radio', { name: 'All sounds (94)' }));
     expect(screen.getByText('Snare').closest('details')).toHaveAttribute('open');
     expect(screen.getByText('Bongo high').closest('details')).not.toHaveAttribute('open');
+    await user.click(screen.getByRole('radio', { name: 'In this track (2)' }));
     rerender(<DrumMapPanel trackId="t" mix={base} used={[]} onEdit={vi.fn()} />);
     expect(screen.getByText('This track has no drum notes yet.')).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: 'All sounds (94)' }));
     expect(screen.queryByText('This track has no drum notes yet.')).toBeNull();
   });
 
-  it('heads the note column with the octave the app uses, middle C being 60', () => {
+  it('says the octave the app uses in the hint, middle C being 60, and shows the note name on the row', () => {
     render(<DrumMapPanel trackId="t" mix={{ ...base, drumMap: { preset: 'gm', keys: [[91, 60]] } }} used={[91]} onEdit={vi.fn()} />);
-    expect(screen.getByText('Note (C4 = 60)')).toBeInTheDocument();
+    expect(screen.getByText('A key is 0 to 127, middle C (C4) being 60. Leave it empty for no sound.')).toBeInTheDocument();
     expect(keyField('Snare rim shot').closest('li')).toHaveTextContent('C4');
   });
 
@@ -273,6 +277,105 @@ describe('which sounds are listed', () => {
     document.removeEventListener('keydown', outer);
     expect(details.open).toBe(false);
     expect(document.activeElement).toBe(details.querySelector('summary'));
+  });
+});
+
+/** The visible name of each row, as drawn: the first span of the sound cell. */
+const soundNames = () => [...document.querySelectorAll('.drum-map-sound > span:first-child')].map(node => node.textContent);
+
+describe('the compact list', () => {
+  it('lists the track sounds flat, one row each named by piece and technique, in kit order, with no group headings', () => {
+    render(<DrumMapPanel trackId="t" mix={base} used={[42, 91, 38]} onEdit={vi.fn()} />);
+    expect(soundNames()).toEqual(['Snare · hit', 'Snare · rim shot', 'Hi-hat · closed']);
+    expect(document.querySelector('.drum-map-table details')).toBeNull();
+    expect(document.querySelector('.drum-map-table summary')).toBeNull();
+    expect(document.querySelectorAll('.drum-map-table ul')).toHaveLength(1);
+    // The accessible name of a field is still the whole sound.
+    expect(keyField('Snare rim shot')).toHaveAccessibleName('Key for Snare rim shot');
+    expect(keyField('Snare rim shot').closest('li')).toHaveTextContent('Snare · rim shot');
+  });
+
+  it('keeps the grouped, collapsible layout for all sounds, with the hit named under its group', async () => {
+    const user = userEvent.setup();
+    render(<DrumMapPanel trackId="t" mix={base} used={[38]} onEdit={vi.fn()} />);
+    await user.click(screen.getByRole('radio', { name: 'All sounds (94)' }));
+    const group = screen.getByText('Snare').closest('details')!;
+    expect(group.querySelector('.drum-map-sound > span:first-child')).toHaveTextContent(/^hit$/);
+    expect(group.querySelectorAll('li').length).toBeGreaterThan(1);
+  });
+
+  it('draws the keys to try in the row of the sound they are for', () => {
+    render(<Harness initial={{ ...base, drumMap: { preset: 'test-kit' } }} onEdit={vi.fn()} />);
+    const group = screen.getByRole('group', { name: 'Keys to try for Snare rim shot' });
+    expect(group.closest('li')).toBe(keyField('Snare rim shot').closest('li'));
+    expect(screen.getAllByRole('group', { name: /^Keys to try for / })).toHaveLength(1);
+  });
+
+  it('says in one short line that an unchecked layout is unchecked, and keeps what its data says in a disclosure', () => {
+    render(<Harness initial={{ ...base, drumMap: { preset: 'test-kit' } }} onEdit={vi.fn()} />);
+    expect(screen.getByText(SHORT_STATUS)).not.toHaveTextContent('Notes from the maker');
+    const disclosure = screen.getByText('Notes from the maker of the test kit.').closest('details')!;
+    expect(disclosure).toHaveClass('drum-map-source');
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(within(disclosure).getByText('Where these numbers come from').tagName).toBe('SUMMARY');
+  });
+
+  it('keeps one line of source for General MIDI and for a checked layout, and no disclosure', () => {
+    const { rerender } = render(<DrumMapPanel trackId="t" mix={base} used={[38]} onEdit={vi.fn()} />);
+    expect(screen.getByText('General MIDI keys, as the built-in kit plays them.')).toBeInTheDocument();
+    expect(document.querySelector('.drum-map-source')).toBeNull();
+    rerender(<DrumMapPanel trackId="t" mix={{ ...base, drumMap: { preset: 'checked-kit' } }} used={[38]} onEdit={vi.fn()} />);
+    expect(screen.getByText('Source. Checked on 2026-11-01.')).toBeInTheDocument();
+    expect(document.querySelector('.drum-map-source')).toBeNull();
+  });
+
+  it('puts what the map is used by under the label as the select description, and the live line after the Keys section', () => {
+    render(<DrumMapPanel trackId="t" mix={base} used={[38]} onEdit={vi.fn()} />);
+    expect(screen.getByRole('combobox', { name: 'Drum map' })).toHaveAccessibleDescription('Used by the plug-in and the MIDI output. The built-in kits are not affected.');
+    const section = screen.getByRole('region', { name: 'Drum map' });
+    expect(section.querySelector('.drum-map-preset')!.children[1]).toHaveTextContent(/^Used by the plug-in/);
+    const status = screen.getByRole('status');
+    expect(status.closest('details')).toBeNull();
+    expect(status.compareDocumentPosition(document.querySelector('details.drum-map-keys')!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(status).toBeEmptyDOMElement();
+  });
+
+  it('puts Reset all, Import and Export in one footer row', () => {
+    render(<DrumMapPanel trackId="t" mix={base} used={[38]} onEdit={vi.fn()} />);
+    const footer = document.querySelector('.drum-map-footer')!;
+    expect([...footer.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Reset all to preset', 'Import…', 'Export…']);
+    expect(footer.closest('details')).toBeNull();
+  });
+
+  it('keeps Reset all focusable and inert with a description when nothing is changed, and live when something is', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    render(<Harness initial={{ ...base, drumMap: { preset: 'gm', keys: [[91, 40]] } }} onEdit={onEdit} />);
+    const reset = () => screen.getByRole('button', { name: 'Reset all to preset' });
+    expect(reset()).not.toHaveAttribute('aria-disabled');
+    expect(reset()).toHaveAccessibleDescription('');
+    await user.click(reset());
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(reset()).toHaveAttribute('aria-disabled', 'true');
+    expect(reset()).not.toBeDisabled();
+    expect(reset()).toHaveAccessibleDescription('Nothing is changed, so there is nothing to reset.');
+    reset().focus();
+    expect(document.activeElement).toBe(reset());
+    await user.keyboard('{Enter}');
+    await user.click(reset());
+    expect(onEdit).toHaveBeenCalledTimes(1);
+  });
+
+  it('says the short status, the source title and the reset description in Estonian and German', () => {
+    const cases = [['et', 'Kust need numbrid pärinevad', 'Midagi pole muudetud, seega pole midagi lähtestada.', /pole teegi vastu kontrollitud/], ['de', 'Woher diese Nummern stammen', 'Es ist nichts geändert, also gibt es nichts zurückzusetzen.', /nicht an der Bibliothek geprüft/]] as const;
+    for (const [language, title, none, status] of cases) {
+      setLanguagePreference(language);
+      render(<Harness initial={{ ...base, drumMap: { preset: 'test-kit' } }} onEdit={vi.fn()} />);
+      expect(screen.getByText(status)).toBeInTheDocument();
+      expect(screen.getByText(title).tagName).toBe('SUMMARY');
+      expect(screen.getByText(none)).toBeInTheDocument();
+      cleanup();
+    }
   });
 });
 

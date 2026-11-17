@@ -23,6 +23,7 @@ pub mod practice;
 pub mod reference_sync;
 pub mod renderer;
 pub mod resources;
+pub mod silent_output;
 pub mod tonality;
 pub mod tone;
 pub mod voices;

@@ -932,6 +932,13 @@ fn desktop_test_io(
     }
 }
 
+/// Whether this desktop-test run hands the output device silence. The drivers assert it before they press Play.
+#[cfg(feature = "desktop-test")]
+#[tauri::command]
+fn desktop_test_silent_output() -> bool {
+    audio::silent_output::active()
+}
+
 #[cfg(all(test, feature = "desktop-test"))]
 mod desktop_test_response_tests {
     use super::*;
@@ -1069,6 +1076,9 @@ async fn launch_files_settle(
 }
 
 pub fn run() {
+    // Desktop-test builds hand the output device silence unless TABPLAYER_TEST_SILENT_OUTPUT=0. Read once, before any stream.
+    #[cfg(feature = "desktop-test")]
+    audio::silent_output::init_from_env();
     let builder = tauri::Builder::default()
         // Must be the first plugin: a second launch hands its files to the running app and exits before anything else.
         .plugin(tauri_plugin_single_instance::init(
@@ -1518,7 +1528,8 @@ pub fn run() {
         fretlight::fretlight_status,
         fretlight::fretlight_test_log,
         plugins::commands::plugin_test_set_parameter,
-        desktop_test_io
+        desktop_test_io,
+        desktop_test_silent_output
     ]);
     builder
         .build(tauri::generate_context!())

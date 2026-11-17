@@ -25,6 +25,7 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpat
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { sha256 } from './score-layout-fixture.mjs';
+import { assertSilentOutput } from './silent-output.mjs';
 import { assertScoreLayoutListener } from './parity-score-layouts.mjs';
 import { assertStringCountBuild, assertStringCountIdentity, assertStringCountPortFree, stringCountEnvironment } from './parity-string-count.mjs';
 
@@ -239,6 +240,8 @@ export async function runDrumMapParity({ buildPath } = {}) {
     owned();
     assertScoreLayoutListener(identity, profileDir, listeners());
     page = browser.contexts()[0].pages()[0];
+    // Refuse to go on if the app would play audibly: the output is silent in a desktop-test build unless TABPLAYER_TEST_SILENT_OUTPUT=0.
+    await assertSilentOutput(page);
     page.setDefaultTimeout(30000);
     page.on('pageerror', error => result.pageErrors.push(error.message));
     page.on('console', message => {

@@ -28,8 +28,8 @@ mod windows_helper {
         state::STATE_OVERHEAD,
     };
     use tabplayer_test_plugin::{
-        DRUM_CLASS_ID, TEST_CLASS_ID, TestMode, TestState, decode_test_state, drum_amplitude,
-        encode_test_state,
+        DRUM_CLASS_ID, DRUM_PERIOD_FRAMES, TEST_CLASS_ID, TestMode, TestState, decode_test_state,
+        drum_amplitude, encode_test_state,
     };
     use windows_sys::Win32::Foundation::{
         CloseHandle, DuplicateHandle, HANDLE, INVALID_HANDLE_VALUE,
@@ -1183,7 +1183,8 @@ mod windows_helper {
             let a = drum_amplitude(50, 64);
             assert_eq!(out[2], [0.0, 0.0]);
             assert_eq!(out[3], [a, a], "the one channel is on both");
-            assert_eq!(out[5], [-a, -a]);
+            assert_eq!(out[4], [a, a], "still in the first half of the wave");
+            assert_eq!(out[3 + DRUM_PERIOD_FRAMES as usize / 2], [-a, -a], "the second half");
         }
 
         fn a_note_on_sounds_from_exactly_its_frame_and_a_note_off_silences_it() {
@@ -1209,7 +1210,7 @@ mod windows_helper {
             for (n, frame) in output.iter().enumerate() {
                 let expected = if n < starts || n >= ends {
                     0.0
-                } else if (n - starts) % 4 < 2 {
+                } else if (n - starts) % (DRUM_PERIOD_FRAMES as usize) < (DRUM_PERIOD_FRAMES as usize) / 2 {
                     a
                 } else {
                     -a

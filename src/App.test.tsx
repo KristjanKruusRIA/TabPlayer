@@ -217,8 +217,11 @@ const selectString=(string:number)=>{
   expect(current()).toBe(string);
 };
 function functionalButton(name:string|RegExp){return exposeFunctionalControl(screen.queryByRole('button',{name})??inProperties(()=>screen.getByRole('button',{name,hidden:true})).found);}
-const change=(label:string,value:string)=>{const {found,done}=inProperties(()=>screen.getByLabelText(label));fireEvent.change(exposeFunctionalControl(found),{target:{value}});done();};
+// Adding a track is a dialog, opened from the + at the head of the dock's track list.
+const ensureAddTrackDialog=()=>{if(!screen.queryByRole('dialog',{name:'Add track'}))fireEvent.click(screen.getByRole('button',{name:'Add a track',hidden:true}));};
+const change=(label:string,value:string)=>{if(/^New (notation )?track/.test(label))ensureAddTrackDialog();const {found,done}=inProperties(()=>screen.getByLabelText(label));fireEvent.change(exposeFunctionalControl(found),{target:{value}});done();};
 const click=(name:string)=>{
+  if(['Add track','Add pitched track','Add percussion track'].includes(name)){ensureAddTrackDialog();fireEvent.click(within(screen.getByRole('dialog',{name:'Add track'})).getByRole('button',{name}));return;}
   // Selecting a track is now reached through Mixer; return to the viewer when that was the active task.
   const restoreInstrument=/^Track \d+:/.test(name)&&screen.queryByRole('button',{name:'Instrument'})?.getAttribute('aria-pressed')==='true';
   const {found,done}=inProperties(()=>screen.queryByRole('button',{name})??screen.getByRole('button',{name,hidden:true}));

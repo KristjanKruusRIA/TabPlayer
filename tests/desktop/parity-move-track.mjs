@@ -29,7 +29,7 @@ try{
   await revealLeftTask(page,'Track');
   const trackName=()=>page.locator('.track-settings').getByLabel('Track name',{exact:true}).inputValue();
   assert.equal(await trackName(),'Bass6');
-  assert.equal(await page.getByRole('button',{name:'Move track up',exact:true}).getAttribute('aria-disabled'),'true','the first track cannot move up');
+  assert.equal(await page.getByRole('button',{name:'Move track up',exact:true,includeHidden:true}).getAttribute('aria-disabled'),'true','the first track cannot move up');
   assert.equal(await page.locator('.track-settings').getByRole('button',{name:'Previous track',exact:true}).getAttribute('aria-disabled'),'true','the first track has no previous track');
   // The arrows choose the neighbouring track and record nothing.
   const edits=(await readActiveDocument(page)).project.edits.length;

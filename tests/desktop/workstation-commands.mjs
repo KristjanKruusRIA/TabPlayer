@@ -258,9 +258,9 @@ export async function openAddTrackDialog(page) {
   if(!await dialog.isVisible()){await closeInspectorDialogs(page);await clickTrackMenuItem(page,'Add track…');await dialog.waitFor({state:'visible'});}
   return dialog;
 }
-/** Clicks an item of the Track menu in the command bar ('Add track…', 'Move track up', 'Move track down'). */
-export async function clickTrackMenuItem(page,name) {
-  await openDisclosure(summary(page,/^Track$/));
+/** Clicks an item of the Track menu (or `menu`, such as 'Sound') in the command bar: 'Add track…', 'Move track up', 'Move track down', 'VST3 plug-in…'. */
+export async function clickTrackMenuItem(page,name,menu='Track') {
+  await openDisclosure(summary(page,new RegExp(`^${menu}$`)));
   await page.getByRole('button',{name,exact:true}).click();
 }
 

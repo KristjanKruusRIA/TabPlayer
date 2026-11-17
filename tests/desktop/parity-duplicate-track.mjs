@@ -24,7 +24,7 @@ try{
   // The copy is selected: Track > Move track down is available for it and the Track tab's name field shows it.
   await revealLeftTask(page,'Track');
   assert.equal(await page.locator('.track-settings').getByLabel('Track name',{exact:true}).inputValue(),'Bass6');
-  assert.equal(await page.getByRole('button',{name:'Move track down',exact:true}).getAttribute('aria-disabled'),null);
+  assert.equal(await page.getByRole('button',{name:'Move track down',exact:true,includeHidden:true}).getAttribute('aria-disabled'),null);
   await button('Export GP');
   const exportedTracks=await page.evaluate(async bytes=>{const {importer,Settings}=await import('/alphatab/alphaTab.mjs');const score=importer.ScoreLoader.loadScoreFromBytes(Uint8Array.from(bytes),new Settings());
     const notes=track=>track.staves[0].bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.flatMap(beat=>beat.notes.map(note=>`${note.string}/${note.fret}`))));

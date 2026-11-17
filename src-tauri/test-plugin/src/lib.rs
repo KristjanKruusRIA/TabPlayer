@@ -51,7 +51,7 @@
 //! Each class is a single object that is both the component and the edit controller, which VST3 allows. The probe sees
 //! two classes: the gain, [`TEST_CLASS_ID`] (sub-categories `Fx`), and "TabPlayer Test Drum", [`DRUM_CLASS_ID`]
 //! (`Instrument|Drum`), an instrument with no audio input, a stereo output and one event input bus. The drum makes a
-//! period-4 square wave while any note is held, whose amplitude says which note and how hard (see [`drum_amplitude`]);
+//! square wave (a period of [`DRUM_PERIOD_FRAMES`] frames) while any note is held, whose amplitude says which note and how hard (see [`drum_amplitude`]);
 //! it shares the gain's parameters, state, modes and delay, which are applied to what it makes.
 //! `TABPLAYER_TEST_PLUGIN_DRUM_MONO=1` makes its output mono.
 //!
@@ -425,6 +425,10 @@ pub fn sort_drum_events(events: &mut [DrumEvent]) {
     }
 }
 
+/// The drum's square wave has this period in frames: half of it at +a, half at -a. A few hundred hertz at the usual rates,
+/// so a run that is ever heard is a buzz and not a shriek; the level is what encodes the note, never the pitch.
+pub const DRUM_PERIOD_FRAMES: u32 = 96;
+
 /// The amplitude of the drum's square wave for a note: `(key * 128 + velocity) / 16384`, which a float holds exactly, so
 /// [`drum_decode`] reads the key and the velocity back from one sample. It is never zero for a valid note (velocity 1 to
 /// 127) and below 1.
@@ -440,8 +444,8 @@ pub fn drum_decode(sample: f32) -> (u8, u8) {
 
 /// What the drum holds: which keys of which channels are down, the latest note, and where it is in the wave.
 ///
-/// While any key is held, the output is a square wave with a period of four frames (+a +a -a -a), with `a` from the
-/// latest NoteOn ([`drum_amplitude`]); the wave starts at +a on the frame of a NoteOn. With nothing held it is silence. A
+/// While any key is held, the output is a square wave with a period of [`DRUM_PERIOD_FRAMES`] frames (+a for the first half,
+/// -a for the second), with `a` from the latest NoteOn ([`drum_amplitude`]); the wave starts at +a on the frame of a NoteOn. With nothing held it is silence. A
 /// NoteOff for a key that is not held does nothing. Held keys are not cleared by `setProcessing(false)` or by a restart,
 /// as a sloppy plug-in's would not be: a host has to send the NoteOffs, which is what a test of stuck notes needs.
 #[derive(Debug, Clone)]
@@ -513,7 +517,7 @@ impl DrumVoices {
             }
             *sample = if self.count > 0 {
                 let amplitude = drum_amplitude(self.key, self.velocity);
-                let value = if self.phase % 4 < 2 {
+                let value = if self.phase % DRUM_PERIOD_FRAMES < DRUM_PERIOD_FRAMES / 2 {
                     amplitude
                 } else {
                     -amplitude
@@ -2177,20 +2181,24 @@ mod drum_tests {
     }
 
     #[test]
-    fn a_note_starts_on_its_frame_with_a_period_four_square_wave() {
+    fn a_note_starts_on_its_frame_with_a_square_wave_of_the_drum_period() {
         let mut voices = DrumVoices::new();
         let a = drum_amplitude(40, 100);
-        let out = render(&mut voices, &[on(5, 40, 100)], 16);
+        let period = DRUM_PERIOD_FRAMES as usize;
+        let half = period / 2;
+        let out = render(&mut voices, &[on(5, 40, 100)], 5 + 2 * period + 8);
         assert!(out[..5].iter().all(|s| *s == 0.0), "silence before it");
-        assert_eq!(
-            out[5..13],
-            [a, a, -a, -a, a, a, -a, -a],
-            "the wave starts on the NoteOn's frame"
-        );
+        for (n, sample) in out[5..5 + 2 * period].iter().enumerate() {
+            let expected = if n % period < half { a } else { -a };
+            assert_eq!(*sample, expected, "frame {n} of the wave");
+        }
+        assert_eq!(out[5], a, "the wave starts on the NoteOn's frame");
         assert_eq!(voices.held(), 1);
         // It goes on in the next block, in phase, until a NoteOff.
+        let phase = (out.len() - 5) % period;
         let more = render(&mut voices, &[off(2, 40)], 6);
-        assert_eq!(more, vec![-a, a, 0.0, 0.0, 0.0, 0.0]);
+        let wave = |n: usize| if (phase + n) % period < half { a } else { -a };
+        assert_eq!(more, vec![wave(0), wave(1), 0.0, 0.0, 0.0, 0.0]);
         assert_eq!(voices.held(), 0);
     }
 
@@ -3206,10 +3214,19 @@ mod com_tests {
         let rig = Rig::of(&DRUM_CID);
         let a = drum_amplitude(40, 100);
         let velocity = 100.0 / 127.0;
-        let out = rig.process_drum(16, vec![note_on(5, 0, 40, velocity), note_off(11, 0, 40)]);
+        let half = DRUM_PERIOD_FRAMES as usize / 2;
+        let ends = 5 + half + 3;
+        let out = rig.process_drum(
+            ends + 5,
+            vec![note_on(5, 0, 40, velocity), note_off(ends as i32, 0, 40)],
+        );
         assert!(out[..5].iter().all(|s| *s == 0.0));
-        assert_eq!(out[5..11], [a, a, -a, -a, a, a]);
-        assert!(out[11..].iter().all(|s| *s == 0.0));
+        assert!(out[5..5 + half].iter().all(|s| *s == a), "the first half");
+        assert!(
+            out[5 + half..ends].iter().all(|s| *s == -a),
+            "then the second"
+        );
+        assert!(out[ends..].iter().all(|s| *s == 0.0));
         // Held across blocks until the NoteOff.
         rig.process_drum(4, vec![note_on(0, 3, 64, 1.0)]);
         let held = rig.process_drum(4, vec![]);

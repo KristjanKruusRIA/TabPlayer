@@ -467,6 +467,8 @@ pub struct PluginInsert {
     /// Set by a flush on an instrument, cleared when the insert takes over the track's own history: until `D` frames have
     /// played, only the plug-in is heard (see `process`).
     silent_prime: bool,
+    /// Whether a result block has played since the stream started (a priming instrument is held silent until one has).
+    wet_heard: bool,
 }
 
 impl PluginInsert {
@@ -580,6 +582,7 @@ impl PluginInsert {
             kind,
             notes: NoteStage::new(),
             silent_prime: false,
+            wet_heard: false,
         })
     }
 
@@ -648,6 +651,7 @@ impl PluginInsert {
         }
         self.last = [0.0; 2];
         self.silent_prime = self.kind == SlotKind::Instrument;
+        self.wet_heard = false;
         // The helper releases every key on the new epoch the next frame starts, so nothing staged or held is owed.
         self.notes.clear();
     }
@@ -877,8 +881,14 @@ impl PluginInsert {
                         wet = Some([frame[0] * output_gain, frame[1] * output_gain]);
                     }
                 }
-                self.out_pos += 1;
+                // A result held back (see `fetch`) leaves the next frame to try again.
+                if self.out_pos < BLOCK_FRAMES {
+                    self.out_pos += 1;
+                }
             }
+        }
+        if wet.is_some() {
+            self.wet_heard = true;
         }
         if live {
             self.run = self.run.saturating_add(1);
@@ -899,10 +909,11 @@ impl PluginInsert {
         // frames of history, so the stand-in (the input `D` frames back) is silent there as well, and the plug-in has
         // not sounded yet. Taking the plug-in at once, not gliding to it, keeps its first hit from blending with the
         // built-in sound of the same note, which the stand-in plays from frame `D` on. From then on the usual rule holds.
+        // It goes on until a result is playing, if the helper is late with its first: silence meanwhile, never the stand-in.
         let silent = self.silent_prime
             && self.fault.is_none()
             && self.started
-            && self.run <= self.delay as u64;
+            && (self.run <= self.delay as u64 || !self.wet_heard);
         self.g = if silent {
             1.0
         } else if self.g < target {
@@ -962,6 +973,7 @@ impl PluginInsert {
         self.in_fill = 0;
         self.out_pos = BLOCK_FRAMES;
         self.playable = false;
+        self.wet_heard = false;
     }
 
     /// Publishes the gathered block and wakes the helper. A block that cannot go (the host end is in use, or another
@@ -1001,6 +1013,19 @@ impl PluginInsert {
             }
             Some(timeout) => self.wait_for_result(seq, epoch, timeout),
         };
+        // A priming instrument holds a missing result, not skips it, until the first block boundary at or after `D`: its
+        // block is tried again on the next frame and none of the plug-in's sound is dropped, the way the built-in tone
+        // would cover for an effect. The silent prime plays nothing meanwhile (see `process`). Past that point a missing
+        // result is an underrun as before.
+        if matches!(status, OutputRead::NotReady | OutputRead::Torn)
+            && self.offline.is_none()
+            && self.silent_prime
+            && self.run < self.hold_until()
+        {
+            self.out_pos = BLOCK_FRAMES;
+            self.playable = false;
+            return;
+        }
         self.next_read = self.next_read.wrapping_add(1);
         self.out_pos = 0;
         match status {
@@ -1026,6 +1051,12 @@ impl PluginInsert {
                 }
             }
         }
+    }
+
+    /// The first frame at which a missing result is an underrun even for a priming instrument: the first block boundary
+    /// of the result stream at or after `D`, which is where a result that was skipped while priming used to end.
+    fn hold_until(&self) -> u64 {
+        (self.pipeline + self.latency.div_ceil(BLOCK_FRAMES) * BLOCK_FRAMES) as u64
     }
 
     /// The offline wait: the result, or `NotReady` once `timeout` has passed.

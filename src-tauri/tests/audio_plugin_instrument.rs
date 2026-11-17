@@ -98,7 +98,15 @@ struct FakeInstrument {
 
 impl FakeInstrument {
     /// ffect_gain: answer with the input scaled, as an effect would, instead of from the notes.
-    fn spawn(mut ring: HelperRing, link: &BridgeLink, effect_gain: Option<f32>) -> FakeInstrument {
+    ///
+    /// `latency`: the plug-in's own latency in frames. Its output trails what it would play by that many frames, as a
+    /// plug-in that reports a latency does, and the insert is built for the same figure.
+    fn spawn(
+        mut ring: HelperRing,
+        link: &BridgeLink,
+        effect_gain: Option<f32>,
+        latency: usize,
+    ) -> FakeInstrument {
         let stop = Arc::new(AtomicBool::new(false));
         let paused = Arc::new(AtomicBool::new(false));
         let pause_flag = paused.clone();
@@ -112,6 +120,8 @@ impl FakeInstrument {
         let thread = std::thread::spawn(move || {
             let mut sounding = [0u128; 16];
             let mut epoch = None;
+            // What the plug-in has played and not yet delivered: `latency` frames of silence ahead of its output.
+            let mut pending: std::collections::VecDeque<[f32; 2]> = Default::default();
             let mut block: Block = [[0.0; 2]; BLOCK_FRAMES];
             let mut words = [0u64; EVENTS_PER_BLOCK];
             while !stop_flag.load(Ordering::Relaxed) {
@@ -124,6 +134,7 @@ impl FakeInstrument {
                             if epoch != Some(info.epoch) {
                                 sounding = [0; 16];
                                 epoch = Some(info.epoch);
+                                pending = vec![[0.0f32; 2]; latency].into();
                             }
                             let taken = words[..usize::from(info.event_count)].to_vec();
                             let mut events: Vec<MidiEvent> =
@@ -176,6 +187,10 @@ impl FakeInstrument {
                                 words: taken,
                                 sounding_after: count,
                             });
+                            pending.extend(out);
+                            for slot in out.iter_mut() {
+                                *slot = pending.pop_front().unwrap_or([0.0; 2]);
+                            }
                             assert!(ring.publish_output(seq, info.epoch, &out, &info.meta));
                             output.signal();
                         }
@@ -243,6 +258,8 @@ struct Rig {
     link: BridgeLink,
     helper: FakeInstrument,
     shared: Arc<InsertShared>,
+    /// The latency the fake has and its inserts are built for.
+    latency: u32,
 }
 
 fn rig() -> Rig {
@@ -251,14 +268,20 @@ fn rig() -> Rig {
 
 /// A rig whose fake answers with the input scaled by ffect_gain, as an effect would.
 fn rig_with(effect_gain: Option<f32>) -> Rig {
+    rig_full(effect_gain, 0)
+}
+
+/// [`rig_with`] for a plug-in that reports `latency` frames and plays them late.
+fn rig_full(effect_gain: Option<f32>, latency: u32) -> Rig {
     let owned = OwnedRing::new(RATE);
     let helper_end = owned.helper();
     let link = BridgeLink::in_process(owned);
-    let helper = FakeInstrument::spawn(helper_end, &link, effect_gain);
+    let helper = FakeInstrument::spawn(helper_end, &link, effect_gain, latency as usize);
     Rig {
         link,
         helper,
         shared: Arc::new(InsertShared::default()),
+        latency,
     }
 }
 
@@ -280,7 +303,7 @@ impl Rig {
     }
 
     fn instrument(&self) -> PluginInsert {
-        self.make(SlotKind::Instrument, 0)
+        self.make(SlotKind::Instrument, self.latency)
     }
 
     fn dropped(&self) -> u64 {
@@ -771,6 +794,53 @@ fn after_a_flush_an_instruments_first_hit_is_the_plugin_alone() {
 }
 
 #[test]
+fn a_late_first_result_never_lets_the_stand_in_through_and_loses_none_of_the_plugin() {
+    // Latencies that are not whole blocks (the first result block holds the plug-in's silent start and its first sound),
+    // with a helper that answers its first blocks after the first fetch has found nothing.
+    for latency in [64u32, 100, 192] {
+        let rig = rig_full(None, latency);
+        let mut insert = rig.instrument();
+        insert.flush();
+        let d = insert.delay_frames();
+        assert_eq!(d, 2 * BLOCK_FRAMES + latency as usize);
+        rig.helper.paused.store(true, Ordering::Relaxed);
+        let out = drive_input(
+            &mut insert,
+            &rig,
+            0,
+            d + 1200,
+            [STAND_IN; 2],
+            &mut |m, insert| {
+                if m == 0 {
+                    insert.stage_note(true, 0, 36, 100);
+                }
+                if m == 700 {
+                    insert.stage_note(false, 0, 36, 0);
+                }
+                // The first fetch, at frame 256, found nothing; the helper answers at frame 300.
+                if m == 300 {
+                    rig.helper.paused.store(false, Ordering::Relaxed);
+                    rig.settle();
+                }
+            },
+        );
+        assert_eq!(insert.faulted(), None, "latency {latency}");
+        let leaked = out.iter().position(|f| f[0].abs() > LEVEL + 1e-6);
+        assert_eq!(leaked, None, "the stand-in is heard, latency {latency}");
+        // Silence, then the plug-in's 700 frames of sound in one run: none of them dropped.
+        let sounding: Vec<usize> = (0..out.len()).filter(|&m| out[m] == [LEVEL; 2]).collect();
+        assert_eq!(sounding.len(), 700, "latency {latency}");
+        assert_eq!(
+            sounding[699] - sounding[0],
+            699,
+            "one unbroken run, latency {latency}"
+        );
+        assert!(sounding[0] >= d, "never before its time, latency {latency}");
+        assert!(out.iter().all(|f| *f == [0.0; 2] || *f == [LEVEL; 2]));
+    }
+}
+
+#[test]
 fn an_instrument_added_to_a_sounding_track_still_blends_in_from_the_stand_in() {
     // `start_undelayed` is how a plug-in joins a track that is playing: the built-in sound carries on, undelayed, and
     // glides to the plug-in. A silent prime there would drop it.
@@ -1164,10 +1234,18 @@ fn staging_a_full_block_overflowing_it_and_sending_it_never_touches_the_heap() {
 const TICK: usize = 50;
 
 fn rig_keyed() -> Rig {
-    let rig = rig();
+    rig_keyed_at(0)
+}
+
+/// A keyed rig whose plug-in has `latency` frames of its own.
+fn rig_keyed_at(latency: u32) -> Rig {
+    let rig = rig_full(None, latency);
     rig.helper.keyed.store(true, Ordering::Relaxed);
     rig
 }
+
+/// The latencies the renderer tests run at: none, one that is not a whole block (64) and one that is (128).
+const LATENCIES: [u32; 3] = [0, 64, 128];
 
 impl Rig {
     /// An instrument insert for an export: it waits for the helper's every result.

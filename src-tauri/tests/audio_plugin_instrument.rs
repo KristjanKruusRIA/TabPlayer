@@ -16,7 +16,7 @@ use std::{
 };
 use tabplayer_lib::{
     audio::{
-        dsp::FrameContext,
+        dsp::{FrameContext, FxSettings, TrackDsp},
         plugin_insert::{FaultReason, InsertMode, PluginInsert},
     },
     plugins::bridge::{BridgeLink, InsertShared},
@@ -73,12 +73,17 @@ struct FakeInstrument {
     stop: Arc<AtomicBool>,
     blocks: Arc<Mutex<Vec<Received>>>,
     sounding: Arc<AtomicU32>,
+    /// While set, input blocks are not answered, as with a stalled plug-in.
+    paused: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl FakeInstrument {
-    fn spawn(mut ring: HelperRing, link: &BridgeLink) -> FakeInstrument {
+    /// ffect_gain: answer with the input scaled, as an effect would, instead of from the notes.
+    fn spawn(mut ring: HelperRing, link: &BridgeLink, effect_gain: Option<f32>) -> FakeInstrument {
         let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
+        let pause_flag = paused.clone();
         let blocks = Arc::new(Mutex::new(Vec::new()));
         let sounding_now = Arc::new(AtomicU32::new(0));
         let (input, output) = (link.input_event().clone(), link.output_event().clone());
@@ -91,7 +96,7 @@ impl FakeInstrument {
             let mut words = [0u64; EVENTS_PER_BLOCK];
             while !stop_flag.load(Ordering::Relaxed) {
                 input.wait(Duration::from_millis(2));
-                loop {
+                while !pause_flag.load(Ordering::Relaxed) {
                     let seq = ring.next_output();
                     match ring.read_input(seq, &mut block, &mut words) {
                         InputRead::Ready(info) => {
@@ -124,7 +129,9 @@ impl FakeInstrument {
                                     }
                                     next += 1;
                                 }
-                                *slot = if sounding.iter().any(|keys| *keys != 0) {
+                                *slot = if let Some(gain) = effect_gain {
+                                    block[frame].map(|v| v * gain)
+                                } else if sounding.iter().any(|keys| *keys != 0) {
                                     [LEVEL; 2]
                                 } else {
                                     [0.0; 2]
@@ -162,6 +169,7 @@ impl FakeInstrument {
             stop,
             blocks,
             sounding: sounding_now,
+            paused,
             thread: Some(thread),
         }
     }
@@ -206,10 +214,15 @@ struct Rig {
 }
 
 fn rig() -> Rig {
+    rig_with(None)
+}
+
+/// A rig whose fake answers with the input scaled by ffect_gain, as an effect would.
+fn rig_with(effect_gain: Option<f32>) -> Rig {
     let owned = OwnedRing::new(RATE);
     let helper_end = owned.helper();
     let link = BridgeLink::in_process(owned);
-    let helper = FakeInstrument::spawn(helper_end, &link);
+    let helper = FakeInstrument::spawn(helper_end, &link, effect_gain);
     Rig {
         link,
         helper,
@@ -245,7 +258,7 @@ impl Rig {
     /// Waits, as a device would between callbacks, until the fake has answered what was sent.
     fn settle(&self) {
         let deadline = Instant::now() + Duration::from_secs(5);
-        while self.link.ring().blocks_pending() {
+        while self.link.ring().blocks_pending() && !self.helper.paused.load(Ordering::Relaxed) {
             assert!(Instant::now() < deadline, "the fake helper fell behind");
             std::thread::yield_now();
         }
@@ -753,6 +766,244 @@ fn an_instrument_added_to_a_sounding_track_still_blends_in_from_the_stand_in() {
     let mid = out[d + 240];
     assert!(mid[0] > LEVEL && mid[0] < STAND_IN, "mid-blend {mid:?}");
     assert_eq!(out[d + 600], [LEVEL; 2]);
+}
+
+// ---- placement in the board ---------------------------------------------------------------------------------------
+
+fn signal(n: usize) -> [f32; 2] {
+    let t = n as f64 / RATE as f64;
+    [
+        (0.5 * (std::f64::consts::TAU * 220.0 * t).sin()) as f32,
+        (0.4 * (std::f64::consts::TAU * 330.0 * t).sin()) as f32,
+    ]
+}
+
+fn driven() -> FxSettings {
+    let mut fx = FxSettings::default();
+    fx.drive.enabled = true;
+    fx.amp.enabled = true;
+    fx.amp.model = "crunch".into();
+    fx.amp.drive = 0.6;
+    fx.cabinet.enabled = true;
+    fx
+}
+
+fn board(settings: FxSettings) -> TrackDsp {
+    TrackDsp::new(settings, RATE, 1.0).expect("a board")
+}
+
+fn max_step(frames: &[[f32; 2]]) -> f32 {
+    frames
+        .windows(2)
+        .map(|w| (w[1][0] - w[0][0]).abs().max((w[1][1] - w[0][1]).abs()))
+        .fold(0.0, f32::max)
+}
+
+fn assert_close(a: [f32; 2], b: [f32; 2], tolerance: f32, what: &str) {
+    assert!(
+        (a[0] - b[0]).abs() <= tolerance && (a[1] - b[1]).abs() <= tolerance,
+        "{what}: {a:?} against {b:?}"
+    );
+}
+
+/// Plays frames `from..from + frames` through `track`, letting every rig answer after each block. `before` runs before
+/// each frame, where a renderer would stage the frame's notes.
+fn play(
+    track: &mut TrackDsp,
+    rigs: &[&Rig],
+    from: usize,
+    frames: usize,
+    input: &dyn Fn(usize) -> [f32; 2],
+    before: &mut dyn FnMut(usize, &mut TrackDsp),
+    out: &mut Vec<[f32; 2]>,
+) {
+    let ctx = FrameContext::at_bpm(120.0);
+    for m in from..from + frames {
+        before(m, track);
+        out.push(track.process_at(input(m), &ctx));
+        if (m + 1) % BLOCK_FRAMES == 0 {
+            rigs.iter().for_each(|rig| rig.settle());
+        }
+    }
+    rigs.iter().for_each(|rig| rig.settle());
+}
+
+fn contiguous(rig: &Rig) -> bool {
+    let blocks = rig.helper.blocks();
+    blocks
+        .iter()
+        .enumerate()
+        .all(|(index, block)| block.seq == index as u64)
+}
+
+#[test]
+fn an_instruments_sound_runs_through_the_boards_later_stages() {
+    let rig = rig();
+    let mut track = board(driven());
+    track.attach_plugin(Box::new(rig.instrument()));
+    let d = track.plugin_delay();
+    let frames = 5000;
+    let (on_at, off_at) = (100, 2000);
+    let mut out = Vec::new();
+    play(
+        &mut track,
+        &[&rig],
+        0,
+        frames,
+        &|_| [0.0; 2],
+        &mut |m, track| match m {
+            m if m == on_at => track.stage_note(true, 0, 36, 100),
+            m if m == off_at => track.stage_note(false, 0, 36, 0),
+            _ => {}
+        },
+        &mut out,
+    );
+    // A board with no plug-in, fed what the instrument plays, gives the same output: Drive, Amp and Cabinet stay in place
+    // and play the instrument.
+    let mut reference = board(driven());
+    let mut louder = 0.0f32;
+    for (m, frame) in out.iter().enumerate() {
+        let sounding = (on_at + d..off_at + d).contains(&m);
+        let heard = reference.process([if sounding { LEVEL } else { 0.0 }; 2], 120.0);
+        assert_close(*frame, heard, 1e-6, &format!("frame {m}"));
+        louder = louder.max(frame[0].abs());
+    }
+    assert!(louder > 0.01, "the stages play the instrument");
+    assert!(
+        out[on_at + d + 1000][0] != LEVEL,
+        "not the bare instrument: the stages shaped it"
+    );
+}
+
+#[test]
+fn a_dead_instrument_falls_back_to_the_tracks_own_sound() {
+    let rig = rig();
+    let mut track = board(FxSettings::default());
+    track.attach_plugin(Box::new(rig.instrument()));
+    let d = track.plugin_delay();
+    let mut out = Vec::new();
+    let on_first = &mut |m: usize, track: &mut TrackDsp| {
+        if m == 0 {
+            track.stage_note(true, 0, 36, 100);
+        }
+    };
+    play(&mut track, &[&rig], 0, 8000, &signal, on_first, &mut out);
+    // While it plays, the instrument is all that is heard.
+    assert_close(out[7999], [LEVEL; 2], 1e-6, "the instrument");
+    rig.helper.paused.store(true, Ordering::Relaxed);
+    play(
+        &mut track,
+        &[&rig],
+        8000,
+        6000,
+        &signal,
+        &mut |_, _| {},
+        &mut out,
+    );
+    assert_eq!(
+        track.plugin().unwrap().faulted(),
+        Some(FaultReason::Underrun)
+    );
+    // Once the 10 ms glide is over, the track's own sound plays, as late as the insert's stand-in always is.
+    for m in 12000..14000 {
+        assert_close(out[m], signal(m - d), 1e-5, &format!("frame {m}"));
+    }
+    assert!(max_step(&out[7500..14000]) < 0.2, "no click");
+}
+
+/// An effect (the input scaled by a half) and an instrument on one board, switched while the track plays.
+fn switch(effect_first: bool) -> (Vec<[f32; 2]>, usize, usize, Rig, Rig) {
+    let effect_rig = rig_with(Some(0.5));
+    let instrument_rig = rig();
+    let make_effect = || {
+        let mut track = board(FxSettings::default());
+        track.attach_plugin(Box::new(effect_rig.make(SlotKind::Effect, 0)));
+        track
+    };
+    let make_instrument = || {
+        let mut track = board(FxSettings::default());
+        track.attach_plugin(Box::new(instrument_rig.instrument()));
+        track
+    };
+    let hold_a_note = &mut |m: usize, track: &mut TrackDsp| {
+        if m == 0 {
+            track.stage_note(true, 0, 36, 100);
+        }
+    };
+    let rigs = [&effect_rig, &instrument_rig];
+    let mut out = Vec::new();
+    let swap_at = 24_037;
+    let (mut first, mut second) = if effect_first {
+        (make_effect(), make_instrument())
+    } else {
+        (make_instrument(), make_effect())
+    };
+    let d = first.plugin_delay();
+    play(
+        &mut first,
+        &rigs,
+        0,
+        swap_at,
+        &signal,
+        hold_a_note,
+        &mut out,
+    );
+    second.transition_from(&mut first);
+    // The note starts again on the new board, as a renderer starting the instrument's stream would.
+    let note_on_second = &mut |m: usize, track: &mut TrackDsp| {
+        if m == swap_at {
+            track.stage_note(true, 0, 36, 100);
+        }
+    };
+    play(
+        &mut second,
+        &rigs,
+        swap_at,
+        6000,
+        &signal,
+        note_on_second,
+        &mut out,
+    );
+    (out, swap_at, d, effect_rig, instrument_rig)
+}
+
+#[test]
+fn switching_a_slot_from_an_effect_to_an_instrument_is_click_free_and_runs_each_insert_once() {
+    let (out, at, d, effect_rig, instrument_rig) = switch(true);
+    // The effect played the input scaled by a half before the switch.
+    assert_close(
+        out[at - 1],
+        signal(at - 1 - d).map(|v| v * 0.5),
+        1e-5,
+        "before",
+    );
+    // No step in the signal is sharper than the sound itself: 0.014 a frame at the loudest.
+    let around = max_step(&out[at - 100..at + d + 3 * 480]);
+    assert!(around <= 0.03, "step {around}");
+    // Then only the instrument is heard.
+    assert_close(out[at + d + 3 * 480], [LEVEL; 2], 1e-5, "after");
+    assert!(contiguous(&effect_rig) && contiguous(&instrument_rig));
+    // The effect's helper saw one block for every 128 frames it played: before the switch and the fade.
+    assert!(effect_rig.helper.blocks().len() <= (at + 480) / BLOCK_FRAMES + 2);
+    assert!(effect_rig.helper.blocks().len() >= at / BLOCK_FRAMES);
+}
+
+#[test]
+fn switching_a_slot_from_an_instrument_to_an_effect_is_click_free_and_runs_each_insert_once() {
+    let (out, at, d, effect_rig, instrument_rig) = switch(false);
+    assert_close(out[at - 1], [LEVEL; 2], 1e-5, "before");
+    let around = max_step(&out[at - 100..at + d + 3 * 480]);
+    assert!(around <= 0.03, "step {around}");
+    // Then only the effect is heard: the input scaled by a half, as late as the insert is.
+    for m in at + d + 3 * 480..out.len() {
+        assert_close(
+            out[m],
+            signal(m - d).map(|v| v * 0.5),
+            1e-5,
+            &format!("frame {m}"),
+        );
+    }
+    assert!(contiguous(&effect_rig) && contiguous(&instrument_rig));
 }
 
 // ---- real-time safety ---------------------------------------------------------------------------------------------

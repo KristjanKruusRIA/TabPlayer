@@ -210,7 +210,8 @@ impl PreparedMix {
 
             if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
                 // A refusal leaves the track on its built-in sound and is named, so the slot can say why.
-                match PluginInsert::new(
+                match PluginInsert::new_of_kind(
+                    plan.kind,
                     plan.link.clone(),
                     crate::audio::plugin_insert::InsertMode::Realtime { pipeline_frames },
                     plan.latency,

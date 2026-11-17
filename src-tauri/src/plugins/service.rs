@@ -132,6 +132,8 @@ pub struct InsertPlan {
     pub input_db: f64,
     pub output_db: f64,
     pub shared: Arc<InsertShared>,
+    /// What the slot holds: an instrument sits at the board's input, an effect in place of Drive, Amp and Cabinet.
+    pub kind: crate::settings::SlotKind,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -596,6 +598,7 @@ fn plan_of(session: &Arc<dyn HelperSession>, slot: &PluginSlot) -> InsertPlan {
         input_db: slot.input_db,
         output_db: slot.output_db,
         shared: session.shared(),
+        kind: slot.kind,
     }
 }
 
@@ -1781,7 +1784,8 @@ impl PluginService {
             let latency = session.latency();
             let shared = session.shared();
             sessions.push(session.clone());
-            let insert = match crate::audio::plugin_insert::PluginInsert::new(
+            let insert = match crate::audio::plugin_insert::PluginInsert::new_of_kind(
+                slot.kind,
                 link,
                 OFFLINE_INSERT_MODE,
                 latency,

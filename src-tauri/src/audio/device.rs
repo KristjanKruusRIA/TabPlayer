@@ -4163,6 +4163,7 @@ mod reference_tests {
                 input_db: 0.0,
                 output_db: 0.0,
                 shared: Arc::new(crate::plugins::bridge::InsertShared::default()),
+                kind: crate::settings::SlotKind::Effect,
             }),
         )]
     }

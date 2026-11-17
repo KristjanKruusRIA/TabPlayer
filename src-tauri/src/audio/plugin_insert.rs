@@ -33,6 +33,14 @@
 //! between Drive and Amp) plays after all three while the plug-in is in, not between them as it does without one
 //! (review M3). A plug-in replaces the three as one block; this is the order a fallback plays.
 //!
+//! An instrument (a slot of [`SlotKind::Instrument`]) is the same insert with two differences. It sits at the board's
+//! input ([`InsertPoint::Input`]): its audio replaces the track's own sound, and the stages after it, Drive, Amp and
+//! Cabinet included, play it; the stand-in for a plug-in that is not live is the track's own sound. And it takes note
+//! events, staged with [`PluginInsert::stage_note`] before the frame they belong to and sent with that frame's block, so a
+//! note sounds `D` frames later, on the frame the built-in sound of the same note is heard. After a flush its first `D`
+//! frames are the plug-in alone (see `process`): the stand-in and the plug-in are both silent there, and the first hit
+//! must not blend with the built-in sound.
+//!
 //! Every result block is checked whole at its first frame, before any of it plays: it must be ready, of the expected
 //! sequence and epoch, finite and within [`RUNAWAY_LIMIT`] (preflight ruling P14). Only a copy is ever played.
 //!
@@ -580,6 +588,7 @@ impl PluginInsert {
     /// (preflight ruling P8). Trims may differ.
     pub fn same_stream(&self, other: &PluginInsert) -> bool {
         self.same_link(other)
+            && self.kind == other.kind
             && self.offline == other.offline
             && self.pipeline == other.pipeline
             && self.latency == other.latency

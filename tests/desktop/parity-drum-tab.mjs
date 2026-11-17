@@ -21,6 +21,7 @@ import { resolve } from 'node:path';
 import { directory, launch, connect, stop } from './harness.mjs';
 import { waitForWorkspaceIdle, clickWorkstationButton, revealInspectorTab, selectWorkspaceTrack, cursorPosition, moveCursor, scoreWorkspace } from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
+import { lastExportTexts } from './drum-tab-pages.mjs';
 
 const fixture = resolve(directory, 'drum-tab-fixture.gp'), saved = resolve(directory, 'drum-tab.tabplayer'), exported = resolve(directory, 'drum-tab-export'), pdf = `${exported}.pdf`;
 const BARS = 2;
@@ -85,8 +86,8 @@ try {
     await dialog.getByRole('button', { name: 'Export', exact: true }).click();
     await Promise.race([dialog.waitFor({ state: 'hidden', timeout: 30000 }), dialog.getByRole('alert').waitFor({ timeout: 30000 }).then(async () => { throw new Error(await dialog.getByRole('alert').textContent()); })]); await dialog.waitFor({ state: 'hidden', timeout: 30000 }); await idle();
     assert.equal(readFileSync(pdf).subarray(0, 5).toString(), '%PDF-');
-    // The pages' SVG as the app hands it to the test hook: the numbers are text elements in it.
-    return page.evaluate(() => window.__tabplayerTestExportPages.flatMap(sheet => [...new DOMParser().parseFromString(sheet.svg, 'image/svg+xml').querySelectorAll('text')].map(text => text.textContent.trim())));
+    // The pages' SVG as the app hands it to the test hook (one array of pages per export, the latest last): the numbers are text elements in it.
+    return page.evaluate(lastExportTexts);
   };
   await closeLibrary(); await button('Open'); await score().first().waitFor();
   await selectWorkspaceTrack(page, 'Track 2: Drums'); await idle();
@@ -190,18 +191,33 @@ try {
   assert.deepEqual(await pressed(), ['true', 'true']);
   await page.waitForTimeout(300); assert.deepEqual(without(digitsOf(await texts()), baseline), kit);
 
-  // 8. Screenshots in three languages: tab only, both, and the multi-track view (the guitar and the drums on one page).
-  const setLanguage = async language => { await page.evaluate(value => window.localStorage.setItem('tabplayer.language', value), language); await page.reload(); await page.locator('.app-shell').waitFor(); await idle(); await page.waitForTimeout(400); };
+  // 8. Screenshots in three languages: both (the track alone, the percussion staff with the tab beneath it), tab only, and the multi-track view.
+  // The names of the dock, the inspector tabs and the track buttons are translated, so after English the track and its inspector are found
+  // by what is the same in every language: the mixer strip's "2. Drums" text, the inspector's tabs by position, and the toggles' class.
+  const reloadApp = async () => { await page.reload(); await page.locator('.app-shell').waitFor(); await idle(); await page.waitForTimeout(400); };
+  const setLanguage = async language => { await page.evaluate(value => window.localStorage.setItem('tabplayer.language', value), language); await reloadApp(); };
+  const setTrackView = async tracks => { await page.evaluate(value => window.localStorage.setItem('tabplayer.viewDefaults', JSON.stringify({ layout: 'parchment', zoomMode: 'manual', zoom: 100, tracks: value })), tracks); await reloadApp(); };
+  const showDrumTrack = async language => {
+    if (language === 'en') { await selectWorkspaceTrack(page, 'Track 2: Drums'); await idle(); await revealInspectorTab(page, 'Track'); return; }
+    const strip = page.locator('button.track-channel-select:has-text("2. Drums")').first();
+    if (await strip.isVisible()) { await strip.click(); await idle(); }
+    const toggle = page.locator('.notation-toggle').first(), tabs = page.locator('[role="tab"]');
+    for (let index = 0; index < await tabs.count() && !await toggle.isVisible(); index++) await tabs.nth(index).click().catch(() => {});
+    await toggle.waitFor({ state: 'visible' });
+  };
   const shoot = async (name, language) => { await page.waitForTimeout(400); await page.screenshot({ path: resolve(directory, `drum-tab-${name}-${language}.png`) }); };
-  const press = async which => { await revealInspectorTab(page, 'Track'); await page.locator('.notation-toggle').nth(which).click(); await idle(); };
+  const press = async which => { await page.locator('.notation-toggle').nth(which).click(); await idle(); };
   for (const language of ['en', 'et', 'de']) {
-    if (language !== 'en') { await setLanguage(language); await selectWorkspaceTrack(page, 'Track 2: Drums'); await idle(); }
-    await revealInspectorTab(page, 'Track');
+    if (language !== 'en') await setLanguage(language);
+    await showDrumTrack(language);
     assert.deepEqual(await Promise.all([0, 1].map(which => page.locator('.notation-toggle').nth(which).getAttribute('aria-pressed'))), ['true', 'true']);
     await shoot('both', language);
     await press(1); await shoot('tab-only', language);
-    await press(1); await shoot('multi-track', language);
+    await press(1);
+    await setTrackView('all'); await showDrumTrack(language); await shoot('multi-track', language);
+    await setTrackView('selected');
   }
+  await page.evaluate(() => window.localStorage.removeItem('tabplayer.viewDefaults'));
   await page.evaluate(() => window.localStorage.setItem('tabplayer.language', 'en'));
   console.log(`drum-tab: ${kit.length} numbers drawn on the tab, ${notes.length ? notes.join(' ') : 'all checks ran'}; PDF numbers read from the export hook; screenshots under ${directory}.`);
 } catch (error) { if (page) await page.screenshot({ path: resolve(directory, 'drum-tab-failure.png') }).catch(() => {}); throw error; }

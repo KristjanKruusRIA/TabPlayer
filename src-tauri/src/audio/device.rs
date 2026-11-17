@@ -1093,9 +1093,10 @@ impl CallbackTransport {
         }
         renderer.set_metronome_settings(accepted.metronome);
         if preserve && generation == self.generation {
-            // An edit while playing: the new renderer carries on where the old one is. With a plug-in it keeps the
-            // old compensation lines streaming (a wrap, and the lines handed over); with none it is the plain seek
-            // it always was.
+            // An edit while playing: the new renderer carries on where the old one is. It starts after the last tick
+            // the old one dispatched, so a note or MIDI event in the gap after that frame is struck once, here. A
+            // built-in or port NoteOff falling in the gap is re-struck at the seek and released one frame later. With a
+            // plug-in the old compensation lines keep streaming (a wrap, and the lines handed over).
             match self.renderer.as_mut() {
                 Some(old) => renderer.hand_over_from(self.tick, old),
                 None => renderer.wrap_to_tick(self.tick),

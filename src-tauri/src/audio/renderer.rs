@@ -2137,18 +2137,22 @@ impl Renderer {
         // The running instrument comes with the notes the old plan had it hold. The edit may have deleted, moved or
         // re-pitched one of them, whose NoteOff would then never come: the instrument keeps exactly the keys the new
         // plan holds at this tick (those struck before it and not ended), and ends the rest.
-        let track_ids = &self.plan.tracks;
-        for (channel, track) in self.mix.channels.iter_mut().zip(track_ids) {
+        let track_count = self.plan.tracks.len();
+        for (track_index, channel) in self.mix.channels.iter_mut().enumerate().take(track_count) {
             let Some(map) = channel.notes else {
                 continue;
             };
             let mut wanted = [[0u8; 128]; 16];
+            // The events of this track, by the track index the renderer worked out for each event at build time: no
+            // string is compared on the audio thread.
             for event in self
                 .plan
                 .midi
                 .iter()
+                .zip(&self.midi_track)
                 .take(self.next_midi)
-                .filter(|event| event.track_id() == track.id)
+                .filter(|(_, owner)| usize::from(**owner) == track_index)
+                .map(|(event, _)| event)
             {
                 let Some(note) = map.note(event) else {
                     continue;

@@ -115,7 +115,7 @@ impl DrumMapRef {
 pub const MAX_MIDI_PORT_NAME: usize = 256;
 /// Whether `c` is a Unicode format character (general category Cf): bidirectional overrides and isolates, zero-width
 /// joiners and spaces, the byte order mark, tag characters and the like, which can make one name read as another.
-fn is_format_char(c: char) -> bool {
+pub(crate) fn is_format_char(c: char) -> bool {
     matches!(u32::from(c),
         0x00AD | 0x0600..=0x0605 | 0x061C | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2 | 0x180E
         | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F | 0xFEFF

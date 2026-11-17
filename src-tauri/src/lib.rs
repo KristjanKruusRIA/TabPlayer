@@ -4,6 +4,7 @@ pub mod audio;
 pub mod audio_input;
 pub mod backing_waveform;
 pub mod batch_convert;
+pub mod drum_map_file;
 pub mod edit_types;
 pub mod engraving;
 pub mod export;
@@ -1324,6 +1325,8 @@ pub fn run() {
         audio::cabinet_ir::cabinet_ir_import,
         audio::cabinet_ir::cabinet_ir_remove,
         audio::cabinet_ir::cabinet_ir_status,
+        drum_map_file::drum_map_export,
+        drum_map_file::drum_map_import,
         audio::nam_library::nam_capture_list,
         audio::nam_library::nam_capture_import,
         audio::nam_library::nam_capture_remove,
@@ -1451,6 +1454,8 @@ pub fn run() {
         audio::cabinet_ir::cabinet_ir_import,
         audio::cabinet_ir::cabinet_ir_remove,
         audio::cabinet_ir::cabinet_ir_status,
+        drum_map_file::drum_map_export,
+        drum_map_file::drum_map_import,
         audio::nam_library::nam_capture_list,
         audio::nam_library::nam_capture_import,
         audio::nam_library::nam_capture_remove,

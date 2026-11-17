@@ -17,6 +17,7 @@ import { InterpretationPanel } from './InterpretationPanel';
 import { SoundPanel } from './SoundPanel';
 import { soundPreset } from './sound-model';
 import { usedDrumSounds } from './drum-map';
+import { drumMapFiles, type ImportedDrumMap } from './drum-map-file';
 import type { MidiOutBridge } from './midi-out';
 
 // Two layouts besides General MIDI, as a later slice's data will bring them: one not yet checked, with a changed key, a silent key and
@@ -34,7 +35,10 @@ vi.mock('./drum-maps.json', async importOriginal => {
   return { default: data, ...data };
 });
 
-afterEach(() => { cleanup(); setLanguagePreference('en'); });
+// The two file commands are the native side's; here they answer what a test says.
+vi.mock('./drum-map-file', async importOriginal => ({ ...(await importOriginal<object>()), drumMapFiles: { import: vi.fn(), export: vi.fn() } }));
+
+afterEach(() => { cleanup(); setLanguagePreference('en'); vi.mocked(drumMapFiles.import).mockReset(); vi.mocked(drumMapFiles.export).mockReset(); });
 
 const base: ChannelMix = { gain: 0.7, pan: -0.2, mute: false, solo: false };
 const mixEdit = (edit: EditCommand | undefined) => (edit as Extract<EditCommand, { type: 'setTrackMix' }>).mix;
@@ -379,5 +383,145 @@ describe('usedDrumSounds', () => {
     expect(note.isPercussion).toBe(true);
     expect(usedDrumSounds(own)).toEqual([42]);
     expect(usedDrumSounds(new model.Track())).toEqual([]);
+  });
+});
+
+describe('drum map files', () => {
+  const importButton = () => screen.getByRole('button', { name: 'Import…' });
+  const exportButton = () => screen.getByRole('button', { name: 'Export…' });
+  const file = (over: Partial<ImportedDrumMap> = {}): ImportedDrumMap => ({ name: 'Kit', base: null, keys: [[38, 41], [42, null]], ...over });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+  it('imports a file as one edit that keeps the rest of the mix, and keeps focus on the button', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    vi.mocked(drumMapFiles.import).mockResolvedValue(file());
+    render(<Harness onEdit={onEdit} />);
+    await user.click(importButton());
+    await waitFor(() => expect(onEdit).toHaveBeenCalledTimes(1));
+    expect(onEdit.mock.calls[0][0]).toMatchObject({ type: 'setTrackMix', trackId: 'base/1' });
+    expect(mixEdit(onEdit.mock.calls[0][0])).toEqual({ ...base, drumMap: { preset: 'gm', keys: [[38, 41], [42, null]] } });
+    expect(document.activeElement).toBe(importButton());
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('2 keys changed.');
+  });
+
+  it('stores the base layout and only the rows that differ from it, and General MIDI when the base is unknown here', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    vi.mocked(drumMapFiles.import).mockResolvedValueOnce(file({ base: 'test-kit', keys: [[91, 41], [42, null], [38, 38]] }));
+    render(<Harness onEdit={onEdit} />);
+    await user.click(importButton());
+    await waitFor(() => expect(onEdit).toHaveBeenCalledTimes(1));
+    expect(mixEdit(onEdit.mock.calls[0][0]).drumMap).toEqual({ preset: 'test-kit', keys: [[91, 41]] });
+    vi.mocked(drumMapFiles.import).mockResolvedValueOnce(file({ base: 'nonesuch', keys: [[38, 41]] }));
+    await user.click(importButton());
+    await waitFor(() => expect(onEdit).toHaveBeenCalledTimes(2));
+    expect(mixEdit(onEdit.mock.calls[1][0]).drumMap).toEqual({ preset: 'gm', keys: [[38, 41]] });
+  });
+
+  it('records nothing for a file that says what the track already plays', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    vi.mocked(drumMapFiles.import).mockResolvedValue(file({ base: 'test-kit', keys: [[91, 40], [42, null], [38, 41]] }));
+    render(<Harness initial={{ ...base, drumMap: { preset: 'test-kit', keys: [[38, 41]] } }} onEdit={onEdit} />);
+    await user.click(importButton());
+    await waitFor(() => expect(drumMapFiles.import).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says nothing when the dialog is cancelled, for an import and an export alike', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    vi.mocked(drumMapFiles.import).mockResolvedValue(null);
+    vi.mocked(drumMapFiles.export).mockResolvedValue(false);
+    render(<Harness onEdit={onEdit} />);
+    await user.click(importButton());
+    await settle();
+    await user.click(exportButton());
+    await waitFor(() => expect(drumMapFiles.export).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.activeElement).toBe(exportButton());
+  });
+
+  it('shows a refused file in words, keeps the map, and clears the message with the next edit', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    vi.mocked(drumMapFiles.import).mockRejectedValue('newer_version');
+    render(<Harness onEdit={onEdit} />);
+    await user.click(importButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent('The drum map was not imported: This drum map was made by a newer TabPlayer. Update TabPlayer to use it.');
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(importButton());
+    type(keyField('Snare rim shot'), '40');
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('alert')).toBeNull();
+    vi.mocked(drumMapFiles.import).mockRejectedValue('unreadable: Access is denied.');
+    await user.click(importButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent('The file could not be read. Access is denied.');
+  });
+
+  it('shows the refusal in the chosen language', async () => {
+    const user = userEvent.setup();
+    setLanguagePreference('de');
+    vi.mocked(drumMapFiles.import).mockRejectedValue('too_large');
+    render(<Harness onEdit={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Importieren…' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Die Zuordnung wurde nicht importiert: Die Datei ist größer als 16 KiB');
+    cleanup();
+    setLanguagePreference('et');
+    render(<Harness onEdit={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Impordi…' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Trummikaarti ei imporditud: Fail on suurem kui 16 KiB');
+  });
+
+  it("exports the map the track has, under the layout's name, and shows a failed write", async () => {
+    const user = userEvent.setup();
+    vi.mocked(drumMapFiles.export).mockResolvedValueOnce(true);
+    const map = { preset: 'test-kit', keys: [[38, 41]] as [number, number | null][] };
+    render(<Harness initial={{ ...base, drumMap: map }} onEdit={vi.fn()} />);
+    await user.click(exportButton());
+    await waitFor(() => expect(drumMapFiles.export).toHaveBeenCalledWith(map, 'Test kit'));
+    expect(screen.queryByRole('alert')).toBeNull();
+    vi.mocked(drumMapFiles.export).mockRejectedValueOnce('unreadable: The disk is full.');
+    await user.click(exportButton());
+    expect(await screen.findByRole('alert')).toHaveTextContent('The drum map was not exported: The file could not be read. The disk is full.');
+    cleanup();
+    render(<Harness onEdit={vi.fn()} />);
+    await user.click(exportButton());
+    await waitFor(() => expect(drumMapFiles.export).toHaveBeenLastCalledWith(undefined, 'General MIDI'));
+  });
+
+  it('asks for one file at a time and applies it to the mix as it is when the dialog closes', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    let answer: (value: ImportedDrumMap) => void = () => undefined;
+    vi.mocked(drumMapFiles.import).mockReturnValue(new Promise<ImportedDrumMap | null>(resolve => { answer = resolve; }));
+    render(<Harness onEdit={onEdit} />);
+    await user.click(importButton());
+    await user.click(importButton());
+    expect(drumMapFiles.import).toHaveBeenCalledTimes(1);
+    // An edit made while the dialog is open is not lost to a stale mix: the import lands on top of it.
+    type(keyField('Hi-hat closed'), '');
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    answer(file({ keys: [[38, 41]] }));
+    await waitFor(() => expect(onEdit).toHaveBeenCalledTimes(2));
+    expect(mixEdit(onEdit.mock.calls[1][0]).drumMap).toEqual({ preset: 'gm', keys: [[38, 41]] });
+  });
+
+  it('refuses both buttons while an edit is in flight, without disabling them', async () => {
+    const user = userEvent.setup();
+    render(<Harness onEdit={vi.fn()} busy />);
+    for (const button of [importButton(), exportButton()]) {
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+      expect(button).not.toBeDisabled();
+      await user.click(button);
+    }
+    expect(drumMapFiles.import).not.toHaveBeenCalled();
+    expect(drumMapFiles.export).not.toHaveBeenCalled();
   });
 });

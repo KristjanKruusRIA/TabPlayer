@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { model } from '@coderline/alphatab';
 import { defaultMix } from '../document-settings';
@@ -9,6 +9,7 @@ import { useI18n, type MessageKey } from '../i18n';
 import { BusyFieldset, CommitField, Segmented, busyGuard, busySelect } from '../ui';
 import maps from './drum-maps.json';
 import { SILENT, drumMapPresets, resolveDrumMap, withDrumMap } from './drum-map';
+import { drumMapFiles, exportedName, fileProblem, mapFromImport } from './drum-map-file';
 import { noteName } from './tuner';
 
 interface Row { id: number; name: string; sound: string; plain: number }
@@ -70,6 +71,9 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
   const { t } = useI18n();
   const [view, setView] = useState<'track' | 'all'>('track');
   const [error, setError] = useState('');
+  /** Why the last import or export did not happen, in words; empty while there is nothing to say. A cancelled dialog is not a reason. */
+  const [fileError, setFileError] = useState('');
+  const transferring = useRef(false), commitNow = useRef<(next: DrumMapRef | undefined) => Promise<boolean> | false>(() => false);
   /** The layout whose choice cleared changed keys, so the status can say Undo brings them back for as long as that layout is the one shown. */
   const [cleared, setCleared] = useState<string | null>(null);
   const map = mix?.drumMap, presetId = map?.preset ?? 'gm';
@@ -96,8 +100,27 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
     const current = mix ?? defaultMix(), nextMix = withDrumMap(current, next);
     if (busy || nextMix === current) return false;
     setError('');
+    setFileError('');
     return Promise.resolve(onEdit({ type: 'setTrackMix', trackId, mix: nextMix })).then(() => true, reason => { setError(message(reason)); return false; });
   };
+  commitNow.current = commit;
+  /** One import or export at a time. Whatever the dialog gave is applied to the track as it is when the dialog closes, not as it was when it opened. */
+  const transfer = (failed: 'drum_map.import_failed' | 'drum_map.export_failed', run: () => Promise<void>) => {
+    if (transferring.current) return;
+    transferring.current = true;
+    setFileError('');
+    void run().catch(reason => {
+      const { key, detail } = fileProblem(reason);
+      setFileError(t(failed, { error: t(key, { detail }) }));
+    }).finally(() => { transferring.current = false; });
+  };
+  const importFile = () => transfer('drum_map.import_failed', async () => {
+    const imported = await drumMapFiles.import();
+    if (imported) await commitNow.current(mapFromImport(imported));
+  });
+  const exportFile = () => transfer('drum_map.export_failed', async () => {
+    await drumMapFiles.export(map, exportedName(presetId, preset?.name));
+  });
   const withRow = (id: number, key: number | null | 'reset'): DrumMapRef => {
     const rows = new Map(map?.keys ?? []);
     if (key === 'reset') rows.delete(id); else rows.set(id, key);
@@ -160,6 +183,11 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
       </div>}
       <div className="drum-map-footer"><button type="button" {...busyGuard({ busy, unavailable: count === 0, onClick: () => { void commit({ preset: presetId }); } })}>{t('drum_map.reset_all')}</button></div>
     </details>
+    <div className="drum-map-files" role="group" aria-label={t('drum_map.files')}>
+      <button type="button" {...busyGuard({ busy, onClick: importFile })}>{t('drum_map.import')}</button>
+      <button type="button" {...busyGuard({ busy, onClick: exportFile })}>{t('drum_map.export')}</button>
+    </div>
     {error && <p role="alert">{t('drum_map.change_failed', { error })}</p>}
+    {fileError && <p role="alert">{fileError}</p>}
   </section>;
 }

@@ -31,6 +31,8 @@
 .effect-strip-empty { color:var(--ws-muted); font-size:12px; line-height:24px; }
 .inspector-section .sound-editor-open { display:flex; align-items:center; gap:6px; justify-content:flex-start; }
 .sound-dialog { width:min(820px,calc(100vw - 32px)); max-height:min(88vh,calc(100vh - 32px)); }
+.plugin-dialog { width:min(480px,calc(100vw - 32px)); max-height:min(88vh,calc(100vh - 32px)); }
+.plugin-dialog .tp-dialog-body { overflow:auto; padding:8px; }
 .sound-dialog .tp-dialog-body { overflow:auto; }
 .track-info-row { display:grid; grid-template-columns:28px minmax(0,1fr) minmax(0,.55fr); align-items:center; gap:6px; }
 .inspector-section .track-info-row input:not([type=color]) { min-width:0; }

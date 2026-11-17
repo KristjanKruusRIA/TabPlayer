@@ -295,19 +295,18 @@ export async function runDrumMapParity({ buildPath } = {}) {
 
   /** Escape closes the open Keys section first (its own rule), then the dialog, so it is pressed until the dialog is gone. */
   const closeSound = async () => {
-    const dialog = page.locator('.sound-dialog');
+    const dialog = page.locator('.plugin-dialog');
     for (let i = 0; i < 3 && await dialog.isVisible(); i++) { await page.keyboard.press('Escape'); await sleep(150); }
     await dialog.waitFor({ state: 'hidden' });
     await ui.waitForWorkspaceIdle(page);
   };
 
   // ---- Panels ----------------------------------------------------------------------------------------------------------------
-  const soundPanel = () => page.locator('.sound-dialog').getByRole('region', { name: 'Track sound' });
+  // The plug-in slot and the drum map are in the Plug-in dialog (the sound dialog holds neither).
+  const soundPanel = () => page.locator('.plugin-dialog').getByRole('region', { name: 'Plug-in' });
   const openSound = async () => {
     where = 'dialog';
-    await ui.openSoundDialog(page);
-    const slotDetails = soundPanel().locator('details.sound-plugin-slot');
-    if (!await slotDetails.evaluate(node => node.open)) await slotDetails.locator('summary').click();
+    await ui.openPluginDialog(page);
   };
   const pluginPicker = () => page.locator('.sound-plugin-slot select');
   const selectTrack = async name => {
@@ -333,18 +332,18 @@ export async function runDrumMapParity({ buildPath } = {}) {
     await closeSound();
     const strip = page.locator(`button.track-channel-select[aria-pressed="false"]:has-text("${ordinal}. Drums")`).first();
     if (await strip.isVisible()) { await strip.click(); await idle(); }
-    const open = page.locator('.sound-editor-open');
+    const open = page.locator('.sound-plugin-open');
     if (!await open.isVisible()) {
       const tabs = page.locator('[role="tab"]');
       for (let i = 0; i < await tabs.count() && !await open.isVisible(); i++) await tabs.nth(i).click().catch(() => {});
     }
     await open.click();
-    await page.locator('.sound-dialog').waitFor({ state: 'visible' });
+    await page.locator('.plugin-dialog').waitFor({ state: 'visible' });
     await idle();
   };
   /** Which panel section() means: the sound dialog's Drum map row or the MIDI out panel's. */
   let where = 'dialog';
-  const section = () => page.locator(where === 'dialog' ? '.sound-dialog .drum-map' : 'details.midi-out-more .drum-map').first();
+  const section = () => page.locator(where === 'dialog' ? '.plugin-dialog .drum-map' : 'details.midi-out-more .drum-map').first();
   const mapSelect = () => section().locator('select');
   const keysDetails = () => section().locator('details.drum-map-keys');
   const openKeys = async view => {
@@ -524,16 +523,16 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
 
     // 1. Where the row shows.
     const hasRow = async () => section().isVisible().catch(() => false);
-    assert.equal(await page.locator('.sound-dialog .drum-map').count(), 0, 'no Drum map row on a guitar track');
+    assert.equal(await page.locator('.plugin-dialog .drum-map').count(), 0, 'no Drum map row on a guitar track');
     await selectTrack(DRUMS);
-    assert.equal(await page.locator('.sound-dialog .drum-map').count(), 0, 'no Drum map row on a drum track with no instrument');
+    assert.equal(await page.locator('.plugin-dialog .drum-map').count(), 0, 'no Drum map row on a drum track with no instrument');
     const midiBeforeRoute = await midiPanel(DRUMS);
     assert.equal(await page.locator('details.midi-out-more .drum-map').count(), 0, 'no Drum map row on a drum track with no MIDI port');
     await selectTrack(DRUMS);
     const editsBeforeChoose = await editCount();
     await pluginPicker().selectOption(DRUM_CLASS_ID);
     await idle();
-    await poll(async () => page.locator('.sound-dialog .drum-map').count(), n => n === 1, 'the Drum map row appears with the instrument');
+    await poll(async () => page.locator('.plugin-dialog .drum-map').count(), n => n === 1, 'the Drum map row appears with the instrument');
     const order = await soundPanel().evaluate(node => {
       const slot = node.querySelector('.sound-plugin-slot'), map = node.querySelector('.drum-map');
       return Boolean(slot.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING);
@@ -541,7 +540,7 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     assert.ok(order, 'the Drum map row follows the plug-in slot');
     const drumTrackId = (await edits()).filter(e => e.type === 'setTrackSound').at(-1).trackId;
     await selectTrack(GUITAR);
-    assert.equal(await page.locator('.sound-dialog .drum-map').count(), 0, 'still none on the guitar track');
+    assert.equal(await page.locator('.plugin-dialog .drum-map').count(), 0, 'still none on the guitar track');
     await selectTrack(DRUMS);
     step('1. The Drum map row shows after the plug-in slot of a drum track with the instrument, not on a guitar track, not on a drum track with neither instrument nor port', { drumTrackId });
 
@@ -656,7 +655,7 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     assert.equal(focused.tag, 'INPUT', `focus stays on the field after a commit: ${JSON.stringify(focused)}`);
     assert.equal(focused.value, '60');
     await page.keyboard.press('Escape');
-    assert.equal(await page.locator('.sound-dialog').isVisible(), true, 'Escape inside Keys does not close the sound dialog');
+    assert.equal(await page.locator('.plugin-dialog').isVisible(), true, 'Escape inside Keys does not close the Plug-in dialog');
     assert.equal(await keysDetails().evaluate(node => node.open), false, 'Escape closes the Keys section');
     await openKeys('In this track');
     await resetAll();
@@ -837,7 +836,7 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
       assert.equal(trackNames.length, 4, `the duplicate adds a track: ${trackNames}`);
       const copyName = trackNames.find(n => !['Track 1: Guitar', 'Track 2: Drums', 'Track 3: Drums B'].includes(n)) ?? trackNames[3];
       await selectTrack(copyName);
-      await poll(async () => page.locator('.sound-dialog .drum-map').count(), n => n === 1, `the copy "${copyName}" has the Drum map row (it kept the instrument)`);
+      await poll(async () => page.locator('.plugin-dialog .drum-map').count(), n => n === 1, `the copy "${copyName}" has the Drum map row (it kept the instrument)`);
       await openKeys('In this track');
       const copyRows = await rows();
       assert.equal(copyRows.find(r => r.changed)?.key, '53', `the copy keeps the map: ${JSON.stringify(copyRows)}`);
@@ -878,10 +877,10 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     for (const language of LANGUAGES) {
       if (language !== 'en') await setLanguage(language);
       await selectAnyLanguage(2);
-      await page.locator('.sound-dialog .drum-map').scrollIntoViewIfNeeded();
+      await page.locator('.plugin-dialog .drum-map').scrollIntoViewIfNeeded();
       await openKeys();
       await section().scrollIntoViewIfNeeded();
-      await shoot(`sound-dialog-keys-${language}`);
+      await shoot(`plugin-dialog-keys-${language}`);
       await shoot(`drum-map-in-track-${language}`, section());
       // All sounds, with the percussion groups open.
       await section().getByRole('radio', { name: /^(All sounds|Kõik helid|Alle Klänge)/ }).click().catch(async () => { await section().locator('[role="radio"]').nth(1).click(); });

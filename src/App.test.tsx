@@ -1796,6 +1796,18 @@ it('a drum kit change is a sound edit that keeps the music selection',async()=>{
   fireEvent.click(exposeFunctionalControl(screen.getByText('Selected playback',{selector:'summary'})));click('Play selection');
   expect(integration.playSelection).toHaveBeenCalledWith({kind:'bars',tracks:[1],firstBar:0,lastBar:0},expect.anything());
 },60000);
+it('Sound > Plug-in… opens the Plug-in dialog of the selected track, and the sidebar buttons open the two dialogs one at a time',async()=>{
+  await setup();
+  const menu=within(document.querySelector<HTMLElement>('header section[aria-label="Sound"]')!);
+  fireEvent.click(exposeFunctionalControl(menu.getByRole('button',{name:'Plug-in…',hidden:true})));
+  const plugin=await screen.findByRole('dialog',{name:'Plug-in'});expect(within(plugin).getByRole('combobox',{name:'VST3 plug-in'})).toBeInTheDocument();expect(within(plugin).queryByText('My sounds')).toBeNull();
+  closeDialog('Plug-in');
+  fireEvent.click(screen.getAllByRole('button',{name:'Plug-in…',hidden:true}).find(button=>!menu.queryByRole('button',{name:'Plug-in…',hidden:true})||button!==menu.getByRole('button',{name:'Plug-in…',hidden:true}))!);
+  closeDialog('Plug-in');
+  fireEvent.click(screen.getByRole('button',{name:'Sound and pedalboard…',hidden:true}));
+  const sound=await screen.findByRole('dialog',{name:'Sound and pedalboard'});expect(within(sound).queryByRole('combobox',{name:'VST3 plug-in'})).toBeNull();expect(screen.queryByRole('dialog',{name:'Plug-in'})).toBeNull();
+  closeDialog('Sound and pedalboard');
+});
 it('ties and unties the selected notes from the keyboard, as one edit each, and stays out of fields and the Sound view',async()=>{
   const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'}),last=()=>c.getState().snapshot.project.edits.at(-1);
   await typeFret(3);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));

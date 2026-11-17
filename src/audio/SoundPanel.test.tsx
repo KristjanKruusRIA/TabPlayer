@@ -324,13 +324,25 @@ it('words a device the backend cannot name with the translated label', async () 
   expect(await screen.findByRole('option', { name: 'Unknown device' })).toBeInTheDocument();
 });
 
-it.each([['guitar',false],['drums',true]])('puts the VST3 plug-in slot first, before the sound source and My sounds, and marks it for focus only when asked (%s)',(_name,percussion)=>{
-  const view=render(<SoundPanel trackId="track" percussion={percussion} sound={soundPreset(percussion?'gm':'lead')} onEdit={vi.fn()}/>);
-  const slot=view.container.querySelector('.sound-plugin-slot') as HTMLElement,source=screen.getByLabelText('Sound source'),library=screen.getByText('My sounds').closest('fieldset')!;
-  const before=(a:Node,b:Node)=>!!(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING);
-  expect(before(slot,source)).toBe(true);expect(before(slot,library)).toBe(true);
-  const choice=()=>within(slot).getByRole('combobox',{name:'VST3 plug-in'});
-  expect(choice()).not.toHaveAttribute('data-autofocus');
-  view.rerender(<SoundPanel trackId="track" percussion={percussion} sound={soundPreset(percussion?'gm':'lead')} onEdit={vi.fn()} openPlugin/>);
-  expect(choice()).toHaveAttribute('data-autofocus','true');expect(slot).toHaveAttribute('open');
+const pluginSlot={format:'vst3' as const,classId:'A'.repeat(32),name:'Amp Rig',vendor:'Vendor',active:true,inputDb:0,outputDb:0,state:''};
+it.each([['guitar',false],['drums',true]])('has no plug-in slot, drum map or plug-in choice: they are in the Plug-in dialog (%s)',(_name,percussion)=>{
+  const view=render(<SoundPanel trackId="track" percussion={percussion} sound={{...soundPreset(percussion?'gm':'lead'),plugin:{...pluginSlot,kind:percussion?'instrument':undefined}}} onEdit={vi.fn()}/>);
+  expect(view.container.querySelector('.sound-plugin-slot')).toBeNull();expect(screen.queryByRole('combobox',{name:'VST3 plug-in'})).toBeNull();expect(screen.queryByRole('button',{name:'Add plug-in…'})).toBeNull();expect(screen.queryByRole('combobox',{name:'Drum map'})).toBeNull();
+  expect(screen.getByLabelText('Sound source')).toBeInTheDocument();expect(screen.getByText('My sounds')).toBeInTheDocument();expect(screen.getByText('Signal chain')).toBeInTheDocument();
+});
+it('an effect plug-in keeps the Replaced markers and a one-line note with a Plug-in… button that asks for the Plug-in dialog',()=>{
+  const open=vi.fn();
+  const view=render(<SoundPanel trackId="guitar" sound={{...soundPreset('lead'),plugin:pluginSlot}} onEdit={vi.fn()} onOpenPlugin={open}/>);
+  expect(Array.from(view.container.querySelectorAll('.sound-block>summary')).filter(summary=>/Replaced/.test(summary.textContent??'')).length).toBe(3);
+  const note=view.container.querySelector('.sound-plugin-link') as HTMLElement;expect(note).toHaveTextContent('Drive, Amp and Cabinet are replaced by the plug-in.');
+  fireEvent.click(within(note).getByRole('button',{name:'Plug-in…'}));expect(open).toHaveBeenCalledTimes(1);
+  view.rerender(<SoundPanel trackId="guitar" sound={{...soundPreset('lead'),plugin:{...pluginSlot,active:false}}} onEdit={vi.fn()} onOpenPlugin={open}/>);
+  expect(view.container.querySelector('.sound-plugin-link')).toBeNull();
+  view.rerender(<SoundPanel trackId="guitar" sound={{...soundPreset('lead'),plugin:{...pluginSlot,kind:'instrument'}}} onEdit={vi.fn()} onOpenPlugin={open}/>);
+  expect(view.container.querySelector('.sound-plugin-link')).toBeNull();
+});
+it('a drum instrument keeps the kit note in the sound editor with a Plug-in… route to the Plug-in dialog',()=>{
+  const open=vi.fn();
+  render(<SoundPanel trackId="drums" percussion sound={{...soundPreset('gm'),plugin:{...pluginSlot,kind:'instrument'}}} onEdit={vi.fn()} onOpenPlugin={open}/>);
+  const note=screen.getByText(/The kit and its mix apply to the built-in kit/);fireEvent.click(within(note).getByRole('button',{name:'Plug-in…'}));expect(open).toHaveBeenCalledTimes(1);
 });

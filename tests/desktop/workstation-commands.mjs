@@ -275,6 +275,25 @@ export async function openSoundDialog(page,chip=null) {
   }
   return dialog.getByRole('region',{name:'Track sound'});
 }
+/** Opens the 'Plug-in' dialog (the track's plug-in slot, plus the drum map of a drum instrument) from the Track tab's Plug-in… button and returns its 'Plug-in' panel.
+ * It is modal and never open together with the sound dialog: it closes that one first. Call closePluginDialog before touching anything behind it. */
+export async function openPluginDialog(page) {
+  const dialog=page.locator('.plugin-dialog');
+  if(!await dialog.isVisible()) {
+    await closeSoundDialog(page);
+    await revealInspectorTab(page,'Track');
+    await page.locator('.sound-plugin-open').click();
+    await dialog.waitFor({state:'visible'});
+  }
+  return dialog.getByRole('region',{name:'Plug-in'});
+}
+/** Escape closes an open disclosure inside the dialog first (the drum map's Keys), so it is pressed until the dialog is gone. */
+export async function closePluginDialog(page) {
+  const dialog=page.locator('.plugin-dialog');
+  for(let i=0;i<3&&await dialog.isVisible();i++){await page.keyboard.press('Escape');await page.waitForTimeout(150);}
+  if(await dialog.isVisible()){await dialog.waitFor({state:'hidden'});}
+  await waitForWorkspaceIdle(page);
+}
 export async function closeSoundDialog(page) {
   const dialog=page.locator('.sound-dialog');
   if(await dialog.isVisible()){await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});await waitForWorkspaceIdle(page);}

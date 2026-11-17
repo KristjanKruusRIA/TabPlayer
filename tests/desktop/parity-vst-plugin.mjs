@@ -278,7 +278,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
   };
 
   const exportWav = async name => {
-    await ui.closeSoundDialog(page);
+    await ui.closePluginDialog(page);
     await ui.clickWorkspaceCommand(page, 'Export score', { waitForIdle: false });
     const dialog = page.getByRole('dialog', { name: 'Export score' });
     await dialog.getByLabel('Export format').selectOption('wav');
@@ -300,15 +300,11 @@ export async function runVstPluginParity({ buildPath } = {}) {
   };
 
   const openSound = async () => {
-    // The track's sound is in the modal "Sound and pedalboard" dialog; toolbar clicks through the workstation helpers close it.
-    const panel = await ui.openSoundDialog(page);
-    const slotDetails = panel.locator('details.sound-plugin-slot');
-    if (!await slotDetails.evaluate(node => node.open)) {
-      await slotDetails.locator('summary').click();
-    }
+    // The track's plug-in slot is in the modal "Plug-in" dialog; toolbar clicks through the workstation helpers close it.
+    await ui.openPluginDialog(page);
   };
 
-  const closeSound = () => ui.closeSoundDialog(page);
+  const closeSound = () => ui.closePluginDialog(page);
   const pluginPicker = () => page.locator('.sound-plugin-slot select');
   const lastSoundEdit = async () => (await record()).snapshot.project.edits.filter(e => e.type === 'setTrackSound').at(-1);
 
@@ -501,8 +497,8 @@ export async function runVstPluginParity({ buildPath } = {}) {
     await button('Stop');
 
     // Click "Try again" to recover
-    // The page-level notice's button is named "Try again: <track>"; the slot's own, in the Sound dialog, is plain.
-    const panel = await ui.openSoundDialog(page);
+    // The page-level notice's button is named "Try again: <track>"; the slot's own, in the Plug-in dialog, is plain.
+    const panel = await ui.openPluginDialog(page);
     const retryBtn = panel.getByRole('button', { name: 'Try again', exact: true }).first();
     await retryBtn.click();
     await idle();

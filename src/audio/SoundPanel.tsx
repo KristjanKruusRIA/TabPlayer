@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { delayDivisions, effectBlocks, modulationDivisions, syncedBlocks } from '../document-settings';
-import type { ChannelMix, EditCommand, EffectBlock, TrackSound } from '../edit-types';
+import type { EditCommand, EffectBlock, TrackSound } from '../edit-types';
 import { CabinetResponse } from './CabinetResponse';
 import { AmpCapture } from './AmpCapture';
 import type { NativePlaybackController } from './NativePlaybackController';
@@ -11,9 +11,6 @@ import { SoundLock } from './SoundLock';
 import { BusyFieldset, busyGuard } from '../ui';
 import { useI18n } from '../i18n';
 import { DrumKitPicker } from './DrumKitPicker';
-import { PluginSlotPanel } from './PluginSlotPanel';
-import { DrumMapPanel } from './DrumMapPanel';
-import { makePluginStateCandidate, type PluginStatus } from './plugin-host';
 import type { AssetCandidate } from '../project';
 import { useSoundEditing } from './useSoundEditing';
 import type { Board } from './useSoundEditing';
@@ -21,7 +18,7 @@ import './sound-panel.css';
 
 export { soundPreset };
 /** The inspector's Sound task: every control as a field. The rig in `src/rig` shows the same sound as hardware; both share `useSoundEditing`. */
-export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false,documentId,status:pluginStatus,onAllowConsent,onRetrySlot,openBlock,openPlugin=false,mix,usedDrumSounds=[]}:{/** Opens on the plug-in slot: it is scrolled into view and its choice has focus, as when the sidebar's Plug-in row opened this. */openPlugin?:boolean;/** The track's mix, whose drum map the instrument slot's map row edits. */mix?:ChannelMix;/** The standard drum sounds the track's notes play. */usedDrumSounds?:readonly number[];trackId:string;/** The pedal whose controls start unfolded and scrolled to, as when its slot in the sidebar's effect strip opened this. */openBlock?:EffectBlock;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand,asset?:AssetCandidate)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean;documentId?:string;status?:PluginStatus;onAllowConsent?:()=>void|Promise<unknown>;onRetrySlot?:()=>void|Promise<unknown>}) {
+export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false,openBlock,onOpenPlugin}:{/** Opens the Plug-in dialog in place of this one: the small Plug-in… buttons beside the notes about a plug-in that replaces pedals or the kit. */onOpenPlugin?:()=>void;trackId:string;/** The pedal whose controls start unfolded and scrolled to, as when its slot in the sidebar's effect strip opened this. */openBlock?:EffectBlock;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand,asset?:AssetCandidate)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}) {
   const { lang, t } = useI18n();
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown,diagnostics:true});
   const {playbackState,current,devices,diagnostics,diagnosticsError,testToneMessage,testTone,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
@@ -66,33 +63,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
 
   return <section ref={panel} className="sound-panel" aria-label={t('sound.track_sound')}><h3>{t('sound.heading')}</h3>
     <SoundLock editing={editing} className="check"/>
-    {percussion&&<DrumKitPicker editing={editing} className="drum-kit"/>}
-    {/* The plug-in comes first, with its drum map: it replaces the built-in sound below, and it is what a player looks for. */}
-    <PluginSlotPanel
-      trackId={trackId}
-      slot={current.plugin}
-      status={pluginStatus}
-      busy={busy}
-      documentId={documentId}
-      percussion={percussion}
-      reveal={openPlugin}
-      onChange={(nextSlot, assetToken) => {
-        const next = { ...current };
-        if (nextSlot) {
-          next.plugin = nextSlot;
-        } else {
-          delete next.plugin;
-        }
-        if (assetToken && nextSlot) {
-          void onEdit({ type: 'setTrackSound', trackId, sound: next }, makePluginStateCandidate(nextSlot.state, assetToken));
-        } else {
-          void editing.save(next);
-        }
-      }}
-      onAllow={onAllowConsent}
-      onRetry={onRetrySlot}
-    />
-    {percussion&&current.plugin?.kind==='instrument'&&<DrumMapPanel trackId={trackId} mix={mix} used={usedDrumSounds} busy={busy} onEdit={onEdit}/>}
+    {percussion&&<DrumKitPicker editing={editing} className="drum-kit" onOpenPlugin={onOpenPlugin}/>}
     <BusyFieldset busy={busy}>
     <label>{t('sound.sound_source')}<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">{t(playsRecordedKit(0,percussion,current.drumKit)?'sound.recorded_drum_kit':'sound.automatic_instrument')}</option>{sourceChoices(percussion,current.voiceId).map(id=><option key={id} value={id}>{percussion&&id==='gm'?t('sound.general_midi_drums'):voiceNames[id]}</option>)}</select></label>
     <label>{t('sound.sound_preset')}<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{localizedPresetName(id,lang)}</option>)}</select></label>
@@ -113,6 +84,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
       <div className="sound-library-actions"><button disabled={!name.trim()} onClick={editing.saveNamed}>{t('sound.save_sound')}</button><button disabled={!entry||!name.trim()} onClick={editing.renameChosen}>{t('sound.rename_saved_sound')}</button></div>
       <p role="status" className="muted">{status}</p>
     </BusyFieldset>
+    {current.plugin?.active&&current.plugin.kind!=='instrument'&&<p className="sound-plugin-link muted">{t('plugin.replaced_tone')}{onOpenPlugin&&<> <button type="button" aria-haspopup="dialog" className="sound-plugin-link-open" onClick={onOpenPlugin}>{t('sound_summary.plugin_open')}</button></>}</p>}
     <p className="sound-chain-label muted">{t('sound.signal_chain')}</p>
     <div className="sound-chain" ref={chainRef}>{order.map((block,index)=>pedal(first,block,index))}</div>
     {second&&effectBlocks.some(block=>second.effects[block].enabled)&&<section className="sound-second-board" aria-label={t('sound.second_pedalboard')}><p className="sound-chain-label muted">{t('sound.second_pedalboard_desc')}</p><div className="sound-chain">{chainOrder(second.effects).filter(block=>second.effects[block].enabled).map((block,index)=>pedal(second,block,index))}</div></section>}

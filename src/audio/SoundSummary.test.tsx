@@ -96,34 +96,73 @@ it('has a Plug-in row naming the chosen plug-in, its state when it is not ready,
   rerender(<SoundSummary trackId="guitar" sound={{ ...soundPreset('lead'), plugin: { ...slot, active: false } }} onEdit={vi.fn()} status="ready" />);
   expect(row()).toHaveTextContent('Amp Rig · Bypassed');
 });
-it.each([['a guitar track', false], ['a drum track', true]])('the Plug-in… button opens the sound dialog on the plug-in slot, open and focused, above My sounds, for %s', (_name, percussion) => {
+const dialogs = () => screen.queryAllByRole('dialog');
+it.each([['a guitar track', false], ['a drum track', true]])('the Plug-in… button opens the Plug-in dialog with the plug-in slot and nothing of the sound editor, for %s', (_name, percussion) => {
   const onEdit = vi.fn();
   render(<SoundSummary trackId="track" percussion={percussion} sound={soundPreset(percussion ? 'gm' : 'lead')} onEdit={onEdit} />);
   const open = screen.getByRole('button', { name: 'Plug-in…' });expect(open).toHaveAttribute('aria-haspopup', 'dialog');
   open.focus();fireEvent.click(open);
-  const dialog = within(screen.getByRole('dialog', { name: 'Sound and pedalboard' }));
-  const section = dialog.getByText('VST3 plug-in', { selector: '.sound-plugin-name' }).closest('details')!;
-  expect(section).toHaveAttribute('open');
-  expect(within(section).getByRole('combobox', { name: 'VST3 plug-in' })).toHaveFocus();
-  expect(dialog.getByRole('button', { name: 'Add plug-in…' })).toBeInTheDocument();
-  // The slot comes before the saved sounds and the pedal chain, and the sound source and preset follow it.
-  const library = dialog.getByText('My sounds').closest('fieldset')!, chain = dialog.getByText('Signal chain');
-  expect(section.compareDocumentPosition(library) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(section.compareDocumentPosition(chain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(dialogs()).toHaveLength(1);
+  const dialog = within(screen.getByRole('dialog', { name: 'Plug-in' }));
+  expect(dialog.getByRole('combobox', { name: 'VST3 plug-in' })).toHaveFocus();expect(dialog.getByRole('button', { name: 'Add plug-in…' })).toBeInTheDocument();
+  for (const label of ['Sound source', 'Sound preset', 'Saved sound', 'Factory sound']) expect(dialog.queryByLabelText(label)).toBeNull();
+  for (const text of ['My sounds', 'Signal chain', 'Copy sound']) expect(dialog.queryByText(text)).toBeNull();
+  expect(document.querySelector('.plugin-dialog .sound-block')).toBeNull();expect(document.querySelector('.plugin-dialog .drum-kit')).toBeNull();
   expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.keyDown(document, { key: 'Escape' });expect(screen.queryByRole('dialog')).toBeNull();expect(open).toHaveFocus();
+});
+it('Sound and pedalboard… opens the sound dialog without the plug-in slot, and its focus returns to the button', () => {
+  render(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} />);
+  const open = screen.getByRole('button', { name: 'Sound and pedalboard…' });open.focus();fireEvent.click(open);
+  expect(dialogs()).toHaveLength(1);const dialog = within(screen.getByRole('dialog', { name: 'Sound and pedalboard' }));
+  expect(dialog.getByText('My sounds')).toBeInTheDocument();expect(dialog.getByText('Signal chain')).toBeInTheDocument();
+  expect(dialog.queryByRole('combobox', { name: 'VST3 plug-in' })).toBeNull();expect(dialog.queryByRole('button', { name: 'Add plug-in…' })).toBeNull();expect(document.querySelector('.sound-dialog .sound-plugin-slot')).toBeNull();
   fireEvent.keyDown(document, { key: 'Escape' });expect(open).toHaveFocus();
 });
-it('a request from the Sound menu opens the dialog on the plug-in slot once and says it was taken', () => {
+it('a request from the Sound menu opens the Plug-in dialog once and says it was taken', () => {
   const taken = vi.fn();
   const { rerender } = render(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} request={null} onRequestHandled={taken} />);
   expect(screen.queryByRole('dialog')).toBeNull();
   rerender(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} request="plugin" onRequestHandled={taken} />);
-  expect(taken).toHaveBeenCalledTimes(1);
-  expect(within(screen.getByRole('dialog', { name: 'Sound and pedalboard' })).getByRole('combobox', { name: 'VST3 plug-in' })).toHaveFocus();
+  expect(taken).toHaveBeenCalledTimes(1);expect(dialogs()).toHaveLength(1);
+  expect(within(screen.getByRole('dialog', { name: 'Plug-in' })).getByRole('combobox', { name: 'VST3 plug-in' })).toHaveFocus();
 });
-it('a drum track keeps its drum map row directly after the plug-in slot', () => {
-  render(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), plugin: { ...slot, kind: 'instrument' } }} onEdit={vi.fn()} />);
+it('the drum map follows the plug-in slot in the Plug-in dialog for an instrument on a drum track, and is in no other case there or in the sound editor', () => {
+  const view = render(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), plugin: { ...slot, kind: 'instrument' } }} onEdit={vi.fn()} />);
   fireEvent.click(screen.getByRole('button', { name: 'Plug-in…' }));
-  const dialog = screen.getByRole('dialog', { name: 'Sound and pedalboard' });
-  const section = dialog.querySelector('.sound-plugin-slot') as HTMLElement, map = dialog.querySelector('.drum-map-panel, [aria-label="Drum map"], .sound-drum-map') as HTMLElement | null;
+  const dialog = screen.getByRole('dialog', { name: 'Plug-in' });
+  const section = dialog.querySelector('.sound-plugin-slot') as HTMLElement, map = dialog.querySelector('.drum-map') as HTMLElement | null;
   expect(map).not.toBeNull();expect(section.nextElementSibling).toBe(map);
+  fireEvent.keyDown(document, { key: 'Escape' });
+  fireEvent.click(screen.getByRole('button', { name: 'Sound and pedalboard…' }));
+  expect(document.querySelector('.sound-dialog .drum-map')).toBeNull();expect(document.querySelector('.sound-dialog .drum-kit')).not.toBeNull();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  view.rerender(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), plugin: slot }} onEdit={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Plug-in…' }));expect(document.querySelector('.plugin-dialog .drum-map')).toBeNull();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  view.rerender(<SoundSummary trackId="guitar" sound={{ ...soundPreset('lead'), plugin: { ...slot, kind: 'instrument' } }} onEdit={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Plug-in…' }));expect(document.querySelector('.plugin-dialog .drum-map')).toBeNull();
+});
+it('the effect note in the sound editor opens the Plug-in dialog in its place, and the focus goes back to the sidebar button that opened the editor', () => {
+  render(<SoundSummary trackId="guitar" sound={{ ...soundPreset('lead'), plugin: slot }} onEdit={vi.fn()} />);
+  const opener = screen.getByRole('button', { name: 'Sound and pedalboard…' });opener.focus();fireEvent.click(opener);
+  const note = document.querySelector('.sound-dialog .sound-plugin-link') as HTMLElement;expect(note).not.toBeNull();
+  fireEvent.click(within(note).getByRole('button', { name: 'Plug-in…' }));
+  expect(dialogs()).toHaveLength(1);expect(screen.getByRole('dialog', { name: 'Plug-in' })).toBeInTheDocument();expect(document.querySelector('.sound-dialog')).toBeNull();
+  fireEvent.keyDown(document, { key: 'Escape' });expect(screen.queryByRole('dialog')).toBeNull();expect(opener).toHaveFocus();
+});
+it('the drum kit note opens the Plug-in dialog in its place for an instrument on a drum track', () => {
+  render(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), plugin: { ...slot, kind: 'instrument' } }} onEdit={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Sound and pedalboard…' }));
+  const note = screen.getByText(/The kit and its mix apply to the built-in kit/);fireEvent.click(within(note).getByRole('button', { name: 'Plug-in…' }));
+  expect(dialogs()).toHaveLength(1);expect(screen.getByRole('dialog', { name: 'Plug-in' })).toBeInTheDocument();expect(document.querySelector('.plugin-dialog .drum-map')).not.toBeNull();
+});
+it('choosing a plug-in in its dialog is one setTrackSound edit, and choosing the current one records nothing', () => {
+  const onEdit = vi.fn();
+  render(<SoundSummary trackId="guitar" sound={{ ...soundPreset('lead'), plugin: slot }} onEdit={onEdit} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Plug-in…' }));
+  const dialog = within(screen.getByRole('dialog', { name: 'Plug-in' }));
+  fireEvent.change(dialog.getByRole('combobox', { name: 'VST3 plug-in' }), { target: { value: slot.classId } });expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.change(dialog.getByRole('combobox', { name: 'VST3 plug-in' }), { target: { value: '' } });
+  expect(onEdit).toHaveBeenCalledTimes(1);expect(recorded(onEdit)).toMatchObject({ type: 'setTrackSound', trackId: 'guitar' });expect(recorded(onEdit).sound.plugin).toBeUndefined();
 });

@@ -823,50 +823,100 @@ fn after_a_flush_an_instruments_first_hit_is_the_plugin_alone_at(latency: u32) {
     assert_eq!(rig.helper.sounding(), 0);
 }
 
+/// The runs of frames at the instrument's level in `out`, as `(start, end)` pairs.
+fn level_runs(out: &[[f32; 2]]) -> Vec<(usize, usize)> {
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for (m, frame) in out.iter().enumerate() {
+        if *frame == [LEVEL; 2] {
+            match runs.last_mut() {
+                Some(run) if run.1 == m => run.1 = m + 1,
+                _ => runs.push((m, m + 1)),
+            }
+        }
+    }
+    runs
+}
+
 #[test]
-fn a_late_first_result_never_lets_the_stand_in_through_and_loses_none_of_the_plugin() {
+fn a_late_first_result_never_lets_the_stand_in_through_and_rejoins_the_grid() {
     // Latencies that are not whole blocks (the first result block holds the plug-in's silent start and its first sound),
-    // with a helper that answers its first blocks after the first fetch has found nothing.
+    // with a helper that answers its first blocks after the first fetch has found nothing, at several moments up to just
+    // before the fault deadline.
     for latency in [64u32, 100, 192] {
+        let hold_until =
+            2 * BLOCK_FRAMES + (latency as usize).div_ceil(BLOCK_FRAMES) * BLOCK_FRAMES;
+        let d = 2 * BLOCK_FRAMES + latency as usize;
+        // Up to the last frame before the fault deadline; for 192 that is past block 1 of the result stream (several
+        // whole blocks were missed), where the first result to play is read from block 1.
+        let mut answers: Vec<usize> = vec![300, d - 1, d, d + 1, 400, hold_until - 1]
+            .into_iter()
+            .filter(|&a| a < hold_until)
+            .collect();
+        answers.sort_unstable();
+        answers.dedup();
+        for answer in answers {
+            let what = format!("latency {latency}, answer at {answer}");
+            let rig = rig_full(None, latency);
+            let mut insert = rig.instrument();
+            insert.flush();
+            assert_eq!(insert.delay_frames(), d);
+            rig.helper.paused.store(true, Ordering::Relaxed);
+            let out = drive_input(
+                &mut insert,
+                &rig,
+                0,
+                1500 + d + 400,
+                [STAND_IN; 2],
+                &mut |m, insert| {
+                    // A hit at the start, and a second one later in the plan.
+                    match m {
+                        0 | 1500 => insert.stage_note(true, 0, 36, 100),
+                        700 | 1600 => insert.stage_note(false, 0, 36, 0),
+                        _ => {}
+                    }
+                    if m == answer {
+                        rig.helper.paused.store(false, Ordering::Relaxed);
+                        rig.settle();
+                    }
+                },
+            );
+            assert_eq!(insert.faulted(), None, "{what}");
+            assert!(
+                out.iter().all(|f| *f == [0.0; 2] || *f == [LEVEL; 2]),
+                "the stand-in is heard, {what}"
+            );
+            // The first hit is on the grid at D, or starts when the result arrives if that is later (the frames due
+            // before it are lost to the lateness). It ends where its NoteOff puts it. The second is on the grid.
+            assert_eq!(
+                level_runs(&out),
+                vec![(answer.max(d), 700 + d), (1500 + d, 1600 + d)],
+                "{what}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_helper_that_never_answers_faults_at_the_same_deadline_and_the_stand_in_then_plays() {
+    for latency in [64u32, 100, 192] {
+        let hold_until =
+            2 * BLOCK_FRAMES + (latency as usize).div_ceil(BLOCK_FRAMES) * BLOCK_FRAMES;
         let rig = rig_full(None, latency);
         let mut insert = rig.instrument();
         insert.flush();
-        let d = insert.delay_frames();
-        assert_eq!(d, 2 * BLOCK_FRAMES + latency as usize);
         rig.helper.paused.store(true, Ordering::Relaxed);
-        let out = drive_input(
-            &mut insert,
-            &rig,
-            0,
-            d + 1200,
-            [STAND_IN; 2],
-            &mut |m, insert| {
-                if m == 0 {
-                    insert.stage_note(true, 0, 36, 100);
-                }
-                if m == 700 {
-                    insert.stage_note(false, 0, 36, 0);
-                }
-                // The first fetch, at frame 256, found nothing; the helper answers at frame 300.
-                if m == 300 {
-                    rig.helper.paused.store(false, Ordering::Relaxed);
-                    rig.settle();
-                }
-            },
-        );
-        assert_eq!(insert.faulted(), None, "latency {latency}");
-        let leaked = out.iter().position(|f| f[0].abs() > LEVEL + 1e-6);
-        assert_eq!(leaked, None, "the stand-in is heard, latency {latency}");
-        // Silence, then the plug-in's 700 frames of sound in one run: none of them dropped.
-        let sounding: Vec<usize> = (0..out.len()).filter(|&m| out[m] == [LEVEL; 2]).collect();
-        assert_eq!(sounding.len(), 700, "latency {latency}");
-        assert_eq!(
-            sounding[699] - sounding[0],
-            699,
-            "one unbroken run, latency {latency}"
-        );
-        assert!(sounding[0] >= d, "never before its time, latency {latency}");
-        assert!(out.iter().all(|f| *f == [0.0; 2] || *f == [LEVEL; 2]));
+        let mut faulted_at = None;
+        let ctx = FrameContext::at_bpm(120.0);
+        let mut last = [0.0; 2];
+        for m in 0..hold_until + 2000 {
+            last = insert.process([STAND_IN; 2], &ctx, &mut |v| v);
+            if faulted_at.is_none() && insert.faulted().is_some() {
+                faulted_at = Some(m);
+            }
+        }
+        assert_eq!(insert.faulted(), Some(FaultReason::Underrun));
+        assert_eq!(faulted_at, Some(hold_until), "latency {latency}");
+        assert_eq!(last, [STAND_IN; 2], "the stand-in plays, latency {latency}");
     }
 }
 

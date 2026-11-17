@@ -475,6 +475,8 @@ pub struct PluginInsert {
     silent_prime: bool,
     /// Whether a result block has played since the stream started (a priming instrument is held silent until one has).
     wet_heard: bool,
+    /// Whether the first result block of the stream has been taken (see `fetch`).
+    joined: bool,
 }
 
 impl PluginInsert {
@@ -589,6 +591,7 @@ impl PluginInsert {
             notes: NoteStage::new(),
             silent_prime: false,
             wet_heard: false,
+            joined: false,
         })
     }
 
@@ -980,6 +983,7 @@ impl PluginInsert {
         self.out_pos = BLOCK_FRAMES;
         self.playable = false;
         self.wet_heard = false;
+        self.joined = false;
     }
 
     /// Publishes the gathered block and wakes the helper. A block that cannot go (the host end is in use, or another
@@ -1009,7 +1013,18 @@ impl PluginInsert {
 
     /// Reads the next result block into `out_block`, checking it whole, or faults.
     fn fetch(&mut self) {
-        let (seq, epoch) = (self.next_read, self.epoch);
+        // A priming instrument whose first result has not been taken yet reads the block the grid is in, not block 0: the
+        // result stream began at frame `P`, so `held` frames in, the frame to play is `held % BLOCK_FRAMES` of block
+        // `held / BLOCK_FRAMES`. The blocks and frames before it were due while the helper had not answered, and are
+        // skipped, as an effect skips a missing block: the stream rejoins `D = P + L` instead of trailing it by `held`.
+        let rejoin = self.offline.is_none() && self.silent_prime && !self.joined;
+        let held = if rejoin {
+            self.run.saturating_sub(self.pipeline as u64) as usize
+        } else {
+            0
+        };
+        let (skip_blocks, skip_frames) = (held / BLOCK_FRAMES, held % BLOCK_FRAMES);
+        let (seq, epoch) = (self.next_read.wrapping_add(skip_blocks as u64), self.epoch);
         let status = match self.offline {
             None => {
                 let out = &mut self.out_block;
@@ -1032,8 +1047,9 @@ impl PluginInsert {
             self.playable = false;
             return;
         }
-        self.next_read = self.next_read.wrapping_add(1);
-        self.out_pos = 0;
+        self.next_read = seq.wrapping_add(1);
+        self.out_pos = skip_frames;
+        self.joined = true;
         match status {
             OutputRead::Ready => {
                 let runaway = self

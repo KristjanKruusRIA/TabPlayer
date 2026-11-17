@@ -19,8 +19,8 @@ async function openDisclosure(locator) {
   if(!await locator.evaluate(node=>node.parentElement.open))await locator.click();
 }
 
-/** The modal dialogs the inspector's controls open (Properties, Score style, Sound and pedalboard, Sound mastering). Each makes the rest of the app inert while it is open. */
-const inspectorDialogs=page=>[page.getByRole('dialog',{name:'Properties',exact:true}),page.getByRole('dialog',{name:'Add track',exact:true}),page.locator('.score-style-dialog'),page.locator('.sound-dialog'),page.locator('.master-dialog')];
+/** The modal dialogs the inspector's controls open (Properties, Score style, Sound and pedalboard, Plug-in, Sound mastering). Each makes the rest of the app inert while it is open. */
+const inspectorDialogs=page=>[page.getByRole('dialog',{name:'Properties',exact:true}),page.getByRole('dialog',{name:'Add track',exact:true}),page.locator('.score-style-dialog'),page.locator('.sound-dialog'),page.locator('.plugin-dialog'),page.locator('.master-dialog')];
 async function dismiss(page,dialog) {
   if(await dialog.isVisible()){await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});}
 }
@@ -258,10 +258,11 @@ export async function openAddTrackDialog(page) {
   if(!await dialog.isVisible()){await closeInspectorDialogs(page);await clickTrackMenuItem(page,'Add track…');await dialog.waitFor({state:'visible'});}
   return dialog;
 }
-/** Clicks an item of the Track menu (or `menu`, such as 'Sound') in the command bar: 'Add track…', 'Move track up', 'Move track down', 'VST3 plug-in…'. */
+/** Clicks an item of the Track menu (or `menu`, such as 'Sound') in the command bar: 'Add track…', 'Move track up', 'Move track down', 'Plug-in…' (menu 'Sound'). */
 export async function clickTrackMenuItem(page,name,menu='Track') {
   await openDisclosure(summary(page,new RegExp(`^${menu}$`)));
-  await page.getByRole('button',{name,exact:true}).click();
+  // The menu's own section, so a same-named button elsewhere (the sidebar's Plug-in…) is not matched.
+  await page.locator('header details.command-menu[open]').getByRole('button',{name,exact:true}).click();
 }
 
 /** Opens the 'Sound and pedalboard' dialog from the Track tab (optionally at a pedal's chip: 'Edit Drive') and returns the 'Track sound' panel inside it.
@@ -274,6 +275,25 @@ export async function openSoundDialog(page,chip=null) {
     await dialog.waitFor({state:'visible'});
   }
   return dialog.getByRole('region',{name:'Track sound'});
+}
+/** Opens the 'Plug-in' dialog (the track's plug-in slot, plus the drum map of a drum instrument) from the Track tab's Plug-in… button and returns its 'Plug-in' panel.
+ * It is modal and never open together with the sound dialog: it closes that one first. Call closePluginDialog before touching anything behind it. */
+export async function openPluginDialog(page) {
+  const dialog=page.locator('.plugin-dialog');
+  if(!await dialog.isVisible()) {
+    await closeSoundDialog(page);
+    await revealInspectorTab(page,'Track');
+    await page.locator('.sound-plugin-open').click();
+    await dialog.waitFor({state:'visible'});
+  }
+  return dialog.getByRole('region',{name:'Plug-in'});
+}
+/** Escape closes an open disclosure inside the dialog first (the drum map's Keys), so it is pressed until the dialog is gone. */
+export async function closePluginDialog(page) {
+  const dialog=page.locator('.plugin-dialog');
+  for(let i=0;i<3&&await dialog.isVisible();i++){await page.keyboard.press('Escape');await page.waitForTimeout(150);}
+  if(await dialog.isVisible()){await dialog.waitFor({state:'hidden'});}
+  await waitForWorkspaceIdle(page);
 }
 export async function closeSoundDialog(page) {
   const dialog=page.locator('.sound-dialog');

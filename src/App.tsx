@@ -312,7 +312,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const openProperties=(tab:PropertiesTab,focus?:PropertiesRequest['focus'])=>{closeCommands();setProperties(current=>({tab,focus,nonce:(current?.nonce??0)+1}));};
   // The dock's + and Track > Add track… open the Add track dialog.
   const [addTrackOpen,setAddTrackOpen]=useState(false);
-  // Sound > VST3 plug-in… asks the Track tab's sound summary to open the sound dialog at the plug-in slot of the selected track.
+  // Sound > Plug-in… asks the Track tab's sound summary to open the Plug-in dialog of the selected track.
   const [soundRequest,setSoundRequest]=useState<'plugin'|null>(null);
   const startAddTrack=()=>{closeCommands();if(controlsBusy)return;setAddTrackOpen(true);};
   const showInspector=()=>openInspector();

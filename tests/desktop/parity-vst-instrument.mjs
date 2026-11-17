@@ -248,7 +248,7 @@ export async function runVstInstrumentParity({ buildPath } = {}) {
   };
 
   const exportWav = async name => {
-    await ui.closeSoundDialog(page);
+    await ui.closePluginDialog(page);
     await ui.clickWorkspaceCommand(page, 'Export score', { waitForIdle: false });
     const dialog = page.getByRole('dialog', { name: 'Export score' });
     await dialog.getByLabel('Export format').selectOption('wav');
@@ -268,17 +268,26 @@ export async function runVstInstrumentParity({ buildPath } = {}) {
     return readFileSync(targetFile);
   };
 
-  // The track's sound lives in the modal "Sound and pedalboard" dialog, which toolbar clicks through
-  // `clickWorkstationButton` close first; every check of the plug-in slot opens it again.
-  const soundPanel = () => page.locator('.sound-dialog').getByRole('region', { name: 'Track sound' });
+  // The track's plug-in slot (and its drum map) lives in the modal "Plug-in" dialog, which toolbar clicks through
+  // `clickWorkstationButton` close first; every check of the plug-in slot opens it again. The kit note is in the sound dialog.
+  const soundPanel = () => page.locator('.plugin-dialog').getByRole('region', { name: 'Plug-in' });
   const openSound = async () => {
-    await ui.openSoundDialog(page);
-    const slotDetails = soundPanel().locator('details.sound-plugin-slot');
-    if (!await slotDetails.evaluate(node => node.open)) await slotDetails.locator('summary').click();
+    await ui.openPluginDialog(page);
+  };
+  const kitNote = 'The kit and its mix apply to the built-in kit, which plays only when the plug-in is unavailable.';
+  /** The kit note is in the sound dialog (with a Plug-in… route back), not in the Plug-in dialog; this looks there and reopens the Plug-in dialog. */
+  const checkKitNote = async () => {
+    await ui.closePluginDialog(page);
+    const panel = await ui.openSoundDialog(page);
+    await panel.getByText(kitNote).waitFor();
+    assert.equal(await page.locator('.sound-dialog .sound-plugin-slot').count(), 0, 'the sound dialog holds no plug-in slot');
+    assert.equal(await page.locator('.sound-dialog').getByText(kitNote).getByRole('button', { name: 'Plug-in…', exact: true }).count(), 1, 'the kit note offers a Plug-in… route');
+    await ui.closeSoundDialog(page);
+    await openSound();
   };
   const pluginPicker = () => page.locator('.sound-plugin-slot select');
   const selectTrack = async name => {
-    await ui.closeSoundDialog(page);
+    await ui.closePluginDialog(page);
     await page.locator('.view-switch button[role="radio"]').nth(0).click().catch(() => {});
     await ui.selectWorkspaceTrack(page, name);
     await idle();
@@ -286,17 +295,17 @@ export async function runVstInstrumentParity({ buildPath } = {}) {
   };
   /** The same, with nothing in it that is translated: for the Estonian and German pages, whose button names differ. */
   const selectDrumsAnyLanguage = async () => {
-    await ui.closeSoundDialog(page);
+    await ui.closePluginDialog(page);
     // The selected track survives a reload; the mixer strip is only there when the mixer is shown.
     const strip = page.locator('button.track-channel-select[aria-pressed="false"]:has-text("2. Drums")').first();
     if (await strip.isVisible()) { await strip.click(); await idle(); }
-    const open = page.locator('.sound-editor-open');
+    const open = page.locator('.sound-plugin-open');
     if (!await open.isVisible()) {
       const tabs = page.locator('[role="tab"]');
       for (let i = 0; i < await tabs.count() && !await open.isVisible(); i++) await tabs.nth(i).click().catch(() => {});
     }
     await open.click();
-    await page.locator('.sound-dialog').waitFor({ state: 'visible' });
+    await page.locator('.plugin-dialog').waitFor({ state: 'visible' });
     await idle();
   };
   const GUITAR = 'Track 1: Guitar', DRUMS = 'Track 2: Drums';
@@ -315,7 +324,7 @@ export async function runVstInstrumentParity({ buildPath } = {}) {
     await idle();
     await sleep(400);
   };
-  const inRig = async () => { await ui.closeSoundDialog(page); await page.locator('.view-switch button[role="radio"]').nth(1).click(); await idle(); };
+  const inRig = async () => { await ui.closePluginDialog(page); await page.locator('.view-switch button[role="radio"]').nth(1).click(); await idle(); };
   const inEditor = async () => { await page.locator('.view-switch button[role="radio"]').nth(0).click(); await idle(); };
 
   /** Plays until the drum's slot is ready and the app rendered audio; returns the audio status. */
@@ -446,9 +455,56 @@ export async function runVstInstrumentParity({ buildPath } = {}) {
 
     assert.equal(await soundPanel().getByLabel('Input trim', { exact: true }).count(), 0, 'The input trim is hidden for an instrument');
     await soundPanel().getByLabel('Output trim', { exact: true }).waitFor();
-    const kitNote = 'The kit and its mix apply to the built-in kit, which plays only when the plug-in is unavailable.';
-    await soundPanel().getByText(kitNote, { exact: true }).waitFor();
-    await ui.closeSoundDialog(page);
+    await checkKitNote();
+    // Layout pictures only (PLUGIN_DIALOG_SHOTS_ONLY=1): nothing here starts playback, so the test plug-in is never heard.
+    if (process.env.PLUGIN_DIALOG_SHOTS_ONLY) {
+      await ui.closePluginDialog(page);
+      await selectTrack(GUITAR);
+      await pluginPicker().selectOption(EFFECT_CLASS_ID);
+      await idle();
+      await ui.closePluginDialog(page);
+      // The Information row's arrows choose the previous (guitar) or next (drums) track in every language.
+      const openAny = async which => {
+        await ui.closePluginDialog(page);
+        const arrow = page.locator('.track-settings .track-actions button').nth(which === 'guitar' ? 0 : 1);
+        if (await arrow.getAttribute('aria-disabled') !== 'true') { await arrow.click(); await idle(); }
+        await page.locator('.sound-plugin-open').click();
+        await page.locator('.plugin-dialog').waitFor({ state: 'visible' });
+        await idle();
+        await sleep(300);
+        return page.locator('.plugin-dialog');
+      };
+      const cdp = await page.context().newCDPSession(page);
+      for (const language of LANGUAGES) {
+        if (language !== 'en') await setLanguage(language);
+        let dialog = await openAny('guitar');
+        await shoot(`plugin-dialog-guitar-effect-${language}`, dialog);
+        await dialog.locator('details.plugin-library-manage').evaluate(node => { node.open = true; });
+        await shoot(`plugin-dialog-guitar-library-${language}`, dialog);
+        dialog = await openAny('drums');
+        await shoot(`plugin-dialog-drums-instrument-${language}`, dialog);
+        if (language === 'en') result.observations.pluginDialogGeometry = await dialog.locator('.plugin-panel, .plugin-panel > *, .plugin-slot-controls > *').evaluateAll(nodes => nodes.map(node => { const r = node.getBoundingClientRect(); return [node.tagName.toLowerCase() + '.' + node.className, Math.round(r.top), Math.round(r.height)]; }));
+        await dialog.locator('details.plugin-library-manage').evaluate(node => { node.open = true; });
+        await shoot(`plugin-dialog-drums-library-${language}`, dialog);
+        await dialog.locator('details.plugin-library-manage').evaluate(node => { node.open = false; });
+        // The drum map's Keys open at 1366x768: the dialog must stay inside the window and scroll inside itself.
+        await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+        await sleep(300);
+        await dialog.locator('details.drum-map-keys > summary').click();
+        await dialog.locator('details.drum-map-keys [role="radio"]').nth(1).click(); // All sounds: a long list
+        await sleep(300);
+        const box = await dialog.boundingBox(), body = await dialog.locator('.tp-dialog-body').evaluate(node => ({ client: node.clientHeight, scroll: node.scrollHeight }));
+        assert.ok(box.y >= 0 && box.y + box.height <= 768, `${language}: the dialog stays inside the 768px window: ${JSON.stringify(box)}`);
+        assert.ok(body.scroll > body.client, `${language}: with Keys open the dialog body scrolls inside the dialog: ${JSON.stringify(body)}`);
+        await shoot(`plugin-dialog-drums-keys-1366x768-${language}`);
+        await cdp.send('Emulation.clearDeviceMetricsOverride');
+        await ui.closePluginDialog(page);
+      }
+      await setLanguage('en');
+      healthy();
+      return result;
+    }
+    await ui.closePluginDialog(page);
     await inRig();
     const banners = await page.locator('.rig-replaced-banner').allInnerTexts();
     // The Rig keeps the kit note in the drum kit's "?" popover (and in the select's accessible description).
@@ -565,7 +621,7 @@ export async function runVstInstrumentParity({ buildPath } = {}) {
     assert.equal(await pluginPicker().inputValue(), DRUM_CLASS_ID, 'The reopened slot is the instrument');
     const reopenedSlot = (await soundEdits()).at(-1)?.sound?.plugin;
     assert.equal(reopenedSlot?.kind, 'instrument', 'The reopened slot is still an instrument');
-    await soundPanel().getByText(kitNote, { exact: true }).waitFor();
+    await checkKitNote();
     assert.equal(await soundPanel().getByLabel('Input trim', { exact: true }).count(), 0);
     const reopenedPlay = await playUntilSound('reopened instrument');
     assert.equal((await drumStatus(doc2, drumTrackId)).status, 'ready');

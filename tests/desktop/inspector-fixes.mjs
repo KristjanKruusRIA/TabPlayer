@@ -1,5 +1,5 @@
 // The inspector fixes (picking and playing a track keeps its staff in view, the Track tab scrolls with the wheel, Add track is a dialog, the
-// Information arrows choose tracks and Track > Move track reorders, the Plug-in row and Sound > VST3 plug-in…), driven in the real app over CDP
+// Information arrows choose tracks and Track > Move track reorders, the Plug-in row and Sound > Plug-in…), driven in the real app over CDP
 // with real mouse wheel, mouse and key events, on a generated score of five guitar tracks and drums over 52 bars, at 1366x768 and 1920x1080.
 // usage (from the checkout root, after scripts/build-desktop-test.ps1): node tests/desktop/inspector-fixes.mjs [screenshot-directory] [--shots-only]
 import assert from 'node:assert/strict';
@@ -177,22 +177,33 @@ try {
     assert.equal(await page.locator('.track-settings').getByRole('button', { name: 'Previous track', exact: true }).getAttribute('aria-disabled'), 'true', 'inert at the first track');
     note(`${tag}: the arrows and Ctrl+Up/Down choose tracks (no edit); Move track up/down is one undo step each`, { e0 });
 
-    // ---- 5. the Plug-in row and Sound > VST3 plug-in… open the dialog at the plug-in slot, in view, Add plug-in… in two clicks -------------------------
+    // ---- 5. the Plug-in row and Sound > Plug-in… open the Plug-in dialog (slot only, sized to its content); Sound and pedalboard… has no slot, and each links to the other -----
     for (const name of ['Rhythm', 'Drums']) {
       await pick(name); await revealInspectorTab(page, 'Track');
       for (const via of ['row', 'menu']) {
         if (via === 'row') await page.locator('.sound-plugin-open').scrollIntoViewIfNeeded().then(() => page.locator('.sound-plugin-open').click());
-        else await clickTrackMenuItem(page, 'VST3 plug-in…', 'Sound');
-        const sound = page.locator('.sound-dialog'); await sound.waitFor();
+        else await clickTrackMenuItem(page, 'Plug-in…', 'Sound');
+        const sound = page.locator('.plugin-dialog'); await sound.waitFor();
+        assert.equal(await page.locator('.sound-dialog').count(), 0, 'only the Plug-in dialog is open');
+        for (const absent of ['My sounds', 'Signal chain', 'Sound source']) assert.equal(await sound.getByText(absent, { exact: true }).count(), 0, `the Plug-in dialog has no "${absent}"`);
         const slot = sound.locator('.sound-plugin-slot'), add = sound.getByRole('button', { name: 'Add plug-in…', exact: true });
         await add.waitFor(); const body = await sound.locator('.tp-dialog-body').boundingBox(), r = await slot.boundingBox(), a = await add.boundingBox();
         assert.ok(r.y >= body.y - 1 && a.y + a.height <= body.y + body.height + 1, `${tag}: ${name} via ${via}: the plug-in section and Add plug-in… are in view without scrolling`);
         assert.equal(await sound.getByRole('combobox', { name: 'VST3 plug-in' }).evaluate(node => node === document.activeElement), true, 'its choice has focus');
-        if (via === 'row') await shot(`sound-dialog-from-plugin-row-${name === 'Drums' ? 'drums' : 'guitar'}-${tag}.png`);
+        const panel = await sound.boundingBox();
+        if (name === 'Rhythm') assert.ok(panel.height < 0.7 * (await page.evaluate(() => innerHeight)), `${tag}: the guitar Plug-in dialog is sized to its content (${Math.round(panel.height)}px)`);
+        if (via === 'row') await shot(`plugin-dialog-from-plugin-row-${name === 'Drums' ? 'drums' : 'guitar'}-${tag}.png`);
         await page.keyboard.press('Escape'); await sound.waitFor({ state: 'hidden' });
+        assert.equal(await page.locator('.sound-plugin-open').evaluate(node => node === document.activeElement), via === 'row', 'focus returns to the Plug-in… button that opened it');
       }
+      // The sound dialog has no plug-in slot, and the replaced-by-plug-in note / kit note route to the Plug-in dialog.
+      await page.getByRole('button', { name: 'Sound and pedalboard…', exact: true }).click();
+      const editor = page.locator('.sound-dialog'); await editor.waitFor();
+      assert.equal(await editor.locator('.sound-plugin-slot').count(), 0, 'no plug-in slot in the sound dialog');
+      assert.equal(await editor.getByText('My sounds', { exact: true }).count() > 0, true, 'My sounds is in the sound dialog');
+      await page.keyboard.press('Escape'); await editor.waitFor({ state: 'hidden' });
     }
-    note(`${tag}: Plug-in… and Sound > VST3 plug-in… open the sound dialog at the plug-in slot with Add plug-in… in view (guitar and drums)`);
+    note(`${tag}: Plug-in… and Sound > Plug-in… open the Plug-in dialog (slot only, content-sized, focus returns); Sound and pedalboard… has no plug-in slot (guitar and drums)`);
   }
 
   // ---- screenshots in English, Estonian and German ---------------------------------------------------------------------------------------
@@ -210,7 +221,9 @@ try {
     await page.keyboard.press('Escape'); await addDialog.waitFor({ state: 'hidden' });
     for (const [name, label] of [['Rhythm', 'guitar'], ['Drums', 'drums']]) {
       await pick(name); await trackTab(); await page.locator('.sound-plugin-open').click();
-      const sound = page.locator('.sound-dialog'); await sound.waitFor(); await sleep(300); await shot(`sound-dialog-from-plugin-row-${label}-${code}.png`); await page.keyboard.press('Escape'); await sound.waitFor({ state: 'hidden' });
+      const sound = page.locator('.plugin-dialog'); await sound.waitFor(); await sleep(300); await shot(`plugin-dialog-${label}-${code}.png`); await page.keyboard.press('Escape'); await sound.waitFor({ state: 'hidden' });
+      await page.locator('.sound-editor-open').click();
+      const editor = page.locator('.sound-dialog'); await editor.waitFor(); await sleep(300); await shot(`sound-dialog-${label}-${code}.png`); await page.keyboard.press('Escape'); await editor.waitFor({ state: 'hidden' });
     }
   }
   await language('en');

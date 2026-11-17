@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { normalizePluginSlot } from '../document-settings';
 import type { PluginSlot } from '../edit-types';
 import { useI18n } from '../i18n';
+import { TrashGlyph } from '../shell/glyphs';
 import { BusyFieldset, busyGuard, busySelect } from '../ui';
 import {
   localizePluginError,
@@ -29,8 +30,6 @@ export interface PluginSlotPanelProps {
   documentId?: string;
   /** A drum track: the only kind of track that may take an instrument, so only it lists instruments. */
   percussion?: boolean;
-  /** Asked for (the sidebar's Plug-in row, Sound > VST3 plug-in…): the section is open, scrolled into view and its plug-in choice has focus when the dialog opens. */
-  reveal?: boolean;
   onChange: (slot: PluginSlot | undefined, assetToken?: string) => void;
   /** May return a promise; a rejection is shown here. */
   onAllow?: () => void | Promise<unknown>;
@@ -48,7 +47,7 @@ function parseTrim(text: string): number | null {
 }
 
 /**
- * The plug-in slot in the sound panel: chooses a VST3 effect (or, on a drum track, an instrument) from the library,
+ * The plug-in slot, the body of the Plug-in dialog: chooses a VST3 effect (or, on a drum track, an instrument) from the library,
  * tweaks trims and active state, opens the editor, and displays fallback notices.
  */
 export function PluginSlotPanel({
@@ -58,18 +57,16 @@ export function PluginSlotPanel({
   busy = false,
   documentId = '',
   percussion = false,
-  reveal = false,
   onChange,
   onAllow,
   onRetry,
 }: PluginSlotPanelProps) {
   const { t } = useI18n();
+  const selectId = useId();
   const [entries, setEntries] = useState<PluginLibraryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [replacedNotes, setReplacedNotes] = useState<string[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
-  const section = useRef<HTMLDetailsElement>(null);
-  useEffect(() => { if (reveal) section.current?.scrollIntoView?.({ block: 'nearest' }); }, [reveal]);
 
   // Local state for trims while typing before committing on blur or Enter
   const [inputVal, setInputVal] = useState<string>(() => String(slot?.inputDb ?? 0));
@@ -142,10 +139,6 @@ export function PluginSlotPanel({
       .catch(err => {
         setError(localizePluginError(err, t));
       });
-  };
-
-  const handleRemove = () => {
-    if (slot) removeFromLibrary(slot.classId);
   };
 
   const handleSelect = (classId: string) => {
@@ -299,69 +292,52 @@ export function PluginSlotPanel({
   );
 
   return (
-    <details className="sound-plugin-slot" open ref={section}>
-      <summary>
-        <span className="sound-plugin-name">{t('plugin.slot_label')}</span>
-        <span className="sound-block-state">
-          {slot ? (slot.active ? t('plugin.active') : t('plugin.bypassed')) : t('plugin.builtin_tone')}
-        </span>
-      </summary>
-      <BusyFieldset busy={busy}>
+    <section className="sound-plugin-slot">
+      <BusyFieldset busy={busy} className="plugin-slot-fields">
         <div className="plugin-slot-controls">
-          <label>
-            {t('plugin.slot_label')}
-            <select
-              aria-label={t('plugin.slot_label')}
-              data-autofocus={reveal || undefined}
-              value={slot?.classId ?? ''}
-              {...busySelect(busy)}
-              onChange={e => handleSelect(e.target.value)}
-            >
-              <option value="">{t('plugin.builtin_tone')}</option>
-              {slot && !listed.some(e => e.classId === slot.classId) && (
-                <option value={slot.classId}>
-                  {slot.name}
-                  {slot.vendor ? ` (${slot.vendor})` : ''}
-                </option>
-              )}
-              {percussion ? (
-                <>
-                  {instruments.length > 0 && (
-                    <optgroup label={t('plugin.group_instruments')}>{instruments.map(optionFor)}</optgroup>
-                  )}
-                  {effects.length > 0 && <optgroup label={t('plugin.group_effects')}>{effects.map(optionFor)}</optgroup>}
-                </>
-              ) : (
-                effects.map(optionFor)
-              )}
-            </select>
-          </label>
-
-          <div className="plugin-library-actions">
-            <button
-              type="button"
-              {...busyGuard({ busy, onClick: handleAdd })}
-            >
-              {t('plugin.add_plugin')}
-            </button>
-            {slot && (
-              <button
-                type="button"
-                {...busyGuard({ busy, onClick: handleRemove })}
+          <div className="plugin-field">
+            <label className="plugin-field-label" htmlFor={selectId}>
+              {t('plugin.slot_label')}
+            </label>
+            <div className="plugin-choice-row">
+              <select
+                id={selectId}
+                aria-label={t('plugin.slot_label')}
+                data-autofocus
+                value={slot?.classId ?? ''}
+                {...busySelect(busy)}
+                onChange={e => handleSelect(e.target.value)}
               >
-                {t('plugin.remove_plugin')}
+                <option value="">{t('plugin.builtin_tone')}</option>
+                {slot && !listed.some(e => e.classId === slot.classId) && (
+                  <option value={slot.classId}>
+                    {slot.name}
+                    {slot.vendor ? ` (${slot.vendor})` : ''}
+                  </option>
+                )}
+                {percussion ? (
+                  <>
+                    {instruments.length > 0 && (
+                      <optgroup label={t('plugin.group_instruments')}>{instruments.map(optionFor)}</optgroup>
+                    )}
+                    {effects.length > 0 && <optgroup label={t('plugin.group_effects')}>{effects.map(optionFor)}</optgroup>}
+                  </>
+                ) : (
+                  effects.map(optionFor)
+                )}
+              </select>
+              <button type="button" {...busyGuard({ busy, onClick: handleAdd })}>
+                {t('plugin.add_plugin')}
               </button>
-            )}
+            </div>
           </div>
 
           {currentEntry?.previousBundle && (
-            <p className="plugin-moved-note muted">
-              {t('plugin.moved_note', { bundle: currentEntry.bundle })}
-            </p>
+            <p className="plugin-moved-note muted">{t('plugin.moved_note', { bundle: currentEntry.bundle })}</p>
           )}
 
           {slot && (
-            <>
+            <div className="plugin-state-row">
               <label className="check">
                 <input
                   type="checkbox"
@@ -371,122 +347,129 @@ export function PluginSlotPanel({
                 />
                 {t('plugin.active')}
               </label>
-
-              {/* An instrument has no audio input; its stored input trim is kept as it is. */}
-              {!instrumentSlot && (
-                <label>
-                  {t('plugin.input_trim')}
-                  <input
-                    type="number"
-                    aria-label={t('plugin.input_trim')}
-                    min={-12}
-                    max={12}
-                    step={0.1}
-                    value={inputVal}
-                    onChange={e => setInputVal(e.target.value)}
-                    onBlur={commitInputTrim}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        commitInputTrim();
-                      }
-                    }}
-                  />
-                </label>
+              {status && (
+                <div role="status" className="plugin-status-line">
+                  <span className="plugin-status-badge">{t(statusLabelKey(status))}</span>
+                </div>
               )}
+            </div>
+          )}
+          {!slot && status && (
+            <div role="status" className="plugin-status-line">
+              <span className="plugin-status-badge">{t(statusLabelKey(status))}</span>
+            </div>
+          )}
 
-              <label>
-                {t('plugin.output_trim')}
-                <input
-                  type="number"
-                  aria-label={t('plugin.output_trim')}
-                  min={-12}
-                  max={12}
-                  step={0.1}
-                  value={outputVal}
-                  onChange={e => setOutputVal(e.target.value)}
-                  onBlur={commitOutputTrim}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      commitOutputTrim();
-                    }
-                  }}
-                />
-              </label>
-
-              <div className="plugin-editor-row">
-                <button
-                  type="button"
-                  {...busyGuard({ busy, onClick: handleEditorOpen })}
-                >
-                  {t('plugin.edit')}
-                </button>
-                {editorOpen && (
-                  <button
-                    type="button"
-                    {...busyGuard({ busy, onClick: handleEditorSave })}
-                  >
-                    {t('plugin.save')}
+          {status && showNotice && (
+            <div className="plugin-status-notice">
+              <p>{t(noticeMessageKey(status, instrumentSlot), { name: slot?.name ?? '' })}</p>
+              <div className="plugin-notice-actions">
+                {status === 'needsConsent' && (
+                  <button type="button" {...busyGuard({ busy, onClick: handleAllowConsent })}>
+                    {t('plugin.allow')}
                   </button>
                 )}
+                {(status === 'crashed' || status === 'hung' || status === 'underrun' || status === 'nonFinite') && (
+                  <button type="button" {...busyGuard({ busy, onClick: handleRetrySlot })}>
+                    {t('plugin.try_again')}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {slot && (
+            <>
+              <div className="plugin-trims">
+                {/* An instrument has no audio input; its stored input trim is kept as it is. */}
+                {!instrumentSlot && (
+                  <label className="plugin-trim">
+                    <span className="plugin-field-label">{t('plugin.input_trim')}</span>
+                    <span className="plugin-trim-field">
+                      <input
+                        type="number"
+                        aria-label={t('plugin.input_trim')}
+                        min={-12}
+                        max={12}
+                        step={0.1}
+                        value={inputVal}
+                        onChange={e => setInputVal(e.target.value)}
+                        onBlur={commitInputTrim}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            commitInputTrim();
+                          }
+                        }}
+                      />
+                      <span className="plugin-unit">{t('plugin.unit_db')}</span>
+                    </span>
+                  </label>
+                )}
+                <label className="plugin-trim">
+                  <span className="plugin-field-label">{t('plugin.output_trim')}</span>
+                  <span className="plugin-trim-field">
+                    <input
+                      type="number"
+                      aria-label={t('plugin.output_trim')}
+                      min={-12}
+                      max={12}
+                      step={0.1}
+                      value={outputVal}
+                      onChange={e => setOutputVal(e.target.value)}
+                      onBlur={commitOutputTrim}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          commitOutputTrim();
+                        }
+                      }}
+                    />
+                    <span className="plugin-unit">{t('plugin.unit_db')}</span>
+                  </span>
+                </label>
+              </div>
+
+              <div className="plugin-editor-row">
+                <div className="plugin-editor-actions">
+                  <button type="button" {...busyGuard({ busy, onClick: handleEditorOpen })}>
+                    {t('plugin.edit')}
+                  </button>
+                  {editorOpen && (
+                    <button type="button" {...busyGuard({ busy, onClick: handleEditorSave })}>
+                      {t('plugin.save')}
+                    </button>
+                  )}
+                </div>
                 <p className="muted plugin-focus-hint">{t('plugin.editor_focus_hint')}</p>
               </div>
             </>
           )}
 
-          {status && (
-            <div className="plugin-status-line">
-              <div role="status">
-                <span className="plugin-status-badge">{t(statusLabelKey(status))}</span>
-                {showNotice && (
-                  <div className="plugin-status-notice">
-                    <p>{t(noticeMessageKey(status, instrumentSlot), { name: slot?.name ?? '' })}</p>
-                  </div>
-                )}
-              </div>
-              {showNotice && status === 'needsConsent' && (
-                <button
-                  type="button"
-                  {...busyGuard({ busy, onClick: handleAllowConsent })}
-                >
-                  {t('plugin.allow')}
-                </button>
-              )}
-              {showNotice &&
-                (status === 'crashed' ||
-                  status === 'hung' ||
-                  status === 'underrun' ||
-                  status === 'nonFinite') && (
-                  <button
-                    type="button"
-                    {...busyGuard({ busy, onClick: handleRetrySlot })}
-                  >
-                    {t('plugin.try_again')}
-                  </button>
-                )}
-            </div>
-          )}
-
           {entries.length > 0 && (
             <details className="plugin-library-manage">
-              <summary>{t('plugin.manage_library')}</summary>
+              <summary>{t('plugin.manage_library', { count: entries.length })}</summary>
               <ul>
-                {entries.map(entry => (
-                  <li key={entry.classId}>
-                    <span>
-                      {entry.name}
-                      {entry.vendor ? ` (${entry.vendor})` : ''}
-                    </span>
-                    <span className="muted plugin-kind-label">
-                      {t(entry.kind === 'instrument' ? 'plugin.kind_instrument' : 'plugin.kind_effect')}
-                    </span>
-                    <button
-                      type="button"
-                      {...busyGuard({ busy, onClick: () => removeFromLibrary(entry.classId) })}
-                    >
-                      {t('plugin.remove_named', { name: entry.name })}
-                    </button>
-                  </li>
-                ))}
+                {entries.map(entry => {
+                  const full = `${entry.name}${entry.vendor ? ` (${entry.vendor})` : ''}`;
+                  const remove = t('plugin.remove_named', { name: entry.name });
+                  return (
+                    <li key={entry.classId}>
+                      <span className="plugin-library-name" title={full}>
+                        {full}
+                      </span>
+                      <span className="muted plugin-kind-label">
+                        {t(entry.kind === 'instrument' ? 'plugin.kind_instrument' : 'plugin.kind_effect')}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={remove}
+                        title={remove}
+                        {...busyGuard({ busy, className: 'plugin-remove-icon', onClick: () => removeFromLibrary(entry.classId) })}
+                      >
+                        <TrashGlyph />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </details>
           )}
@@ -504,6 +487,6 @@ export function PluginSlotPanel({
           )}
         </div>
       </BusyFieldset>
-    </details>
+    </section>
   );
 }

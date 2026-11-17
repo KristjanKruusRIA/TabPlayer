@@ -872,6 +872,29 @@ describe('review fixes: moved classes and replaced plug-ins', () => {
     await waitFor(() => expect(mockCalls).toContainEqual(['plugin_library_remove', { classId: 'B'.repeat(32) }]));
     await waitFor(() => expect(screen.queryByRole('option', { name: /Other FX/ })).toBeNull());
   });
+
+  it('removal is one icon button per library row (name, kind, bin), with no separate Remove from library button, and the library starts collapsed with its count', async () => {
+    const other = { ...mockEntry, classId: 'B'.repeat(32), name: 'Other FX', kind: 'instrument' as const };
+    invokeHandler = async (command: string) => (command === 'plugin_library_list' ? [mockEntry, other] : null);
+    const { container } = render(<PluginSlotPanel trackId="track-1" slot={mockSlot} onChange={vi.fn()} />);
+    await screen.findByText('Plug-in library (2)');
+    expect(screen.queryByRole('button', { name: 'Remove from library' })).toBeNull();
+    const library = container.querySelector('details.plugin-library-manage') as HTMLDetailsElement;
+    expect(library).not.toHaveAttribute('open');expect(library.querySelector('summary')).toHaveTextContent('Plug-in library (2)');
+    const rows = library.querySelectorAll('li');expect(rows).toHaveLength(2);
+    const bin = screen.getByRole('button', { name: 'Remove Other FX from library' });
+    expect(bin).toHaveAttribute('title', 'Remove Other FX from library');expect(bin.textContent).toBe('');expect(bin.querySelector('svg')).not.toBeNull();
+    expect(bin.closest('li')?.querySelector('.plugin-library-name')).toHaveAttribute('title', 'Other FX (Audio Corp)');
+    expect(bin.closest('li')).toHaveTextContent('instrument');
+  });
+
+  it('shows the dB unit beside each trim and the Active choice before them', async () => {
+    const { container } = render(<PluginSlotPanel trackId="track-1" slot={mockSlot} onChange={vi.fn()} />);
+    await screen.findByRole('option', { name: /Super Amp/ });
+    expect(container.querySelectorAll('.plugin-trim .plugin-unit')).toHaveLength(2);
+    const active = screen.getByRole('checkbox', { name: 'Active' }), trim = screen.getByRole('spinbutton', { name: 'Input trim' });
+    expect(active.compareDocumentPosition(trim) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });
 
 describe('review fixes: consent, retry, notices', () => {

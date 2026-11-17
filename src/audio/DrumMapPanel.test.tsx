@@ -14,7 +14,7 @@ import { setLanguagePreference } from '../i18n';
 import { DrumMapPanel } from './DrumMapPanel';
 import { MidiOutPanel } from './MidiOutPanel';
 import { InterpretationPanel } from './InterpretationPanel';
-import { SoundPanel } from './SoundPanel';
+import { PluginPanel } from './PluginPanel';
 import { soundPreset } from './sound-model';
 import { usedDrumSounds } from './drum-map';
 import { drumMapFiles, type ImportedDrumMap } from './drum-map-file';
@@ -404,13 +404,13 @@ describe('where the panel shows', () => {
 
   it('follows an instrument in a drum track\'s plug-in slot, and edits the mix through the same edit', () => {
     const onEdit = vi.fn();
-    const { rerender } = render(<SoundPanel trackId="base/1" sound={sound(slot)} percussion mix={base} usedDrumSounds={[38, 91]} onEdit={onEdit} />);
+    const { rerender } = render(<PluginPanel trackId="base/1" sound={sound(slot)} percussion mix={base} usedDrumSounds={[38, 91]} onEdit={onEdit} />);
     expect(screen.getByRole('combobox', { name: 'Drum map' })).toBeInTheDocument();
     type(keyField('Snare rim shot'), '40');
     expect(onEdit).toHaveBeenCalledTimes(1);
     expect(onEdit.mock.calls[0][0]).toEqual({ type: 'setTrackMix', trackId: 'base/1', mix: { ...base, drumMap: { preset: 'gm', keys: [[91, 40]] } } });
     for (const [plugin, percussion] of [[undefined, true], [effect, true], [slot, false]] as const) {
-      rerender(<SoundPanel trackId="base/1" sound={sound(plugin)} percussion={percussion} mix={base} usedDrumSounds={[38]} onEdit={onEdit} />);
+      rerender(<PluginPanel trackId="base/1" sound={sound(plugin)} percussion={percussion} mix={base} usedDrumSounds={[38]} onEdit={onEdit} />);
       expect(screen.queryByRole('combobox', { name: 'Drum map' })).toBeNull();
     }
   });

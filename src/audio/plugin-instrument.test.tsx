@@ -6,6 +6,7 @@ import type { PluginSlot, TrackSound } from '../edit-types';
 import { PluginSlotPanel } from './PluginSlotPanel';
 import { PluginNotices } from './PluginNotices';
 import { SoundPanel } from './SoundPanel';
+import { PluginPanel } from './PluginPanel';
 import { SoundRig } from '../rig/SoundRig';
 import { localizePluginError, noticeMessageKey, statusLabelKey, type PluginLibraryEntry, type PluginStatus } from './plugin-host';
 import { soundPreset } from './sound-model';
@@ -248,11 +249,11 @@ describe('the banners and the kit note', () => {
     expect(screen.getByText(note)).toBeInTheDocument();
   });
 
-  it('offers instruments in the sound panel of a drum track only', async () => {
-    render(<SoundPanel trackId="drums" sound={soundPreset('lead')} onEdit={vi.fn()} percussion />);
+  it('offers instruments in the Plug-in dialog of a drum track only', async () => {
+    render(<PluginPanel trackId="drums" sound={soundPreset('lead')} onEdit={vi.fn()} percussion />);
     await waitFor(() => expect(screen.getByRole('option', { name: /Big Drums/ })).toBeInTheDocument());
     cleanup();
-    render(<SoundPanel trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} />);
+    render(<PluginPanel trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} />);
     await waitFor(() => expect(screen.getByRole('option', { name: /Super Amp/ })).toBeInTheDocument());
     expect(screen.queryByRole('option', { name: /Big Drums/ })).toBeNull();
   });

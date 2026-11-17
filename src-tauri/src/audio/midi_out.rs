@@ -499,6 +499,9 @@ struct Lane {
     release_pending: bool,
     /// The state the port holds no longer matches the score's position.
     needs_resync: bool,
+    /// The drum map changed under this lane while it plays: the keys it holds are put right against what the plan holds
+    /// under the new map, by `remap`, with nothing of the channel stated again.
+    remap: bool,
     plan_volume: u8,
     plan_pan: u8,
     range: f64,
@@ -523,6 +526,7 @@ impl Lane {
             dirty: false,
             release_pending: false,
             needs_resync: true,
+            remap: false,
             plan_volume: 127,
             plan_pan: 64,
             range: DEFAULT_RANGE,
@@ -696,6 +700,7 @@ pub struct MidiTap {
     faults: u32,
     idle: bool,
     resync_due: bool,
+    remap_due: bool,
     retry_pending: bool,
     dropped: u64,
 }
@@ -741,6 +746,7 @@ impl MidiTap {
             faults: 0,
             idle: false,
             resync_due: false,
+            remap_due: false,
             retry_pending: false,
             dropped: 0,
         });
@@ -811,6 +817,10 @@ impl MidiTap {
     }
     pub fn resync_due(&self) -> bool {
         self.resync_due
+    }
+    /// Whether a lane's drum map changed and the keys it holds are still to be put right (`remap`).
+    pub fn remap_due(&self) -> bool {
+        self.remap_due
     }
     /// A frame is being rendered.
     pub fn rendering(&mut self) {
@@ -1101,26 +1111,9 @@ impl MidiTap {
         self.delay_frames = old.delay_frames;
         self.faults = old.faults;
         self.idle = old.idle;
-        // A lane that plays where it did but through another drum map holds keys the new map would not end: they are
-        // released under the keys they were sent on, before the old tap's messages are carried on, and the lane is
-        // stated again like after a seek, so what the score holds is struck on the new keys before the next event.
-        for j in 0..old.lanes.len() {
-            let changed = self
-                .lanes
-                .iter()
-                .any(|n| n.same_place(&old.lanes[j]) && n.drum != old.lanes[j].drum);
-            if changed && !old.release_notes(j) {
-                // No room to send them all: what is left is owed as note-offs, which no restate can lose.
-                let lane = &mut old.lanes[j];
-                for key in 0..128usize {
-                    if lane.held[key] > 0 {
-                        lane.retry_off |= 1u128 << key;
-                        lane.held[key] = 0;
-                    }
-                }
-                old.retry_pending = true;
-            }
-        }
+        // A lane that plays where it did but through another drum map keeps what it holds and is only flagged `remap`: its
+        // held keys are put right against what the plan holds under the new map before the next event (`remap`), which sends
+        // note-offs and nothing else, so the notes that stay are not touched.
         for j in 0..old.lanes.len() {
             if !self.lanes.iter().any(|n| n.same_place(&old.lanes[j])) {
                 old.release_lane(j);
@@ -1166,14 +1159,32 @@ impl MidiTap {
             }
         }
         self.retry_pending |= old.retry_pending;
+        let kept_faults = self.faults;
         for lane in &mut self.lanes {
             if let Some(before) = old.lanes.iter().find(|o| o.same_place(lane)) {
-                let remap = lane.drum != before.drum;
                 lane.held = before.held;
                 lane.retry_off = before.retry_off;
                 lane.dirty = before.dirty;
                 lane.release_pending = before.release_pending;
-                lane.needs_resync = before.needs_resync || remap;
+                // A release the old tap could not finish is for a lane that stopped. One that plays on must not have it
+                // finished over the notes it strikes next, nor a panic of its channel in the middle of playing: what was
+                // still sounding is owed as note-offs, which a restate cannot lose and which come before a new strike.
+                let plays = self.tracks[lane.track]
+                    .route
+                    .as_ref()
+                    .is_some_and(|r| kept_faults & slot_bit(r.slot) == 0 && r.audible);
+                if lane.release_pending && plays {
+                    for key in 0..128usize {
+                        if lane.held[key] > 0 {
+                            lane.retry_off |= 1u128 << key;
+                            lane.held[key] = 0;
+                        }
+                    }
+                    lane.release_pending = false;
+                    self.retry_pending |= lane.retry_off != 0;
+                }
+                lane.needs_resync = before.needs_resync;
+                lane.remap = before.remap || lane.drum != before.drum;
                 lane.plan_volume = before.plan_volume;
                 lane.plan_pan = before.plan_pan;
                 lane.range = before.range;
@@ -1186,6 +1197,7 @@ impl MidiTap {
         }
         let faults = self.faults;
         let mut due = false;
+        let mut remap_due = false;
         for index in 0..self.tracks.len() {
             let want = self.tracks[index]
                 .route
@@ -1206,9 +1218,11 @@ impl MidiTap {
                     self.send_levels(lane, false);
                 }
                 due |= want && self.lanes[lane].needs_resync;
+                remap_due |= want && self.lanes[lane].remap;
             }
         }
         self.resync_due = due;
+        self.remap_due = remap_due;
     }
     /// The volume and pan to send for `lane`: the score's own levels as the mix scales and moves them.
     fn levels(&self, lane: usize) -> (u8, u8) {
@@ -1275,7 +1289,7 @@ impl MidiTap {
                     if self.stage(slot, 3, [0x80 | chan, k as u8, 0], true) {
                         self.lanes[lane].retry_off &= !(1u128 << k);
                     } else {
-                        self.dropped += 1;
+                        // `stage` counted the loss of the note-off; the note-on is lost with it, and is not counted again.
                         return;
                     }
                 }
@@ -1394,6 +1408,8 @@ impl MidiTap {
                 continue;
             }
             self.lanes[lane].needs_resync = false;
+            // The lane is stated under its present map, so there is nothing left to put right.
+            self.lanes[lane].remap = false;
             let (slot, chan) = (self.lanes[lane].slot, self.lanes[lane].chan);
             // Reset all controllers first, unless another lane is playing on this channel (percussion shares one).
             if !self.shares_channel(lane) {
@@ -1464,6 +1480,61 @@ impl MidiTap {
             self.restrike(lane);
         }
     }
+    /// Puts right the keys a lane holds after its drum map changed while it played, from the plan's events before `until`.
+    /// What the plan holds there under the new map is counted by the key sent, as a resync counts it. A key the lane holds
+    /// and the new map no longer wants gets its note-off; one it holds more of than the plan does is lowered; a key that is
+    /// still wanted is left sounding as it was. Nothing else goes out: no controller, program, level or wheel, and no
+    /// strike, so a note whose row moved sounds on its new key from its next hit, as it does on a hosted instrument. Does
+    /// not allocate.
+    pub fn remap(&mut self, events: &[PlanMidiEvent], event_tracks: &[u16], until: usize) {
+        self.remap_due = false;
+        let mut any = false;
+        for lane in 0..self.lanes.len() {
+            if !self.lanes[lane].remap {
+                continue;
+            }
+            // A lane that is not playing holds nothing; one that is to be stated again will be stated under its map.
+            if self.tracks[self.lanes[lane].track].live && !self.lanes[lane].needs_resync {
+                self.scan[lane].reset(0);
+                any = true;
+            } else {
+                self.lanes[lane].remap = false;
+            }
+        }
+        if !any {
+            return;
+        }
+        for (event, &track) in events.iter().zip(event_tracks).take(until) {
+            let Some(t) = self.tracks.get(usize::from(track)) else {
+                continue;
+            };
+            let lane = t.lane_of[usize::from(event.channel() & 15)];
+            if lane != NO_LANE && self.lanes[usize::from(lane)].remap {
+                let lane = usize::from(lane);
+                self.scan[lane].apply(event, self.lanes[lane].drum.as_ref());
+            }
+        }
+        for lane in 0..self.lanes.len() {
+            if !self.lanes[lane].remap {
+                continue;
+            }
+            self.lanes[lane].remap = false;
+            let (slot, chan) = (self.lanes[lane].slot, self.lanes[lane].chan);
+            for key in 0..128usize {
+                let wanted = self.scan[lane].held[key];
+                let held = self.lanes[lane].held[key];
+                if held <= wanted {
+                    continue;
+                }
+                self.lanes[lane].held[key] = wanted;
+                if wanted == 0 && !self.stage(slot, 3, [0x80 | chan, key as u8, 0], true) {
+                    // No room: the note-off is owed, and goes out before anything is struck on the key.
+                    self.lanes[lane].retry_off |= 1u128 << key;
+                    self.retry_pending = true;
+                }
+            }
+        }
+    }
     /// Strikes again the keys the score holds at the position `lane` was just stated at, by the keys the port is sent.
     fn restrike(&mut self, lane: usize) {
         let (slot, chan) = (self.lanes[lane].slot, self.lanes[lane].chan);
@@ -1476,7 +1547,7 @@ impl MidiTap {
                 if self.stage(slot, 3, [0x80 | chan, key as u8, 0], true) {
                     self.lanes[lane].retry_off &= !(1u128 << key);
                 } else {
-                    self.dropped += 1;
+                    // Counted by `stage`; the strike waits behind the owed note-off and is not counted twice.
                     continue;
                 }
             }
@@ -2820,5 +2891,165 @@ mod tests {
         assert!(shared.rendering.load(Ordering::Relaxed));
         shared.request_reset();
         assert!(!shared.rendering.load(Ordering::Relaxed));
+    }
+
+    fn drum_on(key: u8) -> PlanMidiEvent {
+        event_on(9, key, 90)
+    }
+    fn drum_off(key: u8) -> PlanMidiEvent {
+        PlanMidiEvent::NoteOff {
+            track_id: "t".into(),
+            tick: 0.0,
+            channel: 9,
+            key,
+            velocity: 0,
+            kit_element: None,
+            articulation_id: None,
+        }
+    }
+    fn drum_tap(rows: &[(u8, Option<u8>)]) -> Box<MidiTap> {
+        let map = crate::audio::drum_map::resolve(
+            Some(&crate::settings::DrumMapRef {
+                preset: "gm".into(),
+                keys: rows.to_vec(),
+            }),
+            true,
+        );
+        MidiTap::new(
+            &[0],
+            &[(0, RouteSpec::lanes(0, 0, &[(9, 9)]).with_drum_map(map))],
+        )
+    }
+    /// A tap with a kick (36) and a snare (38, sent on 51) held, and one that replaces it with the snare on 52.
+    fn held_kick_and_snare() -> (Box<MidiTap>, Box<MidiTap>, Vec<PlanMidiEvent>) {
+        let events = vec![drum_on(36), drum_on(38)];
+        let mut old = drum_tap(&[(38, Some(51))]);
+        old.resync(&events, &[0, 0], 2);
+        sent(&mut old);
+        assert_eq!(old.held_notes(0), 2);
+        (old, drum_tap(&[(38, Some(52))]), events)
+    }
+
+    #[test]
+    fn a_changed_map_only_lets_go_of_the_keys_it_no_longer_wants() {
+        let (mut old, mut new, events) = held_kick_and_snare();
+        new.adopt(Some(&mut old));
+        assert!(new.remap_due() && !new.resync_due());
+        assert!(
+            sent(&mut new).is_empty(),
+            "adopting says nothing: the lane is put right before the next event"
+        );
+        new.remap(&events, &[0, 0], 2);
+        assert_eq!(sent(&mut new), vec![vec![0x89, 51, 0]]);
+        assert_eq!(new.held_notes(0), 1, "the kick is untouched");
+        assert!(!new.remap_due());
+        // The score's end of the snare finds nothing on 52 to end, and the kick's still ends the kick.
+        new.event(0, &drum_off(38));
+        assert!(sent(&mut new).is_empty());
+        new.event(0, &drum_off(36));
+        assert_eq!(sent(&mut new), vec![vec![0x89, 36, 0]]);
+    }
+
+    #[test]
+    fn a_key_the_new_map_still_wants_is_left_sounding_and_a_lower_count_is_taken() {
+        // Two snares held on 51; the map moves one of them away (to a different id), so one strike of the key is still wanted.
+        let events = vec![drum_on(38), drum_on(38)];
+        let mut old = drum_tap(&[(38, Some(51))]);
+        old.resync(&events, &[0, 0], 2);
+        sent(&mut old);
+        assert_eq!(old.held_notes(0), 2);
+        let mut new = drum_tap(&[(38, Some(51)), (40, Some(51))]);
+        new.adopt(Some(&mut old));
+        new.remap(&events[..1], &[0], 1);
+        assert!(sent(&mut new).is_empty(), "the key is still wanted once");
+        assert_eq!(new.held_notes(0), 1);
+    }
+
+    #[test]
+    fn a_map_change_with_the_staging_area_full_owes_the_note_off_and_never_releases_or_panics_the_lane()
+     {
+        let (mut old, mut new, events) = held_kick_and_snare();
+        while old.staging.len() < STAGE_CAPACITY {
+            old.staging.push(message(1));
+        }
+        new.adopt(Some(&mut old));
+        drop(old);
+        assert!(!new.lanes[0].release_pending);
+        new.remap(&events, &[0, 0], 2);
+        assert_eq!(
+            new.lanes[0].retry_off,
+            1u128 << 51,
+            "the snare's note-off is owed"
+        );
+        assert!(!new.lanes[0].release_pending && new.retry_pending);
+        assert_eq!(new.held_notes(0), 1, "the kick is still counted held");
+        new.staging.clear();
+        new.service();
+        // Exactly the owed note-off: no note-off of the kick, no all-notes-off, no controller reset.
+        assert_eq!(sent(&mut new), vec![vec![0x89, 51, 0]]);
+        assert_eq!(new.held_notes(0), 1);
+        assert_eq!(new.lanes[0].retry_off, 0);
+        new.service();
+        assert!(sent(&mut new).is_empty());
+        // The strike that follows on the new key is whole.
+        new.event(0, &drum_on(38));
+        assert_eq!(sent(&mut new), vec![vec![0x99, 52, 90]]);
+    }
+
+    #[test]
+    fn a_release_the_old_tap_could_not_finish_is_not_carried_into_a_lane_that_plays_on() {
+        let events = vec![drum_on(36)];
+        let mut old = drum_tap(&[(38, Some(51))]);
+        old.resync(&events, &[0], 1);
+        sent(&mut old);
+        // A release found no room and is pending, though the lane plays on in the next route.
+        old.lanes[0].release_pending = true;
+        old.retry_pending = true;
+        let mut new = drum_tap(&[(38, Some(51))]);
+        new.adopt(Some(&mut old));
+        assert!(!new.lanes[0].release_pending);
+        new.service();
+        let said = sent(&mut new);
+        assert_eq!(
+            said,
+            vec![vec![0x89, 36, 0]],
+            "the held key is owed, no panic: {said:?}"
+        );
+        // A strike before the owed release came is not cut by it afterwards.
+        new.event(0, &drum_on(36));
+        assert_eq!(sent(&mut new), vec![vec![0x99, 36, 90]]);
+        new.service();
+        assert!(sent(&mut new).is_empty());
+    }
+
+    #[test]
+    fn a_loss_is_counted_once() {
+        let mut tap = MidiTap::new(&[0], &[(0, spec(0, 0))]);
+        tap.resync(&[], &[], 0);
+        tap.event(0, &on(60, 90));
+        sent(&mut tap);
+        while tap.staging.len() < STAGE_CAPACITY {
+            tap.staging.push(message(1));
+        }
+        tap.event(0, &off(60));
+        let before = tap.dropped;
+        // The note-off is owed and the strike behind it cannot go: one message that did not fit, counted once.
+        tap.event(0, &on(60, 90));
+        assert_eq!(tap.dropped - before, 1);
+        // The same for a restate that finds a note-off still owed.
+        tap.lanes[0].needs_resync = true;
+        let before = tap.dropped;
+        tap.resync(&[on(60, 90)], &[0], 1);
+        assert!(tap.dropped - before >= 1);
+        let mut tap = MidiTap::new(&[0], &[(0, spec(0, 0))]);
+        tap.lanes[0].retry_off = 1u128 << 60;
+        tap.lanes[0].needs_resync = false;
+        tap.scan[0].held[60] = 1;
+        while tap.staging.len() < STAGE_CAPACITY {
+            tap.staging.push(message(1));
+        }
+        let before = tap.dropped;
+        tap.restrike(0);
+        assert_eq!(tap.dropped - before, 1, "one loss, one count");
     }
 }

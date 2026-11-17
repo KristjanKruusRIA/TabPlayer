@@ -1278,8 +1278,7 @@ fn a_seek_and_a_loop_wrap_strike_the_held_notes_again_on_their_mapped_keys() {
 }
 
 #[test]
-fn a_map_changed_while_a_key_is_held_releases_the_old_key_and_strikes_the_new_one_and_nothing_sticks()
- {
+fn a_map_changed_while_a_key_is_held_lets_go_of_the_key_it_was_sent_on_and_says_nothing_else() {
     let events = vec![
         drum_event("on", 100, 38, None),
         drum_event("on", 100, 36, None),
@@ -1306,30 +1305,78 @@ fn a_map_changed_while_a_key_is_held_releases_the_old_key_and_strikes_the_new_on
     );
     all.extend(quiet);
 
-    // Another key for the snare: the old key is let go first, then what the score holds is struck on the new one.
+    // Another key for the snare: only the key it was sent on is let go. Nothing else is said, and nothing is struck again.
     let changed = tap(&[(DRUMS, drum_route(&[(38, Some(52))]))]);
     drop(rig.transport.replace_midi(changed, 1));
     rig.run(0.1);
     let after = rig.messages();
-    let notes = notes_of(&after);
-    let released = notes.iter().position(|n| *n == [0x89, 51, 0]).unwrap();
-    let struck = notes
-        .iter()
-        .position(|n| n[0] == 0x99 && n[1] == 52)
-        .unwrap();
-    assert!(released < struck, "{notes:?}");
+    assert_eq!(
+        after.iter().map(|m| m.bytes.clone()).collect::<Vec<_>>(),
+        vec![vec![0x89, 51, 0]],
+        "{after:?}"
+    );
     all.extend(after);
-    assert_eq!(sounding(&all), vec![(0, 9, 36), (0, 9, 52)]);
+    assert_eq!(sounding(&all), vec![(0, 9, 36)]);
 
-    // The map goes away: the key it sent is let go and the plan's own is struck.
+    // The map goes away: the kick, which the plan's key and the map's alike give 36, is left alone; the snare was already
+    // let go, and is not struck on the plan's key.
     drop(rig.transport.replace_midi(tap(&[(DRUMS, spec(0, 9))]), 1));
     rig.run(0.1);
-    all.extend(rig.messages());
-    assert_eq!(sounding(&all), vec![(0, 9, 36), (0, 9, 38)]);
+    let removed = rig.messages();
+    assert!(removed.is_empty(), "{removed:?}");
+    all.extend(removed);
+    assert_eq!(sounding(&all), vec![(0, 9, 36)]);
     rig.command(TransportCommand::Stop { generation: 1 });
     rig.run(0.1);
     all.extend(rig.messages());
     assert_eq!(sounding(&all), vec![], "nothing is stuck after stop");
+}
+
+#[test]
+fn a_map_edit_during_playback_only_remaps_and_the_next_hit_goes_out_on_the_new_key() {
+    // A kick and a snare are held from early on; the snare is hit again later.
+    let events = vec![
+        drum_event("on", 100, 36, None),
+        drum_event("on", 100, 38, None),
+        drum_event("on", 3000, 38, None),
+        drum_event("off", 3100, 38, None),
+        drum_event("off", 7000, 38, None),
+        drum_event("off", 7000, 36, None),
+    ];
+    let mut rig = Rig::with_plan(
+        &[(DRUMS, drum_route(&[(38, Some(51))]))],
+        plan_with(1, events),
+    );
+    rig.play();
+    rig.run(0.5);
+    let mut all = rig.messages();
+    assert_eq!(sounding(&all), vec![(0, 9, 36), (0, 9, 51)]);
+    drop(
+        rig.transport
+            .replace_midi(tap(&[(DRUMS, drum_route(&[(38, Some(52))]))]), 1),
+    );
+    rig.run(0.1);
+    let edit = rig.messages();
+    // Exactly the key the snare was sent on: no restate of the channel, no strike of the kick, and the snare is not
+    // struck on its new key (it sounds there from its next hit, as it does on a hosted instrument).
+    assert_eq!(
+        edit.iter().map(|m| m.bytes.clone()).collect::<Vec<_>>(),
+        vec![vec![0x89, 51, 0]],
+        "{edit:?}"
+    );
+    all.extend(edit);
+    rig.run(3.0);
+    let later = rig.messages();
+    assert_eq!(
+        notes_of(&later),
+        vec![[0x99, 52, 90], [0x89, 52, 0]],
+        "the next snare hit is on the new key, and the score's old note end finds nothing to end"
+    );
+    all.extend(later);
+    rig.command(TransportCommand::Stop { generation: 1 });
+    rig.run(0.1);
+    all.extend(rig.messages());
+    assert_eq!(sounding(&all), vec![], "nothing is held after stop");
 }
 
 /// Two drum tracks that share channel 10 of one port.

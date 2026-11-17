@@ -1404,6 +1404,9 @@ impl Renderer {
             if tap.resync_due() {
                 tap.resync(&self.plan.midi, &self.midi_track, self.next_midi);
             }
+            if tap.remap_due() {
+                tap.remap(&self.plan.midi, &self.midi_track, self.next_midi);
+            }
         }
         if !self.tail {
             self.dispatched_through = Some(tick);

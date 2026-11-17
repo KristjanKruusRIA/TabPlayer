@@ -169,7 +169,7 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
     <p className="muted">{status}</p>
     <p className="muted" role="status">{[summary, cleared === presetId && count === 0 ? t('drum_map.cleared_note') : ''].filter(Boolean).join(' ')}</p>
     <p className="muted">{t('drum_map.used_by')}</p>
-    <details className="drum-map-keys" onKeyDown={stepOut}><summary>{t('drum_map.keys')}</summary>
+    <details className="drum-map-keys" data-escape-closes onKeyDown={stepOut}><summary>{t('drum_map.keys')}</summary>
       <Segmented label={t('drum_map.view')} value={view} disabled={busy} onChange={setView} options={[
         { value: 'track', label: t('drum_map.view_track', { count: used.length }) },
         { value: 'all', label: t('drum_map.view_all', { count: SOUND_COUNT }) },

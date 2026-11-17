@@ -436,6 +436,9 @@ pub struct InsertShared {
     /// Set by the supervisor once the helper is gone (exited, hung or killed), so the insert faults as disconnected at the
     /// next block (preflight ruling P32).
     pub disconnected: AtomicBool,
+    /// Written by the audio thread: note-ons an instrument insert could not stage (a full block, a sealed one after an
+    /// overflow, a key held 255 times, or a note that does not encode). Only ever counts up; a later slice surfaces it.
+    pub dropped_notes: AtomicU64,
 }
 
 #[cfg(test)]

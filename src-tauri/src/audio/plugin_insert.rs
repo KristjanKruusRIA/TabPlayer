@@ -48,12 +48,197 @@ use std::sync::{Arc, atomic::Ordering};
 use std::time::{Duration, Instant};
 
 use tabplayer_plugin_protocol::{
-    limits::{BLOCK_FRAMES, MAX_PIPELINE_FRAMES, max_latency_frames},
+    event::MidiEvent,
+    limits::{BLOCK_FRAMES, EVENTS_PER_BLOCK, MAX_PIPELINE_FRAMES, max_latency_frames},
     ring::{BLOCK_FLAG_PLAYING, Block, BlockMeta, EventWords, OutputRead},
 };
 
 use super::dsp::FrameContext;
 use crate::plugins::bridge::{BridgeLink, InsertShared, fault};
+use crate::settings::SlotKind;
+
+/// Where an insert sits in a track's board: an effect replaces Drive, Amp and Cabinet, an instrument replaces the track's
+/// own source at the board's input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InsertPoint {
+    Input,
+    Amp,
+}
+
+impl InsertPoint {
+    pub fn of(kind: SlotKind) -> InsertPoint {
+        match kind {
+            SlotKind::Effect => InsertPoint::Amp,
+            SlotKind::Instrument => InsertPoint::Input,
+        }
+    }
+}
+
+/// The note events an instrument insert has staged for the block it is gathering (see [`PluginInsert::stage_note`]).
+///
+/// Everything is fixed size and lives inline, so staging and sending never allocate. The rules:
+/// - Ordinary events use the first `EVENTS_PER_BLOCK - 1` slots. The last slot is reserved, so the release an overflow
+///   owes can always be staged.
+/// - `held` counts, per channel and key, the NoteOns staged and not yet matched by a NoteOff, so two overlapping strikes
+///   of one key share one NoteOff, sent when the last of them ends (the rule `audio/midi_out.rs` uses).
+/// - The helper's AllNotesOff is per channel, and "everything off" is a new epoch (the flush). A NoteOff that finds no
+///   room therefore cannot be dropped, and instead releases every channel that holds a key: `owed` is the set of channels
+///   whose AllNotesOff has not been staged yet. [`NoteStage::release_owed`] stages as many as fit now (at this offset)
+///   and the rest at offset 0 of the next block, which is empty, so it takes all of them (at most 16 of 64 slots). The
+///   stage is `sealed` meanwhile: a NoteOn on a channel being released would be released with it.
+struct NoteStage {
+    ev: [u64; EVENTS_PER_BLOCK],
+    n: u8,
+    sealed: bool,
+    owed: u16,
+    held: [[u8; 128]; 16],
+}
+
+/// Slots ordinary events may use.
+const ORDINARY_EVENTS: usize = EVENTS_PER_BLOCK - 1;
+
+impl NoteStage {
+    fn new() -> NoteStage {
+        NoteStage {
+            ev: [0; EVENTS_PER_BLOCK],
+            n: 0,
+            sealed: false,
+            owed: 0,
+            held: [[0; 128]; 16],
+        }
+    }
+
+    /// Forgets everything: the helper releases every key on the new epoch a flush starts.
+    fn clear(&mut self) {
+        self.n = 0;
+        self.sealed = false;
+        self.owed = 0;
+        self.held = [[0; 128]; 16];
+    }
+
+    fn push(&mut self, limit: usize, word: u64) -> bool {
+        let at = usize::from(self.n);
+        if at >= limit {
+            return false;
+        }
+        match self.ev.get_mut(at) {
+            Some(slot) => {
+                *slot = word;
+                self.n = self.n.saturating_add(1);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn held_mut(&mut self, channel: u8, key: u8) -> Option<&mut u8> {
+        self.held
+            .get_mut(usize::from(channel))
+            .and_then(|row| row.get_mut(usize::from(key)))
+    }
+
+    /// Stages a NoteOn at `offset`. False when it was dropped: sealed, no room, held 255 times already, or not encodable.
+    fn note_on(&mut self, offset: u8, channel: u8, key: u8, velocity: u8) -> bool {
+        if self.sealed {
+            return false;
+        }
+        let word = MidiEvent::NoteOn {
+            offset,
+            channel,
+            key,
+            velocity,
+        }
+        .encode();
+        let Some(word) = word else {
+            return false;
+        };
+        if self
+            .held_mut(channel, key)
+            .is_none_or(|held| *held == u8::MAX)
+        {
+            return false;
+        }
+        if !self.push(ORDINARY_EVENTS, word) {
+            return false;
+        }
+        if let Some(held) = self.held_mut(channel, key) {
+            *held = held.saturating_add(1);
+        }
+        true
+    }
+
+    /// Stages the NoteOff of the last strike of a key held at `offset`; one that is not the last, or of a key not held,
+    /// sends nothing. Never loses a release: without room, or if the NoteOff cannot be encoded, the channels that hold
+    /// keys are released instead.
+    fn note_off(&mut self, offset: u8, channel: u8, key: u8) {
+        let Some(held) = self.held_mut(channel, key) else {
+            return;
+        };
+        if *held == 0 {
+            return;
+        }
+        *held -= 1;
+        if *held > 0 {
+            return;
+        }
+        let word = MidiEvent::NoteOff {
+            offset,
+            channel,
+            key,
+        }
+        .encode();
+        if let Some(word) = word {
+            if self.push(ORDINARY_EVENTS, word) {
+                return;
+            }
+        }
+        // The key's count is already 0, but the helper may still hear it: its channel is released too. An overflow seals
+        // the stage for the rest of the block, as the NoteOns after it would find the block full anyway.
+        self.release_all(offset, 1u16.checked_shl(u32::from(channel)).unwrap_or(0));
+        self.sealed = true;
+    }
+
+    /// Releases every channel that holds a key, and `extra`, now where there is room and at offset 0 of the next block
+    /// for the rest. The stage is sealed until then, and `held` forgets what is released.
+    fn release_all(&mut self, offset: u8, extra: u16) {
+        let mut channels = extra;
+        for (channel, row) in self.held.iter_mut().enumerate() {
+            if row.iter().any(|&held| held > 0) {
+                channels |= 1u16 << channel;
+            }
+            *row = [0; 128];
+        }
+        self.owed |= channels;
+        self.release_owed(offset);
+        // A channel still owed its release keeps the stage sealed until the next block carries it.
+        if self.owed != 0 {
+            self.sealed = true;
+        }
+    }
+
+    /// Stages an AllNotesOff at `offset` for each owed channel while a slot is free (the reserved one included). A
+    /// channel without a slot stays owed.
+    fn release_owed(&mut self, offset: u8) {
+        for channel in 0..16u8 {
+            let bit = 1u16 << channel;
+            if self.owed & bit == 0 {
+                continue;
+            }
+            let word = MidiEvent::AllNotesOff { offset, channel }.encode();
+            match word {
+                Some(word) if self.push(EVENTS_PER_BLOCK, word) => self.owed &= !bit,
+                _ => break,
+            }
+        }
+    }
+
+    /// The block went out: starts the next one, which carries the releases still owed first, at offset 0.
+    fn sent(&mut self) {
+        self.n = 0;
+        self.release_owed(0);
+        self.sealed = self.owed != 0;
+    }
+}
 
 /// A result sample beyond this magnitude faults the insert as [`FaultReason::NonFinite`]: the same ceiling as NAM's
 /// output (`audio/nam/stage.rs`), so a runaway but finite plug-in never reaches the mix (preflight ruling P14).
@@ -238,6 +423,10 @@ pub struct PluginInsert {
     g: f32,
     last: [f32; 2],
     fault: Option<FaultReason>,
+
+    /// What the slot holds, and the note events staged for the block being gathered (instruments only).
+    kind: SlotKind,
+    notes: NoteStage,
 }
 
 impl PluginInsert {
@@ -268,6 +457,31 @@ impl PluginInsert {
     /// `latency` is the plug-in's reported latency in frames; `input_db` and `output_db` are the slot's trims (clamped
     /// to ±12 dB). `rate` is the device rate, which is the ring's.
     pub fn new(
+        link: BridgeLink,
+        mode: InsertMode,
+        latency: u32,
+        input_db: f64,
+        output_db: f64,
+        rate: u32,
+        shared: Arc<InsertShared>,
+    ) -> Result<PluginInsert, InsertError> {
+        Self::new_of_kind(
+            SlotKind::Effect,
+            link,
+            mode,
+            latency,
+            input_db,
+            output_db,
+            rate,
+            shared,
+        )
+    }
+
+    /// [`new`](Self::new) for a slot of `kind`: an instrument takes note events ([`stage_note`](Self::stage_note)) and
+    /// sits at the board's input ([`InsertPoint`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_of_kind(
+        kind: SlotKind,
         link: BridgeLink,
         mode: InsertMode,
         latency: u32,
@@ -323,7 +537,19 @@ impl PluginInsert {
             g: if offline.is_some() { 1.0 } else { 0.0 },
             last: [0.0; 2],
             fault: None,
+            kind,
+            notes: NoteStage::new(),
         })
+    }
+
+    /// What the slot holds.
+    pub fn kind(&self) -> SlotKind {
+        self.kind
+    }
+
+    /// Where this insert sits in the board.
+    pub fn point(&self) -> InsertPoint {
+        InsertPoint::of(self.kind)
     }
 
     /// `D`: how far the insert's output trails its input. `P + L` live, `BLOCK_FRAMES + L` offline.
@@ -379,6 +605,48 @@ impl PluginInsert {
             self.g = 0.0;
         }
         self.last = [0.0; 2];
+        // The helper releases every key on the new epoch the next frame starts, so nothing staged or held is owed.
+        self.notes.clear();
+    }
+
+    /// Stages a note event for the block being gathered, to go to an instrument plug-in with it. Call it before
+    /// [`process`](Self::process) of the frame the note belongs to: the event lands on the frame `process` is about to
+    /// take, so it sounds `D` frames later, where the built-in sound of that frame is heard.
+    ///
+    /// Nothing happens for an effect. An instrument that is not live (the host end is busy and the stream could not
+    /// start, or the insert has faulted) drops a NoteOn and ignores a NoteOff: the built-in sound plays instead. A NoteOn
+    /// with velocity 0 is a NoteOff. A NoteOn the block cannot take is dropped and counted in
+    /// [`InsertShared::dropped_notes`]. A NoteOff is never lost: see [`NoteStage`].
+    ///
+    /// Does not allocate, lock or wait.
+    pub fn stage_note(&mut self, on: bool, channel: u8, key: u8, velocity: u8) {
+        if self.kind != SlotKind::Instrument {
+            return;
+        }
+        // Started as `process` would start it for this frame, so the stream and `in_fill` are the ones it will use.
+        self.ensure_started();
+        if !(self.started && self.fault.is_none()) {
+            return;
+        }
+        let offset = self.in_fill.min(BLOCK_FRAMES - 1) as u8;
+        if on && velocity > 0 {
+            if !self.notes.note_on(offset, channel, key, velocity) {
+                self.shared.dropped_notes.fetch_add(1, Ordering::Relaxed);
+            }
+        } else {
+            self.notes.note_off(offset, channel, key);
+        }
+    }
+
+    /// Releases every key an instrument holds, as a loop wrap or a stop in the middle of a note needs: the channels that
+    /// hold keys get an AllNotesOff at this frame, or at the start of the next block if this one has no room. Nothing
+    /// happens for an effect or an insert that is not live.
+    pub fn all_notes_off(&mut self) {
+        if self.kind != SlotKind::Instrument || !(self.started && self.fault.is_none()) {
+            return;
+        }
+        let offset = self.in_fill.min(BLOCK_FRAMES - 1) as u8;
+        self.notes.release_all(offset, 0);
     }
 
     /// Takes over `arriving`'s trims and shared word, as the running insert that `arriving` was built to replace with
@@ -517,12 +785,7 @@ impl PluginInsert {
         let x = x.map(|v| if v.is_finite() { v } else { 0.0 });
         let input_gain = self.input_gain.next();
         let output_gain = self.output_gain.next();
-        if self.fault.is_none() && self.shared.disconnected.load(Ordering::Relaxed) {
-            self.give_up(FaultReason::Disconnected);
-        }
-        if !self.started && self.fault.is_none() {
-            self.start();
-        }
+        self.ensure_started();
         let live = self.started && self.fault.is_none();
 
         // The input side: gather, and publish each full block.
@@ -595,6 +858,17 @@ impl PluginInsert {
         std::array::from_fn(|c| tone[c] * (1.0 - g) + plugin[c] * g)
     }
 
+    /// What `process` does first for a frame: notices a helper that is gone, and starts the stream if it is not running.
+    /// [`stage_note`](Self::stage_note) does the same, so the frame it stages for finds the stream as `process` will.
+    fn ensure_started(&mut self) {
+        if self.fault.is_none() && self.shared.disconnected.load(Ordering::Relaxed) {
+            self.give_up(FaultReason::Disconnected);
+        }
+        if !self.started && self.fault.is_none() {
+            self.start();
+        }
+    }
+
     /// Opens the stream on the ring's current sequence. A ring that carried another insert's blocks (one on the same
     /// helper with another pipeline or latency) starts a new epoch, so the helper discards what it still holds.
     fn start(&mut self) {
@@ -624,16 +898,26 @@ impl PluginInsert {
     /// Publishes the gathered block and wakes the helper. A block that cannot go (the host end is in use, or another
     /// insert moved the sequence on) is never answered, and is an underrun at its time: the stream never slips. The
     /// sequence moves on either way, so the fetch side's count stays the send side's (review M1).
+    ///
+    /// The note events staged for the block go with it, never more than a block holds ([`NoteStage`]); an effect has
+    /// none. A block that cannot go loses its events with it, which ends in the underrun above, a sticky fault.
     fn send(&mut self) {
         let (seq, block, meta) = (self.next_send, &self.in_block, &self.in_meta);
+        let staged = self
+            .notes
+            .ev
+            .get(..usize::from(self.notes.n))
+            .unwrap_or(&[]);
+        let events = EventWords::split(staged).0;
         let sent = self
             .link
-            .with_host(|host| host.send_input(seq, block, meta, EventWords::NONE))
+            .with_host(|host| host.send_input(seq, block, meta, events))
             .unwrap_or(false);
         self.next_send = self.next_send.wrapping_add(1);
         if sent {
             self.link.signal_input();
         }
+        self.notes.sent();
     }
 
     /// Reads the next result block into `out_block`, checking it whole, or faults.

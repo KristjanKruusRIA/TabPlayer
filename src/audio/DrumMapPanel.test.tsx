@@ -171,6 +171,7 @@ describe('the layout', () => {
     render(<Harness initial={{ ...base, drumMap: { preset: 'test-kit' } }} onEdit={onEdit} />);
     const group = screen.getByRole('group', { name: 'Keys to try for Snare rim shot' });
     expect(within(group).getAllByRole('button').map(button => button.textContent)).toEqual(['40', '41']);
+    expect(within(group).getByText('Keys to try:')).toBeInTheDocument();
     expect(within(group).getByRole('button', { name: 'Use key 40 for Snare rim shot' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(within(group).getByRole('button', { name: 'Use key 41 for Snare rim shot' }));
     expect(onEdit).toHaveBeenCalledTimes(1);

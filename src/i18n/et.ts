@@ -2147,6 +2147,7 @@ export const et: MessageCatalog = {
   'drum_map.reset_row': 'Lähtesta',
   'drum_map.reset_row_named': 'Lähtesta paigutuse järgi: {sound}',
   'drum_map.candidates_named': 'Proovitavad klahvid: {sound}',
+  'drum_map.try_keys': 'Proovitavad klahvid:',
   'drum_map.use_key': 'Kasuta klahvi {key}: {sound}',
   'drum_map.reset_all': 'Lähtesta kõik paigutuse järgi',
   'drum_map.change_failed': 'Trummikaarti ei muudetud: {error}',

@@ -2146,6 +2146,7 @@ export const en = {
   'drum_map.reset_row': 'Reset',
   'drum_map.reset_row_named': 'Reset {sound} to the layout',
   'drum_map.candidates_named': 'Keys to try for {sound}',
+  'drum_map.try_keys': 'Keys to try:',
   'drum_map.use_key': 'Use key {key} for {sound}',
   'drum_map.reset_all': 'Reset all to preset',
   'drum_map.change_failed': 'The drum map was not changed: {error}',

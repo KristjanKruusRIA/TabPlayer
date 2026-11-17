@@ -150,7 +150,7 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
           event.currentTarget.closest('li')?.querySelector('input')?.focus();
           void commit(withRow(item.id, 'reset'));
         } })}>{t('drum_map.reset_row')}</button></>}</span>
-      {candidates.get(item.id) && <span className="drum-map-candidates" role="group" aria-label={t('drum_map.candidates_named', { sound: item.sound })}>{candidates.get(item.id)!.map(candidate =>
+      {candidates.get(item.id) && <span className="drum-map-candidates" role="group" aria-label={t('drum_map.candidates_named', { sound: item.sound })}><span className="muted drum-map-try">{t('drum_map.try_keys')}</span>{candidates.get(item.id)!.map(candidate =>
         <button key={candidate} type="button" aria-pressed={key === candidate} aria-label={t('drum_map.use_key', { sound: item.sound, key: candidate })} {...busyGuard({ busy, onClick: () => { void commit(withRow(item.id, candidate)); } })}>{candidate}</button>)}</span>}
     </li>;
   };

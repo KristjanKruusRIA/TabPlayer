@@ -41,6 +41,9 @@
 .plugin-library-manage .plugin-kind-label{flex:none;font-size:11px}
 .sound-panel .drum-map{margin-top:12px;padding-top:8px;border-top:1px solid var(--ws-border)}
 .sound-panel .drum-map p{margin:4px 0}
+.sound-panel .drum-map-preset{display:flex;flex-direction:column;align-items:stretch;gap:4px}
+.sound-panel .drum-map-preset select{width:100%;min-width:0}
+.sound-panel .drum-map-try{align-self:center;font-size:11px}
 .sound-panel .drum-map-keys{margin-top:6px}
 .sound-panel .drum-map-keys>summary{min-height:28px;padding:6px 0;font-size:12px;font-weight:600;color:var(--ws-text)}
 .sound-panel .drum-map-table{margin-top:6px}

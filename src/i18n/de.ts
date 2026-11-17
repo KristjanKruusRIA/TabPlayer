@@ -2147,6 +2147,7 @@ export const de: MessageCatalog = {
   'drum_map.reset_row': 'Zurücksetzen',
   'drum_map.reset_row_named': '{sound} auf die Belegung zurücksetzen',
   'drum_map.candidates_named': 'Tasten zum Ausprobieren für {sound}',
+  'drum_map.try_keys': 'Tasten zum Ausprobieren:',
   'drum_map.use_key': 'Taste {key} für {sound} verwenden',
   'drum_map.reset_all': 'Alle auf Voreinstellung zurücksetzen',
   'drum_map.change_failed': 'Die Zuordnung wurde nicht geändert: {error}',

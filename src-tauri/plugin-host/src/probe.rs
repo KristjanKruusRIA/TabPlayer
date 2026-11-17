@@ -85,15 +85,22 @@ pub fn clean_class(class: &RawClassInfo, kind: PluginKind) -> ClassInfo {
 }
 
 /// The effect and instrument classes of a bundle, cleaned, at most [`MAX_CLASSES`] across both kinds, each class ID once.
+/// Effects come first, then instruments, each in the factory's order, so the cap never costs an effect to an instrument: the
+/// effects listed are exactly those listed before instruments were hosted, and instruments only fill what is left.
 pub fn listed_classes(raw: &[RawClassInfo]) -> Vec<ClassInfo> {
     let mut out: Vec<ClassInfo> = Vec::new();
-    for (class, kind) in raw.iter().filter_map(|c| raw_kind(c).map(|k| (c, k))) {
-        let info = clean_class(class, kind);
-        if out.iter().all(|seen| seen.class_id != info.class_id) {
-            out.push(info);
-        }
-        if out.len() == MAX_CLASSES {
-            break;
+    for wanted in [PluginKind::Effect, PluginKind::Instrument] {
+        for (class, kind) in raw.iter().filter_map(|c| raw_kind(c).map(|k| (c, k))) {
+            if out.len() == MAX_CLASSES {
+                return out;
+            }
+            if kind != wanted {
+                continue;
+            }
+            let info = clean_class(class, kind);
+            if out.iter().all(|seen| seen.class_id != info.class_id) {
+                out.push(info);
+            }
         }
     }
     out
@@ -223,11 +230,11 @@ mod tests {
             seen,
             [
                 ("Amp", PluginKind::Effect),
+                ("Lower", PluginKind::Effect),
                 ("Synth", PluginKind::Instrument),
                 ("Odd", PluginKind::Instrument),
-                ("Lower", PluginKind::Effect),
             ],
-            "duplicates and classes of no kind are dropped, in the factory's order"
+            "duplicates and classes of no kind are dropped; effects first, then instruments, each in the factory's order"
         );
         assert_eq!(listed[0].class_id, "01".repeat(16));
         assert!(listed.iter().all(|c| c.validate().is_ok()));
@@ -243,21 +250,46 @@ mod tests {
             })
             .collect();
         assert_eq!(listed_classes(&many).len(), MAX_CLASSES);
-        // The cap is across both kinds.
-        let mixed: Vec<RawClassInfo> = (0..200u8)
-            .map(|i| {
-                let sub = if i % 2 == 0 { "Fx" } else { "Instrument" };
-                let mut c = raw(&format!("Plug {i}"), AUDIO_CLASS, sub);
-                c.cid = [i; 16];
-                c
-            })
-            .collect();
-        let listed = listed_classes(&mixed);
+        // The cap is across both kinds, but instruments never take a place from an effect.
+        let mixed = |effects: u8, instruments: u8| -> Vec<RawClassInfo> {
+            // Interleaved: one effect, one instrument, ... until one kind runs out, then the rest.
+            let mut out = Vec::new();
+            let (mut e, mut i) = (0u8, 0u8);
+            while e < effects || i < instruments {
+                if e < effects {
+                    let mut c = raw(&format!("Fx {e}"), AUDIO_CLASS, "Fx");
+                    c.cid = [e; 16];
+                    out.push(c);
+                    e += 1;
+                }
+                if i < instruments {
+                    let mut c = raw(&format!("Inst {i}"), AUDIO_CLASS, "Instrument");
+                    c.cid = [100 + i; 16];
+                    out.push(c);
+                    i += 1;
+                }
+            }
+            out
+        };
+        let listed = listed_classes(&mixed(64, 64));
         assert_eq!(listed.len(), MAX_CLASSES);
-        let instruments = listed
+        assert!(
+            listed.iter().all(|c| c.kind == PluginKind::Effect),
+            "64 effects interleaved with instruments list all 64 effects and no instrument"
+        );
+        let names: Vec<_> = listed.iter().map(|c| c.name.clone()).collect();
+        assert_eq!(
+            names,
+            (0..64).map(|n| format!("Fx {n}")).collect::<Vec<_>>()
+        );
+        let listed = listed_classes(&mixed(40, 64));
+        assert_eq!(listed.len(), MAX_CLASSES);
+        let effects = listed
             .iter()
-            .filter(|c| c.kind == PluginKind::Instrument)
+            .filter(|c| c.kind == PluginKind::Effect)
             .count();
-        assert_eq!(instruments, MAX_CLASSES / 2);
+        assert_eq!(effects, 40, "every effect is listed");
+        assert_eq!(listed.len() - effects, 24, "instruments fill what is left");
+        assert!(listed[..40].iter().all(|c| c.kind == PluginKind::Effect));
     }
 }

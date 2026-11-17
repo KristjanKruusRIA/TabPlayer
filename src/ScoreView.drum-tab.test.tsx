@@ -109,3 +109,19 @@ it('tab only: a range of beats is highlighted on the tab staff',()=>{
   expect(api.highlighted?.[0]).toBe(beats[0]);expect(api.highlighted?.[1]).toBe(beats[2]);
   expect(projection.renderedBeats!.get(beats[0])).toBe(score.tracks[1].staves[0].bars[0].voices[0].beats[0]);
 });
+
+it('both staves: the staff the user clicked is forgotten when another document opens, and follows the track, not its place in the list',async()=>{
+  const {score,props,projection,rerender}=setup('standardTab',{editTarget:drumTarget(1),editNoteIndex:0,trackIds:['base/0','base/1'],documentEpoch:1});
+  const snare=score.tracks[1].staves[0].bars[0].voices[0].beats[1].notes[0],pair=projection.notes.get(snare.id)!;
+  const onPercussion=top();
+  await act(async()=>{view.note?.(pair.tab!);});
+  expect(top()).toBeGreaterThan(onPercussion+DROP-1);
+  // The same score again, as another document's track of the same index: nothing was clicked there.
+  await act(async()=>{rerender(<ScoreView {...props as React.ComponentProps<typeof ScoreView>} documentEpoch={2}/>);});
+  expect(top()).toBe(onPercussion);
+  // Within one document the track that was clicked keeps its tab when its place changes; another track at that place does not inherit it.
+  await act(async()=>{view.note?.(pair.tab!);});
+  expect(top()).toBeGreaterThan(onPercussion+DROP-1);
+  await act(async()=>{rerender(<ScoreView {...props as React.ComponentProps<typeof ScoreView>} documentEpoch={2} trackIds={['base/0','removed-and-replaced']}/>);});
+  expect(top()).toBe(onPercussion);
+});

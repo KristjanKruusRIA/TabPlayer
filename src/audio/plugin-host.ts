@@ -34,7 +34,8 @@ export type PluginStatus =
   | 'nonFinite'
   | 'rejectedState'
   | 'stateTooLarge'
-  | 'hostMissing';
+  | 'hostMissing'
+  | 'instrumentNeedsDrums';
 
 /** An audio-effect class in the user's plug-in library, as the native app describes it. `classId` is 32 uppercase hex characters. */
 export interface PluginLibraryEntry {
@@ -280,6 +281,7 @@ export function statusLabelKey(status: PluginStatus): MessageKey {
     case 'rejectedState': return 'plugin.status.rejected_state';
     case 'stateTooLarge': return 'plugin.status.state_too_large';
     case 'hostMissing': return 'plugin.status.host_missing';
+    case 'instrumentNeedsDrums': return 'plugin.status.instrument_needs_drums';
   }
 }
 
@@ -302,6 +304,8 @@ export function noticeMessageKey(status: PluginStatus, instrument = false): Mess
     case 'rejectedState': return 'plugin.notice.rejected_state';
     case 'stateTooLarge': return 'plugin.notice.state_too_large';
     case 'hostMissing': return 'plugin.notice.host_missing';
+    // Only an instrument slot can be in this state, so there is one text.
+    case 'instrumentNeedsDrums': return 'plugin.notice_instrument.instrument_needs_drums';
     default: return 'plugin.notice.unreadable';
   }
 }
@@ -323,6 +327,7 @@ function instrumentNoticeKey(status: PluginStatus): MessageKey {
     case 'rejectedState': return 'plugin.notice_instrument.rejected_state';
     case 'stateTooLarge': return 'plugin.notice_instrument.state_too_large';
     case 'hostMissing': return 'plugin.notice_instrument.host_missing';
+    case 'instrumentNeedsDrums': return 'plugin.notice_instrument.instrument_needs_drums';
     default: return 'plugin.notice_instrument.unreadable';
   }
 }

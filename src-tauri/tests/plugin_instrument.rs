@@ -140,6 +140,7 @@ mod windows_tests {
                 .grant_consent("doc1", &[(DRUM_CLASS_ID.to_string(), state_id.to_string())])
                 .unwrap();
             SlotRequest {
+                percussion: true,
                 track_id: "drums".into(),
                 slot: drum_slot(DRUM_CLASS_ID, state_id),
                 state: encode_state(&state, &[]).unwrap().into(),

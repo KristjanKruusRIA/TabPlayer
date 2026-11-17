@@ -806,6 +806,7 @@ mod tests {
         };
 
         let req = SlotRequest {
+            percussion: true,
             track_id: "t1".into(),
             slot: PluginSlot {
                 kind: crate::settings::SlotKind::Effect,
@@ -940,6 +941,7 @@ mod tests {
         );
 
         let req = SlotRequest {
+            percussion: true,
             track_id: "t1".into(),
             slot: PluginSlot {
                 kind: crate::settings::SlotKind::Effect,

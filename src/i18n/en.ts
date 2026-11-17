@@ -2131,6 +2131,7 @@ export const en = {
   'plugin.status.rejected_state': 'Rejected settings',
   'plugin.status.state_too_large': 'Settings too large',
   'plugin.status.host_missing': 'Plug-in host missing',
+  'plugin.status.instrument_needs_drums': 'Needs a drum track',
 
   // Plug-in notices
   'plugin.notice.needs_consent': 'The plug-in "{name}" needs your permission to run on this score, so the built-in tone plays instead. The document is unchanged.',
@@ -2163,6 +2164,7 @@ export const en = {
   'plugin.notice_instrument.rejected_state': 'The plug-in "{name}" refused its saved settings, so the built-in kit plays instead. The document is unchanged.',
   'plugin.notice_instrument.state_too_large': 'The settings for plug-in "{name}" are too large, so the built-in kit plays instead. The document is unchanged.',
   'plugin.notice_instrument.host_missing': 'The plug-in helper program is missing, so "{name}" cannot run and the built-in kit plays instead. The document is unchanged.',
+  'plugin.notice_instrument.instrument_needs_drums': 'The plug-in "{name}" is an instrument and can only play a drum track, so this track\'s own sound plays instead. The document is unchanged.',
 
   // Plug-in errors
   'plugin.error.not_vst3': 'Choose a .vst3 plug-in.',

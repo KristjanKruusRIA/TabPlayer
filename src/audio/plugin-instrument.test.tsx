@@ -7,7 +7,7 @@ import { PluginSlotPanel } from './PluginSlotPanel';
 import { PluginNotices } from './PluginNotices';
 import { SoundPanel } from './SoundPanel';
 import { SoundRig } from '../rig/SoundRig';
-import { localizePluginError, noticeMessageKey, type PluginLibraryEntry, type PluginStatus } from './plugin-host';
+import { localizePluginError, noticeMessageKey, statusLabelKey, type PluginLibraryEntry, type PluginStatus } from './plugin-host';
 import { soundPreset } from './sound-model';
 import { forgetSessionSoundLibrary, forgetSoundClipboard } from './sound-library';
 import { getMessage, setLanguagePreference } from '../i18n';
@@ -174,6 +174,21 @@ describe('the status notices of an instrument slot', () => {
     expect(getMessage('en', noticeMessageKey('missing', true), { name: 'Big Drums' })).toBe(
       'The plug-in "Big Drums" is not installed on this computer, so the built-in kit plays instead. The document is unchanged.',
     );
+  });
+
+  it('says an instrument on a track that is not a drum track plays only its own sound, in every language', () => {
+    const wanted = {
+      en: `The plug-in "X" is an instrument and can only play a drum track, so this track's own sound plays instead. The document is unchanged.`,
+      et: 'Plugin "X" on instrument ja saab mängida ainult trummirada, seega kõlab selle rea enda heli. Dokumenti ei muudeta.',
+      de: 'Das Plugin „X“ ist ein Instrument und kann nur eine Schlagzeugspur spielen, daher wird stattdessen der eigene Klang dieser Spur wiedergegeben. Das Dokument bleibt unverändert.',
+    } as const;
+    for (const language of ['en', 'et', 'de'] as const) {
+      for (const instrument of [true, false]) {
+        expect(getMessage(language, noticeMessageKey('instrumentNeedsDrums', instrument), { name: 'X' })).toBe(wanted[language]);
+      }
+      expect(getMessage(language, statusLabelKey('instrumentNeedsDrums'))).not.toBe(getMessage(language, statusLabelKey('unreadable')));
+    }
+    expect(getMessage('en', statusLabelKey('instrumentNeedsDrums'))).toBe('Needs a drum track');
   });
 
   it('shows the kit text in the slot panel for an instrument and the tone text for an effect', async () => {

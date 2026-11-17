@@ -2132,6 +2132,7 @@ export const et: MessageCatalog = {
   'plugin.status.rejected_state': 'Lükkas seaded tagasi',
   'plugin.status.state_too_large': 'Seaded on liiga suured',
   'plugin.status.host_missing': 'Plugina host puudub',
+  'plugin.status.instrument_needs_drums': 'Vajab trummirada',
 
   // Plug-in notices
   'plugin.notice.needs_consent': 'Plugin "{name}" vajab luba sellel partituuril töötamiseks, seega kõlab sisseehitatud toon. Dokumenti ei muudeta.',
@@ -2164,6 +2165,7 @@ export const et: MessageCatalog = {
   'plugin.notice_instrument.rejected_state': 'Plugin "{name}" lükkas oma salvestatud seaded tagasi, seega mängib selle asemel sisseehitatud trummikomplekt. Dokumenti ei muudeta.',
   'plugin.notice_instrument.state_too_large': 'Plugina "{name}" seaded on liiga suured, seega mängib selle asemel sisseehitatud trummikomplekt. Dokumenti ei muudeta.',
   'plugin.notice_instrument.host_missing': 'Plugina abiprogramm puudub, seega "{name}" ei saa töötada ja mängib selle asemel sisseehitatud trummikomplekt. Dokumenti ei muudeta.',
+  'plugin.notice_instrument.instrument_needs_drums': 'Plugin "{name}" on instrument ja saab mängida ainult trummirada, seega kõlab selle rea enda heli. Dokumenti ei muudeta.',
 
   // Plug-in errors
   'plugin.error.not_vst3': 'Vali .vst3 plugin.',

@@ -205,6 +205,7 @@ mod windows_tests {
             service.set_workspace(Arc::downgrade(&ws_arc));
 
             let req = SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 slot,
                 state: default_bytes.into(),
@@ -377,6 +378,7 @@ mod windows_tests {
                 ws.asset_bytes(&rig.document_id, &save_res.state).unwrap()
             };
             let req = SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 slot: PluginSlot {
                     kind: tabplayer_lib::settings::SlotKind::Effect,
@@ -495,6 +497,7 @@ mod windows_tests {
 
             // Ensure helper has state_id (edits=5)
             let req = SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 slot: PluginSlot {
                     kind: tabplayer_lib::settings::SlotKind::Effect,
@@ -540,6 +543,7 @@ mod windows_tests {
                 ws.asset_bytes(&rig.document_id, &rig.initial_state_id).unwrap()
             };
             let undo_req = SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 slot: doc_slot,
                 state: initial_bytes.into(),
@@ -665,6 +669,7 @@ mod windows_tests {
                 ws.asset_bytes(&rig.document_id, &rig.initial_state_id).unwrap()
             };
             let req = SlotRequest {
+                percussion: true,
                 track_id: "base/0".into(),
                 slot: PluginSlot {
                     kind: tabplayer_lib::settings::SlotKind::Effect,

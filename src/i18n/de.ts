@@ -2132,6 +2132,7 @@ export const de: MessageCatalog = {
   'plugin.status.rejected_state': 'Einstellungen abgelehnt',
   'plugin.status.state_too_large': 'Einstellungen zu groß',
   'plugin.status.host_missing': 'Plugin-Host fehlt',
+  'plugin.status.instrument_needs_drums': 'Braucht eine Schlagzeugspur',
 
   // Plug-in notices
   'plugin.notice.needs_consent': 'Das Plugin „{name}“ benötigt Ihre Erlaubnis, um für diese Partitur ausgeführt zu werden, daher wird der integrierte Ton wiedergegeben. Das Dokument bleibt unverändert.',
@@ -2164,6 +2165,7 @@ export const de: MessageCatalog = {
   'plugin.notice_instrument.rejected_state': 'Das Plugin „{name}“ hat seine gespeicherten Einstellungen abgelehnt, daher wird stattdessen das integrierte Schlagzeug wiedergegeben. Das Dokument bleibt unverändert.',
   'plugin.notice_instrument.state_too_large': 'Die Einstellungen für das Plugin „{name}“ sind zu groß, daher wird stattdessen das integrierte Schlagzeug wiedergegeben. Das Dokument bleibt unverändert.',
   'plugin.notice_instrument.host_missing': 'Das Plugin-Hilfsprogramm fehlt, daher kann „{name}“ nicht ausgeführt werden und stattdessen wird das integrierte Schlagzeug wiedergegeben. Das Dokument bleibt unverändert.',
+  'plugin.notice_instrument.instrument_needs_drums': 'Das Plugin „{name}“ ist ein Instrument und kann nur eine Schlagzeugspur spielen, daher wird stattdessen der eigene Klang dieser Spur wiedergegeben. Das Dokument bleibt unverändert.',
 
   // Plug-in errors
   'plugin.error.not_vst3': 'Wählen Sie ein .vst3-Plugin.',

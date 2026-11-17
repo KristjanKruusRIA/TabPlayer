@@ -2555,13 +2555,21 @@ impl AudioService {
             .map(|document| document.plan.generation)
     }
     /// Track IDs of the prepared document in track order.
-    pub fn prepared_track_ids(&self) -> Option<Vec<String>> {
+    /// The prepared plan's tracks, each with whether it is a percussion track.
+    pub fn prepared_tracks(&self) -> Option<Vec<(String, bool)>> {
         self.control
             .lock()
             .unwrap()
             .document
             .as_ref()
-            .map(|document| document.plan.tracks.iter().map(|t| t.id.clone()).collect())
+            .map(|document| {
+                document
+                    .plan
+                    .tracks
+                    .iter()
+                    .map(|t| (t.id.clone(), t.percussion))
+                    .collect()
+            })
     }
     pub fn prepare(
         &self,

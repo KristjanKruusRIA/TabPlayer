@@ -21,10 +21,10 @@ try{
   await revealLeftTask(page,'Track');await page.locator('.track-settings').getByRole('button',{name:'Duplicate track',exact:true}).click();await waitForWorkspaceIdle(page);
   assert.deepEqual((await readActiveDocument(page)).project.edits.at(-1),{type:'duplicateTrack',track:1});
   assert.deepEqual((await tracks()).slice(0,5),['Track 1: Guitar9','Track 2: Bass6','Track 3: Bass6','Track 4: Drums','Track 5: Keys']);
-  // The copy is selected: Move track up is enabled for it and the heading names it.
+  // The copy is selected: Track > Move track down is available for it and the Track tab's name field shows it.
   await revealLeftTask(page,'Track');
-  assert.equal(await page.locator('.track-settings h2').innerText(),'Bass6');
-  assert.equal(await page.locator('.track-settings').getByRole('button',{name:'Move track down',exact:true}).isDisabled(),false);
+  assert.equal(await page.locator('.track-settings').getByLabel('Track name',{exact:true}).inputValue(),'Bass6');
+  assert.equal(await page.getByRole('button',{name:'Move track down',exact:true,includeHidden:true}).getAttribute('aria-disabled'),null);
   await button('Export GP');
   const exportedTracks=await page.evaluate(async bytes=>{const {importer,Settings}=await import('/alphatab/alphaTab.mjs');const score=importer.ScoreLoader.loadScoreFromBytes(Uint8Array.from(bytes),new Settings());
     const notes=track=>track.staves[0].bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.flatMap(beat=>beat.notes.map(note=>`${note.string}/${note.fret}`))));

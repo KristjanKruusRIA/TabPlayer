@@ -113,7 +113,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
 
   const candidateDlls = [
     resolve(ownedDirectory, 'tabplayer_test_plugin.dll'),
-    resolve(repository, 'src-tauri/target/release/tabplayer_test_plugin.dll'),
+    resolve(repository, 'src-tauri/target/test-plugin/release/tabplayer_test_plugin.dll'),
     resolve(repository, '.analysis/desktop-smoke/tabplayer_test_plugin.dll'),
   ];
   const sourceDll = candidateDlls.find(p => existsSync(p));

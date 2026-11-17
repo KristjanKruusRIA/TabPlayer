@@ -20,14 +20,22 @@ try{
   await button('Open');
   const before=await tracks();assert.deepEqual(before.map(text=>text.replace(/^Track \d+: /,'')).slice(0,4),['Guitar9','Bass6','Drums','Keys']);
   await button('Track 2: Bass6');
-  await revealLeftTask(page,'Track');await page.locator('.track-settings').getByRole('button',{name:'Move track up',exact:true}).click();await waitForWorkspaceIdle(page);
+  // Reordering is in the Track menu; the arrows in the Track tab only choose the previous and next track.
+  await button('Move track up');
   const document=await readActiveDocument(page);
   assert.deepEqual(document.project.edits.at(-1),{type:'moveTrack',track:1,to:0});
   assert.deepEqual((await tracks()).slice(0,2),['Track 1: Bass6','Track 2: Guitar9']);
   // The selection follows the moved track, so the panel still shows Bass6 and it can't move further up.
   await revealLeftTask(page,'Track');
-  assert.equal(await page.locator('.track-settings h2').innerText(),'Bass6');
-  assert.equal(await page.locator('.track-settings').getByRole('button',{name:'Move track up',exact:true}).isDisabled(),true);
+  const trackName=()=>page.locator('.track-settings').getByLabel('Track name',{exact:true}).inputValue();
+  assert.equal(await trackName(),'Bass6');
+  assert.equal(await page.getByRole('button',{name:'Move track up',exact:true,includeHidden:true}).getAttribute('aria-disabled'),'true','the first track cannot move up');
+  assert.equal(await page.locator('.track-settings').getByRole('button',{name:'Previous track',exact:true}).getAttribute('aria-disabled'),'true','the first track has no previous track');
+  // The arrows choose the neighbouring track and record nothing.
+  const edits=(await readActiveDocument(page)).project.edits.length;
+  await page.locator('.track-settings').getByRole('button',{name:'Next track',exact:true}).click();await waitForWorkspaceIdle(page);
+  assert.equal(await trackName(),'Guitar9');assert.equal((await readActiveDocument(page)).project.edits.length,edits,'choosing a track records no edit');
+  await page.locator('.track-settings').getByRole('button',{name:'Previous track',exact:true}).click();await waitForWorkspaceIdle(page);assert.equal(await trackName(),'Bass6');
   await button('Export GP');
   const order=await page.evaluate(async bytes=>{const {importer,Settings}=await import('/alphatab/alphaTab.mjs');const score=importer.ScoreLoader.loadScoreFromBytes(Uint8Array.from(bytes),new Settings());return score.tracks.map(track=>[track.name,track.staves[0].bars.some(bar=>bar.voices.some(voice=>voice.beats.some(beat=>beat.notes.length)))]);},[...readFileSync(exported)]);
   assert.deepEqual(order.map(([name])=>name),['Bass6','Guitar9','Drums','Keys']);
@@ -36,7 +44,7 @@ try{
   assert.deepEqual((await tracks()).slice(0,2),['Track 1: Guitar9','Track 2: Bass6']);
   // Undo moves Bass6 back to second place and the selection goes with it.
   await revealLeftTask(page,'Track');
-  assert.equal(await page.locator('.track-settings h2').innerText(),'Bass6');
+  assert.equal(await page.locator('.track-settings').getByLabel('Track name',{exact:true}).inputValue(),'Bass6');
   assert.deepEqual(errors,[]);
   console.log(`move track: ${order.map(([name])=>name).join(', ')}; undo restored the order.`);
 }finally{if(browser)await browser.close().catch(()=>{});stop(id);}

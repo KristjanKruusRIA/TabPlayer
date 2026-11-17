@@ -323,3 +323,14 @@ it('words a device the backend cannot name with the translated label', async () 
   render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
   expect(await screen.findByRole('option', { name: 'Unknown device' })).toBeInTheDocument();
 });
+
+it.each([['guitar',false],['drums',true]])('puts the VST3 plug-in slot first, before the sound source and My sounds, and marks it for focus only when asked (%s)',(_name,percussion)=>{
+  const view=render(<SoundPanel trackId="track" percussion={percussion} sound={soundPreset(percussion?'gm':'lead')} onEdit={vi.fn()}/>);
+  const slot=view.container.querySelector('.sound-plugin-slot') as HTMLElement,source=screen.getByLabelText('Sound source'),library=screen.getByText('My sounds').closest('fieldset')!;
+  const before=(a:Node,b:Node)=>!!(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING);
+  expect(before(slot,source)).toBe(true);expect(before(slot,library)).toBe(true);
+  const choice=()=>within(slot).getByRole('combobox',{name:'VST3 plug-in'});
+  expect(choice()).not.toHaveAttribute('data-autofocus');
+  view.rerender(<SoundPanel trackId="track" percussion={percussion} sound={soundPreset(percussion?'gm':'lead')} onEdit={vi.fn()} openPlugin/>);
+  expect(choice()).toHaveAttribute('data-autofocus','true');expect(slot).toHaveAttribute('open');
+});

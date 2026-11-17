@@ -113,7 +113,7 @@ export async function runVstInstrumentParity({ buildPath } = {}) {
   mkdirSync(bundleInner, { recursive: true });
   const candidateDlls = [
     resolve(ownedDirectory, 'tabplayer_test_plugin.dll'),
-    resolve(repository, 'src-tauri/target/release/tabplayer_test_plugin.dll'),
+    resolve(repository, 'src-tauri/target/test-plugin/release/tabplayer_test_plugin.dll'),
   ];
   const sourceDll = candidateDlls.find(p => existsSync(p));
   assert.ok(sourceDll, `tabplayer_test_plugin.dll not found in: ${candidateDlls.join(', ')}`);

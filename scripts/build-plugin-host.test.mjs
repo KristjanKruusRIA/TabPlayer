@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { helperBinaryName, hostTriple, copyPluginHost, cargoBuildArgs, resolveTargetDir, findTool } from './build-plugin-host.mjs';
+import { helperBinaryName, hostTriple, copyPluginHost, cargoBuildArgs, resolveTargetDir, findTool, removeTestPlugin } from './build-plugin-host.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 
@@ -76,4 +76,18 @@ test('build_plugin_host_finds_cargo_on_path_before_the_home_folder', async () =>
 
 test('build_plugin_host_survives_a_missing_toolchain_when_naming_the_triple', () => {
   assert.match(hostTriple({ PATH: '', Path: '', HOME: '', USERPROFILE: '', CARGO_HOME: '' }), /^.+-.+-.+/);
+});
+
+test('build_plugin_host_removes_a_stale_test_plugin_from_the_release_folder_only', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'test-target-'));
+  for (const profile of ['release', 'debug']) await mkdir(join(target, profile), { recursive: true });
+  for (const name of ['tabplayer_test_plugin.dll', 'tabplayer_test_plugin.pdb', 'tabplayer-plugin-host.exe']) await writeFile(join(target, 'release', name), 'x');
+  await writeFile(join(target, 'debug', 'tabplayer_test_plugin.dll'), 'x');
+  const removed = await removeTestPlugin({ targetDir: target, profile: 'release' });
+  assert.deepEqual(removed.map(path => basename(path)).sort(), ['tabplayer_test_plugin.dll', 'tabplayer_test_plugin.pdb']);
+  const { existsSync } = await import('node:fs');
+  assert.equal(existsSync(join(target, 'release', 'tabplayer_test_plugin.dll')), false);
+  assert.equal(existsSync(join(target, 'release', 'tabplayer-plugin-host.exe')), true, 'the helper is kept');
+  assert.equal(existsSync(join(target, 'debug', 'tabplayer_test_plugin.dll')), true, 'the debug test plug-in, which the real-helper tests use, is kept');
+  assert.deepEqual(await removeTestPlugin({ targetDir: target, profile: 'release' }), []);
 });

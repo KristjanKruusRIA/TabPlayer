@@ -83,3 +83,47 @@ it('the sound editor is drawn on the document body, not inside the inspector', (
   fireEvent.click(screen.getByRole('button', { name: 'Edit Delay' }));
   expect(view.container.contains(screen.getByRole('dialog', { name: 'Sound and pedalboard' }))).toBe(false);
 });
+
+const slot = { format: 'vst3' as const, classId: 'A'.repeat(32), name: 'Amp Rig', vendor: 'Vendor', active: true, inputDb: 0, outputDb: 0, state: '' };
+it('has a Plug-in row naming the chosen plug-in, its state when it is not ready, or None', () => {
+  const { rerender } = render(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} />);
+  const row = () => document.querySelector('.sound-plugin-row') as HTMLElement;
+  expect(row()).toHaveTextContent('Plug-in');expect(row()).toHaveTextContent('None');
+  rerender(<SoundSummary trackId="guitar" sound={{ ...soundPreset('lead'), plugin: slot }} onEdit={vi.fn()} status="ready" />);
+  expect(row()).toHaveTextContent('Amp Rig');expect(row()).not.toHaveTextContent('Ready');
+  rerender(<SoundSummary trackId="guitar" sound={{ ...soundPreset('lead'), plugin: slot }} onEdit={vi.fn()} status="missing" />);
+  expect(row()).toHaveTextContent('Amp Rig · Missing');
+  rerender(<SoundSummary trackId="guitar" sound={{ ...soundPreset('lead'), plugin: { ...slot, active: false } }} onEdit={vi.fn()} status="ready" />);
+  expect(row()).toHaveTextContent('Amp Rig · Bypassed');
+});
+it.each([['a guitar track', false], ['a drum track', true]])('the Plug-in… button opens the sound dialog on the plug-in slot, open and focused, above My sounds, for %s', (_name, percussion) => {
+  const onEdit = vi.fn();
+  render(<SoundSummary trackId="track" percussion={percussion} sound={soundPreset(percussion ? 'gm' : 'lead')} onEdit={onEdit} />);
+  const open = screen.getByRole('button', { name: 'Plug-in…' });expect(open).toHaveAttribute('aria-haspopup', 'dialog');
+  open.focus();fireEvent.click(open);
+  const dialog = within(screen.getByRole('dialog', { name: 'Sound and pedalboard' }));
+  const section = dialog.getByText('VST3 plug-in', { selector: '.sound-plugin-name' }).closest('details')!;
+  expect(section).toHaveAttribute('open');
+  expect(within(section).getByRole('combobox', { name: 'VST3 plug-in' })).toHaveFocus();
+  expect(dialog.getByRole('button', { name: 'Add plug-in…' })).toBeInTheDocument();
+  // The slot comes before the saved sounds and the pedal chain, and the sound source and preset follow it.
+  const library = dialog.getByText('My sounds').closest('fieldset')!, chain = dialog.getByText('Signal chain');
+  expect(section.compareDocumentPosition(library) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();expect(section.compareDocumentPosition(chain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.keyDown(document, { key: 'Escape' });expect(open).toHaveFocus();
+});
+it('a request from the Sound menu opens the dialog on the plug-in slot once and says it was taken', () => {
+  const taken = vi.fn();
+  const { rerender } = render(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} request={null} onRequestHandled={taken} />);
+  expect(screen.queryByRole('dialog')).toBeNull();
+  rerender(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={vi.fn()} request="plugin" onRequestHandled={taken} />);
+  expect(taken).toHaveBeenCalledTimes(1);
+  expect(within(screen.getByRole('dialog', { name: 'Sound and pedalboard' })).getByRole('combobox', { name: 'VST3 plug-in' })).toHaveFocus();
+});
+it('a drum track keeps its drum map row directly after the plug-in slot', () => {
+  render(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), plugin: { ...slot, kind: 'instrument' } }} onEdit={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Plug-in…' }));
+  const dialog = screen.getByRole('dialog', { name: 'Sound and pedalboard' });
+  const section = dialog.querySelector('.sound-plugin-slot') as HTMLElement, map = dialog.querySelector('.drum-map-panel, [aria-label="Drum map"], .sound-drum-map') as HTMLElement | null;
+  expect(map).not.toBeNull();expect(section.nextElementSibling).toBe(map);
+});

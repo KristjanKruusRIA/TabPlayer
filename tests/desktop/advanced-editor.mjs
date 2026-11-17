@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import { directory, launch, connect, stop } from './harness.mjs';
-import { closeWelcomeLibrary, clickWorkstationButton, revealDock, revealInspectorControl, revealInspectorTab, openProperties, closeProperties, openSection, setTrackField, runCommand, moveCursor, setFret, scoreWorkspace, paletteButton, waitForWorkspaceIdle } from './workstation-commands.mjs';
+import { closeWelcomeLibrary, clickWorkstationButton, openAddTrackDialog, revealDock, revealInspectorControl, revealInspectorTab, openProperties, closeProperties, openSection, setTrackField, runCommand, moveCursor, setFret, scoreWorkspace, paletteButton, waitForWorkspaceIdle } from './workstation-commands.mjs';
 
 const source=process.env.TABPLAYER_TEST_GP;
 if(!source)throw new Error('Set TABPLAYER_TEST_GP to an authorized private score.');
@@ -16,16 +16,18 @@ const button=async(name,options)=>{await clickWorkstationButton(page,name,option
 const dialog=()=>page.getByRole('dialog');
 const dialogChange=async(label,value)=>dialog().getByLabel(label,{exact:true}).fill(String(value));
 const openDetails=async text=>{const summary=page.locator('summary').filter({hasText:text}).first();await revealInspectorControl(page,summary);await summary.evaluate(node=>node.parentElement.open=true);};
-const change=async(label,value)=>{const field=page.getByLabel(label,{exact:true});await revealInspectorControl(page,field);await field.fill(String(value));};
+// The Add track dialog is modal: its fields are reached directly, not through the inspector tabs behind it.
+const addDialogOpen=()=>page.getByRole('dialog',{name:'Add track',exact:true}).isVisible();
+const change=async(label,value)=>{const field=page.getByLabel(label,{exact:true});if(!await addDialogOpen())await revealInspectorControl(page,field);await field.fill(String(value));};
 const combo=label=>page.getByRole('combobox',{name:new RegExp(`^${label}`)});
 const ctl=async name=>{const control=page.getByRole('button',{name,exact:true});await revealInspectorControl(page,control);return control;};
 const read=async(box,details)=>{await openDetails(details);await revealInspectorControl(page,box);return box.inputValue();};
-const choose=async(box,value)=>{await revealInspectorControl(page,box);await box.selectOption(value);};
+const choose=async(box,value)=>{if(!await addDialogOpen())await revealInspectorControl(page,box);await box.selectOption(value);};
 const tick=async(box)=>{await revealInspectorControl(page,box);await box.click();await page.waitForFunction(node=>node.checked,await box.elementHandle());};
-// The Track tab's tuning is a row whose button opens the Tuning dialog; Add instrument has its own row and the same dialog.
+// The Track tab's tuning is a row whose button opens the Tuning dialog; the Add track dialog has its own row and the same dialog.
 const trackRow=/^Edit tuning/,newRow=/^Edit new track tuning/;
 const tuningDialog=()=>page.getByRole('dialog',{name:'Tuning',exact:true});
-const openTuning=async row=>{const rowButton=page.getByRole('button',{name:row});await revealInspectorControl(page,rowButton);await rowButton.click();await tuningDialog().waitFor();return tuningDialog();};
+const openTuning=async row=>{const rowButton=page.getByRole('button',{name:row});if(!await addDialogOpen())await revealInspectorControl(page,rowButton);await rowButton.click();await tuningDialog().waitFor();return tuningDialog();};
 const notesOf=dialogBox=>dialogBox.getByLabel('Notes, high to low',{exact:true});
 const libraryPreset=async(dialogBox,id)=>{const [instrument,strings]=id.split('-');await dialogBox.getByLabel('Instrument',{exact:true}).selectOption(instrument);await dialogBox.getByLabel('Number of strings',{exact:true}).selectOption(strings);await dialogBox.getByLabel('Preset',{exact:true}).selectOption(id);};
 const finish=async(dialogBox,name)=>{await dialogBox.getByRole('button',{name,exact:true}).click();await dialogBox.waitFor({state:'hidden'});await idle();};
@@ -75,13 +77,13 @@ try {
   {const palette=page.getByRole('complementary',{name:'Edition palette'});await palette.getByRole('button',{name:'Text',exact:true}).click();const field=palette.getByRole('textbox',{name:'Text'});await field.fill('Advanced editor smoke');await field.press('Enter');await idle();}
   await page.getByRole('complementary',{name:'Edition palette'}).getByRole('button',{name:'Chords',exact:true}).click();await page.waitForFunction(()=>document.querySelector('[role="dialog"] fieldset')?.getAttribute('aria-disabled')!=='true');await dialogChange('Chord name','D');await dialog().locator('summary').filter({hasText:'Shape and display'}).evaluate(node=>node.parentElement.open=true);await dialogChange('String 1 fret',2);await dialogChange('String 2 fret',3);await dialogChange('String 3 fret',2);await dialog().getByRole('button',{name:'Apply chord',exact:true}).click();await dialog().waitFor({state:'hidden'});await idle();
   const beforeUndo=await snapshot();await button('Undo');assert.equal((await snapshot()).project.edits.length,beforeUndo.project.edits.length-1);await button('Redo');assert.deepEqual((await snapshot()).project,beforeUndo.project);
-  await openDetails('Add instrument');await change('New track name','Preset bass six');await choose(combo('MIDI instrument'),'33');
+  await openAddTrackDialog(page);await change('New track name','Preset bass six');await choose(combo('MIDI instrument'),'33');
   const beforePreset=await snapshot();{const dialogBox=await openTuning(newRow);await libraryPreset(dialogBox,'bass-6-standard-b');assert.equal(await notesOf(dialogBox).inputValue(),'C3 G2 D2 A1 E1 B0');await dialogBox.getByRole('button',{name:'Use tuning',exact:true}).click();await dialogBox.waitFor({state:'hidden'});assert.equal(await rowText(newRow),'C3 G2 D2 A1 E1 B0');}assert.deepEqual(await snapshot(),beforePreset);
   await button('Add track');const bassIndex=await trackCount();const bassLabel=`Track ${bassIndex}: Preset bass six`;await clickWorkstationButton(page,bassLabel);assert.equal(await presetOfTrack(),'bass-6-standard-b');
   const beforeBassDraft=await snapshot();{const dialogBox=await openTuning(trackRow);await libraryPreset(dialogBox,'bass-6-drop-a');assert.deepEqual(await snapshot(),beforeBassDraft);await finish(dialogBox,'Keep fingering');}assert.deepEqual((await snapshot()).project.edits.at(-1).tuning,[48,43,38,33,28,21]);
   {const dialogBox=await openTuning(trackRow);await notesOf(dialogBox).fill('C3 G2 D2 A1 E1 Bb0');assert.equal(await dialogBox.getByLabel('Preset',{exact:true}).inputValue(),'custom');await finish(dialogBox,'Keep fingering');}assert.equal(await rowText(trackRow),'C3 G2 D2 A1 E1 A#0');
   const bassCustom=await snapshot();await button('Undo');assert.equal(await presetOfTrack(),'bass-6-drop-a');await button('Redo');assert.deepEqual((await snapshot()).project,bassCustom.project);assert.equal(await presetOfTrack(),'custom');
-  await change('New track name','Preset guitar nine');await choose(combo('MIDI instrument'),'25');{const dialogBox=await openTuning(newRow);await libraryPreset(dialogBox,'guitar-9-standard-csharp');assert.equal(await notesOf(dialogBox).inputValue(),'E4 B3 G3 D3 A2 E2 B1 F#1 C#1');await dialogBox.getByRole('button',{name:'Use tuning',exact:true}).click();await dialogBox.waitFor({state:'hidden'});}await button('Add track');assert.deepEqual((await snapshot()).project.edits.at(-1).tuning,[64,59,55,50,45,40,35,30,25]);
+  await openAddTrackDialog(page);await change('New track name','Preset guitar nine');await choose(combo('MIDI instrument'),'25');{const dialogBox=await openTuning(newRow);await libraryPreset(dialogBox,'guitar-9-standard-csharp');assert.equal(await notesOf(dialogBox).inputValue(),'E4 B3 G3 D3 A2 E2 B1 F#1 C#1');await dialogBox.getByRole('button',{name:'Use tuning',exact:true}).click();await dialogBox.waitFor({state:'hidden'});}await button('Add track');assert.deepEqual((await snapshot()).project.edits.at(-1).tuning,[64,59,55,50,45,40,35,30,25]);
   const guitarIndex=await trackCount(),guitarLabel=`Track ${guitarIndex}: Preset guitar nine`;await clickWorkstationButton(page,guitarLabel);assert.equal(await presetOfTrack(),'guitar-9-standard-csharp');
   // A preset chosen in the Tuning dialog is a draft until Keep fingering.
   const beforeStaffDraft=await snapshot();{const dialogBox=await openTuning(trackRow);await libraryPreset(dialogBox,'guitar-9-drop-b');assert.deepEqual(await snapshot(),beforeStaffDraft);await finish(dialogBox,'Keep fingering');}assert.deepEqual((await snapshot()).project.edits.at(-1).tuning,[64,59,55,50,45,40,35,30,23]);await button('Undo');assert.equal(await presetOfTrack(),'guitar-9-standard-csharp');await button('Redo');assert.equal(await presetOfTrack(),'guitar-9-drop-b');

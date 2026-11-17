@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, stat } from 'node:fs/promises';
+import { copyFile, mkdir, rm, stat } from 'node:fs/promises';
 import { delimiter, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -83,6 +83,21 @@ export function cargoBuildArgs({ debug = false, manifestPath = join(root, 'src-t
   return args;
 }
 
+/** The synthetic test plug-in and the files cargo writes beside it. Tauri's Windows bundler packs every DLL it finds next to the app binary, so none of these may be in the release folder when a shipping package is built. */
+export const testPluginArtifacts = ['tabplayer_test_plugin.dll', 'tabplayer_test_plugin.dll.lib', 'tabplayer_test_plugin.dll.exp', 'tabplayer_test_plugin.pdb', 'libtabplayer_test_plugin.so', 'libtabplayer_test_plugin.dylib'];
+
+/** Removes a test plug-in an earlier test build left in `<targetDir>/<profile>` (the desktop test build now writes it to its own folder). Returns the files removed. */
+export async function removeTestPlugin({ targetDir = resolveTargetDir(), profile = 'release' } = {}) {
+  const removed = [];
+  for (const name of testPluginArtifacts) {
+    const path = join(targetDir, profile, name);
+    if (!existsSync(path)) continue;
+    await rm(path, { force: true });
+    removed.push(path);
+  }
+  return removed;
+}
+
 export async function buildPluginHost({
   debug = false,
   manifestPath = join(root, 'src-tauri/Cargo.toml'),
@@ -90,6 +105,8 @@ export async function buildPluginHost({
   outputDir = join(root, 'src-tauri/binaries'),
 } = {}) {
   const profile = debug ? 'debug' : 'release';
+  // A shipping build must not carry a test plug-in left by a test build.
+  if (!debug) for (const path of await removeTestPlugin({ targetDir, profile })) console.log(`Removed a stale test plug-in so it is not packaged: ${path}`);
   execFileSync(findTool('cargo'), cargoBuildArgs({ debug, manifestPath }), { stdio: 'inherit' });
   return copyPluginHost({ targetDir, outputDir, profile });
 }

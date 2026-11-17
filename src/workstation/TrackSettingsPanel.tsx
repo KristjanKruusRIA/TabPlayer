@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { model } from '@coderline/alphatab';
 import type { EditCommand } from '../project';
 import { midiPrograms } from '../midi-programs';
-import { formatTuning, parseTuning } from '../tuning';
+import { formatTuning } from '../tuning';
 import { TuningRow } from '../tuning/TuningRow';
 import { TuningDialog, type TuningChoice } from '../tuning/TuningDialog';
 import { busyGuard, busySelect } from '../ui/useBusyGuard';
@@ -13,7 +13,6 @@ import { CommitSelect } from '../ui/CommitSelect';
 import { ArrowDownGlyph, ArrowUpGlyph, DuplicateGlyph, ScoreGlyph, TrashGlyph } from '../shell/glyphs';
 import { trackIdentity } from '../engine';
 import type { TuningAudition } from '../audio/audition';
-import { NotationTrackControls } from '../editor/NonTabPanel';
 import { readStaffSettings, staffSettingsUnchanged } from '../editor/staff-settings';
 import { getBanjoDrone } from '../editor/banjo-drone';
 import { getPartialCapo, noPartialCapo } from '../editor/partial-capo';
@@ -166,28 +165,11 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
   </div>;
 }
 
-/** The new-track form: name, instrument and tuning, then Add track; and the notation tracks (pitched, percussion). Folded away until asked for. */
-function AddInstrument({ busy, locked, onEdit, onAudition }: { busy: boolean; locked: boolean; onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition }) {
-  const { t } = useI18n();
-  const [name, setName] = useState('Bass'), [instrument, setInstrument] = useState(33), [newTuning, setNewTuning] = useState('G2 D2 A1 E1');
-  const [newTuningName, setNewTuningName] = useState(''), [newTuningOpen, setNewTuningOpen] = useState(false);
-  const applyNewTrack = () => { if (locked) return; onEdit({ type: 'addTrack', name, tuning: parseTuning(newTuning), program: instrument, tuningName: newTuningName }); };
-  return <BusyFieldset busy={busy}>
-    <details className="track-add"><summary>{t('track_settings.add_instrument')}</summary><label>{t('track_settings.new_track_name')}<input value={name} onChange={e => setName(e.target.value)} /></label>
-      <label>{t('track_settings.midi_instrument')}<select value={instrument} onChange={e => setInstrument(Number(e.target.value))}>{midiPrograms.map((label, value) => <option key={value} value={value}>{value + 1}. {label}</option>)}</select></label>
-      <TuningRow label={t('track_settings.tuning_row')} editKey="track_settings.new_track_tuning_edit" notes={newTuning} unavailable={false} busy={busy} onOpen={() => setNewTuningOpen(true)} onPlay={onAudition && (() => onAudition({ program: instrument }, parseTuning(newTuning), true))} />
-      {newTuningOpen && <TuningDialog mode="draft" pitches={parseTuning(newTuning)} name={newTuningName} onApply={choice => { setNewTuning(formatTuning(choice.pitches)); setNewTuningName(choice.name); }} onClose={() => setNewTuningOpen(false)} onAudition={onAudition && ((list, strum) => onAudition({ program: instrument }, list, strum))} />}
-      <button disabled={locked} onClick={applyNewTrack}>{t('track_settings.add_track')}</button>
-      <NotationTrackControls busy={busy || locked} onEdit={onEdit} />
-    </details>
-  </BusyFieldset>;
-}
-
 /**
  * The Track tab in the manner of Guitar Pro's track inspector: the track actions and one Information row, Musical notation
- * (two toggles, the tuning row, More), then whatever the app puts under Sounds, Interpretation and MIDI output, and Add instrument.
+ * (two toggles, the tuning row, More), then whatever the app puts under Sounds and Interpretation and MIDI output. The Information row's arrows select the previous and next track; adding and moving tracks are in the Track menu.
  */
-export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, locked = false, refusal = null, onEdit, onAudition, onSelectStaff, sounds, interpretation, midi }: {
+export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, locked = false, refusal = null, onEdit, onAudition, onSelectStaff, onStepTrack, sounds, interpretation, midi }: {
   score: model.Score; selected: number;
   /** The staff and bar under the cursor: the toggles, clef and transposition act on that staff. */
   staff?: number; bar?: number;
@@ -195,16 +177,24 @@ export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, 
   onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition;
   /** Moves the cursor to another staff of the selected track; the staff selector (shown for a track with several staves) uses it. */
   onSelectStaff?: (staff: number) => void;
+  /** Selects the previous (-1) or next (+1) track, as Ctrl+Up and Ctrl+Down do. Selecting records no edit. */
+  onStepTrack?: (direction: -1 | 1) => void;
   sounds?: ReactNode; interpretation?: ReactNode; midi?: ReactNode;
 }): React.JSX.Element {
   const { t } = useI18n();
   const current = score.tracks[selected];
   const action = (label: string, glyph: React.JSX.Element, disabled: boolean, onClick: () => void, className?: string) => <button type="button" title={label} aria-label={label} {...busyGuard({ busy, disabled, className, onClick })}>{glyph}</button>;
+  // Choosing a track is not an edit, so it stays available while a document is finalized; at either end the button keeps focus and says why it does nothing.
+  const step = (direction: -1 | 1) => {
+    const label = t(direction < 0 ? 'track_settings.previous_track' : 'track_settings.next_track'), atEnd = direction < 0 ? selected === 0 : selected === score.tracks.length - 1;
+    const note = t(direction < 0 ? 'track_settings.first_track_note' : 'track_settings.last_track_note');
+    return <button type="button" title={atEnd ? `${label} (${note})` : label} aria-label={label} {...busyGuard({ busy, unavailable: atEnd || !onStepTrack, onClick: () => onStepTrack?.(direction) })}>{direction < 0 ? <ArrowUpGlyph /> : <ArrowDownGlyph />}</button>;
+  };
   return <aside className="track-settings" aria-label={t('track_settings.aria_label')}>
     <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3>
       <div className="track-actions" role="group" aria-label={t('track_settings.track_actions')}>
-        {action(t('track_settings.move_track_up'), <ArrowUpGlyph />, locked || selected === 0, () => onEdit({ type: 'moveTrack', track: selected, to: selected - 1 }))}
-        {action(t('track_settings.move_track_down'), <ArrowDownGlyph />, locked || selected === score.tracks.length - 1, () => onEdit({ type: 'moveTrack', track: selected, to: selected + 1 }))}
+        {step(-1)}
+        {step(1)}
         {action(t('track_settings.duplicate_track'), <DuplicateGlyph />, locked, () => onEdit({ type: 'duplicateTrack', track: selected }))}
         <span className="track-actions-gap" aria-hidden="true" />
         {action(t('track_settings.remove_track'), <TrashGlyph />, locked || score.tracks.length === 1, () => onEdit({ type: 'removeTrack', track: selected }), 'track-remove')}
@@ -217,6 +207,5 @@ export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, 
     {sounds && <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{sounds}</section>}
     {interpretation}
     {midi}
-    <section className="inspector-section inspector-add-section"><AddInstrument busy={busy} locked={locked} onEdit={onEdit} onAudition={onAudition} /></section>
   </aside>;
 }

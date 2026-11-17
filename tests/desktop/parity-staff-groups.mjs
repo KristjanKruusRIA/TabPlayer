@@ -511,7 +511,8 @@ try{
   await revealDock(page,'Mixer');
   await page.getByRole('button',{name:'Track 3: Drums',exact:true}).click();await idle();
   await revealInspectorTab(page,'Track');const before6=await edits();
-  await page.locator('.track-settings').getByRole('button',{name:'Move track up',exact:true}).click();await idle();
+  // Reordering is a Track menu item now (the Information row's arrows choose the previous and next track).
+  await page.locator('summary').filter({hasText:/^Track$/}).click();await page.getByRole('button',{name:'Move track up',exact:true}).click();await idle();
   const afterMove=await snapshot();
   await button('Presentation');await open();
   await check('move Drums above Grand Piano: the group is no longer drawn and the panel says why',async()=>{

@@ -32,12 +32,15 @@ it('keeps full long track names accessible and selected/remove/notation command 
   render(<TrackSettingsPanel score={added.score} selected={1} busy={false} onEdit={onEdit}/>);
   expect(screen.getByLabelText('Track name')).toHaveValue(name);
   fireEvent.click(screen.getByRole('button',{name:'Remove track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'removeTrack',track:1});
-  // The last of two tracks can move up only.
-  expect(screen.getByRole('button',{name:'Move track down'})).toBeDisabled();
-  fireEvent.click(screen.getByRole('button',{name:'Move track up'}));expect(onEdit).toHaveBeenLastCalledWith({type:'moveTrack',track:1,to:0});
-  cleanup();render(<TrackSettingsPanel score={added.score} selected={0} busy={false} onEdit={onEdit}/>);
-  expect(screen.getByRole('button',{name:'Move track up'})).toBeDisabled();
-  fireEvent.click(screen.getByRole('button',{name:'Move track down'}));expect(onEdit).toHaveBeenLastCalledWith({type:'moveTrack',track:0,to:1});
+  // The arrows choose the neighbouring track (Ctrl+Up and Ctrl+Down); reordering is in the Track menu. The last of two tracks has no next one.
+  const next=screen.getByRole('button',{name:'Next track'}),onStepTrack=vi.fn();
+  expect(next).toHaveAttribute('aria-disabled','true');expect(next).not.toBeDisabled();expect(next).toHaveAttribute('title',expect.stringContaining('last track'));
+  cleanup();render(<TrackSettingsPanel score={added.score} selected={1} busy={false} onEdit={onEdit} onStepTrack={onStepTrack}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Previous track'}));expect(onStepTrack).toHaveBeenLastCalledWith(-1);fireEvent.click(screen.getByRole('button',{name:'Next track'}));expect(onStepTrack).toHaveBeenCalledTimes(1);
+  cleanup();render(<TrackSettingsPanel score={added.score} selected={0} busy={false} onEdit={onEdit} onStepTrack={onStepTrack}/>);
+  expect(screen.getByRole('button',{name:'Previous track'})).toHaveAttribute('aria-disabled','true');
+  fireEvent.click(screen.getByRole('button',{name:'Next track'}));expect(onStepTrack).toHaveBeenLastCalledWith(1);
+  expect(screen.queryByRole('button',{name:/^Move track/})).toBeNull();expect(onEdit).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button',{name:'Duplicate track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'duplicateTrack',track:0});
   const color=screen.getByLabelText('Track color');expect(color).toHaveValue(trackColorHex(added.score.tracks[0].color));
   const before=onEdit.mock.calls.length;fireEvent.change(color,{target:{value:trackColorHex(added.score.tracks[0].color)}});expect(onEdit).toHaveBeenCalledTimes(before);
@@ -45,25 +48,9 @@ it('keeps full long track names accessible and selected/remove/notation command 
   // Another track shows its own color, and an unchanged color can't be applied as an empty Undo step.
   const recolored=previewEdit(added.project,{type:'setTrackColor',track:1,color:'#00ff00'}).score;cleanup();render(<TrackSettingsPanel score={recolored} selected={1} busy={false} onEdit={onEdit}/>);
   expect(screen.getByLabelText('Track color')).toHaveValue('#00ff00');const calls=onEdit.mock.calls.length;fireEvent.change(screen.getByLabelText('Track color'),{target:{value:'#00ff00'}});expect(onEdit).toHaveBeenCalledTimes(calls);
-  fireEvent.click(screen.getByText('Add instrument'));fireEvent.change(screen.getByLabelText('New notation track name'),{target:{value:'Piano'}});fireEvent.change(screen.getByLabelText('New notation track program'),{target:{value:'5'}});
-  fireEvent.click(screen.getByRole('button',{name:'Add pitched track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPitchedTrack',name:'Piano',program:5});
-  fireEvent.click(screen.getByRole('button',{name:'Add percussion track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionTrack',name:'Piano',program:5});
-});
-it('retains new-track and notation drafts while its mounted pane is hidden',()=>{
-  const score=rest(),onEdit=vi.fn();
-  const pane=(hidden:boolean)=><div hidden={hidden}><TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/></div>;
-  const view=render(pane(false));
-  fireEvent.click(screen.getByText('Add instrument'));fireEvent.change(screen.getByLabelText('New track name'),{target:{value:'Fretless'}});
-  fireEvent.click(newEdit());fireEvent.change(notes(),{target:{value:'G2 D2 A1 D1'}});fireEvent.click(inDialog('Use tuning'));
-  fireEvent.change(screen.getByLabelText('New notation track name'),{target:{value:'Keys'}});
-  view.rerender(pane(true));view.rerender(pane(false));
-  expect(screen.getByLabelText('New track name')).toHaveValue('Fretless');expect(newEdit()).toHaveTextContent('G2 D2 A1 D1');
-  expect(screen.getByText('Add instrument').closest('details')).toHaveAttribute('open');
-  expect(screen.getByLabelText('New notation track name')).toHaveValue('Keys');expect(onEdit).not.toHaveBeenCalled();
 });
 const rest=()=>previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score;
 const edit=()=>screen.getByRole('button',{name:/^Edit tuning/});
-const newEdit=()=>screen.getByRole('button',{name:/^Edit new track tuning/});
 const dialog=()=>screen.getByRole('dialog',{name:'Tuning'});
 const notes=()=>within(dialog()).getByLabelText('Notes, high to low') as HTMLInputElement;
 const inDialog=(name:string|RegExp)=>within(dialog()).getByRole('button',{name});
@@ -80,8 +67,10 @@ it('puts the four track actions in one row of named icon buttons with Remove set
   render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={vi.fn()}/>);
   const row=screen.getByRole('group',{name:'Track actions'});
   const names=within(row).getAllByRole('button').map(button=>button.getAttribute('aria-label'));
-  expect(names).toEqual(['Move track up','Move track down','Duplicate track','Remove track']);
-  for(const button of within(row).getAllByRole('button'))expect(button).toHaveAttribute('title',button.getAttribute('aria-label')!);
+  expect(names).toEqual(['Previous track','Next track','Duplicate track','Remove track']);
+  // At the first track the Previous button is still a focusable button; its tooltip says why it does nothing.
+  for(const button of within(row).getAllByRole('button'))expect(button.getAttribute('title')!.startsWith(button.getAttribute('aria-label')!)).toBe(true);
+  expect(within(row).getByRole('button',{name:'Previous track'})).toHaveAttribute('title','Previous track (this is the first track)');
   expect(within(row).getByRole('button',{name:'Remove track'})).toHaveClass('track-remove');expect(row.querySelector('.track-actions-gap')).not.toBeNull();
 });
 it('records nothing until Keep fingering: Cancel and Escape discard, and focus returns to the Edit button',()=>{
@@ -197,23 +186,7 @@ it('disables removal for the sole track, and the actions keep focus and refuse p
   expect(screen.getByRole('button',{name:'Remove track'})).toBeDisabled();
   const dup=screen.getByRole('button',{name:'Duplicate track'});dup.focus();view.rerender(<TrackSettingsPanel score={score} selected={0} busy onEdit={onEdit}/>);
   expect(dup).toHaveFocus();expect(dup).not.toBeDisabled();expect(dup).toHaveAttribute('aria-disabled','true');fireEvent.click(dup);expect(onEdit).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByText('Add instrument'));for(const name of ['Add track','Add pitched track','Add percussion track']){fireEvent.click(screen.getByRole('button',{name}));expect(screen.getByRole('button',{name}).closest('[aria-disabled="true"],fieldset:disabled')).not.toBeNull();}
   expect(onEdit).not.toHaveBeenCalled();
-});
-it('Add instrument uses the same row and dialog: Use tuning fills only the new track draft, and Cancel leaves it',()=>{
-  const onEdit=vi.fn();render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={onEdit}/>);
-  const add=screen.getByText('Add instrument').closest('details')!;expect(add).not.toHaveAttribute('open');
-  fireEvent.click(screen.getByText('Add instrument'));expect(newEdit()).toHaveTextContent('G2 D2 A1 E1');
-  newEdit().focus();fireEvent.click(newEdit());expect(within(dialog()).queryByRole('button',{name:'Keep pitch'})).toBeNull();expect(within(dialog()).queryByRole('button',{name:'Keep fingering'})).toBeNull();
-  fireEvent.change(notes(),{target:{value:'G2 bad'}});fireEvent.click(inDialog('Use tuning'));
-  expect(dialog()).toBeInTheDocument();expect(notes()).toHaveAttribute('aria-invalid','true');expect(within(dialog()).getByRole('alert')).toHaveTextContent('bad');expect(onEdit).not.toHaveBeenCalled();
-  fireEvent.click(inDialog('Cancel'));expect(newEdit()).toHaveFocus();expect(newEdit()).toHaveTextContent('G2 D2 A1 E1');
-  fireEvent.click(newEdit());select('Instrument','bass');select('Number of strings','4');select('Preset','bass-4-drop-d');expect(notes()).toHaveValue('G2 D2 A1 D1');fireEvent.click(inDialog('Use tuning'));
-  expect(newEdit()).toHaveTextContent('G2 D2 A1 D1');expect(edit()).toHaveTextContent('E4 B3 G3 D3 A2 E2');expect(onEdit).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,26],tuningName:'Drop D'});
-  // Any string count is fine for a track that does not exist yet.
-  fireEvent.click(newEdit());fireEvent.change(notes(),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});expect(within(dialog()).queryByLabelText('Strings kept in place')).toBeNull();fireEvent.click(inDialog('Use tuning'));
-  fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[64,59,55,50,45,40,35],tuningName:''});
 });
 
 const named=(name:string)=>{const score=rest();score.tracks[0].staves[0].stringTuning.name=name;return score;};
@@ -260,7 +233,7 @@ it('the dialog belongs to the track it was opened for: it follows a move and clo
 });
 it('the tuning buttons announce a dialog',()=>{
   render(<TrackSettingsPanel score={rest()} selected={0} busy={false} onEdit={vi.fn()}/>);
-  expect(edit()).toHaveAttribute('aria-haspopup','dialog');expect(screen.getByRole('button',{name:/^Edit new track tuning/})).toHaveAttribute('aria-haspopup','dialog');
+  expect(edit()).toHaveAttribute('aria-haspopup','dialog');
 });
 it('a refused edit keeps the dialog and its draft, says why in the dialog itself, and the reason goes when the draft changes',async()=>{
   const built=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3});

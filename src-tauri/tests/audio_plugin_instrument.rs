@@ -1038,6 +1038,86 @@ fn switching_a_slot_from_an_instrument_to_an_effect_is_click_free_and_runs_each_
     assert!(contiguous(&effect_rig) && contiguous(&instrument_rig));
 }
 
+/// One slot's helper for `kind`: an effect halves its input, an instrument plays its notes.
+fn rig_of(kind: SlotKind) -> Rig {
+    match kind {
+        SlotKind::Effect => rig_with(Some(0.5)),
+        SlotKind::Instrument => rig(),
+    }
+}
+
+fn board_with(kind: Option<SlotKind>, rig: &Rig) -> TrackDsp {
+    let mut track = board(FxSettings::default());
+    if let Some(kind) = kind {
+        track.attach_plugin(Box::new(rig.make(kind, 0)));
+    }
+    track
+}
+
+/// Plays a board holding `leaving`, then switches it to one holding `arriving` on another helper, and returns what the
+/// crossfade state read on every frame from the switch on.
+fn crossfade_after_switch(leaving: Option<SlotKind>, arriving: Option<SlotKind>) -> Vec<f32> {
+    let (first_rig, second_rig) = (
+        rig_of(leaving.unwrap_or(SlotKind::Effect)),
+        rig_of(arriving.unwrap_or(SlotKind::Effect)),
+    );
+    let rigs = [&first_rig, &second_rig];
+    let mut first = board_with(leaving, &first_rig);
+    let mut second = board_with(arriving, &second_rig);
+    let mut out = Vec::new();
+    let swap_at = 24_037;
+    play(
+        &mut first,
+        &rigs,
+        0,
+        swap_at,
+        &signal,
+        &mut |_, _| {},
+        &mut out,
+    );
+    second.transition_from(&mut first);
+    let ctx = FrameContext::at_bpm(120.0);
+    let mut states = Vec::new();
+    for m in swap_at..swap_at + 4_000 {
+        // A board with no insert running leaves the state as it was (nothing runs to write it).
+        let running = second.has_plugin();
+        out.push(second.process_at(signal(m), &ctx));
+        if running {
+            states.push(second.crossfade_state().0);
+        }
+        if (m + 1) % BLOCK_FRAMES == 0 {
+            rigs.iter().for_each(|rig| rig.settle());
+        }
+    }
+    states
+}
+
+#[test]
+fn the_crossfade_state_has_one_writer_a_frame_in_every_combination_of_leaving_and_arriving() {
+    let kinds = [None, Some(SlotKind::Effect), Some(SlotKind::Instrument)];
+    let ramp = (RATE as f64 * 0.01) as usize;
+    for leaving in kinds {
+        for arriving in kinds {
+            let states = crossfade_after_switch(leaving, arriving);
+            let fading: Vec<f32> = states.iter().copied().filter(|s| *s < 1.0).collect();
+            let want = if leaving.is_some() { ramp } else { 0 };
+            assert_eq!(
+                fading.len(),
+                want,
+                "{leaving:?} to {arriving:?}: frames of the fade, last values {:?}",
+                &fading[fading.len().saturating_sub(3)..]
+            );
+            // One writer a frame: the fade climbs by one step each frame and never jumps, the last frame included.
+            for pair in fading.windows(2) {
+                assert!(
+                    (pair[1] - pair[0] - 1.0 / ramp as f32).abs() < 1e-4,
+                    "{leaving:?} to {arriving:?}: {pair:?}"
+                );
+            }
+        }
+    }
+}
+
 // ---- real-time safety ---------------------------------------------------------------------------------------------
 
 #[test]

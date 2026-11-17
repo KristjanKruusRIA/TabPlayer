@@ -1866,6 +1866,10 @@ struct InsertSlots<'a> {
     leaving: &'a mut Option<Box<PluginInsert>>,
     /// Whether the leaving insert still runs.
     live: &'a mut bool,
+    /// Whether an insert was leaving, at either point, when the frame began. Decided once, before either call: the call at
+    /// the leaving insert's point can end the fade and clear `live`, and the call at the other point must still find the
+    /// crossfade state to be the leaving call's.
+    leaving_anywhere: bool,
     /// Frames of the crossfade left.
     fade: &'a mut u32,
     /// How far the crossfade was on the last frame, and what all but the arriving sound added up to.
@@ -1896,7 +1900,7 @@ fn run_inserts(
     // The arriving insert runs first, so the stand-in plays on its input; with none arriving here, the leaving one runs
     // first and the stand-in plays on the input it glides back.
     let live = *slots.live;
-    let leaving_anywhere = live && slots.leaving.is_some();
+    let leaving_anywhere = slots.leaving_anywhere;
     let leaving = slots
         .leaving
         .as_mut()
@@ -2477,6 +2481,11 @@ impl TrackDsp {
     pub fn plugin_faulted(&self) -> bool {
         self.plugin.as_ref().is_some_and(|p| p.faulted().is_some())
     }
+    /// How far the plug-in crossfade was on the last frame (1 when none runs) and what all but the arriving sound added
+    /// up to: the state a configuration taking over carries on from. For tests.
+    pub fn crossfade_state(&self) -> (f32, [f32; 2]) {
+        (self.fade_s, self.leaving_part)
+    }
     /// Whether the board has rendered since it was built, reset or paused (see the field).
     pub fn sounding(&self) -> bool {
         self.sounding
@@ -2673,6 +2682,7 @@ impl TrackDsp {
         // other two are skipped in place.
         let inserted = self.inserted_at(InsertPoint::Amp);
         let input_inserted = self.inserted_at(InsertPoint::Input);
+        let leaving_anywhere = self.leaving_live && self.plugin_leaving.is_some();
         let mut three = [Stage::Drive, Stage::Amp, Stage::Cabinet];
         let mut found = 0;
         for stage in self.chain {
@@ -3061,6 +3071,7 @@ impl TrackDsp {
                     plugin: &mut self.plugin,
                     leaving: &mut self.plugin_leaving,
                     live: &mut self.leaving_live,
+                    leaving_anywhere,
                     fade: &mut self.plugin_fade,
                     fade_s: &mut self.fade_s,
                     part: &mut self.leaving_part,
@@ -3368,6 +3379,7 @@ impl TrackDsp {
                                 plugin: &mut self.plugin,
                                 leaving: &mut self.plugin_leaving,
                                 live: &mut self.leaving_live,
+                                leaving_anywhere,
                                 fade: &mut self.plugin_fade,
                                 fade_s: &mut self.fade_s,
                                 part: &mut self.leaving_part,

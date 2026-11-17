@@ -28,3 +28,11 @@ Remaining slices open for future development:
 - **Slice 4: macOS and Linux helpers.** macOS out-of-process helper (NSWindow, library-validation entitlement, notarisation) and Linux helper (X11 and `IRunLoop`).
 - **Slice 5: CLAP hosting.** CLAP support through `clack-host`, using the same helper IPC protocol.
 - **Slice 6: Extended features.** Macro knobs and parameter automation, `.vstpreset` exchange, A/B auditioning against the built-in tone, Line-In live monitoring through a plug-in, shared helpers, multiple plug-in slots per track, and track freeze to audio.
+
+## Drum tablature (THE-220, done 2026-11-17)
+
+A drum track can show its hits as a six-line tab of the written sound numbers, instead of or beside the percussion staff; see `docs/validation/2026-11-17-drum-tablature.md`. It is stored as the track's engraving profile, so no project-schema field was added. Still open from it:
+- **Digit entry on the tab.** Hits are entered from the drum kit; a number cannot be typed on the tab staff.
+- **Guitar Pro's per-note drum-tab lines.** The importers of alphaTab 1.8.4 drop them, so a fixed rule (cymbals, ride and metal, hi-hat, toms, snare, kick) decides the line. alphaTab 1.9 draws drum tab natively; the upgrade is a separate project and would replace this work.
+- **Guitar Pro export of the preference.** The tab/standard choice lives in the engraving profile and is not written to a `.gp` file.
+- **Smaller review findings** (error shading on both staves, arrow keys by drawn line, a print test that checks lines, a measurement of re-projection on a long score); listed in `docs/validation/2026-11-17-the-220-drum-tab.md`.

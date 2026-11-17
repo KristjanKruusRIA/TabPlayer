@@ -172,7 +172,7 @@
 .inspector-section+.inspector-section { border-top:1px solid color-mix(in srgb,var(--ws-border) 60%,transparent); }
 .inspector-section>h3 { margin:6px 0 8px; font:700 13px/1.2 var(--tp-font-ui); letter-spacing:.05em; text-transform:uppercase; color:var(--ws-text); }
 .inspector-section>fieldset { margin:0; padding:0; border:0; min-width:0; display:grid; gap:6px; }
-.inspector-section :is(.sound-panel,.backing-panel,.track-settings) { border-top:0; margin:0; padding:0; }
+.inspector-section :is(.sound-panel,.backing-panel) { border-top:0; margin:0; padding:0; }
 
 /* Status bar: the cursor's place at the right, as Guitar Pro shows it. */
 .app-shell .statusbar .statusbar-position { margin-left:auto; font-variant-numeric:tabular-nums; white-space:nowrap; }

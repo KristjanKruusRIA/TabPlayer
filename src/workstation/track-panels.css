@@ -18,7 +18,8 @@
 .track-panel button:disabled,.track-panel input:disabled { cursor:not-allowed; }
 .track-panel button:disabled { opacity:1; color:var(--ws-muted); border-style:dashed; }
 .track-panel :is(button,input):focus-visible { outline:2px solid var(--ws-accent); outline-offset:2px; }
-.track-settings { box-sizing:border-box; min-width:0; min-height:0; height:100%; padding:8px; overflow:auto; overscroll-behavior:contain; color:var(--ws-text); background:var(--ws-panel); font-size:13px; line-height:1.35; scrollbar-color:var(--ws-border) var(--ws-input); }
+/* The whole Track tab, inside .inspector-tabpanel (which has the gutters). It is not a scroll container: .workstation-inspector is the one scroller, and a nested overscroll-behavior:contain would stop the wheel reaching it. */
+.track-settings { box-sizing:border-box; min-width:0; margin:0; padding:0; color:var(--ws-text); background:var(--ws-panel); font-size:13px; line-height:1.35; scrollbar-color:var(--ws-border) var(--ws-input); }
 .track-settings h2 { margin:0 0 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ws-text); font-size:14px; line-height:20px; text-transform:none; letter-spacing:normal; }
 .track-settings h3 { margin:0 0 6px; font-size:13px; }
 .track-settings fieldset { min-width:0; margin:0; padding:0; border:0; display:grid; gap:6px; }

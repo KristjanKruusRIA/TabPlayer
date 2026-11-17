@@ -349,8 +349,10 @@ pub struct TrackSound {
     /// sound bank. Left out for the Standard kit, so a file that never chose one is unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drum_kit: Option<u8>,
-    /// A VST3 plug-in inserted after the track's pedalboard. Left out for a track with none, so a file that never
-    /// used one is unchanged, and an older build, which does not know the key, refuses a file that has it.
+    /// A VST3 plug-in on the track: an effect takes the place of the Drive, Amp and Cabinet stages, an instrument (a
+    /// drum track only) sits at the board's input and plays the track instead of the built-in kit. Left out for a
+    /// track with none, so a file that never used one is unchanged, and an older build, which does not know the key,
+    /// refuses a file that has it.
     /// A `null` is refused rather than read as none, so the key is present exactly when there is a plug-in.
     #[serde(
         default,

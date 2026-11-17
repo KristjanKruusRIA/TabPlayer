@@ -1823,7 +1823,10 @@ impl Renderer {
         // A hand-over starts after what the old renderer dispatched, not at `tick`: the frames it rendered saw events up to
         // its last frame's tick, and the first frame here sees those up to `tick`.
         let through = through.filter(|through| through.is_finite() && *through < tick);
-        self.dispatched_through = None;
+        // Carried on, so a second hand-over before any frame is rendered still starts after what the first renderer
+        // dispatched: this renderer has dispatched nothing since, and the gap after that frame is still open. A plain seek
+        // or a wrap passes none and resets it.
+        self.dispatched_through = through;
         self.next_note = match through {
             Some(through) => self
                 .plan

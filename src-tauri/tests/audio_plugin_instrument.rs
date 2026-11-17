@@ -1970,6 +1970,29 @@ fn an_edit_hand_over_at_any_frame_sends_each_hit_to_the_instrument_exactly_once(
 }
 
 #[test]
+fn two_hand_overs_with_no_frame_between_them_still_send_each_hit_exactly_once() {
+    let plan = fast_plan(vec![note_on(960, 36), note_off(961, 36)]);
+    let rig = rig_keyed();
+    let mut straight = instrument_renderer(&rig, &plan);
+    run(&mut straight, Some(&rig), 21_000);
+    let want = heard(&rig);
+    assert_eq!(want.len(), 2);
+    // Pause, edit, edit, resume: the second renderer renders nothing before the third takes over.
+    for at in 20_560..=20_600 {
+        let rig = rig_keyed();
+        let mut first = instrument_renderer(&rig, &plan);
+        run(&mut first, Some(&rig), at);
+        let mut second = instrument_renderer(&rig, &plan);
+        hand_over(&mut second, &mut first);
+        let mut third = instrument_renderer(&rig, &plan);
+        hand_over(&mut third, &mut second);
+        run(&mut third, Some(&rig), 21_000 - at);
+        assert_eq!(heard(&rig), want, "two hand-overs after {at} frames");
+        assert_eq!(rig.helper.sounding(), 0, "after {at} frames");
+    }
+}
+
+#[test]
 fn a_hand_over_never_worsens_the_built_in_kit_and_keeps_a_ports_notes_paired() {
     let plan = fast_plan(vec![
         note_on(960, 36),

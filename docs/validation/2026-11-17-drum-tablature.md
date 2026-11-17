@@ -75,8 +75,8 @@ after (`section-both-1920-en.png`).
 
 ### Screenshots and what they showed
 
-Folder (git-ignored, never committed): `E:\git\TabPlayer\.worktrees\the-218\.analysis\desktop-smoke\drum-tab-views\` (48 files) and
-`...\desktop-smoke\drum-tab-*.png` (the driver's own). Names: `inspector-standard-`, `both-`, `tab-only-`, `both-all-tracks-`,
+Folder (git-ignored, never committed): `.analysis/desktop-smoke/drum-tab-views/` in the checkout that ran the drivers (48 files) and
+`.analysis/desktop-smoke/drum-tab-*.png` (the driver's own). Names: `inspector-standard-`, `both-`, `tab-only-`, `both-all-tracks-`,
 `tab-only-all-tracks-` and `section-standard-/both-/tab-only-`, each `<width>-<lang>.png`. The fixture is authored by the script: five guitar and
 bass tracks and drums over four bars; one beat holds five hits at once (36, 49, 46, 51, 91), one holds seven (36, 38, 42, 49, 51, 45, 50).
 

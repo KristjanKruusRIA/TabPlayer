@@ -67,7 +67,7 @@ jobs:
           - os: ubuntu-24.04
             bundles: deb,appimage
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash

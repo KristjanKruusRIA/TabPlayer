@@ -989,6 +989,14 @@ pub enum EditCommand {
         staff: u32,
         bar: u32,
         voice: u32,
+        /// Only newer gestures record it, and only as true: the beat crossing the barline is
+        /// shortened instead of removed. Absent means the original behaviour.
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        shorten: Option<bool>,
     },
     #[serde(deserialize_with = "empty_command")]
     AppendMeasure,
@@ -1536,6 +1544,12 @@ impl EditCommand {
                     command.validate()?;
                 }
             }
+            Self::FitVoice {
+                shorten: Some(false),
+                ..
+            } => {
+                return Err("The shorten flag of a voice fit is true or absent.".into());
+            }
             Self::MoveTrack { track, to } if track == to => {
                 return Err("Choose a different track position.".into());
             }
@@ -1982,6 +1996,23 @@ mod tests {
                 "masterAutomations": false, "sections": false
             }
         }})
+    }
+
+    #[test]
+    fn fit_voice_keeps_its_old_shape_and_takes_only_a_true_shorten_flag() {
+        let old = json!({"type": "fitVoice", "track": 0, "staff": 0, "bar": 1, "voice": 0});
+        assert_eq!(serde_json::to_value(accepted(&old)).unwrap(), old);
+        let mut shorten = old.clone();
+        shorten["shorten"] = json!(true);
+        assert_eq!(serde_json::to_value(accepted(&shorten)).unwrap(), shorten);
+        shorten["shorten"] = json!(false);
+        let parsed: EditCommand = serde_json::from_value(shorten.clone()).unwrap();
+        assert!(parsed.validate().is_err());
+        shorten["shorten"] = json!(1);
+        assert!(serde_json::from_value::<EditCommand>(shorten).is_err());
+        let mut unknown = old;
+        unknown["extra"] = json!(1);
+        assert!(serde_json::from_value::<EditCommand>(unknown).is_err());
     }
 
     #[test]

@@ -15,7 +15,7 @@ use crate::{
         voices::resource_requests,
     },
     export::{
-        audio::{AudioExportRender, AudioExportRequest},
+        audio::{AudioExportCommand, AudioExportRender},
         jobs::{ExportJobs, ExportProgress, JobHandle},
         pdf::SvgPage,
     },
@@ -1400,7 +1400,7 @@ fn prepare_export_backing(
 pub async fn export_audio(
     document: DocumentRevision,
     plan: PlaybackPlan,
-    request: AudioExportRequest,
+    request: AudioExportCommand,
     mut settings: DocumentSettings,
     embedded_bytes: Option<Vec<u8>>,
     stems: bool,
@@ -1408,7 +1408,11 @@ pub async fn export_audio(
     app: AppHandle,
 ) -> Result<Option<String>, String> {
     settings.validate()?;
+    let (request, count_in) = request.into_parts();
     request.format.validate()?;
+    if count_in.is_some_and(|c| c.bars > 0) && stems {
+        return Err("A count-in applies to mixed audio only.".into());
+    }
     if let Some(level) = request.normalize_rms_db {
         if stems {
             return Err("Normalization applies to mixed audio only.".into());
@@ -1557,6 +1561,9 @@ pub async fn export_audio(
             let normalize = request.normalize_rms_db;
             let mut render =
                 AudioExportRender::new_with_plugins(renderer, &plan, request, offline_plugins)?;
+            if let Some(count_in) = count_in {
+                render = render.with_count_in(count_in)?;
+            }
             let job = &capture.job;
             // Normalizing renders the audio and then writes it, so its progress counts both passes.
             job.total_frames(render.total_frames() * if normalize.is_some() { 2 } else { 1 });
@@ -1571,10 +1578,13 @@ pub async fn export_audio(
                 )?;
             } else if let Some(level) = normalize {
                 capture.protect_destination(&path)?;
-                crate::export::wav::write_normalized_wav(
+                // The count-in is not measured: the music is normalized as it is without one.
+                let count_in_frames = render.count_in_frames();
+                crate::export::wav::write_normalized_wav_after(
                     &path,
                     format,
                     level,
+                    count_in_frames,
                     |output| render.render_mix(output),
                     &job.cancel,
                     |frames| job.progress(frames),

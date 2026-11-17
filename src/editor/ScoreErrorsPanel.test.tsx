@@ -93,3 +93,19 @@ it('moves focus to the repair now in the repaired row\'s place, or to the headin
   view.rerender(<ScoreErrorsPanel errors={[]} mark onMark={()=>{}} onSelect={()=>{}} onFit={()=>{}}/>);
   expect(screen.getByText('Score errors (0)')).toHaveFocus();
 });
+
+it('says what Trim to fit really does when it shortens the crossing note',()=>{
+  const both:ScoreError[]=[{track:0,staff:0,bar:1,voice:0,beat:0,kind:'overfull',ticks:480,place:'Guitar',shortened:1,trim:{beats:2,notes:3}},
+    {track:0,staff:0,bar:2,voice:0,beat:0,kind:'overfull',ticks:480,place:'Guitar',shortened:2}];
+  render(<ScoreErrorsPanel errors={both} mark onMark={()=>{}} onSelect={()=>{}} onFit={()=>{}}/>);
+  const first=screen.getByRole('button',{name:'Trim to fit: measure 2, Guitar, voice 1, shortens 1 note, removes 2 beats and 3 notes'});
+  expect(first).toHaveTextContent('shortens 1 note, removes 2 beats and 3 notes');
+  const second=screen.getByRole('button',{name:'Trim to fit: measure 3, Guitar, voice 1, shortens 2 notes'});
+  expect(second).toHaveTextContent('shortens 2 notes');expect(second).not.toHaveTextContent('removes');
+});
+
+it('words the Trim hint in all three languages',async()=>{
+  const {getMessage}=await import('../i18n');
+  for(const language of ['en','et','de'] as const)for(const key of ['editor.trim_shortens_one','editor.trim_shortens_other','editor.trim_removes_beats_one','editor.trim_removes_beats_other','editor.trim_removes_notes_one','editor.trim_removes_notes_other','editor.trim_hint_and','editor.trim_hint_then'] as const)
+    expect(getMessage(language,key,{count:2,first:'a',second:'b'})).toMatch(/\S/);
+});

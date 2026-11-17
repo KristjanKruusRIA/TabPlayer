@@ -131,8 +131,9 @@ export type SingleCommand = LyricsCommand | GestureCommand | BarGestureCommand |
   | { type: 'setDuration'; target: BeatTarget; duration: number; dots: number }
   | { type: 'insertBeat'; target: BeatTarget; duration: number; dots: number }
   | { type: 'deleteBeat'; target: BeatTarget }
-  /** Makes one voice fill its measure exactly: rests are added for a short voice, and beats past the barline are removed from an overfull one. */
-  | { type: 'fitVoice'; track: number; staff: number; bar: number; voice: number }
+  /** Makes one voice fill its measure exactly: rests are added for a short voice, and beats past the barline are removed from an overfull one.
+   * `shorten` is recorded only by newer gestures: an overfull voice then has the beat that crosses the barline cut to the length that is left (tied pieces of exact written length) instead of removed. An edit without it replays as it always did. */
+  | { type: 'fitVoice'; track: number; staff: number; bar: number; voice: number; shorten?: true }
   | { type: 'appendMeasure' }
   | { type: 'removeMeasure'; bar: number }
   | { type: 'addTrack'; name: string; tuning: number[]; program: number; tuningName?: string }

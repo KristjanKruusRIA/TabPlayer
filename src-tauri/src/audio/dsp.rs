@@ -2529,6 +2529,13 @@ impl TrackDsp {
             insert.stage_note(on, channel, key, velocity);
         }
     }
+    /// Strikes a key the plan holds at a seek point, a wrap or an export's start on the board's instrument: see
+    /// `PluginInsert::restrike_note`. Nothing happens without an instrument.
+    pub fn restrike_note(&mut self, channel: u8, key: u8, velocity: u8, strikes: u8) {
+        if let Some(insert) = self.plugin.as_mut() {
+            insert.restrike_note(channel, key, velocity, strikes);
+        }
+    }
     /// Releases every key the board's instrument holds (a loop wrap keeps the insert streaming, so the notes it holds
     /// would otherwise ring on): see `PluginInsert::all_notes_off`. Nothing happens without an instrument.
     pub fn all_notes_off(&mut self) {

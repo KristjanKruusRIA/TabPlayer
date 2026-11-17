@@ -93,7 +93,7 @@ The existing effect driver `tests/desktop/parity-vst-plugin.mjs` still opened th
 7. **Only the main stereo output.** A kit preset that routes drums to other outputs is silent on those. A mono output is accepted; more than the main stereo bus is not used.
 8. **Per-drum-element mix applies only to the built-in kit.** The kit note says so in the interface.
 9. **One slot per track.** An instrument replaces an effect on that track. Instruments are for drum tracks only; a slot on another track is refused and the track's own sound plays.
-10. **A hit that began just before a seek is not re-struck.** The built-in kit re-strikes held notes after a seek or at the start of a range export; an instrument does not receive them, so a long note that is already sounding at that point is silent until the next hit. The same holds at the start of a range export.
+10. **Re-strike of held hits (closed, with its own limits in `2026-11-17-instrument-restrike.md`).** A seek, a loop wrap and the start of a range export strike the keys the plan holds there on a hosted instrument, one NoteOn per key, with the first music frame (not during a count-in). A strike the block has no room for is dropped and counted, and nothing was heard with a real library.
 11. **Sampler that ignores note-off.** A one-shot sampler that ignores NoteOff is cut at the end of the export tail.
 12. **Swapped out mid-note.** When an instrument is replaced while a note sounds, it is not sent a release while it fades out; its helper is shut down afterwards.
 13. **Library version 2.** A library file that holds an instrument is written as version 2. An older TabPlayer treats it as a newer library and does not list, change or write it.

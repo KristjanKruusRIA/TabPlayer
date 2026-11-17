@@ -12,7 +12,7 @@ export type PngResolution=typeof PNG_RESOLUTIONS[number];
 export interface SvgSystem { svg:string; width:number; height:number; firstBar?:number; lastBar?:number; top?:number; left?:number }
 /** `container` is present only for AIFF, FLAC, Ogg Vorbis or MP3; audio is written as WAV without it. `normalizeRmsDb` is present only when
  * mixed audio is normalized to that RMS level. */
-export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;container?:'aiff'|'flac'|'ogg'|'mp3';normalizeRmsDb?:number;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
+export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;container?:'aiff'|'flac'|'ogg'|'mp3';normalizeRmsDb?:number;countIn?:boolean;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
 /** `fileName` is a GP8 token template, present only when it differs from the default. */
 export type ExportOptions = (
   | {format:'gp';selection:ExportSelection;backing?:boolean}

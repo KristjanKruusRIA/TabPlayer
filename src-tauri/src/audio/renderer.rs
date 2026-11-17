@@ -784,6 +784,10 @@ pub struct Renderer {
     /// The tick of the last frame whose notes and MIDI events were dispatched, `None` after a seek. An edit hand-over
     /// starts the new renderer's cursors from it, so an event between that frame and the next is dispatched once.
     dispatched_through: Option<f64>,
+    /// Set by a seek, a wrap or an export's first seek: the hosted instruments are still to be struck for the keys the plan
+    /// holds there. The first frame rendered after it does that, not the seek, so a count-in between the two (which runs the
+    /// inserts) sends no strike and the music's first frame carries them.
+    restrike_pending: bool,
     /// The plan track of each MIDI event, to find a track's events without comparing names.
     midi_track: Vec<u16>,
     /// External MIDI output: the tracks routed to a port. Offline exports never have one, so they render every track.
@@ -1218,6 +1222,7 @@ impl Renderer {
             active: Vec::with_capacity(capacity),
             next_note: 0,
             dispatched_through: None,
+            restrike_pending: false,
             next_midi: 0,
             midi_track,
             midi: None,
@@ -1575,6 +1580,10 @@ impl Renderer {
             }
         }
         if !self.tail {
+            if self.restrike_pending {
+                self.restrike_pending = false;
+                self.restrike_held(tick, end_tick);
+            }
             self.dispatched_through = Some(tick);
             while self.next_note < self.plan.notes.len()
                 && self.plan.notes[self.next_note].start_tick <= tick + 1e-7
@@ -1959,11 +1968,11 @@ impl Renderer {
         self.status(frames, pulse_count, last_pulse)
     }
     pub fn seek_tick(&mut self, tick: f64) {
-        self.seek_tick_internal(tick, false, None);
+        self.seek_tick_internal(tick, false, None, false);
     }
     /// A loop wrap: repositions playback, but keeps inserts, compensation lines and master bus continuous.
     pub fn wrap_to_tick(&mut self, tick: f64) {
-        self.seek_tick_internal(tick, true, None);
+        self.seek_tick_internal(tick, true, None, false);
     }
     /// An edit while playing: this renderer takes over from `old` at `tick`, the tick of the next frame to render, as
     /// [`wrap_to_tick`](Self::wrap_to_tick) and [`continue_from`](Self::continue_from) do, and also dispatches what
@@ -1971,10 +1980,18 @@ impl Renderer {
     /// instead of by neither (a note or MIDI event is struck once across the hand-over). What `old` dispatched is
     /// reconstructed as before.
     pub fn hand_over_from(&mut self, tick: f64, old: &mut Renderer) {
-        self.seek_tick_internal(tick, true, old.dispatched_through);
+        self.seek_tick_internal(tick, true, old.dispatched_through, true);
         self.continue_from(old);
+        // A strike the old renderer had not yet sent is still owed, to the instrument that carries on, under this plan.
+        self.restrike_pending = old.restrike_pending;
     }
-    fn seek_tick_internal(&mut self, tick: f64, is_wrap: bool, through: Option<f64>) {
+    fn seek_tick_internal(
+        &mut self,
+        tick: f64,
+        is_wrap: bool,
+        through: Option<f64>,
+        hand_over: bool,
+    ) {
         // With no plug-in, a wrap is the seek it was before plug-ins, so playback and export stay bit-identical.
         let is_wrap = is_wrap && self.plugins_active();
         let tick = if tick.is_finite() {
@@ -2149,6 +2166,14 @@ impl Renderer {
                 }
             }
         }
+        // A hosted instrument is struck again for each key the plan holds at this position, as the built-in kit's held notes
+        // are above, but with the first frame rendered here (`restrike_held`), not now: a count-in runs the inserts before
+        // that frame and would send the strikes at its start. A hand-over is not a new position: the running instrument
+        // keeps its keys and `continue_from` fixes them up, and this renderer's insert may not even be the one that carries
+        // on, so it asks for no strike.
+        if !hand_over {
+            self.restrike_pending = true;
+        }
         for index in 0..self.next_note {
             if self.note_end_ticks[index] > tick {
                 self.start_note(index);
@@ -2321,7 +2346,48 @@ impl Renderer {
         track_index: usize,
         map: &NoteMap,
     ) -> [[u8; 128]; 16] {
+        Self::held_strikes(midi, midi_track, next_midi, track_index, map, None).0
+    }
+    /// [`held_wanted`](Self::held_wanted), and with it the velocity of the last strike of each key the plan holds, which a
+    /// seek, a wrap or an export's start strikes the key again at. A key counts as held only if it is still held once the
+    /// NoteOffs the first frame dispatches have been applied: with `first_frame` (that frame's tick and end tick), a NoteOff
+    /// of the track at a tick up to the frame's tick plus the dispatch tolerance (and before its end) ends a strike here as
+    /// it will there, so a key that ends exactly where the position begins is not struck only to be released at once. A
+    /// key that is held keeps all its strikes counted, for those NoteOffs to leave the rest. Does not allocate.
+    fn held_strikes(
+        midi: &[PlanMidiEvent],
+        midi_track: &[u16],
+        next_midi: usize,
+        track_index: usize,
+        map: &NoteMap,
+        first_frame: Option<(f64, f64)>,
+    ) -> ([[u8; 128]; 16], [[u8; 128]; 16]) {
         let mut wanted = [[0u8; 128]; 16];
+        let mut velocities = [[0u8; 128]; 16];
+        let count = |wanted: &mut [[u8; 128]; 16],
+                     velocities: Option<&mut [[u8; 128]; 16]>,
+                     event: &PlanMidiEvent| {
+            let Some(note) = map.note(event) else {
+                return;
+            };
+            let Some(held) = wanted
+                .get_mut(usize::from(note.channel))
+                .and_then(|row| row.get_mut(usize::from(note.key)))
+            else {
+                return;
+            };
+            if note.on && note.velocity > 0 {
+                *held = held.saturating_add(1);
+                if let Some(velocity) = velocities
+                    .and_then(|v| v.get_mut(usize::from(note.channel)))
+                    .and_then(|row| row.get_mut(usize::from(note.key)))
+                {
+                    *velocity = note.velocity;
+                }
+            } else {
+                *held = held.saturating_sub(1);
+            }
+        };
         for event in midi
             .iter()
             .zip(midi_track)
@@ -2329,22 +2395,69 @@ impl Renderer {
             .filter(|(_, owner)| usize::from(**owner) == track_index)
             .map(|(event, _)| event)
         {
-            let Some(note) = map.note(event) else {
-                continue;
-            };
-            let Some(count) = wanted
-                .get_mut(usize::from(note.channel))
-                .and_then(|row| row.get_mut(usize::from(note.key)))
-            else {
-                continue;
-            };
-            if note.on && note.velocity > 0 {
-                *count = count.saturating_add(1);
-            } else {
-                *count = count.saturating_sub(1);
+            count(&mut wanted, Some(&mut velocities), event);
+        }
+        if let Some((tick, end_tick)) = first_frame {
+            // What the first frame dispatches next, in plan order, as the frame's own loop selects it. Only the ends are
+            // applied: its NoteOns are the frame's to send.
+            let mut after = wanted;
+            for event in midi
+                .iter()
+                .zip(midi_track)
+                .skip(next_midi)
+                .take_while(|(event, _)| event.tick() <= tick + 1e-7 && event.tick() < end_tick)
+                .filter(|(_, owner)| usize::from(**owner) == track_index)
+                .map(|(event, _)| event)
+            {
+                if map.note(event).is_some_and(|n| n.on && n.velocity > 0) {
+                    continue;
+                }
+                count(&mut after, None, event);
+            }
+            for (row, left) in wanted.iter_mut().zip(&after) {
+                for (held, left) in row.iter_mut().zip(left) {
+                    if *left == 0 {
+                        *held = 0;
+                    }
+                }
             }
         }
-        wanted
+        (wanted, velocities)
+    }
+    /// Strikes each hosted instrument for the keys the plan holds at the position a seek, a wrap or an export's start has
+    /// put the renderer at (`restrike_pending`), on the frame about to be rendered, before its events are dispatched. A track
+    /// a port plays strikes none. Does not allocate.
+    fn restrike_held(&mut self, tick: f64, end_tick: f64) {
+        for (track_index, channel) in self.mix.channels.iter_mut().enumerate() {
+            let Some(map) = channel.notes.as_ref() else {
+                continue;
+            };
+            // A track a port plays strikes no note, here or on its instrument.
+            if self
+                .midi
+                .as_ref()
+                .is_some_and(|tap| tap.silences(track_index))
+            {
+                continue;
+            }
+            let (strikes, velocities) = Self::held_strikes(
+                &self.plan.midi,
+                &self.midi_track,
+                self.next_midi,
+                track_index,
+                map,
+                Some((tick, end_tick)),
+            );
+            for (c, row) in strikes.iter().enumerate() {
+                for (key, &held) in row.iter().enumerate() {
+                    if held > 0 {
+                        channel
+                            .dsp
+                            .restrike_note(c as u8, key as u8, velocities[c][key], held);
+                    }
+                }
+            }
+        }
     }
     /// An edit while playing: this renderer replaces `old` at the same place. It takes over `old`'s plug-in inserts and
     /// compensation lines the way a mix change does, so the plug-in tracks and the delayed stems keep streaming instead

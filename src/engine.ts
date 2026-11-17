@@ -28,6 +28,7 @@ import { addTicks,trimStart,voiceTicks,writtenTicks,type Fraction } from './edit
 import { planMeasureMap,mapBackingMeasures } from './editor/measures';
 import { mapLyricsMeasures } from './editor/lyrics-measures';
 import { preparePasteMusic } from './editor/clipboard-paste';
+import { shortenCrossingBeat } from './editor/fit-shorten';
 import { duplicateStylesheetTrack,remapStylesheetTracks,validateEngravingTracks } from './engraving/projection';
 import { mapEngravingBars } from './engraving/bar-widths';
 import { prepareHarmonyTranspose } from './harmony/transpose';
@@ -95,13 +96,15 @@ const restLengths=[1,2,4,8,16,32,64].flatMap(duration=>[0,1,2].map(dots=>({durat
 
 /** Makes a voice fill its measure exactly. Beats from the one that crosses the barline on go (a tuplet and the grace
  * notes before a removed beat go whole), then the remainder is written as the fewest standard rests. A crossing beat
- * is removed, not split. A last note tied into the next measure, or a remainder no standard rest can write, is refused. */
-function fitVoiceToMeasure(master: model.MasterBar, voice: model.Voice) {
+ * is removed, or with `shorten` cut at the barline when that is allowed (see `shortenCrossingBeat`; the declined cases fall back to removal). A last note tied into the next measure, or a remainder no standard rest can write, is refused. */
+function fitVoiceToMeasure(master: model.MasterBar, voice: model.Voice, shorten = false) {
   if (master.isFreeTime) throw refusal('engine.free_time_fill');
   const expected = master.calculateDuration(false), whole = voiceTicks(voice, expected);
   if (!whole) throw refusal('engine.voice_unused_fill');
   if (whole[0] === expected * whole[1]) throw refusal('engine.voice_complete_fill');
-  const cut = whole[0] > expected * whole[1] ? trimStart(voice, expected) : voice.beats.length;
+  if (shorten && whole[0] > expected * whole[1]) shortenCrossingBeat(master, voice, expected);
+  const fitted = shorten ? voiceTicks(voice, expected) : whole;
+  const cut = fitted![0] > expected * fitted![1] ? trimStart(voice, expected) : voice.beats.length;
   const kept = voice.beats.slice(0, cut), removed = voice.beats.slice(cut);
   let total: Fraction = [0, 1];
   for (const beat of kept) total = addTicks(total, writtenTicks(beat, expected));
@@ -242,7 +245,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
   switch (edit.type) {
     case 'fitVoice': {
       const {voice} = voiceAt(score, {track: edit.track, staff: edit.staff, bar: edit.bar, voice: edit.voice, beat: 0});
-      fitVoiceToMeasure(score.masterBars[edit.bar], voice);
+      fitVoiceToMeasure(score.masterBars[edit.bar], voice, edit.shorten === true);
       break;
     }
     case 'setNote': case 'removeNote': case 'setRest': case 'setDuration': case 'insertBeat': case 'deleteBeat': {

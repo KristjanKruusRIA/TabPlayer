@@ -427,6 +427,21 @@ pub fn write_normalized_wav(
     path: &Path,
     format: AudioFormat,
     target_rms_db: f64,
+    render: impl FnMut(&mut [[f32; 2]]) -> Result<usize, String>,
+    cancel: &AtomicBool,
+    progress: impl FnMut(u64),
+) -> Result<Normalized, String> {
+    write_normalized_wav_after(path, format, target_rms_db, 0, render, cancel, progress)
+}
+/// As `write_normalized_wav`, except that the first `lead_frames` frames are not measured: the RMS level and the peak
+/// that set the gain are those of the frames after them, and the result reports those. A count-in ahead of the music is
+/// such a lead, so the music's level is what it is without it. The lead gets the same gain, lowered only where it would
+/// peak above `NORMALIZE_CEILING_DB`. Where the audio after the lead is silent, nothing is changed.
+pub fn write_normalized_wav_after(
+    path: &Path,
+    format: AudioFormat,
+    target_rms_db: f64,
+    lead_frames: u64,
     mut render: impl FnMut(&mut [[f32; 2]]) -> Result<usize, String>,
     cancel: &AtomicBool,
     mut progress: impl FnMut(u64),
@@ -446,7 +461,7 @@ pub fn write_normalized_wav(
     )));
     let mut file = BufWriter::new(File::create_new(&scratch.0).map_err(|e| e.to_string())?);
     let mut block = [[0.0; 2]; BLOCK_FRAMES];
-    let (mut frames, mut sum, mut peak) = (0u64, 0.0f64, 0.0f32);
+    let (mut frames, mut sum, mut peak, mut lead_peak) = (0u64, 0.0f64, 0.0f32, 0.0f32);
     loop {
         if cancel.load(Ordering::Acquire) {
             return Err("Audio export cancelled.".into());
@@ -458,14 +473,21 @@ pub fn write_normalized_wav(
         if count == 0 {
             break;
         }
-        for sample in block[..count].iter().flatten() {
-            if !sample.is_finite() {
-                return Err("Audio renderer produced a non-finite sample.".into());
+        for (offset, frame) in block[..count].iter().enumerate() {
+            let measured = frames + offset as u64 >= lead_frames;
+            for sample in frame {
+                if !sample.is_finite() {
+                    return Err("Audio renderer produced a non-finite sample.".into());
+                }
+                if measured {
+                    sum += (*sample as f64).powi(2);
+                    peak = peak.max(sample.abs());
+                } else {
+                    lead_peak = lead_peak.max(sample.abs());
+                }
+                file.write_all(&sample.to_le_bytes())
+                    .map_err(|e| e.to_string())?;
             }
-            sum += (*sample as f64).powi(2);
-            peak = peak.max(sample.abs());
-            file.write_all(&sample.to_le_bytes())
-                .map_err(|e| e.to_string())?;
         }
         frames += count as u64;
         progress(frames);
@@ -473,21 +495,30 @@ pub fn write_normalized_wav(
     file.flush().map_err(|e| e.to_string())?;
     drop(file);
     let db = |value: f64| 20.0 * value.max(1e-12).log10();
-    let rms = if frames == 0 {
+    let measured_frames = frames.saturating_sub(lead_frames);
+    let rms = if measured_frames == 0 {
         0.0
     } else {
-        (sum / (2 * frames) as f64).sqrt()
+        (sum / (2 * measured_frames) as f64).sqrt()
     };
+    let ceiling = 10f64.powf(NORMALIZE_CEILING_DB / 20.0);
     let gain = if peak == 0.0 {
         1.0
     } else {
         (10f64.powf(target_rms_db / 20.0) / rms)
-            .min(10f64.powf(NORMALIZE_CEILING_DB / 20.0) / peak as f64)
+            .min(ceiling / peak as f64)
             .min(10f64.powf(NORMALIZE_MAX_GAIN_DB / 20.0))
+    };
+    // The lead has the audio's gain, lowered only where it would peak above the ceiling.
+    let lead_gain = if lead_peak == 0.0 {
+        gain
+    } else {
+        gain.min(ceiling / lead_peak as f64)
     };
     let mut reader = BufReader::new(File::open(&scratch.0).map_err(|e| e.to_string())?);
     let mut bytes = vec![0; BLOCK_FRAMES * 8];
     let mut remaining = frames;
+    let mut next = 0u64;
     let written = write_wav(
         path,
         format,
@@ -497,9 +528,11 @@ pub fn write_normalized_wav(
                 .read_exact(&mut bytes[..count * 8])
                 .map_err(|e| e.to_string())?;
             for (frame, chunk) in output[..count].iter_mut().zip(bytes.chunks_exact(8)) {
+                let applied = if next < lead_frames { lead_gain } else { gain };
+                next += 1;
                 for (c, value) in frame.iter_mut().enumerate() {
                     let raw = f32::from_le_bytes(chunk[c * 4..c * 4 + 4].try_into().unwrap());
-                    *value = (raw as f64 * gain) as f32;
+                    *value = (raw as f64 * applied) as f32;
                 }
             }
             remaining -= count as u64;
@@ -1145,6 +1178,69 @@ mod tests {
     }
     fn peak_db(samples: &[f64]) -> f64 {
         20.0 * samples.iter().fold(0.0f64, |a, v| a.max(v.abs())).log10()
+    }
+    /// A lead is written with the gain of the audio after it, lowered where it would peak above the ceiling, and where
+    /// the audio after it is silent nothing is changed.
+    #[test]
+    fn a_lead_is_not_measured_and_is_kept_from_clipping() {
+        let d = tempfile::tempdir().unwrap();
+        let write = |name: &str, lead: u64, signal: &dyn Fn(usize) -> [f32; 2]| {
+            let path = d.path().join(name);
+            let mut n = 0;
+            let result = write_normalized_wav_after(
+                &path,
+                AudioFormat::wav(48000, 24),
+                -16.0,
+                lead,
+                |block| {
+                    let count = (48_000 - n).min(block.len());
+                    for (i, sample) in block[..count].iter_mut().enumerate() {
+                        *sample = signal(n + i);
+                    }
+                    n += count;
+                    Ok(count)
+                },
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap();
+            let samples: Vec<f64> = hound::WavReader::open(&path)
+                .unwrap()
+                .samples::<i32>()
+                .map(|v| v.unwrap() as f64 / 8_388_608.0)
+                .collect();
+            (result, samples)
+        };
+        // A -40 dBFS peak tone after a lead of 4 000 frames: silent but for a single click at 0.4.
+        let tone = |n: usize| {
+            let v = ((std::f64::consts::TAU * 440.0 * n as f64 / 48_000.0).sin() * 0.01) as f32;
+            if n < 4_000 {
+                if n == 100 { [0.4, 0.4] } else { [0.0, 0.0] }
+            } else {
+                [v, v]
+            }
+        };
+        let (plain, _) = write("plain.wav", 4_000, &|n| {
+            if n < 4_000 { [0.0; 2] } else { tone(n) }
+        });
+        let (led, samples) = write("led.wav", 4_000, &tone);
+        assert!(
+            (led.gain_db - plain.gain_db).abs() < 1e-9 && (led.rms_db - plain.rms_db).abs() < 1e-9,
+            "the lead does not change the gain: {plain:?} against {led:?}"
+        );
+        // The gain would put the click at about 7 dBFS; it stops at the ceiling, and the tone has the full gain.
+        let click = samples[200].abs();
+        assert!(
+            (20.0 * click.log10() - NORMALIZE_CEILING_DB).abs() < 0.01,
+            "the click peaks at {click}"
+        );
+        let tone_peak = samples[8_000..].iter().fold(0.0f64, |a, v| a.max(v.abs()));
+        assert!((tone_peak - 0.01 * 10f64.powf(led.gain_db / 20.0)).abs() < 1e-3);
+        // Silence after the lead leaves the lead unchanged.
+        let (_, silent) = write("silent.wav", 4_000, &|n| {
+            if n == 100 { [0.4, 0.4] } else { [0.0; 2] }
+        });
+        assert!((silent[200] - 0.4).abs() < 1e-6, "{}", silent[200]);
     }
     #[test]
     fn normalization_brings_the_rms_level_to_the_target() {

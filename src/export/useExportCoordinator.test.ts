@@ -527,3 +527,13 @@ describe('export_awaits_role_faces_and_music',()=>{
     expect(render.mock.calls[0][3]?.music).toMatchObject({id:'bravura',families:['Bravura'],metadata:null});
   });
 });
+it('sends the practice count-in only for a mixed audio export that asks for it',async()=>{
+  const score=buildScore(blankProject()),api=native(),payloads:NativeAudioExportPayload[]=[];
+  api.exportAudio=async value=>{payloads.push(value);return 'count';};api.status=async()=>({id:'count',frames:1,totalFrames:1,status:'complete'});
+  const bridge={readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true};
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,metronomeSound:'cowbell',countIn:{bars:2,betweenLoops:true},bridge,native:api}));
+  const audio={sampleRate:48000 as const,bitDepth:16 as const,speed:'saved' as const,metronome:false,tailSeconds:0,backing:false,includeMix:true};
+  for(const [format,countIn] of [['wav',true],['wav',false],['stems',true]] as const)await act(async()=>{expect(await result.current.run({format,selection:{tracks:[0],range:null},audio:{...audio,...(countIn?{countIn:true}:{})}})).toBe(true);});
+  expect(payloads[0].request.countIn).toEqual({bars:2,betweenLoops:true});expect(payloads[0].request.metronomeSound).toBe('cowbell');
+  for(const later of payloads.slice(1)){expect(later.request).not.toHaveProperty('countIn');expect(later.request).not.toHaveProperty('metronomeSound');}
+});

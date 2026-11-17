@@ -8,6 +8,7 @@ import { buildDocument, previewEdit, trackIdentity } from '../engine';
 import { defaultMix, validateBackingSettings, validateMix } from '../document-settings';
 import { blankProject } from '../project';
 import fixture from '../../tests/drum-map-protocol.json';
+import { brandWords, namesBrand } from './drum-map-brands.test.helper';
 import { cleanDrumMap, drumMapPresets, drumMapProblem, isStandardArticulation, mapArticulationId, mappedKey, readPresets, resolveDrumMap, withDrumMap } from './drum-map';
 
 const table = () => [...new Map(standardPercussionCatalog.map(entry => [entry.id, entry.outputMidiNumber])).entries()].sort((a, b) => a[0] - b[0]);
@@ -239,13 +240,14 @@ it('resolves each library layout alike here and on the native side, by the share
 });
 
 it('names the libraries nowhere in the app apart from the layouts file', () => {
-  const found: string[] = [];
+  const found: string[] = [], words = [...brandWords(), 'ggd'];
   const walk = (dir: string) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const path = `${dir}/${entry.name}`;
       if (entry.isDirectory()) { if (entry.name !== 'node_modules' && entry.name !== 'gen') walk(path); continue; }
       if (!/\.(ts|tsx|css|json|rs)$/.test(entry.name) || /\.test\./.test(entry.name) || path.endsWith('src/audio/drum-maps.json')) continue;
-      if (/ezdrummer|toontrack|superior drummer|getgood|\bggd\b/i.test(readFileSync(path, 'utf8'))) found.push(path);
+      const hits = namesBrand(readFileSync(path, 'utf8'), words);
+      if (hits.length) found.push(`${path}: ${hits.join(', ')}`);
     }
   };
   walk('src'); walk('src-tauri/src');

@@ -1640,7 +1640,7 @@ fn a_tempo_change_mid_plan_leaves_every_onset_exact() {
     }
 }
 
-fn a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_for_a_note_held_across_it_at(
+fn a_seek_into_a_held_hit_strikes_it_once_on_the_new_epoch_and_sends_no_orphan_note_off_at(
     latency: u32,
 ) {
     let rig = rig_keyed_at(latency);
@@ -1673,21 +1673,45 @@ fn a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_
     assert_eq!(kinds(true), vec![('n', 36)]);
     assert_eq!(
         kinds(false),
-        vec![('n', 38), ('f', 38), ('n', 42), ('f', 42)],
-        "nothing before the seek point is sent again, and the held hit's NoteOff is not"
+        vec![
+            ('n', 36),
+            ('f', 36),
+            ('n', 38),
+            ('f', 38),
+            ('n', 42),
+            ('f', 42)
+        ],
+        "the hit held across the seek is struck once on the new epoch and ends with its own NoteOff; \
+         nothing that ended before the seek point is sent again"
     );
-    // Silence from the seek to the next hit's sound: the held hit does not sound again, in the instrument or the kit.
+    let new_epoch: Vec<Heard> = heard_in(blocks.iter().filter(|b| b.epoch != first_epoch));
+    assert_eq!(
+        new_epoch[0].0 % BLOCK_FRAMES,
+        0,
+        "struck at the first frame after the seek"
+    );
+    assert_eq!(rig.dropped(), 0);
+    // The held hit sounds again from the seek, as the built-in kit's does, and ends where it ends; the next hit follows.
+    let held_end = (400 - 300) * TICK;
     let next_hit = (600 - 300) * TICK;
-    assert!(after[..next_hit + d].iter().all(|f| *f == [0.0; 2]));
+    assert!(after[..d].iter().all(|f| *f == [0.0; 2]));
+    assert!(after[d][0] > 0.0);
+    assert!(after[held_end + d - 1][0] > 0.0);
+    assert!(
+        after[held_end + d..next_hit + d]
+            .iter()
+            .all(|f| *f == [0.0; 2])
+    );
     assert!(after[next_hit + d][0] > 0.0);
     assert_eq!(rig.helper.sounding(), 0);
 }
 
 #[test]
-fn a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_for_a_note_held_across_it()
- {
+fn a_seek_into_a_held_hit_strikes_it_once_on_the_new_epoch_and_sends_no_orphan_note_off() {
     for latency in LATENCIES {
-        a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_for_a_note_held_across_it_at(latency);
+        a_seek_into_a_held_hit_strikes_it_once_on_the_new_epoch_and_sends_no_orphan_note_off_at(
+            latency,
+        );
     }
 }
 
@@ -1737,6 +1761,693 @@ fn a_hit_held_across_the_loop_end_is_released_at_the_wrap_and_nothing_sticks_aft
     }
 }
 
+fn a_loop_wrap_into_a_held_hit_releases_then_strikes_it_once_and_nothing_sticks_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
+    // Held from tick 0 to past the loop end at 970, and the loop starts at tick 300, inside it.
+    let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let d = renderer.plugin_delay_frames();
+    let mut out = Vec::new();
+    let mut want: Vec<Heard> = vec![(0, 'n', 36)];
+    for _ in 0..4 {
+        run_to(&mut renderer, &rig, 970.0, &mut out);
+        want.push((out.len(), 'a', 9));
+        renderer.wrap_to_tick(300.0);
+        want.push((out.len(), 'n', 36));
+    }
+    out.extend(run(&mut renderer, Some(&rig), 1_000));
+    assert_eq!(
+        heard(&rig),
+        want,
+        "a release then one strike on the wrap's frame, once a pass"
+    );
+    assert_eq!(rig.dropped(), 0);
+    assert_eq!(rig.helper.sounding(), 1, "the hit sounds in the loop");
+    let epochs: std::collections::HashSet<_> =
+        rig.helper.blocks().iter().map(|b| b.epoch).collect();
+    assert_eq!(epochs.len(), 1, "a wrap keeps the stream going");
+    // Stop in the middle of it: nothing stays on.
+    renderer.begin_tail();
+    run(&mut renderer, Some(&rig), 1_000);
+    assert_eq!(rig.helper.sounding(), 0);
+    assert!(out.len() > d);
+}
+
+#[test]
+fn a_loop_wrap_into_a_held_hit_releases_then_strikes_it_once_and_nothing_sticks() {
+    for latency in LATENCIES {
+        a_loop_wrap_into_a_held_hit_releases_then_strikes_it_once_and_nothing_sticks_at(latency);
+    }
+}
+
+#[test]
+fn a_seek_into_overlapping_strikes_of_one_key_sends_one_note_on_and_one_note_off() {
+    let rig = rig_keyed();
+    // Two strikes of key 36 overlap from tick 100 to 300; the seek point at 200 is inside both.
+    let plan = drum_plan(vec![
+        note_on(0, 36),
+        note_on(100, 36),
+        note_off(300, 36),
+        note_off(500, 36),
+    ]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    run(&mut renderer, Some(&rig), 10_000);
+    renderer.seek_tick(200.0);
+    run(&mut renderer, Some(&rig), 30_000);
+    let blocks = rig.helper.blocks();
+    let first_epoch = blocks[0].epoch;
+    let after: Vec<(char, u8)> = heard_in(blocks.iter().filter(|b| b.epoch != first_epoch))
+        .into_iter()
+        .map(|(_, kind, key)| (kind, key))
+        .collect();
+    assert_eq!(
+        after,
+        vec![('n', 36), ('f', 36)],
+        "one strike for the key, one NoteOff when the last strike ends"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn a_seek_does_not_strike_a_hit_that_has_ended_a_velocity_zero_one_or_one_on_a_track_a_port_plays()
+{
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![
+        note_on(0, 36),
+        note_off(100, 36),
+        json!({"type":"noteOn","trackId":"drums","tick":150,"channel":9,"key":38,"velocity":0}),
+        note_on(160, 42),
+        note_off(1000, 42),
+    ]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    run(&mut renderer, Some(&rig), 5_000);
+    renderer.seek_tick(400.0);
+    run(&mut renderer, Some(&rig), 5_000);
+    let blocks = rig.helper.blocks();
+    let first_epoch = blocks[0].epoch;
+    let after: Vec<(char, u8)> = heard_in(blocks.iter().filter(|b| b.epoch != first_epoch))
+        .into_iter()
+        .map(|(_, kind, key)| (kind, key))
+        .collect();
+    assert_eq!(
+        after,
+        vec![('n', 42)],
+        "only the hit still held at the seek point is struck"
+    );
+    assert_eq!(rig.helper.sounding(), 1);
+}
+
+fn a_range_export_starting_inside_a_held_hit_strikes_it_on_the_first_sample_at(latency: u32) {
+    // Two bars of 3,840 ticks; a hit from tick 3000 to 5000 is held across the start of bar 1.
+    let plan = drum_plan(vec![
+        note_on(3000, 36),
+        note_off(5000, 36),
+        note_on(6000, 38),
+        note_off(6060, 38),
+    ]);
+    let rig = rig_keyed_at(latency);
+    let mut renderer = plain_renderer(&plan);
+    renderer.attach_plugin(0, Box::new(rig.offline_instrument()));
+    let mut request = export_request(0.1);
+    request.range = Some(tabplayer_lib::export::audio::MeasureRange { first: 1, last: 1 });
+    let mut export = AudioExportRender::new(renderer, &plan, request).unwrap();
+    let out = export_mix(&mut export).unwrap();
+    let notes = heard(&rig);
+    assert_eq!(
+        notes[0],
+        (0, 'n', 36),
+        "struck on the range's first frame, not skipped"
+    );
+    assert_eq!(notes[1], ((5000 - 3840) * TICK, 'f', 36));
+    assert_eq!(notes[2], ((6000 - 3840) * TICK, 'n', 38));
+    assert_eq!(first_sound(&out), Some(0), "sounds from the first sample");
+    let scale = scale_of(&out, 0, key_signal(36));
+    let sounding = [
+        (0, (5000 - 3840) * TICK, 36),
+        ((6000 - 3840) * TICK, (6060 - 3840) * TICK, 38),
+    ];
+    assert_signal(&out[..(6060 - 3840) * TICK + 10], scale, &sounding, 0);
+}
+
+#[test]
+fn a_range_export_starting_inside_a_held_hit_strikes_it_on_the_first_sample() {
+    for latency in LATENCIES {
+        a_range_export_starting_inside_a_held_hit_strikes_it_on_the_first_sample_at(latency);
+    }
+}
+
+/// The notes and releases the fake received, in frame order and then key order, without the AllNotesOff words.
+fn notes_heard(rig: &Rig) -> Vec<Heard> {
+    let mut notes: Vec<Heard> = heard(rig).into_iter().filter(|h| h.1 != 'a').collect();
+    notes.sort();
+    notes
+}
+
+/// How many NoteOns of `key` the fake received: a strike released on the very frame it is sent still counts.
+fn note_ons_of(rig: &Rig, key: u8) -> usize {
+    heard(rig)
+        .iter()
+        .filter(|h| h.1 == 'n' && h.2 == key)
+        .count()
+}
+
+/// Every hit ends where the next begins (as the plan builds `note.end`): at tick 300 the kick (36) and the first hat (46)
+/// end exactly as the snare (38) begins, while 42 is held through it. A note is held at a tick iff it starts before it and
+/// ends after it, as the built-in kit has it, so nothing that ends at 300 is struck again there.
+fn boundary_plan() -> PlaybackPlan {
+    drum_plan(vec![
+        note_on(0, 36),
+        note_on(0, 46),
+        note_on(100, 42),
+        note_off(300, 36),
+        note_off(300, 46),
+        note_on(300, 38),
+        note_off(400, 38),
+        note_off(500, 42),
+    ])
+}
+
+fn a_seek_exactly_where_a_hit_ends_does_not_strike_it_again_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
+    let mut renderer = instrument_renderer(&rig, &boundary_plan());
+    run(&mut renderer, Some(&rig), 20_000);
+    let before = heard(&rig).len();
+    renderer.seek_tick(300.0);
+    run(&mut renderer, Some(&rig), 20_000);
+    let after: Vec<Heard> = heard(&rig).split_off(before);
+    let blocks = rig.helper.blocks();
+    let base = blocks
+        .iter()
+        .find(|b| b.epoch != blocks[0].epoch)
+        .map(|b| b.seq as usize * BLOCK_FRAMES)
+        .expect("the seek began a new epoch");
+    let mut got: Vec<(usize, char, u8)> = after.iter().map(|h| (h.0 - base, h.1, h.2)).collect();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            (0, 'n', 38),
+            (0, 'n', 42),
+            (100 * TICK, 'f', 38),
+            (200 * TICK, 'f', 42),
+        ],
+        "the kick and the hat that end at the seek point are not struck, not even to be released on the same frame"
+    );
+    // Over the whole run the key was struck once, at the start.
+    assert_eq!(note_ons_of(&rig, 36), 1);
+    assert_eq!(note_ons_of(&rig, 46), 1);
+    assert_eq!(rig.helper.sounding(), 0);
+    assert_eq!(rig.dropped(), 0);
+}
+
+#[test]
+fn a_seek_exactly_where_a_hit_ends_does_not_strike_it_again() {
+    for latency in LATENCIES {
+        a_seek_exactly_where_a_hit_ends_does_not_strike_it_again_at(latency);
+    }
+}
+
+fn a_loop_wrap_exactly_where_a_hit_ends_does_not_strike_it_again_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
+    let mut renderer = instrument_renderer(&rig, &boundary_plan());
+    let mut out = Vec::new();
+    let mut want: Vec<Heard> = vec![
+        (0, 'n', 36),
+        (0, 'n', 46),
+        (100 * TICK, 'n', 42),
+        (300 * TICK, 'f', 36),
+        (300 * TICK, 'f', 46),
+        (300 * TICK, 'n', 38),
+    ];
+    // Pass 1 plays up to tick 350 and wraps back to 300, where the kick and the hat end and the snare begins.
+    run_to(&mut renderer, &rig, 350.0, &mut out);
+    renderer.wrap_to_tick(300.0);
+    // Pass 2 starts a stream frame later than the wrap: the snare is struck on its first frame.
+    let wrap = out.len();
+    want.push((wrap, 'n', 42));
+    want.push((wrap, 'n', 38));
+    out.extend(run(&mut renderer, Some(&rig), 30_000));
+    want.push((wrap + 100 * TICK, 'f', 38));
+    want.push((wrap + 200 * TICK, 'f', 42));
+    want.sort();
+    assert_eq!(
+        notes_heard(&rig),
+        want,
+        "the wrap strikes the hat held through it and not the kick or the hat that end on it"
+    );
+    assert_eq!(note_ons_of(&rig, 36), 1);
+    assert_eq!(note_ons_of(&rig, 46), 1);
+    assert_eq!(rig.helper.sounding(), 0);
+    assert_eq!(rig.dropped(), 0);
+}
+
+#[test]
+fn a_loop_wrap_exactly_where_a_hit_ends_does_not_strike_it_again() {
+    for latency in LATENCIES {
+        a_loop_wrap_exactly_where_a_hit_ends_does_not_strike_it_again_at(latency);
+    }
+}
+
+fn a_range_export_starting_exactly_where_a_hit_ends_does_not_strike_it_at(latency: u32) {
+    // Bar 1 begins at tick 3840: a kick ends there as a hat begins and a crash is held through it.
+    let plan = drum_plan(vec![
+        note_on(3000, 36),
+        note_on(3000, 49),
+        note_off(3840, 36),
+        note_on(3840, 42),
+        note_off(4000, 42),
+        note_off(5000, 49),
+    ]);
+    let rig = rig_keyed_at(latency);
+    let mut renderer = plain_renderer(&plan);
+    renderer.attach_plugin(0, Box::new(rig.offline_instrument()));
+    let mut request = export_request(0.1);
+    request.range = Some(tabplayer_lib::export::audio::MeasureRange { first: 1, last: 1 });
+    let mut export = AudioExportRender::new(renderer, &plan, request).unwrap();
+    export_mix(&mut export).unwrap();
+    let mut want = vec![
+        (0, 'n', 42),
+        (0, 'n', 49),
+        ((4000 - 3840) * TICK, 'f', 42),
+        ((5000 - 3840) * TICK, 'f', 49),
+    ];
+    want.sort();
+    assert_eq!(notes_heard(&rig), want);
+    assert_eq!(
+        note_ons_of(&rig, 36),
+        0,
+        "the kick ended where the range starts"
+    );
+}
+
+#[test]
+fn a_range_export_starting_exactly_where_a_hit_ends_does_not_strike_it() {
+    for latency in LATENCIES {
+        a_range_export_starting_exactly_where_a_hit_ends_does_not_strike_it_at(latency);
+    }
+}
+
+/// Plays `frames` count-in frames as the device does before the music, the fake answering after every block.
+fn count_in(renderer: &mut Renderer, rig: &Rig, frames: usize) {
+    for n in 0..frames {
+        renderer.count_in_frame(0.0);
+        if n % BLOCK_FRAMES == BLOCK_FRAMES - 1 {
+            rig.settle();
+        }
+    }
+    rig.settle();
+}
+
+fn a_hit_struck_again_at_a_seek_sounds_with_the_first_music_frame_not_in_the_count_in_at(
+    latency: u32,
+) {
+    const COUNT_IN: usize = 1_000;
+    let rig = rig_keyed_at(latency);
+    let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    run(&mut renderer, Some(&rig), 5_000);
+    renderer.seek_tick(300.0);
+    count_in(&mut renderer, &rig, COUNT_IN);
+    run(&mut renderer, Some(&rig), 20_000);
+    let blocks = rig.helper.blocks();
+    let base = blocks
+        .iter()
+        .find(|b| b.epoch != blocks[0].epoch)
+        .map(|b| b.seq as usize * BLOCK_FRAMES)
+        .expect("the seek began a new epoch");
+    let strikes: Vec<usize> = heard(&rig)
+        .into_iter()
+        .filter(|h| h.1 == 'n' && h.0 >= base)
+        .map(|h| h.0 - base)
+        .collect();
+    assert_eq!(
+        strikes,
+        vec![COUNT_IN],
+        "the held hit is struck on the first music frame, after the count-in"
+    );
+    assert_eq!(rig.helper.sounding(), 1);
+    assert_eq!(rig.dropped(), 0);
+}
+
+#[test]
+fn a_hit_struck_again_at_a_seek_sounds_with_the_first_music_frame_not_in_the_count_in() {
+    for latency in LATENCIES {
+        a_hit_struck_again_at_a_seek_sounds_with_the_first_music_frame_not_in_the_count_in_at(
+            latency,
+        );
+    }
+}
+
+fn a_hit_struck_again_at_a_wrap_with_a_count_in_between_loops_sounds_with_the_music_at(
+    latency: u32,
+) {
+    const COUNT_IN: usize = 1_000;
+    let rig = rig_keyed_at(latency);
+    let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let mut out = Vec::new();
+    run_to(&mut renderer, &rig, 970.0, &mut out);
+    renderer.wrap_to_tick(300.0);
+    let wrap = out.len();
+    count_in(&mut renderer, &rig, COUNT_IN);
+    run(&mut renderer, Some(&rig), 5_000);
+    assert_eq!(
+        heard(&rig),
+        vec![(0, 'n', 36), (wrap, 'a', 9), (wrap + COUNT_IN, 'n', 36)],
+        "the release is the wrap's, the strike waits for the music"
+    );
+    assert_eq!(rig.helper.sounding(), 1);
+}
+
+#[test]
+fn a_hit_struck_again_at_a_wrap_with_a_count_in_between_loops_sounds_with_the_music() {
+    for latency in LATENCIES {
+        a_hit_struck_again_at_a_wrap_with_a_count_in_between_loops_sounds_with_the_music_at(
+            latency,
+        );
+    }
+}
+
+#[test]
+fn a_seek_into_a_held_hit_strikes_nothing_on_a_track_a_port_plays_and_does_when_the_port_is_gone() {
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36), note_on(1600, 38)]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let routed = MidiTap::new(&[0], &[(0, RouteSpec::lanes(0, 0, &[(9, 9)]))]);
+    assert!(renderer.replace_midi(routed).is_none());
+    assert!(renderer.midi_silences(0));
+    run(&mut renderer, Some(&rig), 2_000);
+    renderer.seek_tick(300.0);
+    run(&mut renderer, Some(&rig), 10_000);
+    assert_eq!(
+        heard(&rig),
+        vec![],
+        "the held hit is not struck on the instrument of a track a port plays, before or after the seek"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+    // Back on the speakers: the same seek strikes it.
+    renderer.replace_midi(MidiTap::new(&[0], &[]));
+    renderer.seek_tick(300.0);
+    run(&mut renderer, Some(&rig), 128);
+    assert_eq!(kinds_of(&rig), vec![('n', 36)]);
+}
+
+#[test]
+fn an_edit_hand_over_before_the_first_frame_after_a_seek_still_strikes_the_held_hit_once() {
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+    let mut old = instrument_renderer(&rig, &plan);
+    run(&mut old, Some(&rig), 5_000);
+    old.seek_tick(300.0);
+    // The edit lands before any frame of the new position: the strike is still owed, and the instrument that carries on
+    // gets it once, from the renderer that takes over.
+    let mut next = instrument_renderer(&rig, &plan);
+    hand_over(&mut next, &mut old);
+    run(&mut next, Some(&rig), 5_000);
+    let blocks = rig.helper.blocks();
+    let first_epoch = blocks[0].epoch;
+    let after: Vec<(char, u8)> = heard_in(blocks.iter().filter(|b| b.epoch != first_epoch))
+        .into_iter()
+        .map(|(_, kind, key)| (kind, key))
+        .collect();
+    assert_eq!(
+        after,
+        vec![('n', 36)],
+        "struck once, and held to its own end"
+    );
+    assert_eq!(rig.helper.sounding(), 1);
+    assert_eq!(rig.dropped(), 0);
+}
+
+// ---- a hand-over or a map change while a strike is still owed ---------------------------------------------------------
+
+/// The notes (no AllNotesOff) the fake received as (kind, key), in the order they arrived.
+fn note_kinds(rig: &Rig) -> Vec<(char, u8)> {
+    heard(rig)
+        .into_iter()
+        .filter(|h| h.1 != 'a')
+        .map(|h| (h.1, h.2))
+        .collect()
+}
+
+fn a_hand_over_after_a_seek_and_a_count_in_still_ends_the_hit_it_struck_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
+    let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+    let mut old = instrument_renderer(&rig, &plan);
+    run(&mut old, Some(&rig), 5_000);
+    old.seek_tick(300.0);
+    count_in(&mut old, &rig, 1_000);
+    // The edit lands while the count-in runs: the instrument is live, holds nothing, and the strike is still owed.
+    let mut next = instrument_renderer(&rig, &plan);
+    hand_over(&mut next, &mut old);
+    run(&mut next, Some(&rig), 70_000);
+    assert_eq!(
+        note_kinds(&rig),
+        vec![('n', 36), ('n', 36), ('f', 36)],
+        "latency {latency}: struck again once, and its own NoteOff ends it"
+    );
+    assert_eq!(rig.helper.sounding(), 0, "latency {latency}");
+    assert_eq!(rig.dropped(), 0);
+}
+
+#[test]
+fn a_hand_over_after_a_seek_and_a_count_in_still_ends_the_hit_it_struck() {
+    for latency in LATENCIES {
+        a_hand_over_after_a_seek_and_a_count_in_still_ends_the_hit_it_struck_at(latency);
+    }
+}
+
+fn a_hand_over_after_a_wrap_still_ends_the_hit_it_struck_at(latency: u32, count_in_frames: usize) {
+    let rig = rig_keyed_at(latency);
+    let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+    let mut old = instrument_renderer(&rig, &plan);
+    let mut out = Vec::new();
+    run_to(&mut old, &rig, 970.0, &mut out);
+    old.wrap_to_tick(300.0);
+    if count_in_frames > 0 {
+        count_in(&mut old, &rig, count_in_frames);
+    }
+    let mut next = instrument_renderer(&rig, &plan);
+    hand_over(&mut next, &mut old);
+    run(&mut next, Some(&rig), 70_000);
+    assert_eq!(
+        note_kinds(&rig),
+        vec![('n', 36), ('n', 36), ('f', 36)],
+        "latency {latency}, count-in {count_in_frames}"
+    );
+    assert_eq!(rig.helper.sounding(), 0, "latency {latency}");
+    assert_eq!(rig.dropped(), 0);
+}
+
+#[test]
+fn a_hand_over_after_a_wrap_still_ends_the_hit_it_struck() {
+    for latency in LATENCIES {
+        for count_in_frames in [0, 1_000] {
+            a_hand_over_after_a_wrap_still_ends_the_hit_it_struck_at(latency, count_in_frames);
+        }
+    }
+}
+
+fn a_drum_map_change_while_a_strike_is_owed_still_ends_the_hit_it_struck_at(
+    latency: u32,
+    how: &str,
+) {
+    let rig = rig_keyed_at(latency);
+    let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+    let before = map_settings(&[(36, Some(60))]);
+    let after = map_settings(&[(36, Some(61))]);
+    let mut renderer = mapped_renderer(&rig, &plan, &before);
+    let mut out = Vec::new();
+    match how {
+        "seek and count-in" => {
+            run(&mut renderer, Some(&rig), 5_000);
+            renderer.seek_tick(300.0);
+            count_in(&mut renderer, &rig, 1_000);
+        }
+        _ => {
+            run_to(&mut renderer, &rig, 970.0, &mut out);
+            renderer.wrap_to_tick(300.0);
+        }
+    }
+    // The map changes (a pause, or the count-in, is going on) before the first music frame.
+    renderer.set_mix(instrument_mix(&rig, &plan, &after));
+    run(&mut renderer, Some(&rig), 70_000);
+    assert_eq!(
+        note_kinds(&rig),
+        vec![('n', 60), ('n', 61), ('f', 61)],
+        "latency {latency}, {how}: struck again on the new key, and ended on it"
+    );
+    assert_eq!(rig.helper.sounding(), 0, "latency {latency}, {how}");
+    assert_eq!(rig.dropped(), 0);
+}
+
+#[test]
+fn a_drum_map_change_while_a_strike_is_owed_still_ends_the_hit_it_struck() {
+    for latency in LATENCIES {
+        for how in ["seek and count-in", "wrap"] {
+            a_drum_map_change_while_a_strike_is_owed_still_ends_the_hit_it_struck_at(latency, how);
+        }
+    }
+}
+
+#[test]
+fn a_second_seek_or_wrap_while_a_strike_is_owed_strikes_once_at_the_last_position() {
+    for latency in LATENCIES {
+        for how in ["seek", "wrap", "wrap then seek"] {
+            let rig = rig_keyed_at(latency);
+            let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+            let mut old = instrument_renderer(&rig, &plan);
+            let mut out = Vec::new();
+            match how {
+                "seek" => {
+                    run(&mut old, Some(&rig), 5_000);
+                    old.seek_tick(300.0);
+                    count_in(&mut old, &rig, 500);
+                    old.seek_tick(800.0);
+                }
+                _ => {
+                    run_to(&mut old, &rig, 970.0, &mut out);
+                    old.wrap_to_tick(300.0);
+                    count_in(&mut old, &rig, 500);
+                    if how == "wrap" {
+                        old.wrap_to_tick(800.0);
+                    } else {
+                        old.seek_tick(800.0);
+                    }
+                }
+            }
+            count_in(&mut old, &rig, 500);
+            let mut next = instrument_renderer(&rig, &plan);
+            hand_over(&mut next, &mut old);
+            run(&mut next, Some(&rig), 50_000);
+            assert_eq!(
+                note_kinds(&rig),
+                vec![('n', 36), ('n', 36), ('f', 36)],
+                "latency {latency}, {how}: the first position's strike is never sent"
+            );
+            assert_eq!(rig.helper.sounding(), 0, "latency {latency}, {how}");
+            assert_eq!(rig.dropped(), 0);
+        }
+    }
+}
+
+#[test]
+fn a_stop_while_a_strike_is_owed_strikes_nothing_and_holds_nothing() {
+    for latency in LATENCIES {
+        for handed_over in [false, true] {
+            let rig = rig_keyed_at(latency);
+            let plan = drum_plan(vec![note_on(0, 36), note_off(1500, 36)]);
+            let mut old = instrument_renderer(&rig, &plan);
+            run(&mut old, Some(&rig), 5_000);
+            old.seek_tick(300.0);
+            count_in(&mut old, &rig, 500);
+            let mut next = instrument_renderer(&rig, &plan);
+            let renderer = if handed_over {
+                hand_over(&mut next, &mut old);
+                &mut next
+            } else {
+                &mut old
+            };
+            renderer.begin_tail();
+            run(renderer, Some(&rig), 20_000);
+            assert_eq!(
+                note_kinds(&rig),
+                vec![('n', 36)],
+                "latency {latency}, handed over {handed_over}: only the first pass's strike"
+            );
+            assert_eq!(rig.helper.sounding(), 0, "latency {latency}");
+            assert_eq!(rig.dropped(), 0);
+        }
+    }
+}
+
+#[test]
+fn a_hand_over_while_a_strike_is_owed_does_not_strike_a_hit_that_ends_where_the_position_begins() {
+    for latency in LATENCIES {
+        let rig = rig_keyed_at(latency);
+        let mut old = instrument_renderer(&rig, &boundary_plan());
+        run(&mut old, Some(&rig), 20_000);
+        old.seek_tick(300.0);
+        count_in(&mut old, &rig, 1_000);
+        let mut next = instrument_renderer(&rig, &boundary_plan());
+        hand_over(&mut next, &mut old);
+        run(&mut next, Some(&rig), 30_000);
+        // The kick (36) and the first hat (46) end exactly at 300 and are not struck again; the hat (42) is held through it.
+        assert_eq!(note_ons_of(&rig, 36), 1, "latency {latency}");
+        assert_eq!(note_ons_of(&rig, 46), 1, "latency {latency}");
+        assert_eq!(note_ons_of(&rig, 42), 2, "latency {latency}");
+        assert_eq!(rig.helper.sounding(), 0, "latency {latency}");
+    }
+}
+
+/// Insert level: the strike a seek owes and the retain a hand-over makes count each key's strikes once between them.
+#[test]
+fn a_retain_and_the_strike_after_it_count_the_same_strikes_once_at_the_insert() {
+    let rig = rig();
+    let mut insert = rig.instrument();
+    drive(&mut insert, &rig, 0, 10, &mut none);
+    insert.flush();
+    drive(&mut insert, &rig, 10, 300, &mut none);
+    // The plan holds key 40 twice and key 41 once at the position.
+    let mut wanted = [[0u8; 128]; 16];
+    wanted[0][40] = 2;
+    wanted[0][41] = 1;
+    insert.retain_notes(&wanted);
+    insert.restrike_note(0, 40, 100, 2);
+    insert.restrike_note(0, 41, 100, 1);
+    drive(&mut insert, &rig, 310, 700, &mut |m, insert| match m {
+        400 | 500 => insert.stage_note(false, 0, 40, 0),
+        600 => insert.stage_note(false, 0, 41, 0),
+        _ => {}
+    });
+    let events = rig.helper.events();
+    let sent: Vec<(char, u8)> = events
+        .iter()
+        .filter_map(|(_, event)| match event {
+            MidiEvent::NoteOn { key, .. } => Some(('n', *key)),
+            MidiEvent::NoteOff { key, .. } => Some(('f', *key)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        vec![('n', 40), ('n', 41), ('f', 40), ('f', 41)],
+        "one NoteOn and one NoteOff a key, the first of key 40's two ends only its count"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+    assert_eq!(rig.dropped(), 0);
+}
+
+/// Insert level: strikes the block has no room for are dropped and counted, and their NoteOffs find nothing to end and
+/// cannot cut a strike that was sent.
+#[test]
+fn a_strike_with_no_room_after_a_retain_is_dropped_and_leaves_nothing_stuck() {
+    let rig = rig();
+    let mut insert = rig.instrument();
+    drive(&mut insert, &rig, 0, 10, &mut none);
+    insert.flush();
+    drive(&mut insert, &rig, 10, 300, &mut none);
+    let mut wanted = [[0u8; 128]; 16];
+    for key in 0..70 {
+        wanted[0][key] = 1;
+    }
+    insert.retain_notes(&wanted);
+    for key in 0..70u8 {
+        insert.restrike_note(0, key, 100, 1);
+    }
+    // Every NoteOff of the plan comes, a few a block.
+    drive(&mut insert, &rig, 310, 1_500, &mut |m, insert| {
+        if m >= 400 && (m - 400) % 8 == 0 && (m - 400) / 8 < 70 {
+            insert.stage_note(false, 0, ((m - 400) / 8) as u8, 0);
+        }
+    });
+    assert_eq!(rig.dropped(), 7, "the block took 63 of the 70 strikes");
+    assert_eq!(
+        rig.helper.sounding(),
+        0,
+        "every strike that was sent is ended by the NoteOff of its own key"
+    );
+}
 fn the_end_of_the_score_releases_what_an_instrument_holds_at(latency: u32) {
     let rig = rig_keyed_at(latency);
     let plan = drum_plan(vec![note_on(100, 36), note_off(5000, 36)]);
@@ -2202,7 +2913,8 @@ fn a_mix_that_adds_or_drops_an_instrument_mid_play_starts_and_stops_the_notes_wi
 
     // An instrument, then an effect on another helper, with the hit held across the swap: the instrument hears nothing
     // more, not the NoteOff either (it has left; its helper is shut down once the slot has moved on), and is sent no
-    // block once its fade is over.
+    // block once its fade is over. It is deliberately not sent a release: an instrument that cuts at a NoteOff would step
+    // in the middle of the fade (`switching_a_slot_from_an_instrument_to_an_effect_is_click_free...`).
     let instrument = rig_keyed();
     let effect = rig_with(Some(0.5));
     let mut renderer = instrument_renderer(&instrument, &plan);
@@ -2257,12 +2969,13 @@ fn a_renderer_frame_loop_that_dispatches_notes_to_an_instrument_never_touches_th
     let mut renderer = instrument_renderer(&rig, &plan);
     let mut buffer = [[0.0f32; 2]; BLOCK_FRAMES];
     HEAP_OPERATIONS.with(|n| n.set(0));
-    // 40 hits of 20 ticks: 40,000 frames of dispatch, a loop wrap and the tail.
+    // 40 hits of 20 ticks: 40,000 frames of dispatch, a loop wrap into a held hit and the tail.
     for block in 0..320 {
         COUNT_HEAP.with(|flag| flag.set(true));
         renderer.render_into(&mut buffer);
         if block == 160 {
-            renderer.wrap_to_tick(0.0);
+            // Into the first hit (ticks 20 to 35): the next frame strikes it again.
+            renderer.wrap_to_tick(25.0);
         }
         if block == 300 {
             renderer.begin_tail();
@@ -3171,6 +3884,24 @@ fn expected_strikes(plan: &PlaybackPlan, rows: &[(u8, Option<u8>)], from: f64, t
         .collect()
 }
 
+/// A note of a random plan: where it starts and ends in ticks and the key (and articulation id) it is written with.
+type PlanNote = (u32, u32, u8, Option<u8>);
+
+/// The keys a seek or a wrap to `at` strikes again under `rows`: one for each key some note holds there, in key order.
+/// A note is held at a tick iff it starts before it and ends after it, as the built-in kit has it, so a note that ends
+/// exactly at `at` is not held and one that starts exactly at `at` is not either (the first frame strikes that).
+fn expected_held(notes: &[PlanNote], rows: &[(u8, Option<u8>)], at: f64) -> Vec<u8> {
+    let mut held = [false; 128];
+    for &(start, end, key, id) in notes {
+        if f64::from(start) < at && f64::from(end) > at {
+            if let Some(key) = reference_key(rows, key, id) {
+                held[usize::from(key)] = true;
+            }
+        }
+    }
+    (0..128u8).filter(|&key| held[usize::from(key)]).collect()
+}
+
 fn random_rows(rng: &mut Rng) -> Vec<(u8, Option<u8>)> {
     let mut rows: Vec<(u8, Option<u8>)> = Vec::new();
     for &(id, _) in &drum_map::SOUNDS {
@@ -3190,8 +3921,9 @@ fn random_rows(rng: &mut Rng) -> Vec<(u8, Option<u8>)> {
     rows
 }
 
-fn random_plan(rng: &mut Rng) -> PlaybackPlan {
+fn random_plan(rng: &mut Rng) -> (PlaybackPlan, Vec<PlanNote>) {
     let mut midi = Vec::new();
+    let mut notes = Vec::new();
     for _ in 0..30 {
         let (id, key) = drum_map::SOUNDS[rng.below(drum_map::SOUNDS.len() as u64) as usize];
         let on = 10 * rng.below(180) as u32;
@@ -3199,12 +3931,14 @@ fn random_plan(rng: &mut Rng) -> PlaybackPlan {
         if rng.below(2) == 0 || id == key {
             midi.push(note_on(on, key));
             midi.push(note_off(off, key));
+            notes.push((on, off, key, None));
         } else {
             midi.push(id_on(on, key, id));
             midi.push(id_off(off, key, id));
+            notes.push((on, off, key, Some(id)));
         }
     }
-    drum_plan(midi)
+    (drum_plan(midi), notes)
 }
 
 fn over_changing_maps_seeks_wraps_and_hand_overs_the_keys_struck_are_the_reference_keys_and_nothing_sticks_at(
@@ -3212,7 +3946,7 @@ fn over_changing_maps_seeks_wraps_and_hand_overs_the_keys_struck_are_the_referen
 ) {
     for seed in 1..=6u64 {
         let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
-        let plan = random_plan(&mut rng);
+        let (plan, notes) = random_plan(&mut rng);
         let mut rows = random_rows(&mut rng);
         let rig = rig_keyed_at(latency);
         let mut renderer = mapped_renderer(&rig, &plan, &map_settings(&rows));
@@ -3220,48 +3954,118 @@ fn over_changing_maps_seeks_wraps_and_hand_overs_the_keys_struck_are_the_referen
         let mut expected: Vec<u8> = Vec::new();
         let mut from = renderer.position().tick;
         let mut log = Vec::new();
+        // Where the strikes of the last seek or wrap begin in `expected` and at which tick, until a frame is rendered. They
+        // are sent with the first frame, under the map in force then, and a seek, a mix or a hand-over before it changes them.
+        let mut pending: Option<(usize, f64)>;
+        // The tick of a seek or a wrap: on a multiple of ten, where a hit of the plan may end or begin, or between.
+        fn target(rng: &mut Rng) -> f64 {
+            10.0 * rng.below(150) as f64 + if rng.below(2) == 0 { 0.0 } else { 5.0 }
+        }
+        fn restrike(
+            expected: &mut Vec<u8>,
+            pending: &mut Option<(usize, f64)>,
+            notes: &[PlanNote],
+            rows: &[(u8, Option<u8>)],
+            at: Option<f64>,
+        ) {
+            let at = at.or(pending.map(|(_, at)| at));
+            if let Some((mark, _)) = pending.take() {
+                expected.truncate(mark);
+            }
+            if let Some(at) = at {
+                *pending = Some((expected.len(), at));
+                expected.extend(expected_held(notes, rows, at));
+            }
+        }
         for step in 0..10 {
             // Play for a while; what the plan strikes in the window is what is struck, under the map in force.
+            let mut counted_in = false;
             if rng.below(4) == 0 && step > 0 {
                 // A loop wrap: play up to a tick, and go back to an earlier one.
                 let end = from + 40.0 + rng.below(200) as f64 + 0.3;
+                pending = None;
+                let before = out.len();
                 run_to(&mut renderer, &rig, end, &mut out);
+                // To the end of the block being staged, so what the plan staged in it has been sent when a seek flushes: the
+                // model counts every event the plan sends, and a flush drops a block that is not complete.
+                let pad = (BLOCK_FRAMES - (out.len() - before) % BLOCK_FRAMES) % BLOCK_FRAMES;
+                out.extend(run(&mut renderer, Some(&rig), pad));
                 let reached = renderer.position().tick;
                 expected.extend(expected_strikes(&plan, &rows, from, reached));
-                let start = 10.0 * rng.below(150) as f64 + 5.0;
+                let start = target(&mut rng);
                 renderer.wrap_to_tick(start);
+                restrike(&mut expected, &mut pending, &notes, &rows, Some(start));
                 from = renderer.position().tick;
                 log.push(format!("wrap to {start}"));
+                // A count-in between loops keeps the insert live with nothing held, so a mix or a hand-over that follows
+                // finds the strike still owed. Whole blocks, so the events of the plan are staged on the same blocks as
+                // before (a flush drops the block being staged, and the model counts every event it sent).
+                if rng.below(2) == 0 {
+                    count_in(
+                        &mut renderer,
+                        &rig,
+                        BLOCK_FRAMES * (1 + rng.below(3) as usize),
+                    );
+                    log.push("count-in".to_string());
+                    counted_in = true;
+                }
             } else {
                 let blocks = 20 + rng.below(100) as usize;
+                pending = None;
                 out.extend(run(&mut renderer, Some(&rig), blocks * BLOCK_FRAMES));
                 let reached = renderer.position().tick;
                 expected.extend(expected_strikes(&plan, &rows, from, reached));
                 from = reached;
             }
-            match rng.below(4) {
-                0 => {
-                    // The map is changed by a mix while notes are held.
-                    rows = random_rows(&mut rng);
-                    renderer.set_mix(instrument_mix(&rig, &plan, &map_settings(&rows)));
-                    log.push(format!("mix {rows:?}"));
+            loop {
+                // After a count-in the strike is still owed: the next action is a mix or a hand-over, which retain the keys the
+                // plan holds, before the first music frame.
+                let action = if counted_in {
+                    2 * rng.below(2)
+                } else {
+                    rng.below(4)
+                };
+                counted_in = false;
+                match action {
+                    0 => {
+                        // The map is changed by a mix while notes are held.
+                        rows = random_rows(&mut rng);
+                        renderer.set_mix(instrument_mix(&rig, &plan, &map_settings(&rows)));
+                        restrike(&mut expected, &mut pending, &notes, &rows, None);
+                        log.push(format!("mix {rows:?}"));
+                    }
+                    1 => {
+                        let tick = target(&mut rng);
+                        renderer.seek_tick(tick);
+                        // A seek straight after a wrap or a seek, with no frame between, discards their unsent strikes.
+                        restrike(&mut expected, &mut pending, &notes, &rows, Some(tick));
+                        from = renderer.position().tick;
+                        log.push(format!("seek {tick}"));
+                        if rng.below(2) == 0 {
+                            count_in(
+                                &mut renderer,
+                                &rig,
+                                BLOCK_FRAMES * (1 + rng.below(3) as usize),
+                            );
+                            log.push("count-in".to_string());
+                            counted_in = true;
+                        }
+                    }
+                    2 => {
+                        // An edit hand-over to a renderer of the same plan, whose map is another.
+                        rows = random_rows(&mut rng);
+                        let mut next = mapped_renderer(&rig, &plan, &map_settings(&rows));
+                        hand_over(&mut next, &mut renderer);
+                        renderer = next;
+                        restrike(&mut expected, &mut pending, &notes, &rows, None);
+                        from = renderer.position().tick;
+                        log.push(format!("hand-over {rows:?}"));
+                    }
+                    _ => {}
                 }
-                1 => {
-                    let tick = 10.0 * rng.below(150) as f64 + 5.0;
-                    renderer.seek_tick(tick);
-                    from = renderer.position().tick;
-                    log.push(format!("seek {tick}"));
+                if !counted_in {
+                    break;
                 }
-                2 => {
-                    // An edit hand-over to a renderer of the same plan, whose map is another.
-                    rows = random_rows(&mut rng);
-                    let mut next = mapped_renderer(&rig, &plan, &map_settings(&rows));
-                    hand_over(&mut next, &mut renderer);
-                    renderer = next;
-                    from = renderer.position().tick;
-                    log.push(format!("hand-over {rows:?}"));
-                }
-                _ => {}
             }
         }
         // Play on until every note of the plan has ended.

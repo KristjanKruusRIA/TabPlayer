@@ -1369,8 +1369,8 @@ fn a_map_edit_during_playback_only_remaps_and_the_next_hit_goes_out_on_the_new_k
     let later = rig.messages();
     assert_eq!(
         notes_of(&later),
-        vec![[0x99, 52, 90], [0x89, 52, 0]],
-        "the next snare hit is on the new key, and the score's old note end finds nothing to end"
+        vec![[0x99, 52, 90]],
+        "the next snare hit is on the new key; the first note end that follows is owed to the strike the new key never got, so it ends nothing, and the hit is ended by the later one or by stop (as on a hosted instrument)"
     );
     all.extend(later);
     rig.command(TransportCommand::Stop { generation: 1 });

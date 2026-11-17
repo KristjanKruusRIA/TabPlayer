@@ -5,7 +5,7 @@ import { defaultMix } from '../document-settings';
 import type { ChannelMix, DrumMapRef, EditCommand } from '../edit-types';
 import { standardPercussionCatalog } from '../editor/percussion-catalog';
 import { drumPieces, instrumentHits, percussionInstruments, type Instrument } from '../instruments/drum-kit';
-import { useI18n, type MessageKey } from '../i18n';
+import { catalogs, useI18n, type MessageKey } from '../i18n';
 import { BusyFieldset, CommitField, Segmented, busyGuard, busySelect } from '../ui';
 import maps from './drum-maps.json';
 import { SILENT, drumMapPresets, resolveDrumMap, withDrumMap } from './drum-map';
@@ -83,16 +83,28 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
   const tables = resolveDrumMap(map, true), base = resolveDrumMap({ preset: presetId }, true);
   const keyOf = (id: number): number | null => tables.byId[id] < 128 ? tables.byId[id] : null;
   const changed = new Set(maps.sounds.map(([id]) => id).filter(id => tables.byId[id] !== base.byId[id]));
+  /** The sound and piece names in the shown language; an id the catalogue of translations does not know keeps its English name. Display only: a map file holds ids. */
+  const say = (key: string, fallback: string): string => t(key as MessageKey) || fallback;
+  /** A layout's paragraph about where its numbers come from, in the shown language: found by its English text, so no layout id names a message. */
+  const sourceText = (english: string): string => {
+    const key = Object.keys(catalogs.en).find(name => name.startsWith('drum_map.source_text_') && (catalogs.en as Record<string, string>)[name] === english);
+    return key ? say(key, english) : english;
+  };
+  const localized = (item: Row, groupId: string): Row => {
+    const name = say(`drum_sound.${item.id}`, item.name), piece = item.piece ? say(`drum_piece.${groupId}`, item.piece) : '';
+    return { ...item, piece, name, sound: piece ? `${piece} ${name}` : name };
+  };
+  const everything = groups().map(group => ({ ...group, label: group.label ? say(`drum_piece.${group.id}`, group.label) : '', rows: group.rows.map(item => localized(item, group.id)) }));
   const usedSet = new Set(used);
   const silent = used.filter(id => tables.byId[id] === SILENT).length;
-  const shown = view === 'track' ? groups().map(group => ({ ...group, rows: group.rows.filter(row => usedSet.has(row.id)) })).filter(group => group.rows.length) : groups();
+  const shown = view === 'track' ? everything.map(group => ({ ...group, rows: group.rows.filter(row => usedSet.has(row.id)) })).filter(group => group.rows.length) : everything;
   const label = (id: string): string => {
     const entry = presets.find(item => item.id === id);
     if (id === 'gm') return t('drum_map.preset_gm');
     const name = entry?.name ?? id;
     return entry?.state === 'unverified' ? t('drum_map.preset_unchecked', { name }) : name;
   };
-  const source = !known ? '' : presetId === 'gm' ? t('drum_map.source_gm') : preset.source ?? '';
+  const source = !known ? '' : presetId === 'gm' ? t('drum_map.source_gm') : sourceText(preset.source ?? '');
   const unverified = known && presetId !== 'gm' && preset.state === 'unverified';
   // An unchecked layout gets one short line; the paragraph the data carries about where its numbers come from sits in a disclosure.
   const status = !known ? t('drum_map.status_unknown')
@@ -141,7 +153,7 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
   const row = (item: Row, flat: boolean) => {
     const key = keyOf(item.id), isChanged = changed.has(item.id), states = [isChanged ? t('drum_map.sr_changed') : '', key === null ? t('drum_map.sr_none') : ''].filter(Boolean);
     const named = states.length ? t('drum_map.key_of_state', { sound: item.sound, state: states.join(', ') }) : t('drum_map.key_of', { sound: item.sound });
-    const same = key !== null && item.id !== item.plain && key === keyOf(item.plain) ? groups().flatMap(group => group.rows).find(other => other.id === item.plain) : undefined;
+    const same = key !== null && item.id !== item.plain && key === keyOf(item.plain) ? everything.flatMap(group => group.rows).find(other => other.id === item.plain) : undefined;
     return <li key={item.id} className="drum-map-row" data-changed={isChanged || undefined}>
       <span className="drum-map-sound"><span>{flat && item.piece ? `${item.piece} · ${item.name}` : item.name}</span>{same && <span className="muted drum-map-same">{t('drum_map.same_key', { sound: same.sound })}</span>}</span>
       <CommitField hideLabel label={named} value={keyText(key)} target={trackId} busy={busy} onCommit={text => {
@@ -177,7 +189,7 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
       </select>
     </div>
     <p className="muted">{status}</p>
-    {unverified && preset.source && <details className="drum-map-source"><summary>{t('drum_map.source_title')}</summary><p className="muted">{preset.source}</p></details>}
+    {unverified && preset.source && <details className="drum-map-source"><summary>{t('drum_map.source_title')}</summary><p className="muted">{source}</p></details>}
     <details className="drum-map-keys" data-escape-closes onKeyDown={stepOut}><summary>{t('drum_map.keys')}</summary>
       <Segmented label={t('drum_map.view')} value={view} disabled={busy} onChange={setView} options={[
         { value: 'track', label: t('drum_map.view_track', { count: used.length }) },

@@ -491,6 +491,10 @@ struct Lane {
     drum: Option<DrumMap>,
     /// Note-ons sent and not yet released, by the key actually sent, never the plan's.
     held: [u8; 128],
+    /// Strikes the plan holds that were never sent (no room in the staging area), by the key sent. Their note-offs are
+    /// spent here before they reach `held`, so one cannot end a later strike of the key early. Forgotten wherever `held`
+    /// is cleared or set from the plan.
+    unsent: [u8; 128],
     /// Keys whose note-off could not be staged and is still owed.
     retry_off: u128,
     /// Something has sounded since the last panic, so the channel needs one when it stops.
@@ -522,6 +526,7 @@ impl Lane {
             knock: spec.knock && plan_channel == 9,
             drum: spec.drum_map.filter(|_| !(spec.knock && plan_channel == 9)),
             held: [0; 128],
+            unsent: [0; 128],
             retry_off: 0,
             dirty: false,
             release_pending: false,
@@ -945,6 +950,8 @@ impl MidiTap {
                 }
             }
         }
+        // Everything is let go: no strike is counted against a release that is still to come.
+        self.lanes[lane].unsent = [0; 128];
         true
     }
     /// Sustain up, and when `full` all notes off, all sound off, reset all controllers and the wheel centred, on
@@ -1163,6 +1170,7 @@ impl MidiTap {
         for lane in &mut self.lanes {
             if let Some(before) = old.lanes.iter().find(|o| o.same_place(lane)) {
                 lane.held = before.held;
+                lane.unsent = before.unsent;
                 lane.retry_off = before.retry_off;
                 lane.dirty = before.dirty;
                 lane.release_pending = before.release_pending;
@@ -1177,6 +1185,9 @@ impl MidiTap {
                     for key in 0..128usize {
                         if lane.held[key] > 0 {
                             lane.retry_off |= 1u128 << key;
+                            // The plan still holds these strikes and ends them later on a lane that plays on: those
+                            // note-offs are owed to strikes given up here, not to the next strike of the key.
+                            lane.unsent[key] = lane.unsent[key].saturating_add(lane.held[key]);
                             lane.held[key] = 0;
                         }
                     }
@@ -1290,12 +1301,16 @@ impl MidiTap {
                         self.lanes[lane].retry_off &= !(1u128 << k);
                     } else {
                         // `stage` counted the loss of the note-off; the note-on is lost with it, and is not counted again.
+                        // The plan still ends this strike later, and that release must not end another strike of the key.
+                        self.lanes[lane].unsent[k] = self.lanes[lane].unsent[k].saturating_add(1);
                         return;
                     }
                 }
                 if self.stage(slot, 3, [0x90 | chan, k as u8, (*velocity).max(1)], false) {
                     self.lanes[lane].held[k] = self.lanes[lane].held[k].saturating_add(1);
                     self.lanes[lane].dirty = true;
+                } else {
+                    self.lanes[lane].unsent[k] = self.lanes[lane].unsent[k].saturating_add(1);
                 }
             }
             PlanMidiEvent::NoteOff {
@@ -1309,7 +1324,10 @@ impl MidiTap {
                     return;
                 };
                 let k = usize::from(sent & 127);
-                if self.lanes[lane].held[k] > 0 {
+                // The release of a strike that was never sent ends nothing.
+                if self.lanes[lane].unsent[k] > 0 {
+                    self.lanes[lane].unsent[k] -= 1;
+                } else if self.lanes[lane].held[k] > 0 {
                     self.lanes[lane].held[k] -= 1;
                     // Overlapping strikes of one key share one note-off, sent when the last of them ends.
                     if self.lanes[lane].held[k] == 0
@@ -1523,6 +1541,10 @@ impl MidiTap {
             for key in 0..128usize {
                 let wanted = self.scan[lane].held[key];
                 let held = self.lanes[lane].held[key];
+                // Where the plan holds the key more often than the lane sent it (a silent row given a key, or a row moved
+                // onto a key another holds), the plan's later note-offs for the strikes never sent are owed here, so they end
+                // nothing. Computed afresh from the plan for every key: a shortfall counted under the old map is dropped.
+                self.lanes[lane].unsent[key] = wanted.saturating_sub(held);
                 if held <= wanted {
                     continue;
                 }
@@ -1538,6 +1560,8 @@ impl MidiTap {
     /// Strikes again the keys the score holds at the position `lane` was just stated at, by the keys the port is sent.
     fn restrike(&mut self, lane: usize) {
         let (slot, chan) = (self.lanes[lane].slot, self.lanes[lane].chan);
+        // The lane was just released and stated again: what is counted now is what the plan holds at this position.
+        self.lanes[lane].unsent = [0; 128];
         for key in 0..128usize {
             if self.scan[lane].held[key] == 0 {
                 continue;
@@ -1548,6 +1572,7 @@ impl MidiTap {
                     self.lanes[lane].retry_off &= !(1u128 << key);
                 } else {
                     // Counted by `stage`; the strike waits behind the owed note-off and is not counted twice.
+                    self.lanes[lane].unsent[key] = self.scan[lane].held[key];
                     continue;
                 }
             }
@@ -1555,6 +1580,8 @@ impl MidiTap {
             if self.stage(slot, 3, [0x90 | chan, key as u8, velocity], false) {
                 self.lanes[lane].held[key] = self.scan[lane].held[key];
                 self.lanes[lane].dirty = true;
+            } else {
+                self.lanes[lane].unsent[key] = self.scan[lane].held[key];
             }
         }
     }
@@ -3023,6 +3050,35 @@ mod tests {
     }
 
     #[test]
+    fn the_plans_release_of_a_strike_given_up_at_a_hand_over_does_not_end_a_newer_strike() {
+        let events = vec![drum_on(36)];
+        let mut old = drum_tap(&[(38, Some(51))]);
+        old.resync(&events, &[0], 1);
+        sent(&mut old);
+        old.lanes[0].release_pending = true;
+        old.retry_pending = true;
+        let mut new = drum_tap(&[(38, Some(51))]);
+        new.adopt(Some(&mut old));
+        new.service();
+        assert_eq!(sent(&mut new), vec![vec![0x89, 36, 0]]);
+        // The lane plays on: a new strike of the key is sounding.
+        new.event(0, &drum_on(36));
+        assert_eq!(sent(&mut new), vec![vec![0x99, 36, 90]]);
+        // The plan's release of the first strike, which the hand-over gave up, ends nothing.
+        new.event(0, &drum_off(36));
+        let said = sent(&mut new);
+        assert!(
+            said.is_empty(),
+            "the earlier strike's release ended the newer one: {said:?}"
+        );
+        assert_eq!(new.held_notes(0), 1);
+        // The newer strike's own release ends it.
+        new.event(0, &drum_off(36));
+        assert_eq!(sent(&mut new), vec![vec![0x89, 36, 0]]);
+        assert_eq!(new.held_notes(0), 0);
+    }
+
+    #[test]
     fn a_loss_is_counted_once() {
         let mut tap = MidiTap::new(&[0], &[(0, spec(0, 0))]);
         tap.resync(&[], &[], 0);
@@ -3051,5 +3107,179 @@ mod tests {
         let before = tap.dropped;
         tap.restrike(0);
         assert_eq!(tap.dropped - before, 1, "one loss, one count");
+    }
+    /// Fills the staging area so the next message finds no room.
+    fn fill_staging(tap: &mut MidiTap) {
+        while tap.staging.len() < STAGE_CAPACITY {
+            tap.staging.push(message(1));
+        }
+    }
+
+    #[test]
+    fn the_note_off_of_a_strike_that_was_never_sent_does_not_end_a_later_strike_of_the_key() {
+        let mut tap = MidiTap::new(&[0], &[(0, spec(0, 0))]);
+        tap.resync(&[], &[], 0);
+        // The first strike of key 60 finds no room and is dropped; the second is sent.
+        fill_staging(&mut tap);
+        tap.event(0, &on(60, 90));
+        tap.staging.clear();
+        tap.event(0, &on(60, 90));
+        assert_eq!(sent(&mut tap), vec![vec![0x90, 60, 90]]);
+        // The dropped strike's release comes first and has nothing to end.
+        tap.event(0, &off(60));
+        assert!(
+            sent(&mut tap).is_empty(),
+            "the second strike is still sounding"
+        );
+        assert_eq!(tap.held_notes(0), 1);
+        tap.event(0, &off(60));
+        assert_eq!(sent(&mut tap), vec![vec![0x80, 60, 0]]);
+        assert_eq!(tap.held_notes(0), 0);
+        // Nothing is left over for the next strike.
+        tap.event(0, &on(60, 90));
+        tap.event(0, &off(60));
+        assert_eq!(sent(&mut tap), vec![vec![0x90, 60, 90], vec![0x80, 60, 0]]);
+    }
+
+    #[test]
+    fn a_strike_dropped_behind_an_owed_note_off_owes_nothing_to_the_next_release() {
+        let mut tap = MidiTap::new(&[0], &[(0, spec(0, 0))]);
+        tap.resync(&[], &[], 0);
+        tap.event(0, &on(60, 90));
+        sent(&mut tap);
+        fill_staging(&mut tap);
+        tap.event(0, &off(60));
+        // Strike while the release is still owed and the staging area is still full: dropped.
+        tap.event(0, &on(60, 90));
+        tap.staging.clear();
+        tap.service();
+        sent(&mut tap);
+        tap.event(0, &on(60, 90));
+        assert_eq!(sent(&mut tap), vec![vec![0x90, 60, 90]]);
+        // The dropped strike's release is spent first.
+        tap.event(0, &off(60));
+        assert!(sent(&mut tap).is_empty());
+        tap.event(0, &off(60));
+        assert_eq!(sent(&mut tap), vec![vec![0x80, 60, 0]]);
+    }
+
+    #[test]
+    fn the_shortfall_is_forgotten_when_the_lane_is_released() {
+        let mut tap = MidiTap::new(&[0], &[(0, spec(0, 0))]);
+        tap.resync(&[], &[], 0);
+        fill_staging(&mut tap);
+        tap.event(0, &on(60, 90));
+        tap.staging.clear();
+        // Stop, seek and loop release the lane; a strike after that has its own release.
+        tap.release_all();
+        tap.event(0, &on(60, 90));
+        sent(&mut tap);
+        tap.event(0, &off(60));
+        assert_eq!(sent(&mut tap), vec![vec![0x80, 60, 0]]);
+        assert_eq!(tap.held_notes(0), 0);
+    }
+
+    #[test]
+    fn a_held_note_is_still_released_on_stop_after_a_dropped_strike() {
+        let mut tap = MidiTap::new(&[0], &[(0, spec(0, 0))]);
+        tap.resync(&[], &[], 0);
+        fill_staging(&mut tap);
+        tap.event(0, &on(60, 90));
+        tap.staging.clear();
+        tap.event(0, &on(60, 90));
+        sent(&mut tap);
+        tap.release_all();
+        assert_eq!(sent(&mut tap)[0], vec![0x80, 60, 0]);
+        assert_eq!(tap.held_notes(0), 0);
+    }
+
+    #[test]
+    fn a_silent_row_given_a_key_does_not_let_its_note_off_end_the_strike_sounding_there() {
+        // Kick (36) is sent; the snare (38) is silent, so the lane holds the kick once while the plan holds both.
+        let events = vec![drum_on(36), drum_on(38)];
+        let mut old = drum_tap(&[(38, None)]);
+        old.resync(&events, &[0, 0], 2);
+        sent(&mut old);
+        assert_eq!(old.held_notes(0), 1);
+        // A map change gives the snare the kick's key.
+        let mut new = drum_tap(&[(38, Some(36))]);
+        new.adopt(Some(&mut old));
+        new.remap(&events, &[0, 0], 2);
+        assert!(sent(&mut new).is_empty());
+        // The snare's release is for a strike that was never sent on 36: the kick goes on sounding.
+        new.event(0, &drum_off(38));
+        assert!(
+            sent(&mut new).is_empty(),
+            "the kick is still sounding on 36"
+        );
+        assert_eq!(new.held_notes(0), 1);
+        new.event(0, &drum_off(36));
+        assert_eq!(sent(&mut new), vec![vec![0x89, 36, 0]]);
+        assert_eq!(new.held_notes(0), 0);
+    }
+
+    #[test]
+    fn a_row_moved_onto_a_key_another_row_holds_does_not_end_that_row_early() {
+        let events = vec![drum_on(38), drum_on(40)];
+        let mut old = drum_tap(&[(38, Some(51)), (40, Some(52))]);
+        old.resync(&events, &[0, 0], 2);
+        sent(&mut old);
+        assert_eq!(old.held_notes(0), 2);
+        // Both rows now share 52: the plan holds it twice, the lane once.
+        let mut new = drum_tap(&[(38, Some(52)), (40, Some(52))]);
+        new.adopt(Some(&mut old));
+        new.remap(&events, &[0, 0], 2);
+        assert_eq!(sent(&mut new), vec![vec![0x89, 51, 0]]);
+        new.event(0, &drum_off(38));
+        assert!(
+            sent(&mut new).is_empty(),
+            "row 40's strike is still sounding on 52"
+        );
+        assert_eq!(new.held_notes(0), 1);
+        new.event(0, &drum_off(40));
+        assert_eq!(sent(&mut new), vec![vec![0x89, 52, 0]]);
+        assert_eq!(new.held_notes(0), 0);
+    }
+
+    #[test]
+    fn a_stale_shortfall_of_the_old_map_does_not_swallow_a_release_after_a_map_change() {
+        let events = vec![drum_on(38), drum_on(40)];
+        let mut old = drum_tap(&[(38, Some(51)), (40, Some(51))]);
+        old.resync(&[], &[], 0);
+        sent(&mut old);
+        // Row 38 is sent on 51; row 40 finds no room and is dropped, so 51 is owed one release.
+        old.event(0, &drum_on(38));
+        fill_staging(&mut old);
+        old.event(0, &drum_on(40));
+        old.staging.clear();
+        assert_eq!(old.lanes[0].unsent[51], 1);
+        // The map change moves row 40 to 53 and leaves row 38 on 51.
+        let mut new = drum_tap(&[(38, Some(51)), (40, Some(53))]);
+        new.adopt(Some(&mut old));
+        new.remap(&events, &[0, 0], 2);
+        assert!(sent(&mut new).is_empty());
+        // Row 38's release ends the strike sent on 51; row 40's strike was never sent on 53.
+        new.event(0, &drum_off(38));
+        assert_eq!(sent(&mut new), vec![vec![0x89, 51, 0]]);
+        new.event(0, &drum_off(40));
+        assert!(sent(&mut new).is_empty());
+        assert_eq!(new.held_notes(0), 0);
+        assert_eq!(new.lanes[0].unsent, [0; 128]);
+    }
+
+    #[test]
+    fn a_held_key_is_still_released_on_stop_after_a_map_change_left_a_shortfall() {
+        let events = vec![drum_on(36), drum_on(38)];
+        let mut old = drum_tap(&[(38, None)]);
+        old.resync(&events, &[0, 0], 2);
+        sent(&mut old);
+        let mut new = drum_tap(&[(38, Some(36))]);
+        new.adopt(Some(&mut old));
+        new.remap(&events, &[0, 0], 2);
+        assert_eq!(new.lanes[0].unsent[36], 1);
+        new.release_all();
+        assert_eq!(sent(&mut new)[0], vec![0x89, 36, 0]);
+        assert_eq!(new.held_notes(0), 0);
+        assert_eq!(new.lanes[0].unsent, [0; 128]);
     }
 }

@@ -182,6 +182,33 @@ impl NoteStage {
         true
     }
 
+    /// Stages one NoteOn at `offset` for a key the plan holds `strikes` times at the seek point, and counts all of them as
+    /// held, so the NoteOffs still to come (one per strike) end the key on the last of them. False when the NoteOn was
+    /// dropped, in which case nothing is counted and those NoteOffs find the key not held and send nothing.
+    ///
+    /// A [`retain`](Self::retain) that ran while this strike was still owed (a hand-over or a drum-map change between the
+    /// seek and the first music frame) found the key not held and recorded all of the plan's strikes of it in `short`. The
+    /// strike sends `strikes` of them after all, so exactly that many leave `short`: `held + short` stays the number of
+    /// NoteOffs the plan still has for the key, and the last of them ends the key. Counting them in both would spend the
+    /// plan's NoteOffs against `short` and never reach `held`. A strike that is dropped leaves `short` alone, so its NoteOffs
+    /// are still not taken for the end of another strike.
+    fn strike_held(&mut self, offset: u8, channel: u8, key: u8, velocity: u8, strikes: u8) -> bool {
+        if !self.note_on(offset, channel, key, velocity) {
+            return false;
+        }
+        if let Some(held) = self.held_mut(channel, key) {
+            *held = held.saturating_add(strikes.saturating_sub(1));
+        }
+        if let Some(short) = self
+            .short
+            .get_mut(usize::from(channel))
+            .and_then(|row| row.get_mut(usize::from(key)))
+        {
+            *short = short.saturating_sub(strikes);
+        }
+        true
+    }
+
     /// Stages the NoteOff of the last strike of a key held at `offset`; one that is not the last, or of a key not held,
     /// sends nothing. Never loses a release: without room, or if the NoteOff cannot be encoded, the channels that hold
     /// keys are released instead.
@@ -731,6 +758,28 @@ impl PluginInsert {
             }
         } else {
             self.notes.note_off(offset, channel, key);
+        }
+    }
+
+    /// Strikes a key the plan holds at a seek point, a loop wrap or the start of a range export: one NoteOn for the key,
+    /// counted `strikes` times so the plan's NoteOffs (one per strike) release it on the last. Call it after the flush or
+    /// the release that began the new position, and before the frame the position starts on is processed. Nothing happens
+    /// for an effect or an insert that is not live. A NoteOn the block cannot take is counted in
+    /// [`InsertShared::dropped_notes`], like any other. Does not allocate, lock or wait.
+    pub fn restrike_note(&mut self, channel: u8, key: u8, velocity: u8, strikes: u8) {
+        if self.kind != SlotKind::Instrument || velocity == 0 || strikes == 0 {
+            return;
+        }
+        self.ensure_started();
+        if !(self.started && self.fault.is_none()) {
+            return;
+        }
+        let offset = self.in_fill.min(BLOCK_FRAMES - 1) as u8;
+        if !self
+            .notes
+            .strike_held(offset, channel, key, velocity, strikes)
+        {
+            self.shared.dropped_notes.fetch_add(1, Ordering::Relaxed);
         }
     }
 

@@ -6,6 +6,8 @@ export interface ScoreError {track:number;staff:number;bar:number;voice:number;
   beat:number;kind:'incomplete'|'overfull';ticks:number;
   /** What Trim to fit would remove from an overfull voice. */
   trim?:{beats:number;notes:number};
+  /** Set by `withShortening`: the notes of the barline-crossing beat that Trim to fit keeps, cut short, instead of removing; `trim` then counts only the beats after it. */
+  shortened?:number;
   /** Track name, plus the staff when the track has several. */
   place:string}
 

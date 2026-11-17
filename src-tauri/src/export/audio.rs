@@ -31,6 +31,51 @@ pub struct AudioExportRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normalize_rms_db: Option<f64>,
 }
+/// What the export command receives: the request plus the optional count-in. A count-in is absent from requests
+/// written before it existed, which read as none, so they export exactly as they did.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AudioExportCommand {
+    pub tracks: Vec<StemTrack>,
+    pub range: Option<MeasureRange>,
+    pub format: AudioFormat,
+    pub speed: f64,
+    pub metronome: bool,
+    #[serde(default)]
+    pub metronome_sound: crate::audio::practice::ClickSound,
+    pub tail_seconds: f64,
+    pub include_backing: bool,
+    pub include_mix: bool,
+    #[serde(default)]
+    pub normalize_rms_db: Option<f64>,
+    /// Bars of count-in, from the practice settings, to put ahead of a mixed export; absent for none.
+    #[serde(default)]
+    pub count_in: Option<crate::audio::practice::CountInSettings>,
+}
+impl AudioExportCommand {
+    pub fn into_parts(
+        self,
+    ) -> (
+        AudioExportRequest,
+        Option<crate::audio::practice::CountInSettings>,
+    ) {
+        (
+            AudioExportRequest {
+                tracks: self.tracks,
+                range: self.range,
+                format: self.format,
+                speed: self.speed,
+                metronome: self.metronome,
+                metronome_sound: self.metronome_sound,
+                tail_seconds: self.tail_seconds,
+                include_backing: self.include_backing,
+                include_mix: self.include_mix,
+                normalize_rms_db: self.normalize_rms_db,
+            },
+            self.count_in,
+        )
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Segment {
     pub start_tick: f64,
@@ -136,6 +181,15 @@ pub struct AudioExportRender {
     d_max: usize,
     trim_remaining: usize,
     offline: Option<crate::plugins::service::OfflinePlugins>,
+    count: Option<crate::audio::practice::CountInClock>,
+    /// Count-in frames still to come, and the whole count-in's length.
+    count_left: u64,
+    count_frames: u64,
+    /// Where the count-in's bars are: the start of the first exported bar, with how many frames the export's first
+    /// segment begins before it (a note played before the beat, such as a grace note, pulls the segment earlier).
+    count_tick: f64,
+    count_lead_frames: u64,
+    click: crate::audio::practice::ClickVoice,
 }
 impl AudioExportRender {
     pub fn new(
@@ -206,6 +260,26 @@ impl AudioExportRender {
             renderer.seek_tick(s.start_tick);
         }
         let d_max = renderer.plugin_delay_frames();
+        let rate = request.format.sample_rate;
+        // The count-in leads to the first bar's downbeat, which a note played before it does not move.
+        let first_start = schedule.segments.first().map_or(0.0, |s| s.start_tick);
+        let count_tick = request
+            .range
+            .and_then(|range| {
+                plan.occurrences
+                    .iter()
+                    .find(|o| o.bar >= range.first && o.bar <= range.last)
+            })
+            .map_or(first_start, |o| o.start_tick.max(first_start));
+        let count_lead_frames = if count_tick > first_start {
+            let timeline = Timeline::new(plan)?;
+            ((timeline.tick_to_seconds(count_tick) - timeline.tick_to_seconds(first_start))
+                * rate as f64
+                / request.speed)
+                .round() as u64
+        } else {
+            0
+        };
         Ok(Self {
             renderer,
             schedule,
@@ -219,7 +293,52 @@ impl AudioExportRender {
             d_max,
             trim_remaining: d_max,
             offline,
+            count: None,
+            count_left: 0,
+            count_frames: 0,
+            count_tick,
+            count_lead_frames,
+            click: crate::audio::practice::ClickVoice::new(rate),
         })
+    }
+    /// Puts the practice count-in ahead of the music: its bars of clicks at the meter and the export's tempo where the
+    /// first exported bar starts, in the chosen click sound. The count-in ends where that bar's downbeat falls, so music
+    /// that begins a little earlier, with a grace note, is not pushed off it. The music then follows exactly as it would
+    /// without it. Zero bars adds nothing.
+    pub fn with_count_in(
+        mut self,
+        settings: crate::audio::practice::CountInSettings,
+    ) -> Result<Self, String> {
+        if settings.bars == 0 {
+            return Ok(self);
+        }
+        let start = self.count_tick;
+        let (numerator, denominator) = self.renderer.meter_at(start);
+        let bpm = self.renderer.authored_bpm_at(start) * self.request.speed;
+        let clock = crate::audio::practice::CountInClock::new(
+            settings.bars,
+            numerator,
+            denominator,
+            bpm,
+            self.request.format.sample_rate,
+        )
+        .map_err(str::to_string)?;
+        let frames = clock
+            .snapshot()
+            .total_frames
+            .saturating_sub(self.count_lead_frames);
+        if frames == 0 {
+            return Ok(self);
+        }
+        self.schedule.total_frames += frames;
+        self.count_left = frames;
+        self.count_frames = frames;
+        self.count = Some(clock);
+        Ok(self)
+    }
+    /// The frames the count-in adds ahead of the music: none without one.
+    pub fn count_in_frames(&self) -> u64 {
+        self.count_frames
     }
     pub fn total_frames(&self) -> u64 {
         self.schedule.total_frames
@@ -341,7 +460,43 @@ impl AudioExportRender {
         }
         Ok(())
     }
+    /// Fills `output` with count-in frames while any remain; the renderer is not advanced, as in playback. With a
+    /// plug-in the click goes down the same compensation line as the music, so the count-in and the music are one stream
+    /// delayed by `D_max`, and the pre-roll is trimmed from the start of that stream: the first frames the click
+    /// produces are dropped, and what the count-in is too short to cover is trimmed from the music.
+    fn render_count_in(&mut self, output: &mut [[f32; 2]]) -> usize {
+        let Some(clock) = &mut self.count else {
+            return 0;
+        };
+        let cap = output.len().min(BLOCK_FRAMES);
+        let mut written = 0;
+        while written < cap {
+            let frame = clock.next_frame();
+            if frame.finished || self.count_left == 0 {
+                self.count = None;
+                break;
+            }
+            self.count_left -= 1;
+            if let Some(pulse) = frame.pulse {
+                self.click
+                    .trigger(pulse.accent, self.request.metronome_sound);
+            }
+            let click = self.click.frame(0.4);
+            let out = self.renderer.count_in_frame(click);
+            if self.trim_remaining > 0 {
+                self.trim_remaining -= 1;
+                continue;
+            }
+            output[written] = out;
+            written += 1;
+        }
+        written
+    }
     pub fn render_mix(&mut self, output: &mut [[f32; 2]]) -> Result<usize, String> {
+        let counted = self.render_count_in(output);
+        if counted > 0 {
+            return Ok(counted);
+        }
         self.trim_pre_roll()?;
         let n = self.next_count(output.len());
         if n == 0 {
@@ -362,6 +517,9 @@ impl AudioExportRender {
         Ok(n)
     }
     pub fn render_stems(&mut self, outputs: &mut [Vec<[f32; 2]>]) -> Result<usize, String> {
+        if self.count.is_some() {
+            return Err("A count-in applies to mixed audio only.".into());
+        }
         self.trim_pre_roll()?;
         let expected = self.stem_indices.len() + usize::from(self.request.include_mix);
         if outputs.len() != expected || outputs.iter().any(|b| b.len() < BLOCK_FRAMES) {
@@ -1303,6 +1461,524 @@ mod tests {
                 "frame {i} (join at {join}): the plug-in stem {p:?} is not aligned with the dry stem {d:?}"
             );
         }
+    }
+
+    fn render_all_mix(mut render: AudioExportRender) -> (u64, Vec<[f32; 2]>) {
+        let mut got = Vec::new();
+        let mut buffer = vec![[0.0f32; 2]; 4096];
+        loop {
+            let n = render.render_mix(&mut buffer).unwrap();
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buffer[..n]);
+        }
+        (render.total_frames(), got)
+    }
+
+    fn count_in_export(
+        count_in: Option<crate::audio::practice::CountInSettings>,
+        sound: crate::audio::practice::ClickSound,
+    ) -> (u64, Vec<[f32; 2]>) {
+        use std::sync::Arc;
+        let ids = ["t1"];
+        let plan = repeated_bar_plan(&ids);
+        let renderer = Renderer::new(
+            Arc::new(plan.clone()),
+            export_resources(),
+            dry_gm_settings(&ids),
+            48000,
+        )
+        .unwrap();
+        let mut request = range_request(&ids, 0.2);
+        request.range = None;
+        request.metronome_sound = sound;
+        let mut render = AudioExportRender::new(renderer, &plan, request).unwrap();
+        if let Some(settings) = count_in {
+            render = render.with_count_in(settings).unwrap();
+        }
+        render_all_mix(render)
+    }
+
+    /// The count-in is the practice settings' bars of clicks, in the playback click, ahead of the music, which is
+    /// exactly what the export is without it.
+    #[test]
+    fn a_count_in_is_prepended_and_the_music_after_it_is_unchanged() {
+        use crate::audio::practice::{ClickSound, ClickVoice, CountInSettings};
+        let (base_total, base) = count_in_export(None, ClickSound::Woodblock);
+        assert!(
+            base.iter().any(|f| f[0].abs() > 0.01),
+            "the score must sound"
+        );
+        assert_eq!(base_total as usize, base.len());
+        // 120 bpm in 4/4 is 2 s a bar: two bars at 48 kHz.
+        let count_frames = 2 * 96_000usize;
+        let (total, with) = count_in_export(
+            Some(CountInSettings {
+                bars: 2,
+                between_loops: false,
+            }),
+            ClickSound::Woodblock,
+        );
+        assert_eq!(total as usize, base.len() + count_frames);
+        assert_eq!(with.len(), base.len() + count_frames);
+        assert_eq!(
+            &with[count_frames..],
+            &base[..],
+            "the music must be sample-identical"
+        );
+        let mut click = ClickVoice::new(48000);
+        let mut expected = vec![[0.0f32; 2]; count_frames];
+        for pulse in 0..8usize {
+            click.trigger(pulse % 4 == 0, ClickSound::Woodblock);
+            let start = pulse * 24_000;
+            for frame in &mut expected[start..start + 24_000] {
+                let sample = click.frame(0.4);
+                *frame = [sample, sample];
+            }
+        }
+        assert_eq!(
+            &with[..count_frames],
+            &expected[..],
+            "the count-in is the playback click"
+        );
+        assert!(expected.iter().any(|f| f[0].abs() > 0.01));
+    }
+
+    /// Requests written before the option, and zero bars, export exactly as before.
+    #[test]
+    fn no_count_in_leaves_the_export_unchanged_and_an_old_request_still_reads() {
+        use crate::audio::practice::{ClickSound, CountInSettings};
+        let (_, base) = count_in_export(None, ClickSound::Beep);
+        let (_, zero) = count_in_export(
+            Some(CountInSettings {
+                bars: 0,
+                between_loops: false,
+            }),
+            ClickSound::Beep,
+        );
+        assert_eq!(base, zero);
+        let old = serde_json::json!({
+            "tracks": [{"id":"t1","name":"t1","preset":"gm","kind":"score"}],
+            "range": null, "format": {"sampleRate":48000,"bitDepth":24}, "speed": 1.0, "metronome": false,
+            "tailSeconds": 0.1, "includeBacking": false, "includeMix": true
+        });
+        let wire: AudioExportCommand = serde_json::from_value(old).unwrap();
+        assert!(wire.count_in.is_none());
+        let mut new = serde_json::json!({
+            "tracks": [{"id":"t1","name":"t1","preset":"gm","kind":"score"}],
+            "range": null, "format": {"sampleRate":48000,"bitDepth":24}, "speed": 1.0, "metronome": false,
+            "tailSeconds": 0.1, "includeBacking": false, "includeMix": true
+        });
+        new["countIn"] = serde_json::json!({"bars": 2, "betweenLoops": false});
+        let (request, count_in) = serde_json::from_value::<AudioExportCommand>(new)
+            .unwrap()
+            .into_parts();
+        assert_eq!(count_in.unwrap().bars, 2);
+        assert!(request.include_mix);
+    }
+
+    /// A stand-in plug-in helper: every block comes back `latency` frames late at unity gain, from silence again on each
+    /// new epoch. Dropping it stops and joins its thread.
+    struct DelayHelper {
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        input: std::sync::Arc<crate::plugins::bridge::EventHandle>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+    impl Drop for DelayHelper {
+        fn drop(&mut self) {
+            self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.input.signal();
+            if let Some(thread) = self.thread.take() {
+                let _ = thread.join();
+            }
+        }
+    }
+    fn delay_insert(
+        latency: usize,
+    ) -> (Box<crate::audio::plugin_insert::PluginInsert>, DelayHelper) {
+        use crate::audio::plugin_insert::{InsertMode, PluginInsert};
+        use crate::plugins::bridge::{BridgeLink, InsertShared};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+        use std::time::Duration;
+        use tabplayer_plugin_protocol::ring::{Block, OwnedRing};
+        let owned = OwnedRing::new(48000);
+        let mut helper = owned.helper();
+        let link = BridgeLink::in_process(owned);
+        let input = link.input_event().clone();
+        let output = link.output_event().clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (stopped, wake) = (stop.clone(), input.clone());
+        let thread = std::thread::spawn(move || {
+            let mut block: Block = [[0.0; 2]; 128];
+            let mut line = vec![[0.0f32; 2]; latency.max(1)];
+            let mut pos = 0;
+            let mut epoch = None;
+            let mut seq = 0;
+            while !stopped.load(Ordering::Relaxed) {
+                wake.wait(Duration::from_millis(2));
+                while let Some(read) = helper
+                    .read_input(
+                        seq,
+                        &mut block,
+                        &mut [0; tabplayer_plugin_protocol::limits::EVENTS_PER_BLOCK],
+                    )
+                    .block()
+                {
+                    if epoch != Some(read.epoch) {
+                        line.iter_mut().for_each(|f| *f = [0.0; 2]);
+                        epoch = Some(read.epoch);
+                    }
+                    if latency > 0 {
+                        for frame in block.iter_mut() {
+                            let late = line[pos];
+                            line[pos] = *frame;
+                            pos = (pos + 1) % latency;
+                            *frame = late;
+                        }
+                    }
+                    helper.publish_output(seq, read.epoch, &block, &read.meta);
+                    output.signal();
+                    seq = seq.wrapping_add(1);
+                }
+            }
+        });
+        let insert = PluginInsert::new(
+            link,
+            InsertMode::Offline {
+                timeout: Duration::from_secs(5),
+            },
+            latency as u32,
+            0.0,
+            0.0,
+            48000,
+            Arc::new(InsertShared::default()),
+        )
+        .unwrap();
+        (
+            Box::new(insert),
+            DelayHelper {
+                stop,
+                input,
+                thread: Some(thread),
+            },
+        )
+    }
+
+    /// The mixed export of `plan`'s track `t1`, with a plug-in of `latency` frames on it, and the count-in ahead of it
+    /// where there is one. Returns the output and the compensation delay `D_max`.
+    fn plugin_export(
+        plan: &PlaybackPlan,
+        range: Option<MeasureRange>,
+        speed: f64,
+        latency: usize,
+        count_in: Option<crate::audio::practice::CountInSettings>,
+    ) -> (Vec<[f32; 2]>, usize) {
+        use std::sync::Arc;
+        let ids = ["t1"];
+        let mut renderer = Renderer::new(
+            Arc::new(plan.clone()),
+            export_resources(),
+            dry_gm_settings(&ids),
+            48000,
+        )
+        .unwrap();
+        let (insert, _helper) = delay_insert(latency);
+        renderer.attach_plugin(0, insert);
+        let d_max = renderer.plugin_delay_frames();
+        let mut request = range_request(&ids, 0.2);
+        request.range = range;
+        request.speed = speed;
+        request.metronome_sound = crate::audio::practice::ClickSound::Woodblock;
+        let mut render =
+            AudioExportRender::new_with_plugins(renderer, plan, request, None).unwrap();
+        if let Some(settings) = count_in {
+            render = render.with_count_in(settings).unwrap();
+        }
+        let total = render.total_frames();
+        let (_, out) = render_all_mix(render);
+        assert_eq!(
+            out.len() as u64,
+            total,
+            "the frames written are the frames announced"
+        );
+        (out, d_max)
+    }
+
+    /// The playback click for `pulses` pulses `spacing` frames apart, `accent_every` pulses a bar, over `frames` frames.
+    fn click_stream(
+        frames: usize,
+        pulses: usize,
+        spacing: usize,
+        accent_every: usize,
+    ) -> Vec<[f32; 2]> {
+        use crate::audio::practice::{ClickSound, ClickVoice};
+        let mut click = ClickVoice::new(48000);
+        let mut out = vec![[0.0f32; 2]; frames];
+        for pulse in 0..pulses {
+            click.trigger(pulse % accent_every == 0, ClickSound::Woodblock);
+            let start = pulse * spacing;
+            for frame in &mut out[start..(start + spacing).min(frames)] {
+                let sample = click.frame(0.4);
+                *frame = [sample, sample];
+            }
+        }
+        out
+    }
+
+    fn first_sound(frames: &[[f32; 2]]) -> Option<usize> {
+        frames
+            .iter()
+            .position(|f| f[0].abs() > 1e-4 || f[1].abs() > 1e-4)
+    }
+
+    /// With a plug-in on a track the count-in and the music are one compensated stream: the pre-roll that the plug-in's
+    /// delay adds is trimmed once from its start, so the click lands on the beat, the music begins exactly one count-in
+    /// after it, and the music is what the export without a count-in holds.
+    #[test]
+    fn a_count_in_with_a_plugin_stays_on_the_beat_and_the_music_follows_it_exactly() {
+        use crate::audio::practice::CountInSettings;
+        let plan = repeated_bar_plan(&["t1"]);
+        let (base, d_max) = plugin_export(&plan, None, 1.0, 4800, None);
+        assert_eq!(d_max, 128 + 4800, "an offline insert's delay");
+        let first_note = first_sound(&base).expect("the score must sound");
+        let count = 2 * 96_000usize;
+        let (with, _) = plugin_export(
+            &plan,
+            None,
+            1.0,
+            4800,
+            Some(CountInSettings {
+                bars: 2,
+                between_loops: false,
+            }),
+        );
+        assert_eq!(with.len(), base.len() + count);
+        // The click: eight onsets, one a beat (24 000 frames) apart from frame 0.
+        let reference = click_stream(count, 8, 24_000, 4);
+        for beat in 0..8 {
+            let at = beat * 24_000;
+            assert_eq!(
+                first_sound(&with[at..at + 24_000]),
+                first_sound(&reference[at..at + 24_000]),
+                "beat {beat}: the click's onset in the beat from frame {at}, with {d_max} frames of delay"
+            );
+        }
+        // The click is whole: the frames the delay moved out of the start are not the click's tail.
+        for (i, (got, want)) in with[..count].iter().zip(&reference).enumerate() {
+            assert!(
+                (got[0] - want[0]).abs() < 1e-4 && (got[1] - want[1]).abs() < 1e-4,
+                "count-in frame {i}: {got:?}, the playback click gives {want:?}"
+            );
+        }
+        // The music begins exactly one count-in later and is what the export without a count-in holds.
+        assert_eq!(first_sound(&with[count..]), Some(first_note));
+        assert_eq!(&with[count..], &base[..], "the music is sample-identical");
+    }
+
+    /// A count-in shorter than the plug-in's delay is still one stream: the part of the delay it does not cover is
+    /// trimmed from the music's start, so the music begins exactly one count-in in and is what it is without one. (The
+    /// renderer drops a click that is still in the compensation line while the metronome is off, which here is the whole
+    /// click, so the count-in's frames are silent: playback has the same gap; see the validation note.)
+    #[test]
+    fn a_count_in_shorter_than_the_plugin_delay_still_lines_up() {
+        use crate::audio::practice::CountInSettings;
+        let mut plan = repeated_bar_plan(&["t1"]);
+        for o in &mut plan.occurrences {
+            o.meter_numerator = 1;
+            o.meter_denominator = 8;
+        }
+        // Three times the tempo: an eighth is 4 000 frames, under the 4 928 of delay.
+        let (base, d_max) = plugin_export(&plan, None, 3.0, 4800, None);
+        let (with, _) = plugin_export(
+            &plan,
+            None,
+            3.0,
+            4800,
+            Some(CountInSettings {
+                bars: 1,
+                between_loops: false,
+            }),
+        );
+        let count = 4_000usize;
+        assert!(count < d_max);
+        assert_eq!(with.len(), base.len() + count);
+        assert_eq!(&with[count..], &base[..], "the music is sample-identical");
+        assert!(first_sound(&base).is_some(), "the score must sound");
+    }
+
+    /// A score whose bar 1 (4/4) follows a bar 0 in 3/4 and opens with a grace note played 30 ticks (750 frames at 120
+    /// bpm) before its downbeat, which is what pulls a range export's first segment ahead of the bar.
+    fn grace_note_plan() -> PlaybackPlan {
+        let note = |id: &str, bar: u32, start: u32, end: u32, key: u8| {
+            serde_json::json!({
+                "id": id, "trackId": "t1", "occurrence": 0, "startTick": start, "endTick": end, "key": key,
+                "velocity": 100, "channel": 0, "articulation": "picked",
+                "pitch": [{"tick": start, "semitones": 0.0}],
+                "source": {"target": {"track": 0, "staff": 0, "bar": bar, "voice": 0, "beat": 0}, "string": 0}
+            })
+        };
+        let events = |start: u32, end: u32, key: u8| {
+            [
+                serde_json::json!({"type": "noteOn", "trackId": "t1", "tick": start, "channel": 0, "key": key, "velocity": 100}),
+                serde_json::json!({"type": "noteOff", "trackId": "t1", "tick": end, "channel": 0, "key": key, "velocity": 0}),
+            ]
+        };
+        let mut midi = Vec::new();
+        midi.extend(events(0, 2880, 52));
+        midi.extend(events(2850, 2880, 55));
+        midi.extend(events(2880, 6720, 52));
+        midi.sort_by_key(|event| event["tick"].as_i64());
+        serde_json::from_value(serde_json::json!({
+            "generation": 1, "ppq": 960, "durationTick": 6720, "durationMs": 3500,
+            "tracks": [{"id": "t1", "program": 0, "percussion": false}],
+            "tempos": [{"tick": 0, "bpm": 120}],
+            "occurrences": [
+                {"bar": 0, "occurrence": 0, "meterNumerator": 3, "meterDenominator": 4, "startTick": 0, "endTick": 2880, "startMs": 0, "endMs": 1500},
+                {"bar": 1, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 2880, "endTick": 6720, "startMs": 1500, "endMs": 3500}
+            ],
+            "notes": [note("a", 0, 0, 2880, 52), note("g", 1, 2850, 2880, 55), note("b", 1, 2880, 6720, 52)],
+            "midi": midi
+        }))
+        .unwrap()
+    }
+
+    /// A range export that opens on a bar whose first note is a grace note before the beat takes the count-in's meter and
+    /// tempo from the bar, not from the grace note, which falls in the bar before. The count-in leads to the downbeat:
+    /// its four beats end where the bar starts, so the music, which opens a grace note early, follows it directly.
+    #[test]
+    fn a_range_count_in_takes_its_meter_from_the_bar_and_ends_on_the_downbeat() {
+        use crate::audio::practice::CountInSettings;
+        use std::sync::Arc;
+        let plan = grace_note_plan();
+        let export = |count_in: Option<CountInSettings>| {
+            let renderer = Renderer::new(
+                Arc::new(plan.clone()),
+                export_resources(),
+                dry_gm_settings(&["t1"]),
+                48000,
+            )
+            .unwrap();
+            let mut request = range_request(&["t1"], 0.2);
+            request.range = Some(MeasureRange { first: 1, last: 1 });
+            request.metronome_sound = crate::audio::practice::ClickSound::Woodblock;
+            let mut render = AudioExportRender::new(renderer, &plan, request).unwrap();
+            assert_eq!(render.schedule.segments[0].start_tick, 2850.0);
+            if let Some(settings) = count_in {
+                render = render.with_count_in(settings).unwrap();
+            }
+            render_all_mix(render).1
+        };
+        let base = export(None);
+        let with = export(Some(CountInSettings {
+            bars: 1,
+            between_loops: false,
+        }));
+        // Four beats of 24 000 frames, less the 750 frames the music opens ahead of the downbeat.
+        let count = 4 * 24_000 - 750;
+        assert_eq!(with.len(), base.len() + count);
+        assert_eq!(&with[count..], &base[..], "the music is sample-identical");
+        assert_eq!(
+            &with[..count],
+            &click_stream(count, 4, 24_000, 4)[..],
+            "four clicks, the first accented"
+        );
+    }
+
+    /// Normalizing measures the music, not the count-in: the count-in is mostly silence, and counting it would raise the
+    /// music above the level the export has without it. The count-in gets the same gain, lowered only so it does not clip.
+    #[test]
+    fn normalization_measures_the_music_only_and_the_count_in_does_not_change_its_level() {
+        use crate::audio::practice::{ClickSound, CountInSettings};
+        use crate::export::wav::{NORMALIZE_CEILING_DB, write_normalized_wav_after};
+        use std::sync::{Arc, atomic::AtomicBool};
+        let plan = repeated_bar_plan(&["t1"]);
+        let dir = tempfile::tempdir().unwrap();
+        let export = |name: &str, count_in: Option<CountInSettings>| {
+            let renderer = Renderer::new(
+                Arc::new(plan.clone()),
+                export_resources(),
+                dry_gm_settings(&["t1"]),
+                48000,
+            )
+            .unwrap();
+            let mut request = range_request(&["t1"], 0.2);
+            request.range = None;
+            request.metronome_sound = ClickSound::Woodblock;
+            let mut render = AudioExportRender::new(renderer, &plan, request).unwrap();
+            if let Some(settings) = count_in {
+                render = render.with_count_in(settings).unwrap();
+            }
+            let lead = render.count_in_frames();
+            let path = dir.path().join(name);
+            let result = write_normalized_wav_after(
+                &path,
+                AudioFormat::wav(48000, 24),
+                -16.0,
+                lead,
+                |output| render.render_mix(output),
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap();
+            let samples: Vec<f64> = hound::WavReader::open(&path)
+                .unwrap()
+                .samples::<i32>()
+                .map(|v| v.unwrap() as f64 / 8_388_608.0)
+                .collect();
+            (result, samples, lead as usize)
+        };
+        let (base, base_samples, _) = export("base.wav", None);
+        let (with, with_samples, lead) = export(
+            "count.wav",
+            Some(CountInSettings {
+                bars: 2,
+                between_loops: false,
+            }),
+        );
+        assert_eq!(lead, 2 * 96_000);
+        assert_eq!(with.frames, base.frames + lead as u64);
+        assert!(
+            base.gain_db < 39.0 && base.gain_db + base.peak_db < NORMALIZE_CEILING_DB - 0.1,
+            "the music's gain comes from its level: {base:?}"
+        );
+        assert!(
+            (with.gain_db - base.gain_db).abs() < 1e-9 && (with.rms_db - base.rms_db).abs() < 1e-9,
+            "the count-in must not change the gain: {} dB without it, {} dB with it",
+            base.gain_db,
+            with.gain_db
+        );
+        // The same samples to within the dither a 24-bit write adds, which follows the frame count.
+        assert_eq!(with_samples.len(), base_samples.len() + 2 * lead);
+        let worst = with_samples[2 * lead..]
+            .iter()
+            .zip(&base_samples)
+            .fold(0.0f64, |a, (x, y)| a.max((x - y).abs()));
+        assert!(
+            worst < 3e-7,
+            "the music is written at the same level: its samples differ by up to {worst}"
+        );
+        // The count-in has the music's gain, or less where that would clip.
+        let click = click_stream(lead, 8, 24_000, 4);
+        let peak = click.iter().fold(0.0f32, |a, f| a.max(f[0].abs())) as f64;
+        let gain = 10f64
+            .powf(with.gain_db / 20.0)
+            .min(10f64.powf(NORMALIZE_CEILING_DB / 20.0) / peak);
+        for (i, (got, want)) in with_samples[..2 * lead]
+            .iter()
+            .zip(click.iter().flatten())
+            .enumerate()
+        {
+            assert!(
+                (got - *want as f64 * gain).abs() < 3e-7,
+                "count-in sample {i}: {got}, the click at gain {gain} gives {}",
+                *want as f64 * gain
+            );
+        }
+        assert!(with_samples[..2 * lead].iter().any(|v| v.abs() > 0.01));
     }
 
     /// With no plug-in, a range export's segment joins are the seeks they were before plug-ins: a master reverb and

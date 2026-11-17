@@ -1,5 +1,6 @@
 import { describe,expect,it } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
+import { scoreFromJson } from '../model-clone';
 import { standardPercussionCatalog } from '../editor/percussion-catalog';
 import { assignDrumTabLines,convertDrumTabJson,drumTabLine,drumTabNumber,DRUM_TAB_LINES,DRUM_TAB_TUNING,hideDrumTabTuning } from './drum-tab';
 
@@ -175,6 +176,37 @@ describe('convertDrumTabJson',()=>{
     notes.push({...notes[0],id:77,percussionarticulation:5});
     const report=convertDrumTabJson(json,source,new Map([[0,'tab']]));
     expect(report.unresolvedNotes).toEqual([77]);expect(staffNotes(json.tracks[0].staves[0])[0]).toHaveLength(1);
+  });
+});
+
+describe('ties on the tab',()=>{
+  it('keeps a tie only between hits written alike: an equal number moved to another line is not tied, and the JSON names no tie partner',()=>{
+    // 38 and 91 both want line 5: 91 is moved to line 4, and the lone 91 after it sits on line 5.
+    const source=drumSource([[38,91],[91]]),json=jsonOf(source);
+    const [first,second]=json.tracks[0].staves[0].bars[0].voices[0].beats as J[];
+    const moved=first.notes.find((n:J)=>n.percussionarticulation===91),lone=second.notes[0];
+    moved.tiedestinationnoteid=lone.id;lone.tieoriginnoteid=moved.id;lone.istiedestination=true;
+    const report=convertDrumTabJson(json,source,new Map([[0,'tab']]));
+    expect(report.ties).toEqual([]);
+    expect(JSON.stringify(json.tracks[0].staves[0])).not.toMatch(/tie(?:origin|destination)noteid/);
+  });
+  it('keeps the tie of two equal hits on one line, by the ids the tab notes got',()=>{
+    const source=drumSource([[49],[49]]),json=jsonOf(source);
+    const [first,second]=json.tracks[0].staves[0].bars[0].voices[0].beats as J[];
+    first.notes[0].tiedestinationnoteid=second.notes[0].id;second.notes[0].tieoriginnoteid=first.notes[0].id;second.notes[0].istiedestination=true;
+    const report=convertDrumTabJson(json,source,new Map([[0,'both']]));
+    const tab=json.tracks[0].staves[1].bars[0].voices[0].beats as J[];
+    expect(report.ties).toEqual([{from:tab[0].notes[0].id,to:tab[1].notes[0].id}]);
+  });
+  it('builds a score when a note shares its tie origin with a destination that was left off the tab',()=>{
+    const source=drumSource([[36],[36,38,42,45,51,49,55]]),json=jsonOf(source);
+    const [first,crowd]=json.tracks[0].staves[0].bars[0].voices[0].beats as J[];
+    const probe=JSON.parse(JSON.stringify(json)) as J;
+    const surplus=convertDrumTabJson(probe,source,new Map([[0,'tab']])).surplusNotes[0],written=crowd.notes.find((n:J)=>n.id!==surplus&&n.percussionarticulation===38);
+    first.notes[0].tiedestinationnoteid=surplus;
+    for(const id of [surplus,written.id]){const note=crowd.notes.find((n:J)=>n.id===id);note.tieoriginnoteid=first.notes[0].id;note.istiedestination=true;}
+    convertDrumTabJson(json,source,new Map([[0,'tab']]));
+    expect(()=>scoreFromJson(JSON.stringify(json) as never,new Settings())).not.toThrow();
   });
 });
 

@@ -140,14 +140,13 @@ function keepIdsAbove(highest:DrumTabReport['highestIds']):void {
   idCounters.Bar._globalBarId=Math.max(idCounters.Bar._globalBarId,highest.bar+1);idCounters.Voice._globalVoiceId=Math.max(idCounters.Voice._globalVoiceId,highest.voice+1);
 }
 /**
- * The source's note links as the display copy needs them. A drum tab note keeps only ties (slurs, slides and hammer-ons mean nothing on a drum
- * hit); in 'both' mode the tab note has an id of its own, so each tie between two source notes that are both on the tab is repeated between their tab notes.
+ * The source's note links as the display copy needs them. A drum tab note keeps only the ties the conversion kept (slurs, slides and hammer-ons mean
+ * nothing on a drum hit, and a tie between hits written differently would draw wrongly); in 'both' mode the percussion staff keeps its own links.
  */
 function drumTabLinks(links:NoteLinks,report:DrumTabReport):NoteLinks {
-  const drawn=new Set(report.notes.keys()),tabOf=new Map([...report.notes].map(([rendered,origin])=>[origin,rendered]));
-  const kept=links.filter(link=>link.kind==='tie'||!(drawn.has(link.from)||drawn.has(link.to)));
-  const added=links.flatMap(link=>{const from=tabOf.get(link.from),to=tabOf.get(link.to);return link.kind==='tie'&&from!==undefined&&to!==undefined&&from!==link.from?[{...link,from,to}]:[];});
-  return [...kept,...added];
+  const drawn=new Set(report.notes.keys());
+  const kept=links.filter(link=>!(drawn.has(link.from)||drawn.has(link.to)));
+  return [...kept,...report.ties.map(({from,to})=>({from,to,kind:'tie' as const}))];
 }
 /**
  * Applies `value` to `settings`. The engraving settings always restart from Bravura's, so switching back from another music font leaves none of its

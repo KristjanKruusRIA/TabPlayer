@@ -91,6 +91,8 @@ export interface DrumTabReport {
   surplusNotes:number[];
   /** Source note ids left off the tab because their articulation resolves to nothing. */
   unresolvedNotes:number[];
+  /** The ties the tab keeps, as pairs of rendered note ids (origin to destination): both ends are written, with the same number on the same line. */
+  ties:Array<{from:number;to:number}>;
   /** Track indexes whose per-track tuning label was hidden in the JSON stylesheet. */
   hiddenTuningTracks:number[];
   /** The highest bar, voice, beat and note id the converted JSON uses (the fresh ids of 'both' mode included), so the caller can keep alphaTab's id counters above them. */
@@ -101,7 +103,7 @@ export interface DrumTabReport {
 const noteDefaults:Json={accentuated:0,bendtype:0,bendstyle:0,iscontinuedbend:false,showstringnumber:false,octave:-1,tone:-1,isvisible:true,islefthandtapped:false,ishammerpullorigin:false,isslurdestination:false,harmonictype:0,harmonicvalue:0,isletring:false,ispalmmute:false,isdead:false,isstaccato:false,slideintype:0,slideouttype:0,vibrato:0,lefthandfinger:-2,righthandfinger:-2,trillvalue:-1,trillspeed:32,durationpercent:1,accidentalmode:0,ornament:0};
 /** Beat effects of the drum staff that tab would draw wrongly (or twice): back to their defaults on the copy. */
 const beatDefaults:Json={whammystyle:0,islegatoorigin:false,pop:false,slap:false,tap:false,slashed:false,deadslapped:false,brushtype:0,brushduration:0,iscontinuedwhammy:false,whammybartype:0,vibrato:0,pickstroke:0,golpe:0,wahpedal:0,barrefret:-1,barreshape:0,rasgueado:0,showtimer:false,timer:null};
-/** The JSON keys that name another note by id. A tab note starts without them: ties are written back afterwards, by the ids the tab notes got; the other links mean nothing on a drum hit. */
+/** The JSON keys that name another note by id. A tab note starts without them: the ties it keeps are listed in the report, by the ids the tab notes got; the other links mean nothing on a drum hit. */
 const noteLinkKeys=['tiedestinationnoteid','tieoriginnoteid','slurdestinationnoteid','sluroriginnoteid','hammerpulldestinationnoteid','hammerpulloriginnoteid','slidetargetnoteid','slideoriginnoteid'];
 /** Things printed once per beat that the second staff of a track must not repeat. */
 const beatRepeats:Json={text:null,lyrics:null,chordid:null,crescendo:0};
@@ -109,7 +111,7 @@ const beatRepeats:Json={text:null,lyrics:null,chordid:null,crescendo:0};
 /**
  * What the tab staff does with each thing a drum note can carry:
  * - rhythm (duration, dots, tuplets, grace notes), rests, positions: kept as they are;
- * - ties: kept (tab draws a tied hit in parentheses; alphaTab drops the flag by itself when the origin is not on the same line and number);
+ * - ties: kept between two hits written alike, same number on the same line (the tab draws the destination in parentheses at the start of a bar); a tie between hits written differently is dropped, because alphaTab would show the destination as the origin's number or draw a slanted arc;
  * - ghost notes: kept (tab shows them in parentheses, as it does for a ghost on a string);
  * - accents: kept on the note;
  * - dead notes, staccato, palm mute, let ring, bends, slides, harmonics, vibrato, fingering, trills, ornaments: dropped (the drum staff has no use for them and tab would draw them as "x", slides, and the like);
@@ -120,7 +122,7 @@ const beatRepeats:Json={text:null,lyrics:null,chordid:null,crescendo:0};
  */
 function tabNote(note:Json,line:number,number:number,id:number):Json {
   const copy={...note};for(const key of noteLinkKeys)delete copy[key];
-  return {...copy,...noteDefaults,accentuated:note.accentuated,isvisible:note.isvisible,id,string:DRUM_TAB_LINES+1-line,fret:number,percussionarticulation:-1,isghost:note.isghost,istiedestination:note.istiedestination,dynamics:note.dynamics};
+  return {...copy,...noteDefaults,accentuated:note.accentuated,isvisible:note.isvisible,id,string:DRUM_TAB_LINES+1-line,fret:number,percussionarticulation:-1,isghost:note.isghost,istiedestination:false,dynamics:note.dynamics};
 }
 
 interface Ids {note:number;beat:number;voice:number;bar:number}
@@ -143,7 +145,7 @@ function maxIds(tracks:readonly Json[]):Ids {
  * Staves other than percussion ones are left alone.
  */
 export function convertDrumTabJson(json:Json,source:model.Score,modes:ReadonlyMap<number,DrumTabMode>):DrumTabReport {
-  const tracks=json.tracks as Json[],report:DrumTabReport={notes:new Map(),beats:new Map(),surplusNotes:[],unresolvedNotes:[],hiddenTuningTracks:[],highestIds:{note:-1,beat:-1,voice:-1,bar:-1}};
+  const tracks=json.tracks as Json[],report:DrumTabReport={notes:new Map(),beats:new Map(),surplusNotes:[],unresolvedNotes:[],ties:[],hiddenTuningTracks:[],highestIds:{note:-1,beat:-1,voice:-1,bar:-1}};
   const next=maxIds(tracks);report.highestIds=next;
   const written:Array<{tab:Json;origin:Json}>=[];
   const fresh=(key:keyof Ids)=>++next[key];
@@ -164,13 +166,13 @@ export function convertDrumTabJson(json:Json,source:model.Score,modes:ReadonlyMa
       map[String(trackIndex)]=false;report.hiddenTuningTracks.push(trackIndex);
     }
   });
-  // A tie is kept between two hits that are both written: each end names the other by its tab note's id, which alphaTab then finishes as a tie (the destination takes the origin's number).
-  // A tied hit whose origin was left off the tab is an ordinary hit.
+  // A tie is kept between two hits that are both written and written alike (same number, same line): a tie from one number or line to another would
+  // make alphaTab show the destination as the origin's number, or draw a slanted arc. The JSON carries no tie at all: `projectEngraving` hands the
+  // kept ones back through `report.ties`, by the ids the tab notes got, so a note never names a partner that is not in the JSON.
   const tabOf=new Map(written.map(({tab,origin})=>[origin.id as number,tab]));
-  for(const {tab,origin} of written){
-    const from=typeof origin.tieoriginnoteid==='number'?tabOf.get(origin.tieoriginnoteid):undefined,to=typeof origin.tiedestinationnoteid==='number'?tabOf.get(origin.tiedestinationnoteid):undefined;
-    if(from)tab.tieoriginnoteid=from.id;else tab.istiedestination=false;
-    if(to)tab.tiedestinationnoteid=to.id;
+  for(const {origin} of written){
+    const to=typeof origin.tiedestinationnoteid==='number'?tabOf.get(origin.tiedestinationnoteid):undefined,from=tabOf.get(origin.id as number)!;
+    if(to&&to.fret===from.fret&&to.string===from.string)report.ties.push({from:from.id as number,to:to.id as number});
   }
   return report;
 }

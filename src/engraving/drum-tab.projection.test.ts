@@ -173,3 +173,25 @@ describe('playback and MIDI read the source, never the display copy',()=>{
 describe('the kit pattern the tests use',()=>{
   it('is the pattern the render test draws',()=>{expect(KIT_BAR_1).toEqual([[36,42],[38,42],[36,42,49],[91,53]]);});
 });
+
+describe('a tie is drawn on the tab only between two hits that are written alike',()=>{
+  /** Every tab note that has a tie origin, with the origin's number and line. */
+  const tabTies=(score:model.Score)=>notesOf(score.tracks[1].staves.find(staff=>!staff.isPercussion)!).filter(note=>note.tieOrigin).map(note=>[note.tieOrigin!.fret,note.tieOrigin!.string,note.fret,note.string]);
+  /** The ride bell (53) of bar 1's last beat tied into the snare (38) of bar 2's second beat: two different hits. */
+  function crossTied() {
+    const kit=kitScore(),staff=kit.score.tracks[1].staves[0];
+    const from=staff.bars[0].voices[0].beats[3].notes.find(note=>note.percussionArticulation===53)!,to=staff.bars[1].voices[0].beats[1].notes[0];
+    from.tieDestination=to;to.tieOrigin=from;to.isTieDestination=true;
+    return kit;
+  }
+  it('draws no tie between two different numbers, in either mode, and still draws the tie of equal hits',()=>{
+    for(const profile of ['tablature','standardTab'] as const){
+      const {score,ids}=crossTied(),result=projectEngraving(score,ids,engraving(ids,profile));
+      expect(tabTies(result.score),profile).toEqual([[49,6,49,6]]);
+      const to=score.tracks[1].staves[0].bars[1].voices[0].beats[1].notes[0],pair=result.notes.get(to.id)!;
+      expect((pair.tab??pair.rendered).tieOrigin,profile).toBeNull();expect((pair.tab??pair.rendered).isTieDestination,profile).toBe(false);
+      // The percussion staff of the other mode still carries the source's own tie.
+      if(profile==='standardTab')expect(pair.rendered.isTieDestination).toBe(true);
+    }
+  });
+});

@@ -84,7 +84,7 @@ import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
 import { MidiImportDialog } from './workspace/MidiImportDialog';
 import { BatchConvertDialog } from './batch/BatchConvertDialog';
 import { HelpDialog } from './help/HelpDialog';
-import { helpTargetFor,type HelpTopicId } from './help/help-topics';
+import { helpTargetFor,type HelpTarget,type HelpTopicId } from './help/help-topics';
 import type { PaletteAction } from './editor/command-palette';
 import { ViewDefaultsPanel } from './workspace/ViewDefaultsPanel';
 import { currentViewDefaults,hasSavedViewDefaults,standardViewDefaults,writeViewDefaults,type ViewDefaults } from './workspace/view-defaults';
@@ -130,7 +130,7 @@ import { HarmonyChordDialog } from './harmony/HarmonyChordDialog';
 import { ScaleToolPanel } from './harmony/ScaleToolPanel';
 import { getHarmonyChord } from './harmony/chord-source';
 import { readHarmonyLibrary,putHarmonyLibraryEntry,removeHarmonyLibraryEntry } from './harmony/library';
-import type { HarmonyLibrary } from './editor/harmony-types';
+import type { HarmonyAudition,HarmonyLibrary } from './editor/harmony-types';
 import { HarmonyTransposePanel } from './harmony/HarmonyTransposePanel';
 import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
 import { AddTrackDialog } from './workstation/AddTrackDialog';
@@ -441,6 +441,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(next.noteIndex!==undefined)setNoteIndex(next.noteIndex);
   });
   const auditionTuning:TuningAudition=(source,pitches,strum)=>{const heard=tuningAudition(pitches,strum);player?.audition(source,heard.notes,heard.durationMs);};
+  // A chord or scale preview sounds through its track's own sound, and only while nothing is playing; it records no edit.
+  const auditionHarmony:HarmonyAudition=(track,heard)=>{if(!player||player.getState().playing||player.getState().practice.phase==='countIn')return;const current=controller.getState();player.audition({trackId:trackIdentity(track)},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});};
   const copyMusic=(mode:ClipboardMode,cut=false)=>{
     if(!musicSelection||controlsBusy||cut&&editLocked)return;setClipboardError(null);
     try{
@@ -471,17 +473,31 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false),[batchOpen,setBatchOpen]=useState(false);
   const [helpTopic,setHelpTopic]=useState<HelpTopicId|null>(null),[helpSection,setHelpSection]=useState<string|undefined>(undefined),helpReturn=useRef<HTMLElement|null>(null);
   /** Opens help on the topic for what had focus; help only reads, so open scores and edits are untouched. */
-  const openHelp=(topic?:HelpTopicId)=>{const focused=document.activeElement instanceof HTMLElement?document.activeElement:null;helpReturn.current=focused;closeCommands(false);const target=topic?{topic}:helpTargetFor(focused);setHelpSection(target.section);setHelpTopic(target.topic);};
-  // F1 is heard on the window so it works with nothing focused; it never opens help over another dialog.
+  const openHelp=(topic?:HelpTopicId,section?:string)=>{const focused=document.activeElement instanceof HTMLElement?document.activeElement:null;helpReturn.current=focused;closeCommands(false);const target:HelpTarget=topic?{topic,section}:helpTargetFor(focused);setHelpSection(target.section);setHelpTopic(target.topic);};
+  // F1 is heard on the window so it works with nothing focused. It opens help over the Export, MIDI import, ASCII import and Batch convert dialogs (at their own topic) and over no other dialog.
   const helpKey=useRef<(event:globalThis.KeyboardEvent)=>void>(()=>{});
   helpKey.current=event=>{
     if(event.key!=='F1'||event.ctrlKey||event.metaKey||event.altKey||event.shiftKey)return;
     event.preventDefault();
-    if(event.repeat||helpTopic!==null||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||batchOpen||document.querySelector('[role="dialog"]'))return;
+    if(event.repeat||helpTopic!==null)return;
+    const over:HelpTarget|null=exportOpen?{topic:'export',section:'start'}:asciiOpen||midiOpen?{topic:'files',section:'import'}:batchOpen?{topic:'files',section:'batch'}:null;
+    if(over){if(harmonyOpen||scaleOpen||paletteOpen||document.querySelectorAll('[role="dialog"]').length!==1)return;openHelp(over.topic,over.section);return;}
+    if(harmonyOpen||scaleOpen||paletteOpen||document.querySelector('[role="dialog"]'))return;
     openHelp();
   };
   useEffect(()=>{const listener=(event:globalThis.KeyboardEvent)=>helpKey.current(event);window.addEventListener('keydown',listener);return ()=>window.removeEventListener('keydown',listener);},[]);
-  const closeHelp=()=>{setHelpTopic(null);const back=helpReturn.current;helpReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
+  const helpRestore=useRef<HTMLElement|null|undefined>(undefined);
+  const closeHelp=()=>{setHelpTopic(null);helpRestore.current=helpReturn.current;helpReturn.current=null;};
+  // Focus goes back once help has unmounted and lifted its inert marks; before that the browser refuses it. If the control that had focus is gone (such as Cancel conversion when a run ended), it goes to the dialog still open, else the score.
+  useEffect(()=>{
+    if(helpTopic!==null||helpRestore.current===undefined)return;
+    const back=helpRestore.current;helpRestore.current=undefined;
+    if(back?.isConnected)back.focus();
+    if(back&&document.activeElement===back)return;
+    const open=document.querySelector<HTMLElement>('[role="dialog"]');
+    open?.querySelector<HTMLElement>('input:not(:disabled),button:not(:disabled),textarea:not(:disabled),select:not(:disabled)')?.focus();
+    if(!open)scorePane.current?.focus();
+  },[helpTopic]);
   const openAscii=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setAsciiOpen(true);};
   const openMidi=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setMidiOpen(true);};
   const openBatch=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setBatchOpen(true);};
@@ -1435,7 +1451,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         {!dockCollapsed&&<DockResizeHandle height={dockHeight} min={dockMin} max={dockMax} onHeight={setDockSize} onReset={()=>setDockSize(null)}/>}
         <nav aria-label={t('dock.views_group')}><button aria-pressed={!dockPanelVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>{t('dock.overview')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>{t('dock.mixer')}</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>{t('dock.instrument')}</button><button aria-pressed={keyboardVisible} onClick={()=>chooseDock('keyboard')}>{t('dock.keyboard')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>{t('dock.backing')}</button><button className="dock-collapse" aria-label={t(dockCollapsed?'dock.expand_aria':'dock.hide_aria')} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{t(dockCollapsed?'dock.expand':'dock.hide')}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
-          <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={selectTrack}/>}</div>
+          <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} onMoveTrack={editLocked?undefined:(from,to)=>{if(editBusy)return false;act(edit({type:'moveTrack',track:from,to}));return true;}} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={selectTrack}/>}</div>
           {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           {keyboardVisible&&<LiveInstrumentView panel="keyboard" score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           <div className="workstation-dock-backing" hidden={dockPanelVisible||dockMode!=='backing'}>
@@ -1447,16 +1463,17 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </section>
     </div>
     {exportOpen&&<ExportDialog layoutLocked={editLocked} layoutLockedNote={finalized?undefined:t('export.layout_locked_note')} plainNote={state.snapshot.protection&&(state.snapshot.protection.open||state.snapshot.protection.edit!=='none')?t('export.plain_protection_note'):undefined} sounds={state.settings.sounds} trackNames={trackNames} pluginWarnings={pluginStatuses} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} countInBars={playbackState?.practice.settings.countIn.bars??0} onExport={runExport} onCancel={cancelExport}/>}
-    {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
+    {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}} onAudition={auditionHarmony} auditionUnavailable={playbackRunning}/>}
     {addTrackOpen&&<AddTrackDialog busy={controlsBusy} locked={editLocked} onAudition={auditionTuning} onAdd={command=>edit(command,score=>{const last=score.tracks.length-1;if(last>=0)select({track:last,staff:0,bar:target.bar,voice:0,beat:0},score.tracks[last].staves[0].tuning.length);})} onClose={()=>setAddTrackOpen(false)}/>}
-    {helpTopic!==null&&<HelpDialog initial={helpTopic} initialSection={helpSection} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}
     {batchOpen&&<BatchConvertDialog busy={controlsBusy} onClose={closeBatch}/>}
     {protectionDialog==='manage'&&<ProtectionDialog protection={state.snapshot.protection??{edit:'none',open:false}} dirty={state.snapshot.dirty} onRequest={request=>controller.protect(request)} onClose={closeProtection}/>}
     {protectionDialog==='unlock'&&<UnlockEditingDialog onTry={async password=>{await controller.protect({kind:'unlockEditing',password});closeProtection();}} onClose={closeProtection}/>}
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound',key:{shift:playbackState?.keyTarget??playbackState?.practice.settings.tonality??0,ready:playbackState?.ready??false}}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
-    {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onNote={editLocked?undefined:instrumentEdit} onClose={closeModal}/>}
+    {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onNote={editLocked?undefined:instrumentEdit} onAudition={auditionHarmony} auditionUnavailable={playbackRunning} onClose={closeModal}/>}
+    {/* Last, so help paints above every dialog it can open over: they share one z-index and the later one wins. */}
+    {helpTopic!==null&&<HelpDialog initial={helpTopic} initialSection={helpSection} onClose={closeHelp}/>}
     <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? t('status.save_hint')}</span>}{state.repaired&&<span className="statusbar-note" role="status">{t('status.document_rebuilt')}</span>}{recoveryStatus}<StatusReadout score={state.score} target={target} string={string} noteIndex={noteIndex} selection={musicSelection} indexed={indexed}/></footer>
   </div>;
 }

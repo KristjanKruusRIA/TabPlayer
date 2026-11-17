@@ -7,6 +7,8 @@ import { scoreFromJson } from '../model-clone';
 import { selectScore } from './selection';
 import { withPlainDrone } from '../editor/banjo-drone';
 import { isNoteCautionary } from '../editor/cautionary';
+import { resolvePercussionArticulation,standardPercussionCatalog } from '../editor/percussion-catalog';
+import { standardArticulationId } from '../audio/kit-sound';
 import type { ExportSelection } from './types';
 
 // An owned MusicXML 4.0 score-partwise writer. Durations use 960 divisions per
@@ -100,15 +102,17 @@ function defaults(){
   pristine={score:json,master:(json.masterbars as Json[])[0],track:tracks[0],playback:tracks[0].playbackinfo as Json,staff:staves[0],bar:bars[0],voice:voices[0],beat:beats[0],note:(beats[0].notes as Json[])[0]};
   return pristine;
 }
-function check(kind:keyof typeof written,value:Json){
+// `allowed` names the further fields a percussion staff writes (see percussionSounds).
+function check(kind:keyof typeof written,value:Json,allowed:readonly string[]=[]){
   const base=defaults()[kind];
   for(const key of new Set([...Object.keys(base),...Object.keys(value)])){
-    if(written[kind].has(key))continue;
+    if(written[kind].has(key)||allowed.includes(key))continue;
     if(JSON.stringify(value[key]??null)!==JSON.stringify(base[key]??null))unsupported(`${kind} ${key}`);
   }
 }
 
-function clef(bar:model.Bar,tab:boolean,number=''){
+function clef(bar:model.Bar,tab:boolean,number='',percussion=false){
+  if(percussion)return element('clef',element('sign','percussion')+element('line',2),number);
   if(tab)return element('clef',element('sign','TAB')+element('line',5),number);
   const signs:Partial<Record<model.Clef,[string,number]>>={[model.Clef.G2]:['G',2],[model.Clef.F4]:['F',4],[model.Clef.C3]:['C',3],[model.Clef.C4]:['C',4]};
   const sign=signs[bar.clef]??unsupported('this clef');
@@ -411,12 +415,72 @@ function endingNumbers(flags:number):number[]{
   return result;
 }
 
-function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean}){
+// Percussion. A hit is an <unpitched> note whose display step and octave put it on the staff line the app draws it on, and
+// whose <instrument> names the drum sound. Each distinct sound the part uses is one score-instrument with a midi-unpitched key.
+// alphaTab's import reads the line back as steps 38 - 7 * octave - letter above the staff's top line (percussion clef, five lines).
+interface PercussionSound{id:string;name:string;key:number;articulation:model.InstrumentArticulation}
+const soundKey=(a:model.InstrumentArticulation)=>JSON.stringify([a.elementType,a.staffLine,a.outputMidiNumber,a.noteHeadDefault,a.noteHeadHalf,a.noteHeadWhole,a.techniqueSymbol,a.techniqueSymbolPlacement]);
+function soundOf(track:model.Track,note:model.Note){
+  const articulation=resolvePercussionArticulation(track,note.percussionArticulation)??unsupported('an unknown percussion sound');
+  if(!Number.isInteger(articulation.staffLine))unsupported('a percussion sound on no staff line');
+  // The mark above or inside the head (edge, choke, mute) has no MusicXML form the import reads back.
+  if(articulation.techniqueSymbol!==model.MusicFontSymbol.None)unsupported(`a technique mark on a percussion sound (${articulation.elementType||'custom'})`);
+  return articulation;
+}
+function percussionChecks(track:model.Track){
+  if(track.staves.length>1)unsupported('a percussion staff beside another staff');
+  const staff=track.staves[0];
+  if(!staff.showStandardNotation)unsupported('a percussion staff without standard notation');
+  if(staff.standardNotationLineCount!==5)unsupported(`a percussion staff with ${staff.standardNotationLineCount} lines`);
+  for(const bar of staff.bars){
+    if(bar.clef!==model.Clef.Neutral||bar.clefOttava!==model.Ottavia.Regular)unsupported('a clef on a percussion staff');
+    // The import spells the line by the key, which would move the head.
+    if(bar.keySignature!==0)unsupported('a key signature on a percussion staff');
+  }
+}
+/** The sounds a percussion part uses, in order of first use; each is a score-instrument of the part. */
+function percussionSounds(track:model.Track,part:string):Map<string,PercussionSound>{
+  const sounds=new Map<string,PercussionSound>();
+  if(!track.staves.some(staff=>staff.isPercussion))return sounds;
+  percussionChecks(track);
+  for(const bar of track.staves[0].bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes){
+    const articulation=soundOf(track,note),key=soundKey(articulation);
+    if(sounds.has(key))continue;
+    const standard=standardArticulationId(track,note.percussionArticulation),label=standard===undefined?undefined:standardPercussionCatalog.find(entry=>entry.id===standard)?.label;
+    sounds.set(key,{id:`${part}-I${sounds.size+1}`,name:label??(articulation.elementType||'Custom percussion'),key:articulation.outputMidiNumber,articulation});
+  }
+  return sounds;
+}
+function unpitched(articulation:model.InstrumentArticulation){
+  const steps=38-articulation.staffLine,octave=Math.floor(steps/7),letter=steps-octave*7;
+  if(octave<0||octave>9)unsupported('a percussion staff line outside octaves 0–9');
+  return element('unpitched',element('display-step','CDEFGAB'[letter])+element('display-octave',octave));
+}
+// The shape families MusicXML names for a drum head. `smufl` carries the exact glyph for readers that know it.
+const symbol=model.MusicFontSymbol;
+const headFamilies=new Map<model.MusicFontSymbol,[string,string]>([
+  [symbol.NoteheadXBlack,['x','']],[symbol.NoteheadXHalf,['x','']],[symbol.NoteheadXWhole,['x','']],[symbol.NoteheadHeavyX,['x','']],[symbol.NoteheadHeavyXHat,['x','']],
+  [symbol.NoteheadCircleX,['circle-x','']],[symbol.NoteheadCircleSlash,['circle-x','']],
+  [symbol.NoteheadDiamondWhite,['diamond',' filled="no"']],[symbol.NoteheadDiamondBlack,['diamond',' filled="yes"']],
+  [symbol.NoteheadTriangleUpBlack,['triangle','']],[symbol.NoteheadTriangleUpHalf,['triangle',' filled="no"']],[symbol.NoteheadTriangleUpWhole,['triangle',' filled="no"']],
+  [symbol.NoteheadSlashedBlack2,['back slashed','']],[symbol.NoteheadNull,['none','']],
+]);
+const plainHeads=new Set([symbol.NoteheadBlack,symbol.NoteheadHalf,symbol.NoteheadWhole,symbol.NoteheadDoubleWhole]);
+function percussionHead(note:model.Note,articulation:model.InstrumentArticulation){
+  const duration=note.beat.duration as number,shown=duration<=1?articulation.noteHeadWhole:duration===2?articulation.noteHeadHalf:articulation.noteHeadDefault;
+  const parentheses=note.isGhost?' parentheses="yes"':'';
+  if(plainHeads.has(shown))return note.isGhost?`<notehead${parentheses}>normal</notehead>`:'';
+  const family=headFamilies.get(shown),name=model.MusicFontSymbol[shown];
+  if(!family||!name?.startsWith('Notehead'))return unsupported(`the notehead of ${articulation.elementType||'a percussion sound'}`);
+  return element('notehead',family[0],`${parentheses}${family[1]} smufl="${name[0].toLowerCase()}${name.slice(1)}"`);
+}
+
+function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean},sounds:Map<string,PercussionSound>){
   state.started=false;
   const mix=trackMixAutomations(track),sung={seen:new Set<number>(),open:[] as boolean[]};
-  check('track',json);check('playback',json.playbackinfo as Json);
-  (json.staves as Json[]).forEach(s=>check('staff',s));
-  if(track.staves.some(s=>s.isPercussion))unsupported('percussion staves');
+  const percussion=track.staves.some(s=>s.isPercussion);
+  check('track',json,percussion?['percussionarticulations']:[]);check('playback',json.playbackinfo as Json);
+  (json.staves as Json[]).forEach((s,at)=>check('staff',s,track.staves[at].isPercussion?['ispercussion']:[]));
   if(track.staves.length>1&&track.staves.some(s=>s.stringTuning.tunings.length>0))unsupported('more than one staff per track');
   if(track.staves.some(s=>s.capo!==0&&!s.stringTuning.tunings.length))unsupported('a capo on a non-stringed staff');
   const staff0=track.staves[0],strings=staff0.stringTuning.tunings,stringed=strings.length>0;
@@ -459,7 +523,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       }else if(track.staves.length>1){
         layouts.forEach(layout=>attributes.push(clef(track.staves[layout.staffIndex].bars[index],false,` number="${layout.staff}"`)));
       }else{
-        attributes.push(clef(bar0,tab,''));
+        attributes.push(clef(bar0,tab,'',percussion));
       }
     }else{
       if(both){
@@ -656,8 +720,9 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             if(!beat.notes.length){notes+=element('note','<rest/>'+rhythm+(held?element('notations',held):''));continue;}
             const sorted=[...beat.notes].sort((a,b)=>a.realValue-b.realValue),lyrics=lyricsOf(beat,sung);
             for(const [noteIndex,note] of sorted.entries()){
-              check('note',(beatJson.notes as Json[])[note.index]);
-              const written=pitch(note.calculateRealValue(false,false)-transpose,bar.keySignature,note.accidentalMode,isNoteCautionary(note));
+              check('note',(beatJson.notes as Json[])[note.index],percussion?['percussionarticulation']:[]);
+              const articulation=percussion?soundOf(track,note):null,drum=articulation&&sounds.get(soundKey(articulation));
+              const written=articulation?{pitch:unpitched(articulation),accidental:''}:pitch(note.calculateRealValue(false,false)-transpose,bar.keySignature,note.accidentalMode,isNoteCautionary(note));
               const open=ties[at],links:[string,number][]=[];
               if(note.isTieDestination){
                 const level=note.tieOrigin&&open.get(note.tieOrigin);if(!level)unsupported('a tie without its origin');
@@ -672,8 +737,10 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               const slurred=legato(note,legatos[at],legatos),plucks=fingerOf(note),technical=fingering||bent||mark.technical||slurred||plucks?element('technical',slurred+bent+mark.technical+fingering+plucks):'';
               const marked=(noteIndex===0?held:'')+(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
               const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
-              const timing=rhythm.replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`);
-              notes+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+placeNoteAttributes(timing,written.accidental,noteheadOf(note))
+              const tying=rhythm.replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`);
+              // A percussion note names its sound after its ties and before its voice.
+              const timing=drum?tying.replace('<voice>',`<instrument id="${drum.id}"/><voice>`):tying;
+              notes+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+placeNoteAttributes(timing,written.accidental,articulation?percussionHead(note,articulation):noteheadOf(note))
                 +(tied||marked?element('notations',tied+marked):'')+(layout.staffIndex===0&&at===0&&noteIndex===0?lyrics:'')+playOf(note));
             }
           }
@@ -737,10 +804,16 @@ function exportMusicXmlPlain(score:model.Score,selection:ExportSelection):Uint8A
   const parts=copy.tracks.map((track,index)=>{
     const info=track.playbackInfo,id=`P${index+1}`;
     if(info.primaryChannel<0||info.primaryChannel>15)unsupported('MIDI channels above 16');
+    // A percussion part has one instrument per sound it uses, each on its own midi-unpitched key; others have the one.
+    const sounds=percussionSounds(track,id),used=[...sounds.values()];
+    const mix=element('volume',number(info.volume*100/16))+element('pan',number(info.balance*180/16-90));
+    const common=element('midi-channel',info.primaryChannel+1)+element('midi-program',info.program+1);
+    const instruments=used.length?used.map(sound=>element('score-instrument',element('instrument-name',escape(sound.name)),` id="${sound.id}"`)).join('')
+      +used.map(sound=>element('midi-instrument',common+element('midi-unpitched',sound.key+1)+mix,` id="${sound.id}"`)).join('')
+      :element('score-instrument',element('instrument-name',escape(track.name)),` id="${id}-I1"`)+element('midi-instrument',common+mix,` id="${id}-I1"`);
     return {
-      list:element('score-part',element('part-name',escape(track.name))+(track.shortName?element('part-abbreviation',escape(track.shortName)):'')+element('score-instrument',element('instrument-name',escape(track.name)),` id="${id}-I1"`)
-        +element('midi-instrument',element('midi-channel',info.primaryChannel+1)+element('midi-program',info.program+1)+element('volume',number(info.volume*100/16))+element('pan',number(info.balance*180/16-90)),` id="${id}-I1"`),` id="${id}"`),
-      body:element('part',writePart(track,copy,(json.tracks as Json[])[index],json,index===0,`${id}-I1`,state),` id="${id}"`),
+      list:element('score-part',element('part-name',escape(track.name))+(track.shortName?element('part-abbreviation',escape(track.shortName)):'')+instruments,` id="${id}"`),
+      body:element('part',writePart(track,copy,(json.tracks as Json[])[index],json,index===0,`${id}-I1`,state,sounds),` id="${id}"`),
     };
   });
   const identification=[copy.artist?element('creator',escape(copy.artist),' type="composer"'):'',copy.words?element('creator',escape(copy.words),' type="lyricist"'):'',copy.music?element('creator',escape(copy.music),' type="arranger"'):'',copy.copyright?element('rights',escape(copy.copyright)):''].join('');

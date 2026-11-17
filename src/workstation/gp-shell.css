@@ -205,6 +205,12 @@
 .workstation-dock .score-overview-track { box-shadow:inset 6px 0 var(--overview-track,transparent); padding-left:14px; gap:8px; }
 .workstation-dock .dock-track-instrument { display:grid; place-items:center; flex:0 0 auto; width:18px; color:var(--ws-text); opacity:.85; }
 .workstation-dock .score-overview-track-number { min-width:1.6em; text-align:right; }
+.workstation-dock .dock-track-handle { appearance:none; flex:0 0 auto; display:grid; place-items:center; width:14px; height:22px; margin:0 -4px 0 -6px; padding:0; border:0; border-radius:3px; background:none; color:var(--ws-muted); cursor:grab; touch-action:none; }
+.workstation-dock .dock-track-handle:hover,.workstation-dock .dock-track-handle[data-dragging] { color:var(--ws-text); }
+.workstation-dock .dock-track-handle[data-dragging] { cursor:grabbing; }
+.workstation-dock .dock-track-handle[aria-disabled="true"] { opacity:.45; cursor:default; }
+.workstation-dock .dock-track-handle:focus-visible { outline:2px solid var(--ws-accent,currentColor); outline-offset:1px; }
+.dock-drop-indicator { position:fixed; z-index:60; height:2px; margin-top:-1px; background:var(--ws-accent,currentColor); pointer-events:none; }
 .workstation-dock .score-overview-mix { grid-template-columns:24px 24px 24px 124px 26px; gap:4px; }
 .workstation-dock .score-overview-mix button { display:grid; place-items:center; width:24px; height:22px; padding:0; border:0; border-radius:4px; background:transparent; color:color-mix(in srgb,var(--ws-muted) 75%,transparent); }
 .workstation-dock .score-overview-mix button:not(:disabled):not([aria-disabled="true"]):hover { background:color-mix(in srgb,var(--ws-text) 10%,transparent); color:var(--ws-text); }

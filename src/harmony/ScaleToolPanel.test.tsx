@@ -42,3 +42,18 @@ it('announces that a busy scale browser is waiting',()=>{
   view.rerender(<ScaleToolPanel {...props} busy/>);
   expect(screen.getByRole('status')).toHaveTextContent('Wait for the current operation to finish.');expect(screen.getByLabelText('Scale root').closest('fieldset')).toHaveAttribute('aria-busy','true');expect(screen.getByRole('status').closest('fieldset')).toBeNull();
 });
+it('plays_the_scale_ascending_from_the_root_through_the_audition_without_an_edit',()=>{
+  const score=music(),before=model.JsonConverter.scoreToJson(score),heard:Array<{track:model.Track;notes:Array<{key:number;startMs:number}>;durationMs:number}>=[],edits:unknown[]=[];
+  render(<ScaleToolPanel score={score} selection={null} busy={false} onClose={()=>{}} onEdit={command=>edits.push(command)} onAudition={(track,result)=>heard.push({track,...result})}/>);
+  fireEvent.change(screen.getByLabelText('Scale root'),{target:{value:'2'}});
+  fireEvent.click(screen.getByRole('button',{name:'Play scale'}));
+  expect(heard).toHaveLength(1);expect(heard[0].track).toBe(score.tracks[0]);expect(heard[0].durationMs).toBe(600);
+  expect(heard[0].notes.map(note=>note.key)).toEqual([62,64,66,67,69,71,73,74]);expect(heard[0].notes.map(note=>note.startMs)).toEqual([0,120,240,360,480,600,720,840]);
+  expect(edits).toEqual([]);expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+});
+it('keeps_the_scale_play_control_focusable_but_inert_while_playing_and_absent_without_an_audition',()=>{
+  const score=music(),calls:number[]=[];
+  const view=render(<ScaleToolPanel score={score} selection={null} busy={false} onClose={()=>{}} onAudition={()=>calls.push(1)} auditionUnavailable/>);
+  const play=screen.getByRole('button',{name:'Play scale'});expect(play).not.toBeDisabled();expect(play).toHaveAttribute('aria-disabled','true');play.focus();expect(play).toHaveFocus();fireEvent.click(play);expect(calls).toEqual([]);
+  view.rerender(<ScaleToolPanel score={score} selection={null} busy={false} onClose={()=>{}}/>);expect(screen.queryByRole('button',{name:'Play scale'})).not.toBeInTheDocument();
+});

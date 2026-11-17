@@ -6,6 +6,8 @@ import { chordTones,findChordShapes,formatChordName,recognizeChords } from './ch
 import { getHarmonyChord,setHarmonyChordSource } from './chord-source';
 import { createHarmonyLibraryEntry,recallHarmonyLibraryEntry } from './library';
 import { ChordDiagramPreview,soundingChordPitches } from './ChordDiagramPreview';
+import { useI18n } from '../i18n';
+import { chordAudition } from '../audio/audition';
 import { Dialog } from '../ui/Dialog';
 import { Segmented } from '../ui/Segmented';
 import { busyGuard,busyRegion } from '../ui/useBusyGuard';
@@ -32,7 +34,8 @@ function effective(value:HarmonyChord,staff:model.Staff):HarmonyChord {
 function initial(value:HarmonyChord|null,staff:model.Staff):HarmonyChord {
   return value?effective(value,staff):{name:'C',nameMode:'theory',recipe:newRecipe(),firstFret:1,frets:staff.tuning.map(()=>-1),fingers:staff.tuning.map(()=>-2),barreFrets:[],showName:true,showDiagram:true,showFingering:true};
 }
-export function HarmonyChordDialog({score,target,selection,value,busy,library,onEdit,onClose,onLibraryPut,onLibraryRemove}:HarmonyChordDialogProps) {
+export function HarmonyChordDialog({score,target,selection,value,busy,library,onEdit,onClose,onLibraryPut,onLibraryRemove,onAudition,auditionUnavailable=false}:HarmonyChordDialogProps) {
+  const { t }=useI18n();
   const staff=score.tracks[target.track].staves[target.staff],beat=staff.bars[target.bar].voices[target.voice].beats[target.beat];
   const [draft,setDraft]=useState(()=>initial(value,staff)),[recipe,setRecipe]=useState(()=>draft.recipe??newRecipe()),[barres,setBarres]=useState(()=>draft.barreFrets.join(', ')),[text,setText]=useState(beat.text??'');
   const [shapes,setShapes]=useState<HarmonyChord[]>([]),[fill,setFill]=useState(false),[error,setError]=useState(''),[pending,setPending]=useState(false),[libraryId,setLibraryId]=useState(''),[libraryLabel,setLibraryLabel]=useState(''),[status,setStatus]=useState('');
@@ -105,6 +108,7 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
           {matches.length>0&&<div aria-label="Recognized chords"><p className="muted">Exact sounding pitch-class matches</p>{matches.map((match,index)=><button type="button" key={index} onClick={()=>updateRecipe(match.recipe)}>Use recognized {match.name}</button>)}</div>}
         </div><div className="harmony-shapes"><h3>Selected shape</h3>
           <ChordDiagramPreview chord={draft} staff={staff} highlightRoot onToggle={busy||pending?null:updateFret}/>
+          {onAudition&&<button type="button" {...busyGuard({unavailable:auditionUnavailable||!chordAudition(staff,draft.frets),onClick:()=>{const heard=chordAudition(staff,draft.frets);if(heard)onAudition(score.tracks[target.track],heard);}})}>{t('harmony.play_chord')}</button>}
           {shapes.length>0?<div className="harmony-candidates" aria-label="Generated shapes">{shapes.map((shape,index)=><button className="harmony-candidate" type="button" key={index} aria-label={`Use shape ${index+1}`} aria-pressed={JSON.stringify([shape.frets,shape.barreFrets])===JSON.stringify([draft.frets,draft.barreFrets])} onClick={()=>{setDraft(structuredClone(shape));setBarres(shape.barreFrets.join(', '));setError('');}}><span>Shape {index+1}</span><ChordDiagramPreview chord={shape} staff={staff} highlightRoot onToggle={null}/></button>)}</div>:<p className="muted">Choose a formula and generate shapes to compare fingerings.</p>}
         </div></div>
         <details><summary>Shape and display</summary><fieldset>

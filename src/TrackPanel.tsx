@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from './project';
 import type { ChannelMix } from './edit-types';
@@ -42,12 +43,84 @@ const DockShown=createContext<{shown:readonly number[];toggle?:(track:number)=>v
 
 type DockPlayer=Parameters<typeof TrackPanel>[0]['player'];
 /** What the dock rows read; a context, so a change re-renders the rows instead of remounting them, which would drop focus and drags. */
-const DockRows=createContext<{score:model.Score;player:DockPlayer;busy:boolean}>({score:{tracks:[]} as unknown as model.Score,player:null,busy:true});
+const DockRows=createContext<{score:model.Score;player:DockPlayer;busy:boolean;move?:(from:number,to:number)=>void|boolean}>({score:{tracks:[]} as unknown as model.Score,player:null,busy:true});
+const dockRowHeight=28;
+/** Rows are keyed by position, so after a move the grip that had focus belongs to another track; the moved track's grip is given focus once the list shows it there. */
+let focusAfterMove:{id:string;to:number;until:number}|null=null;
+const moveAndFollow=(move:(from:number,to:number)=>void|boolean,id:string,from:number,to:number)=>{focusAfterMove={id,to,until:Date.now()+2000};if(move(from,to)===false)focusAfterMove=null;};
+/** A row's grip: dragging it moves the track by as many rows as the pointer crosses, as one edit made at the release.
+ * Escape, a cancelled pointer, or a track list that changes under the drag leaves everything as it was; a drop on the row it started in changes nothing. */
+function TrackHandle({track:index}:{track:number}){
+  const {score,busy,move}=useContext(DockRows);const { t } = useI18n();
+  const track=score.tracks[index],id=track?trackIdentity(track):'',count=score.tracks.length;
+  const latest=useRef({score,move,id,index,count});latest.current={score,move,id,index,count};
+  const session=useRef<{id:string;from:number;startY:number;rowHeight:number;pointerId:number;row:HTMLElement|null}|null>(null);
+  const [drag,setDrag]=useState<{to:number;line:{top:number;left:number;width:number}}|null>(null);
+  // True from the press to the release or cancel, whether or not the pointer has left the starting row.
+  const [active,setActive]=useState(false);
+  const cancel=useCallback(()=>{session.current=null;setDrag(null);setActive(false);},[]);
+  const at=(event:{clientY:number})=>{
+    const s=session.current!;const to=Math.max(0,Math.min(latest.current.count-1,s.from+Math.round((event.clientY-s.startY)/s.rowHeight)));
+    const rect=s.row?.getBoundingClientRect();
+    return {to,line:{top:(rect?.top??0)+(to>s.from?(to-s.from+1):(to-s.from))*s.rowHeight,left:rect?.left??0,width:rect?.width??0}};
+  };
+  // Escape cancels before the score's own handlers see it; a changed track list cancels too.
+  useEffect(()=>{
+    if(!active)return;
+    const key=(event:KeyboardEvent)=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancel();}};
+    document.addEventListener('keydown',key,true);return()=>document.removeEventListener('keydown',key,true);
+  },[active,cancel]);
+  useEffect(()=>{
+    const s=session.current;if(s&&score.tracks.findIndex(other=>trackIdentity(other)===s.id)!==s.from)cancel();
+  },[score,cancel]);
+  useEffect(()=>cancel,[cancel]);
+  const button=useRef<HTMLButtonElement>(null);
+  useEffect(()=>{
+    const want=focusAfterMove;if(!want)return;
+    if(Date.now()>want.until){focusAfterMove=null;return;}
+    if(want.id===id&&want.to===index){focusAfterMove=null;button.current?.focus();}
+  },[id,index]);
+  if(!track||!move||count<2)return null;
+  const name=track.name||`Track ${index+1}`;
+  const finish=(event:React.PointerEvent<HTMLButtonElement>)=>{
+    const s=session.current;if(!s||s.pointerId!==event.pointerId)return;
+    const {to}=at(event);session.current=null;setDrag(null);setActive(false);
+    try{event.currentTarget.releasePointerCapture?.(event.pointerId);}catch{/* Not captured. */}
+    const now=latest.current;
+    if(to!==s.from&&now.score.tracks.findIndex(other=>trackIdentity(other)===s.id)===s.from){if(now.move)moveAndFollow(now.move,s.id,s.from,to);}
+  };
+  return <button type="button" ref={button} className="dock-track-handle" data-dragging={drag?'':undefined} aria-label={t('overview.move_track',{track:name})} title={t('overview.move_track_hint')} aria-disabled={busy||undefined}
+    onPointerDown={event=>{
+      if(event.button!==0||busy||session.current)return;
+      const row=event.currentTarget.closest<HTMLElement>('.score-overview-track');
+      session.current={id,from:index,startY:event.clientY,rowHeight:row?.getBoundingClientRect().height||dockRowHeight,pointerId:event.pointerId,row};setActive(true);
+      try{event.currentTarget.setPointerCapture?.(event.pointerId);}catch{/* Not capturable. */}
+      event.preventDefault();event.currentTarget.focus();
+    }}
+    onPointerMove={event=>{
+      const s=session.current;if(!s||s.pointerId!==event.pointerId)return;
+      const next=at(event);
+      setDrag(old=>next.to===s.from?(old?null:old):old&&old.to===next.to&&old.line.top===next.line.top?old:next);
+    }}
+    onPointerUp={finish}
+    onPointerCancel={event=>{if(session.current?.pointerId===event.pointerId)cancel();}}
+    onLostPointerCapture={event=>{if(session.current?.pointerId===event.pointerId)cancel();}}
+    onKeyDown={event=>{
+      // The keyboard way to the same edit: Alt+Up and Alt+Down, one row each.
+      if(!event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||(event.key!=='ArrowUp'&&event.key!=='ArrowDown'))return;
+      event.preventDefault();event.stopPropagation();
+      const to=index+(event.key==='ArrowUp'?-1:1);
+      if(!busy&&to>=0&&to<count)moveAndFollow(move,id,index,to);
+    }}>
+    <svg viewBox="0 0 8 14" width="8" height="14" aria-hidden="true" fill="currentColor"><circle cx="2" cy="3" r="1"/><circle cx="6" cy="3" r="1"/><circle cx="2" cy="7" r="1"/><circle cx="6" cy="7" r="1"/><circle cx="2" cy="11" r="1"/><circle cx="6" cy="11" r="1"/></svg>
+    {drag&&createPortal(<span className="dock-drop-indicator" data-testid="track-drop-indicator" aria-hidden="true" style={{top:drag.line.top,left:drag.line.left,width:drag.line.width}}/>,document.body)}
+  </button>;
+}
 function TrackInstrument({track:index}:{track:number}){
   const {score}=useContext(DockRows);
   const track=score.tracks[index];if(!track)return null;
   const Mark=instrumentMark(track);
-  return <span className="dock-track-instrument" aria-hidden="true"><Mark width={15} height={15}/></span>;
+  return <><TrackHandle track={index}/><span className="dock-track-instrument" aria-hidden="true"><Mark width={15} height={15}/></span></>;
 }
 /** Volume or pan of one track as a gesture: heard while dragged (a preview of the mix, nothing recorded), then saved once, as the Mixer view does. */
 function useMixGesture(player:DockPlayer,score:model.Score,id:string){
@@ -92,7 +165,7 @@ function ChannelRanges({player,score,track,busy,volume,pan}:{player:DockPlayer;s
   </>;
 }
 
-export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,onSelect,onSelectPosition,player,shown=[],onToggleShown,onAddTrack}: {
+export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,onSelect,onSelectPosition,player,shown=[],onToggleShown,onAddTrack,onMoveTrack}: {
   score:model.Score;selected:number;busy:boolean;view:'overview'|'mixer';target:BeatTarget;onExitOverview:()=>void;
   /** The bars a running loop plays, marked on the overview. */
   loop?:LoopPassage|null;
@@ -101,6 +174,8 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
   shown?:readonly number[];onToggleShown?:(track:number)=>void;
   /** Shows a + button in the track list's header that starts adding a track. */
   onAddTrack?:()=>void;
+  /** Gives each dock row a grip that drags its track to a new position (and Alt+Up and Alt+Down on it); called once per drag, with the track's index and where it lands. */
+  onMoveTrack?:(from:number,to:number)=>void|boolean;
   player:Pick<NativePlaybackController,'subscribe'|'getState'|'mix'|'setMute'|'setSolo'|'setTrackVolume'|'setPan'|'focus'|'setFocus'>&Partial<Pick<NativePlaybackController,'master'|'setMaster'|'previewMix'>>|null;
 }):React.JSX.Element {
   const state=useSyncExternalStore(player?.subscribe ?? noSubscribe,player?.getState ?? noState);
@@ -117,7 +192,10 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
     header:<span className="score-overview-mix" aria-hidden="true"><span className="score-overview-mix-head" title={t('overview.col_shown_hint')}><EyeGlyph open/></span><span className="score-overview-mix-head" title={t('overview.col_mute')}><MuteGlyph width={14} height={14}/></span><span className="score-overview-mix-head" title={t('overview.col_solo')}><SoloGlyph width={14} height={14}/></span><span className="score-overview-mix-head">{t('overview.col_volume')}</span><span className="score-overview-mix-head">{t('overview.col_pan')}</span></span>,
     Lead:TrackInstrument,Row:TrackMixRow,
   }),[busy,t,canAddTrack]);
-  const dockRows=useMemo(()=>({score,player,busy}),[score,player,busy]);
+  // The latest move handler, read when a drag ends, so a new handler on each render does not rebuild the rows and drop a drag.
+  const moveTrack=useRef(onMoveTrack);moveTrack.current=onMoveTrack;const canMove=Boolean(onMoveTrack);
+  const move=useCallback((from:number,to:number)=>moveTrack.current?.(from,to),[]);
+  const dockRows=useMemo(()=>({score,player,busy,move:canMove?move:undefined}),[score,player,busy,canMove,move]);
   const shownKey=shown.join(','),dockShown=useMemo(()=>({shown,toggle:onToggleShown}),[shownKey,onToggleShown]);
   // Focus belongs to the selected track (by identity): selecting another track moves it there.
   const selectedId=score.tracks[selected]?trackIdentity(score.tracks[selected]):null,focus=player?.focus(),amount=focus&&focus.track===selectedId?focus.amount:0;

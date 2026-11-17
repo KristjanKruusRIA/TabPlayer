@@ -6,12 +6,13 @@ import { resolveSelectionNotes } from '../editor/range-selection';
 import { matchScales,scalePatterns,scalePitches } from './scales';
 import { harmonyPitchName,soundingChordPitches } from './ChordDiagramPreview';
 import { ScaleDiagramEditor } from './ScaleDiagramEditor';
+import { scaleAudition } from '../audio/audition';
 import { Dialog } from '../ui/Dialog';
-import { busyRegion } from '../ui/useBusyGuard';
+import { busyGuard,busyRegion } from '../ui/useBusyGuard';
 
 const roots=['C','C# / Db','D','D# / Eb','E','F','F# / Gb','G','G# / Ab','A','A# / Bb','B'];
 const tagOptions=[{value:'',label:'All tags'},...[...new Set(scalePatterns.flatMap(value=>value.tags))].map(value=>({value,label:value}))];
-export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose,target,beat,onEdit,onNote}:ScaleToolPanelProps) {
+export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose,target,beat,onEdit,onNote,onAudition,auditionUnavailable=false}:ScaleToolPanelProps) {
   const { t }=useI18n();
   const [root,setRoot]=useState(0),[pattern,setPattern]=useState('major'),[search,setSearch]=useState(''),[tag,setTag]=useState(''),[custom,setCustom]=useState('0, 2, 4, 5, 7, 9, 11');
   const filtered=scalePatterns.filter(value=>(!tag||value.tags.includes(tag))&&`${value.name} ${value.tags.join(' ')}`.toLowerCase().includes(search.trim().toLowerCase())),active=pattern==='custom'?null:filtered.find(value=>value.id===pattern)??filtered[0];
@@ -51,6 +52,7 @@ export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose,
     {error&&<p role="alert">{error}</p>}
     {pitches.length>0&&<>
       {writable&&<p className="muted">{t('scales.overlay_hint')}</p>}
+      {onAudition&&staff&&<button type="button" {...busyGuard({unavailable:auditionUnavailable||!scaleAudition(staff,pitches),onClick:()=>{const heard=scaleAudition(staff,pitches);if(heard)onAudition(staff.track,heard);}})}>{t('harmony.play_scale')}</button>}
       <p aria-label="Scale notes">{pitches.map(harmonyPitchName).join(' ')}</p>
       <p aria-label="Scale degrees">Degrees: {pitches.map((_,index)=>index+1).join(' ')}</p>
       <p aria-label="Adjacent semitones">Adjacent semitones: {intervals.map((value,index)=>(intervals[index+1]??12)-value).join(' ')}</p>

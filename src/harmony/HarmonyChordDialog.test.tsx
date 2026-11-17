@@ -138,3 +138,24 @@ it('a_pending_library_save_is_announced_and_keeps_focus_on_the_button',()=>{
   const save=screen.getByRole('button',{name:'Save to library'});save.focus();fireEvent.click(save);
   expect(screen.getByRole('status')).toHaveTextContent('Updating the chord library…');expect(save).toHaveFocus();
 });
+it('plays_the_drawn_chord_low_to_high_through_the_audition_without_an_edit',()=>{
+  const {input,commands}=props(),heard:Array<{track:model.Track;notes:unknown;durationMs:number}>=[];
+  const score=input.score,before=model.JsonConverter.scoreToJson(score);
+  render(<HarmonyChordDialog {...input} onAudition={(track,result)=>heard.push({track,...result})}/>);
+  const play=screen.getByRole('button',{name:'Play chord'});fireEvent.click(play);expect(heard).toEqual([]);
+  // A major written high to low: x 0 2 2 2 0 from the low end.
+  [0,2,2,2,0,-1].forEach((fret,index)=>fireEvent.change(screen.getByLabelText(`String ${index+1} fret`),{target:{value:String(fret)}}));
+  fireEvent.click(play);
+  expect(heard).toEqual([{track:score.tracks[0],notes:[45,52,57,61,64].map((key,index)=>({key,startMs:index*60,velocity:96})),durationMs:1500}]);
+  expect(commands).toEqual([]);expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+});
+it('keeps_the_chord_play_control_reachable_by_keyboard_and_refuses_it_while_playing',()=>{
+  const {input}=props(legacy),calls:number[]=[];
+  const view=render(<HarmonyChordDialog {...input} onAudition={()=>calls.push(1)} auditionUnavailable/>);
+  const play=screen.getByRole('button',{name:'Play chord'});expect(play).not.toBeDisabled();expect(play).toHaveAttribute('aria-disabled','true');
+  play.focus();expect(play).toHaveFocus();fireEvent.click(play);expect(calls).toEqual([]);
+  view.rerender(<HarmonyChordDialog {...input} onAudition={()=>calls.push(1)}/>);fireEvent.click(screen.getByRole('button',{name:'Play chord'}));expect(calls).toEqual([1]);
+});
+it('offers_no_chord_play_control_without_an_audition',()=>{
+  const {input}=props();render(<HarmonyChordDialog {...input}/>);expect(screen.queryByRole('button',{name:'Play chord'})).not.toBeInTheDocument();
+});

@@ -4,7 +4,7 @@ import {blankProject} from '../project';
 import {buildScore} from '../engine';
 import type {EditCommand} from '../edit-types';
 import {preparePlanFromScore} from './plan';
-import {editAudition,readAuditionWhileEditing,tuningAudition,writeAuditionWhileEditing} from './audition';
+import {chordAudition,editAudition,readAuditionWhileEditing,scaleAudition,tuningAudition,writeAuditionWhileEditing} from './audition';
 
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 const standard=[64,59,55,50,45,40];
@@ -42,4 +42,31 @@ it('stores the editing preference with a default of on and survives broken stora
   writeAuditionWhileEditing(true,storage);expect(readAuditionWhileEditing(storage)).toBe(true);
   const broken={getItem:()=>{throw new Error('blocked');},setItem:()=>{throw new Error('blocked');}};
   expect(readAuditionWhileEditing(broken)).toBe(true);expect(()=>writeAuditionWhileEditing(false,broken)).not.toThrow();expect(readAuditionWhileEditing(undefined)).toBe(true);
+});
+
+it('strums a chord low to high at the staff keys, skipping muted strings',()=>{
+  const score=buildScore(blankProject()),staff=score.tracks[0].staves[0];
+  // A major, strings listed high to low: x 0 2 2 2 0 read from the low end.
+  expect(chordAudition(staff,[0,2,2,2,0,-1])).toEqual({notes:[45,52,57,61,64].map((key,index)=>({key,startMs:index*60,velocity:96})),durationMs:1500});
+  staff.capo=2;staff.transpositionPitch=3;
+  expect(chordAudition(staff,[-1,-1,-1,-1,-1,0])?.notes).toEqual([{key:40+2-3,startMs:0,velocity:96}]);
+  expect(chordAudition(staff,[-1,-1,-1,-1,-1,-1])).toBeNull();
+  expect(chordAudition(staff,[0,0,0])).toBeNull();
+  staff.isPercussion=true;expect(chordAudition(staff,[0,0,0,0,0,0])).toBeNull();
+});
+it('bounds a chord to twelve notes inside the native start limit',()=>{
+  const score=buildScore(blankProject()),staff=score.tracks[0].staves[0];
+  staff.stringTuning.tunings=Array.from({length:14},(_,index)=>30+index);
+  const heard=chordAudition(staff,Array.from({length:14},()=>0))!;
+  expect(heard.notes).toHaveLength(12);expect(Math.max(...heard.notes.map(note=>note.startMs))).toBeLessThanOrEqual(1000);
+});
+it('plays a scale ascending from the root, moved by octaves into the instrument range',()=>{
+  const score=buildScore(blankProject()),staff=score.tracks[0].staves[0],cMajor=[60,62,64,65,67,69,71,72];
+  expect(scaleAudition(staff,cMajor)).toEqual({notes:cMajor.map((key,index)=>({key,startMs:index*120,velocity:96})),durationMs:600});
+  staff.stringTuning.tunings=[43,38,33,28];
+  expect(scaleAudition(staff,cMajor)?.notes.map(note=>note.key)).toEqual(cMajor.map(key=>key-12));
+  expect(scaleAudition(staff,Array.from({length:14},(_,index)=>60+index))?.notes).toHaveLength(12);
+  expect(Math.max(...scaleAudition(staff,Array.from({length:14},(_,index)=>60+index))!.notes.map(note=>note.startMs))).toBeLessThanOrEqual(1000);
+  expect(scaleAudition(staff,[])).toBeNull();
+  staff.isPercussion=true;expect(scaleAudition(staff,cMajor)).toBeNull();
 });

@@ -2,7 +2,7 @@ import { midi,model,Settings, type io } from '@coderline/alphatab';
 import '../tremolo-guard';
 import { validateSelection,type ExportSelection } from './types';
 import { selectStaves } from './selection';
-import { deadBrushMidiDurations,drumMidiHits,fadeRestoreLevels,noteAudioMidiAdjustments,prepareMidiScore,restoreVolumeAfterFades } from '../audio/plan';
+import { deadBrushMidiDurations,drumMidiHits,fadeMixControllers,noteAudioMidiAdjustments,prepareMidiScore,restoreVolumeAfterFades } from '../audio/plan';
 import { hasNoteAudio } from '../editor/note-audio';
 import { gpControllerEvents,prepareGpMidiScore } from '../interchange/automation';
 import { GOLPE_CHANNEL,golpeHits } from '../audio/golpe';
@@ -69,7 +69,7 @@ export function exportMidi(score:model.Score,selection:ExportSelection,options:M
   // A golpe is written as a General MIDI percussion hit in its own track's events, as playback plays it.
   for(const hit of golpeHits(prepared,performed))handler.pairs.push({on:new midi.NoteOnEvent(hit.track,hit.tick,GOLPE_CHANNEL,hit.key,hit.velocity),off:new midi.NoteOffEvent(hit.track,hit.tick+hit.length,GOLPE_CHANNEL,hit.key,hit.velocity),attack:-1});
   const automated=gpControllerEvents(prepared,performed);
-  for(const event of [...automated,...fadeRestoreLevels(restores,automated,source.tickShift)])source.addEvent(new midi.ControlChangeEvent(event.track,event.tick,event.channel,event.controller,event.value));
+  for(const event of fadeMixControllers(restores,automated,source.tickShift))source.addEvent(new midi.ControlChangeEvent(event.track,event.tick,event.channel,event.controller,event.value));
   const selected=new Set(selection.tracks);const remap=new Map(selection.tracks.map((n,i)=>[n,i+1]));
   const conductor=(e:midi.MidiEvent)=>e instanceof midi.TempoChangeEvent||e instanceof midi.TimeSignatureEvent;
   // 1.8.4's aggregate events getter recurses for multiple tracks.

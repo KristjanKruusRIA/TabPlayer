@@ -6,6 +6,7 @@ import { buildScore, exportGp } from '../engine';
 import { buildPlaybackPlan, buildPlaybackPlanFromJson, deadBrushMidiDurations, prepareMidiScore, preparePlan, validateBackingAnchors, validatePlaybackPlan } from './plan';
 import { blankProject } from '../project';
 import selectionProtocol from '../../tests/selection-playback-protocol.json';
+import fadeSeries from '../../tests/fixtures/fade-automation-series.json';
 import type { PlaybackPlan } from './types';
 import { standardPercussionCatalog } from '../editor/percussion-catalog';
 import { isStandardArticulation } from './drum-map';
@@ -807,4 +808,79 @@ it('refuses a plan whose event names an id that is no standard articulation', ()
     expect(() => validatePlaybackPlan(bad), `event ${index} id ${id}`).toThrow(/Invalid native playback plan/);
   }
   expect(() => validatePlaybackPlan(structuredClone(plan))).not.toThrow();
+});
+
+// A fade is a series of volume events the generator writes from the track's written volume (120 here). On a track whose volume
+// is automated, the ramp has to run in the level in force instead, or the level jumps at the fade start and the end.
+const fadeControllers = (fade: model.FadeType | null, automation: { value: number; ratio: number }[] = [], build = (s: model.Score) => buildPlaybackPlan(s, 1).midi) => {
+  const score = authored(1); note(score, 0, 0); note(score, 0, 1);
+  const beat = score.tracks[0].staves[0].bars[0].voices[0].beats[0];
+  if (fade !== null) beat.fade = fade;
+  for (const { value, ratio } of automation) beat.automations.push(Object.assign(new model.Automation(), { type: model.AutomationType.Volume, value, ratioPosition: ratio, isLinear: false }));
+  score.finish(settings);
+  return build(score).filter(e => e.type === 'controller' && e.controller === 7 && e.channel === 0).map(e => [e.tick, (e as { value: number }).value]);
+};
+// The level that sounds: the last event written at a tick wins.
+const levels = (events: number[][]) => [...new Map(events.map(([tick, value]) => [tick, value])).entries()];
+const FADES = [model.FadeType.FadeIn, model.FadeType.FadeOut, model.FadeType.VolumeSwell];
+it('golden_fades_without_volume_automation_are_unchanged', () => {
+  // Every event of the plan of a faded track with no automation, hashed as it was before the ramp followed the automated level.
+  const hash = (fade: model.FadeType) => {
+    let events: unknown;
+    fadeControllers(fade, [], s => { events = buildPlaybackPlan(s, 1).midi; return buildPlaybackPlan(s, 1).midi; });
+    return createHash('sha256').update(JSON.stringify(events)).digest('hex').slice(0, 16);
+  };
+  expect(FADES.map(hash)).toEqual(['5e041ce2ed29f584', 'b5d78f8dd9067427', 'a2f36475b23824a1']);
+});
+it('a_fade_runs_in_the_automated_volume_not_the_written_one', () => {
+  // Written volume 120, automated to 64 at the start. tests/fixtures/fade-automation-series.json holds the series; tests/audio_render.rs renders that same file.
+  const at64 = [{ value: 8, ratio: 0 }];
+  expect(levels(fadeControllers(model.FadeType.FadeOut, at64))).toEqual(fadeSeries.fadeOut);
+  // A fade in rises to the level in force, not to the written volume, and starts silent.
+  expect(levels(fadeControllers(model.FadeType.FadeIn, at64))).toEqual(fadeSeries.fadeIn);
+  const swell = levels(fadeControllers(model.FadeType.VolumeSwell, at64));
+  expect(swell[0]).toEqual([0, 0]);
+  expect(Math.max(...swell.map(e => e[1]))).toBe(64);
+  expect(swell.at(-1)).toEqual([960, 64]);
+});
+it('a_volume_move_during_a_fade_scales_the_ramp_and_never_steps_it', () => {
+  // Automated to 64 at the start of the bar and to 32 (tick 384) inside the fade out: the move lands on the ramp's position, not on the raw level.
+  const events = levels(fadeControllers(model.FadeType.FadeOut, [{ value: 8, ratio: 0 }, { value: 4, ratio: 0.1 }]));
+  expect(events).toEqual(fadeSeries.fadeOutMoved);
+  // Moved up again inside the silent end of the ramp: it stays silent until the restore, which lands on the new level.
+  const tail = levels(fadeControllers(model.FadeType.FadeOut, [{ value: 8, ratio: 0 }, { value: 12, ratio: 0.22 }]));
+  expect(tail.filter(e => e[0] >= 768)).toEqual([[768, 0], [845, 0], [960, 96]]);
+});
+it('a_fade_that_starts_where_the_last_one_ended_starts_silent_on_an_automated_track', () => {
+  // Back-to-back fades on beats 0 and 1 of an automated track (written 120, automated to 64). The first fade's restore lands on the
+  // tick the second starts at; the second's first step (0) is the same scaled as written, so it was skipped and the restore won.
+  const back = (first: model.FadeType, second: model.FadeType, automate: boolean) => {
+    const score = authored(1); note(score, 0, 0); note(score, 0, 1);
+    const beats = score.tracks[0].staves[0].bars[0].voices[0].beats;
+    beats[0].fade = first; beats[1].fade = second;
+    if (automate) beats[0].automations.push(Object.assign(new model.Automation(), { type: model.AutomationType.Volume, value: 8, ratioPosition: 0, isLinear: false }));
+    score.finish(settings);
+    return levels(buildPlaybackPlan(score, 1).midi.filter(e => e.type === 'controller' && e.controller === 7 && e.channel === 0).map(e => [e.tick, (e as { value: number }).value]));
+  };
+  const at = (events: number[][], tick: number) => events.find(e => e[0] === tick)?.[1];
+  // The same score without automation starts the second fade at silence; the automated one must too, and end at the automated level.
+  expect(at(back(model.FadeType.VolumeSwell, model.FadeType.VolumeSwell, false), 960)).toBe(0);
+  const swells = back(model.FadeType.VolumeSwell, model.FadeType.VolumeSwell, true);
+  expect(at(swells, 960)).toBe(0);
+  expect(swells.at(-1)).toEqual([expect.any(Number), 64]);
+  expect(Math.max(...swells.filter(e => e[0] > 960).map(e => e[1]))).toBeLessThanOrEqual(64);
+  // A fade out followed by a fade in, and a fade out followed by a fade out, which starts at the level in force.
+  expect(at(back(model.FadeType.FadeOut, model.FadeType.FadeIn, true), 960)).toBe(0);
+  expect(at(back(model.FadeType.FadeOut, model.FadeType.FadeOut, true), 960)).toBe(64);
+});
+it('a_fade_on_a_track_without_volume_automation_is_not_touched_by_another_tracks', () => {
+  const build = (automate: boolean) => {
+    const score = authored(1, 1, 2); note(score, 0, 0); note(score, 0, 1);
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].fade = model.FadeType.VolumeSwell;
+    if (automate) score.tracks[1].staves[0].bars[0].voices[0].beats[0].automations.push(Object.assign(new model.Automation(), { type: model.AutomationType.Volume, value: 8, ratioPosition: 0.05, isLinear: false }));
+    score.finish(settings);
+    const plan = buildPlaybackPlan(score, 1);
+    return plan.midi.filter(e => e.trackId === plan.tracks[0].id);
+  };
+  expect(JSON.stringify(build(true))).toBe(JSON.stringify(build(false)));
 });

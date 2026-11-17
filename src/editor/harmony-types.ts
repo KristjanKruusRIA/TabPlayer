@@ -4,6 +4,7 @@ import type { EditCommand, IndexedNoteTarget } from '../edit-types';
 import type { EntryFollow } from '../instruments/entry';
 import type { MusicSelection } from './range-types';
 import type { ScaleDiagramCommand } from '../harmony/scale-diagram';
+import type { AuditionNote } from '../audio/bridge';
 
 export interface SpelledPitchClass {step:number;alteration:number}
 export type ChordDegree=1|2|3|4|5|6|7|9|11|13;
@@ -33,11 +34,15 @@ export interface ScalePattern {id:string;name:string;intervals:number[];tags:str
 export interface ScaleMatch {patternId:string;root:number;matched:number;total:number;extra:number}
 export interface HarmonyLibraryEntry {id:string;label:string;chord:HarmonyChord;tuning:number[];capo:number;transposition:number}
 export interface HarmonyLibrary {format:'TabPlayerHarmonyLibrary';version:1;entries:HarmonyLibraryEntry[]}
+/** Hears notes through a track's own sound; the host plays them only while the transport is stopped. */
+export type HarmonyAudition=(track:model.Track,heard:{notes:AuditionNote[];durationMs:number})=>void;
 export interface HarmonyChordDialogProps {
   score:model.Score;target:BeatTarget;selection:MusicSelection|null;value:HarmonyChord|null;
   busy:boolean;library:HarmonyLibrary;onEdit:(command:HarmonyCommand)=>void;onClose:()=>void;
   onLibraryPut:(entry:HarmonyLibraryEntry)=>Promise<void>;
   onLibraryRemove:(id:string)=>Promise<void>;
+  /** With this, a Play chord control hears the drawn chord; `auditionUnavailable` (the transport is running) leaves it inert. */
+  onAudition?:HarmonyAudition;auditionUnavailable?:boolean;
 }
 export interface ScaleToolPanelProps {
   score:model.Score;staff?:model.Staff;selection:MusicSelection|null;busy:boolean;onClose:()=>void;
@@ -45,6 +50,8 @@ export interface ScaleToolPanelProps {
   target?:BeatTarget;beat?:model.Beat;onEdit?:(command:ScaleDiagramCommand)=>void;
   /** With these too, a position of the scale preview can be clicked to put that note on the selected beat. The follow says what the editor should select afterwards. */
   onNote?:(command:EditCommand,follow:EntryFollow)=>void;
+  /** With this, a Play scale control hears the scale ascending; `auditionUnavailable` (the transport is running) leaves it inert. */
+  onAudition?:HarmonyAudition;auditionUnavailable?:boolean;
 }
 export interface HarmonyTransposePanelProps {score:model.Score;selection:MusicSelection|null;busy:boolean;onEdit:(command:Extract<HarmonyCommand,{type:'transposeHarmony'}>)=>void}
 export interface ChordDiagramPreviewProps {

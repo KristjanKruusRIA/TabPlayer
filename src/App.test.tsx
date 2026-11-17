@@ -3654,3 +3654,56 @@ describe('menus with sections inside them',()=>{
     expect(other.open).toBe(true);expect(view.open).toBe(false);
   });
 });
+
+describe('F1 over the import, export and batch dialogs',()=>{
+  const cases=[
+    {name:'Export score',open:'Export score',topic:'Exporting',section:'Starting an export'},
+    {name:'Import MIDI',open:'Import MIDI…',topic:'Opening, saving and importing',section:'Importing ASCII tab and MIDI'},
+    {name:'Import ASCII tab',open:'Import ASCII tab…',topic:'Opening, saving and importing',section:'Importing ASCII tab and MIDI'},
+    {name:'Batch convert scores',open:'Batch convert…',topic:'Opening, saving and importing',section:'Batch convert'},
+  ];
+  it.each(cases)('opens help for $name above it, keeps its state, and closes help before the dialog',async({name,open,topic,section})=>{
+    const scroll=vi.fn();Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,writable:true,value:scroll});
+    try{
+      const c=await setup(),before=c.getState().snapshot.project;
+      click(open);const dialog=screen.getByRole('dialog',{name});
+      const field=dialog.querySelector<HTMLElement>('textarea,input[type="text"],input:not([type]),input[type="checkbox"],select')!;field.focus();
+      if(field instanceof HTMLTextAreaElement)fireEvent.change(field,{target:{value:'kept text'}});
+      fireEvent.keyDown(field,{key:'F1'});
+      const help=await screen.findByRole('dialog',{name:'TabPlayer help'});
+      expect(screen.getByRole('dialog',{name,hidden:true})).toBeInTheDocument();
+      expect(within(help).getByRole('article',{name:topic})).toBeInTheDocument();
+      expect(scroll.mock.contexts.some(el=>(el as HTMLElement).textContent===section)).toBe(true);
+      if(field instanceof HTMLTextAreaElement)expect(field).toHaveValue('kept text');
+      fireEvent.keyDown(document.activeElement??document.body,{key:'Escape'});
+      await waitFor(()=>expect(screen.queryByRole('dialog',{name:'TabPlayer help'})).not.toBeInTheDocument());
+      expect(screen.getByRole('dialog',{name})).toBeInTheDocument();expect(field).toHaveFocus();
+      if(field instanceof HTMLTextAreaElement)expect(field).toHaveValue('kept text');
+      expect(c.getState().snapshot.project).toEqual(before);
+      fireEvent.keyDown(field,{key:'Escape'});
+      await waitFor(()=>expect(screen.queryByRole('dialog',{name})).not.toBeInTheDocument());
+    }finally{delete (HTMLElement.prototype as {scrollIntoView?:unknown}).scrollIntoView;}
+  });
+  // Dialogs share one z-index, so the one later in the document paints on top: help must come after the dialog it is over.
+  it.each(cases)('puts help after $name in the document so it paints above',async({name,open})=>{
+    const c=await setup();void c;
+    click(open);const dialog=screen.getByRole('dialog',{name});
+    fireEvent.keyDown(dialog.querySelector<HTMLElement>('button,input,textarea')!,{key:'F1'});
+    const help=await screen.findByRole('dialog',{name:'TabPlayer help'});
+    expect(dialog.compareDocumentPosition(help)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+  it('keeps focus inside the batch dialog when the focused control is gone by the time help closes',async()=>{
+    await setup();
+    click('Batch convert…');const dialog=screen.getByRole('dialog',{name:'Batch convert scores'});
+    const button=dialog.querySelector<HTMLElement>('button')!;button.focus();
+    fireEvent.keyDown(button,{key:'F1'});
+    await screen.findByRole('dialog',{name:'TabPlayer help'});
+    // The control that had focus (such as Cancel conversion when a run ends) is removed while help is open.
+    Object.defineProperty(button,'isConnected',{configurable:true,get:()=>false});
+    fireEvent.keyDown(document.activeElement??document.body,{key:'Escape'});
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'TabPlayer help'})).not.toBeInTheDocument());
+    await waitFor(()=>expect(dialog.contains(document.activeElement)).toBe(true));
+    fireEvent.keyDown(document.activeElement!,{key:'Escape'});
+    await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Batch convert scores'})).not.toBeInTheDocument());
+  });
+});

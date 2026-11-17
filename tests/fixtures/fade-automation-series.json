@@ -1,0 +1,6 @@
+{
+  "note": "The level that sounds (last volume event at each tick: [tick, value]) for a fade on a quarter-note beat of a track written at volume 120 and automated to 64 at the start of the bar. src/audio/plan.test.ts asserts the playback plan produces exactly these series; src-tauri/tests/audio_render.rs renders them.",
+  "fadeOut": [[0, 64], [120, 54], [240, 44], [360, 34], [480, 24], [600, 14], [768, 0], [960, 64]],
+  "fadeOutMoved": [[0, 64], [120, 54], [240, 44], [360, 34], [384, 17], [480, 12], [600, 7], [768, 0], [960, 32]],
+  "fadeIn": [[0, 0], [120, 10], [240, 20], [360, 30], [480, 40], [600, 50], [768, 64]]
+}

@@ -2510,6 +2510,10 @@ fn a_real_renderer_and_export_play_the_locked_articulation_only_when_locked() {
 /// Windowed RMS of one rendered second of a held note whose track channel gets the volume events `controllers` (tick, value),
 /// as the plan carries a beat's fade. Windows are 50 ms.
 fn fade_levels(controllers: &[(u32, u8)]) -> Vec<f64> {
+    fade_levels_in(controllers, 2_400)
+}
+/// [`fade_levels`] with windows of `window` samples.
+fn fade_levels_in(controllers: &[(u32, u8)], window: usize) -> Vec<f64> {
     use tabplayer_lib::audio::renderer::Renderer;
     let (_, resources, settings) = renderer_fixture(false);
     let mut midi = vec![
@@ -2525,7 +2529,7 @@ fn fade_levels(controllers: &[(u32, u8)]) -> Vec<f64> {
     let mut renderer = Renderer::new(Arc::new(plan), resources, settings, 48_000).unwrap();
     let mut out = vec![[0.0f32; 2]; 48_000];
     renderer.render_into(&mut out);
-    out.chunks(2_400)
+    out.chunks(window)
         .map(|window| energy(window).sqrt())
         .collect()
 }
@@ -2634,4 +2638,123 @@ fn fades_shape_the_rendered_level_of_a_held_note() {
         held[19] > steady * 0.5,
         "the held note keeps sounding to the end of its beat window"
     );
+}
+
+// The series the playback plan carries for a fade on a track whose volume is automated (the followed series are shared with plan.test.ts through a fixture file):
+// the track is written at 120 and automated to 64 at the start of the bar. `PLAN_*` is what the generator's ramp gave, from the
+// written volume (the automation event comes after the ramp's first step); `followed_series` is the ramp in the level in force.
+const PLAN_FADE_OUT: [(u32, u8); 9] = [
+    (0, 120),
+    (0, 64),
+    (120, 101),
+    (240, 83),
+    (360, 64),
+    (480, 45),
+    (600, 26),
+    (768, 0),
+    (960, 64),
+];
+const PLAN_FADE_OUT_MOVED: [(u32, u8); 10] = [
+    (0, 120),
+    (0, 64),
+    (120, 101),
+    (240, 83),
+    (360, 64),
+    (384, 32),
+    (480, 45),
+    (600, 26),
+    (768, 0),
+    (960, 32),
+];
+const PLAN_FADE_IN: [(u32, u8); 8] = [
+    (0, 0),
+    (0, 64),
+    (120, 19),
+    (240, 38),
+    (360, 56),
+    (480, 75),
+    (600, 94),
+    (768, 120),
+];
+/// One of the series in `tests/fixtures/fade-automation-series.json`, the ramp in the level in force. `src/audio/plan.test.ts`
+/// asserts the playback plan produces exactly these, so a change to the plan cannot leave this test rendering stale series.
+fn followed_series(name: &str) -> Vec<(u32, u8)> {
+    let all: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/fade-automation-series.json"
+    ))
+    .unwrap();
+    all[name]
+        .as_array()
+        .unwrap_or_else(|| panic!("no series {name}"))
+        .iter()
+        .map(|pair| {
+            (
+                pair[0].as_u64().unwrap() as u32,
+                pair[1].as_u64().unwrap() as u8,
+            )
+        })
+        .collect()
+}
+
+/// The largest rise from one 10 ms window to the next within `windows`, as a share of `steady`.
+fn largest_rise(levels: &[f64], windows: std::ops::Range<usize>, steady: f64) -> f64 {
+    windows
+        .map(|w| (levels[w + 1] - levels[w]) / steady)
+        .fold(f64::MIN, f64::max)
+}
+
+#[test]
+fn a_fade_on_an_automated_track_has_no_step_from_the_written_volume() {
+    // 10 ms windows; the note is held at the automated level 64 for the level the fade should be a share of.
+    let held = fade_levels_in(&[(0, 64)], 480);
+    let steady = held[10..40].iter().sum::<f64>() / 30.0;
+    assert!(steady > 0.01, "the automated note must sound: {steady}");
+    // Fade out: 0.4 s is windows 0 to 40, the restore at 0.5 s. From the written volume the level climbed from 64 to 101 at
+    // 62 ms; in the level in force it only falls.
+    let before = fade_levels_in(&PLAN_FADE_OUT, 480);
+    assert!(
+        largest_rise(&before, 5..40, steady) > 0.3,
+        "the ramp from the written volume steps up: {before:?}"
+    );
+    let after = fade_levels_in(&followed_series("fadeOut"), 480);
+    assert!(
+        largest_rise(&after, 5..40, steady) < 0.1,
+        "the ramp in the level in force never rises: {after:?}"
+    );
+    assert!(
+        (after[8] / steady - 1.0).abs() < 0.25,
+        "it starts at the level in force"
+    );
+    assert!(after[40] < steady * 0.02, "and ends silent");
+    // A volume move inside the fade lands on the ramp: it must not climb back up, as the unscaled level did at 480 ticks.
+    let before = fade_levels_in(&PLAN_FADE_OUT_MOVED, 480);
+    assert!(
+        largest_rise(&before, 5..40, steady) > 0.15,
+        "the written ramp rises after the move: {before:?}"
+    );
+    let after = fade_levels_in(&followed_series("fadeOutMoved"), 480);
+    assert!(
+        largest_rise(&after, 5..40, steady) < 0.1,
+        "the scaled ramp falls through the move: {after:?}"
+    );
+    // The level after the restore is the level in force, 32 here: half the level of 64.
+    assert!(
+        (after[55] / steady - 0.5).abs() < 0.1,
+        "restored to the moved level: {}",
+        after[55] / steady
+    );
+    // Fade in: it ends at the level in force. Written, it rose to 120, almost twice the automated level.
+    let before = fade_levels_in(&PLAN_FADE_IN, 480);
+    assert!(
+        before[44] / steady > 1.5,
+        "the written fade in overshoots: {}",
+        before[44] / steady
+    );
+    let after = fade_levels_in(&followed_series("fadeIn"), 480);
+    assert!(
+        (after[44] / steady - 1.0).abs() < 0.1,
+        "the fade in ends at the level in force: {}",
+        after[44] / steady
+    );
+    assert!(after[0] < steady * 0.25, "and starts near silence");
 }

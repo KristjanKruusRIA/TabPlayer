@@ -85,34 +85,68 @@ class Collector implements midi.IMidiFileHandler {
 }
 /** alphaTab ends a fade out or a swell at volume 0 and never raises the track again, so every later note was silent.
  * This writes the volume the fade started from back at the end of the faded beat, on the channels the fade used.
- * Scores without a fade get no extra event. Mix automation is added after generation, so fadeRestoreLevels corrects these levels. */
-type FadeRestore = { track: number; channel: number; tick: number };
+ * Scores without a fade get no extra event. It also records each fade's ramp (the volume events the generator wrote, at
+ * the track's written volume) so `fadeMixControllers` can run the ramp in the level in force once the mix automation is known. */
+type FadeRamp = { track: number; channel: number; level: number; steps: { tick: number; value: number }[]; end: number; restore: boolean };
 export function restoreVolumeAfterFades(generator: midi.MidiFileGenerator, handler: midi.IMidiFileHandler) {
-  const restores: FadeRestore[] = [];
+  const ramps: FadeRamp[] = [];
   const hooked = generator as unknown as { _generateFade(beat: model.Beat, start: number, duration: number): void };
   const original = hooked._generateFade.bind(generator);
   hooked._generateFade = (beat, start, duration) => {
-    const levels = new Map<number, { track: number; level: number }>(), add = handler.addControlChange.bind(handler);
+    const found = new Map<number, FadeRamp>(), add = handler.addControlChange.bind(handler);
     handler.addControlChange = (track, tick, channel, controller, value) => {
-      if (controller === midi.ControllerType.VolumeCoarse) levels.set(channel, { track, level: Math.max(levels.get(channel)?.level ?? 0, value) });
+      if (controller === midi.ControllerType.VolumeCoarse) {
+        const ramp = found.get(channel) ?? { track, channel, level: 0, steps: [], end: 0, restore: beat.fade !== model.FadeType.FadeIn };
+        ramp.level = Math.max(ramp.level, value); ramp.steps.push({ tick, value }); found.set(channel, ramp);
+      }
       add(track, tick, channel, controller, value);
     };
     try { original(beat, start, duration); } finally { handler.addControlChange = add; }
-    if (beat.fade === model.FadeType.FadeIn) return;
-    for (const [channel, { track, level }] of levels) { add(track, start + duration, channel, midi.ControllerType.VolumeCoarse, level); restores.push({ track, channel, tick: start + duration }); }
+    for (const ramp of found.values()) {
+      // A fade out or a swell ends where its beat does, with the written level back; a fade in ends at its last step, already at that level.
+      ramp.end = ramp.restore ? start + duration : ramp.steps.at(-1)!.tick;
+      if (ramp.restore) add(ramp.track, start + duration, ramp.channel, midi.ControllerType.VolumeCoarse, ramp.level);
+      ramps.push(ramp);
+    }
   };
-  return restores;
+  return ramps;
 }
-/** A restore lands on the automated level in force at its tick, not the track's written volume. */
-export function fadeRestoreLevels(restores: readonly FadeRestore[], controllers: readonly GpControllerEvent[], tickShift: number) {
-  return restores.flatMap(({ track, channel, tick }) => {
-    const at = tick + tickShift, level = controllers.filter(e => e.controller === 7 && e.track === track && e.channel === channel && e.tick <= at).at(-1);
-    return level ? [{ ...level, tick: at }] : [];
-  });
+/** The volume events of the mix automation and the fades, with each fade run in the level in force instead of the written one.
+ * The generator writes a ramp from the track's written volume, so on an automated track the level jumped at the fade start and a
+ * fade in ended above the automated level. Here every step is the fade's share of the level in force at its tick, and a volume
+ * move inside the fade lands on the ramp's position at that tick (a fade out stays silent through its end whatever moves).
+ * The restore at the end of a fade out or swell lands on the level in force. A track with no automation gets nothing added. */
+export function fadeMixControllers(ramps: readonly FadeRamp[], automated: readonly GpControllerEvent[], tickShift: number): GpControllerEvent[] {
+  const added: GpControllerEvent[] = [], dropped = new Set<GpControllerEvent>();
+  const volume = (track: number, channel: number) => automated.filter(e => e.controller === 7 && e.track === track && e.channel === channel);
+  // A fade that starts on the tick another one's restore lands on (back-to-back swells) must still write its first step: the restore
+  // is a corrective event written after the generator's, so a first step equal to the generator's (0) would otherwise lose to it.
+  const restoredAt = new Set(ramps.filter(r => r.restore && volume(r.track, r.channel).length).map(r => `${r.track}/${r.channel}/${r.end + tickShift}`));
+  for (const ramp of ramps) {
+    const moves = volume(ramp.track, ramp.channel), levelAt = (tick: number) => moves.filter(e => e.tick <= tick).at(-1)?.value;
+    const first = ramp.steps[0].tick + tickShift, end = ramp.end + tickShift;
+    if (ramp.level > 0 && moves.length) {
+      const inside = moves.filter(e => e.tick >= first && e.tick < end);
+      for (const move of inside) dropped.add(move);
+      const stepTicks = new Set(ramp.steps.map(step => step.tick + tickShift));
+      for (const tick of [...new Set([...stepTicks, ...inside.map(e => e.tick)])].sort((a, b) => a - b)) {
+        const level = levelAt(tick);
+        if (level === undefined || tick > end) continue;
+        const raw = ramp.steps.filter(step => step.tick + tickShift <= tick).at(-1)!.value, value = Math.round(raw * level / ramp.level);
+        if (stepTicks.has(tick) && value === raw && !inside.some(e => e.tick === tick) && !restoredAt.has(`${ramp.track}/${ramp.channel}/${tick}`)) continue;
+        added.push({ track: ramp.track, tick, channel: ramp.channel, controller: 7, value });
+      }
+    }
+    // The restore the generator hook wrote is the written level; on an automated track the level in force replaces it.
+    const level = ramp.restore ? levelAt(end) : undefined;
+    if (level !== undefined) added.push({ track: ramp.track, tick: end, channel: ramp.channel, controller: 7, value: level });
+  }
+  if (!added.length && !dropped.size) return [...automated];
+  return [...automated.filter(e => !dropped.has(e)), ...added].map((e, index) => ({ e, index })).sort((a, b) => a.e.tick - b.e.tick || a.index - b.index).map(({ e }) => e);
 }
 function generate(score: model.Score) {
-  const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events), restores = restoreVolumeAfterFades(generator, events); generator.generate();
-  return { events, lookup: generator.tickLookup, restores };
+  const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events), ramps = restoreVolumeAfterFades(generator, events); generator.generate();
+  return { events, lookup: generator.tickLookup, restores: ramps };
 }
 
 function resolvePrograms(score: model.Score, events: Collector) {
@@ -456,7 +490,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   if (interpreted.length) interpretAttacks(interpreted, interpretations!);
   const events: OrderedMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
   const automated = gpControllerEvents(score,occurrences);
-  for(const event of [...automated,...fadeRestoreLevels(complete.restores,automated,complete.events.shift)])events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
+  for(const event of fadeMixControllers(complete.restores,automated,complete.events.shift))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
   if (audible.length) applyNoteAudio(audible, notes, Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end)));
   for (const note of complete.events.notes) {
     const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity, ...(note.kit ? { kitElement: note.kit } : {}), ...(note.articulationId !== undefined ? { articulationId: note.articulationId } : {}) };

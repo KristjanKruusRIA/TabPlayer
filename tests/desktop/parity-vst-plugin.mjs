@@ -278,6 +278,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
   };
 
   const exportWav = async name => {
+    await ui.closeSoundDialog(page);
     await ui.clickWorkspaceCommand(page, 'Export score', { waitForIdle: false });
     const dialog = page.getByRole('dialog', { name: 'Export score' });
     await dialog.getByLabel('Export format').selectOption('wav');
@@ -299,19 +300,21 @@ export async function runVstPluginParity({ buildPath } = {}) {
   };
 
   const openSound = async () => {
-    await ui.revealLeftTask(page, 'Sound');
-    const panel = page.getByRole('region', { name: 'Track sound' });
+    // The track's sound is in the modal "Sound and pedalboard" dialog; toolbar clicks through the workstation helpers close it.
+    const panel = await ui.openSoundDialog(page);
     const slotDetails = panel.locator('details.sound-plugin-slot');
     if (!await slotDetails.evaluate(node => node.open)) {
       await slotDetails.locator('summary').click();
     }
   };
 
+  const closeSound = () => ui.closeSoundDialog(page);
   const pluginPicker = () => page.locator('.sound-plugin-slot select');
   const lastSoundEdit = async () => (await record()).snapshot.project.edits.filter(e => e.type === 'setTrackSound').at(-1);
 
   /** Opens the editor, proves a helper-owned window exists, sets the gain through the test hook, closes it and waits for the one edit. */
   const changeGainThroughEditor = async (documentId, trackId, gain) => {
+    await openSound();
     const before = (await record()).snapshot.project.edits.length;
     await page.getByRole('button', { name: 'Edit plug-in', exact: true }).click();
     await poll(async () => helperWindows(), n => n >= 1, 'helper-owned editor window exists');
@@ -392,6 +395,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
     assert.equal(chosenSlot.active, true);
 
     // Verify Drive, Amp and Cabinet replaced banner in rig
+    await closeSound();
     await page.locator('.view-switch button[role="radio"]').nth(1).click();
     await idle();
     const replacedBanner = page.locator('.rig-replaced-banner');
@@ -415,6 +419,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
     // 3. Editor sessions. A session that changes nothing records nothing; one that changes the gain records one undo step.
     const editsBeforeEditor = (await record()).snapshot.project.edits.length;
     const trackId1 = (await lastSoundEdit()).trackId;
+    await openSound();
     const editBtn = page.getByRole('button', { name: 'Edit plug-in', exact: true });
     await editBtn.click();
     const editorWindows = await poll(async () => helperWindows(), n => n >= 1, 'helper-owned editor window exists');
@@ -496,13 +501,16 @@ export async function runVstPluginParity({ buildPath } = {}) {
     await button('Stop');
 
     // Click "Try again" to recover
-    const retryBtn = page.getByRole('button', { name: 'Try again', exact: true }).first();
+    // The page-level notice's button is named "Try again: <track>"; the slot's own, in the Sound dialog, is plain.
+    const panel = await ui.openSoundDialog(page);
+    const retryBtn = panel.getByRole('button', { name: 'Try again', exact: true }).first();
     await retryBtn.click();
     await idle();
     await poll(async () => {
       const s = await invoke('plugin_status', { documentId: docId2 });
       return s[0]?.status;
     }, st => st === 'ready', 'status recovered to ready after retry');
+    await closeSound();
     step('5. Crash mode shows crashed notice, built-in tone, unchanged doc, and retry gives ready', { peak: crashAudio.outputPeak });
 
     // 6. Hang mode, through the Rust side: plugin_status turns `hung`, the helper is killed, both commands keep answering
@@ -626,6 +634,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
     await consentNotice.waitFor();
     assert.match(await consentNotice.innerText(), /needs your permission.*built-in tone plays instead/i);
 
+    await closeSound();
     const allowBtn = page.getByRole('button', { name: 'Allow plug-ins', exact: true }).first();
     await allowBtn.click();
     await idle();
@@ -637,6 +646,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
 
     // 8. Remove the library entry and reopen, and check the missing notice with an unchanged document
     const editsBeforeRemove = (await record()).snapshot.project.edits.length;
+    await openSound();
     const removeBtn = page.locator('.sound-plugin-slot').getByRole('button', { name: 'Remove from library', exact: true }).first();
     await removeBtn.click();
     await idle();

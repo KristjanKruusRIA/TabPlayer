@@ -25,6 +25,11 @@ use tabplayer_lib::{
         renderer::{PreparedMix, Renderer},
         resources::AudioResources,
     },
+    export::{
+        audio::{AudioExportRender, AudioExportRequest},
+        stems::{StemKind, StemTrack},
+        wav::AudioFormat,
+    },
     plugins::bridge::{BridgeLink, InsertShared},
     settings::{ChannelMix, DocumentSettings, SlotKind, TrackSound},
 };
@@ -1084,6 +1089,25 @@ fn rig_keyed() -> Rig {
     rig
 }
 
+impl Rig {
+    /// An instrument insert for an export: it waits for the helper's every result.
+    fn offline_instrument(&self) -> PluginInsert {
+        PluginInsert::new_of_kind(
+            SlotKind::Instrument,
+            self.link.clone(),
+            InsertMode::Offline {
+                timeout: Duration::from_secs(10),
+            },
+            0,
+            0.0,
+            0.0,
+            RATE,
+            self.shared.clone(),
+        )
+        .expect("an offline insert")
+    }
+}
+
 fn note_on(tick: u32, key: u8) -> Value {
     json!({"type":"noteOn","trackId":"drums","tick":tick,"channel":9,"key":key,"velocity":100})
 }
@@ -1110,6 +1134,19 @@ fn plan_with(tempos: Value, ends: [f64; 2], mut midi: Vec<Value>) -> PlaybackPla
 
 fn drum_plan(midi: Vec<Value>) -> PlaybackPlan {
     plan_with(json!([{"tick": 0, "bpm": 60}]), [4000.0, 8000.0], midi)
+}
+
+/// A plan of one bar of 1920 ticks, two seconds, for exports.
+fn short_plan(mut midi: Vec<Value>) -> PlaybackPlan {
+    midi.sort_by_key(|event| event["tick"].as_u64().unwrap());
+    serde_json::from_value(json!({
+        "generation": 1, "ppq": 960, "durationTick": 1920, "durationMs": 2000,
+        "tracks": [{"id": "drums", "program": 0, "percussion": true}],
+        "tempos": [{"tick": 0, "bpm": 60}],
+        "occurrences": [{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":1920,"startMs":0,"endMs":2000}],
+        "notes": [], "midi": midi
+    }))
+    .unwrap()
 }
 
 fn resources() -> Arc<AudioResources> {
@@ -1671,4 +1708,137 @@ fn a_renderer_frame_loop_that_dispatches_notes_to_an_instrument_never_touches_th
     }
     assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
     assert!(rig.helper.events().len() > 60, "the notes went out");
+}
+
+// ---- export -------------------------------------------------------------------------------------------------------------
+
+fn export_request(tail_seconds: f64) -> AudioExportRequest {
+    AudioExportRequest {
+        tracks: vec![StemTrack {
+            id: "drums".into(),
+            name: "drums".into(),
+            preset: "clean".into(),
+            kind: StemKind::Score,
+        }],
+        range: None,
+        format: AudioFormat::wav(RATE, 24),
+        speed: 1.0,
+        metronome: false,
+        metronome_sound: Default::default(),
+        tail_seconds,
+        include_backing: false,
+        include_mix: true,
+        normalize_rms_db: None,
+    }
+}
+
+fn export_plan() -> PlaybackPlan {
+    // A hit at the very start, one at tick 480, and one held to the end of the score.
+    short_plan(vec![
+        note_on(0, 36),
+        note_off(60, 36),
+        note_on(480, 38),
+        note_off(540, 38),
+        note_on(1800, 42),
+    ])
+}
+
+fn export_of(rig: &Rig, plan: &PlaybackPlan, tail_seconds: f64) -> AudioExportRender {
+    let mut renderer = plain_renderer(plan);
+    renderer.attach_plugin(0, Box::new(rig.offline_instrument()));
+    AudioExportRender::new(renderer, plan, export_request(tail_seconds)).unwrap()
+}
+
+fn export_mix(export: &mut AudioExportRender) -> Result<Vec<[f32; 2]>, String> {
+    let mut mix = Vec::new();
+    let mut buffer = vec![[0.0f32; 2]; 4096];
+    loop {
+        let n = export.render_mix(&mut buffer)?;
+        if n == 0 {
+            return Ok(mix);
+        }
+        mix.extend_from_slice(&buffer[..n]);
+    }
+}
+
+#[test]
+fn an_export_renders_the_instrument_with_its_first_hit_on_the_exact_sample_and_releases_at_the_end()
+{
+    let plan = export_plan();
+    let render = || {
+        let rig = rig_keyed();
+        let mut export = export_of(&rig, &plan, 0.1);
+        let total = export.total_frames() as usize;
+        let out = export_mix(&mut export).unwrap();
+        assert_eq!(out.len(), total);
+        (out, heard(&rig))
+    };
+    let (out, notes) = render();
+    // 96,000 frames of score and 4,800 of tail. The leading trim of D leaves the hit at tick 0 on sample 0.
+    assert_eq!(out.len(), 96_000 + 4_800);
+    assert_eq!(first_sound(&out), Some(0));
+    let scale = scale_of(&out, 0, key_signal(36));
+    let sounding = [(0, 3_000, 36), (24_000, 27_000, 38), (90_000, 96_000, 42)];
+    assert_signal(&out, scale, &sounding, 0);
+    // The held hit is released as the tail begins, so what is heard ends with the score.
+    assert_eq!(
+        notes,
+        vec![
+            (0, 'n', 36),
+            (3_000, 'f', 36),
+            (24_000, 'n', 38),
+            (27_000, 'f', 38),
+            (90_000, 'n', 42),
+            (96_000, 'a', 9),
+        ]
+    );
+    assert!(out[96_000..].iter().all(|f| *f == [0.0; 2]));
+
+    // Two exports are the same to the bit.
+    let (again, _) = render();
+    assert!(
+        out.iter()
+            .zip(&again)
+            .all(|(a, b)| { a[0].to_bits() == b[0].to_bits() && a[1].to_bits() == b[1].to_bits() }),
+        "an export is deterministic"
+    );
+}
+
+#[test]
+fn an_export_whose_instrument_stops_answering_fails_as_an_effect_does_and_one_without_it_keeps_the_built_in_kit()
+ {
+    let plan = export_plan();
+    // Faulting: no answer within the wait. The export ends in an error rather than a hole, and the whole mix is refused.
+    let rig = rig_keyed();
+    let mut renderer = plain_renderer(&plan);
+    renderer.attach_plugin(
+        0,
+        Box::new(
+            PluginInsert::new_of_kind(
+                SlotKind::Instrument,
+                rig.link.clone(),
+                InsertMode::Offline {
+                    timeout: Duration::from_millis(100),
+                },
+                0,
+                0.0,
+                0.0,
+                RATE,
+                rig.shared.clone(),
+            )
+            .unwrap(),
+        ),
+    );
+    rig.helper.paused.store(true, Ordering::Relaxed);
+    let mut export = AudioExportRender::new(renderer, &plan, export_request(0.1)).unwrap();
+    let error = export_mix(&mut export).unwrap_err();
+    assert!(error.contains("Plug-in failed"), "{error}");
+
+    // Missing: no insert is attached (the service reports it as a warning), and the export is the built-in kit's, as it is
+    // for an effect.
+    let mut bare =
+        AudioExportRender::new(plain_renderer(&plan), &plan, export_request(0.1)).unwrap();
+    let kit = export_mix(&mut bare).unwrap();
+    assert_eq!(kit.len(), 96_000 + 4_800);
+    assert!(first_sound(&kit).is_some());
 }

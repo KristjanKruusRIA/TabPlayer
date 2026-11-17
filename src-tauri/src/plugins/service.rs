@@ -3270,6 +3270,37 @@ mod tests {
         assert_eq!(kinds, vec![PluginKind::Effect, PluginKind::Instrument]);
     }
     #[test]
+    fn an_export_builds_an_instrument_insert_for_an_instrument_slot_and_leaves_a_missing_one_to_the_built_in_sound()
+     {
+        use crate::settings::SlotKind;
+        let rig = test_rig();
+        let mut synth = test_slot(&rig.class_id, &rig.state_id);
+        synth.kind = SlotKind::Instrument;
+        let req = vec![request("track_0", synth.clone())];
+        let offline = rig.service.offline_inserts("doc1", &req, 48_000).unwrap();
+        assert!(offline.warnings.is_empty());
+        assert_eq!(offline.inserts.len(), 1);
+        let insert = &offline.inserts[0].1;
+        assert_eq!(insert.kind(), SlotKind::Instrument);
+        assert_eq!(
+            insert.delay_frames(),
+            tabplayer_plugin_protocol::limits::BLOCK_FRAMES + insert.pipeline_and_latency().1
+        );
+        drop(offline);
+
+        // As for an effect: a class the library does not have is a warning, and the track keeps its built-in sound.
+        let mut gone = synth;
+        gone.class_id = "99999999999999999999999999999999".into();
+        let offline = rig
+            .service
+            .offline_inserts("doc1", &[request("track_0", gone)], 48_000)
+            .unwrap();
+        assert!(offline.inserts.is_empty());
+        assert_eq!(offline.warnings.len(), 1);
+        assert_eq!(offline.warnings[0].status, PluginStatus::Missing);
+    }
+
+    #[test]
     fn an_unknown_device_rate_starts_nothing() {
         let rig = test_rig();
         let req = vec![request("track_0", test_slot(&rig.class_id, &rig.state_id))];

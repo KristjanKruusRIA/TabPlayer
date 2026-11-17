@@ -13,11 +13,16 @@
 #[cfg(windows)]
 mod windows_tests {
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, atomic::AtomicBool};
     use std::time::{Duration, Instant};
 
     use tabplayer_lib::{
         audio::{plan::PlaybackPlan, renderer::Renderer, resources::AudioResources},
+        export::{
+            audio::{AudioExportRender, AudioExportRequest},
+            stems::{StemKind, StemTrack},
+            wav::{AudioFormat, write_wav},
+        },
         plugins::{
             helper::probe,
             library::PluginLibrary,
@@ -232,6 +237,38 @@ mod windows_tests {
         out
     }
 
+    fn export_request(tail_seconds: f64) -> AudioExportRequest {
+        AudioExportRequest {
+            tracks: vec![StemTrack {
+                id: "drums".into(),
+                name: "drums".into(),
+                preset: "clean".into(),
+                kind: StemKind::Score,
+            }],
+            range: None,
+            format: AudioFormat::wav(RATE, 24),
+            speed: 1.0,
+            metronome: false,
+            metronome_sound: Default::default(),
+            tail_seconds,
+            include_backing: false,
+            include_mix: true,
+            normalize_rms_db: None,
+        }
+    }
+
+    fn render_mix(export: &mut AudioExportRender) -> Result<Vec<[f32; 2]>, String> {
+        let mut mix = Vec::new();
+        let mut buffer = vec![[0.0f32; 2]; 4096];
+        loop {
+            let n = export.render_mix(&mut buffer)?;
+            if n == 0 {
+                return Ok(mix);
+            }
+            mix.extend_from_slice(&buffer[..n]);
+        }
+    }
+
     /// A drum plan, a crash or a hang in the first `process` and the built-in kit taking over.
     fn falls_back_to_the_built_in_kit(mode: TestMode, state_id: &str, status: &[PluginStatus]) {
         let rig = Rig::new();
@@ -329,6 +366,108 @@ mod windows_tests {
                 &"c".repeat(64),
                 &[PluginStatus::Hung, PluginStatus::Crashed],
             );
+        }
+
+        fn an_export_has_the_instruments_keys_on_the_exact_samples_after_the_trim() {
+            let rig = Rig::new();
+            let request = rig.drum_request(TestMode::Normal, &"d".repeat(64));
+            let hits = [(0, 60, 36), (480, 540, 38), (1800, 1900, 42)];
+            let plan = plan_of(&hits, 1920);
+            let render = || {
+                let offline = rig
+                    .service
+                    .offline_inserts("doc1", std::slice::from_ref(&request), RATE)
+                    .unwrap();
+                assert!(offline.warnings.is_empty());
+                let renderer =
+                    Renderer::new(Arc::new(plan.clone()), resources(), settings(None), RATE)
+                        .unwrap();
+                let mut export = AudioExportRender::new_with_plugins(
+                    renderer,
+                    &plan,
+                    export_request(0.5),
+                    Some(offline),
+                )
+                .unwrap();
+                let total = export.total_frames() as usize;
+                let out = render_mix(&mut export).unwrap();
+                assert_eq!(out.len(), total);
+                out
+            };
+            let out = render();
+            // The trim by D leaves each hit on its own sample, and nothing of the kit is in the mix.
+            assert_eq!(out.len(), 96_000 + 24_000);
+            for &(on, off, key) in &hits {
+                let (on, off) = (on as usize * TICK, off as usize * TICK);
+                if on > 0 {
+                    assert_eq!(out[on - 1], [0.0; 2], "silence before key {key}");
+                }
+                assert_eq!(played(out[on]), (key, VELOCITY), "the onset of key {key}");
+                assert_eq!(played(out[off - 1]), (key, VELOCITY), "key {key} holds");
+                assert_eq!(out[off], [0.0; 2], "key {key} ends on its NoteOff");
+            }
+            assert!(out[90_000..95_000].iter().all(|f| *f != [0.0; 2]), "the third hit holds");
+            assert!(out[95_000..].iter().all(|f| *f == [0.0; 2]), "and ends on its NoteOff");
+
+            // A second export is the same to the bit: a fresh helper each time.
+            let again = render();
+            assert!(
+                out.iter().zip(&again).all(|(a, b)| a[0].to_bits() == b[0].to_bits()
+                    && a[1].to_bits() == b[1].to_bits()),
+                "exports are deterministic"
+            );
+        }
+
+        fn an_export_with_a_missing_instrument_keeps_the_built_in_kit_and_a_crash_fails_naming_it() {
+            let rig = Rig::new();
+            let plan = plan_of(&HITS, 1920);
+
+            // Missing: a warning, and the built-in kit plays, as it does for an effect.
+            let mut gone = rig.drum_request(TestMode::Normal, &"e".repeat(64));
+            gone.slot.class_id = "99999999999999999999999999999999".into();
+            let offline = rig
+                .service
+                .offline_inserts("doc1", std::slice::from_ref(&gone), RATE)
+                .unwrap();
+            assert!(offline.inserts.is_empty());
+            assert_eq!(offline.warnings.len(), 1);
+            assert_eq!(offline.warnings[0].status, PluginStatus::Missing);
+            let renderer =
+                Renderer::new(Arc::new(plan.clone()), resources(), settings(None), RATE).unwrap();
+            let mut export = AudioExportRender::new_with_plugins(
+                renderer,
+                &plan,
+                export_request(0.2),
+                Some(offline),
+            )
+            .unwrap();
+            let kit = render_mix(&mut export).unwrap();
+            assert!(kit.iter().any(|f| f[0] != 0.0), "the built-in kit plays");
+
+            // Crashing: the export fails and says which plug-in, and leaves no file behind.
+            let crashing = rig.drum_request(TestMode::Crash, &"f".repeat(64));
+            let offline = rig
+                .service
+                .offline_inserts("doc1", std::slice::from_ref(&crashing), RATE)
+                .unwrap();
+            let renderer =
+                Renderer::new(Arc::new(plan.clone()), resources(), settings(None), RATE).unwrap();
+            let request = export_request(0.2);
+            let mut export =
+                AudioExportRender::new_with_plugins(renderer, &plan, request.clone(), Some(offline))
+                    .unwrap();
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("crashed.wav");
+            let error = write_wav(
+                &path,
+                request.format,
+                |b| export.render_mix(b),
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap_err();
+            assert!(error.contains(DRUM_PLUGIN_NAME), "the error names the plug-in: {error}");
+            assert!(!path.exists());
         }
     }
 }

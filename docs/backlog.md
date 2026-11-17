@@ -7,7 +7,16 @@ Product ideas that sit outside the GP8 parity tracker. Nothing here is scheduled
 Slice 1 (spikes) and Slice 2 (first shippable slice for Windows x64, VST3) are complete under Linear THE-71. See the design specification in `docs/superpowers/specs/2026-11-07-vst-hosting-design.md` and the validation report in `docs/validation/2026-11-08-vst-hosting.md`.
 
 **Instrument hosting is done for Windows (THE-218, 2026-11-17).** A drum track can hold a VST3 instrument, which plays the track from the score's notes; see `docs/validation/2026-11-17-vst-instruments.md`. Still open from it:
-- **Drum maps (THE-219).** Notes go out with the General MIDI keys as written, so articulations that share a key cannot be told apart.
+- **Drum maps are done (THE-219, 2026-11-17).** A drum track carries a map (a layout plus changed rows) that decides the keys of its hosted instrument and its MIDI port, with an editor, file import and export, and five library layouts; see `docs/validation/2026-11-17-drum-maps.md`. Still open from it:
+  - **Owner verification of the presets.** The five layouts are unverified third-party numbers; the owner's own exported layouts are the reference.
+  - **Audition.** A single sound cannot be played from the editor (no hit path, no stopped-transport listening window).
+  - **Hi-hat openness (CC4) and choke modes.** Need a new map file format version (version 2), since `[id, key]` rows cannot carry them.
+  - **Presets for other libraries,** from map files the owner exports.
+  - **Translated percussion names** in the key editor (English in every language today).
+  - **An app-wide map library** (maps live in the project today).
+  - **Maps applied to exported MIDI** (and Guitar Pro) files.
+  - **The MIDI out late note-off guard:** a late note-off for a note that was never sent can end another strike of the same key early (fixed for hosted instruments only).
+  - **The worktree build script:** `scripts/build-desktop-test.ps1` fails where `src-tauri/resources/library` is a junction.
 - **Controllers.** Hi-hat openness, program changes and pitch bend are not sent.
 - **Multi-output.** Only the main stereo output is used, so kit presets that route drums elsewhere are silent there.
 - **Warm-up for streaming samplers.** A library that loads samples in the background can give silent first hits or a silent start of an export.

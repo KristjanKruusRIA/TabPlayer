@@ -456,6 +456,54 @@ export async function runVstInstrumentParity({ buildPath } = {}) {
     assert.equal(await soundPanel().getByLabel('Input trim', { exact: true }).count(), 0, 'The input trim is hidden for an instrument');
     await soundPanel().getByLabel('Output trim', { exact: true }).waitFor();
     await checkKitNote();
+    // Layout pictures only (PLUGIN_DIALOG_SHOTS_ONLY=1): nothing here starts playback, so the test plug-in is never heard.
+    if (process.env.PLUGIN_DIALOG_SHOTS_ONLY) {
+      await ui.closePluginDialog(page);
+      await selectTrack(GUITAR);
+      await pluginPicker().selectOption(EFFECT_CLASS_ID);
+      await idle();
+      await ui.closePluginDialog(page);
+      // The Information row's arrows choose the previous (guitar) or next (drums) track in every language.
+      const openAny = async which => {
+        await ui.closePluginDialog(page);
+        const arrow = page.locator('.track-settings .track-actions button').nth(which === 'guitar' ? 0 : 1);
+        if (await arrow.getAttribute('aria-disabled') !== 'true') { await arrow.click(); await idle(); }
+        await page.locator('.sound-plugin-open').click();
+        await page.locator('.plugin-dialog').waitFor({ state: 'visible' });
+        await idle();
+        await sleep(300);
+        return page.locator('.plugin-dialog');
+      };
+      const cdp = await page.context().newCDPSession(page);
+      for (const language of LANGUAGES) {
+        if (language !== 'en') await setLanguage(language);
+        let dialog = await openAny('guitar');
+        await shoot(`plugin-dialog-guitar-effect-${language}`, dialog);
+        await dialog.locator('details.plugin-library-manage').evaluate(node => { node.open = true; });
+        await shoot(`plugin-dialog-guitar-library-${language}`, dialog);
+        dialog = await openAny('drums');
+        await shoot(`plugin-dialog-drums-instrument-${language}`, dialog);
+        if (language === 'en') result.observations.pluginDialogGeometry = await dialog.locator('.plugin-panel, .plugin-panel > *, .plugin-slot-controls > *').evaluateAll(nodes => nodes.map(node => { const r = node.getBoundingClientRect(); return [node.tagName.toLowerCase() + '.' + node.className, Math.round(r.top), Math.round(r.height)]; }));
+        await dialog.locator('details.plugin-library-manage').evaluate(node => { node.open = true; });
+        await shoot(`plugin-dialog-drums-library-${language}`, dialog);
+        await dialog.locator('details.plugin-library-manage').evaluate(node => { node.open = false; });
+        // The drum map's Keys open at 1366x768: the dialog must stay inside the window and scroll inside itself.
+        await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+        await sleep(300);
+        await dialog.locator('details.drum-map-keys > summary').click();
+        await dialog.locator('details.drum-map-keys [role="radio"]').nth(1).click(); // All sounds: a long list
+        await sleep(300);
+        const box = await dialog.boundingBox(), body = await dialog.locator('.tp-dialog-body').evaluate(node => ({ client: node.clientHeight, scroll: node.scrollHeight }));
+        assert.ok(box.y >= 0 && box.y + box.height <= 768, `${language}: the dialog stays inside the 768px window: ${JSON.stringify(box)}`);
+        assert.ok(body.scroll > body.client, `${language}: with Keys open the dialog body scrolls inside the dialog: ${JSON.stringify(body)}`);
+        await shoot(`plugin-dialog-drums-keys-1366x768-${language}`);
+        await cdp.send('Emulation.clearDeviceMetricsOverride');
+        await ui.closePluginDialog(page);
+      }
+      await setLanguage('en');
+      healthy();
+      return result;
+    }
     await ui.closePluginDialog(page);
     await inRig();
     const banners = await page.locator('.rig-replaced-banner').allInnerTexts();

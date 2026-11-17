@@ -643,7 +643,11 @@ export async function runVstPluginParity({ buildPath } = {}) {
     // 8. Remove the library entry and reopen, and check the missing notice with an unchanged document
     const editsBeforeRemove = (await record()).snapshot.project.edits.length;
     await openSound();
-    const removeBtn = page.locator('.sound-plugin-slot').getByRole('button', { name: 'Remove from library', exact: true }).first();
+    // Removal is the bin button in the library disclosure's row for the plug-in (there is no separate Remove from library button).
+    const library = page.locator('.sound-plugin-slot details.plugin-library-manage');
+    await library.evaluate(node => { node.open = true; });
+    assert.equal(await page.locator('.sound-plugin-slot').getByRole('button', { name: 'Remove from library', exact: true }).count(), 0, 'no separate Remove from library button');
+    const removeBtn = library.getByRole('button', { name: /^Remove .*(TabPlayer Test Gain|TestGain).* from library$/ }).first();
     await removeBtn.click();
     await idle();
 

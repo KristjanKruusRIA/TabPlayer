@@ -43,3 +43,28 @@ Real app (desktop test build), generated score of five guitar tracks and drums o
 - "Add plug-in…" was checked to be in view and enabled; its second click opens a native file picker and was not driven.
 - Centring is checked from the position of the edit-target box against the middle of the score area (within one staff), not from the staff lines themselves.
 - The Rust side was not changed; only the node tests of the changed scripts were run for build scripts.
+
+## Follow-up: the Plug-in dialog is separate from Sound and pedalboard
+
+Owner's report: "Also Sound and Pedalboard and Plugin open the exact same window. Plugin should only have the plugin and the sound and pedalboard everything else."
+
+What changed:
+
+- Two dialogs now. **Plug-in** (`PluginPanel`, class `plugin-dialog`) holds only the track's plug-in slot (choice with instrument and effect groups, Add plug-in…, Remove from library, Active, trims, Edit plug-in, status and notices, the library disclosure) and, for an instrument on a drum track, the drum map directly after it. **Sound and pedalboard** (`SoundPanel`) has no plug-in slot and no drum map: sound source, preset, drum kit and its mix, copy/paste, My sounds, the signal chain and the output device.
+- One term, "Plug-in" (et and de "Plugin"), for the sidebar row, its button, the Sound menu item and the dialog title. The select inside keeps its descriptive label "VST3 plug-in".
+- The sidebar's Plug-in… button and Sound > Plug-in… open the Plug-in dialog; Sound and pedalboard… opens the other. Only one is open at a time (one state in `SoundSummary`, distinct React keys); opening one from inside the other replaces it.
+- Cross-links: in the sound dialog an effect plug-in keeps the per-pedal "Replaced" markers and a one-line note ("Drive, Amp and Cabinet are replaced by the plug-in.") with a small Plug-in… button; the drum kit note for an instrument has the same button. Both open the Plug-in dialog in its place, and focus goes back to the control that opened the first dialog.
+- The "open scrolled to the plug-in section" mechanism (`openPlugin`, `reveal`, the details wrapper) is gone; the slot is a plain section, and its choice takes initial focus (`data-autofocus`). The Plug-in dialog is 480 px wide and sized to its content; its body scrolls inside the dialog when the drum map's Keys are open.
+- Help text for the Sounds section was reworded for the two dialogs (en, et, de).
+
+Verified: Vitest for each button and the menu item (right dialog, right content, the other's content absent), the drum map only for an instrument on a drum track, the cross-links, focus return, one `setTrackSound` for a plug-in choice and none for the current value, i18n completeness and source-literal tests. Desktop drivers `parity-vst-plugin`, `parity-vst-instrument`, `parity-drum-map` and `inspector-fixes` were changed to open the Plug-in dialog (new helpers `openPluginDialog` and `closePluginDialog` in `workstation-commands.mjs`).
+
+Limits: `tests/desktop/acceptance-vst-real-plugin.mjs` still drives the old left-hand Sound task (`revealLeftTask`) and was already out of date; it was not changed.
+
+### Plug-in dialog layout (owner feedback on the first version)
+
+Before: an empty band and a stray divider under the header (the global `.sound-panel` top border and margin), the select squeezed into the right half of a two-column label grid and truncated, Add plug-in… and Remove from library touching, trims pushed right with no row gap, and library rows whose names wrapped onto three lines beside a long "Remove <name> from library" button.
+
+After (`PluginSlotPanel`, `sound-panel.css`): one column on the Add track dialog's spacing (16 px body, 14 px between sections, 8 px between neighbours). The select has its label above it and the full width, with Add plug-in… beside it. Active comes first under the select with the status ("Ready") quietly at the right of the same row; notices and their Allow or Try again buttons follow. Input and Output trim are a two-column grid with labels above the fields and a "dB" unit (an instrument has Output trim only). Edit plug-in is a normal button with the focus note beneath it. "Plug-in library (N)" is collapsed by default and shows the count; each row is one line (name with ellipsis and full name in the tooltip, the quiet kind label, a bin icon button, 36 px high). The bin's accessible name and tooltip stay "Remove <name> from library". The separate "Remove from library" button was removed: it only removed the chosen class, which the bin in its row already does, so there is one way. The drum map follows with the same spacing. Texts: new `plugin.unit_db`, `plugin.dialog_title`; `plugin.manage_library` takes the count; `plugin.remove_plugin` is gone (en, et, de).
+
+Desktop: `tests/desktop/parity-vst-instrument.mjs` with `PLUGIN_DIALOG_SHOTS_ONLY=1` takes the layout pictures (guitar with an effect, drum instrument with its map, library open, Keys open at 1366x768 asserting the dialog stays inside the window and its body scrolls) in en, et and de without starting playback. The owner heard the synthetic test drum instrument (a full-level square wave) during earlier driver runs and the test build has no silent or null output device, so after that report no step that plays a test plug-in was run; offline export is silent and was not repeated. Pictures were looked at and the spacing fixed (a global `summary{margin:12px 0}` had left a 24 px gap under the library line; a second `.sound-panel .drum-map` rule had kept its 12 px margin).

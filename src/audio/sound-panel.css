@@ -18,11 +18,10 @@
 .sound-block-state{float:right;margin-left:8px;color:var(--ws-muted);font-size:11px;font-weight:400}
 .sound-block[open]>summary{background:var(--ws-raised)}
 .sound-panel .sound-block>fieldset{margin:0;padding:6px 0 8px}
-.sound-panel .sound-plugin-slot>fieldset{margin:0;padding:0}
 .sound-panel .sound-plugin-link{margin:8px 0 0}
 .sound-panel .sound-plugin-link .sound-plugin-link-open{min-height:24px;padding:1px 8px;font-size:11px}
-.sound-panel :is(.sound-block, .sound-plugin-slot) label{margin:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(68px,42%);align-items:center;gap:6px}
-.sound-panel :is(.sound-block, .sound-plugin-slot) .check{display:flex;flex-direction:row}
+.sound-panel .sound-block label{margin:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(68px,42%);align-items:center;gap:6px}
+.sound-panel .sound-block .check{display:flex;flex-direction:row}
 .sound-output{margin-top:12px}
 .sound-panel [role=alert]{margin:8px 0 0;padding:8px;border:1px solid var(--ws-error);border-radius:3px;color:var(--ws-error);background:var(--ws-error-surface);font-size:12px;line-height:1.35;overflow-wrap:anywhere}
 .sound-panel ::selection{color:var(--ws-accent-ink);background:var(--ws-accent)}
@@ -38,10 +37,37 @@
 .sound-panel .sound-diag-item{display:flex;justify-content:space-between;gap:8px}
 .sound-panel .sound-diag-value{font-variant-numeric:tabular-nums;color:var(--ws-text)}
 .plugin-notice-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
-.plugin-library-manage ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
-.plugin-library-manage li{display:flex;align-items:center;justify-content:space-between;gap:6px}
-.plugin-library-manage li>span:first-child{flex:1;min-width:0}
-.plugin-library-manage .plugin-kind-label{flex:none;font-size:11px}
+/* The Plug-in dialog: one column on the dialog's own spacing (16px body, 14px between sections, 8px between neighbours), as the Add track dialog. */
+.plugin-dialog .tp-dialog-body{padding:16px}
+.plugin-dialog .plugin-panel{display:grid;gap:14px;margin:0;padding:0;border:0;background:transparent}
+.plugin-panel fieldset{min-width:0;margin:0;padding:0;border:0}
+.plugin-panel .plugin-slot-controls{display:grid;gap:14px;min-width:0}
+.plugin-panel .plugin-field{display:grid;gap:4px;min-width:0}
+.plugin-panel .plugin-field-label{color:var(--ws-muted);font-size:12px;font-weight:600;line-height:1.2}
+.plugin-panel .plugin-choice-row{display:flex;align-items:center;gap:8px;min-width:0}
+.plugin-panel .plugin-choice-row select{flex:1 1 0;width:100%;min-width:0}
+.plugin-panel .plugin-choice-row button{flex:none;white-space:nowrap}
+.plugin-panel .plugin-state-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:28px}
+.plugin-panel .plugin-status-badge{color:var(--ws-muted);font-size:12px}
+.plugin-panel .plugin-status-notice p{margin:0 0 8px;font-size:12px;line-height:1.4}
+.plugin-panel .plugin-status-notice .plugin-notice-actions{display:flex;flex-wrap:wrap;gap:8px;margin:0}
+.plugin-panel .plugin-moved-note,.plugin-panel .plugin-focus-hint{margin:0}
+.plugin-panel .plugin-trims{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.plugin-panel .plugin-trim{display:grid;gap:4px;min-width:0}
+.plugin-panel .plugin-trim-field{display:flex;align-items:center;gap:6px;min-width:0}
+.plugin-panel .plugin-trim-field input{flex:1 1 0;min-width:0}
+.plugin-panel .plugin-unit{flex:none;color:var(--ws-muted);font-size:12px}
+.plugin-panel .plugin-editor-row{display:grid;justify-items:start;gap:6px}
+.plugin-panel .plugin-editor-actions{display:flex;flex-wrap:wrap;gap:8px}
+.plugin-library-manage>summary{margin:0;display:list-item;list-style-position:inside;line-height:28px;min-height:28px;color:var(--ws-text);font-size:12px;font-weight:600;cursor:pointer}
+.plugin-library-manage ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:2px}
+.plugin-library-manage li{display:grid;grid-template-columns:minmax(0,1fr) auto 28px;align-items:center;gap:8px;min-height:36px;padding:0 4px 0 8px;border-radius:3px}
+.plugin-library-manage li:hover,.plugin-library-manage li:focus-within{background:var(--ws-raised)}
+.plugin-library-manage .plugin-library-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.plugin-library-manage .plugin-kind-label{font-size:11px}
+.sound-panel .plugin-library-manage .plugin-remove-icon{width:28px;min-width:28px;height:28px;min-height:28px;padding:0;display:inline-grid;place-items:center;border-color:transparent;background:transparent;color:var(--ws-muted)}
+.sound-panel .plugin-library-manage .plugin-remove-icon:hover:not(:disabled):not([aria-disabled=true]),.sound-panel .plugin-library-manage .plugin-remove-icon:focus-visible{color:var(--ws-error);border-color:var(--ws-error)}
+.plugin-dialog .plugin-panel .drum-map{margin-top:0;padding-top:14px}
 .sound-panel .drum-map{margin-top:12px;padding-top:8px;border-top:1px solid var(--ws-border)}
 .sound-panel .drum-map p{margin:4px 0}
 .sound-panel .drum-map-preset{display:flex;flex-direction:column;align-items:stretch;gap:4px}

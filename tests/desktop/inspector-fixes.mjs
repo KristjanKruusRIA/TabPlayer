@@ -190,8 +190,8 @@ try {
         await add.waitFor(); const body = await sound.locator('.tp-dialog-body').boundingBox(), r = await slot.boundingBox(), a = await add.boundingBox();
         assert.ok(r.y >= body.y - 1 && a.y + a.height <= body.y + body.height + 1, `${tag}: ${name} via ${via}: the plug-in section and Add plug-in… are in view without scrolling`);
         assert.equal(await sound.getByRole('combobox', { name: 'VST3 plug-in' }).evaluate(node => node === document.activeElement), true, 'its choice has focus');
-        const panel = await sound.locator('.tp-dialog').boundingBox();
-        if (name === 'Rhythm') assert.ok(panel.height < 0.7 * (await page.viewportSize()).height, `${tag}: the guitar Plug-in dialog is sized to its content (${Math.round(panel.height)}px)`);
+        const panel = await sound.boundingBox();
+        if (name === 'Rhythm') assert.ok(panel.height < 0.7 * (await page.evaluate(() => innerHeight)), `${tag}: the guitar Plug-in dialog is sized to its content (${Math.round(panel.height)}px)`);
         if (via === 'row') await shot(`plugin-dialog-from-plugin-row-${name === 'Drums' ? 'drums' : 'guitar'}-${tag}.png`);
         await page.keyboard.press('Escape'); await sound.waitFor({ state: 'hidden' });
         assert.equal(await page.locator('.sound-plugin-open').evaluate(node => node === document.activeElement), via === 'row', 'focus returns to the Plug-in… button that opened it');

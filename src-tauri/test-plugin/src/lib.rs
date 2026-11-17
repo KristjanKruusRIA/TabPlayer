@@ -2136,8 +2136,7 @@ mod tests {
     }
 }
 
-/// The COM layer, in process: the factory, a plug-in instance and the host's side of the conversation, all built on
-/// `ComWrapper` here. No library is loaded, so it runs wherever the unit tests do.
+/// The drum instrument's sound and event handling, without the COM layer.
 #[cfg(test)]
 mod drum_tests {
     use super::*;
@@ -2272,6 +2271,8 @@ mod drum_tests {
     }
 }
 
+/// The COM layer, in process: the factory, a plug-in instance and the host's side of the conversation, all built on
+/// `ComWrapper` here. No library is loaded, so it runs wherever the unit tests do.
 #[cfg(test)]
 mod com_tests {
     use super::*;

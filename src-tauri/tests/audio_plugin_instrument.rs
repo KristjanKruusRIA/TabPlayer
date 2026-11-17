@@ -1592,8 +1592,7 @@ fn an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck() {
     let tick = old.position().tick;
     assert_eq!(tick, 720.0);
     let mut new = instrument_renderer(&rig, &edited);
-    new.wrap_to_tick(tick);
-    new.continue_from(&mut old);
+    new.hand_over_from(tick, &mut old);
     let mut out = out;
     out.extend(run(&mut new, Some(&rig), 30_000));
     let _ = (&out, d);
@@ -1625,6 +1624,118 @@ fn an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck() {
     let epochs: std::collections::HashSet<_> = blocks.iter().map(|b| b.epoch).collect();
     assert_eq!(epochs.len(), 1, "the running stream carried on");
     assert_eq!(rig.helper.sounding(), 0);
+}
+
+/// The hand-over the device makes on an edit while playing: the new renderer takes the tick the old one reached.
+fn hand_over(new: &mut Renderer, old: &mut Renderer) {
+    new.hand_over_from(old.position().tick, old);
+}
+
+/// 140 bpm at 960 ppq: a tick is 21.43 frames, so a hit on tick 960 sits between two frames (20571.4), and no frame has
+/// a tick equal to an event's.
+fn fast_plan(midi: Vec<Value>) -> PlaybackPlan {
+    plan_with(json!([{"tick": 0, "bpm": 140}]), [1714.29, 3428.58], midi)
+}
+
+#[test]
+fn an_edit_hand_over_at_any_frame_sends_each_hit_to_the_instrument_exactly_once() {
+    let plan = fast_plan(vec![note_on(960, 36), note_off(961, 36)]);
+    // What an uninterrupted render sends, and when.
+    let rig = rig_keyed();
+    let mut straight = instrument_renderer(&rig, &plan);
+    run(&mut straight, Some(&rig), 21_000);
+    let want = heard(&rig);
+    assert_eq!(want.len(), 2);
+    // Every frame the hand-over can fall on, either side of the hit and of its NoteOff.
+    for at in 20_560..=20_600 {
+        let rig = rig_keyed();
+        let mut old = instrument_renderer(&rig, &plan);
+        run(&mut old, Some(&rig), at);
+        let mut new = instrument_renderer(&rig, &plan);
+        hand_over(&mut new, &mut old);
+        run(&mut new, Some(&rig), 21_000 - at);
+        assert_eq!(heard(&rig), want, "hand-over after {at} frames");
+        assert_eq!(rig.helper.sounding(), 0, "hand-over after {at} frames");
+    }
+}
+
+#[test]
+fn a_hand_over_never_worsens_the_built_in_kit_and_keeps_a_ports_notes_paired() {
+    let plan = fast_plan(vec![
+        note_on(960, 36),
+        note_off(961, 36),
+        note_on(962, 38),
+        note_off(1100, 38),
+    ]);
+    let mut straight = plain_renderer(&plan);
+    let reference = run(&mut straight, None, 24_000);
+    let drift = |out: &[[f32; 2]]| {
+        out.iter()
+            .zip(&reference)
+            .map(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs()))
+            .fold(0.0, f32::max)
+    };
+    let routed = || MidiTap::new(&[0], &[(0, RouteSpec::lanes(0, 0, &[(9, 9)]))]);
+    // The messages for key 36 a port is sent: 0x90 on, 0x80 off.
+    let key_messages = |tap: &mut MidiTap| {
+        let sent: Vec<u8> = tap
+            .staged()
+            .iter()
+            .filter_map(|record| match record {
+                tabplayer_lib::audio::midi_out::MidiRecord::Message { bytes, .. }
+                    if bytes[1] == 36 && matches!(bytes[0] & 0xf0, 0x80 | 0x90) =>
+                {
+                    Some(bytes[0] & 0xf0)
+                }
+                _ => None,
+            })
+            .collect();
+        tap.clear_staged();
+        sent
+    };
+    for at in 20_568..=20_596 {
+        let mut drifts = [0.0f32; 2];
+        for (i, new_api) in [false, true].into_iter().enumerate() {
+            let mut old = plain_renderer(&plan);
+            let mut out = run(&mut old, None, at);
+            let mut new = plain_renderer(&plan);
+            if new_api {
+                new.hand_over_from(old.position().tick, &mut old);
+            } else {
+                new.wrap_to_tick(old.position().tick);
+                new.continue_from(&mut old);
+            }
+            out.extend(run(&mut new, None, 24_000 - at));
+            drifts[i] = drift(&out);
+        }
+        assert!(
+            drifts[1] <= drifts[0],
+            "the built-in kit after {at} frames: {} against {}",
+            drifts[1],
+            drifts[0]
+        );
+
+        // A port: the old renderer's tap lets go of what it holds as the device does, and the new one states the position.
+        let mut old = plain_renderer(&plan);
+        assert!(old.replace_midi(routed()).is_none());
+        run(&mut old, None, at);
+        let mut sent = key_messages(old.midi_tap().unwrap());
+        old.midi_tap().unwrap().release_all();
+        sent.extend(key_messages(old.midi_tap().unwrap()));
+        let mut new = plain_renderer(&plan);
+        assert!(new.replace_midi(routed()).is_none());
+        new.hand_over_from(old.position().tick, &mut old);
+        run(&mut new, None, 24_000 - at);
+        sent.extend(key_messages(new.midi_tap().unwrap()));
+        let alternates = sent
+            .iter()
+            .enumerate()
+            .all(|(n, kind)| *kind == if n % 2 == 0 { 0x90 } else { 0x80 });
+        assert!(
+            alternates && !sent.is_empty() && sent.len() % 2 == 0,
+            "the port after {at} frames: {sent:x?}"
+        );
+    }
 }
 
 #[test]

@@ -1096,9 +1096,9 @@ impl CallbackTransport {
             // An edit while playing: the new renderer carries on where the old one is. With a plug-in it keeps the
             // old compensation lines streaming (a wrap, and the lines handed over); with none it is the plain seek
             // it always was.
-            renderer.wrap_to_tick(self.tick);
-            if let Some(old) = self.renderer.as_mut() {
-                renderer.continue_from(old);
+            match self.renderer.as_mut() {
+                Some(old) => renderer.hand_over_from(self.tick, old),
+                None => renderer.wrap_to_tick(self.tick),
             }
             // The renderer sounds the key shift its document carries; the echo says the same from here on.
             self.practice.tonality = practice.tonality;

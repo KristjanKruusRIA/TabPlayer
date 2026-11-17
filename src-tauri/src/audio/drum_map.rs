@@ -199,50 +199,81 @@ struct Preset {
 
 const FILE: &str = include_str!("../../../src/audio/drum-maps.json");
 
-fn parse_presets(text: &str) -> Result<Vec<Preset>, String> {
-    let file: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    let mut presets = Vec::new();
-    for entry in file["presets"].as_array().ok_or("no presets")? {
-        let id = entry["id"]
-            .as_str()
-            .ok_or("a preset has no id")?
-            .to_string();
-        let mut rows = Vec::new();
-        for row in entry["rows"].as_array().into_iter().flatten() {
-            let pair = row
-                .as_array()
-                .filter(|pair| pair.len() == 2)
-                .ok_or("bad row")?;
-            let id = pair[0]
-                .as_u64()
-                .and_then(|n| u8::try_from(n).ok())
-                .ok_or("bad row id")?;
-            let key = match &pair[1] {
-                serde_json::Value::Null => None,
-                value => Some(
-                    value
-                        .as_u64()
-                        .and_then(|n| u8::try_from(n).ok())
-                        .filter(|k| *k < 128)
-                        .ok_or("bad row key")?,
-                ),
-            };
-            rows.push((id, key));
-        }
-        presets.push(Preset { id, rows });
+/// One entry of the embedded presets file: its id and changed rows, or why it is malformed. A preset is malformed as a whole if
+/// its id is no string, its `rows` is present and no list, or any row is not `[id 0..=255, key 0..=127 or null]` written as
+/// integers. The rules are those of `readPresets` in `src/audio/drum-map.ts`; `tests/drum-map-protocol.json` holds the two together.
+fn parse_preset(entry: &serde_json::Value) -> Result<Preset, String> {
+    let id = entry["id"]
+        .as_str()
+        .ok_or("a preset has no id")?
+        .to_string();
+    let mut rows = Vec::new();
+    let listed = match entry.get("rows") {
+        None => &[][..],
+        Some(value) => value
+            .as_array()
+            .map(Vec::as_slice)
+            .ok_or_else(|| format!("preset \"{id}\": rows is not a list"))?,
+    };
+    for row in listed {
+        let pair = row
+            .as_array()
+            .filter(|pair| pair.len() == 2)
+            .ok_or_else(|| format!("preset \"{id}\": a row is not an id and a key"))?;
+        let row_id = pair[0]
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| format!("preset \"{id}\": a row id is not 0 to 255"))?;
+        let key = match &pair[1] {
+            serde_json::Value::Null => None,
+            value => Some(
+                value
+                    .as_u64()
+                    .and_then(|n| u8::try_from(n).ok())
+                    .filter(|k| *k < 128)
+                    .ok_or_else(|| format!("preset \"{id}\": a row key is not 0 to 127 or none"))?,
+            ),
+        };
+        rows.push((row_id, key));
     }
-    Ok(presets)
+    Ok(Preset { id, rows })
 }
 
-/// The presets of the embedded file, read once. A file that does not parse leaves none, so every map plays as General MIDI plus its
-/// own rows; that is logged and cannot happen in a build that passes its tests.
+/// The presets of a presets file and what was wrong with the ones left out: a malformed preset is dropped as a whole and the others
+/// survive. A file that is no JSON, or has no `presets` list, is an error.
+fn parse_presets_reporting(text: &str) -> Result<(Vec<Preset>, Vec<String>), String> {
+    let file: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let mut presets = Vec::new();
+    let mut problems = Vec::new();
+    for entry in file["presets"].as_array().ok_or("no presets")? {
+        match parse_preset(entry) {
+            Ok(preset) => presets.push(preset),
+            Err(problem) => problems.push(problem),
+        }
+    }
+    Ok((presets, problems))
+}
+
+fn parse_presets(text: &str) -> Result<Vec<Preset>, String> {
+    parse_presets_reporting(text).map(|(presets, _)| presets)
+}
+
+/// The presets of the embedded file, read once. A preset that is malformed is left out and reported, and the others stay; a file that
+/// does not parse leaves none, so every map plays as General MIDI plus its own rows. Neither can happen in a build that passes its
+/// tests.
 fn presets() -> &'static [Preset] {
     static PRESETS: OnceLock<Vec<Preset>> = OnceLock::new();
-    PRESETS.get_or_init(|| {
-        parse_presets(FILE).unwrap_or_else(|problem| {
+    PRESETS.get_or_init(|| match parse_presets_reporting(FILE) {
+        Ok((presets, problems)) => {
+            for problem in problems {
+                eprintln!("TabPlayer: a drum map preset is left out: {problem}");
+            }
+            presets
+        }
+        Err(problem) => {
             eprintln!("TabPlayer: the drum map presets are unavailable: {problem}");
             Vec::new()
-        })
+        }
     })
 }
 
@@ -301,7 +332,12 @@ mod tests {
         assert!(presets[0].rows.is_empty());
         assert_eq!(super::presets().len(), 1);
         assert!(parse_presets("{").is_err());
-        assert!(parse_presets("{\"presets\":[{\"id\":\"x\",\"rows\":[[1]]}]}").is_err());
+        assert!(
+            parse_presets("{\"presets\":[{\"id\":\"x\",\"rows\":[[1]]}]}")
+                .unwrap()
+                .is_empty(),
+            "a malformed preset is dropped, not the file"
+        );
     }
 
     #[test]
@@ -404,6 +440,82 @@ mod tests {
                 "{name}: {verdict:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_forms_only_the_native_loader_can_tell_are_refused_here() {
+        use crate::settings::ChannelMix;
+        let protocol = protocol();
+        let cases = protocol["nativeOnly"].as_array().unwrap();
+        assert!(cases.len() >= 5);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let verdict = serde_json::from_str::<ChannelMix>(case["rawMix"].as_str().unwrap())
+                .map_err(|e| e.to_string())
+                .and_then(|mix| mix.validate());
+            assert_eq!(
+                verdict.is_ok(),
+                case["valid"].as_bool().unwrap(),
+                "{name}: {verdict:?}"
+            );
+        }
+    }
+
+    fn survivors(file: &serde_json::Value) -> Result<Vec<(String, Vec<(u8, Option<u8>)>)>, String> {
+        parse_presets(&file.to_string()).map(|parsed| {
+            parsed
+                .iter()
+                .map(|preset| (preset.id.clone(), preset.rows.clone()))
+                .collect()
+        })
+    }
+
+    #[test]
+    fn the_shared_preset_cases_drop_a_malformed_preset_whole_and_keep_the_others() {
+        let protocol = protocol();
+        let cases = protocol["presets"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let got = survivors(&case["file"]);
+            if case["error"].as_bool() == Some(true) {
+                assert!(got.is_err(), "{name}: {got:?}");
+                continue;
+            }
+            let want: Vec<(String, Vec<(u8, Option<u8>)>)> = case["survivors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|preset| {
+                    (
+                        preset["id"].as_str().unwrap().to_string(),
+                        preset["rows"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(|row| {
+                                (
+                                    row[0].as_u64().unwrap() as u8,
+                                    row[1].as_u64().map(|k| k as u8),
+                                )
+                            })
+                            .collect(),
+                    )
+                })
+                .collect();
+            assert_eq!(got, Ok(want), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_preset_written_with_a_float_is_malformed_here_though_javascript_reads_it_as_an_integer() {
+        let text = r#"{"presets":[{"id":"x","rows":[[38.0,40]]},{"id":"y","rows":[[38,40]]}]}"#;
+        let ids: Vec<String> = parse_presets(text)
+            .unwrap()
+            .iter()
+            .map(|preset| preset.id.clone())
+            .collect();
+        assert_eq!(ids, vec!["y".to_string()]);
     }
 
     #[test]

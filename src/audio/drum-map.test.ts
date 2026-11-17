@@ -7,7 +7,7 @@ import { buildDocument, previewEdit, trackIdentity } from '../engine';
 import { defaultMix, validateBackingSettings, validateMix } from '../document-settings';
 import { blankProject } from '../project';
 import fixture from '../../tests/drum-map-protocol.json';
-import { cleanDrumMap, drumMapProblem, isStandardArticulation, mapArticulationId, mappedKey, resolveDrumMap, withDrumMap } from './drum-map';
+import { cleanDrumMap, drumMapProblem, isStandardArticulation, mapArticulationId, mappedKey, readPresets, resolveDrumMap, withDrumMap } from './drum-map';
 
 const table = () => [...new Map(standardPercussionCatalog.map(entry => [entry.id, entry.outputMidiNumber])).entries()].sort((a, b) => a[0] - b[0]);
 
@@ -37,6 +37,8 @@ it('maps a table entry by its shape first and its own id second', () => {
 const protocol = fixture as unknown as {
   validity: { name: string; valid: boolean; drumMap: unknown }[];
   resolution: { name: string; map: DrumMapRef | null; percussion: boolean; rows: [number, number | null, number | null][] }[];
+  nativeOnly: { name: string; valid: boolean; rawMix: string }[];
+  presets: { name: string; file: unknown; error?: boolean; survivors?: { id: string; rows: [number, number | null][] }[] }[];
 };
 const mixWith = (drumMap: unknown) => ({ ...defaultMix(), drumMap }) as unknown as ChannelMix;
 
@@ -108,4 +110,30 @@ it('keeps a drum map through edit, undo, redo, save and reload, and replays an o
   expect(buildDocument(old.project).settings).toEqual(old.settings);
   // A bad map is refused as an edit, by the same rules.
   expect(() => previewEdit(old.project, { type: 'setTrackMix', trackId, mix: mixWith({ preset: 'gm' }) })).toThrow();
+});
+
+it('refuses a preset that is malformed anywhere as a whole, keeps the others, and reports it, case for case with the native side', () => {
+  expect(protocol.presets.length).toBeGreaterThanOrEqual(10);
+  for (const { name, file, error, survivors } of protocol.presets) {
+    if (error) { expect(() => readPresets(file), name).toThrow(); continue; }
+    const read = readPresets(file);
+    expect(read.presets.map(preset => ({ id: preset.id, rows: preset.rows ?? [] })), name).toEqual(survivors);
+    const given = (file as { presets: unknown[] }).presets.length;
+    expect(read.problems.length, `${name}: every preset left out is reported`).toBe(given - survivors!.length);
+  }
+  // The presets this build embeds are all sound.
+  const embedded = readPresets(maps);
+  expect(embedded.problems).toEqual([]);
+  expect(embedded.presets).toHaveLength(maps.presets.length);
+});
+
+it('reads a number written as a float as the integer it is, so only the native loader can refuse it, and the list of such forms is this one', () => {
+  expect(protocol.nativeOnly.length).toBeGreaterThanOrEqual(5);
+  for (const { name, rawMix } of protocol.nativeOnly) {
+    let problem: string | null = null;
+    try { validateMix(JSON.parse(rawMix)); } catch (error) { problem = (error as Error).message; }
+    // JSON.parse turns 38.0, 3.8e1, 1e2 and 4e1 into the integers 38, 38, 100 and 40: nothing is left to tell them by.
+    expect(problem, name).toBeNull();
+  }
+  expect(JSON.parse('[38.0, 3.8e1, 1e2, 4e1]')).toEqual([38, 38, 100, 40]);
 });

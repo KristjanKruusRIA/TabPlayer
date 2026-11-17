@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Read by src-tauri/src/audio/drum_map.rs and src/audio/drum-map.test.ts so the Rust and TypeScript drum map rules cannot drift. `validity` cases say whether a mix carrying that `drumMap` must be accepted; `resolution` cases give, for a map and whether the track is percussion, the key each [key, articulation id or null] hit plays (null: no sound).",
+  "note": "Read by src-tauri/src/audio/drum_map.rs and src/audio/drum-map.test.ts so the Rust and TypeScript drum map rules cannot drift. `validity` cases say whether a mix carrying that `drumMap` must be accepted; `resolution` cases give, for a map and whether the track is percussion, the key each [key, articulation id or null] hit plays (null: no sound). `presets` cases give an embedded presets file and the presets that survive it: a preset that is malformed anywhere (its id, `rows` or one row) is dropped as a whole and reported, and the others survive, on both sides. `nativeOnly` holds forms that the native loader refuses and TypeScript cannot tell apart after JSON.parse: a number written as a float (38.0, 1e2) is an integer to JSON.parse, so only the native loader (the loader of record) can refuse it; the persisted writer never writes one. TypeScript's test pins that it reads each as the integer, so the difference stays exactly this list.",
   "validity": [
     {
       "name": "unknown_preset_with_a_row",
@@ -1668,6 +1668,514 @@
           127
         ]
       ]
+    }
+  ],
+  "nativeOnly": [
+    {
+      "name": "id_written_as_a_float",
+      "valid": false,
+      "rawMix": "{\"gain\":1,\"pan\":0,\"mute\":false,\"solo\":false,\"drumMap\":{\"preset\":\"gm\",\"keys\":[[38.0,40]]}}"
+    },
+    {
+      "name": "id_written_in_exponent_form",
+      "valid": false,
+      "rawMix": "{\"gain\":1,\"pan\":0,\"mute\":false,\"solo\":false,\"drumMap\":{\"preset\":\"gm\",\"keys\":[[3.8e1,40]]}}"
+    },
+    {
+      "name": "key_written_as_a_float",
+      "valid": false,
+      "rawMix": "{\"gain\":1,\"pan\":0,\"mute\":false,\"solo\":false,\"drumMap\":{\"preset\":\"gm\",\"keys\":[[38,40.0]]}}"
+    },
+    {
+      "name": "key_written_as_one_e_two",
+      "valid": false,
+      "rawMix": "{\"gain\":1,\"pan\":0,\"mute\":false,\"solo\":false,\"drumMap\":{\"preset\":\"gm\",\"keys\":[[38,1e2]]}}"
+    },
+    {
+      "name": "key_written_as_four_e_one",
+      "valid": false,
+      "rawMix": "{\"gain\":1,\"pan\":0,\"mute\":false,\"solo\":false,\"drumMap\":{\"preset\":\"gm\",\"keys\":[[38,4e1]]}}"
+    },
+    {
+      "name": "integers_are_accepted",
+      "valid": true,
+      "rawMix": "{\"gain\":1,\"pan\":0,\"mute\":false,\"solo\":false,\"drumMap\":{\"preset\":\"gm\",\"keys\":[[38,40]]}}"
+    }
+  ],
+  "presets": [
+    {
+      "name": "two_good_presets",
+      "file": {
+        "presets": [
+          {
+            "id": "gm"
+          },
+          {
+            "id": "studio",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "gm",
+          "rows": []
+        },
+        {
+          "id": "studio",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a_row_with_a_key_past_127_drops_that_preset_only",
+      "file": {
+        "presets": [
+          {
+            "id": "a",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          },
+          {
+            "id": "b",
+            "rows": [
+              [
+                38,
+                128
+              ]
+            ]
+          },
+          {
+            "id": "c",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "a",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        },
+        {
+          "id": "c",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a_row_with_an_id_past_255_drops_that_preset_only",
+      "file": {
+        "presets": [
+          {
+            "id": "b",
+            "rows": [
+              [
+                256,
+                40
+              ]
+            ]
+          },
+          {
+            "id": "c",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "c",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a_negative_id_drops_the_preset",
+      "file": {
+        "presets": [
+          {
+            "id": "b",
+            "rows": [
+              [
+                -1,
+                40
+              ]
+            ]
+          },
+          {
+            "id": "c",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "c",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a_row_of_the_wrong_length_drops_the_preset",
+      "file": {
+        "presets": [
+          {
+            "id": "b",
+            "rows": [
+              [
+                38
+              ]
+            ]
+          },
+          {
+            "id": "d",
+            "rows": [
+              [
+                38,
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "id": "c",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "c",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a_string_key_drops_the_preset",
+      "file": {
+        "presets": [
+          {
+            "id": "b",
+            "rows": [
+              [
+                38,
+                "40"
+              ]
+            ]
+          },
+          {
+            "id": "c",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "c",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a_fractional_key_drops_the_preset",
+      "file": {
+        "presets": [
+          {
+            "id": "b",
+            "rows": [
+              [
+                38,
+                40.5
+              ]
+            ]
+          },
+          {
+            "id": "c",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "c",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rows_that_are_not_a_list_drop_the_preset",
+      "file": {
+        "presets": [
+          {
+            "id": "b",
+            "rows": "none"
+          },
+          {
+            "id": "d",
+            "rows": {
+              "38": 40
+            }
+          },
+          {
+            "id": "c",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "c",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "an_entry_with_no_id_or_a_numeric_id_or_no_object_is_dropped",
+      "file": {
+        "presets": [
+          {
+            "rows": []
+          },
+          {
+            "id": 7,
+            "rows": []
+          },
+          "gm",
+          null,
+          {
+            "id": "c",
+            "rows": [
+              [
+                38,
+                40
+              ],
+              [
+                91,
+                null
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "c",
+          "rows": [
+            [
+              38,
+              40
+            ],
+            [
+              91,
+              null
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "an_ok_preset_may_leave_rows_out",
+      "file": {
+        "presets": [
+          {
+            "id": "gm"
+          }
+        ]
+      },
+      "survivors": [
+        {
+          "id": "gm",
+          "rows": []
+        }
+      ]
+    },
+    {
+      "name": "every_preset_bad_leaves_none",
+      "file": {
+        "presets": [
+          {
+            "id": "b",
+            "rows": [
+              [
+                1
+              ]
+            ]
+          }
+        ]
+      },
+      "survivors": []
+    },
+    {
+      "name": "no_presets_list_is_an_error",
+      "file": {},
+      "error": true
+    },
+    {
+      "name": "a_presets_value_that_is_not_a_list_is_an_error",
+      "file": {
+        "presets": {}
+      },
+      "error": true
     }
   ]
 }

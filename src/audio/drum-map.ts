@@ -47,7 +47,39 @@ export function validateDrumMap(map: unknown): asserts map is DrumMapRef {
 /** The tables of a drum map, as the native side resolves them: the key of an articulation by its id, and of a plain hit by its key. */
 export interface ResolvedDrumMap { byId: Uint8Array; byKey: Uint8Array }
 type PresetRows = readonly (readonly [number, number | null])[];
-const presetRows = (id: string): PresetRows => (maps.presets as { id: string; rows?: PresetRows }[]).find(preset => preset.id === id)?.rows ?? [];
+
+/** Why a presets-file entry is malformed, or null. The rules are those of `parse_preset` in `src-tauri/src/audio/drum_map.rs`: the id is a string, `rows` is absent or a list, and each row is `[id 0-255, key 0-127 or null]` of integers. */
+function presetProblem(entry: unknown): string | null {
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return 'a preset is not an object';
+  const { id, rows } = entry as { id?: unknown; rows?: unknown };
+  if (typeof id !== 'string') return 'a preset has no id';
+  if (!Object.hasOwn(entry, 'rows')) return null;
+  if (!Array.isArray(rows)) return `preset "${id}": rows is not a list`;
+  for (const row of rows as unknown[]) {
+    if (!Array.isArray(row) || row.length !== 2) return `preset "${id}": a row is not an id and a key`;
+    const [rowId, key] = row as unknown[];
+    if (typeof rowId !== 'number' || !Number.isInteger(rowId) || rowId < 0 || rowId > 255) return `preset "${id}": a row id is not 0 to 255`;
+    if (key !== null && (typeof key !== 'number' || !Number.isInteger(key) || key < 0 || key > 127)) return `preset "${id}": a row key is not 0 to 127 or none`;
+  }
+  return null;
+}
+/**
+ * The presets of a presets file and what was wrong with the ones left out: a malformed preset is dropped as a whole and reported, and
+ * the others survive, as on the native side. A file with no `presets` list is an error.
+ */
+export function readPresets(file: unknown): { presets: DrumMapPreset[]; problems: string[] } {
+  const list = (file as { presets?: unknown } | null)?.presets;
+  if (!Array.isArray(list)) throw new Error('no presets');
+  const presets: DrumMapPreset[] = [], problems: string[] = [];
+  for (const entry of list as unknown[]) {
+    const problem = presetProblem(entry);
+    if (problem) problems.push(problem); else presets.push(entry as DrumMapPreset);
+  }
+  return { presets, problems };
+}
+const loaded = readPresets(maps);
+for (const problem of loaded.problems) console.warn(`TabPlayer: a drum map preset is left out: ${problem}`);
+const presetRows = (id: string): PresetRows => loaded.presets.find(preset => preset.id === id)?.rows ?? [];
 const outputKeys = new Set(maps.sounds.map(([, key]) => key));
 function apply(tables: ResolvedDrumMap, rows: PresetRows) {
   for (const [id, key] of rows) {
@@ -117,7 +149,7 @@ export function mapArticulationId(track: model.Track, id: number): number | unde
 /** One layout a drum map can start from, as `drum-maps.json` describes it. Only `id` is required: `state` says whether the layout was checked against the instrument it belongs to, `candidates` lists keys worth trying for a row, `[articulation id, [key, ...]]`. */
 export interface DrumMapPreset { id: string; name?: string; state?: 'verified' | 'unverified'; source?: string; checked?: string; rows?: PresetRows; candidates?: readonly (readonly [number, readonly number[]])[] }
 /** The layouts this build knows, General MIDI first. */
-export const drumMapPresets = (): readonly DrumMapPreset[] => maps.presets as unknown as readonly DrumMapPreset[];
+export const drumMapPresets = (): readonly DrumMapPreset[] => loaded.presets;
 
 /**
  * The standard articulations a track's notes play, ascending: a note's own articulation by the standard one it is, and a plain hit

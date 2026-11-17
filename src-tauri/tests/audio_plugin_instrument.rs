@@ -130,6 +130,27 @@ impl FakeInstrument {
                     let seq = ring.next_output();
                     match ring.read_input(seq, &mut block, &mut words) {
                         InputRead::Ready(info) => {
+                            // A block a flush made stale is not delivered: it is answered with silence and releases every
+                            // key, as the real loop does (`plugin-host/src/audio.rs`).
+                            let stale = (ring.flush_epoch().wrapping_sub(info.epoch) as i32) > 0;
+                            if stale {
+                                sounding = [0; 16];
+                                sounding_count.store(0, Ordering::Relaxed);
+                                record.lock().unwrap().push(Received {
+                                    seq,
+                                    epoch: info.epoch,
+                                    words: Vec::new(),
+                                    sounding_after: 0,
+                                });
+                                assert!(ring.publish_output(
+                                    seq,
+                                    info.epoch,
+                                    &[[0.0; 2]; BLOCK_FRAMES],
+                                    &Default::default(),
+                                ));
+                                output.signal();
+                                continue;
+                            }
                             // A new epoch releases every key, as the real guard's `release_all` does.
                             if epoch != Some(info.epoch) {
                                 sounding = [0; 16];
@@ -196,6 +217,9 @@ impl FakeInstrument {
                         }
                         InputRead::NotYet => break,
                         InputRead::Lapped | InputRead::Torn => {
+                            // Blocks were lost, and with them maybe a NoteOff: every key is released.
+                            sounding = [0; 16];
+                            sounding_count.store(0, Ordering::Relaxed);
                             let to = ring.resync_point().max(seq + 1);
                             let stale = ring.flush_epoch();
                             for skipped in seq..to {
@@ -763,11 +787,17 @@ const STAND_IN: f32 = 0.7;
 
 #[test]
 fn after_a_flush_an_instruments_first_hit_is_the_plugin_alone() {
-    let rig = rig();
+    for latency in LATENCIES {
+        after_a_flush_an_instruments_first_hit_is_the_plugin_alone_at(latency);
+    }
+}
+
+fn after_a_flush_an_instruments_first_hit_is_the_plugin_alone_at(latency: u32) {
+    let rig = rig_full(None, latency);
     let mut insert = rig.instrument();
     insert.flush();
     let d = insert.delay_frames();
-    assert_eq!(d, 2 * BLOCK_FRAMES);
+    assert_eq!(d, 2 * BLOCK_FRAMES + latency as usize);
     let out = drive_input(
         &mut insert,
         &rig,
@@ -1088,6 +1118,12 @@ fn switching_a_slot_from_an_effect_to_an_instrument_is_click_free_and_runs_each_
     // The effect's helper saw one block for every 128 frames it played: before the switch and the fade.
     assert!(effect_rig.helper.blocks().len() <= (at + 480) / BLOCK_FRAMES + 2);
     assert!(effect_rig.helper.blocks().len() >= at / BLOCK_FRAMES);
+    // The instrument side: it was told the note once, on the frame the new board started, and still holds it; the effect
+    // was never told a note.
+    assert_eq!(effect_rig.helper.events(), vec![]);
+    assert_eq!(instrument_rig.helper.events(), vec![(0, on(0, 0, 36))]);
+    assert_eq!(instrument_rig.helper.sounding(), 1);
+    assert_eq!(instrument_rig.dropped(), 0);
 }
 
 #[test]
@@ -1106,6 +1142,14 @@ fn switching_a_slot_from_an_instrument_to_an_effect_is_click_free_and_runs_each_
         );
     }
     assert!(contiguous(&effect_rig) && contiguous(&instrument_rig));
+    // The instrument side: it was told the note on the first frame and nothing more. The insert that left sends no release
+    // (a release in the middle of the fade would step the sound, and its helper is shut down once the slot has moved on, as
+    // the service does), and it stops being sent blocks when its fade ends. The effect was never told a note.
+    assert_eq!(effect_rig.helper.events(), vec![]);
+    assert_eq!(instrument_rig.helper.events(), vec![(0, on(0, 0, 36))]);
+    assert!(instrument_rig.helper.blocks().len() <= (at + 480) / BLOCK_FRAMES + 2);
+    assert!(instrument_rig.helper.blocks().len() >= at / BLOCK_FRAMES);
+    assert_eq!(instrument_rig.dropped(), 0);
 }
 
 /// One slot's helper for `kind`: an effect halves its input, an instrument plays its notes.
@@ -1256,7 +1300,7 @@ impl Rig {
             InsertMode::Offline {
                 timeout: Duration::from_secs(10),
             },
-            0,
+            self.latency,
             0.0,
             0.0,
             RATE,
@@ -1454,10 +1498,10 @@ fn assert_signal(out: &[[f32; 2]], scale: f32, sounding: &[(usize, usize, u8)], 
     }
 }
 
-#[test]
-fn each_hit_reaches_the_instrument_on_the_frame_the_built_in_kit_strikes_it_and_only_the_instrument_is_heard()
- {
-    let rig = rig_keyed();
+fn each_hit_reaches_the_instrument_on_the_frame_the_built_in_kit_strikes_it_and_only_the_instrument_is_heard_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
     let hits: [(u32, u32, u8); 3] = [(100, 160, 36), (300, 360, 38), (500, 560, 42)];
     let plan = drum_plan(
         hits.iter()
@@ -1466,7 +1510,7 @@ fn each_hit_reaches_the_instrument_on_the_frame_the_built_in_kit_strikes_it_and_
     );
     let mut renderer = instrument_renderer(&rig, &plan);
     let d = renderer.plugin_delay_frames();
-    assert_eq!(d, 2 * BLOCK_FRAMES);
+    assert_eq!(d, 2 * BLOCK_FRAMES + latency as usize);
     let out = run(&mut renderer, Some(&rig), 28_000 + d + 200);
 
     // The notes reach the helper on the frames the plan puts them on.
@@ -1499,8 +1543,15 @@ fn each_hit_reaches_the_instrument_on_the_frame_the_built_in_kit_strikes_it_and_
 }
 
 #[test]
-fn a_tempo_change_mid_plan_leaves_every_onset_exact() {
-    let rig = rig_keyed();
+fn each_hit_reaches_the_instrument_on_the_frame_the_built_in_kit_strikes_it_and_only_the_instrument_is_heard()
+ {
+    for latency in LATENCIES {
+        each_hit_reaches_the_instrument_on_the_frame_the_built_in_kit_strikes_it_and_only_the_instrument_is_heard_at(latency);
+    }
+}
+
+fn a_tempo_change_mid_plan_leaves_every_onset_exact_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
     // 60 bpm to tick 960 (one second), then 120 bpm: a tick is 25 frames from there.
     let plan = plan_with(
         json!([{"tick": 0, "bpm": 60}, {"tick": 960, "bpm": 120}]),
@@ -1532,9 +1583,16 @@ fn a_tempo_change_mid_plan_leaves_every_onset_exact() {
 }
 
 #[test]
-fn a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_for_a_note_held_across_it()
- {
-    let rig = rig_keyed();
+fn a_tempo_change_mid_plan_leaves_every_onset_exact() {
+    for latency in LATENCIES {
+        a_tempo_change_mid_plan_leaves_every_onset_exact_at(latency);
+    }
+}
+
+fn a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_for_a_note_held_across_it_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
     let plan = drum_plan(vec![
         note_on(0, 36),
         note_off(400, 36),
@@ -1575,8 +1633,17 @@ fn a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_
 }
 
 #[test]
-fn a_hit_held_across_the_loop_end_is_released_at_the_wrap_and_nothing_sticks_after_many_wraps() {
-    let rig = rig_keyed();
+fn a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_for_a_note_held_across_it()
+ {
+    for latency in LATENCIES {
+        a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_for_a_note_held_across_it_at(latency);
+    }
+}
+
+fn a_hit_held_across_the_loop_end_is_released_at_the_wrap_and_nothing_sticks_after_many_wraps_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
     // The hit starts at tick 480 and is held past the loop end at tick 970, which is not on a block boundary.
     let plan = drum_plan(vec![note_on(480, 36), note_off(1500, 36)]);
     let mut renderer = instrument_renderer(&rig, &plan);
@@ -1613,8 +1680,14 @@ fn a_hit_held_across_the_loop_end_is_released_at_the_wrap_and_nothing_sticks_aft
 }
 
 #[test]
-fn the_end_of_the_score_releases_what_an_instrument_holds() {
-    let rig = rig_keyed();
+fn a_hit_held_across_the_loop_end_is_released_at_the_wrap_and_nothing_sticks_after_many_wraps() {
+    for latency in LATENCIES {
+        a_hit_held_across_the_loop_end_is_released_at_the_wrap_and_nothing_sticks_after_many_wraps_at(latency);
+    }
+}
+
+fn the_end_of_the_score_releases_what_an_instrument_holds_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
     let plan = drum_plan(vec![note_on(100, 36), note_off(5000, 36)]);
     let mut renderer = instrument_renderer(&rig, &plan);
     let d = renderer.plugin_delay_frames();
@@ -1632,8 +1705,14 @@ fn the_end_of_the_score_releases_what_an_instrument_holds() {
 }
 
 #[test]
-fn a_muted_track_keeps_its_notes_and_is_right_when_unmuted_mid_note() {
-    let rig = rig_keyed();
+fn the_end_of_the_score_releases_what_an_instrument_holds() {
+    for latency in LATENCIES {
+        the_end_of_the_score_releases_what_an_instrument_holds_at(latency);
+    }
+}
+
+fn a_muted_track_keeps_its_notes_and_is_right_when_unmuted_mid_note_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
     let plan = drum_plan(vec![note_on(100, 36), note_off(700, 36)]);
     let mut muted = DocumentSettings::default();
     muted.mixes.insert(
@@ -1683,8 +1762,16 @@ fn a_muted_track_keeps_its_notes_and_is_right_when_unmuted_mid_note() {
 }
 
 #[test]
-fn a_track_a_port_plays_strikes_no_note_on_its_instrument_and_does_again_when_it_returns() {
-    let rig = rig_keyed();
+fn a_muted_track_keeps_its_notes_and_is_right_when_unmuted_mid_note() {
+    for latency in LATENCIES {
+        a_muted_track_keeps_its_notes_and_is_right_when_unmuted_mid_note_at(latency);
+    }
+}
+
+fn a_track_a_port_plays_strikes_no_note_on_its_instrument_and_does_again_when_it_returns_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
     let plan = drum_plan(vec![
         note_on(100, 36),
         note_off(160, 36),
@@ -1713,8 +1800,16 @@ fn a_track_a_port_plays_strikes_no_note_on_its_instrument_and_does_again_when_it
 }
 
 #[test]
-fn an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck() {
-    let rig = rig_keyed();
+fn a_track_a_port_plays_strikes_no_note_on_its_instrument_and_does_again_when_it_returns() {
+    for latency in LATENCIES {
+        a_track_a_port_plays_strikes_no_note_on_its_instrument_and_does_again_when_it_returns_at(
+            latency,
+        );
+    }
+}
+
+fn an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
     // At tick 720 five hits are held: key 38 (deleted by the edit), 40 (moved to start at 750), 41 (re-pitched to 43, so
     // 41 is no longer held and 43 was struck before the hand-over) and 45 (untouched, it must not be cut).
     let plan = drum_plan(vec![
@@ -1782,6 +1877,13 @@ fn an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck() {
     let epochs: std::collections::HashSet<_> = blocks.iter().map(|b| b.epoch).collect();
     assert_eq!(epochs.len(), 1, "the running stream carried on");
     assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck() {
+    for latency in LATENCIES {
+        an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck_at(latency);
+    }
 }
 
 /// The hand-over the device makes on an edit while playing: the new renderer takes the tick the old one reached.
@@ -2000,40 +2102,69 @@ fn a_fault_mid_playback_hands_the_track_back_to_the_built_in_kit_and_staging_sto
 #[test]
 fn a_mix_that_adds_or_drops_an_instrument_mid_play_starts_and_stops_the_notes_with_the_next_event()
 {
-    // Nothing, then an instrument: notes reach it from the swap on, as for any plug-in slot change.
-    let rig = rig_keyed();
+    // A hit from before the swap is held across it (tick 100 to 700), and another comes after it (300 to 360).
     let plan = drum_plan(vec![
-        note_on(100, 36),
-        note_off(160, 36),
+        note_on(100, 40),
+        note_off(700, 40),
         note_on(300, 38),
         note_off(360, 38),
     ]);
+    let settings = gm(DocumentSettings::default());
+
+    // Nothing, then an instrument: notes reach it from the swap on, as for any plug-in slot change. The held hit's NoteOff
+    // reaches it and is ignored, because the instrument never heard the hit begin; nothing is left sounding.
+    let rig = rig_keyed();
     let mut renderer = plain_renderer(&plan);
     run(&mut renderer, None, 10_000);
-    let settings = gm(DocumentSettings::default());
     renderer.set_mix(instrument_mix(&rig, &plan, &settings));
-    run(&mut renderer, Some(&rig), 10_000);
+    run(&mut renderer, Some(&rig), 30_000);
     assert_eq!(kinds_of(&rig), vec![('n', 38), ('f', 38)]);
+    assert_eq!(
+        rig.helper.sounding(),
+        0,
+        "the held hit's NoteOff stuck nothing"
+    );
+    assert_eq!(rig.dropped(), 0);
 
-    // An instrument, then an effect on another helper: the instrument hears nothing more.
+    // An instrument, then an effect on another helper, with the hit held across the swap: the instrument hears nothing
+    // more, not the NoteOff either (it has left; its helper is shut down once the slot has moved on), and is sent no
+    // block once its fade is over.
     let instrument = rig_keyed();
     let effect = rig_with(Some(0.5));
     let mut renderer = instrument_renderer(&instrument, &plan);
     run(&mut renderer, Some(&instrument), 10_000);
+    assert_eq!(kinds_of(&instrument), vec![('n', 40)]);
     let mix = PreparedMix::prepare(&settings, &plan, RATE)
         .unwrap()
         .with_inserts(vec![Some(Box::new(effect.make(SlotKind::Effect, 0)))]);
     renderer.set_mix(mix);
-    for _ in 0..80 {
+    for _ in 0..300 {
         run(&mut renderer, Some(&instrument), BLOCK_FRAMES);
         effect.settle();
     }
     assert_eq!(
         kinds_of(&instrument),
-        vec![('n', 36), ('f', 36)],
-        "the second hit went to no instrument"
+        vec![('n', 40)],
+        "the later hit and the held hit's NoteOff went to no instrument"
+    );
+    let sent = instrument.helper.blocks().len();
+    assert!(
+        sent <= (10_000 + 480) / BLOCK_FRAMES + 2,
+        "{sent} blocks: it runs only through its fade"
     );
     assert_eq!(effect.helper.events(), vec![], "an effect takes no notes");
+
+    // An instrument that stays while the mix changes (a mute, say) keeps the held hit and its NoteOff: nothing is stuck.
+    let kept = rig_keyed();
+    let mut renderer = instrument_renderer(&kept, &plan);
+    run(&mut renderer, Some(&kept), 10_000);
+    renderer.set_mix(instrument_mix(&kept, &plan, &settings));
+    run(&mut renderer, Some(&kept), 30_000);
+    assert_eq!(
+        kinds_of(&kept),
+        vec![('n', 40), ('n', 38), ('f', 38), ('f', 40)]
+    );
+    assert_eq!(kept.helper.sounding(), 0);
 }
 
 // ---- real-time safety of the renderer ---------------------------------------------------------------------------------
@@ -2120,12 +2251,12 @@ fn export_mix(export: &mut AudioExportRender) -> Result<Vec<[f32; 2]>, String> {
     }
 }
 
-#[test]
-fn an_export_renders_the_instrument_with_its_first_hit_on_the_exact_sample_and_releases_at_the_end()
-{
+fn an_export_renders_the_instrument_with_its_first_hit_on_the_exact_sample_and_releases_at_the_end_at(
+    latency: u32,
+) {
     let plan = export_plan();
     let render = || {
-        let rig = rig_keyed();
+        let rig = rig_keyed_at(latency);
         let mut export = export_of(&rig, &plan, 0.1);
         let total = export.total_frames() as usize;
         let out = export_mix(&mut export).unwrap();
@@ -2161,6 +2292,14 @@ fn an_export_renders_the_instrument_with_its_first_hit_on_the_exact_sample_and_r
             .all(|(a, b)| { a[0].to_bits() == b[0].to_bits() && a[1].to_bits() == b[1].to_bits() }),
         "an export is deterministic"
     );
+}
+
+#[test]
+fn an_export_renders_the_instrument_with_its_first_hit_on_the_exact_sample_and_releases_at_the_end()
+{
+    for latency in LATENCIES {
+        an_export_renders_the_instrument_with_its_first_hit_on_the_exact_sample_and_releases_at_the_end_at(latency);
+    }
 }
 
 #[test]

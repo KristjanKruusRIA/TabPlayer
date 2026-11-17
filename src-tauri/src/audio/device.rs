@@ -1825,6 +1825,18 @@ struct OutputCallback {
 }
 impl OutputCallback {
     fn render<T: SizedSample + FromSample<f32>>(&mut self, output: &mut [T], channels: usize) {
+        self.render_with(output, channels, super::silent_output::active());
+    }
+    /// One device callback. `silent` (desktop-test builds only) hands the device silence after the block was rendered,
+    /// metered and counted; a shipping build always passes `false` and has no code that acts on it.
+    fn render_with<T: SizedSample + FromSample<f32>>(
+        &mut self,
+        output: &mut [T],
+        channels: usize,
+        silent: bool,
+    ) {
+        #[cfg(not(feature = "desktop-test"))]
+        let _ = silent;
         if self.suspended || self.transport.shared.epoch.load(Ordering::Acquire) != self.epoch {
             output.fill(T::from_sample(0.0));
             return;
@@ -1955,6 +1967,9 @@ impl OutputCallback {
                     });
                 }
             }
+            // Peak, frame count and status were taken inside `render_into`; only the device's samples change.
+            #[cfg(feature = "desktop-test")]
+            super::silent_output::silence_block(chunk, silent);
         }
     }
 }
@@ -4439,6 +4454,59 @@ mod tests {
             },
             tonality: 0,
         }
+    }
+
+    /// Plays the metronome of a prepared practice document through a callback and returns the device samples with the
+    /// status the callback published.
+    #[cfg(feature = "desktop-test")]
+    fn play_click_through_callback(silent: bool) -> (Vec<f32>, NativeAudioStatus) {
+        let service = unavailable_device_with_practice();
+        let document = service.control.lock().unwrap().document.clone().unwrap();
+        let shared = Arc::new(SharedStatus::new());
+        let epoch = shared.epoch.load(Ordering::Acquire);
+        let (_controls_in, controls) = HeapRb::<CallbackCommand>::new(CONTROL_CAPACITY).split();
+        let (retired_in, _retired_out) = HeapRb::<Retired>::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport: CallbackTransport::new(48_000, shared.clone()),
+            controls,
+            retired: retired_in,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch,
+            suspended: false,
+        };
+        callback.transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            true,
+            document.practice,
+        );
+        callback
+            .transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        let mut device = vec![0.0f32; 2048 * 2];
+        callback.render_with(&mut device, 2, silent);
+        (device, shared.snapshot().0)
+    }
+
+    #[cfg(feature = "desktop-test")]
+    #[test]
+    fn silent_output_zeroes_the_device_but_not_the_meters_or_the_frame_count() {
+        let (heard, heard_status) = play_click_through_callback(false);
+        let (silent, silent_status) = play_click_through_callback(true);
+        assert!(
+            heard.iter().any(|s| s.abs() > 0.001),
+            "the control run must sound"
+        );
+        assert!(
+            silent.iter().all(|s| *s == 0.0),
+            "the device buffer must be silence"
+        );
+        assert!(heard_status.output_peak > 0.001);
+        assert_eq!(silent_status.output_peak, heard_status.output_peak);
+        assert!(silent_status.rendered_frames >= 2048);
+        assert_eq!(silent_status.rendered_frames, heard_status.rendered_frames);
+        assert_eq!(silent_status.tick, heard_status.tick);
     }
 
     fn unavailable_device_with_practice() -> AudioService {

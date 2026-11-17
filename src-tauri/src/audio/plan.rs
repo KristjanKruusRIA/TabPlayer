@@ -145,6 +145,9 @@ pub enum PlanMidiEvent {
         /// The kit element the articulation belongs to, where that is not the one its pitch sounds.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kit_element: Option<KitElement>,
+        /// The standard articulation, named only where the key alone does not say it. A NoteOff carries its NoteOn's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        articulation_id: Option<u8>,
     },
     NoteOff {
         track_id: String,
@@ -155,6 +158,9 @@ pub enum PlanMidiEvent {
         /// The kit element the articulation belongs to, where that is not the one its pitch sounds.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kit_element: Option<KitElement>,
+        /// The standard articulation, named only where the key alone does not say it. A NoteOff carries its NoteOn's.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        articulation_id: Option<u8>,
     },
     Program {
         track_id: String,
@@ -397,14 +403,21 @@ impl PlaybackPlan {
                     channel,
                     key,
                     velocity,
+                    articulation_id,
                     ..
                 }
                 | PlanMidiEvent::NoteOff {
                     channel,
                     key,
                     velocity,
+                    articulation_id,
                     ..
-                } => *channel < 16 && *key < 128 && *velocity < 128,
+                } => {
+                    *channel < 16
+                        && *key < 128
+                        && *velocity < 128
+                        && articulation_id.is_none_or(super::drum_map::is_sound)
+                }
                 PlanMidiEvent::Program {
                     channel, program, ..
                 } => *channel < 16 && *program < 128,

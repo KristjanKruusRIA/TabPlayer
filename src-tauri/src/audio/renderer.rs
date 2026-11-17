@@ -3,6 +3,7 @@ use super::{
     backing::{BackingMap, BackingVoice},
     compensation::{Compensation, compensation_capacity},
     decode::DecodedAudio,
+    drum_map::{self, DrumMap},
     dsp::{FrameContext, FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
     instrument::NoteMap,
     master::MasterBus,
@@ -118,6 +119,9 @@ struct PreparedChannel {
     /// instrument. Held by the mix, so a change of slot or of map is a mix change with no renderer rebuilt. The kit mix
     /// above shapes only the built-in stand-in; a hosted instrument has its own mixer.
     notes: Option<NoteMap>,
+    /// The track's drum map, resolved where the mix is prepared (off the audio thread): General MIDI for a track with none
+    /// and for any track that is not percussion. Only an instrument reads it, so the built-in sounds never do.
+    drum_map: DrumMap,
 }
 impl PreparedChannel {
     /// Puts `insert` on the channel and says whether the plan's notes go to it.
@@ -125,7 +129,8 @@ impl PreparedChannel {
         if insert.kind() == SlotKind::Instrument && !self.percussion {
             return Err(InsertError::NotAPercussionTrack);
         }
-        self.notes = (insert.kind() == SlotKind::Instrument).then(NoteMap::identity);
+        self.notes =
+            (insert.kind() == SlotKind::Instrument).then(|| NoteMap::with_drum_map(self.drum_map));
         self.dsp.attach_plugin(insert);
         Ok(())
     }
@@ -228,6 +233,7 @@ impl PreparedMix {
             let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             dsp.set_ir_index(index);
             let mut notes = None;
+            let drum_map = drum_map::resolve(mix.drum_map.as_ref(), track.percussion);
 
             if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
                 // A refusal leaves the track on its built-in sound and is named, so the slot can say why.
@@ -245,7 +251,8 @@ impl PreparedMix {
                         plan.shared.clone(),
                     ) {
                         Ok(insert) => {
-                            notes = (plan.kind == SlotKind::Instrument).then(NoteMap::identity);
+                            notes = (plan.kind == SlotKind::Instrument)
+                                .then(|| NoteMap::with_drum_map(drum_map));
                             dsp.attach_plugin(Box::new(insert));
                         }
                         Err(error) => refused.push((track.id.clone(), error)),
@@ -262,6 +269,7 @@ impl PreparedMix {
                 kit: KitGain::new(kit),
                 kit_active: kit.is_some(),
                 notes,
+                drum_map,
                 mix,
             });
         }
@@ -1396,6 +1404,9 @@ impl Renderer {
             if tap.resync_due() {
                 tap.resync(&self.plan.midi, &self.midi_track, self.next_midi);
             }
+            if tap.remap_due() {
+                tap.remap(&self.plan.midi, &self.midi_track, self.next_midi);
+            }
         }
         if !self.tail {
             self.dispatched_through = Some(tick);
@@ -1438,7 +1449,9 @@ impl Renderer {
                     // ignored by the insert). Mute and solo are gain after the board, so a muted track's instrument keeps
                     // its notes and is right at unmute. The kit mix shapes only the built-in stand-in.
                     if let Some(channel) = self.mix.channels.get_mut(index) {
-                        if let Some(note) = channel.notes.and_then(|map| map.note(event)) {
+                        // The map is borrowed, never copied: it is 256 bytes and this runs per event.
+                        let note = channel.notes.as_ref().and_then(|map| map.note(event));
+                        if let Some(note) = note {
                             if !(silenced && note.on) {
                                 channel.dsp.stage_note(
                                     note.on,
@@ -2111,6 +2124,42 @@ impl Renderer {
     fn compensation_active(&self) -> bool {
         self.mix.compensation.as_ref().is_some_and(|c| c.active())
     }
+    /// The strikes per channel and key that the plan holds at `next_midi` for track `track_index` once `map` has turned each
+    /// note into the key an instrument gets: every NoteOn before it and not yet ended, counted by the key actually sent. A
+    /// sound the map leaves silent is held nowhere. The events of the track are found by the track index the renderer worked
+    /// out for each at build time, so no string is compared on the audio thread. Does not allocate.
+    fn held_wanted(
+        midi: &[PlanMidiEvent],
+        midi_track: &[u16],
+        next_midi: usize,
+        track_index: usize,
+        map: &NoteMap,
+    ) -> [[u8; 128]; 16] {
+        let mut wanted = [[0u8; 128]; 16];
+        for event in midi
+            .iter()
+            .zip(midi_track)
+            .take(next_midi)
+            .filter(|(_, owner)| usize::from(**owner) == track_index)
+            .map(|(event, _)| event)
+        {
+            let Some(note) = map.note(event) else {
+                continue;
+            };
+            let Some(count) = wanted
+                .get_mut(usize::from(note.channel))
+                .and_then(|row| row.get_mut(usize::from(note.key)))
+            else {
+                continue;
+            };
+            if note.on && note.velocity > 0 {
+                *count = count.saturating_add(1);
+            } else {
+                *count = count.saturating_sub(1);
+            }
+        }
+        wanted
+    }
     /// An edit while playing: this renderer replaces `old` at the same place. It takes over `old`'s plug-in inserts and
     /// compensation lines the way a mix change does, so the plug-in tracks and the delayed stems keep streaming instead
     /// of dropping D frames. Lines and inserts pair by position, so a renderer for other tracks, or the same tracks in
@@ -2139,36 +2188,16 @@ impl Renderer {
         // plan holds at this tick (those struck before it and not ended), and ends the rest.
         let track_count = self.plan.tracks.len();
         for (track_index, channel) in self.mix.channels.iter_mut().enumerate().take(track_count) {
-            let Some(map) = channel.notes else {
+            let Some(map) = channel.notes.as_ref() else {
                 continue;
             };
-            let mut wanted = [[0u8; 128]; 16];
-            // The events of this track, by the track index the renderer worked out for each event at build time: no
-            // string is compared on the audio thread.
-            for event in self
-                .plan
-                .midi
-                .iter()
-                .zip(&self.midi_track)
-                .take(self.next_midi)
-                .filter(|(_, owner)| usize::from(**owner) == track_index)
-                .map(|(event, _)| event)
-            {
-                let Some(note) = map.note(event) else {
-                    continue;
-                };
-                let Some(count) = wanted
-                    .get_mut(usize::from(note.channel))
-                    .and_then(|row| row.get_mut(usize::from(note.key)))
-                else {
-                    continue;
-                };
-                if note.on && note.velocity > 0 {
-                    *count = count.saturating_add(1);
-                } else {
-                    *count = count.saturating_sub(1);
-                }
-            }
+            let wanted = Self::held_wanted(
+                &self.plan.midi,
+                &self.midi_track,
+                self.next_midi,
+                track_index,
+                map,
+            );
             channel.dsp.retain_notes(&wanted);
         }
         carry_compensation(
@@ -2347,6 +2376,28 @@ impl Renderer {
             new.gain.remaining = (self.rate as f64 * 0.01) as u32;
             new.kit.current = old.kit.current;
             new.kit.remaining = (self.rate as f64 * 0.01) as u32;
+        }
+        // A drum map that changed while keys were held: the instrument keeps the keys the plan holds now under the new
+        // map and releases the rest, so a key struck under the old map cannot stay on once its NoteOff maps elsewhere.
+        // Nothing is struck again. The held keys are put right before the next plan event is dispatched.
+        for (index, (new, old)) in settings
+            .channels
+            .iter_mut()
+            .zip(&self.mix.channels)
+            .enumerate()
+        {
+            if new.notes != old.notes {
+                if let Some(map) = new.notes.as_ref() {
+                    let wanted = Self::held_wanted(
+                        &self.plan.midi,
+                        &self.midi_track,
+                        self.next_midi,
+                        index,
+                        map,
+                    );
+                    new.dsp.retain_notes(&wanted);
+                }
+            }
         }
         settings.backing.current = self.mix.backing.current;
         settings.backing.remaining = (self.rate as f64 * 0.01) as u32;

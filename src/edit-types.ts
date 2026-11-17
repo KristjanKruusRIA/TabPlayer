@@ -54,7 +54,9 @@ export interface TrackInterpretation { style?: 'pick'|'fingers'; palmMute?: 'lig
 export type DrumKitElement = 'kick'|'snare'|'hats'|'toms'|'cymbals'|'other';
 export interface DrumElementMix { gain: number; pan: number; mute: boolean; solo: boolean }
 export interface DrumKitMix { kick?: DrumElementMix; snare?: DrumElementMix; hats?: DrumElementMix; toms?: DrumElementMix; cymbals?: DrumElementMix; other?: DrumElementMix }
-export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation; drumKit?: DrumKitMix; /** The system MIDI output port (by name) this track plays through instead of the internal sound. Absent is the internal sound; never null. */ midiPort?: string }
+export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation; drumKit?: DrumKitMix; /** The system MIDI output port (by name) this track plays through instead of the internal sound. Absent is the internal sound; never null. */ midiPort?: string; /** Which key each standard drum articulation sounds on a hosted instrument or an external MIDI output, as a preset and the rows changed from it. Absent is General MIDI; never null, and never written for General MIDI with no changed rows. */ drumMap?: DrumMapRef }
+/** A drum map: a preset by its id and only the rows that differ from it, each `[articulation id, key]`, a key of null being no sound. Rows ascend by id; `keys` is absent rather than empty. */
+export interface DrumMapRef { preset: string; keys?: [number, number | null][] }
 /** A cabinet impulse response by the identity it has in a user's library (32 hex digits of the file's hash), with the name it was picked under and a level trim. Documents never hold the audio. */
 export interface CabinetIrRef { id:string;name:string;levelDb:number }
 /** A NAM capture by the identity it has in a user's library (32 hex digits of the file's hash), with the name it was picked under and a level trim of -12 to 12 dB. Documents never hold the capture. */

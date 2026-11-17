@@ -52,6 +52,8 @@ export function Dialog({title,onClose,children,actions,className,backdropClassNa
       if(panel.current?.closest('[inert]'))return;
       if(event.key==='Escape'){
         if(locked.current)return;
+        // A disclosure that closes itself on Escape (a details marked data-escape-closes, open, around the target) gets the key first.
+        if(event.target instanceof Element&&panel.current?.contains(event.target)&&event.target.closest('details[data-escape-closes][open]'))return;
         event.preventDefault();event.stopPropagation();close.current();return;
       }
       if(event.key!=='Tab')return;

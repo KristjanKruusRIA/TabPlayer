@@ -6,6 +6,7 @@ pub mod decode;
 pub mod device;
 #[cfg(test)]
 mod drum_kit_tests;
+pub mod drum_map;
 pub mod dsp;
 pub mod instrument;
 pub mod ir_convolver;

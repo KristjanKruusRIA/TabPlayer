@@ -94,12 +94,17 @@ impl InsertPoint {
 ///   whose AllNotesOff has not been staged yet. [`NoteStage::release_owed`] stages as many as fit now (at this offset)
 ///   and the rest at offset 0 of the next block, which is empty, so it takes all of them (at most 16 of 64 slots). The
 ///   stage is `sealed` meanwhile: a NoteOn on a channel being released would be released with it.
+/// - `short` counts, per channel and key, the NoteOffs still to come for strikes the plan holds and the instrument was never
+///   sent (a sound the map left silent, then given a key; a note an edit made the plan hold). Such a NoteOff names a key
+///   that another strike may hold, so it is spent against `short` first and never reaches `held`. It is forgotten wherever
+///   `held` is.
 struct NoteStage {
     ev: [u64; EVENTS_PER_BLOCK],
     n: u8,
     sealed: bool,
     owed: u16,
     held: [[u8; 128]; 16],
+    short: [[u8; 128]; 16],
 }
 
 /// Slots ordinary events may use.
@@ -113,6 +118,7 @@ impl NoteStage {
             sealed: false,
             owed: 0,
             held: [[0; 128]; 16],
+            short: [[0; 128]; 16],
         }
     }
 
@@ -122,6 +128,7 @@ impl NoteStage {
         self.sealed = false;
         self.owed = 0;
         self.held = [[0; 128]; 16];
+        self.short = [[0; 128]; 16];
     }
 
     fn push(&mut self, limit: usize, word: u64) -> bool {
@@ -179,6 +186,22 @@ impl NoteStage {
     /// sends nothing. Never loses a release: without room, or if the NoteOff cannot be encoded, the channels that hold
     /// keys are released instead.
     fn note_off(&mut self, offset: u8, channel: u8, key: u8) {
+        // The end of a strike that was never sent is that and nothing else: it ends no other strike of the key.
+        if let Some(short) = self
+            .short
+            .get_mut(usize::from(channel))
+            .and_then(|row| row.get_mut(usize::from(key)))
+        {
+            if *short > 0 {
+                *short -= 1;
+                return;
+            }
+        }
+        self.note_off_held(offset, channel, key);
+    }
+
+    /// `note_off` for a strike that was sent.
+    fn note_off_held(&mut self, offset: u8, channel: u8, key: u8) {
         let Some(held) = self.held_mut(channel, key) else {
             return;
         };
@@ -216,6 +239,7 @@ impl NoteStage {
             }
             *row = [0; 128];
         }
+        self.short = [[0; 128]; 16];
         self.owed |= channels;
         self.release_owed(offset);
         // A channel still owed its release keeps the stage sealed until the next block carries it.
@@ -227,7 +251,9 @@ impl NoteStage {
     /// Brings the held counts down to `wanted`, a count per channel and key, for the notes a new plan holds at a hand-over:
     /// a key held more often than wanted is ended, at `offset`, by a NoteOff when none is wanted, or has its count
     /// lowered to `wanted` (its one NoteOff comes with the plan) otherwise. A key the stage holds fewer times is left
-    /// alone. A NoteOff that finds no room releases the channels, as in [`note_off`](Self::note_off).
+    /// alone. A key the plan holds more often than the stage does (its strikes were never sent) is recorded in `short`, so
+    /// the NoteOffs of those strikes are not taken for ones of the strikes that were sent. A NoteOff that finds no room
+    /// releases the channels, as in [`note_off`](Self::note_off).
     fn retain(&mut self, offset: u8, wanted: &[[u8; 128]; 16]) {
         for channel in 0..16u8 {
             for key in 0..128u8 {
@@ -236,18 +262,32 @@ impl NoteStage {
                     .and_then(|row| row.get(usize::from(key)))
                     .copied()
                     .unwrap_or(0);
+                if let Some(short) = self
+                    .short
+                    .get_mut(usize::from(channel))
+                    .and_then(|row| row.get_mut(usize::from(key)))
+                {
+                    *short = 0;
+                }
                 let Some(held) = self.held_mut(channel, key) else {
                     continue;
                 };
-                if *held <= want {
-                    continue;
+                if *held > want {
+                    if want > 0 {
+                        *held = want;
+                    } else {
+                        // The one NoteOff of a key whose strikes are all over.
+                        *held = 1;
+                        self.note_off_held(offset, channel, key);
+                    }
                 }
-                if want > 0 {
-                    *held = want;
-                } else {
-                    // The one NoteOff of a key whose strikes are all over.
-                    *held = 1;
-                    self.note_off(offset, channel, key);
+                let sent = self.held_mut(channel, key).map_or(0, |held| *held);
+                if let Some(short) = self
+                    .short
+                    .get_mut(usize::from(channel))
+                    .and_then(|row| row.get_mut(usize::from(key)))
+                {
+                    *short = want.saturating_sub(sent);
                 }
             }
         }

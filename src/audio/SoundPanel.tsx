@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { delayDivisions, effectBlocks, modulationDivisions, syncedBlocks } from '../document-settings';
-import type { EditCommand, EffectBlock, TrackSound } from '../edit-types';
+import type { ChannelMix, EditCommand, EffectBlock, TrackSound } from '../edit-types';
 import { CabinetResponse } from './CabinetResponse';
 import { AmpCapture } from './AmpCapture';
 import type { NativePlaybackController } from './NativePlaybackController';
@@ -12,6 +12,7 @@ import { BusyFieldset, busyGuard } from '../ui';
 import { useI18n } from '../i18n';
 import { DrumKitPicker } from './DrumKitPicker';
 import { PluginSlotPanel } from './PluginSlotPanel';
+import { DrumMapPanel } from './DrumMapPanel';
 import { makePluginStateCandidate, type PluginStatus } from './plugin-host';
 import type { AssetCandidate } from '../project';
 import { useSoundEditing } from './useSoundEditing';
@@ -20,7 +21,7 @@ import './sound-panel.css';
 
 export { soundPreset };
 /** The inspector's Sound task: every control as a field. The rig in `src/rig` shows the same sound as hardware; both share `useSoundEditing`. */
-export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false,documentId,status:pluginStatus,onAllowConsent,onRetrySlot,openBlock}:{trackId:string;/** The pedal whose controls start unfolded and scrolled to, as when its slot in the sidebar's effect strip opened this. */openBlock?:EffectBlock;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand,asset?:AssetCandidate)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean;documentId?:string;status?:PluginStatus;onAllowConsent?:()=>void|Promise<unknown>;onRetrySlot?:()=>void|Promise<unknown>}) {
+export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false,documentId,status:pluginStatus,onAllowConsent,onRetrySlot,openBlock,mix,usedDrumSounds=[]}:{/** The track's mix, whose drum map the instrument slot's map row edits. */mix?:ChannelMix;/** The standard drum sounds the track's notes play. */usedDrumSounds?:readonly number[];trackId:string;/** The pedal whose controls start unfolded and scrolled to, as when its slot in the sidebar's effect strip opened this. */openBlock?:EffectBlock;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand,asset?:AssetCandidate)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean;documentId?:string;status?:PluginStatus;onAllowConsent?:()=>void|Promise<unknown>;onRetrySlot?:()=>void|Promise<unknown>}) {
   const { lang, t } = useI18n();
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown,diagnostics:true});
   const {playbackState,current,devices,diagnostics,diagnosticsError,testToneMessage,testTone,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
@@ -109,6 +110,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
       onAllow={onAllowConsent}
       onRetry={onRetrySlot}
     />
+    {percussion&&current.plugin?.kind==='instrument'&&<DrumMapPanel trackId={trackId} mix={mix} used={usedDrumSounds} busy={busy} onEdit={onEdit}/>}
     <p className="sound-chain-label muted">{t('sound.signal_chain')}</p>
     <div className="sound-chain" ref={chainRef}>{order.map((block,index)=>pedal(first,block,index))}</div>
     {second&&effectBlocks.some(block=>second.effects[block].enabled)&&<section className="sound-second-board" aria-label={t('sound.second_pedalboard')}><p className="sound-chain-label muted">{t('sound.second_pedalboard_desc')}</p><div className="sound-chain">{chainOrder(second.effects).filter(block=>second.effects[block].enabled).map((block,index)=>pedal(second,block,index))}</div></section>}

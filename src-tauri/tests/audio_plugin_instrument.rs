@@ -18,9 +18,10 @@ use std::{
 };
 use tabplayer_lib::{
     audio::{
+        drum_map,
         dsp::{FrameContext, FxSettings, TrackDsp},
         midi_out::{MidiTap, RouteSpec},
-        plan::PlaybackPlan,
+        plan::{PlanMidiEvent, PlaybackPlan},
         plugin_insert::{FaultReason, InsertError, InsertMode, PluginInsert},
         renderer::{PreparedMix, Renderer},
         resources::AudioResources,
@@ -31,7 +32,7 @@ use tabplayer_lib::{
         wav::AudioFormat,
     },
     plugins::bridge::{BridgeLink, InsertShared},
-    settings::{ChannelMix, DocumentSettings, SlotKind, TrackSound},
+    settings::{ChannelMix, DocumentSettings, DrumMapRef, SlotKind, TrackSound},
 };
 use tabplayer_plugin_protocol::{
     event::MidiEvent,
@@ -2412,4 +2413,1079 @@ fn an_export_whose_instrument_stops_answering_fails_as_an_effect_does_and_one_wi
     let kit = export_mix(&mut bare).unwrap();
     assert_eq!(kit.len(), 96_000 + 4_800);
     assert!(first_sound(&kit).is_some());
+}
+// ---- per-track drum maps (THE-219) ----------------------------------------------------------------------------------------
+
+fn id_on(tick: u32, key: u8, id: u8) -> Value {
+    json!({"type":"noteOn","trackId":"drums","tick":tick,"channel":9,"key":key,"velocity":100,"articulationId":id})
+}
+
+fn id_off(tick: u32, key: u8, id: u8) -> Value {
+    json!({"type":"noteOff","trackId":"drums","tick":tick,"channel":9,"key":key,"velocity":0,"articulationId":id})
+}
+
+/// The settings of the drum track with a drum map of `rows` on General MIDI.
+fn map_settings(rows: &[(u8, Option<u8>)]) -> DocumentSettings {
+    let mut settings = gm(DocumentSettings::default());
+    settings.mixes.insert(
+        "drums".into(),
+        ChannelMix {
+            drum_map: Some(DrumMapRef {
+                preset: "gm".into(),
+                keys: rows.to_vec(),
+            }),
+            ..ChannelMix::default()
+        },
+    );
+    settings.validate().expect("a valid drum map");
+    settings
+}
+
+/// A mix whose track holds an instrument on `rig`, put there by the path the app takes (`prepare`, with a ready plan for the
+/// slot) or the one an export takes (`attach`).
+fn mix_by(path: &str, rig: &Rig, plan: &PlaybackPlan, settings: &DocumentSettings) -> PreparedMix {
+    match path {
+        "prepare" => {
+            let plans = vec![(
+                "drums".to_string(),
+                Ok(tabplayer_lib::plugins::service::InsertPlan {
+                    link: rig.link.clone(),
+                    latency: rig.latency,
+                    input_db: 0.0,
+                    output_db: 0.0,
+                    shared: rig.shared.clone(),
+                    kind: SlotKind::Instrument,
+                }),
+            )];
+            PreparedMix::prepare_with_plugins(settings, plan, RATE, &plans, CALLBACK).unwrap()
+        }
+        _ => instrument_mix(rig, plan, settings),
+    }
+}
+
+fn mapped_renderer(rig: &Rig, plan: &PlaybackPlan, settings: &DocumentSettings) -> Renderer {
+    let mix = instrument_mix(rig, plan, settings);
+    Renderer::new_with_mix(
+        Arc::new(plan.clone()),
+        resources(),
+        mix,
+        settings.clone(),
+        RATE,
+    )
+    .unwrap()
+}
+
+fn a_drum_map_sends_each_articulation_on_its_own_key_and_each_note_off_on_its_note_ons_key_at(
+    latency: u32,
+) {
+    // Snare hit, rim shot (id 91, also key 38), closed, half-open (id 92) and open hat, a crash and its choke (id 30), each to a
+    // key of its own.
+    let rows = [
+        (30, Some(66)),
+        (38, Some(60)),
+        (42, Some(62)),
+        (46, Some(64)),
+        (49, Some(65)),
+        (91, Some(61)),
+        (92, Some(63)),
+    ];
+    let plan = drum_plan(vec![
+        note_on(100, 38),
+        note_off(130, 38),
+        id_on(200, 38, 91),
+        id_off(230, 38, 91),
+        note_on(300, 42),
+        note_off(330, 42),
+        id_on(400, 46, 92),
+        id_off(430, 46, 92),
+        note_on(500, 46),
+        note_off(530, 46),
+        note_on(600, 49),
+        id_on(700, 49, 30),
+        id_off(720, 49, 30),
+        note_off(1000, 49),
+    ]);
+    let settings = map_settings(&rows);
+    for path in ["prepare", "attach"] {
+        let rig = rig_keyed_at(latency);
+        let mix = mix_by(path, &rig, &plan, &settings);
+        let mut renderer = Renderer::new_with_mix(
+            Arc::new(plan.clone()),
+            resources(),
+            mix,
+            settings.clone(),
+            RATE,
+        )
+        .unwrap();
+        run(&mut renderer, Some(&rig), 52_000);
+        assert_eq!(
+            kinds_of(&rig),
+            vec![
+                ('n', 60),
+                ('f', 60),
+                ('n', 61),
+                ('f', 61),
+                ('n', 62),
+                ('f', 62),
+                ('n', 63),
+                ('f', 63),
+                ('n', 64),
+                ('f', 64),
+                ('n', 65),
+                ('n', 66),
+                ('f', 66),
+                ('f', 65),
+            ],
+            "{path}"
+        );
+        assert_eq!(rig.helper.sounding(), 0, "{path}");
+        assert_eq!(rig.dropped(), 0, "{path}");
+    }
+}
+
+#[test]
+fn a_drum_map_sends_each_articulation_on_its_own_key_and_each_note_off_on_its_note_ons_key() {
+    for latency in LATENCIES {
+        a_drum_map_sends_each_articulation_on_its_own_key_and_each_note_off_on_its_note_ons_key_at(
+            latency,
+        );
+    }
+}
+
+fn a_silent_row_sends_neither_a_note_on_nor_a_note_off_and_holds_nothing_at(latency: u32) {
+    // The plain snare hit is silent; the rim shot (id 91, the same key) is not.
+    let plan = drum_plan(vec![
+        note_on(100, 38),
+        note_off(130, 38),
+        note_on(200, 36),
+        note_off(230, 36),
+        id_on(300, 38, 91),
+        id_off(330, 38, 91),
+    ]);
+    let rig = rig_keyed_at(latency);
+    let mut renderer = mapped_renderer(&rig, &plan, &map_settings(&[(38, None)]));
+    run(&mut renderer, Some(&rig), 20_000);
+    assert_eq!(
+        kinds_of(&rig),
+        vec![('n', 36), ('f', 36), ('n', 38), ('f', 38)]
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+    assert_eq!(rig.dropped(), 0);
+}
+
+#[test]
+fn a_silent_row_sends_neither_a_note_on_nor_a_note_off_and_holds_nothing() {
+    for latency in LATENCIES {
+        a_silent_row_sends_neither_a_note_on_nor_a_note_off_and_holds_nothing_at(latency);
+    }
+}
+
+fn a_map_equal_to_general_midi_sends_the_same_words_as_no_map_at(latency: u32) {
+    let plan = short_plan(vec![
+        note_on(100, 36),
+        id_on(150, 38, 91),
+        note_off(300, 36),
+        id_off(400, 38, 91),
+        note_on(500, 42),
+        note_off(600, 42),
+    ]);
+    let words = |settings: DocumentSettings| {
+        let rig = rig_keyed_at(latency);
+        let mut renderer = mapped_renderer(&rig, &plan, &settings);
+        run(&mut renderer, Some(&rig), 40_000);
+        rig.helper
+            .blocks()
+            .iter()
+            .map(|block| (block.seq, block.words.clone()))
+            .collect::<Vec<_>>()
+    };
+    let none = words(gm(DocumentSettings::default()));
+    assert!(none.iter().any(|(_, w)| !w.is_empty()));
+    assert_eq!(none, words(map_settings(&[(38, Some(38)), (42, Some(42))])));
+}
+
+#[test]
+fn a_map_equal_to_general_midi_sends_the_same_words_as_no_map() {
+    for latency in LATENCIES {
+        a_map_equal_to_general_midi_sends_the_same_words_as_no_map_at(latency);
+    }
+}
+
+/// A small seeded generator, so a failure names the seed that reproduces it.
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+#[test]
+fn over_random_maps_and_overlapping_notes_nothing_stays_held_and_no_note_off_is_sent_for_a_key_that_is_not_sounding()
+ {
+    for seed in 1..=12u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+        // Many ids onto few keys, some silent.
+        let mut rows: Vec<(u8, Option<u8>)> = Vec::new();
+        for &(id, _) in &drum_map::SOUNDS {
+            if rng.below(3) == 0 {
+                let key = if rng.below(5) == 0 {
+                    None
+                } else {
+                    Some(40 + rng.below(6) as u8)
+                };
+                rows.push((id, key));
+            }
+        }
+        if rows.is_empty() {
+            rows.push((36, Some(40)));
+        }
+        let settings = map_settings(&rows);
+        let resolved = drum_map::resolve(settings.mixes["drums"].drum_map.as_ref(), true);
+
+        let mut midi = Vec::new();
+        for _ in 0..24 {
+            let (id, key) = drum_map::SOUNDS[rng.below(drum_map::SOUNDS.len() as u64) as usize];
+            let on = 10 * rng.below(170) as u32;
+            let off = on + 10 * (1 + rng.below(20) as u32);
+            if rng.below(2) == 0 || id == key {
+                midi.push(note_on(on, key));
+                midi.push(note_off(off, key));
+            } else {
+                midi.push(id_on(on, key, id));
+                midi.push(id_off(off, key, id));
+            }
+        }
+        let plan = short_plan(midi);
+        let expected: Vec<u8> = plan
+            .midi
+            .iter()
+            .filter_map(|event| match event {
+                PlanMidiEvent::NoteOn {
+                    key,
+                    articulation_id,
+                    ..
+                } => resolved.key(*key, *articulation_id),
+                _ => None,
+            })
+            .collect();
+
+        let rig = rig_keyed();
+        let mut renderer = mapped_renderer(&rig, &plan, &settings);
+        run(&mut renderer, Some(&rig), 96_000);
+
+        let mut sounding = std::collections::HashSet::new();
+        let mut on_keys = Vec::new();
+        for (_, event) in rig.helper.events() {
+            match event {
+                MidiEvent::NoteOn { channel, key, .. } => {
+                    on_keys.push(key);
+                    sounding.insert((channel, key));
+                }
+                MidiEvent::NoteOff { channel, key, .. } => {
+                    assert!(
+                        sounding.remove(&(channel, key)),
+                        "seed {seed}: a NoteOff for key {key}, which is not sounding"
+                    );
+                }
+                MidiEvent::AllNotesOff { .. } => {
+                    panic!(
+                        "seed {seed}: a release of everything means the app held a key past its notes"
+                    )
+                }
+                MidiEvent::Controller { .. } => {}
+            }
+        }
+        assert_eq!(on_keys, expected, "seed {seed}: the keys struck");
+        assert!(
+            sounding.is_empty(),
+            "seed {seed}: {sounding:?} still sounding"
+        );
+        assert_eq!(rig.helper.sounding(), 0, "seed {seed}");
+        assert_eq!(rig.dropped(), 0, "seed {seed}");
+    }
+}
+
+fn a_map_changed_by_a_mix_while_notes_are_held_releases_only_the_keys_that_changed_and_the_next_hit_uses_the_new_key_at(
+    latency: u32,
+) {
+    // Three hits are held at tick 300: a kick (36, not in the map), a snare (38) and a closed hat (42).
+    let plan = drum_plan(vec![
+        note_on(100, 36),
+        note_on(150, 38),
+        note_on(200, 42),
+        note_off(500, 38),
+        note_off(600, 42),
+        note_off(700, 36),
+        note_on(800, 38),
+        note_off(900, 38),
+    ]);
+    let before = map_settings(&[(38, Some(60)), (42, Some(62))]);
+    let after = map_settings(&[(38, Some(61)), (42, Some(62))]);
+    let rig = rig_keyed_at(latency);
+    let mut renderer = mapped_renderer(&rig, &plan, &before);
+    run(&mut renderer, Some(&rig), 15_000);
+    assert_eq!(kinds_of(&rig), vec![('n', 36), ('n', 60), ('n', 62)]);
+    assert_eq!(rig.helper.sounding(), 3);
+
+    // The edit is a mix: the renderer is the one that is playing.
+    renderer.set_mix(instrument_mix(&rig, &plan, &after));
+    run(&mut renderer, Some(&rig), 40_000);
+    assert_eq!(
+        kinds_of(&rig),
+        vec![
+            ('n', 36),
+            ('n', 60),
+            ('n', 62),
+            // Only the snare's key changed, and its note ends on the key it was struck on.
+            ('f', 60),
+            // The others keep sounding until the plan ends them, on the keys they were struck on.
+            ('f', 62),
+            ('f', 36),
+            // The next hit is on the new key.
+            ('n', 61),
+            ('f', 61),
+        ]
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+    assert_eq!(rig.dropped(), 0);
+    let epochs: std::collections::HashSet<_> =
+        rig.helper.blocks().iter().map(|b| b.epoch).collect();
+    assert_eq!(epochs.len(), 1, "the stream carried on, nothing rebuilt");
+}
+
+#[test]
+fn a_map_changed_by_a_mix_while_notes_are_held_releases_only_the_keys_that_changed_and_the_next_hit_uses_the_new_key()
+ {
+    for latency in LATENCIES {
+        a_map_changed_by_a_mix_while_notes_are_held_releases_only_the_keys_that_changed_and_the_next_hit_uses_the_new_key_at(latency);
+    }
+}
+
+fn a_map_set_where_there_was_none_and_one_removed_leave_nothing_stuck_and_strike_nothing_again_at(
+    latency: u32,
+) {
+    let plan = drum_plan(vec![
+        note_on(100, 38),
+        note_off(500, 38),
+        note_on(600, 38),
+        note_off(900, 38),
+    ]);
+    let rig = rig_keyed_at(latency);
+    let mut renderer = mapped_renderer(&rig, &plan, &gm(DocumentSettings::default()));
+    run(&mut renderer, Some(&rig), 10_000);
+    // The snare was struck on 38 and the map now says 50: it is released on the swap, and not struck again on 50.
+    renderer.set_mix(instrument_mix(
+        &rig,
+        &plan,
+        &map_settings(&[(38, Some(50))]),
+    ));
+    run(&mut renderer, Some(&rig), 30_000);
+    // The hit at 600 is on 50; the map goes away while it is held, and it is released on the key it was struck on.
+    renderer.set_mix(instrument_mix(
+        &rig,
+        &plan,
+        &gm(DocumentSettings::default()),
+    ));
+    run(&mut renderer, Some(&rig), 20_000);
+    assert_eq!(
+        kinds_of(&rig),
+        vec![('n', 38), ('f', 38), ('n', 50), ('f', 50)]
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn a_map_set_where_there_was_none_and_one_removed_leave_nothing_stuck_and_strike_nothing_again() {
+    for latency in LATENCIES {
+        a_map_set_where_there_was_none_and_one_removed_leave_nothing_stuck_and_strike_nothing_again_at(latency);
+    }
+}
+
+fn an_edit_hand_over_under_a_map_keeps_the_notes_the_new_plan_holds_and_ends_the_rest_on_the_keys_sent_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
+    let keys = [
+        (36, 70),
+        (38, 71),
+        (40, 72),
+        (41, 73),
+        (42, 74),
+        (43, 75),
+        (45, 76),
+    ];
+    let map = |key: u8| keys.iter().find(|(from, _)| *from == key).unwrap().1;
+    let settings = map_settings(&keys.map(|(from, to)| (from, Some(to))));
+    let plan = drum_plan(vec![
+        note_on(100, 36),
+        note_off(300, 36),
+        note_on(600, 38),
+        note_off(800, 38),
+        note_on(650, 40),
+        note_off(900, 40),
+        note_on(660, 41),
+        note_off(900, 41),
+        note_on(680, 45),
+        note_off(1000, 45),
+        note_on(1000, 42),
+        note_off(1100, 42),
+    ]);
+    let edited = drum_plan(vec![
+        note_on(100, 36),
+        note_off(300, 36),
+        note_on(660, 43),
+        note_off(900, 43),
+        note_on(680, 45),
+        note_off(1000, 45),
+        note_on(750, 40),
+        note_off(850, 40),
+        note_on(1000, 42),
+        note_off(1100, 42),
+    ]);
+    let mut old = mapped_renderer(&rig, &plan, &settings);
+    let mut out = run(&mut old, Some(&rig), 36_000);
+    let tick = old.position().tick;
+    assert_eq!(tick, 720.0);
+    let mut new = mapped_renderer(&rig, &edited, &settings);
+    new.hand_over_from(tick, &mut old);
+    out.extend(run(&mut new, Some(&rig), 30_000));
+    let want: Vec<Heard> = vec![
+        (5_000, 'n', map(36)),
+        (15_000, 'f', map(36)),
+        (30_000, 'n', map(38)),
+        (32_500, 'n', map(40)),
+        (33_000, 'n', map(41)),
+        (34_000, 'n', map(45)),
+        (36_000, 'f', map(38)),
+        (36_000, 'f', map(40)),
+        (36_000, 'f', map(41)),
+        (37_500, 'n', map(40)),
+        (42_500, 'f', map(40)),
+        (50_000, 'f', map(45)),
+        (50_000, 'n', map(42)),
+        (55_000, 'f', map(42)),
+    ];
+    assert_eq!(heard(&rig), want);
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn an_edit_hand_over_under_a_map_keeps_the_notes_the_new_plan_holds_and_ends_the_rest_on_the_keys_sent()
+ {
+    for latency in LATENCIES {
+        an_edit_hand_over_under_a_map_keeps_the_notes_the_new_plan_holds_and_ends_the_rest_on_the_keys_sent_at(latency);
+    }
+}
+
+fn an_edit_hand_over_that_changes_the_map_releases_what_the_old_keys_held_at(latency: u32) {
+    // The same plan, a different map: the hit held across the hand-over was struck on 60 and now means 61.
+    let rig = rig_keyed_at(latency);
+    let plan = drum_plan(vec![
+        note_on(100, 38),
+        note_off(900, 38),
+        note_on(1000, 38),
+        note_off(1100, 38),
+    ]);
+    let mut old = mapped_renderer(&rig, &plan, &map_settings(&[(38, Some(60))]));
+    run(&mut old, Some(&rig), 36_000);
+    let mut new = mapped_renderer(&rig, &plan, &map_settings(&[(38, Some(61))]));
+    hand_over(&mut new, &mut old);
+    run(&mut new, Some(&rig), 30_000);
+    assert_eq!(
+        kinds_of(&rig),
+        vec![('n', 60), ('f', 60), ('n', 61), ('f', 61)]
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn an_edit_hand_over_that_changes_the_map_releases_what_the_old_keys_held() {
+    for latency in LATENCIES {
+        an_edit_hand_over_that_changes_the_map_releases_what_the_old_keys_held_at(latency);
+    }
+}
+
+// ---- a NoteOff for a note that was never sent ----
+
+/// A rim shot (id 91, key 38) that the first map leaves silent, and a snare on key 38 struck while it is held.
+fn unsent_rim_plan() -> PlaybackPlan {
+    drum_plan(vec![
+        id_on(100, 38, 91),
+        note_on(150, 38),
+        id_off(900, 38, 91),
+        note_off(1500, 38),
+        note_on(1800, 38),
+        note_off(1900, 38),
+    ])
+}
+
+fn a_note_off_for_a_note_that_was_never_sent_cannot_end_another_note_early_at(latency: u32) {
+    let rig = rig_keyed_at(latency);
+    let plan = unsent_rim_plan();
+    // The rim shot is silent: its NoteOn is not sent. The snare is, and holds key 38.
+    let mut renderer = mapped_renderer(&rig, &plan, &map_settings(&[(91, None)]));
+    run(&mut renderer, Some(&rig), 15_000);
+    assert_eq!(kinds_of(&rig), vec![('n', 38)]);
+    // The rim now means key 38 as well, and the plan holds two strikes of it: the instrument holds one.
+    renderer.set_mix(instrument_mix(
+        &rig,
+        &plan,
+        &gm(DocumentSettings::default()),
+    ));
+    run(&mut renderer, Some(&rig), 90_000);
+    // The rim's NoteOff at tick 900 is for a note that was never sent: it does not end the snare, which ends at tick 1500.
+    assert_eq!(
+        heard(&rig),
+        vec![
+            (7_500, 'n', 38),
+            (75_000, 'f', 38),
+            (90_000, 'n', 38),
+            (95_000, 'f', 38)
+        ],
+        "latency {latency}"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn a_note_off_for_a_note_that_was_never_sent_cannot_end_another_note_early() {
+    for latency in LATENCIES {
+        a_note_off_for_a_note_that_was_never_sent_cannot_end_another_note_early_at(latency);
+    }
+}
+
+fn an_edit_hand_over_that_makes_the_plan_hold_an_unsent_note_does_not_let_its_end_cut_another_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
+    let old_plan = drum_plan(vec![note_on(150, 38), note_off(1500, 38)]);
+    // The edit adds a rim shot (key 38) that began before the hand-over, which the old plan never sent.
+    let new_plan = drum_plan(vec![
+        id_on(100, 38, 91),
+        note_on(150, 38),
+        id_off(900, 38, 91),
+        note_off(1500, 38),
+    ]);
+    let mut old = instrument_renderer(&rig, &old_plan);
+    run(&mut old, Some(&rig), 15_000);
+    let mut new = instrument_renderer(&rig, &new_plan);
+    hand_over(&mut new, &mut old);
+    run(&mut new, Some(&rig), 70_000);
+    assert_eq!(
+        heard(&rig),
+        vec![(7_500, 'n', 38), (75_000, 'f', 38)],
+        "latency {latency}"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn an_edit_hand_over_that_makes_the_plan_hold_an_unsent_note_does_not_let_its_end_cut_another() {
+    for latency in LATENCIES {
+        an_edit_hand_over_that_makes_the_plan_hold_an_unsent_note_does_not_let_its_end_cut_another_at(latency);
+    }
+}
+
+#[test]
+fn what_a_note_off_still_owes_is_forgotten_wherever_the_held_counts_are() {
+    for latency in LATENCIES {
+        for how in ["seek", "wrap", "flush"] {
+            let rig = rig_keyed_at(latency);
+            let plan = unsent_rim_plan();
+            let mut renderer = mapped_renderer(&rig, &plan, &map_settings(&[(91, None)]));
+            run(&mut renderer, Some(&rig), 15_000);
+            renderer.set_mix(instrument_mix(
+                &rig,
+                &plan,
+                &gm(DocumentSettings::default()),
+            ));
+            run(&mut renderer, Some(&rig), 1_000);
+            match how {
+                "seek" => renderer.seek_tick(1700.0),
+                "wrap" => renderer.wrap_to_tick(1700.0),
+                _ => {
+                    renderer.seek_tick(1700.0);
+                    renderer.wrap_to_tick(1700.0);
+                }
+            }
+            run(&mut renderer, Some(&rig), 20_000);
+            // The strike after the jump is ended by its own NoteOff: nothing a stale count could swallow is left.
+            let heard = kinds_of(&rig);
+            assert_eq!(
+                heard
+                    .iter()
+                    .rev()
+                    .take(2)
+                    .rev()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                vec![('n', 38), ('f', 38)],
+                "latency {latency} {how}: {heard:?}"
+            );
+            assert_eq!(rig.helper.sounding(), 0, "latency {latency} {how}");
+        }
+    }
+}
+
+// ---- a map change on a track with an instrument and a MIDI port ----
+
+fn port_route(settings: &DocumentSettings) -> Box<MidiTap> {
+    let map = drum_map::resolve(settings.mixes["drums"].drum_map.as_ref(), true);
+    MidiTap::new(
+        &[0],
+        &[(0, RouteSpec::lanes(0, 0, &[(9, 9)]).with_drum_map(map))],
+    )
+}
+
+/// The note messages a tap has staged, as `[status, key]`.
+fn port_notes(renderer: &mut Renderer) -> Vec<[u8; 2]> {
+    renderer
+        .midi_tap()
+        .unwrap()
+        .staged()
+        .iter()
+        .filter_map(|record| match record {
+            tabplayer_lib::audio::midi_out::MidiRecord::Message { bytes, .. }
+                if matches!(bytes[0] & 0xf0, 0x80 | 0x90) =>
+            {
+                Some([bytes[0], bytes[1]])
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn a_map_change_on_a_track_with_an_instrument_and_a_port_remaps_the_port_and_strikes_nothing_on_the_instrument_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
+    let plan = drum_plan(vec![
+        note_on(100, 36),
+        note_off(700, 36),
+        note_on(150, 38),
+        note_off(900, 38),
+        note_on(1200, 38),
+        note_off(1300, 38),
+    ]);
+    let before = map_settings(&[(38, Some(51))]);
+    let after = map_settings(&[(38, Some(52))]);
+    let mut renderer = mapped_renderer(&rig, &plan, &before);
+    assert!(renderer.replace_midi(port_route(&before)).is_none());
+    run(&mut renderer, Some(&rig), 15_000);
+    assert_eq!(
+        port_notes(&mut renderer),
+        vec![[0x99, 36], [0x99, 51]],
+        "the port plays the hits on the mapped keys"
+    );
+    assert_eq!(heard(&rig), vec![], "the instrument is not struck");
+
+    // The edit arrives as the device applies it: the mix, and the route that carries the new map.
+    renderer.set_mix(instrument_mix(&rig, &plan, &after));
+    renderer.replace_midi(port_route(&after));
+    run(&mut renderer, Some(&rig), 5_000);
+    assert_eq!(
+        port_notes(&mut renderer),
+        vec![[0x99, 36], [0x99, 51], [0x89, 51]],
+        "the port lets go of the key the snare was sent on and says nothing else"
+    );
+    assert_eq!(
+        heard(&rig),
+        vec![],
+        "the instrument is sent no strike and no release"
+    );
+
+    // The track goes back to the speakers: its next hit is the instrument's, on the new key, and the notes the plan held
+    // across the change end without cutting it.
+    renderer.replace_midi(MidiTap::new(&[0], &[]));
+    run(&mut renderer, Some(&rig), 60_000);
+    assert_eq!(
+        heard(&rig),
+        vec![(60_000, 'n', 52), (65_000, 'f', 52)],
+        "latency {latency}"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+    assert_eq!(rig.dropped(), 0);
+}
+
+#[test]
+fn a_map_change_on_a_track_with_an_instrument_and_a_port_remaps_the_port_and_strikes_nothing_on_the_instrument()
+ {
+    for latency in LATENCIES {
+        a_map_change_on_a_track_with_an_instrument_and_a_port_remaps_the_port_and_strikes_nothing_on_the_instrument_at(latency);
+    }
+}
+
+// ---- a seeded property test over changing maps, seeks, wraps and hand-overs ----
+
+/// The key a hit sounds under General MIDI with `rows` changed, worked out from the table of sounds alone: an articulation the plan
+/// names is read by its id, a plain hit by its key, and a plain hit of a key that is itself an articulation and a key some
+/// articulation sounds follows that articulation's row. `None` is a silent row.
+fn reference_key(rows: &[(u8, Option<u8>)], key: u8, id: Option<u8>) -> Option<u8> {
+    let sounds = &drum_map::SOUNDS;
+    let by_id = |id: u8| -> Option<u8> {
+        if let Some(&(_, wanted)) = rows.iter().rev().find(|(row, _)| *row == id) {
+            return wanted;
+        }
+        Some(
+            sounds
+                .iter()
+                .find(|(sound, _)| *sound == id)
+                .map_or(id, |&(_, general)| general),
+        )
+    };
+    match id {
+        Some(id) => by_id(id),
+        None => {
+            let is_articulation = sounds.iter().any(|(sound, _)| *sound == key);
+            let is_output = sounds.iter().any(|(_, general)| *general == key);
+            if is_articulation && is_output {
+                by_id(key)
+            } else {
+                Some(key)
+            }
+        }
+    }
+}
+
+/// The keys the plan strikes with the ticks in `[from, to)`, under `rows`, in plan order.
+fn expected_strikes(plan: &PlaybackPlan, rows: &[(u8, Option<u8>)], from: f64, to: f64) -> Vec<u8> {
+    plan.midi
+        .iter()
+        .filter_map(|event| match event {
+            PlanMidiEvent::NoteOn {
+                tick,
+                key,
+                articulation_id,
+                ..
+            } if *tick >= from - 1e-6 && *tick < to - 1e-6 => {
+                reference_key(rows, *key, *articulation_id)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn random_rows(rng: &mut Rng) -> Vec<(u8, Option<u8>)> {
+    let mut rows: Vec<(u8, Option<u8>)> = Vec::new();
+    for &(id, _) in &drum_map::SOUNDS {
+        if rng.below(3) == 0 {
+            // Many ids onto few keys, and some silent.
+            let key = if rng.below(5) == 0 {
+                None
+            } else {
+                Some(40 + rng.below(6) as u8)
+            };
+            rows.push((id, key));
+        }
+    }
+    if rows.is_empty() {
+        rows.push((36, Some(40)));
+    }
+    rows
+}
+
+fn random_plan(rng: &mut Rng) -> PlaybackPlan {
+    let mut midi = Vec::new();
+    for _ in 0..30 {
+        let (id, key) = drum_map::SOUNDS[rng.below(drum_map::SOUNDS.len() as u64) as usize];
+        let on = 10 * rng.below(180) as u32;
+        let off = on + 10 * (1 + rng.below(25) as u32);
+        if rng.below(2) == 0 || id == key {
+            midi.push(note_on(on, key));
+            midi.push(note_off(off, key));
+        } else {
+            midi.push(id_on(on, key, id));
+            midi.push(id_off(off, key, id));
+        }
+    }
+    drum_plan(midi)
+}
+
+fn over_changing_maps_seeks_wraps_and_hand_overs_the_keys_struck_are_the_reference_keys_and_nothing_sticks_at(
+    latency: u32,
+) {
+    for seed in 1..=6u64 {
+        let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15) | 1);
+        let plan = random_plan(&mut rng);
+        let mut rows = random_rows(&mut rng);
+        let rig = rig_keyed_at(latency);
+        let mut renderer = mapped_renderer(&rig, &plan, &map_settings(&rows));
+        let mut out: Vec<[f32; 2]> = Vec::new();
+        let mut expected: Vec<u8> = Vec::new();
+        let mut from = renderer.position().tick;
+        let mut log = Vec::new();
+        for step in 0..10 {
+            // Play for a while; what the plan strikes in the window is what is struck, under the map in force.
+            if rng.below(4) == 0 && step > 0 {
+                // A loop wrap: play up to a tick, and go back to an earlier one.
+                let end = from + 40.0 + rng.below(200) as f64 + 0.3;
+                run_to(&mut renderer, &rig, end, &mut out);
+                let reached = renderer.position().tick;
+                expected.extend(expected_strikes(&plan, &rows, from, reached));
+                let start = 10.0 * rng.below(150) as f64 + 5.0;
+                renderer.wrap_to_tick(start);
+                from = renderer.position().tick;
+                log.push(format!("wrap to {start}"));
+            } else {
+                let blocks = 20 + rng.below(100) as usize;
+                out.extend(run(&mut renderer, Some(&rig), blocks * BLOCK_FRAMES));
+                let reached = renderer.position().tick;
+                expected.extend(expected_strikes(&plan, &rows, from, reached));
+                from = reached;
+            }
+            match rng.below(4) {
+                0 => {
+                    // The map is changed by a mix while notes are held.
+                    rows = random_rows(&mut rng);
+                    renderer.set_mix(instrument_mix(&rig, &plan, &map_settings(&rows)));
+                    log.push(format!("mix {rows:?}"));
+                }
+                1 => {
+                    let tick = 10.0 * rng.below(150) as f64 + 5.0;
+                    renderer.seek_tick(tick);
+                    from = renderer.position().tick;
+                    log.push(format!("seek {tick}"));
+                }
+                2 => {
+                    // An edit hand-over to a renderer of the same plan, whose map is another.
+                    rows = random_rows(&mut rng);
+                    let mut next = mapped_renderer(&rig, &plan, &map_settings(&rows));
+                    hand_over(&mut next, &mut renderer);
+                    renderer = next;
+                    from = renderer.position().tick;
+                    log.push(format!("hand-over {rows:?}"));
+                }
+                _ => {}
+            }
+        }
+        // Play on until every note of the plan has ended.
+        while renderer.position().tick < 2_300.0 {
+            out.extend(run(&mut renderer, Some(&rig), 10 * BLOCK_FRAMES));
+            let reached = renderer.position().tick;
+            expected.extend(expected_strikes(&plan, &rows, from, reached));
+            from = reached;
+        }
+        run(&mut renderer, Some(&rig), 4 * BLOCK_FRAMES);
+
+        // Every NoteOff is for a key that sounds, a new epoch releases every key, and nothing is left sounding.
+        let mut struck = Vec::new();
+        let mut sounding = std::collections::HashSet::new();
+        let mut epoch = None;
+        for block in rig.helper.blocks() {
+            if epoch != Some(block.epoch) {
+                sounding.clear();
+                epoch = Some(block.epoch);
+            }
+            for word in &block.words {
+                match MidiEvent::decode(*word) {
+                    Some(MidiEvent::NoteOn { channel, key, .. }) => {
+                        struck.push(key);
+                        sounding.insert((channel, key));
+                    }
+                    Some(MidiEvent::NoteOff { channel, key, .. }) => assert!(
+                        sounding.remove(&(channel, key)),
+                        "seed {seed} latency {latency}: a NoteOff for key {key}, which is not sounding ({log:?})"
+                    ),
+                    Some(MidiEvent::AllNotesOff { channel, .. }) => {
+                        sounding.retain(|(on, _)| *on != channel);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(
+            struck, expected,
+            "seed {seed} latency {latency}: the keys struck ({log:?})"
+        );
+        assert_eq!(
+            rig.helper.sounding(),
+            0,
+            "seed {seed} latency {latency}: {log:?}"
+        );
+        assert_eq!(rig.dropped(), 0, "seed {seed} latency {latency}");
+    }
+}
+
+#[test]
+fn over_changing_maps_seeks_wraps_and_hand_overs_the_keys_struck_are_the_reference_keys_and_nothing_sticks()
+ {
+    for latency in LATENCIES {
+        over_changing_maps_seeks_wraps_and_hand_overs_the_keys_struck_are_the_reference_keys_and_nothing_sticks_at(latency);
+    }
+}
+fn export_with(rig: &Rig, plan: &PlaybackPlan, settings: &DocumentSettings) -> AudioExportRender {
+    let mut renderer =
+        Renderer::new(Arc::new(plan.clone()), resources(), settings.clone(), RATE).unwrap();
+    renderer.attach_plugin(0, Box::new(rig.offline_instrument()));
+    AudioExportRender::new(renderer, plan, export_request(0.1)).unwrap()
+}
+
+fn an_export_through_the_in_process_helper_sends_the_mapped_keys_at(latency: u32) {
+    let plan = export_plan();
+    let rig = rig_keyed_at(latency);
+    let settings = map_settings(&[(36, Some(70)), (38, Some(71)), (42, None)]);
+    let mut export = export_with(&rig, &plan, &settings);
+    let out = export_mix(&mut export).unwrap();
+    // The hat is silent and the held hit that is released as the tail begins is the one the map left out: nothing is held.
+    assert_eq!(
+        heard(&rig),
+        vec![
+            (0, 'n', 70),
+            (3_000, 'f', 70),
+            (24_000, 'n', 71),
+            (27_000, 'f', 71),
+        ]
+    );
+    let scale = scale_of(&out, 0, key_signal(70));
+    assert_signal(&out, scale, &[(0, 3_000, 70), (24_000, 27_000, 71)], 0);
+
+    // The same export with the held hit mapped is released at the end on the key struck.
+    let rig = rig_keyed_at(latency);
+    let settings = map_settings(&[(42, Some(80))]);
+    let mut export = export_with(&rig, &plan, &settings);
+    export_mix(&mut export).unwrap();
+    assert_eq!(
+        heard(&rig),
+        vec![
+            (0, 'n', 36),
+            (3_000, 'f', 36),
+            (24_000, 'n', 38),
+            (27_000, 'f', 38),
+            (90_000, 'n', 80),
+            (96_000, 'a', 9),
+        ]
+    );
+}
+
+#[test]
+fn an_export_through_the_in_process_helper_sends_the_mapped_keys() {
+    for latency in LATENCIES {
+        an_export_through_the_in_process_helper_sends_the_mapped_keys_at(latency);
+    }
+}
+
+#[test]
+fn a_map_with_no_instrument_or_a_dead_one_leaves_the_built_in_kit_bit_for_bit_as_without_it() {
+    let plan = drum_plan(vec![
+        note_on(100, 36),
+        note_off(160, 36),
+        id_on(300, 38, 91),
+        id_off(360, 38, 91),
+        note_on(500, 42),
+        note_off(560, 42),
+    ]);
+    let rows = [(36, Some(70)), (38, Some(71)), (42, None), (91, Some(72))];
+    let render = |settings: DocumentSettings, dead: bool| {
+        let rig = rig_keyed();
+        let mut renderer = if dead {
+            // An instrument whose helper is gone from the first frame: the built-in kit plays.
+            rig.shared.disconnected.store(true, Ordering::Relaxed);
+            let mix = instrument_mix(&rig, &plan, &settings);
+            Renderer::new_with_mix(
+                Arc::new(plan.clone()),
+                resources(),
+                mix,
+                settings.clone(),
+                RATE,
+            )
+            .unwrap()
+        } else {
+            Renderer::new(Arc::new(plan.clone()), resources(), settings.clone(), RATE).unwrap()
+        };
+        let out = run(&mut renderer, None, 30_000);
+        assert!(first_sound(&out).is_some());
+        out
+    };
+    for dead in [false, true] {
+        let plain = render(gm(DocumentSettings::default()), dead);
+        let mapped = render(map_settings(&rows), dead);
+        assert!(
+            plain.iter().zip(&mapped).all(|(a, b)| {
+                a[0].to_bits() == b[0].to_bits() && a[1].to_bits() == b[1].to_bits()
+            }),
+            "dead instrument: {dead}"
+        );
+    }
+}
+
+fn a_renderer_frame_loop_that_maps_notes_to_an_instrument_and_installs_a_changed_map_never_touches_the_heap_at(
+    latency: u32,
+) {
+    let rig = rig_keyed_at(latency);
+    let mut midi = Vec::new();
+    for hit in 0..40u32 {
+        let tick = 20 + hit * 20;
+        let key = 36 + (hit % 3) as u8;
+        if hit % 4 == 3 {
+            midi.push(id_on(tick, 38, 91));
+            midi.push(id_off(tick + 15, 38, 91));
+        } else {
+            midi.push(note_on(tick, key));
+            midi.push(note_off(tick + 15, key));
+        }
+    }
+    let plan = drum_plan(midi);
+    // Many ids onto one key, a silent row, and a changed map installed while keys are held.
+    let first = map_settings(&[(36, Some(50)), (37, Some(50)), (38, None), (91, Some(52))]);
+    let second = map_settings(&[
+        (36, Some(51)),
+        (37, Some(50)),
+        (38, Some(53)),
+        (91, Some(54)),
+    ]);
+    let mut renderer = mapped_renderer(&rig, &plan, &first);
+    let changed = instrument_mix(&rig, &plan, &second);
+    let mut buffer = [[0.0f32; 2]; BLOCK_FRAMES];
+    let mut retired = Vec::with_capacity(8);
+    let mut changed = Some(changed);
+    HEAP_OPERATIONS.with(|n| n.set(0));
+    for block in 0..320 {
+        COUNT_HEAP.with(|flag| flag.set(true));
+        renderer.render_into(&mut buffer);
+        if block == 160 {
+            renderer.wrap_to_tick(0.0);
+        }
+        if block == 100 {
+            // Moving the prepared mix in is the audio thread's; what it displaces is dropped elsewhere.
+            retired.push(renderer.replace_mix(changed.take().unwrap()));
+        }
+        if let Some(old) = renderer.settle_mix() {
+            retired.push(Some(old));
+        }
+        if block == 300 {
+            renderer.begin_tail();
+        }
+        COUNT_HEAP.with(|flag| flag.set(false));
+        rig.settle();
+    }
+    assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
+    assert!(rig.helper.events().len() > 60, "the notes went out");
+    let struck: std::collections::HashSet<u8> = rig
+        .helper
+        .events()
+        .iter()
+        .filter_map(|(_, event)| match event {
+            MidiEvent::NoteOn { key, .. } => Some(*key),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        struck.contains(&52) && struck.contains(&54),
+        "the first map's keys, then the changed map's, were struck: {struck:?}"
+    );
+    drop(retired);
+}
+
+#[test]
+fn a_renderer_frame_loop_that_maps_notes_to_an_instrument_and_installs_a_changed_map_never_touches_the_heap()
+ {
+    for latency in LATENCIES {
+        a_renderer_frame_loop_that_maps_notes_to_an_instrument_and_installs_a_changed_map_never_touches_the_heap_at(latency);
+    }
 }

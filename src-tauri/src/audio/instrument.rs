@@ -1,9 +1,12 @@
 //! Where a plan's notes become a hosted instrument's notes (THE-218).
 //!
 //! Every note that reaches an instrument plug-in passes through [`NoteMap::note`], and the renderer's plan MIDI dispatch
-//! is its one caller. The map takes the whole plan event, not a key and a velocity, so a later change to what a drum hit
-//! means to an instrument (a per-track drum map, an articulation the plan names, as it already names a `kit_element`)
-//! changes this file and the data the mix holds, and no call site.
+//! is its one caller. The map takes the whole plan event, not a key and a velocity: a drum track's map (THE-219) reads
+//! the key and the articulation id the event names, and sends the key the track's map gives that sound.
+//!
+//! A NoteOn and its NoteOff name the same key and articulation id, so the same map gives them the same key. A sound the
+//! map leaves silent sends nothing at all, neither the NoteOn nor its NoteOff. The held-note bookkeeping of the insert is
+//! by the key actually sent, so a release never maps again.
 //!
 //! Only `NoteOn` and `NoteOff` become notes. Program changes, controllers 7, 10 and 11 and bends are not forwarded in this
 //! version: a hosted instrument is played by its own state and its own mixer, not by the score's channel settings.
@@ -11,6 +14,7 @@
 //! The map is plain data, built where the mix is prepared (off the audio thread) and held by the mix's channel, so a
 //! change of map is a mix change like a change of plug-in, with no renderer rebuilt. The audio thread only reads it:
 //! [`NoteMap::note`] does not allocate, lock or wait.
+use super::drum_map::DrumMap;
 use super::plan::PlanMidiEvent;
 
 /// One note for an instrument plug-in, as `PluginInsert::stage_note` takes it.
@@ -22,38 +26,70 @@ pub struct InstrumentNote {
     pub velocity: u8,
 }
 
-/// What a plan's notes become for one hosted instrument. The identity in this version: the plan's channel, key and
-/// velocity go through unchanged.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct NoteMap {}
+/// What a plan's notes become for one hosted instrument: the plan's channel and velocity, and the key the track's drum
+/// map gives the note. Not `Copy`, so that the 256-byte table is borrowed and never copied per event.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoteMap {
+    /// `None` sends the plan's key as it is, which is what a track with no drum map, or one that equals General MIDI, gets.
+    drum: Option<DrumMap>,
+}
+
+impl Default for NoteMap {
+    fn default() -> NoteMap {
+        NoteMap::identity()
+    }
+}
 
 impl NoteMap {
     /// The map that sends every note as the plan has it.
     pub fn identity() -> NoteMap {
-        NoteMap {}
+        NoteMap { drum: None }
+    }
+
+    /// The map for a track whose resolved drum map is `drum`. General MIDI is the identity: the plan's key as it is.
+    pub fn with_drum_map(drum: DrumMap) -> NoteMap {
+        NoteMap {
+            drum: (drum != DrumMap::IDENTITY).then_some(drum),
+        }
+    }
+
+    /// The key the plan's note sounds: `None` when the drum map leaves its articulation silent.
+    #[inline]
+    fn sent_key(&self, key: u8, id: Option<u8>) -> Option<u8> {
+        match &self.drum {
+            Some(drum) => drum.key(key, id),
+            None => Some(key),
+        }
     }
 
     /// The note `event` is for the instrument, or `None` for anything that is not a `NoteOn` or `NoteOff`.
     ///
     /// A NoteOff carries velocity 0: the instrument's release velocity is not used. A NoteOn with velocity 0 stays as the
-    /// plan has it; the insert reads it as a NoteOff, as MIDI does.
+    /// plan has it; the insert reads it as a NoteOff, as MIDI does. A note whose articulation the drum map leaves silent is
+    /// `None`, like an event that is not a note. Does not allocate.
     pub fn note(&self, event: &PlanMidiEvent) -> Option<InstrumentNote> {
         match event {
             PlanMidiEvent::NoteOn {
                 channel,
                 key,
                 velocity,
+                articulation_id,
                 ..
             } => Some(InstrumentNote {
                 on: true,
                 channel: *channel,
-                key: *key,
+                key: self.sent_key(*key, *articulation_id)?,
                 velocity: *velocity,
             }),
-            PlanMidiEvent::NoteOff { channel, key, .. } => Some(InstrumentNote {
+            PlanMidiEvent::NoteOff {
+                channel,
+                key,
+                articulation_id,
+                ..
+            } => Some(InstrumentNote {
                 on: false,
                 channel: *channel,
-                key: *key,
+                key: self.sent_key(*key, *articulation_id)?,
                 velocity: 0,
             }),
             PlanMidiEvent::Program { .. }

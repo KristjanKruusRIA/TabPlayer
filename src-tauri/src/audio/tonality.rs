@@ -251,6 +251,7 @@ pub fn transposed_plan(plan: &Arc<PlaybackPlan>, semitones: i8) -> Arc<PlaybackP
                     channel,
                     key,
                     kit_element,
+                    articulation_id,
                     ..
                 } = &shifted.midi[struck[held].on]
                 {
@@ -265,6 +266,7 @@ pub fn transposed_plan(plan: &Arc<PlaybackPlan>, semitones: i8) -> Arc<PlaybackP
                         key: *key,
                         velocity,
                         kit_element: *kit_element,
+                        articulation_id: *articulation_id,
                     });
                 }
             }
@@ -527,6 +529,48 @@ mod tests {
             // The plan is still one the renderer accepts.
             shifted.validate().unwrap();
         }
+    }
+
+    #[test]
+    fn a_shortened_notes_release_names_the_same_articulation_as_its_start() {
+        let mut midi = vec![
+            on_at("g", 0, 125, 0.0),
+            on_at("g", 0, 127, 480.0),
+            off_at("g", 0, 125, 960.0),
+            off_at("g", 0, 127, 1440.0),
+        ];
+        midi[0]["articulationId"] = 91.into();
+        midi[2]["articulationId"] = 91.into();
+        let original = plan(
+            serde_json::json!([
+                note_at("a", "g", 125, None, 0.0, 960.0),
+                note_at("b", "g", 127, None, 480.0, 1440.0)
+            ]),
+            serde_json::Value::Array(midi),
+        );
+        let shifted = transposed_plan(&original, 12);
+        let ids: Vec<(&str, Option<u8>)> = shifted
+            .midi
+            .iter()
+            .filter_map(|event| match event {
+                PlanMidiEvent::NoteOn {
+                    articulation_id, ..
+                } => Some(("on", *articulation_id)),
+                PlanMidiEvent::NoteOff {
+                    articulation_id, ..
+                } => Some(("off", *articulation_id)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                ("on", Some(91)),
+                ("off", Some(91)),
+                ("on", None),
+                ("off", None)
+            ]
+        );
     }
 
     #[test]

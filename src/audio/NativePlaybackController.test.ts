@@ -905,3 +905,13 @@ it('a click chooses among the occurrences inside a running loop or played select
   // No passage: the first.
   emit({range:null,practice:practiceStatus()});expect(player.chooseCursorOccurrence(cursor)).toEqual(choices[0]);
 });
+it('keeps a drum map when the player saves a volume, pan, mute or solo change',async()=>{
+  const {player,onEdit}=fixture();const added=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0});
+  const id=trackIdentity(added.score.tracks[1]),mix={gain:.5,pan:0,mute:false,solo:false,drumMap:{preset:'gm',keys:[[91,40]] as [number,number|null][]}};
+  const mixed=previewEdit(added.project,{type:'setTrackMix',trackId:id,mix});await player.loadDocument(mixed.project,mixed);
+  player.setTrackVolume(1,.3);expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackMix',trackId:id,mix:{...mix,gain:.3}});
+  player.setPan(1,.4);expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackMix',trackId:id,mix:{...mix,pan:.4}});
+  player.setMute(1,true);expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackMix',trackId:id,mix:{...mix,mute:true}});
+  player.setSolo(1,true);expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackMix',trackId:id,mix:{...mix,solo:true}});
+  player.destroy();
+});

@@ -13,7 +13,7 @@ export interface PitchPoint { tick: number; semitones: number }
 export interface PlanNote { id: string; trackId: string; source: NoteTarget; playedBar?: number; channel?: number; program?: number; occurrence: number; startTick: number; endTick: number; key: number; velocity: number; articulation: Articulation; lockedArticulation?: Articulation; legatoFrom: string | null; pitch: PitchPoint[]; /** A drum note's sound in the recorded kit, where the kit has one. */ kitSound?: number; /** A choked cymbal, stopped when the note ends. */ choke?: true }
 type MidiLocation = { trackId: string; tick: number; channel: number };
 export type PlanMidiEvent =
-  | (MidiLocation & { type: 'noteOn' | 'noteOff'; key: number; velocity: number; /** The kit element of the articulation, named only where its pitch would give another. */ kitElement?: DrumKitElement })
+  | (MidiLocation & { type: 'noteOn' | 'noteOff'; key: number; velocity: number; /** The kit element of the articulation, named only where its pitch would give another. */ kitElement?: DrumKitElement; /** The standard articulation id, named only where the key alone does not say it; a note's off carries its on's. */ articulationId?: number })
   | (MidiLocation & { type: 'program'; program: number })
   | (MidiLocation & { type: 'controller'; controller: number; value: number })
   | (MidiLocation & { type: 'bend'; value: number })

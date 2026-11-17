@@ -182,6 +182,7 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
             key: note.key,
             velocity: note.velocity,
             kit_element: None,
+            articulation_id: None,
         });
         midi.push(PlanMidiEvent::NoteOff {
             track_id: TRACK_ID.into(),
@@ -190,6 +191,7 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
             key: note.key,
             velocity: 0,
             kit_element: None,
+            articulation_id: None,
         });
     }
     midi.sort_by(|a, b| {

@@ -30,7 +30,10 @@ mod windows_tests {
             state::encode_state,
             status::PluginStatus,
         },
-        settings::{DocumentSettings, PluginFormat, PluginSlot, SlotKind, TrackSound},
+        settings::{
+            ChannelMix, DocumentSettings, DrumMapRef, PluginFormat, PluginSlot, SlotKind,
+            TrackSound,
+        },
     };
     use tabplayer_plugin_protocol::limits::pipeline_frames;
     use tabplayer_test_plugin::{
@@ -225,6 +228,41 @@ mod windows_tests {
         settings
     }
 
+    /// [`plan_of`] for hits that may name their standard articulation.
+    fn plan_of_ids(hits: &[(u32, u32, u8, Option<u8>)], duration_tick: u32) -> PlaybackPlan {
+        let mut plan = serde_json::to_value(plan_of(&[], duration_tick)).unwrap();
+        let mut midi = Vec::new();
+        for &(on, off, key, id) in hits {
+            let mut start = serde_json::json!({"type":"noteOn","trackId":"drums","tick":on,"channel":9,"key":key,"velocity":VELOCITY});
+            let mut end = serde_json::json!({"type":"noteOff","trackId":"drums","tick":off,"channel":9,"key":key,"velocity":0});
+            if let Some(id) = id {
+                start["articulationId"] = serde_json::json!(id);
+                end["articulationId"] = serde_json::json!(id);
+            }
+            midi.push(start);
+            midi.push(end);
+        }
+        midi.sort_by_key(|event| event["tick"].as_u64().unwrap());
+        plan["midi"] = serde_json::Value::Array(midi);
+        serde_json::from_value(plan).unwrap()
+    }
+
+    /// [`settings`] with a drum map of `rows` on General MIDI on the drum track.
+    fn mapped_settings(plugin: Option<PluginSlot>, rows: &[(u8, Option<u8>)]) -> DocumentSettings {
+        let mut settings = settings(plugin);
+        settings.mixes.insert(
+            "drums".into(),
+            ChannelMix {
+                drum_map: Some(DrumMapRef {
+                    preset: "gm".into(),
+                    keys: rows.to_vec(),
+                }),
+                ..ChannelMix::default()
+            },
+        );
+        settings
+    }
+
     /// The key and velocity the drum played on a rendered frame, through the mix's pan.
     fn played(frame: [f32; 2]) -> (u8, u8) {
         drum_decode(frame[0] * std::f32::consts::SQRT_2)
@@ -334,6 +372,68 @@ mod windows_tests {
             // No latency, one that is not a whole block of the ring's 128 frames, and one that is.
             for latency in LATENCIES {
                 drum_plan_plays_at(latency);
+            }
+        }
+
+        fn playback_and_export_under_a_drum_map_decode_to_the_mapped_keys() {
+            // A snare hit and a rim shot (the same key, told apart by the id) and two others, each to a key of its own.
+            let hits: [(u32, u32, u8, Option<u8>); 4] = [
+                (100, 160, 36, None),
+                (300, 360, 38, None),
+                (500, 560, 38, Some(91)),
+                (700, 760, 42, None),
+            ];
+            let rows = [(36, Some(60)), (38, Some(61)), (42, Some(62)), (91, Some(63))];
+            let want = [60u8, 61, 63, 62];
+            let plan = plan_of_ids(&hits, 1920);
+
+            // Playback: the instrument plays the mapped key on the frame of each hit plus D.
+            let rig = Rig::new();
+            let request = rig.drum_request(TestMode::Normal, &"9".repeat(64));
+            let plans = rig.ensure_ready(std::slice::from_ref(&request));
+            assert!(plans[0].1.is_ok(), "the instrument loads");
+            let mut renderer = Renderer::new_with_plugins(
+                Arc::new(plan.clone()),
+                resources(),
+                mapped_settings(Some(request.slot.clone()), &rows),
+                RATE,
+                &plans,
+                CALLBACK,
+            )
+            .unwrap();
+            let d = renderer.plugin_delay_frames();
+            let out = play(&mut renderer, 40_000 + d);
+            for (&(on, off, _, _), key) in hits.iter().zip(want) {
+                let (on, off) = (on as usize * TICK + d, off as usize * TICK + d);
+                assert_eq!(out[on - 1], [0.0; 2], "silence before key {key}");
+                assert_eq!(played(out[on]), (key, VELOCITY), "playback: key {key}");
+                assert_eq!(played(out[off - 1]), (key, VELOCITY), "key {key} holds");
+                assert_eq!(out[off], [0.0; 2], "key {key} ends on its NoteOff");
+            }
+            assert!(!renderer.plugin_faulted());
+
+            // Export: the offline instrument plays the same keys on the exact samples after the trim.
+            let offline = rig
+                .service
+                .offline_inserts("doc1", std::slice::from_ref(&request), RATE)
+                .unwrap();
+            assert!(offline.warnings.is_empty());
+            let renderer = Renderer::new(
+                Arc::new(plan.clone()),
+                resources(),
+                mapped_settings(None, &rows),
+                RATE,
+            )
+            .unwrap();
+            let mut export =
+                AudioExportRender::new_with_plugins(renderer, &plan, export_request(0.5), Some(offline))
+                    .unwrap();
+            let out = render_mix(&mut export).unwrap();
+            for (&(on, off, _, _), key) in hits.iter().zip(want) {
+                let (on, off) = (on as usize * TICK, off as usize * TICK);
+                assert_eq!(played(out[on]), (key, VELOCITY), "export: key {key}");
+                assert_eq!(played(out[off - 1]), (key, VELOCITY), "key {key} holds");
+                assert_eq!(out[off], [0.0; 2], "key {key} ends on its NoteOff");
             }
         }
 

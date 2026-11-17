@@ -4324,6 +4324,32 @@ fn sound_source_changed(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_change_of_drum_map_is_a_mix_change_and_never_a_rebuilt_renderer() {
+        use crate::settings::{ChannelMix, DrumMapRef};
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"d","program":0,"percussion":true}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let with = |rows: Vec<(u8, Option<u8>)>| {
+            let mut settings = DocumentSettings::default();
+            settings.mixes.insert(
+                "d".into(),
+                ChannelMix {
+                    drum_map: Some(DrumMapRef {
+                        preset: "gm".into(),
+                        keys: rows,
+                    }),
+                    ..ChannelMix::default()
+                },
+            );
+            settings
+        };
+        let none = DocumentSettings::default();
+        let first = with(vec![(38, Some(40))]);
+        let second = with(vec![(38, Some(41)), (42, None)]);
+        assert!(!sound_source_changed(&plan, &none, &first));
+        assert!(!sound_source_changed(&plan, &first, &second));
+        assert!(!sound_source_changed(&plan, &second, &none));
+    }
+
+    #[test]
     fn a_change_of_drum_kit_needs_a_rebuilt_renderer_but_only_on_a_drum_track() {
         use crate::settings::TrackSound;
         let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"d","program":0,"percussion":true},{"id":"g","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();

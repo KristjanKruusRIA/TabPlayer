@@ -2,6 +2,7 @@ import { describe,expect,it } from 'vitest';
 import { midi,model,Settings } from '@coderline/alphatab';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
+import { standardPercussionCatalog } from '../editor/percussion-catalog';
 import { kitScore,KIT_BAR_1 } from './drum-tab-fixtures';
 import { DRUM_TAB_TUNING } from './drum-tab';
 import { defaultEngraving,drumTabModes,mapProjection,projectEngraving,validateEngravingTracks } from './projection';
@@ -192,6 +193,26 @@ describe('a tie is drawn on the tab only between two hits that are written alike
       expect((pair.tab??pair.rendered).tieOrigin,profile).toBeNull();expect((pair.tab??pair.rendered).isTieDestination,profile).toBe(false);
       // The percussion staff of the other mode still carries the source's own tie.
       if(profile==='standardTab')expect(pair.rendered.isTieDestination).toBe(true);
+    }
+  });
+});
+
+describe('a drum track with its own articulation table, as a Guitar Pro file writes it',()=>{
+  /** The table's entries are the standard ones of 42, 36, 38, 91 and 49, in that order, so no note's index is the number the tab must write. */
+  const WRITTEN=[42,36,38,91,49];
+  function tableScore() {
+    const score=new model.Score(),track=new model.Track();track.name='Drums';
+    track.percussionArticulations=WRITTEN.map(id=>{const entry=standardPercussionCatalog.find(candidate=>candidate.id===id)!;return new model.InstrumentArticulation(entry.element,entry.staffLine,entry.outputMidiNumber,...entry.symbols);});
+    const staff=new model.Staff();staff.isPercussion=true;track.addStaff(staff);score.addTrack(track);score.addMasterBar(new model.MasterBar());
+    const bar=new model.Bar(),voice=new model.Voice();staff.addBar(bar);bar.addVoice(voice);
+    for(const indexes of [[0,1],[2,0],[3,4]]){const beat=new model.Beat();beat.duration=model.Duration.Quarter;beat.isEmpty=false;voice.addBeat(beat);for(const index of indexes){const note=new model.Note();note.percussionArticulation=index;beat.addNote(note);}}
+    score.finish(new Settings());return {score,ids:['base/0']};
+  }
+  it('writes each hit as the standard number its table entry stands for, never the table index, on the line of its kit piece',()=>{
+    for(const profile of ['tablature','standardTab'] as const){
+      const {score,ids}=tableScore(),result=projectEngraving(score,ids,{...defaultEngraving(),profiles:[{trackId:ids[0],profile}]});
+      const drawn=result.score.tracks[0].staves.at(-1)!.bars[0].voices[0].beats.map(beat=>beat.notes.map(note=>`${note.fret}@${7-note.string}`).sort());
+      expect(drawn,profile).toEqual([['36@6','42@3'],['38@5','42@3'],['49@1','91@5']]);
     }
   });
 });

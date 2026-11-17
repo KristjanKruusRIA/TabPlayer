@@ -263,11 +263,23 @@ fn drive(
     frames: usize,
     hook: Hook<'_>,
 ) -> Vec<[f32; 2]> {
+    drive_input(insert, rig, from, frames, [0.0; 2], hook)
+}
+
+/// [`drive`] with a constant input, which the identity stand-in plays back `D` frames late.
+fn drive_input(
+    insert: &mut PluginInsert,
+    rig: &Rig,
+    from: usize,
+    frames: usize,
+    input: [f32; 2],
+    hook: Hook<'_>,
+) -> Vec<[f32; 2]> {
     let ctx = FrameContext::at_bpm(120.0);
     let mut out = Vec::with_capacity(frames);
     for m in from..from + frames {
         hook(m, insert);
-        out.push(insert.process([0.0; 2], &ctx, &mut |v| v));
+        out.push(insert.process(input, &ctx, &mut |v| v));
         if (m + 1) % BLOCK_FRAMES == 0 {
             rig.settle();
         }
@@ -674,6 +686,73 @@ fn adopting_an_insert_keeps_the_running_stage() {
         rig.helper.events(),
         vec![(0, on(10, 0, 50)), (0, off(60, 0, 50))]
     );
+}
+
+// ---- silent priming -----------------------------------------------------------------------------------------------
+
+/// The built-in stand-in's signal in these tests: a constant no instrument output can be mistaken for.
+const STAND_IN: f32 = 0.7;
+
+#[test]
+fn after_a_flush_an_instruments_first_hit_is_the_plugin_alone() {
+    let rig = rig();
+    let mut insert = rig.instrument();
+    insert.flush();
+    let d = insert.delay_frames();
+    assert_eq!(d, 2 * BLOCK_FRAMES);
+    let out = drive_input(
+        &mut insert,
+        &rig,
+        0,
+        d + 1200,
+        [STAND_IN; 2],
+        &mut |m, insert| {
+            if m == 0 {
+                insert.stage_note(true, 0, 36, 100);
+            }
+            if m == 700 {
+                insert.stage_note(false, 0, 36, 0);
+            }
+        },
+    );
+    // Nothing of the stand-in is heard at any frame, and the plug-in arrives at exactly `D`, at full level at once.
+    assert!(out[..d].iter().all(|f| *f == [0.0; 2]), "silence before D");
+    assert_eq!(out[d], [LEVEL; 2], "the plug-in at D");
+    for (m, frame) in out.iter().enumerate() {
+        let sounding = (d..700 + d).contains(&m);
+        assert_eq!(*frame, [if sounding { LEVEL } else { 0.0 }; 2], "frame {m}");
+    }
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn an_instrument_added_to_a_sounding_track_still_blends_in_from_the_stand_in() {
+    // `start_undelayed` is how a plug-in joins a track that is playing: the built-in sound carries on, undelayed, and
+    // glides to the plug-in. A silent prime there would drop it.
+    let rig = rig();
+    let mut insert = rig.instrument();
+    insert.flush();
+    insert.start_undelayed();
+    let d = insert.delay_frames();
+    let out = drive_input(
+        &mut insert,
+        &rig,
+        0,
+        d + 1200,
+        [STAND_IN; 2],
+        &mut |m, insert| {
+            if m == 0 {
+                insert.stage_note(true, 0, 36, 100);
+            }
+        },
+    );
+    assert_eq!(
+        out[0], [STAND_IN; 2],
+        "the stand-in plays from the first frame"
+    );
+    let mid = out[d + 240];
+    assert!(mid[0] > LEVEL && mid[0] < STAND_IN, "mid-blend {mid:?}");
+    assert_eq!(out[d + 600], [LEVEL; 2]);
 }
 
 // ---- real-time safety ---------------------------------------------------------------------------------------------

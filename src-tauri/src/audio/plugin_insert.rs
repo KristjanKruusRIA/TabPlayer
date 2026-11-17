@@ -427,6 +427,9 @@ pub struct PluginInsert {
     /// What the slot holds, and the note events staged for the block being gathered (instruments only).
     kind: SlotKind,
     notes: NoteStage,
+    /// Set by a flush on an instrument, cleared when the insert takes over the track's own history: until `D` frames have
+    /// played, only the plug-in is heard (see `process`).
+    silent_prime: bool,
 }
 
 impl PluginInsert {
@@ -539,6 +542,7 @@ impl PluginInsert {
             fault: None,
             kind,
             notes: NoteStage::new(),
+            silent_prime: false,
         })
     }
 
@@ -605,6 +609,7 @@ impl PluginInsert {
             self.g = 0.0;
         }
         self.last = [0.0; 2];
+        self.silent_prime = self.kind == SlotKind::Instrument;
         // The helper releases every key on the new epoch the next frame starts, so nothing staged or held is owed.
         self.notes.clear();
     }
@@ -691,6 +696,8 @@ impl PluginInsert {
     }
 
     fn take_history(&mut self, leaving: &mut PluginInsert) {
+        // The history is the track's, not silence: the stand-in carries on from it and the plug-in blends in.
+        self.silent_prime = false;
         // Lines differ only between rates, and a configuration at another rate starts afresh.
         if self.dry.len() != leaving.dry.len() {
             return;
@@ -709,6 +716,8 @@ impl PluginInsert {
     /// the offline mode: an export plays the plug-in from its first frame (`g = 1`) and never consults the
     /// stand-in, and exports use a fresh renderer, so no transition from a sounding board reaches one.
     pub fn start_undelayed(&mut self) {
+        // The stand-in plays the track's own sound from now on, so there is something to blend from.
+        self.silent_prime = false;
         self.history = 0;
         self.timing_from = 0;
         self.timing_to = 0;
@@ -836,7 +845,17 @@ impl PluginInsert {
             0.0
         };
         let step = 1.0 / self.ramp_frames as f32;
-        self.g = if self.g < target {
+        // An instrument that restarted from a flush plays only the plug-in for the first `D` frames: the flush cleared `D`
+        // frames of history, so the stand-in (the input `D` frames back) is silent there as well, and the plug-in has
+        // not sounded yet. Taking the plug-in at once, not gliding to it, keeps its first hit from blending with the
+        // built-in sound of the same note, which the stand-in plays from frame `D` on. From then on the usual rule holds.
+        let silent = self.silent_prime
+            && self.fault.is_none()
+            && self.started
+            && self.run <= self.delay as u64;
+        self.g = if silent {
+            1.0
+        } else if self.g < target {
             (self.g + step).min(target)
         } else {
             (self.g - step).max(target)

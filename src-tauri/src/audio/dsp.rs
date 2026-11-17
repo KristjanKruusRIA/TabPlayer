@@ -2514,6 +2514,13 @@ impl TrackDsp {
             insert.all_notes_off();
         }
     }
+    /// After an edit hand-over: ends the keys the board's instrument holds that the new plan does not hold, see
+    /// `PluginInsert::retain_notes`. Nothing happens without an instrument.
+    pub fn retain_notes(&mut self, wanted: &[[u8; 128]; 16]) {
+        if let Some(insert) = self.plugin.as_mut() {
+            insert.retain_notes(wanted);
+        }
+    }
     /// Readies a board that starts from silence while the track already sounds, as a block switched on mid-play
     /// is: the room microphone's reflections fade in rather than arriving at full level.
     fn start_mid_play(&mut self) {

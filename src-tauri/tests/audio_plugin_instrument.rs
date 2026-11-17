@@ -1557,41 +1557,74 @@ fn a_track_a_port_plays_strikes_no_note_on_its_instrument_and_does_again_when_it
 #[test]
 fn an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck() {
     let rig = rig_keyed();
+    // At tick 720 five hits are held: key 38 (deleted by the edit), 40 (moved to start at 750), 41 (re-pitched to 43, so
+    // 41 is no longer held and 43 was struck before the hand-over) and 45 (untouched, it must not be cut).
     let plan = drum_plan(vec![
         note_on(100, 36),
         note_off(300, 36),
         note_on(600, 38),
         note_off(800, 38),
+        note_on(650, 40),
+        note_off(900, 40),
+        note_on(660, 41),
+        note_off(900, 41),
+        note_on(680, 45),
+        note_off(1000, 45),
+        note_on(1000, 42),
+        note_off(1100, 42),
+    ]);
+    let edited = drum_plan(vec![
+        note_on(100, 36),
+        note_off(300, 36),
+        note_on(660, 43),
+        note_off(900, 43),
+        note_on(680, 45),
+        note_off(1000, 45),
+        note_on(750, 40),
+        note_off(850, 40),
         note_on(1000, 42),
         note_off(1100, 42),
     ]);
     let mut old = instrument_renderer(&rig, &plan);
     let d = old.plugin_delay_frames();
     // Tick 720: the second hit is held across the hand-over.
-    let mut out = run(&mut old, Some(&rig), 36_000);
+    let out = run(&mut old, Some(&rig), 36_000);
     let tick = old.position().tick;
     assert_eq!(tick, 720.0);
-    let mut new = instrument_renderer(&rig, &plan);
+    let mut new = instrument_renderer(&rig, &edited);
     new.wrap_to_tick(tick);
     new.continue_from(&mut old);
+    let mut out = out;
     out.extend(run(&mut new, Some(&rig), 30_000));
+    let _ = (&out, d);
 
-    let hits: [(usize, usize, u8); 3] = [
-        (5_000, 15_000, 36),
-        (30_000, 40_000, 38),
-        (50_000, 55_000, 42),
+    let want: Vec<Heard> = vec![
+        (5_000, 'n', 36),
+        (15_000, 'f', 36),
+        (30_000, 'n', 38),
+        (32_500, 'n', 40),
+        (33_000, 'n', 41),
+        (34_000, 'n', 45),
+        // The hand-over releases what the new plan no longer holds, on its frame, and nothing else.
+        (36_000, 'f', 38),
+        (36_000, 'f', 40),
+        (36_000, 'f', 41),
+        (37_500, 'n', 40),
+        (42_500, 'f', 40),
+        (50_000, 'f', 45),
+        (50_000, 'n', 42),
+        (55_000, 'f', 42),
     ];
-    let want: Vec<Heard> = hits
-        .iter()
-        .flat_map(|&(on, off, key)| [(on, 'n', key), (off, 'f', key)])
-        .collect();
-    assert_eq!(heard(&rig), want, "every note once, none repeated or lost");
-    let epochs: std::collections::HashSet<_> =
-        rig.helper.blocks().iter().map(|b| b.epoch).collect();
+    assert_eq!(heard(&rig), want, "every note once, none repeated or stuck");
+    let blocks = rig.helper.blocks();
+    assert_eq!(
+        blocks[281].sounding_after, 1,
+        "after the hand-over only the untouched key 45 sounds"
+    );
+    assert_eq!(blocks[290].sounding_after, 1, "and it is not cut");
+    let epochs: std::collections::HashSet<_> = blocks.iter().map(|b| b.epoch).collect();
     assert_eq!(epochs.len(), 1, "the running stream carried on");
     assert_eq!(rig.helper.sounding(), 0);
-    let scale = scale_of(&out, 5_000 + d, key_signal(36));
-    assert_signal(&out, scale, &hits, d);
 }
 
 #[test]

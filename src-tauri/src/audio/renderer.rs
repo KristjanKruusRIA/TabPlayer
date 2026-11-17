@@ -2081,6 +2081,39 @@ impl Renderer {
         for (new, old) in self.mix.channels.iter_mut().zip(&mut old.mix.channels) {
             new.dsp.continue_plugin_from(&mut old.dsp);
         }
+        // The running instrument comes with the notes the old plan had it hold. The edit may have deleted, moved or
+        // re-pitched one of them, whose NoteOff would then never come: the instrument keeps exactly the keys the new
+        // plan holds at this tick (those struck before it and not ended), and ends the rest.
+        let track_ids = &self.plan.tracks;
+        for (channel, track) in self.mix.channels.iter_mut().zip(track_ids) {
+            let Some(map) = channel.notes else {
+                continue;
+            };
+            let mut wanted = [[0u8; 128]; 16];
+            for event in self
+                .plan
+                .midi
+                .iter()
+                .take(self.next_midi)
+                .filter(|event| event.track_id() == track.id)
+            {
+                let Some(note) = map.note(event) else {
+                    continue;
+                };
+                let Some(count) = wanted
+                    .get_mut(usize::from(note.channel))
+                    .and_then(|row| row.get_mut(usize::from(note.key)))
+                else {
+                    continue;
+                };
+                if note.on && note.velocity > 0 {
+                    *count = count.saturating_add(1);
+                } else {
+                    *count = count.saturating_sub(1);
+                }
+            }
+            channel.dsp.retain_notes(&wanted);
+        }
         carry_compensation(
             &mut self.mix.compensation,
             &mut old.mix.compensation,

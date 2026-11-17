@@ -224,6 +224,35 @@ impl NoteStage {
         }
     }
 
+    /// Brings the held counts down to `wanted`, a count per channel and key, for the notes a new plan holds at a hand-over:
+    /// a key held more often than wanted is ended, at `offset`, by a NoteOff when none is wanted, or has its count
+    /// lowered to `wanted` (its one NoteOff comes with the plan) otherwise. A key the stage holds fewer times is left
+    /// alone. A NoteOff that finds no room releases the channels, as in [`note_off`](Self::note_off).
+    fn retain(&mut self, offset: u8, wanted: &[[u8; 128]; 16]) {
+        for channel in 0..16u8 {
+            for key in 0..128u8 {
+                let want = wanted
+                    .get(usize::from(channel))
+                    .and_then(|row| row.get(usize::from(key)))
+                    .copied()
+                    .unwrap_or(0);
+                let Some(held) = self.held_mut(channel, key) else {
+                    continue;
+                };
+                if *held <= want {
+                    continue;
+                }
+                if want > 0 {
+                    *held = want;
+                } else {
+                    // The one NoteOff of a key whose strikes are all over.
+                    *held = 1;
+                    self.note_off(offset, channel, key);
+                }
+            }
+        }
+    }
+
     /// Stages an AllNotesOff at `offset` for each owed channel while a slot is free (the reserved one included). A
     /// channel without a slot stays owed.
     fn release_owed(&mut self, offset: u8) {
@@ -661,6 +690,18 @@ impl PluginInsert {
         }
         let offset = self.in_fill.min(BLOCK_FRAMES - 1) as u8;
         self.notes.release_all(offset, 0);
+    }
+
+    /// After an edit hand-over: ends every key the instrument holds that the new plan does not hold at the hand-over
+    /// tick, so a note the edit deleted, moved or re-pitched cannot stay on, and keeps the others sounding. `wanted` counts
+    /// the strikes per channel and key the new plan holds there. Nothing happens for an effect or an insert that is not
+    /// live. Does not allocate, lock or wait.
+    pub fn retain_notes(&mut self, wanted: &[[u8; 128]; 16]) {
+        if self.kind != SlotKind::Instrument || !(self.started && self.fault.is_none()) {
+            return;
+        }
+        let offset = self.in_fill.min(BLOCK_FRAMES - 1) as u8;
+        self.notes.retain(offset, wanted);
     }
 
     /// Takes over `arriving`'s trims and shared word, as the running insert that `arriving` was built to replace with

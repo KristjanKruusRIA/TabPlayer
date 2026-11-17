@@ -42,7 +42,7 @@ CI runs on Windows, macOS and Linux with exact Rust 1.90.0 and Node 24.20.0, and
 
 ## Desktop verification
 
-- `scripts/build-desktop-test.ps1` builds the test app with the `desktop-test` feature, builds the helper (`tabplayer-plugin-host.exe`) and test plug-in (`tabplayer_test_plugin.dll`) in release, and copies them beside `.analysis/desktop-smoke/tabplayer.exe`.
+- `scripts/build-desktop-test.ps1` builds the test app with the `desktop-test` feature, builds the helper (`tabplayer-plugin-host.exe`) in release and the test plug-in (`tabplayer_test_plugin.dll`) in release into `src-tauri/target/test-plugin` (never into `target/release`, whose DLLs Tauri's Windows bundler packs into the installer), and copies them beside `.analysis/desktop-smoke/tabplayer.exe`.
 - Drivers in `tests/desktop/` launch `.analysis/desktop-smoke/tabplayer.exe`, resolved from the current directory, and attach over CDP on port 9223. If you built elsewhere, copy that binary there first or the driver silently tests an old build.
 - Only one app can use port 9223 at a time.
 - Synthetic F5/Ctrl+R do not reach WebView2 accelerators; `page.reload()` is not proof of a real reload shortcut.

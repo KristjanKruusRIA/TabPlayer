@@ -165,3 +165,12 @@ test('verify_package_fails_without_plugin_host_helper',async()=> {
     /tabplayer-plugin-host\.exe|plug-in host helper/i
   );
 });
+
+test('verify_package_rejects_a_test_plugin_left_in_the_package',async()=> {
+  const {verifyPackage}=await api();
+  for(const name of ['tabplayer_test_plugin.dll','libtabplayer_test_plugin.so']) {
+    const options=await fixture();await writeFile(join(options.packageRoot,name),'synthetic test plug-in');
+    await assert.rejects(verifyPackage(options),/test artefact.*test_plugin/i);
+  }
+  const clean=await fixture();await verifyPackage(clean);
+});

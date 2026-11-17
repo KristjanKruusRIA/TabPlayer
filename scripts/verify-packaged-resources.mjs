@@ -48,6 +48,9 @@ async function verifyLibraryInventory(root,allowed) {
 /** Inspect extracted package bytes only. No process launch or network access. */
 export async function verifyPackage({packageRoot,referenceRoot=join(repository,'src-tauri/resources/audio'),cabinetRoot=join(repository,'src-tauri/resources/cabinet-irs'),sourceRoot=repository,checkPluginHost=process.platform==='win32'}) {
   const packageFiles=await files(packageRoot);
+  // The synthetic test plug-in is a test artefact: it must never reach an installer (a stale one in the release folder is packed by Tauri's Windows bundler).
+  const testArtifacts=packageFiles.filter(path=>/^(lib)?tabplayer[_-]test[_-]plugin/i.test(basename(path)));
+  if(testArtifacts.length)throw new Error(`Test artefact in the package: ${testArtifacts.map(path=>relative(packageRoot,path).replaceAll('\\','/')).join(', ')}`);
   if(checkPluginHost) {
     const hasHelper=packageFiles.some(path=>basename(path).toLowerCase()==='tabplayer-plugin-host.exe');
     if(!hasHelper)throw new Error('Packaged plug-in host helper is missing (tabplayer-plugin-host.exe)');

@@ -13,8 +13,12 @@ try {
     npm run tauri -- build --no-bundle --features desktop-test --config $testConfiguration
     if($LASTEXITCODE -ne 0){throw 'Desktop test build failed'}
     $cargo = if (Test-Path "$env:USERPROFILE\.cargo\bin\cargo.exe") { "$env:USERPROFILE\.cargo\bin\cargo.exe" } else { "cargo" }
-    & $cargo build --release --locked --manifest-path (Join-Path $taskRoot 'src-tauri/Cargo.toml') -p tabplayer-plugin-host -p tabplayer-test-plugin
-    if($LASTEXITCODE -ne 0){throw 'Plug-in helper and test plug-in build failed'}
+    & $cargo build --release --locked --manifest-path (Join-Path $taskRoot 'src-tauri/Cargo.toml') -p tabplayer-plugin-host
+    if($LASTEXITCODE -ne 0){throw 'Plug-in helper build failed'}
+    # The synthetic test plug-in is built in a folder of its own, never into src-tauri/target/release: Tauri's Windows bundler packs every DLL it finds beside the app binary, so a test plug-in left there ships in the installer.
+    $testPluginTarget=Join-Path $taskRoot 'src-tauri/target/test-plugin'
+    & $cargo build --release --locked --manifest-path (Join-Path $taskRoot 'src-tauri/Cargo.toml') -p tabplayer-test-plugin --target-dir $testPluginTarget
+    if($LASTEXITCODE -ne 0){throw 'Test plug-in build failed'}
     $destination=Join-Path $testDirectory 'tabplayer.exe'
     foreach($testProcess in @(Get-Process tabplayer -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $destination})){
         Stop-Process -Id $testProcess.Id
@@ -27,7 +31,7 @@ try {
         $null=$helperProcess.WaitForExit(5000)
     }
     Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri/target/release/tabplayer-plugin-host.exe') -Destination $helperDestination
-    Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri/target/release/tabplayer_test_plugin.dll') -Destination (Join-Path $testDirectory 'tabplayer_test_plugin.dll')
+    Copy-Item -LiteralPath (Join-Path $testPluginTarget 'release/tabplayer_test_plugin.dll') -Destination (Join-Path $testDirectory 'tabplayer_test_plugin.dll')
     node scripts/prepare-library.mjs --destination (Join-Path $testDirectory 'library')
     if($LASTEXITCODE -ne 0){throw 'Desktop test Library resources could not be prepared'}
     $testAudio=Join-Path $testDirectory 'audio'

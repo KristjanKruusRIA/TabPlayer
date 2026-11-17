@@ -4,9 +4,11 @@
 //! The helper is a fake: a thread on the helper end of an in-process ring. It records every input block's event words,
 //! applies them as the real helper's note guard does (a NoteOff only for a key that sounds, an AllNotesOff per channel,
 //! everything released on a new epoch, events in offset order) and answers each block with a constant while any key sounds.
+use serde_json::{Value, json};
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -17,10 +19,14 @@ use std::{
 use tabplayer_lib::{
     audio::{
         dsp::{FrameContext, FxSettings, TrackDsp},
+        midi_out::{MidiTap, RouteSpec},
+        plan::PlaybackPlan,
         plugin_insert::{FaultReason, InsertMode, PluginInsert},
+        renderer::{PreparedMix, Renderer},
+        resources::AudioResources,
     },
     plugins::bridge::{BridgeLink, InsertShared},
-    settings::SlotKind,
+    settings::{ChannelMix, DocumentSettings, SlotKind, TrackSound},
 };
 use tabplayer_plugin_protocol::{
     event::MidiEvent,
@@ -57,6 +63,11 @@ const CALLBACK: usize = BLOCK_FRAMES;
 /// What the fake instrument plays while any key sounds.
 const LEVEL: f32 = 0.25;
 
+/// What a keyed fake plays for one sounding key: distinct per key, and small enough that a few keys never reach the limiter.
+fn key_signal(key: u8) -> f32 {
+    (f32::from(key) + 1.0) / 512.0
+}
+
 // ---- the fake helper ----------------------------------------------------------------------------------------------
 
 /// One input block as the fake read it.
@@ -75,6 +86,8 @@ struct FakeInstrument {
     sounding: Arc<AtomicU32>,
     /// While set, input blocks are not answered, as with a stalled plug-in.
     paused: Arc<AtomicBool>,
+    /// While set, the fake plays a recognisable signal per sounding key ([`keyed_level`]) instead of one constant.
+    keyed: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -84,6 +97,8 @@ impl FakeInstrument {
         let stop = Arc::new(AtomicBool::new(false));
         let paused = Arc::new(AtomicBool::new(false));
         let pause_flag = paused.clone();
+        let keyed = Arc::new(AtomicBool::new(false));
+        let keyed_flag = keyed.clone();
         let blocks = Arc::new(Mutex::new(Vec::new()));
         let sounding_now = Arc::new(AtomicU32::new(0));
         let (input, output) = (link.input_event().clone(), link.output_event().clone());
@@ -110,6 +125,7 @@ impl FakeInstrument {
                                 taken.iter().filter_map(|w| MidiEvent::decode(*w)).collect();
                             events.sort_by_key(|event| event.offset());
                             let mut out = [[0.0f32; 2]; BLOCK_FRAMES];
+                            let keyed_now = keyed_flag.load(Ordering::Relaxed);
                             let mut next = 0;
                             for (frame, slot) in out.iter_mut().enumerate() {
                                 while next < events.len()
@@ -131,6 +147,16 @@ impl FakeInstrument {
                                 }
                                 *slot = if let Some(gain) = effect_gain {
                                     block[frame].map(|v| v * gain)
+                                } else if keyed_now {
+                                    let mut level = 0.0f32;
+                                    for keys in sounding {
+                                        let mut bits = keys;
+                                        while bits != 0 {
+                                            level += key_signal(bits.trailing_zeros() as u8);
+                                            bits &= bits - 1;
+                                        }
+                                    }
+                                    [level; 2]
                                 } else if sounding.iter().any(|keys| *keys != 0) {
                                     [LEVEL; 2]
                                 } else {
@@ -170,6 +196,7 @@ impl FakeInstrument {
             blocks,
             sounding: sounding_now,
             paused,
+            keyed,
             thread: Some(thread),
         }
     }
@@ -1042,4 +1069,606 @@ fn staging_a_full_block_overflowing_it_and_sending_it_never_touches_the_heap() {
     COUNT_HEAP.with(|flag| flag.set(false));
     assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
     assert!(rig.dropped() >= 8);
+}
+// ---- the renderer sends a track's notes to its instrument ----------------------------------------------------------
+//
+// A drum track at 60 bpm and 960 ppq: one tick is 50 frames. Its notes are plan MIDI events on channel 9, and the plan has
+// no sampled notes, so the built-in sound is the General MIDI kit, which these tests tell apart from the instrument: the
+// keyed fake plays `key_signal` per sounding key, which the kit never does.
+
+const TICK: usize = 50;
+
+fn rig_keyed() -> Rig {
+    let rig = rig();
+    rig.helper.keyed.store(true, Ordering::Relaxed);
+    rig
+}
+
+fn note_on(tick: u32, key: u8) -> Value {
+    json!({"type":"noteOn","trackId":"drums","tick":tick,"channel":9,"key":key,"velocity":100})
+}
+
+fn note_off(tick: u32, key: u8) -> Value {
+    json!({"type":"noteOff","trackId":"drums","tick":tick,"channel":9,"key":key,"velocity":0})
+}
+
+/// A plan of one drum track with two bars. `ends` are the bars' end times in ms; `tempos` is the tempo map.
+fn plan_with(tempos: Value, ends: [f64; 2], mut midi: Vec<Value>) -> PlaybackPlan {
+    midi.sort_by_key(|event| event["tick"].as_u64().unwrap());
+    serde_json::from_value(json!({
+        "generation": 1, "ppq": 960, "durationTick": 7680, "durationMs": ends[1],
+        "tracks": [{"id": "drums", "program": 0, "percussion": true}],
+        "tempos": tempos,
+        "occurrences": [
+            {"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":ends[0]},
+            {"bar":1,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":ends[0],"endMs":ends[1]}
+        ],
+        "notes": [], "midi": midi
+    }))
+    .unwrap()
+}
+
+fn drum_plan(midi: Vec<Value>) -> PlaybackPlan {
+    plan_with(json!([{"tick": 0, "bpm": 60}]), [4000.0, 8000.0], midi)
+}
+
+fn resources() -> Arc<AudioResources> {
+    Arc::new(
+        AudioResources::load_for_requests(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+            &[],
+        )
+        .unwrap(),
+    )
+}
+
+/// Settings that play the drums on the General MIDI kit, which the test resources carry.
+fn gm(mut settings: DocumentSettings) -> DocumentSettings {
+    settings.sounds.insert(
+        "drums".into(),
+        TrackSound {
+            voice_id: Some("gm".into()),
+            ..TrackSound::default()
+        },
+    );
+    settings
+}
+
+fn plain_renderer(plan: &PlaybackPlan) -> Renderer {
+    Renderer::new(
+        Arc::new(plan.clone()),
+        resources(),
+        gm(DocumentSettings::default()),
+        RATE,
+    )
+    .unwrap()
+}
+
+/// A mix whose one track holds a fresh instrument insert on `rig`'s helper.
+fn instrument_mix(rig: &Rig, plan: &PlaybackPlan, settings: &DocumentSettings) -> PreparedMix {
+    PreparedMix::prepare(settings, plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(Box::new(rig.instrument()))])
+}
+
+fn instrument_renderer(rig: &Rig, plan: &PlaybackPlan) -> Renderer {
+    let settings = gm(DocumentSettings::default());
+    let mix = instrument_mix(rig, plan, &settings);
+    Renderer::new_with_mix(Arc::new(plan.clone()), resources(), mix, settings, RATE).unwrap()
+}
+
+/// Renders `frames` in blocks of 128, letting the fake answer after each, as a device would between callbacks.
+fn run(renderer: &mut Renderer, rig: Option<&Rig>, frames: usize) -> Vec<[f32; 2]> {
+    let mut out = Vec::with_capacity(frames);
+    let mut buffer = [[0.0f32; 2]; BLOCK_FRAMES];
+    let mut left = frames;
+    while left > 0 {
+        let n = left.min(BLOCK_FRAMES);
+        renderer.render_into(&mut buffer[..n]);
+        out.extend_from_slice(&buffer[..n]);
+        if let Some(rig) = rig {
+            rig.settle();
+        }
+        left -= n;
+    }
+    out
+}
+
+/// Renders up to the tick `end`, as the device does before a loop wrap.
+fn run_to(renderer: &mut Renderer, rig: &Rig, end: f64, out: &mut Vec<[f32; 2]>) {
+    let mut buffer = [[0.0f32; 2]; BLOCK_FRAMES];
+    loop {
+        let n = renderer.output_frames_until(end).min(BLOCK_FRAMES);
+        if n == 0 {
+            break;
+        }
+        renderer.render_until(&mut buffer[..n], end);
+        out.extend_from_slice(&buffer[..n]);
+        rig.settle();
+    }
+}
+
+fn first_sound(frames: &[[f32; 2]]) -> Option<usize> {
+    frames.iter().position(|f| f[0] != 0.0 || f[1] != 0.0)
+}
+
+/// A note the fake received, by the stream frame it was staged on (`block * 128 + offset`): `'n'` NoteOn, `'f'` NoteOff,
+/// `'a'` AllNotesOff (the number is then the channel).
+type Heard = (usize, char, u8);
+
+fn heard_in<'a>(blocks: impl IntoIterator<Item = &'a Received>) -> Vec<Heard> {
+    blocks
+        .into_iter()
+        .flat_map(|block| {
+            block
+                .words
+                .iter()
+                .filter_map(|w| MidiEvent::decode(*w))
+                .map(move |event| {
+                    let frame = block.seq as usize * BLOCK_FRAMES + usize::from(event.offset());
+                    match event {
+                        MidiEvent::NoteOn { key, .. } => (frame, 'n', key),
+                        MidiEvent::NoteOff { key, .. } => (frame, 'f', key),
+                        MidiEvent::AllNotesOff { channel, .. } => (frame, 'a', channel),
+                        MidiEvent::Controller { .. } => (frame, 'c', 0),
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn heard(rig: &Rig) -> Vec<Heard> {
+    heard_in(&rig.helper.blocks())
+}
+
+/// The notes alone, without their frames.
+fn kinds_of(rig: &Rig) -> Vec<(char, u8)> {
+    heard(rig).into_iter().map(|h| (h.1, h.2)).collect()
+}
+
+/// The level the keyed fake plays at output frame `m`, from the frames each key sounds on the track's input, `d` earlier.
+fn expected_level(sounding: &[(usize, usize, u8)], m: usize, d: usize) -> f32 {
+    let Some(at) = m.checked_sub(d) else {
+        return 0.0;
+    };
+    sounding
+        .iter()
+        .filter(|(on, off, _)| (*on..*off).contains(&at))
+        .map(|(_, _, key)| key_signal(*key))
+        .sum()
+}
+
+/// The factor between the fake's level and what the renderer outputs: the track's gain and pan.
+fn scale_of(out: &[[f32; 2]], at: usize, level: f32) -> f32 {
+    let scale = out[at][0] / level;
+    assert!(
+        scale > 0.3 && scale < 1.0,
+        "the track's gain and pan scale {scale}"
+    );
+    scale
+}
+
+fn assert_signal(out: &[[f32; 2]], scale: f32, sounding: &[(usize, usize, u8)], d: usize) {
+    for (m, frame) in out.iter().enumerate() {
+        let want = scale * expected_level(sounding, m, d);
+        assert!(
+            (frame[0] - want).abs() <= 1e-6 && frame[0] == frame[1],
+            "frame {m}: {frame:?} against {want}"
+        );
+    }
+}
+
+#[test]
+fn each_hit_reaches_the_instrument_on_the_frame_the_built_in_kit_strikes_it_and_only_the_instrument_is_heard()
+ {
+    let rig = rig_keyed();
+    let hits: [(u32, u32, u8); 3] = [(100, 160, 36), (300, 360, 38), (500, 560, 42)];
+    let plan = drum_plan(
+        hits.iter()
+            .flat_map(|&(on, off, key)| [note_on(on, key), note_off(off, key)])
+            .collect(),
+    );
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let d = renderer.plugin_delay_frames();
+    assert_eq!(d, 2 * BLOCK_FRAMES);
+    let out = run(&mut renderer, Some(&rig), 28_000 + d + 200);
+
+    // The notes reach the helper on the frames the plan puts them on.
+    let mut want: Vec<Heard> = Vec::new();
+    for &(on, off, key) in &hits {
+        want.push((on as usize * TICK, 'n', key));
+        want.push((off as usize * TICK, 'f', key));
+    }
+    assert_eq!(heard(&rig), want);
+    assert_eq!(rig.dropped(), 0);
+
+    // The built-in kit strikes the first hit on that frame too; its sound is audible a few dozen frames into the hit (the
+    // General MIDI kit's own attack), where the instrument's is exact.
+    let mut reference = plain_renderer(&plan);
+    let built_in = run(&mut reference, None, 6_000);
+    let struck = first_sound(&built_in).expect("the kit sounds");
+    assert!(
+        (5_000..5_000 + 128).contains(&struck),
+        "the kit starts at {struck}"
+    );
+
+    // The track plays the instrument alone, D frames after each hit, and none of the kit.
+    let sounding: Vec<_> = hits
+        .iter()
+        .map(|&(on, off, key)| (on as usize * TICK, off as usize * TICK, key))
+        .collect();
+    assert_eq!(first_sound(&out), Some(5_000 + d));
+    let scale = scale_of(&out, 5_000 + d, key_signal(36));
+    assert_signal(&out, scale, &sounding, d);
+}
+
+#[test]
+fn a_tempo_change_mid_plan_leaves_every_onset_exact() {
+    let rig = rig_keyed();
+    // 60 bpm to tick 960 (one second), then 120 bpm: a tick is 25 frames from there.
+    let plan = plan_with(
+        json!([{"tick": 0, "bpm": 60}, {"tick": 960, "bpm": 120}]),
+        [2500.0, 4500.0],
+        vec![
+            note_on(480, 36),
+            note_off(540, 36),
+            note_on(1440, 38),
+            note_off(1500, 38),
+            note_on(2400, 42),
+            note_off(2460, 42),
+        ],
+    );
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let d = renderer.plugin_delay_frames();
+    let out = run(&mut renderer, Some(&rig), 87_000 + d);
+    let hits: [(usize, usize, u8); 3] = [
+        (24_000, 24_000 + 60 * 50, 36),
+        (60_000, 60_000 + 60 * 25, 38),
+        (84_000, 84_000 + 60 * 25, 42),
+    ];
+    let want: Vec<Heard> = hits
+        .iter()
+        .flat_map(|&(on, off, key)| [(on, 'n', key), (off, 'f', key)])
+        .collect();
+    assert_eq!(heard(&rig), want);
+    let scale = scale_of(&out, 24_000 + d, key_signal(36));
+    assert_signal(&out, scale, &hits, d);
+}
+
+#[test]
+fn a_seek_leaves_nothing_sounding_re_sends_nothing_and_sends_no_orphan_note_off_for_a_note_held_across_it()
+ {
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![
+        note_on(0, 36),
+        note_off(400, 36),
+        note_on(600, 38),
+        note_off(900, 38),
+        note_on(1000, 42),
+        note_off(1200, 42),
+    ]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let d = renderer.plugin_delay_frames();
+    run(&mut renderer, Some(&rig), 10_000);
+    assert_eq!(rig.helper.sounding(), 1, "the first hit is held");
+
+    // Into the middle of the held hit: it ends at tick 400, which is after the seek point.
+    renderer.seek_tick(300.0);
+    let after = run(&mut renderer, Some(&rig), 50_000);
+
+    let blocks = rig.helper.blocks();
+    let first_epoch = blocks[0].epoch;
+    assert!(blocks.iter().any(|b| b.epoch > first_epoch), "a new epoch");
+    let kinds = |first: bool| {
+        heard_in(blocks.iter().filter(|b| (b.epoch == first_epoch) == first))
+            .into_iter()
+            .map(|(_, kind, key)| (kind, key))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(kinds(true), vec![('n', 36)]);
+    assert_eq!(
+        kinds(false),
+        vec![('n', 38), ('f', 38), ('n', 42), ('f', 42)],
+        "nothing before the seek point is sent again, and the held hit's NoteOff is not"
+    );
+    // Silence from the seek to the next hit's sound: the held hit does not sound again, in the instrument or the kit.
+    let next_hit = (600 - 300) * TICK;
+    assert!(after[..next_hit + d].iter().all(|f| *f == [0.0; 2]));
+    assert!(after[next_hit + d][0] > 0.0);
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn a_hit_held_across_the_loop_end_is_released_at_the_wrap_and_nothing_sticks_after_many_wraps() {
+    let rig = rig_keyed();
+    // The hit starts at tick 480 and is held past the loop end at tick 970, which is not on a block boundary.
+    let plan = drum_plan(vec![note_on(480, 36), note_off(1500, 36)]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let d = renderer.plugin_delay_frames();
+    let mut out = Vec::new();
+    let mut want: Vec<Heard> = Vec::new();
+    let mut wraps = Vec::new();
+    for _ in 0..6 {
+        let start = out.len();
+        run_to(&mut renderer, &rig, 970.0, &mut out);
+        want.push((start + 480 * TICK, 'n', 36));
+        want.push((out.len(), 'a', 9));
+        wraps.push(out.len());
+        renderer.wrap_to_tick(0.0);
+    }
+    run(&mut renderer, Some(&rig), 1_000);
+    assert_eq!(
+        heard(&rig),
+        want,
+        "one NoteOn a pass and one release a wrap, on their frames"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+    let epochs: std::collections::HashSet<_> =
+        rig.helper.blocks().iter().map(|b| b.epoch).collect();
+    assert_eq!(epochs.len(), 1, "a wrap keeps the stream going");
+    // The sound ends at the wrap, D frames later where it is heard, and the next pass is silent until its hit.
+    let first_wrap = wraps[0];
+    assert!(out[first_wrap + d - 1][0] > 0.0);
+    assert!(
+        out[first_wrap + d..first_wrap + d + 100]
+            .iter()
+            .all(|f| *f == [0.0; 2])
+    );
+}
+
+#[test]
+fn the_end_of_the_score_releases_what_an_instrument_holds() {
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![note_on(100, 36), note_off(5000, 36)]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let d = renderer.plugin_delay_frames();
+    let mut out = run(&mut renderer, Some(&rig), 12_000);
+    renderer.begin_tail();
+    out.extend(run(&mut renderer, Some(&rig), 3_000));
+    assert_eq!(
+        heard(&rig),
+        vec![(5_000, 'n', 36), (12_000, 'a', 9)],
+        "released on the frame the tail begins"
+    );
+    assert_eq!(rig.helper.sounding(), 0);
+    assert!(out[12_000 + d - 1][0] > 0.0);
+    assert!(out[12_000 + d..].iter().all(|f| *f == [0.0; 2]));
+}
+
+#[test]
+fn a_muted_track_keeps_its_notes_and_is_right_when_unmuted_mid_note() {
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![note_on(100, 36), note_off(700, 36)]);
+    let mut muted = DocumentSettings::default();
+    muted.mixes.insert(
+        "drums".into(),
+        ChannelMix {
+            mute: true,
+            ..ChannelMix::default()
+        },
+    );
+    let settings = gm(muted);
+    let mix = instrument_mix(&rig, &plan, &settings);
+    let mut renderer =
+        Renderer::new_with_mix(Arc::new(plan.clone()), resources(), mix, settings, RATE).unwrap();
+    let d = renderer.plugin_delay_frames();
+    let mut out = run(&mut renderer, Some(&rig), 20_000);
+    assert!(
+        out.iter().all(|f| *f == [0.0; 2]),
+        "muted is silent in the mix"
+    );
+    assert_eq!(
+        heard(&rig),
+        vec![(5_000, 'n', 36)],
+        "and the note went on to the instrument"
+    );
+    assert_eq!(rig.helper.sounding(), 1);
+
+    // Unmuted in the middle of the hit, the instrument is already sounding it.
+    let settings = gm(DocumentSettings::default());
+    let mix = instrument_mix(&rig, &plan, &settings);
+    renderer.set_mix(mix);
+    out.extend(run(&mut renderer, Some(&rig), 20_000));
+    assert_eq!(
+        heard(&rig),
+        vec![(5_000, 'n', 36), (35_000, 'f', 36)],
+        "the same stream goes on"
+    );
+    let at = 20_000 + 600;
+    let scale = scale_of(&out, at, key_signal(36));
+    for (m, frame) in out.iter().enumerate().take(35_000 + d).skip(at) {
+        assert!(
+            (frame[0] - scale * key_signal(36)).abs() <= 1e-6,
+            "frame {m}"
+        );
+    }
+    assert!(out[35_000 + d..].iter().all(|f| *f == [0.0; 2]));
+    assert_eq!(rig.helper.sounding(), 0);
+}
+
+#[test]
+fn a_track_a_port_plays_strikes_no_note_on_its_instrument_and_does_again_when_it_returns() {
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![
+        note_on(100, 36),
+        note_off(160, 36),
+        note_on(300, 38),
+        note_off(360, 38),
+    ]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let d = renderer.plugin_delay_frames();
+    let routed = MidiTap::new(&[0], &[(0, RouteSpec::lanes(0, 0, &[(9, 9)]))]);
+    assert!(renderer.replace_midi(routed).is_none());
+    assert!(renderer.midi_silences(0));
+    let mut out = run(&mut renderer, Some(&rig), 10_000);
+    assert_eq!(
+        heard(&rig),
+        vec![],
+        "the port plays the hit, as the built-in sound would not"
+    );
+    // Back on the speakers.
+    renderer.replace_midi(MidiTap::new(&[0], &[]));
+    assert!(!renderer.midi_silences(0));
+    out.extend(run(&mut renderer, Some(&rig), 10_000));
+    assert_eq!(heard(&rig), vec![(15_000, 'n', 38), (18_000, 'f', 38)]);
+    assert!(out[..15_000 + d].iter().all(|f| *f == [0.0; 2]));
+    let scale = scale_of(&out, 15_000 + d, key_signal(38));
+    assert_signal(&out, scale, &[(15_000, 18_000, 38)], d);
+}
+
+#[test]
+fn an_edit_hand_over_sends_no_note_twice_and_leaves_none_stuck() {
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![
+        note_on(100, 36),
+        note_off(300, 36),
+        note_on(600, 38),
+        note_off(800, 38),
+        note_on(1000, 42),
+        note_off(1100, 42),
+    ]);
+    let mut old = instrument_renderer(&rig, &plan);
+    let d = old.plugin_delay_frames();
+    // Tick 720: the second hit is held across the hand-over.
+    let mut out = run(&mut old, Some(&rig), 36_000);
+    let tick = old.position().tick;
+    assert_eq!(tick, 720.0);
+    let mut new = instrument_renderer(&rig, &plan);
+    new.wrap_to_tick(tick);
+    new.continue_from(&mut old);
+    out.extend(run(&mut new, Some(&rig), 30_000));
+
+    let hits: [(usize, usize, u8); 3] = [
+        (5_000, 15_000, 36),
+        (30_000, 40_000, 38),
+        (50_000, 55_000, 42),
+    ];
+    let want: Vec<Heard> = hits
+        .iter()
+        .flat_map(|&(on, off, key)| [(on, 'n', key), (off, 'f', key)])
+        .collect();
+    assert_eq!(heard(&rig), want, "every note once, none repeated or lost");
+    let epochs: std::collections::HashSet<_> =
+        rig.helper.blocks().iter().map(|b| b.epoch).collect();
+    assert_eq!(epochs.len(), 1, "the running stream carried on");
+    assert_eq!(rig.helper.sounding(), 0);
+    let scale = scale_of(&out, 5_000 + d, key_signal(36));
+    assert_signal(&out, scale, &hits, d);
+}
+
+#[test]
+fn a_fault_mid_playback_hands_the_track_back_to_the_built_in_kit_and_staging_stops() {
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![
+        note_on(0, 36),
+        note_off(60, 36),
+        note_on(600, 38),
+        note_off(660, 38),
+    ]);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let d = renderer.plugin_delay_frames();
+    let mut out = run(&mut renderer, Some(&rig), 8_000);
+    assert!(out[..3_000 + d].iter().any(|f| f[0] > 0.0));
+    // The plug-in stalls.
+    rig.helper.paused.store(true, Ordering::Relaxed);
+    out.extend(run(&mut renderer, Some(&rig), 37_000));
+    assert!(renderer.plugin_faulted());
+    rig.helper.paused.store(false, Ordering::Relaxed);
+    rig.settle();
+    let received = rig.helper.blocks().len();
+    out.extend(run(&mut renderer, Some(&rig), 5_000));
+    assert_eq!(
+        rig.helper.blocks().len(),
+        received,
+        "nothing is sent to a plug-in given up on"
+    );
+    assert!(
+        heard(&rig).iter().all(|(_, _, key)| *key != 38),
+        "the second hit never went to it"
+    );
+    assert_eq!(rig.dropped(), 0);
+    // The second hit plays on the kit, as late as the stand-in always is, and as the plain renderer plays it.
+    let mut reference = plain_renderer(&plan);
+    let built_in = run(&mut reference, None, 50_000);
+    assert!(built_in[30_000..33_000].iter().any(|f| f[0] != 0.0));
+    for m in 20_000..out.len() {
+        assert!(
+            (out[m][0] - built_in[m - d][0]).abs() <= 1e-5
+                && (out[m][1] - built_in[m - d][1]).abs() <= 1e-5,
+            "frame {m}"
+        );
+    }
+}
+
+#[test]
+fn a_mix_that_adds_or_drops_an_instrument_mid_play_starts_and_stops_the_notes_with_the_next_event()
+{
+    // Nothing, then an instrument: notes reach it from the swap on, as for any plug-in slot change.
+    let rig = rig_keyed();
+    let plan = drum_plan(vec![
+        note_on(100, 36),
+        note_off(160, 36),
+        note_on(300, 38),
+        note_off(360, 38),
+    ]);
+    let mut renderer = plain_renderer(&plan);
+    run(&mut renderer, None, 10_000);
+    let settings = gm(DocumentSettings::default());
+    renderer.set_mix(instrument_mix(&rig, &plan, &settings));
+    run(&mut renderer, Some(&rig), 10_000);
+    assert_eq!(kinds_of(&rig), vec![('n', 38), ('f', 38)]);
+
+    // An instrument, then an effect on another helper: the instrument hears nothing more.
+    let instrument = rig_keyed();
+    let effect = rig_with(Some(0.5));
+    let mut renderer = instrument_renderer(&instrument, &plan);
+    run(&mut renderer, Some(&instrument), 10_000);
+    let mix = PreparedMix::prepare(&settings, &plan, RATE)
+        .unwrap()
+        .with_inserts(vec![Some(Box::new(effect.make(SlotKind::Effect, 0)))]);
+    renderer.set_mix(mix);
+    for _ in 0..80 {
+        run(&mut renderer, Some(&instrument), BLOCK_FRAMES);
+        effect.settle();
+    }
+    assert_eq!(
+        kinds_of(&instrument),
+        vec![('n', 36), ('f', 36)],
+        "the second hit went to no instrument"
+    );
+    assert_eq!(effect.helper.events(), vec![], "an effect takes no notes");
+}
+
+// ---- real-time safety of the renderer ---------------------------------------------------------------------------------
+
+#[test]
+fn a_renderer_frame_loop_that_dispatches_notes_to_an_instrument_never_touches_the_heap() {
+    let rig = rig_keyed();
+    let mut midi = Vec::new();
+    for hit in 0..40u32 {
+        let tick = 20 + hit * 20;
+        let key = 36 + (hit % 3) as u8;
+        midi.push(note_on(tick, key));
+        midi.push(note_off(tick + 15, key));
+    }
+    let plan = drum_plan(midi);
+    let mut renderer = instrument_renderer(&rig, &plan);
+    let mut buffer = [[0.0f32; 2]; BLOCK_FRAMES];
+    HEAP_OPERATIONS.with(|n| n.set(0));
+    // 40 hits of 20 ticks: 40,000 frames of dispatch, a loop wrap and the tail.
+    for block in 0..320 {
+        COUNT_HEAP.with(|flag| flag.set(true));
+        renderer.render_into(&mut buffer);
+        if block == 160 {
+            renderer.wrap_to_tick(0.0);
+        }
+        if block == 300 {
+            renderer.begin_tail();
+        }
+        COUNT_HEAP.with(|flag| flag.set(false));
+        rig.settle();
+    }
+    assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
+    assert!(rig.helper.events().len() > 60, "the notes went out");
 }

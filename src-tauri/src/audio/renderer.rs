@@ -4,6 +4,7 @@ use super::{
     compensation::{Compensation, compensation_capacity},
     decode::DecodedAudio,
     dsp::{FrameContext, FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
+    instrument::NoteMap,
     master::MasterBus,
     midi_out::MidiTap,
     plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
@@ -19,7 +20,8 @@ use super::{
     },
 };
 use crate::settings::{
-    BackingProcessing, ChannelMix, DocumentSettings, DrumKitMix, KitElement, gm_kit_element,
+    BackingProcessing, ChannelMix, DocumentSettings, DrumKitMix, KitElement, SlotKind,
+    gm_kit_element,
 };
 use rustysynth::{Synthesizer, SynthesizerSettings};
 use std::{
@@ -109,6 +111,17 @@ struct PreparedChannel {
     kit: KitGain,
     /// Whether the kit mix changes anything. A kit of elements all at their defaults sounds as the track does without one.
     kit_active: bool,
+    /// What the plan's notes become for the track's instrument plug-in: `Some` while the channel's insert is an
+    /// instrument. Held by the mix, so a change of slot or of map is a mix change with no renderer rebuilt. The kit mix
+    /// above shapes only the built-in stand-in; a hosted instrument has its own mixer.
+    notes: Option<NoteMap>,
+}
+impl PreparedChannel {
+    /// Puts `insert` on the channel and says whether the plan's notes go to it.
+    fn attach(&mut self, insert: Box<PluginInsert>) {
+        self.notes = (insert.kind() == SlotKind::Instrument).then(NoteMap::identity);
+        self.dsp.attach_plugin(insert);
+    }
 }
 /// Hands the compensation over from the mix or renderer that is playing (`old`) to the one taking over (`new`).
 /// - Both delay: the new lines take over the old history and crossfade to their own taps.
@@ -207,6 +220,7 @@ impl PreparedMix {
                 .unwrap_or_else(FxSettings::default);
             let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             dsp.set_ir_index(index);
+            let mut notes = None;
 
             if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
                 // A refusal leaves the track on its built-in sound and is named, so the slot can say why.
@@ -220,7 +234,10 @@ impl PreparedMix {
                     sample_rate,
                     plan.shared.clone(),
                 ) {
-                    Ok(insert) => dsp.attach_plugin(Box::new(insert)),
+                    Ok(insert) => {
+                        notes = (plan.kind == SlotKind::Instrument).then(NoteMap::identity);
+                        dsp.attach_plugin(Box::new(insert));
+                    }
                     Err(error) => refused.push((track.id.clone(), error)),
                 }
             }
@@ -231,6 +248,7 @@ impl PreparedMix {
                 gain: Gain::new(&mix, !mix.mute && (!any_solo || mix.solo)),
                 kit: KitGain::new(kit),
                 kit_active: kit.is_some(),
+                notes,
                 mix,
             });
         }
@@ -268,7 +286,7 @@ impl PreparedMix {
         for (i, insert) in inserts.into_iter().enumerate() {
             if let Some(insert) = insert {
                 if i < self.channels.len() {
-                    self.channels[i].dsp.attach_plugin(insert);
+                    self.channels[i].attach(insert);
                 }
             }
         }
@@ -278,7 +296,7 @@ impl PreparedMix {
     /// Attaches an insert to track `track` and updates delay compensation.
     pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
         if track < self.channels.len() {
-            self.channels[track].dsp.attach_plugin(insert);
+            self.channels[track].attach(insert);
             self.update_compensation();
         }
     }
@@ -1389,6 +1407,23 @@ impl Renderer {
                             self.midi_attacks[self.next_midi],
                         );
                     }
+                    // A track whose slot holds an instrument plays the plan's notes there, through the one seam
+                    // (`NoteMap`). It follows the built-in sound: a track a port is playing strikes no note, here or on
+                    // its instrument, and still releases the ones it has (a NoteOff the instrument does not hold is
+                    // ignored by the insert). Mute and solo are gain after the board, so a muted track's instrument keeps
+                    // its notes and is right at unmute. The kit mix shapes only the built-in stand-in.
+                    if let Some(channel) = self.mix.channels.get_mut(index) {
+                        if let Some(note) = channel.notes.and_then(|map| map.note(event)) {
+                            if !(silenced && note.on) {
+                                channel.dsp.stage_note(
+                                    note.on,
+                                    note.channel,
+                                    note.key,
+                                    note.velocity,
+                                );
+                            }
+                        }
+                    }
                 }
                 self.next_midi += 1;
             }
@@ -1731,6 +1766,10 @@ impl Renderer {
         for channel in &mut self.mix.channels {
             if is_wrap {
                 channel.dsp.reset_for_wrap();
+                // The insert keeps streaming through a wrap, so what an instrument holds would ring on into the next pass.
+                if channel.notes.is_some() {
+                    channel.dsp.all_notes_off();
+                }
             } else {
                 channel.dsp.reset();
             }
@@ -2346,6 +2385,12 @@ impl Renderer {
         for slot in &self.active {
             if let Some(voice) = &mut self.slots[*slot] {
                 voice.end_tick = tick;
+            }
+        }
+        // No note starts or ends from here on, so an instrument is told to let go of what it holds.
+        for channel in &mut self.mix.channels {
+            if channel.notes.is_some() {
+                channel.dsp.all_notes_off();
             }
         }
         for track in &mut self.tracks {

@@ -153,10 +153,10 @@ export function convertDrumTabJson(json:Json,source:model.Score,modes:ReadonlyMa
     const mode=modes.get(trackIndex),track=source.tracks[trackIndex];
     if(!mode||!track)return;
     const staves=trackJson.staves as Json[],out:Json[]=[];let converted=false;
-    for(const staffJson of staves){
+    for(const [staffIndex,staffJson] of staves.entries()){
       if(staffJson.ispercussion!==true){out.push(staffJson);continue;}
       converted=true;
-      const both=mode==='both',tab=convertStaff(staffJson,track,both,fresh,report,written);
+      const both=mode==='both',tab=convertStaff(staffJson,track,track.staves[staffIndex],both,fresh,report,written);
       if(both){out.push(staffJson,tab);}else out.push(tab);
     }
     trackJson.staves=out;
@@ -177,30 +177,46 @@ export function convertDrumTabJson(json:Json,source:model.Score,modes:ReadonlyMa
   return report;
 }
 
-function convertStaff(staff:Json,track:model.Track,fresh_:boolean,fresh:(key:keyof Ids)=>number,report:DrumTabReport,written:Array<{tab:Json;origin:Json}>):Json {
+/**
+ * The line of each hit of one bar, found per moment across all its voices: hands in one voice and feet in another still have to be told apart on
+ * one set of lines, because the tab lines up the beats of every voice by time. A moment is the source beats' display start; a grace beat is a moment
+ * of its own. Candidates are taken voice by voice, in storage order, so the same bar always gets the same lines. A hit that finds no line is `null`.
+ */
+function assignBar(barJson:Json,sourceBar:model.Bar|undefined,track:model.Track,report:DrumTabReport):Map<Json,number|null> {
+  const groups=new Map<string,Array<{note:Json;candidate:TabCandidate}>>(),lines=new Map<Json,number|null>();let alone=0;
+  (barJson.voices as Json[]).forEach((voiceJson,voiceIndex)=>(voiceJson.beats as Json[]).forEach((beatJson,beatIndex)=>{
+    const sourceBeat=sourceBar?.voices[voiceIndex]?.beats[beatIndex],grace=beatJson.gracetype!==undefined&&beatJson.gracetype!==0;
+    const key=sourceBeat&&!grace?`at${sourceBeat.displayStart}`:`own${alone++}`,group=groups.get(key)??[];groups.set(key,group);
+    for(const note of beatJson.notes as Json[]){
+      const like={percussionArticulation:note.percussionarticulation as number},number=drumTabNumber(track,like);
+      if(number===null){report.unresolvedNotes.push(note.id as number);continue;}
+      group.push({note,candidate:{number,line:drumTabLine(track,like)!}});
+    }
+  }));
+  for(const group of groups.values()){
+    const {lines:given}=assignDrumTabLines(group.map(entry=>entry.candidate));
+    group.forEach((entry,at)=>lines.set(entry.note,given[at]));
+  }
+  return lines;
+}
+
+function convertStaff(staff:Json,track:model.Track,sourceStaff:model.Staff|undefined,fresh_:boolean,fresh:(key:keyof Ids)=>number,report:DrumTabReport,written:Array<{tab:Json;origin:Json}>):Json {
   const copyIds=fresh_;
-  const bars=(staff.bars as Json[]).map(barJson=>{
+  const bars=(staff.bars as Json[]).map((barJson,barIndex)=>{
+    const lineOf=assignBar(barJson,sourceStaff?.bars[barIndex],track,report);
     const bar:Json={...barJson,id:copyIds?fresh('bar'):barJson.id,...copyIds?{sustainpedals:[]}:{}};
     bar.voices=(barJson.voices as Json[]).map(voiceJson=>{
       const voice:Json={...voiceJson,id:copyIds?fresh('voice'):voiceJson.id};
       voice.beats=(voiceJson.beats as Json[]).map(beatJson=>{
-        const sourceNotes=beatJson.notes as Json[],numbers=sourceNotes.map(note=>drumTabNumber(track,{percussionArticulation:note.percussionarticulation as number}));
-        const candidates:TabCandidate[]=[],back:number[]=[];
-        sourceNotes.forEach((note,index)=>{
-          const number=numbers[index];
-          if(number===null){report.unresolvedNotes.push(note.id as number);return;}
-          candidates.push({number,line:drumTabLine(track,{percussionArticulation:note.percussionarticulation as number})!});back.push(index);
-        });
-        const {lines,surplus}=assignDrumTabLines(candidates);
         const beatId=copyIds?fresh('beat'):beatJson.id as number;
         const notes:Json[]=[];
-        lines.forEach((line,at)=>{
-          const note=sourceNotes[back[at]];
-          if(line===null){report.surplusNotes.push(note.id as number);return;}
+        for(const note of beatJson.notes as Json[]){
+          if(!lineOf.has(note))continue;
+          const line=lineOf.get(note)!;
+          if(line===null){report.surplusNotes.push(note.id as number);continue;}
           const id=copyIds?fresh('note'):note.id as number;
-          const tab=tabNote(note,line,candidates[at].number,id);notes.push(tab);written.push({tab,origin:note});report.notes.set(id,note.id as number);
-        });
-        void surplus;
+          const tab=tabNote(note,line,drumTabNumber(track,{percussionArticulation:note.percussionarticulation as number})!,id);notes.push(tab);written.push({tab,origin:note});report.notes.set(id,note.id as number);
+        }
         report.beats.set(beatId,beatJson.id as number);
         // Notes are written top line first, as the renderer sorts them anyway; the order is fixed so the output is deterministic.
         notes.sort((a,b)=>(b.string as number)-(a.string as number)||(a.id as number)-(b.id as number));

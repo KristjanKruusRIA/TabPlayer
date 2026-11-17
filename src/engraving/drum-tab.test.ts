@@ -179,6 +179,42 @@ describe('convertDrumTabJson',()=>{
   });
 });
 
+/** One bar, one staff, one voice per entry of `voices`; each voice is a list of quarter-note beats of articulation ids. */
+function voicedSource(voices:number[][][]) {
+  const score=new model.Score(),track=new model.Track();track.name='Drums';
+  const staff=new model.Staff();staff.isPercussion=true;track.addStaff(staff);score.addTrack(track);
+  score.addMasterBar(new model.MasterBar());
+  const bar=new model.Bar();
+  for(const beats of voices){
+    const voice=new model.Voice();
+    for(const ids of beats){const beat=new model.Beat();beat.duration=4;beat.isEmpty=false;for(const id of ids){const note=new model.Note();note.percussionArticulation=id;beat.addNote(note);}voice.addBeat(beat);}
+    bar.addVoice(voice);
+  }
+  staff.addBar(bar);score.finish(new Settings());return score;
+}
+describe('hits of several voices at one moment',()=>{
+  const linesAt=(json:J,beatIndex:number)=>(json.tracks[0].staves[0].bars[0].voices as J[]).map(voice=>(voice.beats[beatIndex].notes as J[]).map(n=>`${n.fret}@${DRUM_TAB_LINES+1-n.string}`));
+  it('gives each its own line: hands in voice 1 and the foot hi-hat in voice 2 never share a line',()=>{
+    const source=voicedSource([[[42],[47,45]],[[44],[36]]]),json=jsonOf(source);
+    convertDrumTabJson(json,source,new Map([[0,'tab']]));
+    // Closed hi-hat 42 keeps line 3 (the lower number first), the pedal hi-hat 44 moves up to 2; the toms still take 4 and 3->..., the kick keeps 6.
+    expect(linesAt(json,0)).toEqual([['42@3'],['44@2']]);
+    expect(linesAt(json,1)).toEqual([['47@3','45@4'],['36@6']]);
+  });
+  it('leaves the hits beyond six at one moment off the tab and counts them, wherever the voices put them',()=>{
+    const source=voicedSource([[[36,38,42,45]],[[51,49,55]]]),json=jsonOf(source);
+    const report=convertDrumTabJson(json,source,new Map([[0,'tab']]));
+    const drawn=(json.tracks[0].staves[0].bars[0].voices as J[]).flatMap(voice=>voice.beats[0].notes as J[]);
+    expect(drawn).toHaveLength(6);expect(new Set(drawn.map(n=>n.string)).size).toBe(6);expect(report.surplusNotes).toHaveLength(1);
+  });
+  it('keeps different moments apart: a hit alone at its moment keeps its own line',()=>{
+    const source=voicedSource([[[42],[42]],[[38],[42]]]),json=jsonOf(source);
+    convertDrumTabJson(json,source,new Map([[0,'tab']]));
+    expect(linesAt(json,0)).toEqual([['42@3'],['38@5']]);
+    expect(linesAt(json,1)).toEqual([['42@3'],['42@2']]);
+  });
+});
+
 describe('ties on the tab',()=>{
   it('keeps a tie only between hits written alike: an equal number moved to another line is not tied, and the JSON names no tie partner',()=>{
     // 38 and 91 both want line 5: 91 is moved to line 4, and the lone 91 after it sits on line 5.

@@ -183,7 +183,7 @@ impl std::fmt::Display for LibraryError {
                 f.write_str("The plug-in's location is too long or is not valid text.")
             }
             // Also what a bundle with no hosted class at all comes to; the text is the UI's key (`plugin.error.no_effects`).
-            LibraryError::NoEffects => f.write_str("This file holds no audio effect."),
+            LibraryError::NoEffects => f.write_str("This file holds no effect or instrument."),
             LibraryError::TooMany => {
                 write!(
                     f,
@@ -526,11 +526,10 @@ fn locate(picked: &Path) -> Result<Located, LibraryError> {
 
 // ---- probe results -----------------------------------------------------------------------------------------------
 
-/// The kinds of plug-in the user is offered. The library keeps every class the helper can host, instruments included, so a
-/// slot can name one, but nothing in the app can play one yet, so offering it would offer a plug-in that cannot be put on
-/// a track. This is the one place that keeps them out of what the user sees ([`PluginLibrary::offered`]) and can choose
-/// (`plugin_choose`): when instruments are offered, add `Instrument` here and nothing else changes.
-const OFFERED_KINDS: &[SlotKind] = &[SlotKind::Effect];
+/// The kinds of plug-in the user is offered: every kind the library keeps, effects and instruments. This is the one place
+/// that decides what the user sees ([`PluginLibrary::offered`]) and can choose (`plugin_choose`); which track may take an
+/// instrument is `plugin_choose`'s own check (a drum track only).
+const OFFERED_KINDS: &[SlotKind] = &[SlotKind::Effect, SlotKind::Instrument];
 
 /// The classes of a probe result as the library keeps them: of a hosted kind (every kind the protocol has), cleaned with the
 /// protocol's own cleaner (the helper's too), valid, each class ID once, at most [`MAX_CLASSES`]. The helper cleans, but
@@ -809,7 +808,7 @@ mod tests {
     }
 
     #[test]
-    fn instruments_are_kept_but_not_offered() {
+    fn instruments_are_kept_and_offered_after_the_effects() {
         let kept = clean_classes(vec![
             class('A', "Amp"),
             instrument('B', "Synth"),
@@ -833,16 +832,17 @@ mod tests {
         assert_eq!(all.len(), 2);
         assert_eq!(all[0].kind, SlotKind::Effect);
         assert_eq!(all[1].kind, SlotKind::Instrument);
-        // The user sees the effect only; the library holds both.
+        // The user is offered both, and the library holds both.
         assert_eq!(library.entries().len(), 2);
         let offered = library.offered();
-        assert_eq!(offered.len(), 1);
+        assert_eq!(offered.len(), 2);
         assert_eq!(offered[0].name, "Amp");
-        assert!(!all[1].is_offered());
+        assert_eq!(offered[1].name, "Synth");
+        assert!(all[0].is_offered() && all[1].is_offered());
     }
 
     #[test]
-    fn a_bundle_of_only_instruments_is_added_and_stays_hidden() {
+    fn a_bundle_of_only_instruments_is_added_and_listed() {
         let dir = tempfile::tempdir().unwrap();
         let data = dir.path().join("data");
         let root = bundle(dir.path(), "Synths", b"module");
@@ -852,7 +852,8 @@ mod tests {
             .unwrap();
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].kind, SlotKind::Instrument);
-        assert!(library.offered().is_empty());
+        // The user is offered it, so adding the bundle visibly succeeds.
+        assert_eq!(library.offered(), all);
         // It is in the file, which an older TabPlayer reads as a newer library; a slot can find it again.
         let reopened = PluginLibrary::open(&data).unwrap();
         assert_eq!(reopened.entries(), all.as_slice());

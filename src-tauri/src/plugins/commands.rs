@@ -134,6 +134,21 @@ pub async fn plugin_library_remove(app: tauri::AppHandle, class_id: String) -> R
         .map_err(|error| error.to_string())?
 }
 
+/// The text of the refusal of an instrument for a track that is not a drum track. The interface maps it (`localizePluginError`).
+pub const INSTRUMENT_NEEDS_DRUMS: &str = "An instrument plug-in can only be used on a drum track.";
+
+/// Whether `entry` may be put on a track: it must be offered, and an instrument goes on a drum (percussion) track only, so
+/// that a guitar track's notes are never sent to a drum plug-in by a request the interface would not make.
+fn check_class_for_track(entry: &LibraryEntry, percussion: bool) -> Result<(), String> {
+    if !entry.is_offered() {
+        return Err("This plug-in cannot be used on a track.".into());
+    }
+    if entry.kind == crate::settings::SlotKind::Instrument && !percussion {
+        return Err(INSTRUMENT_NEEDS_DRUMS.into());
+    }
+    Ok(())
+}
+
 /// The slot a track gets when the user chooses `entry`: the class's own kind, on, with no trim.
 fn new_slot(entry: LibraryEntry, state: String) -> PluginSlot {
     PluginSlot {
@@ -162,6 +177,7 @@ pub async fn plugin_choose(
     document_id: String,
     _track_id: String,
     class_id: String,
+    percussion: Option<bool>,
 ) -> Result<PluginChooseResult, String> {
     if !valid_class_id(&class_id) {
         return Err("Invalid plug-in class ID.".into());
@@ -181,11 +197,9 @@ pub async fn plugin_choose(
         .await
         .map_err(|e| e.to_string())??
     };
-    // The library keeps instruments, which nothing can play yet: the user is not offered one, and a request for one is refused
-    // before it loads anything.
-    if !entry.is_offered() {
-        return Err("This plug-in cannot be used on a track yet.".into());
-    }
+    // A class the app does not offer, or an instrument for a track that is not a drum track, is refused before anything loads.
+    // Whether the track is a drum track is the score's, which the interface reads; a request that leaves it out says no.
+    check_class_for_track(&entry, percussion.unwrap_or(false))?;
     // The plug-in is asked for its defaults at the device's rate: some plug-ins' defaults depend on it.
     let rate = app
         .state::<crate::runtime::NativeAudio>()
@@ -383,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn the_list_offers_effects_only_and_a_new_slot_takes_the_class_kind() {
+    fn the_list_offers_effects_and_instruments_and_a_new_slot_takes_the_class_kind() {
         use crate::settings::SlotKind;
         let dir = tempfile::tempdir().unwrap();
         let folder = library_with(dir.path(), &['A']);
@@ -391,10 +405,9 @@ mod tests {
         synth.kind = SlotKind::Instrument;
         let mut all = PluginLibrary::open(&folder).unwrap().entries().to_vec();
         all.push(synth.clone());
-        // The file holds both (the format that says so is the library's own test), and the user sees the effect.
-        assert_eq!(offered(&all).len(), 1);
-        assert_eq!(list_entries(&folder).unwrap().len(), 1);
-        assert!(!synth.is_offered());
+        // The file holds both (the format that says so is the library's own test), and the user sees both.
+        assert_eq!(offered(&all).len(), 2);
+        assert!(synth.is_offered());
         // The slot a choice makes says what the class is, and an effect's slot has no kind to write.
         let slot = new_slot(synth, "0".repeat(64));
         assert_eq!(slot.kind, SlotKind::Instrument);
@@ -402,6 +415,44 @@ mod tests {
         let slot = new_slot(entry('A', dir.path()), "0".repeat(64));
         assert_eq!(slot.kind, SlotKind::Effect);
         assert!(serde_json::to_value(&slot).unwrap().get("kind").is_none());
+    }
+
+    #[test]
+    fn an_instrument_is_chosen_on_a_drum_track_only() {
+        use crate::settings::SlotKind;
+        let dir = tempfile::tempdir().unwrap();
+        let effect = entry('A', dir.path());
+        let mut synth = entry('B', dir.path());
+        synth.kind = SlotKind::Instrument;
+        // An effect goes on any track.
+        assert!(check_class_for_track(&effect, false).is_ok());
+        assert!(check_class_for_track(&effect, true).is_ok());
+        // An instrument goes on a drum track, and a guitar track's request for one is refused with the text the interface maps.
+        assert!(check_class_for_track(&synth, true).is_ok());
+        assert_eq!(
+            check_class_for_track(&synth, false).unwrap_err(),
+            INSTRUMENT_NEEDS_DRUMS
+        );
+    }
+
+    #[test]
+    fn the_list_holds_the_instrument_a_library_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = library_with(dir.path(), &['A']);
+        let mut synth = entry('B', dir.path());
+        synth.kind = crate::settings::SlotKind::Instrument;
+        let file = serde_json::json!({"version": 2, "entries": [entry('A', dir.path()), synth]});
+        std::fs::write(
+            folder.join(LIBRARY_FILE),
+            serde_json::to_vec(&file).unwrap(),
+        )
+        .unwrap();
+        let listed = list_entries(&folder).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(
+            serde_json::to_value(&listed[1]).unwrap()["kind"],
+            "instrument"
+        );
     }
 
     #[test]

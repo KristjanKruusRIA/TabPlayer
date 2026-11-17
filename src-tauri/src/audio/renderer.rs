@@ -122,6 +122,10 @@ struct PreparedChannel {
     /// The track's drum map, resolved where the mix is prepared (off the audio thread): General MIDI for a track with none
     /// and for any track that is not percussion. Only an instrument reads it, so the built-in sounds never do.
     drum_map: DrumMap,
+    /// Whether the track's board has an effect plug-in, so the score's pan is applied after the board and not before it.
+    /// An amp simulation is made for a guitar as it is played, and one that reads only its left input is silent for a track
+    /// the score pans to the right. The plug-in hears the recorded voices without their pan, and the pan places its output.
+    pan_after: bool,
 }
 impl PreparedChannel {
     /// Puts `insert` on the channel and says whether the plan's notes go to it.
@@ -129,6 +133,7 @@ impl PreparedChannel {
         if insert.kind() == SlotKind::Instrument && !self.percussion {
             return Err(InsertError::NotAPercussionTrack);
         }
+        self.pan_after = insert.kind() == SlotKind::Effect;
         self.notes =
             (insert.kind() == SlotKind::Instrument).then(|| NoteMap::with_drum_map(self.drum_map));
         self.dsp.attach_plugin(insert);
@@ -233,6 +238,7 @@ impl PreparedMix {
             let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             dsp.set_ir_index(index);
             let mut notes = None;
+            let mut pan_after = false;
             let drum_map = drum_map::resolve(mix.drum_map.as_ref(), track.percussion);
 
             if let Some(Ok(plan)) = plan_map.get(track.id.as_str()) {
@@ -253,6 +259,7 @@ impl PreparedMix {
                         Ok(insert) => {
                             notes = (plan.kind == SlotKind::Instrument)
                                 .then(|| NoteMap::with_drum_map(drum_map));
+                            pan_after = plan.kind == SlotKind::Effect;
                             dsp.attach_plugin(Box::new(insert));
                         }
                         Err(error) => refused.push((track.id.clone(), error)),
@@ -270,6 +277,7 @@ impl PreparedMix {
                 kit_active: kit.is_some(),
                 notes,
                 drum_map,
+                pan_after,
                 mix,
             });
         }
@@ -474,7 +482,33 @@ impl MidiChannel {
     fn process(&self, sample: [f32; 2]) -> [f32; 2] {
         std::array::from_fn(|c| sample[c] * self.volume * self.expression * self.pan[c])
     }
+    /// [`process`](Self::process) with the score's pan moved out of the voices by `blend` (see [`pan_pre`]): 0 is the pan as
+    /// the score has it, 1 the same level on both sides, that of the louder side. A track whose pan is applied after its
+    /// board plays its voices at 1.
+    fn process_blended(&self, sample: [f32; 2], blend: f32) -> [f32; 2] {
+        let pre = pan_pre(self.pan, blend);
+        std::array::from_fn(|c| sample[c] * self.volume * self.expression * pre[c])
+    }
 }
+/// How much of the score's `pan` a track's voices keep when the pan is applied after its board, by `blend` (0 all of it, 1
+/// none). A guitar amp simulation is made for a guitar as it is played, and one that reads only its left input is silent for
+/// a track the score pans to the right, so what enters the board is the same on both sides, at the level of the louder one.
+/// That is the level the board's amp saw before, and what a stage that measures a level (a gate, a compressor) measured.
+/// The pan after the board ([`pan_post`]) is the rest, so the two multiply to `pan` all along a glide between them.
+fn pan_pre(pan: [f32; 2], blend: f32) -> [f32; 2] {
+    let loud = pan[0].max(pan[1]);
+    std::array::from_fn(|c| pan[c] + (loud - pan[c]) * blend)
+}
+/// What is left of the score's `pan` to apply after the board when the voices kept [`pan_pre`] of it.
+fn pan_post(pan: [f32; 2], blend: f32) -> [f32; 2] {
+    if blend == 0.0 {
+        return [1.0; 2];
+    }
+    let pre = pan_pre(pan, blend);
+    std::array::from_fn(|c| if pre[c] > 0.0 { pan[c] / pre[c] } else { 1.0 })
+}
+/// Moves of the pan after the board that the board's delay still holds back (see `Track::pan_queue`).
+const PAN_MOVES: usize = 16;
 #[derive(Clone, Copy)]
 struct MidiAttack {
     program: u8,
@@ -496,11 +530,131 @@ struct Track {
     start_programs: [u8; 16],
     percussion: bool,
     channels: [MidiChannel; 16],
+    /// The pan the score last set on any of the track's channels, as the factors for the two sides, and the controller
+    /// value each channel was last given. See `pan_after`.
+    pan: [f32; 2],
+    pan_cc: [u8; 16],
+    /// Whether the track's board has an effect plug-in (`PreparedChannel::pan_after`), so the score's pan is applied after
+    /// the plug-in, to what it makes, and not before it: the recorded voices play without their pan (`pan_pre`), the General
+    /// MIDI synthesizers are told the centre, and the pan places the plug-in's output (`pan_post`). An amp simulation is
+    /// made for a guitar as it is played, and one that reads only its left input is silent for a track the score pans to
+    /// the right.
+    pan_after: bool,
+    /// How far the pan has moved from before the board (0) to after it (1). It glides over 10 ms when `pan_after` changes,
+    /// so adding or removing a plug-in on a panned track does not step.
+    pan_blend: f32,
+    /// Whether the General MIDI synthesizers have been told the centre, which they are once the pan is after the board and
+    /// until the next seek, so their own pan is not applied on top of the renderer's.
+    synth_centred: bool,
+    /// The pan the plug-in's output is placed by. It trails `pan` by the board's delay, because the output of a frame is
+    /// what entered the plug-in that many frames ago, when the score's pan was what it was then. `pan_seen` is the last
+    /// `pan` it was told of, and `pan_queue` the moves of it that have not reached the output yet, as frames to wait and the
+    /// pan they bring, oldest first.
+    pan_late: [f32; 2],
+    pan_seen: [f32; 2],
+    pan_queue: [(u32, [f32; 2]); PAN_MOVES],
+    pan_queued: usize,
     ranges: [f64; 16],
     rpn_msb: [u8; 16],
     rpn_lsb: [u8; 16],
 }
 impl Track {
+    /// Moves the score's pan before or after the board (see `pan_after`). The synthesizers are given the pan they should
+    /// play with now: the centre while it is applied after the board, the score's own otherwise. Allocates nothing.
+    fn set_pan_after(&mut self, after: bool) {
+        self.pan_after = after;
+        self.sync_synth_pan();
+    }
+    /// What the plug-in's output is multiplied by to place it: the part of the score's pan the voices did not keep.
+    fn pan_after_factors(&self) -> [f32; 2] {
+        pan_post(self.pan_late, self.pan_blend)
+    }
+    /// What a General MIDI synthesizer told the centre is multiplied by, so it plays the pan the voices keep. 1 for a
+    /// synthesizer that pans itself.
+    fn synth_factors(&self) -> [f32; 2] {
+        if self.synth_centred {
+            pan_pre(self.pan, self.pan_blend)
+        } else {
+            [1.0; 2]
+        }
+    }
+    /// Moves `pan_blend` a step (`1 / 10 ms`) toward where `pan_after` says it should be.
+    fn glide_pan(&mut self, step: f32) {
+        let aim = if self.pan_after { 1.0 } else { 0.0 };
+        if self.pan_blend < aim {
+            self.pan_blend = (self.pan_blend + step).min(aim);
+        } else if self.pan_blend > aim {
+            self.pan_blend = (self.pan_blend - step).max(aim);
+        } else {
+            return;
+        }
+        self.sync_synth_pan();
+    }
+    /// Puts `pan_blend` where `pan_after` says it should be at once, and the synthesizers with it.
+    fn settle_pan(&mut self) {
+        self.pan_blend = if self.pan_after { 1.0 } else { 0.0 };
+        if self.synth_centred != self.pan_after {
+            self.synth_centred = self.pan_after;
+            for channel in 0..16 {
+                self.send_pan(channel);
+            }
+        }
+    }
+    /// Lets the pan that places the plug-in's output follow the score's, `delay` frames late (the frames the plug-in's
+    /// pipeline and latency take). Call it once a frame, after the frame's MIDI events.
+    fn step_pan(&mut self, delay: usize) {
+        for (wait, _) in &mut self.pan_queue[..self.pan_queued] {
+            *wait = wait.saturating_sub(1);
+        }
+        if self.pan != self.pan_seen {
+            self.pan_seen = self.pan;
+            if self.pan_queued == PAN_MOVES {
+                // More moves than the queue holds: the oldest takes effect now, a little early.
+                self.pan_late = self.pan_queue[0].1;
+                self.pan_queue.copy_within(1.., 0);
+                self.pan_queued -= 1;
+            }
+            self.pan_queue[self.pan_queued] = (delay.min(u32::MAX as usize) as u32, self.pan);
+            self.pan_queued += 1;
+        }
+        let mut due = 0;
+        while due < self.pan_queued && self.pan_queue[due].0 == 0 {
+            self.pan_late = self.pan_queue[due].1;
+            due += 1;
+        }
+        if due > 0 {
+            self.pan_queue.copy_within(due.., 0);
+            self.pan_queued -= due;
+        }
+    }
+    /// Tells the synthesizers the centre once the pan is after the board. They keep it when the plug-in goes, and the
+    /// renderer goes on placing them by the score's pan (`synth_factors`) until the next seek (`settle_pan`): a synthesizer
+    /// that is handed its pan back moves its voices to it over a block of its own, while a factor outside it moves at once,
+    /// and the two together are heard as a click.
+    fn sync_synth_pan(&mut self) {
+        if !self.synth_centred && (self.pan_after || self.pan_blend > 0.0) {
+            self.synth_centred = true;
+            for channel in 0..16 {
+                self.send_pan(channel);
+            }
+        }
+    }
+    /// Tells the track's synthesizers the pan of `channel`: the score's, or the centre while the pan is after the board.
+    fn send_pan(&mut self, channel: usize) {
+        let value = if self.synth_centred {
+            64
+        } else {
+            self.pan_cc[channel]
+        };
+        if let Some(synths) = &mut self.drum_synths {
+            for synth in synths.iter_mut() {
+                synth.process_midi_message(channel as i32, 0xb0, 10, i32::from(value));
+            }
+        }
+        if let Some(synth) = &mut self.synth {
+            synth.process_midi_message(channel as i32, 0xb0, 10, i32::from(value));
+        }
+    }
     /// Whether a MIDI attack that no plan note owns is a golpe knock: on the percussion channel of a track that is not a
     /// drum track.
     fn is_knock(&self, channel: u8, attack: Option<MidiAttack>) -> bool {
@@ -792,6 +946,15 @@ impl Renderer {
                 kit_rendered: false,
                 percussion: track.percussion,
                 channels: std::array::from_fn(|c| MidiChannel::new(start_programs[c])),
+                pan: [1.0; 2],
+                pan_cc: [64; 16],
+                pan_after: false,
+                pan_blend: 0.0,
+                synth_centred: false,
+                pan_late: [1.0; 2],
+                pan_seen: [1.0; 2],
+                pan_queue: [(0, [1.0; 2]); PAN_MOVES],
+                pan_queued: 0,
                 ranges: [2.0; 16],
                 rpn_msb: [127; 16],
                 rpn_lsb: [127; 16],
@@ -1025,6 +1188,11 @@ impl Renderer {
             .map(|event| track_indices[event.track_id()] as u16)
             .collect();
         let track_count = plan.tracks.len();
+        for (track, channel) in tracks.iter_mut().zip(&mix.channels) {
+            track.pan_after = channel.pan_after;
+            track.pan_blend = if channel.pan_after { 1.0 } else { 0.0 };
+            track.synth_centred = channel.pan_after;
+        }
         let capacity = plan.notes.len().saturating_mul(3).max(8);
         let slots = (0..capacity).map(|_| None).collect();
         let scratch = vec![[0.0; 2]; plan.tracks.len() + 2];
@@ -1335,6 +1503,8 @@ impl Renderer {
                             (angle.cos() * std::f64::consts::SQRT_2) as f32,
                             (angle.sin() * std::f64::consts::SQRT_2) as f32,
                         ];
+                        track.pan = track.channels[c].pan;
+                        track.pan_cc[c] = *value;
                     }
                     64 => track.channels[c].sustain = *value >= 64,
                     _ => {}
@@ -1348,23 +1518,19 @@ impl Renderer {
                 if *controller == 6 && track.rpn_msb[c] == 0 && track.rpn_lsb[c] == 0 {
                     track.ranges[c] = (*value as f64).max(1.0);
                 }
+                // While the pan is after the board the synthesizers play at the centre, whatever the score says.
+                let sent = if *controller == 10 && track.synth_centred {
+                    64
+                } else {
+                    i32::from(*value)
+                };
                 if let Some(synths) = &mut track.drum_synths {
                     for synth in synths.iter_mut() {
-                        synth.process_midi_message(
-                            *channel as i32,
-                            0xb0,
-                            *controller as i32,
-                            *value as i32,
-                        );
+                        synth.process_midi_message(*channel as i32, 0xb0, *controller as i32, sent);
                     }
                 }
                 if let Some(synth) = &mut track.synth {
-                    synth.process_midi_message(
-                        *channel as i32,
-                        0xb0,
-                        *controller as i32,
-                        *value as i32,
-                    );
+                    synth.process_midi_message(*channel as i32, 0xb0, *controller as i32, sent);
                 }
             }
             PlanMidiEvent::Bend { channel, value, .. }
@@ -1466,6 +1632,10 @@ impl Renderer {
                 self.next_midi += 1;
             }
         }
+        let pan_step = 100.0 / self.rate as f32;
+        for track in &mut self.tracks {
+            track.glide_pan(pan_step);
+        }
         let mut index = 0;
         while index < self.active.len() {
             let slot = self.active[index];
@@ -1485,8 +1655,15 @@ impl Renderer {
             } else {
                 pitch_at(&self.plan.notes[voice.note].pitch, tick)
             };
-            let sample = self.tracks[voice.track].channels[voice.channel as usize]
-                .process(voice.voice.next_frame(pitch));
+            let frame = voice.voice.next_frame(pitch);
+            let channel = &self.tracks[voice.track].channels[voice.channel as usize];
+            // A track with an effect plug-in is panned after its board.
+            let blend = self.tracks[voice.track].pan_blend;
+            let sample = if blend == 0.0 {
+                channel.process(frame)
+            } else {
+                channel.process_blended(frame, blend)
+            };
             let out = match voice.drum {
                 Some(drum) => &mut self.kit_scratch[voice.track][drum.element],
                 None => &mut self.scratch[voice.track],
@@ -1535,12 +1712,14 @@ impl Renderer {
                 }
             });
         for (index, track) in self.tracks.iter_mut().enumerate() {
+            // A synthesizer told the centre plays the pan the voices keep (`synth_factors`); one that pans itself, as it is.
+            let synth_pan = track.synth_factors();
             if let Some(synth) = &mut track.synth {
                 let mut left = [0.0];
                 let mut right = [0.0];
                 synth.render(&mut left, &mut right);
-                self.scratch[index][0] += left[0];
-                self.scratch[index][1] += right[0];
+                self.scratch[index][0] += left[0] * synth_pan[0];
+                self.scratch[index][1] += right[0] * synth_pan[1];
             }
             if let Some(synths) = &mut track.drum_synths {
                 // The ramp moves with the clock, struck or not, so a note struck after a change starts at the new level.
@@ -1556,12 +1735,15 @@ impl Renderer {
                         let mut left = [0.0];
                         let mut right = [0.0];
                         synth.render(&mut left, &mut right);
-                        self.scratch[index][0] += left[0] * gain[0];
-                        self.scratch[index][1] += right[0] * gain[1];
+                        self.scratch[index][0] += left[0] * gain[0] * synth_pan[0];
+                        self.scratch[index][1] += right[0] * gain[1] * synth_pan[1];
                     }
                 }
             }
             let channel = &mut self.mix.channels[index];
+            // The score's pan places what the plug-in makes, as it stood when that entered the plug-in.
+            track.step_pan(channel.dsp.plugin_delay());
+            channel.dsp.set_insert_pan(track.pan_after_factors());
             let board = match &context {
                 Some(context) if channel.dsp.has_plugin() => {
                     channel.dsp.process_at(self.scratch[index], context)
@@ -1857,6 +2039,10 @@ impl Renderer {
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
             let start_programs = track.start_programs;
             track.channels = std::array::from_fn(|c| MidiChannel::new(start_programs[c]));
+            track.pan = [1.0; 2];
+            track.pan_cc = [64; 16];
+            // Everything sounding is cut, so the pan has nothing to glide for: it is where the board puts it.
+            track.settle_pan();
             track.drum_used = false;
             track.kit_rendered = false;
             if let Some(synths) = &mut track.drum_synths {
@@ -2183,6 +2369,16 @@ impl Renderer {
         for (new, old) in self.mix.channels.iter_mut().zip(&mut old.mix.channels) {
             new.dsp.continue_plugin_from(&mut old.dsp);
         }
+        // What the old renderer's plug-ins still have in flight was placed by its pan, so the pan carries on from where it
+        // stood, glide and moves held back by the plug-in's delay included.
+        for (new, old) in self.tracks.iter_mut().zip(&old.tracks) {
+            new.pan_blend = old.pan_blend;
+            new.pan_late = old.pan_late;
+            new.pan_seen = old.pan_seen;
+            new.pan_queue = old.pan_queue;
+            new.pan_queued = old.pan_queued;
+            new.sync_synth_pan();
+        }
         // The running instrument comes with the notes the old plan had it hold. The edit may have deleted, moved or
         // re-pitched one of them, whose NoteOff would then never come: the instrument keeps exactly the keys the new
         // plan holds at this tick (those struck before it and not ended), and ends the rest.
@@ -2213,6 +2409,13 @@ impl Renderer {
     /// Attaches an insert to track `track` and updates delay compensation.
     pub fn attach_plugin(&mut self, track: usize, insert: Box<PluginInsert>) {
         self.mix.attach_plugin(track, insert);
+        // Before anything plays, so the pan is where the insert puts it from the first frame.
+        if let (Some(channel), Some(track)) =
+            (self.mix.channels.get(track), self.tracks.get_mut(track))
+        {
+            track.set_pan_after(channel.pan_after);
+            track.settle_pan();
+        }
     }
     /// The tracks whose plug-in insert this renderer's mix refused, and why.
     pub fn plugin_refusals(&self) -> &[(String, InsertError)] {
@@ -2244,6 +2447,11 @@ impl Renderer {
             project_quarters: tick / self.plan.ppq.max(1) as f64,
         };
         for (index, channel) in self.mix.channels.iter_mut().enumerate() {
+            let pan = self.tracks.get_mut(index).map_or([1.0; 2], |track| {
+                track.step_pan(channel.dsp.plugin_delay());
+                track.pan_after_factors()
+            });
+            channel.dsp.set_insert_pan(pan);
             let board = if channel.dsp.has_plugin() {
                 channel.dsp.process_at([0.0; 2], &context)
             } else {
@@ -2410,6 +2618,7 @@ impl Renderer {
         );
         for (track, channel) in self.tracks.iter_mut().zip(&settings.channels) {
             track.kit_active = channel.kit_active;
+            track.set_pan_after(channel.pan_after);
         }
         let d_max = settings.compensation.as_ref().map_or(0, |c| c.d_max()) as u64;
         if let Some(tap) = &mut self.midi {

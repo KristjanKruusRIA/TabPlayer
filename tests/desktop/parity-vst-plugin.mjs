@@ -470,7 +470,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
     await ui.clickWorkstationButton(page, 'Play', { waitForIdle: false });
     await poll(() => invoke('audio_status'), s => s.playing && s.renderedFrames > 2048, 'playing before crash');
 
-    // Trigger crash via parameter 2 (Mode = 1.0 / 8.0 = 0.125 = TestMode::Crash).
+    // Trigger crash via parameter 2 (Mode, over nine steps: 0.125 selects the second, TestMode::Crash).
     // TabPlayer automatically restarts crashed helpers up to MAX_CRASH_RETRIES (3) times per session,
     // so re-trigger crash if relaunched until retries are exhausted and status latches 'crashed'.
     await poll(async () => {
@@ -533,7 +533,7 @@ export async function runVstPluginParity({ buildPath } = {}) {
     const helpersBeforeHang = (await helperRows()).map(row => row.pid);
     assert.ok(helpersBeforeHang.length >= 1, 'a helper runs for the plug-in before the hang');
 
-    // Parameter 2 is Mode; 2.0 / 8.0 = 0.25 selects TestMode::Hang. As with the crash above, TabPlayer restarts a hung
+    // Parameter 2 is Mode, over nine steps; 0.25 selects the third, TestMode::Hang. As with the crash above, TabPlayer restarts a hung
     // helper up to MAX_CRASH_RETRIES (3) times, and a restarted helper is back in Normal mode. Its status can pass through
     // `hung`, `loading` and `ready` between two polls, so the hang is set again on every helper that was not yet given it,
     // found by its process, until the retries are exhausted and the status stays `hung`.

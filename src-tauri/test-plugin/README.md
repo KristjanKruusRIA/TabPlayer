@@ -16,7 +16,7 @@ While any key is held, the output is a square wave with a period of 96 frames (+
 
 Held keys are not cleared by `setProcessing(false)`, `setActive(false)` or a restart. A real plug-in may or may not clear its voices there; this one never does, so only a NoteOff stops a note.
 
-The drum uses the gain class's parameters, state and modes as they are: its signal goes through the same gain, the same exact delay (so a note starts `latency` frames later, and `getLatencySamples` reports it) and the same Normal, Crash, Hang, NaN, Slow, Hang on load, Reject state, Fail process and Fault modes. It has the same editor and the same controller state.
+The drum uses the gain class's parameters, state and modes as they are: its signal goes through the same gain, the same exact delay (so a note starts `latency` frames later, and `getLatencySamples` reports it) and the same Normal, Crash, Hang, NaN, Slow, Hang on load, Reject state, Fail process, Fault and Left only modes. It has the same editor and the same controller state.
 
 The controller's `getState` writes five bytes: the `processMode` the host passed to `setupProcessing` (0 realtime, 1 prefetch, 2 offline), then how many times the component has been activated (`setActive(true)`), as a little-endian `u32`. The component's state is the record described below.
 
@@ -26,7 +26,7 @@ The controller's `getState` writes five bytes: the `processMode` the host passed
 |---|---|---|
 | 0 | Gain | the gain, 0 to 1 (default 1); a state can carry any finite gain |
 | 1 | Latency | frames / 48,000, one step per frame (at most one second) |
-| 2 | Mode | one step per mode: Normal, Crash, Hang, NaN, Slow, Hang on load, Reject state, Fail process, Fault |
+| 2 | Mode | one step per mode: Normal, Crash, Hang, NaN, Slow, Hang on load, Reject state, Fail process, Fault, Left only |
 | 3 | Edits | how many edits the editor has reported, over 1,024 |
 
 Slow takes 50 ms through the parameter. To choose another length, set the state: `Slow { ms }` is part of it.
@@ -41,6 +41,7 @@ Slow takes 50 ms through the parameter. To choose another length, set the state:
 - **Reject state**: `setState` returns `kResultFalse`, and so does a state that carries this mode.
 - **Fail process**: every `process` call returns `kResultFalse` and writes nothing.
 - **Fault**: the next `process` call crashes for real, with an access violation (`0xC0000005` on Windows), so the system's own crash handling runs: Windows Error Reporting, with its dialog switched off by a host that hardened its process. Use it to show that a crash ends a hardened host promptly with the real exception code, rather than raising a dialog or stalling the exit. It does not by itself prove the hardening is the cause, since no test runs the host unhardened; use **Crash** where a test needs the process gone at once.
+- **Left only**: the output is the gain times the left input on both sides, and the right input is never read. A guitar amp simulation with a stereo bus that takes one channel behaves so: it is silent for a signal that is only on the right. Use it to show that what a track's effect plug-in hears is the guitar on both sides, whatever the score pans.
 
 ## State
 

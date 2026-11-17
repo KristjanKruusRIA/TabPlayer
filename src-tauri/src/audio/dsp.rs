@@ -1840,6 +1840,10 @@ pub struct TrackDsp {
     plugin: Option<Box<PluginInsert>>,
     plugin_leaving: Option<Box<PluginInsert>>,
     plugin_fade: u32,
+    /// What the track's score pan leaves to apply to what the plug-in makes (see `set_insert_pan`), and whether the frame in
+    /// hand applied it at the plug-in.
+    insert_pan: [f32; 2],
+    insert_pan_applied: bool,
     /// Whether the leaving insert still runs: while it fades, and, with no insert arriving, until the built-in chain's
     /// input has glided back to the undelayed signal.
     leaving_live: bool,
@@ -1994,6 +1998,8 @@ impl TrackDsp {
             plugin: None,
             plugin_leaving: None,
             plugin_fade: 0,
+            insert_pan: [1.0; 2],
+            insert_pan_applied: false,
             leaving_live: false,
             leaving_held: [0.0; 2],
             leaving_scale: 1.0,
@@ -2467,6 +2473,13 @@ impl TrackDsp {
         insert.flush();
         self.plugin = Some(insert);
     }
+    /// Sets what the score's pan leaves to apply to what the plug-in makes: a factor for each side, which multiplies the
+    /// plug-in's output (or the built-in Drive, Amp and Cabinet standing in for it) before the stages after it, so they
+    /// and the second pedalboard hear the guitar as the pan places it. With no plug-in on the board, or at 1, it does
+    /// nothing; a board that has none at the point applies it to what the board makes. Allocates nothing.
+    pub fn set_insert_pan(&mut self, pan: [f32; 2]) {
+        self.insert_pan = pan;
+    }
     /// How far the track's output trails its input because of its plug-in: `D`, or 0 without one.
     pub fn plugin_delay(&self) -> usize {
         self.plugin
@@ -2616,7 +2629,11 @@ impl TrackDsp {
     /// `process` with the renderer's whole context for the frame, which a plug-in insert sends on to its plug-in. The
     /// board itself uses only the tempo, so without a plug-in both give the same samples.
     pub fn process_at(&mut self, input: [f32; 2], ctx: &FrameContext) -> [f32; 2] {
-        let y = self.process_board(input, ctx);
+        let mut y = self.process_board(input, ctx);
+        // A pan that was not applied at a plug-in (one on its way out has gone) is applied to what the board made.
+        if !self.insert_pan_applied && self.insert_pan != [1.0; 2] {
+            y = std::array::from_fn(|c| y[c] * self.insert_pan[c]);
+        }
         let Some(second) = &mut self.second else {
             return y;
         };
@@ -2692,6 +2709,8 @@ impl TrackDsp {
             }
         }
         let mut built_in_live = self.built_in_live;
+        let insert_pan = self.insert_pan;
+        let mut insert_pan_applied = false;
         let fresh = !inserted && !built_in_live;
         // Drive, Amp and Cabinet, as closures over their own state: they play in place, or behind a plug-in insert as
         // its built-in stand-in. `fresh` starts a stage from rest, after it stood still behind a plug-in.
@@ -3395,6 +3414,11 @@ impl TrackDsp {
                         if !ran {
                             built_in_live = false;
                         }
+                        // The score's pan places what the plug-in made, or its stand-in, before the stages after it.
+                        if insert_pan != [1.0; 2] {
+                            x = std::array::from_fn(|c| x[c] * insert_pan[c]);
+                        }
+                        insert_pan_applied = true;
                     }
                 }
                 Stage::Drive => x = drive(x, fresh),
@@ -3807,6 +3831,7 @@ impl TrackDsp {
             }
         }
         self.built_in_live = !inserted || built_in_live;
+        self.insert_pan_applied = insert_pan_applied;
         if let Some(gain) = duck {
             x = x.map(|v| v * gain);
         }

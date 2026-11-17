@@ -122,8 +122,8 @@ pub const PARAM_EDITS: u32 = 3;
 /// The number of parameters.
 pub const PARAM_COUNT: u32 = 4;
 
-/// The number of steps of the mode parameter: nine modes, so eight steps.
-const MODE_STEPS: u32 = 8;
+/// The number of steps of the mode parameter: ten modes, so nine steps.
+const MODE_STEPS: u32 = 9;
 
 /// How much state a `setState` reads before giving up on the stream. The helper's cap is 8 MiB; this leaves room for
 /// the oversize tests and bounds a stream that never ends.
@@ -176,6 +176,10 @@ pub enum TestMode {
     /// The next `process` call crashes for real, with an access violation, so the system's own crash handling (Windows
     /// Error Reporting included) runs. [`TestMode::Crash`] skips that handling to end the process at once.
     Fault,
+    /// The output is the gain times the LEFT input on both sides, and the right input is never read: a guitar amplifier
+    /// simulation with a stereo bus that takes one channel is silent for a signal that is only on the right (several
+    /// commercial ones do).
+    LeftOnly,
 }
 
 impl TestMode {
@@ -191,6 +195,7 @@ impl TestMode {
             TestMode::RejectState => 6,
             TestMode::FailProcess => 7,
             TestMode::Fault => 8,
+            TestMode::LeftOnly => 9,
         }
     }
 
@@ -205,6 +210,7 @@ impl TestMode {
             TestMode::RejectState => "Reject state",
             TestMode::FailProcess => "Fail process",
             TestMode::Fault => "Fault",
+            TestMode::LeftOnly => "Left only",
         }
     }
 
@@ -224,6 +230,7 @@ impl TestMode {
             5 => TestMode::HangOnLoad,
             6 => TestMode::RejectState,
             7 => TestMode::FailProcess,
+            9 => TestMode::LeftOnly,
             _ => TestMode::Fault,
         }
     }
@@ -273,6 +280,7 @@ pub fn encode_test_state(state: &TestState) -> Vec<u8> {
         TestMode::RejectState => (6, 0),
         TestMode::FailProcess => (7, 0),
         TestMode::Fault => (8, 0),
+        TestMode::LeftOnly => (9, 0),
     };
     let mut out = Vec::with_capacity(STATE_BASE_LEN + state.padding as usize);
     out.extend_from_slice(&STATE_MAGIC);
@@ -317,6 +325,7 @@ pub fn decode_test_state(bytes: &[u8]) -> Option<TestState> {
         6 => TestMode::RejectState,
         7 => TestMode::FailProcess,
         8 => TestMode::Fault,
+        9 => TestMode::LeftOnly,
         _ => return None,
     };
     let tail = &bytes[STATE_BASE_LEN..];
@@ -363,8 +372,8 @@ impl Default for DelayLine {
 }
 
 /// Runs the plug-in over one block: the output is the input times `state.gain`, delayed by exactly `state.latency` frames.
-/// In `Nan` mode every output sample is NaN instead. `input` and `output` should be the same length; if they differ, the
-/// shorter one decides. The faults of the other modes are not here: they belong to the COM layer, so this stays pure.
+/// In `Nan` mode every output sample is NaN instead, and in `LeftOnly` mode both outputs are the delayed left input times the
+/// gain. `input` and `output` should be the same length; if they differ, the shorter one decides. The faults of the other modes are not here: they belong to the COM layer, so this stays pure.
 pub fn process_block(
     state: &TestState,
     delay: &mut DelayLine,
@@ -377,10 +386,10 @@ pub fn process_block(
         delay.frames[delay.write] = *frame;
         let read = (delay.write + capacity - latency) % capacity;
         let delayed = delay.frames[read];
-        *out = if state.mode == TestMode::Nan {
-            [f32::NAN; 2]
-        } else {
-            [delayed[0] * state.gain, delayed[1] * state.gain]
+        *out = match state.mode {
+            TestMode::Nan => [f32::NAN; 2],
+            TestMode::LeftOnly => [delayed[0] * state.gain; 2],
+            _ => [delayed[0] * state.gain, delayed[1] * state.gain],
         };
         delay.write = (delay.write + 1) % capacity;
     }
@@ -1751,6 +1760,7 @@ mod tests {
             TestMode::RejectState,
             TestMode::FailProcess,
             TestMode::Fault,
+            TestMode::LeftOnly,
         ] {
             let state = TestState {
                 mode,
@@ -1780,7 +1790,7 @@ mod tests {
         bad[4] = 2;
         assert_eq!(decode_test_state(&bad), None, "version");
         let mut bad = good.clone();
-        bad[14] = 9;
+        bad[14] = 10;
         assert_eq!(decode_test_state(&bad), None, "mode tag");
         let mut bad = good.clone();
         bad[6..10].copy_from_slice(&f32::NAN.to_le_bytes());
@@ -1880,6 +1890,23 @@ mod tests {
     }
 
     #[test]
+    fn left_only_plays_the_left_input_on_both_sides_and_is_silent_for_the_right() {
+        let state = TestState {
+            gain: 0.5,
+            mode: TestMode::LeftOnly,
+            ..TestState::default()
+        };
+        let mut out = [[9.0; 2]; 3];
+        process_block(
+            &state,
+            &mut DelayLine::new(),
+            &[[1.0, 0.0], [0.0, 1.0], [0.5, -0.5]],
+            &mut out,
+        );
+        assert_eq!(out, [[0.5, 0.5], [0.0, 0.0], [0.25, 0.25]]);
+    }
+
+    #[test]
     fn clear_forgets_the_delayed_audio() {
         let state = TestState {
             latency: 4,
@@ -1938,7 +1965,7 @@ mod tests {
             PARAM_LATENCY,
             480.0 / f64::from(MAX_LATENCY)
         ));
-        assert!(apply_parameter(&mut state, PARAM_MODE, 3.0 / 8.0));
+        assert!(apply_parameter(&mut state, PARAM_MODE, 3.0 / 9.0));
         assert!(apply_parameter(
             &mut state,
             PARAM_EDITS,
@@ -1987,14 +2014,15 @@ mod tests {
             "Reject state",
             "Fail process",
             "Fault",
+            "Left only",
         ]
         .iter()
         .enumerate()
         {
-            apply_parameter(&mut state, PARAM_MODE, step as f64 / 8.0);
+            apply_parameter(&mut state, PARAM_MODE, step as f64 / 9.0);
             assert_eq!(state.mode.index(), step as u32);
             assert_eq!(
-                parameter_to_string(PARAM_MODE, step as f64 / 8.0).as_deref(),
+                parameter_to_string(PARAM_MODE, step as f64 / 9.0).as_deref(),
                 Some(*name)
             );
         }
@@ -2008,7 +2036,7 @@ mod tests {
             mode: TestMode::Slow { ms: 200 },
             ..TestState::default()
         };
-        apply_parameter(&mut slow, PARAM_MODE, 4.0 / 8.0);
+        apply_parameter(&mut slow, PARAM_MODE, 4.0 / 9.0);
         assert_eq!(slow.mode, TestMode::Slow { ms: 200 });
     }
 
@@ -2030,7 +2058,7 @@ mod tests {
         for (id, text, normalized) in [
             (PARAM_GAIN, "0.50", 0.5),
             (PARAM_LATENCY, "480 frames", 480.0 / f64::from(MAX_LATENCY)),
-            (PARAM_MODE, "nan", 3.0 / 8.0),
+            (PARAM_MODE, "nan", 3.0 / 9.0),
             (PARAM_EDITS, "512", 0.5),
         ] {
             assert_eq!(parameter_from_string(id, text), Some(normalized), "{text}");
@@ -2830,7 +2858,7 @@ mod com_tests {
         assert_eq!(decode_test_state(&rig.get_state()), Some(good));
 
         // A plug-in set to the mode by its parameter refuses everything until the mode is taken off.
-        rig.set_param(PARAM_MODE, 6.0 / 8.0);
+        rig.set_param(PARAM_MODE, 6.0 / 9.0);
         assert_eq!(rig.set_state(&good), kResultFalse);
         rig.set_param(PARAM_MODE, 0.0);
         assert_eq!(rig.set_state(&good), kResultOk);
@@ -2983,10 +3011,10 @@ mod com_tests {
     fn the_parameters_read_back_what_was_set() {
         let rig = Rig::new();
         rig.set_param(PARAM_GAIN, 0.5);
-        rig.set_param(PARAM_MODE, 3.0 / 8.0);
+        rig.set_param(PARAM_MODE, 3.0 / 9.0);
         unsafe {
             assert_eq!(rig.controller.getParamNormalized(PARAM_GAIN), 0.5);
-            assert_eq!(rig.controller.getParamNormalized(PARAM_MODE), 3.0 / 8.0);
+            assert_eq!(rig.controller.getParamNormalized(PARAM_MODE), 3.0 / 9.0);
             assert_eq!(
                 rig.controller.setParamNormalized(PARAM_COUNT, 0.5),
                 kInvalidArgument

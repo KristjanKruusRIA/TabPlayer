@@ -273,10 +273,27 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     const value=current.current,projection=value.projection,pair=projection?.notes.get(note.id),source=projection?(projection.renderedNotes?projection.renderedNotes.get(note)??null:pair?.rendered===note?pair.source:null):note;
     return source&&canonicalBeat(note.beat)&&source.beat.voice.bar.staff.track.score===value.score?source:null;
   };
+  /**
+   * A drum track shown as standard notation and tablature draws each source note twice. The marker and the caret sit on the staff the user last clicked on that
+   * track (the percussion staff until the tab is clicked); where only the tab is drawn, `rendered` is the tab and there is no choice.
+   */
+  const drumTabClicked=useRef(new Set<number>());
+  const onDrumTab=(beat:model.Beat)=>drumTabClicked.current.has(beat.voice.bar.staff.track.index);
   const renderedBeat=(beat:model.Beat)=>{
     const value=current.current,pair=value.projection?.beats.get(beat.id);
-    return value.projection?(pair?.source===beat?pair.rendered:null):beat;
+    return value.projection?(pair?.source===beat?(pair.tab&&onDrumTab(beat)?pair.tab:pair.rendered):null):beat;
   };
+  /** Remembers which staff of a track's drum tab pair the user pressed, a rendered beat of `source`; true when that moved the marker to the other staff. */
+  const chooseDrumStaff=(drawn:model.Beat,source:model.Beat)=>{
+    const tab=current.current.projection?.beats.get(source.id)?.tab;
+    if(!tab)return false;
+    const track=source.voice.bar.staff.track.index,wasTab=drumTabClicked.current.has(track),isTab=tab===drawn;
+    if(wasTab===isTab)return false;
+    if(isTab)drumTabClicked.current.add(track);else drumTabClicked.current.delete(track);
+    return true;
+  };
+  /** The marker and the caret follow a change of staff at once, without waiting for a selection that may not change. */
+  const restage=()=>{queueMicrotask(()=>{refresh.current();refreshCaret.current();});};
   /** The rendered track of the selected track, or null when it is not one of the drawn tracks (the playback scroll then keeps following the system). */
   const selectedRenderedTrack=()=>{
     const value=current.current,source=value.tracks.includes(value.track)?value.score.tracks[value.track]?.staves[0]?.bars[0]?.voices[0]?.beats[0]:null,beat=source?renderedBeat(source):null;
@@ -284,7 +301,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   };
   const renderedNote=(note:model.Note)=>{
     const value=current.current,pair=value.projection?.notes.get(note.id);
-    return value.projection?(pair?.source===note?pair.rendered:null):note;
+    return value.projection?(pair?.source===note?(pair.tab&&onDrumTab(note.beat)?pair.tab:pair.rendered):null):note;
   };
   const clearHighlight=(view:AlphaTabApi)=>{
     const value=current.current,source=value.score.tracks[value.tracks.includes(value.track)?value.track:value.tracks[0]]?.staves[0]?.bars[0]?.voices[0]?.beats[0],first=source?renderedBeat(source):null;
@@ -474,6 +491,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     };
     const downBeat=(beat:model.Beat)=>{
       const source=canonicalBeat(beat);if(!source)return;
+      if(chooseDrumStaff(beat,source))restage();
       const point=address(source);current.current.onSelect(point,undefined,undefined);if(!current.current.onEditorSelection)return;
       if(modifiers.current.detail===3){anchor.current=point;drag.current=null;publish(selectionForTrack(current.current.score,point.track));return;}
       if(modifiers.current.toggle)return;
@@ -485,6 +503,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     };
     const downNote=(note:model.Note)=>{
       const source=canonicalNote(note);if(!source)return;
+      const owner=canonicalBeat(note.beat);if(owner&&chooseDrumStaff(note.beat,owner))restage();
       const point=address(source.beat);current.current.onSelect(point,source.string,source.index);
       if(!current.current.onEditorSelection||!modifiers.current.toggle||modifiers.current.detail===3)return;
       let notes:model.Note[]=[];try{if(current.current.editorSelection)notes=resolveSelectionNotes(current.current.score,current.current.editorSelection);}catch{ /* A replaced document can invalidate an old indexed selection. */ }

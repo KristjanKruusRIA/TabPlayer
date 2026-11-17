@@ -1,7 +1,7 @@
 import { useEffect,useMemo,useState } from 'react';
 import { type model,Settings } from '@coderline/alphatab';
 import type { EngravingCommand,EngravingOverrides,InheritBool,TrackProfile } from './types';
-import { defaultEngraving,validateEngravingTracks } from './projection';
+import { defaultEngraving,isDrumTrack,tablatureAllowed,validateEngravingTracks } from './projection';
 import { StylePresetsPanel } from './StylePresetsPanel';
 import { TypographyFields } from './TypographyFields';
 import type { FontStatus } from './FontRolesFields';
@@ -111,8 +111,9 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit,fontStatus=null
       {score.tracks.map((track,index)=>{
         const id=trackIds[index],profile=draft.profiles.find(entry=>entry.trackId===id)?.profile??'source';
         return <fieldset key={id}><legend>{track.name}</legend><label>{t('engraving.track_profile_label',{name:track.name})}<select value={profile} onChange={e=>{const next=e.target.value as TrackProfile;setDraft({...draft,profiles:[...draft.profiles.filter(entry=>entry.trackId!==id),...next==='source'?[]:[{trackId:id,profile:next}]]});setError(null);}}>
-          {profileOptions.map(([key,msgKey])=><option key={key} value={key} disabled={key==='tablature'?track.staves.some(staff=>!staff.tuning.length||staff.isPercussion):key==='numbered'&&track.staves.some(staff=>staff.isPercussion)}>{t(msgKey)}</option>)}
+          {profileOptions.map(([key,msgKey])=><option key={key} value={key} disabled={key==='tablature'?!tablatureAllowed(track):key==='numbered'&&track.staves.some(staff=>staff.isPercussion)}>{t(msgKey)}</option>)}
         </select></label>
+          {isDrumTrack(track)&&(profile==='tablature'||profile==='standardTab')&&<p>{t('engraving.drum_tab_hint')}</p>}
           {track.staves.map((staff,si)=><p key={si}>{t('engraving.source_staff_summary',{index:si+1,modes:[[staff.showStandardNotation,'engraving.staff_mode_standard'],[staff.showTablature,'engraving.staff_mode_tablature'],[staff.showSlash,'engraving.staff_mode_slash'],[staff.showNumbered,'engraving.staff_mode_numbered']].filter(([shown])=>shown).map(([,name])=>t(name as MessageKey)).join(', ')||t('engraving.source_staff_hidden')})}</p>)}
         </fieldset>;
       })}

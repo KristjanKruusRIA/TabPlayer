@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {withSystemGaps} from './engraving/system-gaps';
+import { defaultEngraving } from './engraving/projection';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act,cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { forgetSessionPanelSizes } from './workstation/panel-sizes';
@@ -2748,6 +2749,24 @@ describe('GP8 edit and cursor keys',()=>{
     const c=await setup(withNotes());
     press({key:'5',ctrlKey:true});press({key:'5',altKey:true});press({key:'5',metaKey:true});await quiet();
     expect(edits(c)).toHaveLength(2);
+  });
+  it('digits typed on a drum track shown as drum tab write no fret: the display copy is never edited, the notice says so, and nothing is recorded',async()=>{
+    const base={...blankProject(),edits:[{type:'addPercussionTrack',name:'Kit',program:0},{type:'addPercussionNote',target:{track:1,staff:0,bar:0,voice:0,beat:0},articulation:36}] as EditCommand[]};
+    const id=trackIdentity(buildScore(base).tracks[1]);
+    for(const profile of ['tablature','standardTab'] as const){
+      const drums=await setup({...base,edits:[...base.edits,{type:'setEngraving',engraving:{...defaultEngraving(),profiles:[{trackId:id,profile}]}} as EditCommand]});
+      fireEvent.click(screen.getByRole('button',{name:'Select track Kit'}));
+      await waitFor(()=>expect(cursor()).toBeTruthy());await quiet();
+      const shown=(engravingView.mock.lastCall![0] as {projection:{score:{tracks:{staves:{isPercussion:boolean}[]}[]}}}).projection.score.tracks[1].staves;
+      expect(shown.map(staff=>staff.isPercussion)).toEqual(profile==='tablature'?[false]:[true,false]);
+      const before=edits(drums).length;
+      press({key:'5'});
+      expect(await screen.findByText('Fret numbers can only be typed on a staff with strings.')).toBeInTheDocument();
+      await quiet();expect(edits(drums)).toHaveLength(before);
+      expect(drums.getState().score.tracks[1].staves[0].isPercussion).toBe(true);
+      expect(drums.getState().score.tracks[1].staves[0].bars[0].voices[0].beats[0].notes.map(note=>note.percussionArticulation)).toEqual([36]);
+      cleanup();
+    }
   });
   it('says why a digit cannot write: no strings on the staff, and a refused write',async()=>{
     const drums=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Kit',program:0}] as EditCommand[]});

@@ -1,7 +1,7 @@
 import type { model } from '@coderline/alphatab';
 import { editCopyInPlace,scoreLineage,undoCopyInPlace } from '../engine';
 import { sameData } from '../same-data';
-import { mapProjection,type EngravingProjection } from './projection';
+import { drumTabModes,mapProjection,type EngravingProjection } from './projection';
 import type { EngravingOverrides } from './types';
 
 /** What a projection was made from, kept so that the next one can follow it. */
@@ -12,6 +12,10 @@ export interface ProjectionBasis {source:model.Score;ids:readonly string[];value
  * A score edited in place records the edit and the track it changed; the rendered copy takes the same edit, in place, and its
  * maps are built again. This is the projection `projectEngraving` gives (a test compares them), without serializing the whole score.
  * On a refusal the basis is no longer usable (its copy may be half edited), so the caller makes a whole new projection.
+ *
+ * A track shown as drum tab is never followed. Its rendered staff is not the source staff (the tab holds only the hits it could write, on lines of its own,
+ * and in 'both' mode has fresh ids), so an edit to the track cannot be repeated on it: the caller projects the whole score again. Edits to other tracks are followed,
+ * and the drum tab's conversion report carries over, since those tracks and their ids are unchanged.
  */
 /** The projection already made for a score from a basis, so that React running the same render twice (or a render that was thrown away) edits the rendered copy once. */
 interface Followed {source:model.Score;basis:model.Score;ids:readonly string[];value:EngravingOverrides;projection:EngravingProjection}
@@ -28,6 +32,8 @@ export function followProjection(basis:ProjectionBasis,source:model.Score,ids:re
     edits.unshift(step);at=step.previous;
   }
   if(!edits.length||!sameData(ids,basis.ids)||!(value===basis.value||sameData(value,basis.value)))return null;
+  const drumTracks=drumTabModes(source,ids,value);
+  if(edits.some(step=>drumTracks.has(step!.track)))return null;
   try {
     let score=basis.projection.score;
     for(const step of edits){
@@ -36,7 +42,7 @@ export function followProjection(basis:ProjectionBasis,source:model.Score,ids:re
       if(!next)return null;
       score=next;
     }
-    const projection={...mapProjection(source,score,ids,value),score,bracketMode:basis.projection.bracketMode};
+    const projection={...mapProjection(source,score,ids,value,basis.projection.drumTab),score,bracketMode:basis.projection.bracketMode};
     followed.push({source,basis:basis.source,ids,value,projection});if(followed.length>FOLLOWED_KEPT)followed.shift();
     return projection;
   } catch {return null;}

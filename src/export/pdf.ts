@@ -3,7 +3,7 @@ import '../tremolo-guard';
 import { validateSelection, type ExportSelection, type PrintLayout, type SvgPage, type SvgSystem } from './types';
 import { selectStaves } from './selection';
 import { prepareScoreTimers } from '../editor/timers';
-import { configureEngraving,projectEngraving,type EngravingProjection } from '../engraving/projection';
+import { configureEngraving,isDrumTrack,projectEngraving,type EngravingProjection } from '../engraving/projection';
 import { applyEffectBandSpacing } from '../engraving/effect-bands';
 import { accoladeMetrics,configureAccolades,planAccolades } from '../engraving/accolades';
 import { composeEngravedSystems } from '../engraving/staff-layout';
@@ -95,9 +95,15 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
     copy.tracks.forEach((track,ti)=>track.staves.forEach((staff,si)=>{const source=score.tracks[ti].staves[selection.staves?.[ti]?.[si]??si];staff.showStandardNotation=source.showStandardNotation;staff.showTablature=source.showTablature;staff.showSlash=source.showSlash;staff.showNumbered=source.showNumbered;}));
     if(frozen.page.profile!=='document'){
       const profile=frozen.page.profile==='Score'?'standard':frozen.page.profile==='Tab'?'tablature':'standardTab';
-      const selected=new Set(selection.tracks.map(index=>frozen.trackIds[index]));
+      const selected=new Set(selection.tracks.map(index=>frozen.trackIds[index])),own=new Map(frozen.engraving.profiles.map(entry=>[entry.trackId,entry.profile]));
       frozen.engraving.profiles=frozen.engraving.profiles.filter(entry=>!selected.has(entry.trackId));
-      frozen.engraving.profiles.push(...[...selected].map(trackId=>({trackId,profile:profile as 'standard'|'tablature'|'standardTab'})));
+      // A drum track has no tab unless its own profile asks for one: the default "Score and tab" page profile prints the drums as they were printed before drum tab existed, while "Tab" gives them drum tab.
+      const forTrack=(trackId:string)=>{
+        const track=copy.tracks[frozen.trackIds.indexOf(trackId)];
+        if(profile!=='standardTab'||!track||!isDrumTrack(track))return profile;
+        const kept=own.get(trackId);return kept==='tablature'||kept==='standardTab'?'standardTab':'standard';
+      };
+      frozen.engraving.profiles.push(...[...selected].map(trackId=>({trackId,profile:forTrack(trackId) as 'standard'|'tablature'|'standardTab'})));
     }
     projection=projectEngraving(copy,frozen.trackIds,frozen.engraving);copy=projection.score;
   }

@@ -89,7 +89,7 @@ const accoladeOverlay=(plan:AccoladePlan,metrics:AccoladeMetrics,systems:readonl
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,autoFit=false,onAutoFit,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
+export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,documentEpoch=0,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,autoFit=false,onAutoFit,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -98,6 +98,8 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   projection?:EngravingProjection;visibleTracks?:number[];engraving?:EngravingOverrides;
   /** The document's track identities, in track order. With `projection` they let staff groups and staff gaps be drawn; without either, neither is. */
   trackIds?:readonly string[];
+  /** Changes when another document is opened; what a document remembered about the staff the user clicked is then dropped. */
+  documentEpoch?:number;
   display?:ScoreDisplayPreferences;page?:PageLayout;onDisplayStatus?:(status:{zoomPercent:number;fitLimited:boolean;pageError:string|null})=>void;
   /** Nothing chose a zoom for this score (no saved default, no choice of its own): a page layout wider than the score area then fits its width, and `onAutoFit` says whether it does. Not part of the display preferences, so it is never saved. */
   autoFit?:boolean;onAutoFit?:(active:boolean)=>void;
@@ -254,7 +256,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     if(display.layout==='horizontalScreen'&&fitMode!=='manual'&&host&&(prev.mode==='manual'||prev.layout!==display.layout))host.scrollLeft=0;
     prevFit.current={mode:fitMode,layout:display.layout};
   },[fitMode,display.layout]);
-  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop};
+  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop,trackIds});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors,loop,trackIds};
   const modifiers=useRef({shift:false,toggle:false,detail:0}),pressPoint=useRef<{x:number;y:number}|null>(null),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null),published=useRef<MusicSelection|null>(null);
   const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
@@ -273,10 +275,32 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     const value=current.current,projection=value.projection,pair=projection?.notes.get(note.id),source=projection?(projection.renderedNotes?projection.renderedNotes.get(note)??null:pair?.rendered===note?pair.source:null):note;
     return source&&canonicalBeat(note.beat)&&source.beat.voice.bar.staff.track.score===value.score?source:null;
   };
+  /**
+   * A drum track shown as standard notation and tablature draws each source note twice. The marker and the caret sit on the staff the user last clicked on that
+   * track (the percussion staff until the tab is clicked); where only the tab is drawn, `rendered` is the tab and there is no choice.
+   */
+  const drumTabClicked=useRef(new Set<string>()),clickedEpoch=useRef(documentEpoch);
+  // Keyed by the track's identity, not its place, so removing or moving a track never hands its choice to another one; a new document starts with none.
+  const drumTabKey=(trackIndex:number)=>current.current.trackIds?.[trackIndex]??`#${trackIndex}`;
+  if(clickedEpoch.current!==documentEpoch){clickedEpoch.current=documentEpoch;drumTabClicked.current.clear();}
+  const onDrumTab=(beat:model.Beat)=>drumTabClicked.current.has(drumTabKey(beat.voice.bar.staff.track.index));
   const renderedBeat=(beat:model.Beat)=>{
     const value=current.current,pair=value.projection?.beats.get(beat.id);
-    return value.projection?(pair?.source===beat?pair.rendered:null):beat;
+    return value.projection?(pair?.source===beat?(pair.tab&&onDrumTab(beat)?pair.tab:pair.rendered):null):beat;
   };
+  /** Remembers which staff of a track's drum tab pair the user pressed, a rendered beat of `source`; true when that moved the marker to the other staff. */
+  const chooseDrumStaff=(drawn:model.Beat,source:model.Beat)=>{
+    const tab=current.current.projection?.beats.get(source.id)?.tab;
+    if(!tab)return false;
+    const track=drumTabKey(source.voice.bar.staff.track.index),wasTab=drumTabClicked.current.has(track),isTab=tab===drawn;
+    if(wasTab===isTab)return false;
+    if(isTab)drumTabClicked.current.add(track);else drumTabClicked.current.delete(track);
+    return true;
+  };
+  /** The marker and the caret follow a change of staff at once, without waiting for a selection that may not change. */
+  const restage=()=>{queueMicrotask(()=>{refresh.current();refreshCaret.current();});};
+  // A new document, or tracks that changed identity, forget which staff was clicked: the marker and the caret move at once.
+  useEffect(()=>{restage();},[documentEpoch,idsKey]);
   /** The rendered track of the selected track, or null when it is not one of the drawn tracks (the playback scroll then keeps following the system). */
   const selectedRenderedTrack=()=>{
     const value=current.current,source=value.tracks.includes(value.track)?value.score.tracks[value.track]?.staves[0]?.bars[0]?.voices[0]?.beats[0]:null,beat=source?renderedBeat(source):null;
@@ -284,7 +308,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   };
   const renderedNote=(note:model.Note)=>{
     const value=current.current,pair=value.projection?.notes.get(note.id);
-    return value.projection?(pair?.source===note?pair.rendered:null):note;
+    return value.projection?(pair?.source===note?(pair.tab&&onDrumTab(note.beat)?pair.tab:pair.rendered):null):note;
   };
   const clearHighlight=(view:AlphaTabApi)=>{
     const value=current.current,source=value.score.tracks[value.tracks.includes(value.track)?value.track:value.tracks[0]]?.staves[0]?.bars[0]?.voices[0]?.beats[0],first=source?renderedBeat(source):null;
@@ -474,6 +498,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     };
     const downBeat=(beat:model.Beat)=>{
       const source=canonicalBeat(beat);if(!source)return;
+      if(chooseDrumStaff(beat,source))restage();
       const point=address(source);current.current.onSelect(point,undefined,undefined);if(!current.current.onEditorSelection)return;
       if(modifiers.current.detail===3){anchor.current=point;drag.current=null;publish(selectionForTrack(current.current.score,point.track));return;}
       if(modifiers.current.toggle)return;
@@ -485,6 +510,7 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     };
     const downNote=(note:model.Note)=>{
       const source=canonicalNote(note);if(!source)return;
+      const owner=canonicalBeat(note.beat);if(owner&&chooseDrumStaff(note.beat,owner))restage();
       const point=address(source.beat);current.current.onSelect(point,source.string,source.index);
       if(!current.current.onEditorSelection||!modifiers.current.toggle||modifiers.current.detail===3)return;
       let notes:model.Note[]=[];try{if(current.current.editorSelection)notes=resolveSelectionNotes(current.current.score,current.current.editorSelection);}catch{ /* A replaced document can invalidate an old indexed selection. */ }

@@ -62,3 +62,7 @@
 .add-track-body fieldset { min-width:0; }
 .add-track-body .pair { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
 .add-track-body h3 { margin:2px 0 6px; padding-top:10px; border-top:1px solid var(--tp-line-subtle); }
+.track-sr-only { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip-path:inset(50%); white-space:nowrap; border:0; }
+.notation-note { margin:4px 0 0; color:var(--ws-muted); font-size:12px; }
+/* A pressed notation toggle keeps its accent fill under the pointer: the generic button hover above would turn it dark and leave its dark ink unreadable. */
+.track-settings .notation-toggle[aria-pressed=true]:hover:not(:disabled) { background:var(--ws-accent); color:var(--ws-accent-ink); border-color:var(--ws-accent); }

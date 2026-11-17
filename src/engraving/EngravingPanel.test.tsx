@@ -41,6 +41,19 @@ it('reset_emits_source_defaults_once_and_applied_value_or_document_resets_drafts
   fireEvent.change(screen.getByLabelText('System spacing (%)'),{target:{value:'200'}});view.rerender(<EngravingPanel {...props} score={music()}/>);expect(screen.getByLabelText('System spacing (%)')).toHaveValue(null);expect(commands).toHaveLength(2);
 });
 
+it('a drum track offers tablature and standard + tablature, says what drum tab writes, and applies the profile as one command',()=>{
+  const score=music(),drums=scoreFromJson(model.JsonConverter.scoreToJson(music()),new Settings()).tracks[0];drums.name='Drums';drums.staves[0].isPercussion=true;drums.staves[0].stringTuning.tunings=[];score.addTrack(drums);score.finish(new Settings());
+  const commands:Edit[]=[],props={score,trackIds:['g','d'],busy:false,onEdit:(edit:Edit)=>commands.push(edit)},view=render(<EngravingPanel {...props} value={defaultEngraving()}/>);
+  const profile=screen.getByLabelText('Drums notation profile');
+  expect(within(profile).getByRole('option',{name:'Tablature'})).toBeEnabled();expect(within(profile).getByRole('option',{name:'Standard + tablature'})).toBeEnabled();expect(within(profile).getByRole('option',{name:'Numbered'})).toBeDisabled();
+  expect(screen.queryByText(/Drum tab writes each hit/)).toBeNull();
+  fireEvent.change(profile,{target:{value:'tablature'}});expect(screen.getByText(/Drum tab writes each hit/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:{...sourceDefaults,profiles:[{trackId:'d',profile:'tablature'}]}}]);
+  // The guitar's own track keeps refusing nothing new: its tablature stays enabled.
+  expect(within(screen.getByLabelText('Guitar notation profile')).getByRole('option',{name:'Tablature'})).toBeEnabled();
+  view.unmount();
+});
 it('invalid_spacing_does_not_dispatch_and_profiles_offer_only_applicable_choices',()=>{
   const score=music(),piano=scoreFromJson(model.JsonConverter.scoreToJson(music()),new Settings()).tracks[0];piano.name='Piano';piano.staves[0].stringTuning.tunings=[];score.addTrack(piano);
   const drums=scoreFromJson(model.JsonConverter.scoreToJson(music()),new Settings()).tracks[0];drums.name='Drums';drums.staves[0].isPercussion=true;score.addTrack(drums);score.finish(new Settings());

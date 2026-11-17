@@ -548,6 +548,44 @@ fn a_kit_element_in_a_plan_is_one_of_the_six_and_is_left_out_when_absent() {
     assert!(serde_json::from_value::<PlaybackPlan>(unknown).is_err());
 }
 
+#[test]
+fn an_articulation_id_in_a_plan_is_optional_a_standard_one_and_left_out_when_absent() {
+    let mut midi = hit(38, 0, 960, None);
+    for event in &mut midi {
+        event["articulationId"] = 91.into();
+    }
+    let named = plan_of(serde_json::Value::Array(midi.clone()));
+    named.validate().unwrap();
+    let text = serde_json::to_string(&*named).unwrap();
+    assert_eq!(text.matches("\"articulationId\":91").count(), 2);
+    // A plan without the field reads, and writes exactly the bytes it was read from.
+    let plain_text = serde_json::to_string(&*drum_plan()).unwrap();
+    assert!(!plain_text.contains("articulationId"));
+    let reread: PlaybackPlan = serde_json::from_str(&plain_text).unwrap();
+    assert_eq!(serde_json::to_string(&reread).unwrap(), plain_text);
+    // An id that is no standard articulation refuses the plan, on either event.
+    for bad in [0u64, 32, 88, 255] {
+        for index in 0..2 {
+            let mut midi = hit(38, 0, 960, None);
+            midi[index]["articulationId"] = bad.into();
+            assert!(
+                plan_of(serde_json::Value::Array(midi)).validate().is_err(),
+                "id {bad} on event {index}"
+            );
+        }
+    }
+    // Not a byte.
+    let mut midi = hit(38, 0, 960, None);
+    midi[0]["articulationId"] = 256.into();
+    let broken = serde_json::json!({
+        "generation": 1, "ppq": 960, "durationTick": 1920, "durationMs": 1000,
+        "tracks": [{"id": "drums", "program": 0, "percussion": true}],
+        "tempos": [{"tick": 0, "bpm": 120}],
+        "occurrences": [], "notes": [], "midi": midi
+    });
+    assert!(serde_json::from_value::<PlaybackPlan>(broken).is_err());
+}
+
 /// A transport with the drum plan installed, driven the way the app drives it.
 fn transport(settings: DocumentSettings) -> CallbackTransport {
     let plan = drum_plan();

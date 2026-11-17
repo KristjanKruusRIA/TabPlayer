@@ -7,6 +7,8 @@ import { buildPlaybackPlan, buildPlaybackPlanFromJson, deadBrushMidiDurations, p
 import { blankProject } from '../project';
 import selectionProtocol from '../../tests/selection-playback-protocol.json';
 import type { PlaybackPlan } from './types';
+import { standardPercussionCatalog } from '../editor/percussion-catalog';
+import { isStandardArticulation } from './drum-map';
 import {captureNoteLinks} from '../editor/links';
 import {preparePitchedGpScore} from '../interchange/pitched';
 
@@ -711,4 +713,84 @@ it('restores the written track volume at the end of a fade out or swell, and wri
   expect(volume(build(model.FadeType.FadeIn)).at(-1)![0]).toBeLessThan(960);
   expect(plain.every(e=>e[0]===0)).toBe(true);
   const first=build(null),second=build(null);expect(JSON.stringify(first.midi)).toBe(JSON.stringify(second.midi));
+});
+
+// THE-219: a drum note's standard articulation id travels in the plan, on its on and its off alike.
+function drumScore(articulations: number[], table: model.InstrumentArticulation[] = []) {
+  const score = authored(Math.ceil(articulations.length / 4) + 1, 1, 2), drums = score.tracks[1];
+  drums.staves[0].isPercussion = true; drums.staves[0].stringTuning.tunings = []; drums.playbackInfo.primaryChannel = 9; drums.playbackInfo.secondaryChannel = 9;
+  drums.percussionArticulations = table;
+  articulations.forEach((articulation, index) => { const drum = new model.Note(); drum.percussionArticulation = articulation; drums.staves[0].bars[Math.floor(index / 4)].voices[0].beats[index % 4].addNote(drum); });
+  score.finish(settings); return score;
+}
+type DrumEvent = Extract<PlaybackPlan['midi'][number], { type: 'noteOn' | 'noteOff' }>;
+const drumEvents = (plan: PlaybackPlan) => plan.midi.filter(e => e.trackId === plan.tracks[1].id && (e.type === 'noteOn' || e.type === 'noteOff')) as DrumEvent[];
+const idsOf = (plan: PlaybackPlan) => drumEvents(plan).map(e => [e.type, e.key, e.articulationId]);
+const copyOf = (id: number, own = 0) => { const entry = standardPercussionCatalog.find(item => item.id === id)!; return new model.InstrumentArticulation(entry.element, entry.staffLine, entry.outputMidiNumber, entry.symbols[0], entry.symbols[1], entry.symbols[2], entry.symbols[3], entry.symbols[4], own); };
+
+it('names the standard articulation of a drum note on its on and its off, where its key alone does not say it', () => {
+  // rim shot 91 (key 38), half-open hat 92 (46), ride edge 93 (51), ride choke 94 (51), crash choke 97 (49), medium cowbell tip 101 (56)
+  const plan = agree(drumScore([91, 92, 93, 94, 97, 101]));
+  expect(idsOf(plan)).toEqual([
+    ['noteOn', 38, 91], ['noteOff', 38, 91], ['noteOn', 46, 92], ['noteOff', 46, 92], ['noteOn', 51, 93], ['noteOff', 51, 93],
+    ['noteOn', 51, 94], ['noteOff', 51, 94], ['noteOn', 49, 97], ['noteOff', 49, 97], ['noteOn', 56, 101], ['noteOff', 56, 101],
+  ]);
+  validatePlaybackPlan(plan);
+});
+
+it('names nothing for a plain General MIDI hit, and its plan has no articulation field at all', () => {
+  const plan = agree(drumScore([38, 42, 46, 36, 35]));
+  expect(drumEvents(plan).every(e => e.articulationId === undefined)).toBe(true);
+  expect(JSON.stringify(plan)).not.toContain('articulationId');
+});
+
+it("reads the id of a copy of a standard sound in the track's own table", () => {
+  const plan = agree(drumScore([0, 1], [copyOf(91), copyOf(93)]));
+  expect(idsOf(plan)).toEqual([['noteOn', 38, 91], ['noteOff', 38, 91], ['noteOn', 51, 93], ['noteOff', 51, 93]]);
+});
+
+it("reads a custom notehead's own id when the catalogue has that id for the same piece and sound", () => {
+  const symbol = model.MusicFontSymbol.NoteheadSlashedBlack1, none = model.MusicFontSymbol.None, outside = model.TechniqueSymbolPlacement.Outside;
+  // The snare rim shot drawn with another notehead: it matches no standard shape, but the file gave it the rim shot's id.
+  const rim = new model.InstrumentArticulation('Snare', 3, 38, symbol, symbol, symbol, none, outside, 91);
+  // The same id on a piece or a sound that is not the catalogue's, and an id that is no standard one, name nothing.
+  const wrongPiece = new model.InstrumentArticulation('Mystery', 3, 38, symbol, symbol, symbol, none, outside, 91);
+  const wrongSound = new model.InstrumentArticulation('Snare', 3, 41, symbol, symbol, symbol, none, outside, 91);
+  const unknown = new model.InstrumentArticulation('Snare', 3, 38, symbol, symbol, symbol, none, outside, 0);
+  const plan = buildPlaybackPlan(drumScore([0, 1, 2, 3], [rim, wrongPiece, wrongSound, unknown]), 7);
+  expect(idsOf(plan)).toEqual([
+    ['noteOn', 38, 91], ['noteOff', 38, 91], ['noteOn', 38, undefined], ['noteOff', 38, undefined],
+    ['noteOn', 41, undefined], ['noteOff', 41, undefined], ['noteOn', 38, undefined], ['noteOff', 38, undefined],
+  ]);
+});
+
+it('names nothing for a golpe knock', () => {
+  const score = authored(2, 1, 1); note(score, 0, 0).beat.golpe = model.GolpeType.Thumb; score.finish(settings);
+  const plan = buildPlaybackPlan(score, 7);
+  expect(plan.midi.some(e => e.type === 'noteOn' && e.channel === 9)).toBe(true);
+  expect(JSON.stringify(plan)).not.toContain('articulationId');
+});
+
+it('gives every drum note off the id of its on, over every standard articulation', () => {
+  const ids = [...new Set(standardPercussionCatalog.map(entry => entry.id))];
+  const plan = buildPlaybackPlan(drumScore(ids), 7), events = drumEvents(plan);
+  const ons = events.filter(e => e.type === 'noteOn'), offs = events.filter(e => e.type === 'noteOff');
+  expect(ons.length).toBe(offs.length); expect(ons.length).toBeGreaterThan(80);
+  const used = new Set<number>();
+  for (const on of ons) {
+    const index = offs.findIndex((off, i) => !used.has(i) && off.key === on.key && off.tick > on.tick);
+    expect(index).toBeGreaterThanOrEqual(0); used.add(index);
+    expect(offs[index].articulationId).toBe(on.articulationId);
+  }
+  expect(ons.filter(e => e.articulationId !== undefined).length).toBeGreaterThan(40);
+  expect(ons.every(e => e.articulationId === undefined || (e.articulationId !== e.key && isStandardArticulation(e.articulationId)))).toBe(true);
+});
+
+it('refuses a plan whose event names an id that is no standard articulation', () => {
+  const plan = buildPlaybackPlan(drumScore([91]), 7);
+  for (const [index, id] of [[0, 0], [1, 32], [0, 88], [1, 255], [0, 1.5], [0, -1], [0, NaN]] as const) {
+    const bad = structuredClone(plan); drumEvents(bad)[index].articulationId = id;
+    expect(() => validatePlaybackPlan(bad), `event ${index} id ${id}`).toThrow(/Invalid native playback plan/);
+  }
+  expect(() => validatePlaybackPlan(structuredClone(plan))).not.toThrow();
 });

@@ -359,6 +359,7 @@ fn shared_core_mix_stems_score_clock_and_tail_agree() {
             key: 60,
             velocity: 70,
             kit_element: None,
+            articulation_id: None,
         },
         PlanMidiEvent::NoteOff {
             track_id: "gm".into(),
@@ -367,6 +368,7 @@ fn shared_core_mix_stems_score_clock_and_tail_agree() {
             key: 60,
             velocity: 0,
             kit_element: None,
+            articulation_id: None,
         },
     ];
     let p = Arc::new(p);

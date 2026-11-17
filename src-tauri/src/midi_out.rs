@@ -2713,6 +2713,7 @@ mod tests {
                         key,
                         velocity: 90,
                         kit_element: None,
+                        articulation_id: None,
                     });
                     if step % 4 == 0 {
                         midi.push(crate::audio::plan::PlanMidiEvent::Bend {
@@ -2736,6 +2737,7 @@ mod tests {
                         key,
                         velocity: 0,
                         kit_element: None,
+                        articulation_id: None,
                     });
                 }
             }
@@ -2806,6 +2808,7 @@ mod tests {
                 key,
                 velocity: 100,
                 kit_element: None,
+                articulation_id: None,
             }
         } else {
             PlanMidiEvent::NoteOff {
@@ -2815,6 +2818,7 @@ mod tests {
                 key,
                 velocity: 0,
                 kit_element: None,
+                articulation_id: None,
             }
         }
     }

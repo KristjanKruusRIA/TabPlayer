@@ -15,6 +15,7 @@ import type { ReferenceLocation } from './reference-sync-types';
 import { interpretAttacks, type Attack } from './interpretation';
 import { DRUM_KIT_ELEMENTS, planKitElement } from './drum-kit';
 import { kitSound } from './kit-sound';
+import { isStandardArticulation, mapArticulationId } from './drum-map';
 import { GOLPE_CHANNEL, golpeHits, playbackBar } from './golpe';
 import { ownerOf } from '../instruments/drum-kit';
 import type { DrumKitElement } from '../edit-types';
@@ -45,7 +46,7 @@ export function prepareMidiScore(score: model.Score): model.Score {
   return copy;
 }
 
-type RawNote = { track: number; trackAttack: number; onOrder: number; offOrder: number; start: number; end: number; channel: number; program?: number; key: number; rawKey: number; velocity: number; provenance?: string; kit?: DrumKitElement };
+type RawNote = { track: number; trackAttack: number; onOrder: number; offOrder: number; start: number; end: number; channel: number; program?: number; key: number; rawKey: number; velocity: number; provenance?: string; kit?: DrumKitElement; articulationId?: number };
 type RawEvent = (Omit<Extract<PlanMidiEvent, { type: 'program' }>, 'trackId'> & { track: number }
   | { type: 'controller'; track: number; tick: number; channel: number; controller: number; value: number }
   | { type: 'bend' | 'noteBend'; track: number; tick: number; channel: number; key?: number; value: number }) & { order: number };
@@ -421,7 +422,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           corrected?.(actual.track, actual.trackAttack, actual.end - actual.start);
         }
         // A drum note is mixed with the piece its articulation belongs to; the player knows only its pitch, and so is told wherever that is another piece.
-        if (source.note.isPercussion) { const kit = planKitElement(ownerOf(score.tracks[source.track], source.note.percussionArticulation), actual.key); if (kit) actual.kit = kit; }
+        if (source.note.isPercussion) { const kit = planKitElement(ownerOf(score.tracks[source.track], source.note.percussionArticulation), actual.key); if (kit) actual.kit = kit; const standard = mapArticulationId(score.tracks[source.track], source.note.percussionArticulation); if (standard !== undefined && standard !== actual.key) actual.articulationId = standard; }
         let origin = source.note.hammerPullOrigin ?? (source.note.slideOrigin?.slideOutType === model.SlideOutType.Legato ? source.note.slideOrigin : null) ?? source.note.slurOrigin;
         while (origin?.tieOrigin) origin = origin.tieOrigin;
         const from = origin && !source.note.beat.deadSlapped ? [...(played.get(origin) ?? [])].reverse().find(n => n.startTick < actual.start && n.source.target.track === source.track && n.source.target.staff === source.staff && n.source.target.voice === source.voice && n.source.string === Math.max(0, source.note.string)) : undefined;
@@ -458,7 +459,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   for(const event of [...automated,...fadeRestoreLevels(complete.restores,automated,complete.events.shift)])events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
   if (audible.length) applyNoteAudio(audible, notes, Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end)));
   for (const note of complete.events.notes) {
-    const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity, ...(note.kit ? { kitElement: note.kit } : {}) };
+    const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity, ...(note.kit ? { kitElement: note.kit } : {}), ...(note.articulationId !== undefined ? { articulationId: note.articulationId } : {}) };
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
   }
   // A golpe adds a percussion hit to its beat; it is part of its track and replaces no note.
@@ -556,7 +557,7 @@ function checkPlaybackPlan(plan: PlaybackPlan) {
     if (event.tick > plan.durationTick) fail(`MIDI ${event.type} after duration`);
     if (!integer(event.channel, 15)) fail('MIDI channel');
     if (!tracks.has(event.trackId) || event.tick < previous) fail('MIDI structure');
-    if ((event.type === 'noteOn' || event.type === 'noteOff') && (!integer(event.key, 127) || !integer(event.velocity, 127) || event.kitElement !== undefined && !DRUM_KIT_ELEMENTS.includes(event.kitElement))) fail();
+    if ((event.type === 'noteOn' || event.type === 'noteOff') && (!integer(event.key, 127) || !integer(event.velocity, 127) || event.kitElement !== undefined && !DRUM_KIT_ELEMENTS.includes(event.kitElement) || event.articulationId !== undefined && !isStandardArticulation(event.articulationId))) fail();
     if (event.type === 'program' && !integer(event.program, 127)) fail();
     if (event.type === 'controller' && (!integer(event.controller, 127) || !integer(event.value, 127))) fail();
     if ((event.type === 'bend' || event.type === 'noteBend') && !Number.isFinite(event.value)) fail();

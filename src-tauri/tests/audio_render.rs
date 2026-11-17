@@ -332,6 +332,7 @@ fn relative_10_123_300_keeps_attack_clock_and_pitch() {
                     key: note.key,
                     velocity: note.velocity,
                     kit_element: None,
+                    articulation_id: None,
                 },
                 PlanMidiEvent::NoteOff {
                     track_id: "a".into(),
@@ -340,6 +341,7 @@ fn relative_10_123_300_keeps_attack_clock_and_pitch() {
                     key: note.key,
                     velocity: 0,
                     kit_element: None,
+                    articulation_id: None,
                 },
                 // Isolate each SoundFont attack from its sampled release tail.
                 PlanMidiEvent::Controller {
@@ -953,6 +955,7 @@ fn render_seek_and_kit_mix_install_do_not_touch_heap() {
             key: 38,
             velocity: 100,
             kit_element: None,
+            articulation_id: None,
         },
         PlanMidiEvent::NoteOn {
             track_id: "a".into(),
@@ -961,6 +964,7 @@ fn render_seek_and_kit_mix_install_do_not_touch_heap() {
             key: 37,
             velocity: 100,
             kit_element: Some(KitElement::Other),
+            articulation_id: None,
         },
         PlanMidiEvent::NoteOff {
             track_id: "a".into(),
@@ -969,6 +973,7 @@ fn render_seek_and_kit_mix_install_do_not_touch_heap() {
             key: 37,
             velocity: 0,
             kit_element: Some(KitElement::Other),
+            articulation_id: None,
         },
         PlanMidiEvent::NoteOff {
             track_id: "a".into(),
@@ -977,6 +982,7 @@ fn render_seek_and_kit_mix_install_do_not_touch_heap() {
             key: 38,
             velocity: 0,
             kit_element: None,
+            articulation_id: None,
         },
     ];
     let plan = Arc::new(plan);

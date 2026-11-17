@@ -1524,6 +1524,7 @@ mod tests {
             key,
             velocity,
             kit_element: None,
+            articulation_id: None,
         }
     }
     fn on(key: u8, velocity: u8) -> PlanMidiEvent {
@@ -1537,6 +1538,7 @@ mod tests {
             key,
             velocity: 0,
             kit_element: None,
+            articulation_id: None,
         }
     }
     fn controller(controller: u8, value: u8) -> PlanMidiEvent {
@@ -2038,6 +2040,7 @@ mod tests {
             key,
             velocity: 0,
             kit_element: None,
+            articulation_id: None,
         }
     }
 

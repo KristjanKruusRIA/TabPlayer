@@ -363,6 +363,7 @@ fn add_note(plan: &mut PlaybackPlan, track: usize, tick: f64) {
         key: 60,
         velocity: 100,
         kit_element: None,
+        articulation_id: None,
     });
     plan.midi.push(PlanMidiEvent::NoteOff {
         track_id: format!("track-{track}"),
@@ -371,6 +372,7 @@ fn add_note(plan: &mut PlaybackPlan, track: usize, tick: f64) {
         key: 60,
         velocity: 0,
         kit_element: None,
+        articulation_id: None,
     });
     plan.notes
         .sort_by(|a, b| a.start_tick.partial_cmp(&b.start_tick).unwrap());
@@ -412,6 +414,7 @@ fn add_note_span(plan: &mut PlaybackPlan, track: usize, start_tick: f64, end_tic
         key: 60,
         velocity: 100,
         kit_element: None,
+        articulation_id: None,
     });
     plan.midi.push(PlanMidiEvent::NoteOff {
         track_id: format!("track-{track}"),
@@ -420,6 +423,7 @@ fn add_note_span(plan: &mut PlaybackPlan, track: usize, start_tick: f64, end_tic
         key: 60,
         velocity: 0,
         kit_element: None,
+        articulation_id: None,
     });
     plan.notes
         .sort_by(|a, b| a.start_tick.partial_cmp(&b.start_tick).unwrap());
@@ -689,6 +693,7 @@ fn midi_out_stamps_are_delayed_by_d_max() {
             key: 60,
             velocity: 100,
             kit_element: None,
+            articulation_id: None,
         },
     );
 

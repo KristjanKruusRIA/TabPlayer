@@ -4,6 +4,7 @@ import {basename,dirname,isAbsolute,relative,resolve,win32} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {sourceManifest,sha256} from './score-layout-fixture.mjs';
 import {assertOwnedScoreLayoutProcess,assertScoreLayoutListener} from './parity-score-layouts.mjs';
+import {silentOutputEnvironment} from './silent-output.mjs';
 
 const repository=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const samePath=(a,b)=>a.replaceAll('\\','/').toLowerCase()===b.replaceAll('\\','/').toLowerCase();
@@ -37,7 +38,7 @@ export function assertStringCountBuild(packet,{worktree=repository,manifest=sour
   const modified=statSync(packet.executable).mtimeMs;assert.ok(modified>=start&&modified<=end,'EXE mtime must lie inside build');return owned;
 }
 export function assertStringCountPortFree(rows){assert.ok(Array.isArray(rows));assert.equal(rows.length,0,'Diagnostic port 9223 is occupied; refusing before fixture writes/launch');}
-export function stringCountEnvironment(environment){return Object.fromEntries(Object.entries(environment).filter(([name])=>!name.toUpperCase().startsWith('TABPLAYER_TEST_')));}
+export function stringCountEnvironment(environment){return {...Object.fromEntries(Object.entries(environment).filter(([name])=>!name.toUpperCase().startsWith('TABPLAYER_TEST_'))),...silentOutputEnvironment()};}
 export const assertStringCountIdentity=assertOwnedScoreLayoutProcess;
 
 // Third tuple fields are authored sounding MIDI pitches, independent of the editor.

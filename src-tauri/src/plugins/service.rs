@@ -515,6 +515,9 @@ enum SlotEntry {
     },
     Ready {
         session: Arc<dyn HelperSession>,
+        /// What the helper was asked to load. One helper hosts one class as one kind, so a slot that names the class as
+        /// another kind never takes this helper.
+        kind: crate::settings::SlotKind,
         /// The state the helper holds that the document named: the one `ensure` applied, or the last one saved from
         /// the editor.
         state_asset_id: String,
@@ -622,6 +625,7 @@ enum Found {
     Faulted(PluginStatus, String),
     Ready {
         session: Arc<dyn HelperSession>,
+        kind: crate::settings::SlotKind,
         state_asset_id: String,
         saved_state_id: Option<String>,
         busy: bool,
@@ -997,6 +1001,7 @@ impl PluginService {
                 }) => Found::Faulted(*status, state_asset_id.clone()),
                 Some(SlotEntry::Ready {
                     session,
+                    kind,
                     state_asset_id,
                     saved_state_id,
                     busy,
@@ -1004,6 +1009,7 @@ impl PluginService {
                     ..
                 }) => Found::Ready {
                     session: session.clone(),
+                    kind: *kind,
                     state_asset_id: state_asset_id.clone(),
                     saved_state_id: saved_state_id.clone(),
                     busy: *busy,
@@ -1051,6 +1057,7 @@ impl PluginService {
                 }
                 Found::Ready {
                     session,
+                    kind,
                     state_asset_id,
                     saved_state_id,
                     busy,
@@ -1080,6 +1087,12 @@ impl PluginService {
                             continue;
                         }
                         *crashes += 1;
+                        true
+                    } else if kind != slot.kind {
+                        // Loaded as the other kind of plug-in: replaced, which is not a crash.
+                        inner.slots.remove(&key);
+                        self.supervisor.unwatch(&key);
+                        retired.push(session);
                         true
                     } else if session.link().sample_rate() != rate {
                         // Started for another device rate (review C1): replaced, which is not a crash.
@@ -1439,6 +1452,7 @@ impl PluginService {
                             key,
                             SlotEntry::Ready {
                                 session,
+                                kind: slot.kind,
                                 state_asset_id: slot.state.clone(),
                                 last_latency: latency,
                                 editor_open: false,
@@ -3269,6 +3283,36 @@ mod tests {
         kinds.sort_by_key(|kind| *kind == PluginKind::Instrument);
         assert_eq!(kinds, vec![PluginKind::Effect, PluginKind::Instrument]);
     }
+    #[test]
+    fn a_slot_whose_kind_changed_never_reuses_the_helper_of_the_other_kind() {
+        use crate::settings::SlotKind;
+        use tabplayer_plugin_protocol::control::PluginKind;
+        let rig = test_rig();
+        let effect = test_slot(&rig.class_id, &rig.state_id);
+        let _ = ready(&rig, 48_000, &[request("track_0", effect.clone())]);
+        // The same class named by a slot of the other kind: the running helper loaded an effect, so it is not handed out.
+        let mut synth = effect;
+        synth.kind = SlotKind::Instrument;
+        let plans = rig
+            .service
+            .ensure("doc1", Some(48_000), &[request("track_0", synth)]);
+        assert_eq!(
+            plans[0].1.as_ref().err(),
+            Some(&PluginStatus::Loading),
+            "a helper of the other kind is replaced, not reused"
+        );
+        assert_eq!(
+            wait_for_slot(&rig.service, "doc1", "track_0"),
+            PluginStatus::Ready
+        );
+        assert_eq!(
+            *rig.launcher.kinds.lock().unwrap(),
+            vec![PluginKind::Effect, PluginKind::Instrument]
+        );
+        // A change of kind is not a crash.
+        assert!(lock(&rig.service.inner).crash_counts.is_empty());
+    }
+
     #[test]
     fn an_export_builds_an_instrument_insert_for_an_instrument_slot_and_leaves_a_missing_one_to_the_built_in_sound()
      {

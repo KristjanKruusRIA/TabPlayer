@@ -2603,6 +2603,12 @@
       "start_line": 1,
       "end_line": 54,
       "kind": "validation_report"
+    },
+    "remainder_batch_4": {
+      "path": "docs/validation/2026-11-18-remainder-batch-4.md",
+      "start_line": 1,
+      "end_line": 50,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -3618,8 +3624,8 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "F1 opens an in-app help viewer on the section for the focused area (24 mapped areas, among them the score, tracks, inspector sections, playback, loop and speed controls, tuner, Line-In, practice settings, backing, instrument view, edition palette and display controls) or Getting started; the Help menu and command palette open Help topics and About and updates. About shows the installed version and Check for updates states plainly that this release has no update service. Help is modal, keeps focus inside, returns focus on close and leaves scores and history unchanged. 2026-11-13: the help has 14 topics and 49 sections, written from the code and the validation notes, in English, Estonian and German (about 4,300, 3,400 and 4,100 words); control names come from the interface catalog so they match the menus. A search field finds sections in the current language (accents folded, every word must match, a heading or topic-title match ranks first, at most 40 results) with keyboard use and a polite result announcement. Checked by Vitest only (help, search and dialog tests, 43 new). 2026-11-14: the owner decided there is no updater for this release; Check for updates and the About text state in one sentence that this release has no update service, and the About text also says that the Estonian and German text is unreviewed.",
-      "remaining_gap": "No update service (no check, download or install; it needs the updater plugin, an update endpoint, a public key and signed artefacts); a written guide, not the full manual, and it leaves out what was not verified (plug-in hosting, what Restore previous session does, Library Examples and Templates placement, bar widths, system gaps and staff groups, the dropped-file limit); search covers only the current language, does not rank by closeness, knows no synonyms and searches help text, not the app; not run in the desktop app (parity-help.mjs was read, not run); Estonian and German text not reviewed by a native speaker; F1 does nothing while another dialog is open, so the Export, MIDI import, ASCII import and Batch convert dialogs have no context help; the Export window and page layout panel labels are English in Estonian and German; no original-GP8 comparison.",
+      "current_behavior": "F1 opens an in-app help viewer on the section for the focused area (24 mapped areas, among them the score, tracks, inspector sections, playback, loop and speed controls, tuner, Line-In, practice settings, backing, instrument view, edition palette and display controls) or Getting started; the Help menu and command palette open Help topics and About and updates. About shows the installed version and Check for updates states plainly that this release has no update service. Help is modal, keeps focus inside, returns focus on close and leaves scores and history unchanged. 2026-11-13: the help has 14 topics and 49 sections, written from the code and the validation notes, in English, Estonian and German (about 4,300, 3,400 and 4,100 words); control names come from the interface catalog so they match the menus. A search field finds sections in the current language (accents folded, every word must match, a heading or topic-title match ranks first, at most 40 results) with keyboard use and a polite result announcement. Checked by Vitest only (help, search and dialog tests, 43 new). 2026-11-14: the owner decided there is no updater for this release; Check for updates and the About text state in one sentence that this release has no update service, and the About text also says that the Estonian and German text is unreviewed. Since 2026-11-18 F1 in the Export, MIDI import, ASCII import and Batch convert dialogs opens the help at the dialog's topic, above the dialog and without closing it; Escape closes the help first, and focus returns to where it was or to the dialog's first enabled control when that control has gone. Since 2026-11-17 the Export dialog and the Page layout panel are translated into Estonian and German (tests only, not run in the desktop app).",
+      "remaining_gap": "No update service (no check, download or install; it needs the updater plugin, an update endpoint, a public key and signed artefacts); a written guide, not the full manual, and it leaves out what was not verified (plug-in hosting, what Restore previous session does, Library Examples and Templates placement, bar widths, system gaps and staff groups, the dropped-file limit); search covers only the current language, does not rank by closeness, knows no synonyms and searches help text, not the app; not run in the desktop app (parity-help.mjs was read, not run); Estonian and German text not reviewed by a native speaker; F1 was added only to those four dialogs, and the stacking of the help above a dialog and the focus return were tested by document order and with a faked lost control, not seen in the app; no original-GP8 comparison.",
       "current_evidence": [
         "help_behavior",
         "help_evidence",
@@ -3628,7 +3634,9 @@
         "the75_help_search",
         "the75_help_verification",
         "the75_help_limits",
-        "the75_help_round2"
+        "the75_help_round2",
+        "remainder_batch_1",
+        "remainder_batch_4"
       ],
       "runtime_rechecked_by_this_audit": false
     },
@@ -3728,8 +3736,8 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Tracks can be reordered with Move track up/down, duplicated with Duplicate track and recolored with a Track color picker in track settings, recorded as the replayed moveTrack {track,to}, duplicateTrack {track} and setTrackColor {track,color:#rrggbb} edits. A moved track keeps its music and identity-keyed settings; a duplicate is inserted after its source with the same music, lyrics, chords, color and per-track style, fresh bar/voice/beat/note IDs, copied in-track links, free MIDI channels (shared once none are free; percussion keeps the drum channel) and a new identity with copied sound, mix and engraving profile. Track colors show as Mixer swatches and round-trip through GP export. GP export regenerates PartConfiguration and LayoutConfiguration after track-structure edits; library metadata and the Rust protocol accept the commands; selection follows the track. Windows desktop-test runs reorder, duplicate and recolor tracks in the four-track fixture and re-import the GP exports.",
-      "remaining_gap": "No drag reorder in the track list; new tracks use one default color instead of per-instrument colors and the score view is not tinted by track color; custom GP score views and layout settings reset after track-structure edits; settings Undo after a duplicate uses the full rebuild; no original-GP8 comparison.",
+      "current_behavior": "Tracks can be reordered with Move track up/down, duplicated with Duplicate track and recolored with a Track color picker in track settings, recorded as the replayed moveTrack {track,to}, duplicateTrack {track} and setTrackColor {track,color:#rrggbb} edits. A moved track keeps its music and identity-keyed settings; a duplicate is inserted after its source with the same music, lyrics, chords, color and per-track style, fresh bar/voice/beat/note IDs, copied in-track links, free MIDI channels (shared once none are free; percussion keeps the drum channel) and a new identity with copied sound, mix and engraving profile. Track colors show as Mixer swatches and round-trip through GP export. GP export regenerates PartConfiguration and LayoutConfiguration after track-structure edits; library metadata and the Rust protocol accept the commands; selection follows the track. Windows desktop-test runs reorder, duplicate and recolor tracks in the four-track fixture and re-import the GP exports. Since 2026-11-18 a track row in the dock overview has a grip: dragging it to a new position records one undoable edit however far it moves, and Alt+Up / Alt+Down on the row moves it one place; dropping in place or pressing Escape records nothing, and focus and the active track follow the moved track (no edit type changed; tests only, not run in the desktop app).",
+      "remaining_gap": "Drag reorder: pointer capture, touch and the look of the grip and drop line were not tried in the real window, there is no edge scrolling, and the grip is only in the dock overview rows; new tracks use one default color instead of per-instrument colors and the score view is not tinted by track color; custom GP score views and layout settings reset after track-structure edits; settings Undo after a duplicate uses the full rebuild; no original-GP8 comparison.",
       "current_evidence": [
         "move_behavior",
         "move_evidence",
@@ -3739,7 +3747,8 @@
         "duplicate_limits",
         "color_behavior",
         "color_evidence",
-        "color_limits"
+        "color_limits",
+        "remainder_batch_4"
       ],
       "runtime_rechecked_by_this_audit": false
     },
@@ -6832,12 +6841,13 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Fade in, fade out and swell render with measured envelopes, and the volume returns to the automated level after the fade in playback and MIDI export.",
-      "remaining_gap": "Checked on a synthetic voice, not by ear on the real sounds; the fade ramp starts from the written volume, so a track under automation can jump at the fade start; overlapping voice fades share a channel.",
+      "current_behavior": "Fade in, fade out and swell render with measured envelopes, and the volume returns to the automated level after the fade in playback and MIDI export. Since 2026-11-18 a fade in, fade out or swell on a track under volume automation ramps from the level in force instead of the written track volume, in playback and in MIDI export, so the level no longer jumps at the fade start, and a fade that starts where another ends opens at the right level; tracks without volume automation are unchanged (tests only, not run in the desktop app).",
+      "remaining_gap": "Checked on a synthetic voice, not by ear on the real sounds; fades of two voices of one track, or of the two channels of a track, still share a channel and interleave; a track whose written volume is 0 but whose automation raises it still fades from the written level; a volume move inside a fade is a step, as volume automation is breakpoints only; the curve was not compared with Guitar Pro's.",
       "current_evidence": [
         "notation_gaps_behavior",
         "notation_gaps_evidence",
-        "notation_gaps_limits"
+        "notation_gaps_limits",
+        "remainder_batch_4"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -9052,12 +9062,13 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "The export dialog writes MusicXML 4.0 score-partwise for the selected tracks, staves and measures through a native save with MIDI-equivalent protections. Single-staff tracks and notation+TAB guitars (as two-staff parts) carry pitches, rhythms, ties, tuplets, clefs, keys, repeats, tempo, dynamics, volume/pan, lyrics, graces, bends, articulations, ornaments, vibrato, hammer-ons/pull-offs, shift slides, tremolo picking, pick strokes, taps and fermata types; unsupported content is refused before the save dialog. The Windows desktop-test export writes a score-partwise file through the native save.",
-      "remaining_gap": "Multi-staff tracks (e.g. piano grand staff), percussion, notation-only stringed staves, sounding transposition, more than four voices on a notation+TAB staff, wide vibrato, alternate endings, other slide types, instrument changes and gradual mix changes are refused. Output is decoded only by the alphaTab importer, with no schema validation or third-party reader.",
+      "current_behavior": "The export dialog writes MusicXML 4.0 score-partwise for the selected tracks, staves and measures through a native save with MIDI-equivalent protections. Single-staff tracks and notation+TAB guitars (as two-staff parts) carry pitches, rhythms, ties, tuplets, clefs, keys, repeats, tempo, dynamics, volume/pan, lyrics, graces, bends, articulations, ornaments, vibrato, hammer-ons/pull-offs, shift slides, tremolo picking, pick strokes, taps and fermata types; unsupported content is refused before the save dialog. The Windows desktop-test export writes a score-partwise file through the native save. Since 2026-11-18 a single-staff percussion track is written as a percussion part (percussion clef, one instrument per drum sound with its key and channel, unpitched notes on the staff line the app draws them on, note heads where one is defined, and rhythm, ties, tuplets, voices, dynamics and repeats as for pitched parts); pitched output is byte-identical to before on the seven real files of the compatibility set (tests only, not run in the desktop app).",
+      "remaining_gap": "Multi-staff tracks (e.g. piano grand staff), notation-only stringed staves, sounding transposition, more than four voices on a notation+TAB staff, wide vibrato, alternate endings, other slide types, instrument changes and gradual mix changes are still refused. Re-import through the app's own reader keeps a drum's key, staff line and length but not the standard sound id, so open and half-open hi-hat stay apart only by instrument, and heavy-X and circle-slash heads come back as plain x and circle-x; a key outside 0 to 127 in a custom sound table is not range-checked. Output is decoded only by the alphaTab importer, with no schema validation or third-party reader.",
       "current_evidence": [
         "musicxml_export",
         "musicxml_evidence",
-        "musicxml_limits"
+        "musicxml_limits",
+        "remainder_batch_4"
       ],
       "runtime_rechecked_by_this_audit": false
     },
@@ -10323,13 +10334,14 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "A personal UUID chord library supports native atomic save/recall/remove across documents and process restart without changing score history.",
-      "remaining_gap": "Chord audition through the current track sound remains absent.",
+      "current_behavior": "A personal UUID chord library supports native atomic save/recall/remove across documents and process restart without changing score history. Since 2026-11-18 a Play chord button beside the chord diagram strums the sounding strings low to high through the track's sound, using the existing note audition command, only while the transport is stopped, and recording no edit (tests only, not run in the desktop app).",
+      "remaining_gap": "The strum spread and hold are choices nobody has heard; a chord of more than 12 notes plays the first 12; nothing was heard or tried in the desktop app.",
       "current_evidence": [
         "harmony",
         "harmony_validation",
         "harmony_limits",
-        "library_source"
+        "library_source",
+        "remainder_batch_4"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -10388,13 +10400,14 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Sixteen named scale patterns over twelve roots, search tags, custom interval sets and interval/fretboard/keyboard previews are available.",
-      "remaining_gap": "The documented broad scale catalogue and audition are not delivered; previewing a diagram is not audible scale playback.",
+      "current_behavior": "Sixteen named scale patterns over twelve roots, search tags, custom interval sets and interval/fretboard/keyboard previews are available. Since 2026-11-18 a Play scale button in the scale panel plays the scale ascending through the existing note audition command, only while the transport is stopped, and recording no edit (tests only, not run in the desktop app).",
+      "remaining_gap": "The documented broad scale catalogue is not delivered; the scale's range and hold are choices nobody has heard; a scale of more than 12 notes plays the first 12; the Play scale button stays visible but inert for a percussion staff; nothing was heard or tried in the desktop app.",
       "current_evidence": [
         "harmony",
         "harmony_validation",
         "harmony_limits",
-        "scale_source"
+        "scale_source",
+        "remainder_batch_4"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",

@@ -124,9 +124,15 @@ mod windows_tests {
 
         /// A request for the drum instrument on the track `drums`, in `mode`, with its consent granted.
         fn drum_request(&self, mode: TestMode, state_id: &str) -> SlotRequest {
+            self.drum_request_at(mode, 0, state_id)
+        }
+
+        /// [`drum_request`](Self::drum_request) for a drum whose own latency is `latency` frames: it plays its notes that
+        /// many frames late and says so.
+        fn drum_request_at(&self, mode: TestMode, latency: u32, state_id: &str) -> SlotRequest {
             let state = encode_test_state(&TestState {
                 gain: 1.0,
-                latency: 0,
+                latency,
                 mode,
                 ..TestState::default()
             });
@@ -270,9 +276,14 @@ mod windows_tests {
     }
 
     /// A drum plan, a crash or a hang in the first `process` and the built-in kit taking over.
-    fn falls_back_to_the_built_in_kit(mode: TestMode, state_id: &str, status: &[PluginStatus]) {
+    fn falls_back_to_the_built_in_kit(
+        mode: TestMode,
+        latency: u32,
+        state_id: &str,
+        status: &[PluginStatus],
+    ) {
         let rig = Rig::new();
-        let request = rig.drum_request(mode, state_id);
+        let request = rig.drum_request_at(mode, latency, state_id);
         let plans = rig.ensure_ready(std::slice::from_ref(&request));
         assert!(plans[0].1.is_ok(), "the instrument loads");
         // A late hit, long after the helper has failed.
@@ -288,7 +299,7 @@ mod windows_tests {
         )
         .unwrap();
         let d = renderer.plugin_delay_frames();
-        assert_eq!(d, pipeline_frames(CALLBACK));
+        assert_eq!(d, pipeline_frames(CALLBACK) + latency as usize);
         let out = play(&mut renderer, 40_000);
         assert!(renderer.plugin_faulted(), "the insert gave up the helper");
 
@@ -319,103 +330,36 @@ mod windows_tests {
 
     needs_build! {
         fn a_drum_plan_plays_the_instruments_keys_on_the_frames_of_the_hits() {
-            let rig = Rig::new();
-            let request = rig.drum_request(TestMode::Normal, &"a".repeat(64));
-            let plans = rig.ensure_ready(std::slice::from_ref(&request));
-            assert!(plans[0].1.is_ok(), "the instrument loads");
-            assert_eq!(plans[0].1.as_ref().unwrap().kind, SlotKind::Instrument);
-            let plan = plan_of(&HITS, 1920);
-            let mut renderer = Renderer::new_with_plugins(
-                Arc::new(plan),
-                resources(),
-                settings(Some(request.slot.clone())),
-                RATE,
-                &plans,
-                CALLBACK,
-            )
-            .unwrap();
-            // P for a callback of 512 is 1,024 frames and the drum has no latency.
-            let d = renderer.plugin_delay_frames();
-            assert_eq!(d, pipeline_frames(CALLBACK));
-            let out = play(&mut renderer, 30_000 + d);
-
-            // Each hit is the plug-in's key and velocity, on the frame of the hit plus D, and the track is silent before
-            // its first hit and after each one's NoteOff: none of the built-in kit is heard.
-            for &(on, off, key) in &HITS {
-                let (on, off) = (on as usize * TICK + d, off as usize * TICK + d);
-                assert_eq!(out[on - 1], [0.0; 2], "silence before key {key}");
-                assert_eq!(played(out[on]), (key, VELOCITY), "the onset of key {key}");
-                assert_eq!(played(out[off - 1]), (key, VELOCITY), "key {key} holds");
-                assert_eq!(out[off], [0.0; 2], "key {key} ends on its NoteOff");
+            // No latency, one that is not a whole block of the ring's 128 frames, and one that is.
+            for latency in LATENCIES {
+                drum_plan_plays_at(latency);
             }
-            assert_eq!(rig.service.statuses("doc1")[0].status, PluginStatus::Ready);
-            assert!(!renderer.plugin_faulted());
         }
 
         fn a_crash_of_the_instrument_hands_the_drums_back_to_the_built_in_kit() {
-            falls_back_to_the_built_in_kit(
-                TestMode::Crash,
-                &"b".repeat(64),
-                &[PluginStatus::Crashed],
-            );
+            for latency in [0, 100] {
+                falls_back_to_the_built_in_kit(
+                    TestMode::Crash,
+                    latency,
+                    &"b".repeat(64),
+                    &[PluginStatus::Crashed],
+                );
+            }
         }
 
         fn a_hang_of_the_instrument_hands_the_drums_back_to_the_built_in_kit() {
             falls_back_to_the_built_in_kit(
                 TestMode::Hang,
+                0,
                 &"c".repeat(64),
                 &[PluginStatus::Hung, PluginStatus::Crashed],
             );
         }
 
         fn an_export_has_the_instruments_keys_on_the_exact_samples_after_the_trim() {
-            let rig = Rig::new();
-            let request = rig.drum_request(TestMode::Normal, &"d".repeat(64));
-            let hits = [(0, 60, 36), (480, 540, 38), (1800, 1900, 42)];
-            let plan = plan_of(&hits, 1920);
-            let render = || {
-                let offline = rig
-                    .service
-                    .offline_inserts("doc1", std::slice::from_ref(&request), RATE)
-                    .unwrap();
-                assert!(offline.warnings.is_empty());
-                let renderer =
-                    Renderer::new(Arc::new(plan.clone()), resources(), settings(None), RATE)
-                        .unwrap();
-                let mut export = AudioExportRender::new_with_plugins(
-                    renderer,
-                    &plan,
-                    export_request(0.5),
-                    Some(offline),
-                )
-                .unwrap();
-                let total = export.total_frames() as usize;
-                let out = render_mix(&mut export).unwrap();
-                assert_eq!(out.len(), total);
-                out
-            };
-            let out = render();
-            // The trim by D leaves each hit on its own sample, and nothing of the kit is in the mix.
-            assert_eq!(out.len(), 96_000 + 24_000);
-            for &(on, off, key) in &hits {
-                let (on, off) = (on as usize * TICK, off as usize * TICK);
-                if on > 0 {
-                    assert_eq!(out[on - 1], [0.0; 2], "silence before key {key}");
-                }
-                assert_eq!(played(out[on]), (key, VELOCITY), "the onset of key {key}");
-                assert_eq!(played(out[off - 1]), (key, VELOCITY), "key {key} holds");
-                assert_eq!(out[off], [0.0; 2], "key {key} ends on its NoteOff");
+            for latency in LATENCIES {
+                export_has_the_keys_on_their_samples_at(latency);
             }
-            assert!(out[90_000..95_000].iter().all(|f| *f != [0.0; 2]), "the third hit holds");
-            assert!(out[95_000..].iter().all(|f| *f == [0.0; 2]), "and ends on its NoteOff");
-
-            // A second export is the same to the bit: a fresh helper each time.
-            let again = render();
-            assert!(
-                out.iter().zip(&again).all(|(a, b)| a[0].to_bits() == b[0].to_bits()
-                    && a[1].to_bits() == b[1].to_bits()),
-                "exports are deterministic"
-            );
         }
 
         fn an_export_with_a_missing_instrument_keeps_the_built_in_kit_and_a_crash_fails_naming_it() {
@@ -468,6 +412,141 @@ mod windows_tests {
             .unwrap_err();
             assert!(error.contains(DRUM_PLUGIN_NAME), "the error names the plug-in: {error}");
             assert!(!path.exists());
+        }
+    }
+
+    /// The drums' own latencies the tests run at: none, one that is not a whole block, and one that is.
+    const LATENCIES: [u32; 3] = [0, 100, 128];
+
+    fn drum_plan_plays_at(latency: u32) {
+        {
+            let rig = Rig::new();
+            let request = rig.drum_request_at(TestMode::Normal, latency, &"a".repeat(64));
+            let plans = rig.ensure_ready(std::slice::from_ref(&request));
+            assert!(plans[0].1.is_ok(), "the instrument loads");
+            assert_eq!(plans[0].1.as_ref().unwrap().kind, SlotKind::Instrument);
+            let plan = plan_of(&HITS, 1920);
+            let mut renderer = Renderer::new_with_plugins(
+                Arc::new(plan),
+                resources(),
+                settings(Some(request.slot.clone())),
+                RATE,
+                &plans,
+                CALLBACK,
+            )
+            .unwrap();
+            // P for a callback of 512 is 1,024 frames, and the drum's own latency comes on top.
+            let d = renderer.plugin_delay_frames();
+            assert_eq!(d, pipeline_frames(CALLBACK) + latency as usize);
+            let out = play(&mut renderer, 30_000 + d);
+
+            // Each hit is the plug-in's key and velocity, on the frame of the hit plus D, and the track is silent before
+            // its first hit and after each one's NoteOff: none of the built-in kit is heard.
+            for &(on, off, key) in &HITS {
+                let (on, off) = (on as usize * TICK + d, off as usize * TICK + d);
+                assert_eq!(out[on - 1], [0.0; 2], "silence before key {key}");
+                assert_eq!(played(out[on]), (key, VELOCITY), "the onset of key {key}");
+                assert_eq!(played(out[off - 1]), (key, VELOCITY), "key {key} holds");
+                assert_eq!(out[off], [0.0; 2], "key {key} ends on its NoteOff");
+            }
+            assert_eq!(rig.service.statuses("doc1")[0].status, PluginStatus::Ready);
+            assert!(!renderer.plugin_faulted());
+        }
+    }
+
+    fn export_has_the_keys_on_their_samples_at(latency: u32) {
+        {
+            let rig = Rig::new();
+            let request = rig.drum_request_at(TestMode::Normal, latency, &"d".repeat(64));
+            let hits = [(0, 60, 36), (480, 540, 38), (1800, 1900, 42)];
+            let plan = plan_of(&hits, 1920);
+            let render = || {
+                let offline = rig
+                    .service
+                    .offline_inserts("doc1", std::slice::from_ref(&request), RATE)
+                    .unwrap();
+                assert!(offline.warnings.is_empty());
+                let renderer =
+                    Renderer::new(Arc::new(plan.clone()), resources(), settings(None), RATE)
+                        .unwrap();
+                let mut export = AudioExportRender::new_with_plugins(
+                    renderer,
+                    &plan,
+                    export_request(0.5),
+                    Some(offline),
+                )
+                .unwrap();
+                let total = export.total_frames() as usize;
+                let out = render_mix(&mut export).unwrap();
+                assert_eq!(out.len(), total);
+                out
+            };
+            let out = render();
+            // The trim by D leaves each hit on its own sample, and nothing of the kit is in the mix.
+            assert_eq!(out.len(), 96_000 + 24_000);
+            for &(on, off, key) in &hits {
+                let (on, off) = (on as usize * TICK, off as usize * TICK);
+                if on > 0 {
+                    assert_eq!(out[on - 1], [0.0; 2], "silence before key {key}");
+                }
+                assert_eq!(played(out[on]), (key, VELOCITY), "the onset of key {key}");
+                assert_eq!(played(out[off - 1]), (key, VELOCITY), "key {key} holds");
+                assert_eq!(out[off], [0.0; 2], "key {key} ends on its NoteOff");
+            }
+            assert!(
+                out[90_000..95_000].iter().all(|f| *f != [0.0; 2]),
+                "the third hit holds"
+            );
+            assert!(
+                out[95_000..].iter().all(|f| *f == [0.0; 2]),
+                "and ends on its NoteOff"
+            );
+
+            // A second export is the same to the bit: a fresh helper each time.
+            let again = render();
+            assert!(
+                out.iter()
+                    .zip(&again)
+                    .all(|(a, b)| a[0].to_bits() == b[0].to_bits()
+                        && a[1].to_bits() == b[1].to_bits()),
+                "exports are deterministic"
+            );
+
+            // And the files are byte for byte the same.
+            let wav = || {
+                let offline = rig
+                    .service
+                    .offline_inserts("doc1", std::slice::from_ref(&request), RATE)
+                    .unwrap();
+                let renderer =
+                    Renderer::new(Arc::new(plan.clone()), resources(), settings(None), RATE)
+                        .unwrap();
+                let wanted = export_request(0.5);
+                let mut export = AudioExportRender::new_with_plugins(
+                    renderer,
+                    &plan,
+                    wanted.clone(),
+                    Some(offline),
+                )
+                .unwrap();
+                let dir = tempfile::tempdir().unwrap();
+                let path = dir.path().join("drums.wav");
+                write_wav(
+                    &path,
+                    wanted.format,
+                    |b| export.render_mix(b),
+                    &AtomicBool::new(false),
+                    |_| {},
+                )
+                .unwrap();
+                std::fs::read(&path).unwrap()
+            };
+            let (first, second) = (wav(), wav());
+            assert!(first.len() > 100_000);
+            assert!(
+                first == second,
+                "two exported files differ, latency {latency}"
+            );
         }
     }
 }

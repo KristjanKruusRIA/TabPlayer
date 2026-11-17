@@ -206,7 +206,7 @@ describe('PluginSlotPanel', () => {
       return null;
     };
     const onChange = vi.fn();
-    render(<PluginSlotPanel trackId="track-1" slot={undefined} onChange={onChange} />);
+    render(<PluginSlotPanel trackId="track-1" slot={undefined} percussion onChange={onChange} />);
     await waitFor(() => expect(screen.getByRole('option', { name: /Super Amp/i })).toBeInTheDocument());
     const select = screen.getByLabelText(/plug-in/i);
     fireEvent.change(select, { target: { value: mockEntry.classId } });

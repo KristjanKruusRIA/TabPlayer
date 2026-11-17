@@ -42,7 +42,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
   /** One pedal's controls on `board`, at `index` in the track's chain. Names on the second board say so. */
   const pedal=(board:Board,block:EffectBlock,index:number)=>{
     const bName=localizedBlockName(block,lang);
-    return <details className="sound-block" key={block} open={!board.second&&openBlock===block||undefined} ref={node=>{if(node&&!board.second&&openBlock===block)requestAnimationFrame(()=>node.scrollIntoView?.({block:'nearest'}));}}><summary><span className="sound-block-name">{bName}</span><span className="sound-block-state">{board.effects[block].enabled?t('sound.enabled'):t('sound.bypassed')}{!board.second&&current.plugin?.active&&(block==='drive'||block==='amp'||block==='cabinet')?`, ${t('plugin.replaced')}`:''}</span></summary><BusyFieldset busy={busy}>
+    return <details className="sound-block" key={block} open={!board.second&&openBlock===block||undefined} ref={node=>{if(node&&!board.second&&openBlock===block)requestAnimationFrame(()=>node.scrollIntoView?.({block:'nearest'}));}}><summary><span className="sound-block-name">{bName}</span><span className="sound-block-state">{board.effects[block].enabled?t('sound.enabled'):t('sound.bypassed')}{!board.second&&current.plugin?.active&&current.plugin.kind!=='instrument'&&(block==='drive'||block==='amp'||block==='cabinet')?`, ${t('plugin.replaced')}`:''}</span></summary><BusyFieldset busy={busy}>
       <label className="check"><input aria-label={board.name(t('sound.enable_block',{block:lang==='en'?block:bName}))} type="checkbox" checked={board.effects[block].enabled} onChange={e=>fx(board,block,'enabled',e.target.checked)}/>{t('sound.enabled')}</label>
       {!board.second&&<div className="sound-block-order"><button aria-label={board.name(t('sound.move_block_earlier',{block:bName}))} disabled={index===0} onClick={()=>move(block,-1)}>{t('sound.move_earlier')}</button><button aria-label={board.name(t('sound.move_block_later',{block:bName}))} disabled={index===order.length-1} onClick={()=>move(block,1)}>{t('sound.move_later')}</button></div>}
       {visibleParameters(block,board.effects).map(p=>{const pLabel=lang==='en'?p.label:localizedParamLabel(block,p.key,p.label,lang);return <label key={p.key} title={localizedParamHint(p.key,p.hint,lang)}>{pLabel}<input aria-label={board.name(`${lang==='en'?block:bName} ${pLabel}`)} type="number" disabled={block==='wah'&&p.key===(board.effects.wah.mode==='auto'?'position':'sensitivity')||p.key==='rateHz'&&syncOf(board,block)!==0} min={p.min} max={p.max} step={p.step} value={Number((board.effects[block] as unknown as Record<string,unknown>)[p.key]??0)} onChange={e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=p.min&&value<=p.max)fx(board,block,p.key,value);}}/></label>;})}
@@ -92,6 +92,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
       status={pluginStatus}
       busy={busy}
       documentId={documentId}
+      percussion={percussion}
       onChange={(nextSlot, assetToken) => {
         const next = { ...current };
         if (nextSlot) {

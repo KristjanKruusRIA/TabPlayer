@@ -37,3 +37,5 @@
 .plugin-notice-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
 .plugin-library-manage ul{list-style:none;margin:0;padding:0;display:grid;gap:4px}
 .plugin-library-manage li{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.plugin-library-manage li>span:first-child{flex:1;min-width:0}
+.plugin-library-manage .plugin-kind-label{flex:none;font-size:11px}

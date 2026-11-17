@@ -146,7 +146,8 @@ export function BlockStage({editing,selected,cabinetResponse,ampCapture}:{editin
   const {block}=selected,board=selected.second&&editing.second?editing.second:editing.first;
   const {order,busy,clipboard,second}=editing,index=order.indexOf(block);
   const name=blockNames[block];
-  const replaced=!board.second&&Boolean(editing.current.plugin?.active)&&(block==='drive'||block==='amp'||block==='cabinet');
+  const pluginHere=!board.second&&Boolean(editing.current.plugin?.active)&&(block==='drive'||block==='amp'||block==='cabinet');
+  const instrument=editing.current.plugin?.kind==='instrument',replaced=pluginHere&&!instrument,instrumentPlays=pluginHere&&instrument;
   const stageRef=useRef<HTMLElement>(null);
   const lastFocused=useRef<HTMLElement|null>(null);
   useLayoutEffect(()=>{
@@ -196,6 +197,7 @@ export function BlockStage({editing,selected,cabinetResponse,ampCapture}:{editin
       </div>
     </header>
     {replaced&&<div className="rig-replaced-banner"><p>{t('plugin.replaced_tone')}</p></div>}
+    {instrumentPlays&&<div className="rig-replaced-banner"><p>{t('plugin.instrument_banner')}</p></div>}
     {body}
   </section>;
 }

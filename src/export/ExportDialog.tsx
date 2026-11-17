@@ -109,7 +109,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <p>Audio export does not include count-in or progressive speed changes.</p>
         <CabinetNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
         <CaptureNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
-        <PluginNotices statuses={pluginWarnings ?? inspection?.pluginWarnings} trackNames={trackNames} className="export-cabinet-notices"/>
+        <PluginNotices statuses={pluginWarnings ?? inspection?.pluginWarnings} trackNames={trackNames} instrumentTracks={Object.keys(sounds??{}).filter(id=>sounds?.[id]?.plugin?.kind==='instrument')} className="export-cabinet-notices"/>
         <label className="export-check"><input type="checkbox" checked={audio.metronome} onChange={e=>setAudio({...audio,metronome:e.target.checked})}/>Metronome</label>
         <label className="export-check"><input type="checkbox" checked={audio.backing} onChange={e=>setAudio({...audio,backing:e.target.checked})}/>Include backing</label>
         <label>Effect tail (seconds)<input type="number" min="0" max="30" step=".1" value={audio.tailSeconds} onChange={e=>setAudio({...audio,tailSeconds:Number(e.target.value)})}/></label>

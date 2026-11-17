@@ -11,6 +11,8 @@ export interface PluginNoticesProps {
   notices?: readonly PluginNotice[];
   onDismiss?: (notice: PluginNotice) => void;
   trackNames?: Record<string, string>;
+  /** The tracks whose slot holds an instrument: their notice ends by saying the built-in kit plays instead. */
+  instrumentTracks?: readonly string[];
   /** May return a promise; a rejection is shown here instead of being dropped. */
   onAllow?: () => void | Promise<unknown>;
   onRetry?: (trackId: string) => void | Promise<unknown>;
@@ -29,6 +31,7 @@ export function PluginNotices({
   notices,
   onDismiss,
   trackNames,
+  instrumentTracks,
   onAllow,
   onRetry,
   className = 'plugin-notices',
@@ -63,7 +66,7 @@ export function PluginNotices({
       <div role="status">
         {warningStatuses.map(item => (
           <div key={`${item.trackId}:${item.classId}:${item.status}`} className="plugin-notice-item">
-            <p className="sound-ir-notice">{withTrack(item.trackId, t(noticeMessageKey(item.status), { name: item.name }))}</p>
+            <p className="sound-ir-notice">{withTrack(item.trackId, t(noticeMessageKey(item.status, instrumentTracks?.includes(item.trackId) ?? false), { name: item.name }))}</p>
           </div>
         ))}
         {movedList.map(item => (

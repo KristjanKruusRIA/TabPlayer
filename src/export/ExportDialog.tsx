@@ -108,7 +108,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         {audio.container!=='ogg'&&audio.container!=='mp3'&&<div className="export-field"><span className="export-field-label" aria-hidden="true">{t('export.bit_depth')}</span><Segmented label={t('export.bit_depth')} value={audio.bitDepth} disabled={busy} options={[{value:16 as const,label:t('export.bits',{value:16})},{value:24 as const,label:t('export.bits',{value:24})}]} onChange={bitDepth=>setAudio({...audio,bitDepth})}/></div>}
         <div className="export-field"><span className="export-field-label" aria-hidden="true">{t('transport.speed')}</span><Segmented label={t('transport.speed')} value={audio.speed} disabled={busy} options={[{value:'saved' as const,label:'100%'},{value:'current' as const,label:t('export.speed_current'),disabled:!currentSpeedAvailable}]} onChange={speed=>setAudio({...audio,speed})}/></div>
         {!currentSpeedAvailable&&<p>{t('export.no_current_speed')}</p>}
-        <p>{t('export.no_countin')}</p>
+        <p>{t(format==='stems'?'export.no_countin':'export.no_progressive')}</p>
         <CabinetNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
         <CaptureNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
         <PluginNotices statuses={pluginWarnings ?? inspection?.pluginWarnings} trackNames={trackNames} instrumentTracks={Object.keys(sounds??{}).filter(id=>sounds?.[id]?.plugin?.kind==='instrument')} className="export-cabinet-notices"/>
@@ -116,7 +116,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <label className="export-check"><input type="checkbox" checked={audio.backing} onChange={e=>setAudio({...audio,backing:e.target.checked})}/>{t('export.include_backing')}</label>
         <label>{t('export.effect_tail')}<input type="number" min="0" max="30" step=".1" value={audio.tailSeconds} onChange={e=>setAudio({...audio,tailSeconds:Number(e.target.value)})}/></label>
         {format==='wav'&&<><label className="export-check"><input type="checkbox" checked={countIn&&countInBars>0} disabled={countInBars<=0} onChange={e=>setCountIn(e.target.checked)}/>{t('export.count_in')}</label>
-        <p>{t('export.count_in_note',{bars:countInBars})}</p>
+        <p>{countInBars>0?t('export.count_in_note',{bars:countInBars}):t('export.count_in_unavailable')}</p>
         <label className="export-check"><input type="checkbox" checked={normalize} onChange={e=>setNormalize(e.target.checked)}/>{t('export.normalize')}</label>
         <label>{t('export.normalize_level')}<input type="number" min="-30" max="-6" step=".5" disabled={!normalize} value={normalizeLevel} onChange={e=>setNormalizeLevel(Number(e.target.value))}/></label>
         <p>{t('export.normalize_note')}</p></>}

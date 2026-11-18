@@ -54,7 +54,8 @@ export class NativePlaybackController {
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private planInterpretationKey='';private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private pendingTimer:ReturnType<typeof setTimeout>|null=null;/** Steps taken while a change was pending, added up into one key sent once it is acknowledged. */private queuedKey:number|null=null;/** The key a pending request asked for when the score changed under it, passed on to the next prepare. */private carriedKey:number|null=null;/** What a request that timed out asked for, so a late echo of it clears the notice. */private lateKey:string|null=null;/** Counts changes of document, so a view can tell a key that reset with the document from one that was changed. */private documentSerial=0;private hasBacking=false;
   /** The running loop by bars, so it can follow an edit that rebuilds the plan. `awaitingRestore` holds off reading the loop back from native while the rebuilt plan has none yet; `loopLost` is an edit that took the loop's bars with it. */
-  private keptLoop:KeptLoop|null=null;private loopLost=false;private awaitingRestore=false;private loopsSending=0;
+  /** The loop the player asked for and native has not yet reported back (or refused), so Play right after setting or clearing a loop follows the request while the status poll lags; a null loop is a clear. */
+  private requestedLoop:{loop:PracticeLoop|null;settled:boolean}|null=null;private keptLoop:KeptLoop|null=null;private loopLost=false;private awaitingRestore=false;private loopsSending=0;
   private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;private lastChangeAt:number|null=null;
   private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
   private bridge:NativeAudioBridge;private options:Options;generation=++nextGeneration;
@@ -96,6 +97,7 @@ export class NativePlaybackController {
     if(status.generation!==this.generation || this.destroyed)return;
     this.lastStatus=status;
     if(!this.awaitingRestore&&this.loopsSending===0&&this.plan&&this.built&&status.ready&&!status.error)this.keptLoop=status.loop?keptLoopOf(status.loop,this.plan.occurrences,this.built.score.masterBars.length):null;
+    if(this.requestedLoop&&(this.requestedLoop.settled||sameData(status.loop,this.requestedLoop.loop)))this.requestedLoop=null;
     if(!status.ready || status.error){this.noteMode='stopped';this.pendingNoteTick=undefined;}
     else if((this.noteMode==='waiting' && status.playing)
       || (this.noteMode==='seeking' && (status.playing || Math.abs(status.tick-this.pendingNoteTick!)<1e-6))
@@ -120,8 +122,8 @@ export class NativePlaybackController {
       } finally {this.suppressHandler=prior;}
     }
   }
-  /** Resolves when the command has completed, whether or not it succeeded. */
-  private send(command:TransportCommand):Promise<void>{return this.bridge.command(command).then(()=>{if(command.type==='setPractice')this.armPending(command.settings);if(command.generation===this.generation){this.operationError=null;this.update({error:null});}}).catch(error=>{if(command.generation===this.generation){if(command.type==='setPractice'){if(this.pendingPractice!==command.settings)return;const dropped=this.queuedKey!==null;this.clearPending();this.queuedKey=null;if(dropped||tonalityOf(command.settings)!==tonalityOf(this.practice)){this.update({practicePending:false,practiceNotice:'key_shift_refused'});if(!dropped||tonalityOf(command.settings)!==tonalityOf(this.practice))return;}else this.update({practicePending:false});}this.fail(error);}});}
+  /** Resolves when the command has completed: true when native accepted it, false when it refused or the command was stale. */
+  private send(command:TransportCommand):Promise<boolean>{return this.bridge.command(command).then(()=>{if(command.type==='setPractice')this.armPending(command.settings);if(command.generation===this.generation){this.operationError=null;this.update({error:null});}return true;}).catch(error=>{if(command.generation===this.generation){if(command.type==='setPractice'){if(this.pendingPractice!==command.settings)return false;const dropped=this.queuedKey!==null;this.clearPending();this.queuedKey=null;if(dropped||tonalityOf(command.settings)!==tonalityOf(this.practice)){this.update({practicePending:false,practiceNotice:'key_shift_refused'});if(!dropped||tonalityOf(command.settings)!==tonalityOf(this.practice))return false;}else this.update({practicePending:false});}this.fail(error);}return false;});}
   private selectionReady(){return !this.destroyed&&!this.preparing&&this.prepared&&this.state.ready&&this.built!==null&&this.plan?.generation===this.generation;}
   private requireSelectionReady(){if(!this.selectionReady())throw new Error('Select a measure after playback is ready.');return {score:this.built!.score,plan:this.plan!};}
   cursorPlaybackChoices(target:BeatTarget):CursorPlaybackChoice[]{if(!this.selectionReady())return [];return cursorPlaybackChoices(this.built!.score,this.plan!,target);}
@@ -151,7 +153,7 @@ export class NativePlaybackController {
   play(cursor?:BeatTarget,choice?:CursorPlaybackChoice){
     if(cursor){
       const {score,plan}=this.requireSelectionReady();
-      if(!this.state.loop&&(this.state.practice.phase==='idle'||this.state.practice.phase==='ended')){
+      if(!(this.requestedLoop?this.requestedLoop.loop:this.state.loop)&&(this.state.practice.phase==='idle'||this.state.practice.phase==='ended')){
         const choices=cursorPlaybackChoices(score,plan,cursor),selected=choice??(choices.length===1?choices[0]:undefined);
         if(!selected)throw new Error('Choose a current performed occurrence.');
         this.startRange(requireCursorChoice(choices,selected).startTick,null);return;
@@ -236,9 +238,9 @@ export class NativePlaybackController {
   setSpeed(percent:number){this.setPractice({...this.practice,tempo:{kind:'relative',ratio:percent/100}});}
   setLoop(start:number,end:number){if(end<start)throw new Error('Loop end must follow its start.');const startTick=this.occurrence(start).startTick,endTick=this.occurrence(end).endTick;this.loopSet({startTick,endTick});this.sendLoop({type:'setLoop',startTick,endTick,generation:this.generation});}
   /** A loop the player asked for replaces whatever an edit left behind, and its notice. */
-  private loopSet(loop:PracticeLoop|null){this.loopLost=false;this.keptLoop=loop&&this.plan&&this.built?keptLoopOf(loop,this.plan.occurrences,this.built.score.masterBars.length):null;this.update({loopNotice:null});}
+  private loopSet(loop:PracticeLoop|null){this.requestedLoop={loop,settled:false};this.loopLost=false;this.keptLoop=loop&&this.plan&&this.built?keptLoopOf(loop,this.plan.occurrences,this.built.score.masterBars.length):null;this.update({loopNotice:null});}
   /** Native's own statuses are not read back as the kept loop while a loop command is on its way, since they can still describe the loop before it. */
-  private sendLoop(command:TransportCommand){this.loopsSending++;return this.send(command).finally(()=>{this.loopsSending--;});}
+  private sendLoop(command:TransportCommand){const request=this.requestedLoop;this.loopsSending++;return this.send(command).then(accepted=>{if(request&&this.requestedLoop===request){if(accepted)request.settled=true;else this.requestedLoop=null;}}).finally(()=>{this.loopsSending--;});}
   clearLoop(){this.loopSet(null);this.sendLoop({type:'clearLoop',generation:this.generation});}
   setMetronome(volume:number){this.setPractice({...this.practice,metronome:{...this.practice.metronome,enabled:volume>0,volume}});}
   selectDevice(deviceId:string|null){return this.send({type:'selectDevice',deviceId,generation:this.generation});}
@@ -365,7 +367,7 @@ export class NativePlaybackController {
     while(playbackResumeEpoch>this.playbackResumeEpoch || this.floorReadyEpoch!==playbackResumeEpoch){
       if(playbackResumeEpoch>this.playbackResumeEpoch || !this.resumeRefresh){
         this.playbackResumeEpoch=playbackResumeEpoch;
-        this.keptLoop=null;this.loopLost=false;this.awaitingRestore=false;
+        this.requestedLoop=null;this.keptLoop=null;this.loopLost=false;this.awaitingRestore=false;
         // Another document starts at the original key: reset before the idle status below is built from it.
         if(this.documentEpoch!==documentEpoch){this.practice=structuredClone(DEFAULT_PRACTICE);this.documentSerial++;}
         this.beforeScoreChange(false);this.update({time:0,endTime:0,measure:0});const generation=this.generation;
@@ -388,7 +390,7 @@ export class NativePlaybackController {
     if(this.mixPreview&&mixLanded(this.mixPreview,built,project))this.mixPreview=null;
     const mixed=this.mixPreview;if(mixed&&!built.score.tracks.some(track=>trackIdentity(track)===mixed.track))this.mixPreview=null;
     const previewed=this.preview;if(previewed&&!built.score.tracks.some(track=>trackIdentity(track)===previewed.track)){this.preview=null;this.update({});}
-    if(documentChanged){this.keptLoop=null;this.loopLost=false;this.awaitingRestore=false;this.trackFocus=null;this.preview=null;this.mixPreview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.carriedKey=null;this.update({practiceNotice:null,documentSerial:++this.documentSerial});}
+    if(documentChanged){this.requestedLoop=null;this.keptLoop=null;this.loopLost=false;this.awaitingRestore=false;this.trackFocus=null;this.preview=null;this.mixPreview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.carriedKey=null;this.update({practiceNotice:null,documentSerial:++this.documentSerial});}
     else if(this.carriedKey!==null){carriedFrom=tonalityOf(this.practice);this.practice={...this.practice,tonality:this.carriedKey};this.carriedKey=null;}
     const saved=effectiveAudioSettings(project,built),preview=this.preview,mixHeard=this.mixPreview;
     const heard={...saved,...(preview?{sounds:{...saved.sounds,[preview.track]:preview.sound}}:{}),...(mixHeard?{mixes:{...saved.mixes,[mixHeard.track]:mixHeard.mix}}:{})};

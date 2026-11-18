@@ -884,3 +884,23 @@ it('a_fade_on_a_track_without_volume_automation_is_not_touched_by_another_tracks
   };
   expect(JSON.stringify(build(true))).toBe(JSON.stringify(build(false)));
 });
+it('a_fade_on_a_track_written_at_volume_0_ramps_in_the_automated_level', () => {
+  // Guitar Pro import can write volume 0 and raise it by automation: the fade ramps from or to the level in force (64), and the level after it is 64.
+  const zeroTrack = (fade: model.FadeType, automate: boolean) => {
+    const score = authored(1); note(score, 0, 0); note(score, 0, 1); score.tracks[0].playbackInfo.volume = 0;
+    const beat = score.tracks[0].staves[0].bars[0].voices[0].beats[0]; beat.fade = fade;
+    if (automate) beat.automations.push(Object.assign(new model.Automation(), { type: model.AutomationType.Volume, value: 8, ratioPosition: 0, isLinear: false }));
+    score.finish(settings);
+    return levels(buildPlaybackPlan(score, 1).midi.filter(e => e.type === 'controller' && e.controller === 7 && e.channel === 0).map(e => [e.tick, (e as { value: number }).value]));
+  };
+  const fadeIn = zeroTrack(model.FadeType.FadeIn, true), fadeOut = zeroTrack(model.FadeType.FadeOut, true), swell = zeroTrack(model.FadeType.VolumeSwell, true);
+  expect(fadeIn[0]).toEqual([0, 0]);
+  expect(fadeIn.slice(1).map(e => e[1])).toEqual([10, 20, 30, 40, 50, 64]);
+  expect(fadeIn.at(-1)![1]).toBe(64);
+  expect(fadeOut.map(e => e[1])).toEqual([64, 54, 44, 34, 24, 14, 0, 64]);
+  expect(fadeOut.at(-1)).toEqual([960, 64]);
+  expect(Math.max(...swell.map(e => e[1]))).toBe(64);
+  expect(swell.at(-1)).toEqual([960, 64]);
+  // Without automation the track stays at 0 throughout, as before.
+  for (const fade of FADES) expect(zeroTrack(fade, false).every(e => e[1] === 0)).toBe(true);
+});

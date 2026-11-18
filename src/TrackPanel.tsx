@@ -147,12 +147,13 @@ function TrackMixRow({track:index}:{track:number}){
   // The score always shows at least one track, so the last shown track's eye cannot close.
   const isShown=view.shown.includes(index),lastShown=isShown&&view.shown.length<=1;
   const eyeLabel=t(isShown?'overview.hide_track':'overview.show_track',{track:name});
+  // The fader and the knob are keyed by track so a row that now shows another track starts them afresh; the keys must differ from each other, or React keeps the old pair beside the new one when they change.
   return <span className="score-overview-mix" onKeyDown={keepInDock}>
     {view.toggle?<button type="button" data-kind="shown" aria-pressed={isShown} aria-label={t('overview.track_shown',{track:name})} title={lastShown?t('overview.last_shown_track'):eyeLabel} aria-disabled={busy||lastShown||undefined} onClick={()=>{if(!busy&&!lastShown)view.toggle!(index);}}><EyeGlyph open={isShown}/></button>:<span/>}
     <button type="button" data-kind="mute" aria-pressed={mute} aria-label={t('overview.mute_track',{track:name})} title={t('overview.mute_track',{track:name})} disabled={off} onClick={()=>player?.setMute(index,!mute)}><MuteGlyph width={14} height={14}/></button>
     <button type="button" data-kind="solo" aria-pressed={solo} aria-label={t('overview.solo_track',{track:name})} title={t('overview.solo_track',{track:name})} disabled={off} onClick={()=>player?.setSolo(index,!solo)}><SoloGlyph width={14} height={14}/></button>
-    <MixSlider key={rowId} className="dock-fader" label={t('overview.track_volume',{track:name})} min={0} max={1} step={.05} value={volume} format={percent} disabled={missing} busy={busy} {...gesture(gain=>({gain}),(at,value)=>player?.setTrackVolume(at,value))}/>
-    <Knob key={rowId} className="dock-pan" label={t('overview.col_pan')} ariaLabel={t('overview.track_pan',{track:name})} bipolar value={pan} min={-1} max={1} step={.05} defaultValue={0} format={panText} disabled={missing} busy={busy} {...gesture(value=>({pan:value}),(at,value)=>player?.setPan(at,value))}/>
+    <MixSlider key={`volume-${rowId}`} className="dock-fader" label={t('overview.track_volume',{track:name})} min={0} max={1} step={.05} value={volume} format={percent} disabled={missing} busy={busy} {...gesture(gain=>({gain}),(at,value)=>player?.setTrackVolume(at,value))}/>
+    <Knob key={`pan-${rowId}`} className="dock-pan" label={t('overview.col_pan')} ariaLabel={t('overview.track_pan',{track:name})} bipolar value={pan} min={-1} max={1} step={.05} defaultValue={0} format={panText} disabled={missing} busy={busy} {...gesture(value=>({pan:value}),(at,value)=>player?.setPan(at,value))}/>
   </span>;
 }
 

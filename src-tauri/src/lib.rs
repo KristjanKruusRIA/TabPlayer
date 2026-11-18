@@ -1170,11 +1170,13 @@ pub fn run() {
                 bundled_directory.clone(),
             ])?;
             let session_handle = app.handle().clone();
-            let session = session::SessionRuntime::open(
+            let session = session::SessionRuntime::open_with_settings(
                 directory,
                 Arc::new(move |status| {
                     let _ = session_handle.emit("recovery-status", status);
                 }),
+                // A settings folder that cannot be placed leaves the startup score plain.
+                personal_data_directory(app.handle()).ok(),
             )?;
             let workspace = session.workspace();
             app.manage(workspace.clone());

@@ -100,7 +100,8 @@ export class WorkspaceController {
       !snapshot.canUndo&&
       !snapshot.canRedo&&
       project.edits.length===0&&
-      project.baselineEdits.length===0&&
+      // New-score defaults (words, music, tab, copyright) are a metadata-only baseline; the blank is still untouched.
+      project.baselineEdits.every(edit=>edit.type==='setScoreMetadata')&&
       state.revision===0&&
       !snapshot.protection?.open&&
       snapshot.protection?.edit!=='locked'&&

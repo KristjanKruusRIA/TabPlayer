@@ -205,6 +205,12 @@ it('runs a fade in the automated volume in the exported file, not the written on
   const levels=[...new Map(parsed.events.filter(e=>e.type===176&&e.data[0]===7&&e.channel===channel&&e.tick<=960).map(e=>[e.tick,e.data[1]])).entries()];
   expect(levels).toEqual([[0,32],[120,27],[240,22],[360,17],[480,12],[600,7],[768,0],[960,32]]);
 });
+it('runs a fade in the automated volume in the exported file on a track written at volume 0',()=>{
+  const s=score(),beat=s.tracks[0].staves[0].bars[0].voices[0].beats[0];s.tracks[0].playbackInfo.volume=0;beat.fade=model.FadeType.FadeOut;beat.automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:4,ratioPosition:0,isLinear:false}));
+  const parsed=decode(exportMidi(s,{tracks:[0],range:null})),channel=parsed.events.find(n=>n.type===144)!.channel;
+  const levels=[...new Map(parsed.events.filter(e=>e.type===176&&e.data[0]===7&&e.channel===channel&&e.tick<=960).map(e=>[e.tick,e.data[1]])).entries()];
+  expect(levels).toEqual([[0,32],[120,27],[240,22],[360,17],[480,12],[600,7],[768,0],[960,32]]);
+});
 it('starts a swell that follows another swell at silence on an automated track in the exported file',()=>{
   const s=score(),voice=s.tracks[0].staves[0].bars[0].voices[0],first=voice.beats[0];
   // Two quarter notes back to back: the first swell's restore lands on the tick the second swell starts at.

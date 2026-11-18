@@ -416,6 +416,20 @@ it('File -> Open replaces an untouched blank document and records no undo histor
   expect(current(w).controller.getState().snapshot.canUndo).toBe(false);
 });
 
+it.each([
+  {name:'new-score defaults only in the metadata baseline',baseline:[{type:'setScoreMetadata' as const,fields:{subTitle:'',album:'',words:'Wil',music:'Mo',copyright:'(c)',tab:'Tess',notices:'',instructions:''}}],replaced:true},
+  {name:'a score-info baseline',baseline:[{type:'setScoreInfo' as const,title:'Kept',artist:'A',tempo:120}],replaced:false},
+])('File -> Open treats an untouched blank with $name as replaceable: $replaced',async({baseline,replaced})=>{
+  const f=fixture();const { bridge, stage, first, records } = f;
+  const record=records.get(first)!;record.snapshot.project={...record.snapshot.project,baselineEdits:baseline};
+  const w=await WorkspaceController.create(bridge);
+  const candidate = stage(await validScoreProject('song.gp'), 'opened-token');
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({ kind: 'candidate', candidate });
+  expect(await w.openDocument()).toBe(true);
+  expect(w.getState().documents.some(d=>d.id===first)).toBe(!replaced);
+  expect(w.getState().documents).toHaveLength(replaced?1:2);
+});
+
 it('Library Open replaces an untouched blank document', async () => {
   const { workspace: w, bridge, stage, first } = await setup();
   const candidate = stage(await validScoreProject('library-score.gp'), 'library-token');

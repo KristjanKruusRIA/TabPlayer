@@ -105,6 +105,15 @@ impl SessionRuntime {
         directory: PathBuf,
         publish: Arc<dyn Fn(RecoveryStatus) + Send + Sync>,
     ) -> Result<Self, String> {
+        Self::open_with_settings(directory, publish, None)
+    }
+
+    /// `settings_directory` holds the settings file whose new-score defaults the startup blank score carries.
+    pub(crate) fn open_with_settings(
+        directory: PathBuf,
+        publish: Arc<dyn Fn(RecoveryStatus) + Send + Sync>,
+        settings_directory: Option<PathBuf>,
+    ) -> Result<Self, String> {
         // The OS lock precedes even the initial mutable workspace construction.
         let store = RecoveryStore::acquire(directory)?;
         let mut issues = Vec::new();
@@ -183,7 +192,7 @@ impl SessionRuntime {
             preview,
             resumed: false,
         };
-        let mut workspace = DocumentWorkspace::new()?;
+        let mut workspace = DocumentWorkspace::new_in(settings_directory)?;
         workspace.freeze()?;
         let inner = Arc::new(Inner {
             workspace: Arc::new(Mutex::new(workspace)),
@@ -415,6 +424,7 @@ impl SessionRuntime {
             let _access = audio.access.lock().unwrap();
             let mut workspace = self.inner.workspace.lock().unwrap();
             invalidate_committed(audio);
+            prepared.set_settings_directory(workspace.settings_directory());
             *workspace = prepared;
             let snapshot = workspace.snapshot();
             let revision = workspace.checkpoint_revision();

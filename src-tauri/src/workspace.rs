@@ -217,6 +217,26 @@ pub struct DocumentWorkspace {
     checkpoint_revision: u64,
     frozen: bool,
     plugins: Option<Arc<crate::plugins::service::PluginService>>,
+    settings_directory: Option<PathBuf>,
+}
+
+/// A blank score with the stored new-score defaults. A missing, unreadable or newer settings file, or defaults the
+/// score refuses, give the plain blank score.
+fn blank_project(settings_directory: Option<&Path>) -> Project {
+    settings_directory
+        .and_then(|directory| crate::app_settings::read_settings(directory).ok())
+        .and_then(|settings| settings.new_score)
+        .and_then(|stored| {
+            Project::blank_with_defaults(&crate::project::NewScoreDefaults {
+                artist: stored.artist,
+                words: stored.words,
+                music: stored.music,
+                tab: stored.tab,
+                copyright: stored.copyright,
+            })
+            .ok()
+        })
+        .unwrap_or_else(Project::blank)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -389,7 +409,13 @@ impl DocumentWorkspace {
     }
 
     pub fn new() -> Result<Self, String> {
-        let document = DocumentEntry::new(Project::blank(), None)?;
+        Self::new_in(None)
+    }
+
+    /// A workspace whose natively created blank scores (this startup one, and the tab left after the last close)
+    /// carry the new-score defaults stored in the settings file of `settings_directory`, as a New score does.
+    pub fn new_in(settings_directory: Option<PathBuf>) -> Result<Self, String> {
+        let document = DocumentEntry::new(blank_project(settings_directory.as_deref()), None)?;
         let active = AudioOwner {
             document_id: document.id.clone(),
             activation_id: identity("activation"),
@@ -404,7 +430,16 @@ impl DocumentWorkspace {
             checkpoint_revision: 0,
             frozen: false,
             plugins: None,
+            settings_directory,
         })
+    }
+
+    pub(crate) fn settings_directory(&self) -> Option<PathBuf> {
+        self.settings_directory.clone()
+    }
+
+    pub(crate) fn set_settings_directory(&mut self, directory: Option<PathBuf>) {
+        self.settings_directory = directory;
     }
 
     pub fn set_plugins(&mut self, plugins: Arc<crate::plugins::service::PluginService>) {
@@ -738,7 +773,8 @@ impl DocumentWorkspace {
         }
         let revision = self.next_checkpoint_revision()?;
         let replacement = if closing.len() == self.documents.len() {
-            let mut blank = DocumentEntry::new(Project::blank(), None)?;
+            let mut blank =
+                DocumentEntry::new(blank_project(self.settings_directory.as_deref()), None)?;
             self.probe_document_id(&mut blank);
             Some(blank)
         } else {
@@ -1065,6 +1101,82 @@ fn normalized_view(view: DocumentViewState) -> Result<DocumentViewState, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const STORED: &str = r#"{"format":"tabplayer-settings","version":1,"newScore":{"artist":"Ann","words":"Wil","music":"Mo","tab":"Tess","copyright":"(c) Ann"}}"#;
+
+    fn first(workspace: &DocumentWorkspace) -> ProjectSnapshot {
+        workspace.snapshot().documents[0].snapshot.clone()
+    }
+    fn new_score_snapshot() -> ProjectSnapshot {
+        let project = Project::blank_with_defaults(&crate::project::NewScoreDefaults {
+            artist: "Ann".into(),
+            words: "Wil".into(),
+            music: "Mo".into(),
+            tab: "Tess".into(),
+            copyright: "(c) Ann".into(),
+        })
+        .unwrap();
+        ProjectSession::new(project, None).unwrap().snapshot()
+    }
+
+    #[test]
+    fn the_startup_blank_score_carries_the_stored_new_score_defaults() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("app-settings.json"), STORED).unwrap();
+        let workspace = DocumentWorkspace::new_in(Some(root.path().to_path_buf())).unwrap();
+        assert_eq!(first(&workspace), new_score_snapshot());
+        assert_ne!(first(&workspace), first(&DocumentWorkspace::new().unwrap()));
+    }
+
+    #[test]
+    fn the_blank_tab_after_the_last_close_carries_the_stored_defaults() {
+        let root = tempfile::tempdir().unwrap();
+        let mut workspace = DocumentWorkspace::new_in(Some(root.path().to_path_buf())).unwrap();
+        let old = workspace.snapshot().documents[0].clone();
+        std::fs::write(root.path().join("app-settings.json"), STORED).unwrap();
+        let after = workspace
+            .close_documents(&[CloseDocument {
+                document_id: old.document_id,
+                revision: 0,
+                discard: false,
+            }])
+            .unwrap();
+        assert_eq!(after.documents.len(), 1);
+        assert_eq!(after.documents[0].snapshot, new_score_snapshot());
+    }
+
+    #[test]
+    fn a_missing_corrupt_or_newer_settings_file_gives_the_plain_blank_score() {
+        let plain = first(&DocumentWorkspace::new().unwrap());
+        let none = tempfile::tempdir().unwrap();
+        assert_eq!(
+            first(&DocumentWorkspace::new_in(Some(none.path().to_path_buf())).unwrap()),
+            plain
+        );
+        for body in [
+            "{ not json".to_owned(),
+            STORED.replace("\"version\":1", "\"version\":2"),
+            STORED.replace(
+                "\"Ann\",\"words\"",
+                &format!("\"{}\",\"words\"", "x".repeat(1001)),
+            ),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::write(root.path().join("app-settings.json"), &body).unwrap();
+            let snapshot =
+                first(&DocumentWorkspace::new_in(Some(root.path().to_path_buf())).unwrap());
+            if body.contains("xxxx") {
+                // One bad field is repaired on its own; the others still apply.
+                assert_ne!(snapshot, plain);
+            } else {
+                assert_eq!(snapshot, plain);
+            }
+        }
+        assert_eq!(
+            first(&DocumentWorkspace::new_in(Some(none.path().join("absent"))).unwrap()),
+            plain
+        );
+    }
 
     #[test]
     fn checkpoint_limit_rejects_before_consuming_candidates_or_changing_live_state() {

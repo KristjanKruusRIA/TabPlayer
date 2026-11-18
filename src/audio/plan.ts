@@ -87,25 +87,29 @@ class Collector implements midi.IMidiFileHandler {
  * This writes the volume the fade started from back at the end of the faded beat, on the channels the fade used.
  * Scores without a fade get no extra event. It also records each fade's ramp (the volume events the generator wrote, at
  * the track's written volume) so `fadeMixControllers` can run the ramp in the level in force once the mix automation is known. */
-type FadeRamp = { track: number; channel: number; level: number; steps: { tick: number; value: number }[]; end: number; restore: boolean };
+type FadeRamp = { track: number; channel: number; level: number; steps: { tick: number; value: number }[]; end: number; restore: boolean; zero?: boolean };
 export function restoreVolumeAfterFades(generator: midi.MidiFileGenerator, handler: midi.IMidiFileHandler) {
   const ramps: FadeRamp[] = [];
   const hooked = generator as unknown as { _generateFade(beat: model.Beat, start: number, duration: number): void };
   const original = hooked._generateFade.bind(generator);
   hooked._generateFade = (beat, start, duration) => {
     const found = new Map<number, FadeRamp>(), add = handler.addControlChange.bind(handler);
+    // A track written at volume 0 gives the generator a ramp of zeros, with no shape to scale. Run it once at a reference volume to
+    // learn the shape, and still write the zeros it always wrote (the plan is the same unless the mix automation raises the track).
+    const info = beat.voice.bar.staff.track.playbackInfo, zero = info.volume === 0, written = info.volume;
+    if (zero) info.volume = 16;
     handler.addControlChange = (track, tick, channel, controller, value) => {
       if (controller === midi.ControllerType.VolumeCoarse) {
-        const ramp = found.get(channel) ?? { track, channel, level: 0, steps: [], end: 0, restore: beat.fade !== model.FadeType.FadeIn };
+        const ramp = found.get(channel) ?? { track, channel, level: 0, steps: [], end: 0, restore: beat.fade !== model.FadeType.FadeIn, zero };
         ramp.level = Math.max(ramp.level, value); ramp.steps.push({ tick, value }); found.set(channel, ramp);
       }
-      add(track, tick, channel, controller, value);
+      add(track, tick, channel, controller, zero && controller === midi.ControllerType.VolumeCoarse ? 0 : value);
     };
-    try { original(beat, start, duration); } finally { handler.addControlChange = add; }
+    try { original(beat, start, duration); } finally { handler.addControlChange = add; info.volume = written; }
     for (const ramp of found.values()) {
       // A fade out or a swell ends where its beat does, with the written level back; a fade in ends at its last step, already at that level.
       ramp.end = ramp.restore ? start + duration : ramp.steps.at(-1)!.tick;
-      if (ramp.restore) add(ramp.track, start + duration, ramp.channel, midi.ControllerType.VolumeCoarse, ramp.level);
+      if (ramp.restore) add(ramp.track, start + duration, ramp.channel, midi.ControllerType.VolumeCoarse, ramp.zero ? 0 : ramp.level);
       ramps.push(ramp);
     }
   };
@@ -133,7 +137,7 @@ export function fadeMixControllers(ramps: readonly FadeRamp[], automated: readon
         const level = levelAt(tick);
         if (level === undefined || tick > end) continue;
         const raw = ramp.steps.filter(step => step.tick + tickShift <= tick).at(-1)!.value, value = Math.round(raw * level / ramp.level);
-        if (stepTicks.has(tick) && value === raw && !inside.some(e => e.tick === tick) && !restoredAt.has(`${ramp.track}/${ramp.channel}/${tick}`)) continue;
+        if (stepTicks.has(tick) && value === (ramp.zero ? 0 : raw) && !inside.some(e => e.tick === tick) && !restoredAt.has(`${ramp.track}/${ramp.channel}/${tick}`)) continue;
         added.push({ track: ramp.track, tick, channel: ramp.channel, controller: 7, value });
       }
     }

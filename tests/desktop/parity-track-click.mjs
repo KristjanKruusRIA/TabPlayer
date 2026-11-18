@@ -57,8 +57,11 @@ try{
   };
   // The fret numbers of the first system, by beat: one column per beat of the first bar (left to right), each holding that beat's number on every track, top track first.
   // Every beat has one note on every track, so the numbers at one x are the tracks' notes, in track order; the system is the topmost row of numbers.
-  const staffDigits=()=>page.evaluate(tracks=>{
-    const host=document.querySelector('.paper-scroll').getBoundingClientRect();
+  // A click on a number scrolls the page to keep the cursor in view (the parchment moves sideways), so the columns that were on the left leave the window and the first column read is no longer
+  // the first beat. The reading starts from the start of the page again; the clicks that follow are still made at the numbers' own screen positions.
+  const staffDigits=()=>page.evaluate(async tracks=>{
+    const scroller=document.querySelector('.paper-scroll');scroller.scrollTo(0,0);await new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)));
+    const host=scroller.getBoundingClientRect();
     const all=[...document.querySelector('.score-paper-host').querySelectorAll('svg text')].filter(text=>/^\d{1,2}$/.test(text.textContent)&&text.getBoundingClientRect().width>0&&!text.closest('.score-source-staging,[aria-hidden="true"],[inert],[transform*="rotate"]')&&!text.getAttribute('transform')?.includes('rotate')).map(text=>{const r=text.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,top:r.y,height:r.height,text:text.textContent};});
     // Bar numbers are drawn smaller than fret numbers (and in red): only the full-size numbers are fret numbers.
     const size=Math.max(...all.map(number=>number.height)),frets=all.filter(number=>number.height>=size*0.9);

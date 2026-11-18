@@ -1,7 +1,15 @@
 // Document-operation idle is independent of native audio preparation/readiness.
-/** @param {import('playwright').Page} page */
+const welcomeHeading=page=>page.getByRole('dialog',{name:'Library',exact:true}).getByRole('heading',{name:'Welcome to TabPlayer',exact:true});
+/**
+ * Waits until the workspace has no document operation running (`aria-busy="false"` on the app shell).
+ * The first-run welcome Library is the one exception: while it is open the workspace controller holds the shell busy (WorkspaceLibrary.show
+ * takes an editor operation so nothing behind the modal dialog changes), and that is not work to wait out. A fresh launch opens it as soon as
+ * the Library snapshot has loaded, which a driver's first idle wait used to beat or lose at random. This wait therefore also returns when the
+ * welcome dialog is up, and the driver closes it with closeWelcomeLibrary (or the same steps inline) before it touches anything behind it;
+ * closeWelcomeLibrary then leaves the shell idle, which the next idle wait confirms. Any other dialog that holds the shell busy still counts as busy.
+ * @param {import('playwright').Page} page */
 export function waitForWorkspaceIdle(page,options={}) {
-  return page.locator('.app-shell[aria-busy="false"]').waitFor({state:'visible',...options});
+  return page.locator('.app-shell[aria-busy="false"]').or(welcomeHeading(page)).first().waitFor({state:'visible',...options});
 }
 
 /** A fresh session opens the Library with a welcome. It is modal, so nothing behind it takes a click until it is closed.
@@ -11,6 +19,8 @@ export async function closeWelcomeLibrary(page) {
   await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();
   await library.getByRole('button',{name:'Close',exact:true}).click();
   await library.waitFor({state:'hidden'});
+  // Closing it frees the shell: the known starting state is welcome closed, workspace idle.
+  await page.locator('.app-shell[aria-busy="false"]').waitFor({state:'visible'});
 }
 
 const fileCommands=new Set(['New','Open','Save','Save As','Close score','Close all scores','Export score','Export GP','Import ASCII tab…','Import MIDI…','Batch convert…','Finalize document','Unfinalize document']);
@@ -300,6 +310,51 @@ export async function closeSoundDialog(page) {
   if(await dialog.isVisible()){await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});await waitForWorkspaceIdle(page);}
 }
 
+// The sound panel and the pitch entry panel used to sit in the inspector, open beside everything a driver pressed. It is a modal dialog now (3637d75, 9669690), and every
+// workspace command, export, undo and play button closes it first (the pitch entry panel is a tab of the Properties dialog, and is closed the same way). soundPanel and entryPanel give such a driver its panel back: it is a Locator that opens the
+// dialog again, as a person would, whenever something is done with it (clicked, filled, read) and the dialog is not open. Asking whether it is visible
+// or waiting for it to go away never opens it. Drivers that need the dialog open or shut at one exact point use openSoundDialog and closeSoundDialog.
+const panelChains=new Set(['and','filter','first','getByAltText','getByLabel','getByPlaceholder','getByRole','getByTestId','getByText','getByTitle','last','locator','nth','or']);
+const panelActions=new Set(['all','allInnerTexts','allTextContents','blur','boundingBox','check','clear','click','count','dblclick','dispatchEvent','dragTo','elementHandle','elementHandles','evaluate','evaluateAll','evaluateHandle','fill','focus','getAttribute','hover','innerHTML','innerText','inputValue','isChecked','isDisabled','isEditable','isEnabled','press','pressSequentially','screenshot','scrollIntoViewIfNeeded','selectOption','selectText','setChecked','tap','textContent','type','uncheck','waitFor']);
+const reopenings=new WeakMap();
+/** Runs `open` unless `isOpen`; two uses at once share one opening. */
+async function ensureOpen(page,key,isOpen,open) {
+  if(await isOpen())return;
+  const pendingByKey=reopenings.get(page)??new Map();reopenings.set(page,pendingByKey);
+  let pending=pendingByKey.get(key);
+  if(!pending){pending=open().finally(()=>pendingByKey.delete(key));pendingByKey.set(key,pending);}
+  await pending;
+}
+// The dialog's pedal disclosures start closed each time it opens, so a driver that had opened one before an export finds it shut again. The panel remembers which were open when it was last used
+// and opens those again, as the person who had them open would; the others stay as they come.
+const openSoundBlocks=new WeakMap();
+const rememberSoundBlocks=async page=>{
+  if(!await page.locator('.sound-dialog').isVisible())return;
+  openSoundBlocks.set(page,await page.locator('.sound-dialog details.sound-block').evaluateAll(nodes=>nodes.filter(node=>node.open).map(node=>node.querySelector('.sound-block-name')?.textContent??'')));
+};
+const ensureSoundDialog=page=>ensureOpen(page,'sound',()=>page.locator('.sound-dialog').isVisible(),async()=>{
+  await openSoundDialog(page);
+  const names=openSoundBlocks.get(page)??[];
+  if(names.length)await page.locator('.sound-dialog details.sound-block').evaluateAll((nodes,names)=>{for(const node of nodes)if(names.includes(node.querySelector('.sound-block-name')?.textContent??''))node.open=true;},names);
+});
+function reopening(locator,ensure,after=async()=>{}) {
+  return new Proxy(locator,{get(target,property) {
+    const value=Reflect.get(target,property,target);
+    if(typeof value!=='function')return value;
+    if(panelChains.has(property))return (...args)=>reopening(value.apply(target,args),ensure,after);
+    if(panelActions.has(property))return async(...args)=>{
+      const leaving=property==='waitFor'&&['hidden','detached'].includes(args[0]?.state);
+      if(!leaving)await ensure();
+      try{return await value.apply(target,args);}finally{if(!leaving)await after().catch(()=>{});}
+    };
+    return value.bind(target);
+  }});
+}
+/** The 'Track sound' panel as a Locator that reopens the Sound and pedalboard dialog whenever it is used while the dialog is shut (see above). */
+export const soundPanel=page=>reopening(page.locator('.sound-dialog').getByRole('region',{name:'Track sound'}),()=>ensureSoundDialog(page),()=>rememberSoundBlocks(page));
+/** The Properties dialog's Pitch entry tab (the staff and the accidental, octave and key signature buttons), reopened the same way when something closed it (ec049ca moved the panel there). */
+export const entryPanel=page=>reopening(page.getByRole('dialog',{name:'Properties',exact:true}),()=>ensureOpen(page,'entry',async()=>await page.getByRole('dialog',{name:'Properties',exact:true}).isVisible()&&await page.getByRole('group',{name:'Pitch entry staff',exact:true}).isVisible(),()=>openProperties(page,'entry')));
+
 /** Practice settings open from the toolbar's practice button. */
 export async function revealPractice(page) {
   await closeInspectorDialogs(page);
@@ -400,6 +455,9 @@ export async function clickWorkstationButton(page,name,{waitForIdle=true}={}) {
     else {
       const control=page.getByRole('button',{name,exact:true});
       let found=host;
+      // A control that is in the page but not shown yet (a transport button that has just changed its name, Play to Pause, shows it when the page next reads the native status)
+      // is waited for briefly before the inspector tabs and dialogs are searched for it.
+      if(!await control.first().isVisible())await control.first().waitFor({state:'visible',timeout:2000}).catch(()=>{});
       if(!await control.first().isVisible()){await revealInspectorControl(page,control);found=null;for(const dialog of inspectorDialogs(page))if(await dialog.isVisible())found=dialog;}
       await control.click();
       // A control that lives in one of those dialogs closes it again behind the click, which would otherwise keep the rest of the app inert.

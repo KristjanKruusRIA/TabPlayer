@@ -5,6 +5,7 @@ import {execFileSync,spawn} from 'node:child_process';
 import {isAbsolute,relative,resolve} from 'node:path';
 import {connect,directory,launch,stop} from './harness.mjs';
 import {readDocumentRecord} from './document-context.mjs';
+import {loopbackRunnable,notRunnableUnderSilence,silenceSummary} from './loopback.mjs';
 import {buildDocumentTabsFixtures,assertFixtureHashes,documentTabsDirectory,sha256} from './document-tabs-fixture.mjs';
 
 // Execution belongs to root. One isolated harness app on CDP 9223 and one
@@ -16,9 +17,11 @@ const helper=realpathSync(resolve('src-tauri/target/debug/examples/capture_loopb
 const helperRelative=relative(realpathSync('.'),helper);
 assert.ok(!isAbsolute(helperRelative)&&!helperRelative.startsWith('..'),'Use the existing workspace capture helper');
 const result={authored:true,fixture:fixture.metadataPath,inputs:fixture.hashes,checks:{},captures:[],screenshots:[],outputs:{},limits:[...fixture.limits,'Windows acceptance only. This script cannot establish macOS/Linux audio or forced-crash recovery.','Normal Save picker cancellation is tested through production save_project IPC; it is separate from diagnostic Close All Save.'],originalGp8RuntimeAcceptance:false};
-const audioCaptureRequested=process.env.TABPLAYER_TABS_UI_ONLY!=='1';
+// The loopback recording hears only silence while the app's output is silent (the default, see loopback.mjs), so the physical audio checks run only when sound was asked for.
+const audioCaptureRequested=process.env.TABPLAYER_TABS_UI_ONLY!=='1'&&loopbackRunnable();
+if(process.env.TABPLAYER_TABS_UI_ONLY!=='1'&&!audioCaptureRequested)notRunnableUnderSilence('the physical loopback captures: each tab sounds its own literal MIDI note and backing frequency, a switched-away or reactivated tab is silent, and the other tab leaks nothing');
 result.audioCapture={requested:audioCaptureRequested,completed:false};
-if(!audioCaptureRequested)result.limits.push('UI-only execution: no physical audio capture was performed in this run.');
+if(!audioCaptureRequested)result.limits.push(loopbackRunnable()?'UI-only execution: no physical audio capture was performed in this run.':'Silent output: no physical audio capture was performed in this run (a loopback recording would be silence); the tab, document and recovery checks ran.');
 const visualCaptureRequested=process.env.TABPLAYER_TABS_SKIP_VISUALS!=='1';
 result.visualCapture={requested:visualCaptureRequested,completed:false};
 if(!visualCaptureRequested)result.limits.push('Functional retry: the previously accepted visual batch was not repeated in this run.');
@@ -225,6 +228,6 @@ try{
   // reject it while A is active, preserving both documents and original bytes.
   await start(fixture.documents.B.backingPath);await initialPair();await activate(A);const protectedBefore=await workspace();
   const nativeA=await record(A);await reject('export_audio',{document:address(nativeA),plan:{generation:1,ppq:960,durationTick:3840,durationMs:2000,tracks:[{id:'literal',program:25,percussion:false}],tempos:[{tick:0,bpm:120}],occurrences:[{bar:0,occurrence:0,meterNumerator:4,meterDenominator:4,startTick:0,endTick:3840,startMs:0,endMs:2000}],notes:[],midi:[]},request:{tracks:[{id:'literal',name:'Literal A',preset:'gm',kind:'score'}],range:null,format:{sampleRate:48000,bitDepth:16},speed:1,metronome:false,tailSeconds:0,includeBacking:false,includeMix:true},settings:emptySettings(),embeddedBytes:null,stems:false},/destination|preserve/i);assert.deepEqual(await workspace(),protectedBefore);result.checks.inactiveBackingExportProtection=true;
-  assertFixtureHashes(fixture);assert.deepEqual(errors,[]);result.passed=true;writeFileSync(output('result.json'),JSON.stringify(result,null,2),{flag:'wx'});console.log(JSON.stringify(result,null,2));
+  assertFixtureHashes(fixture);assert.deepEqual(errors,[]);result.passed=true;writeFileSync(output('result.json'),JSON.stringify(result,null,2),{flag:'wx'});console.log(JSON.stringify(result,null,2));if(silenceSummary())console.log(silenceSummary());
 }catch(error){result.passed=false;result.failure=String(error?.stack??error);if(page){try{result.last={workspace:await workspace(),audio:await status(),body:(await page.locator('body').innerText()).slice(-5000)};}catch(stateError){result.stateError=String(stateError);}}writeFileSync(output('failure.json'),JSON.stringify(result,null,2),{flag:'wx'});throw error;}
 finally{for(const child of children)terminateCapture(child);await closeApp();assertFixtureHashes(fixture);}

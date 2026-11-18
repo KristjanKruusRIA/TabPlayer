@@ -5,6 +5,7 @@ import {existsSync,mkdirSync,readFileSync,realpathSync,renameSync,writeFileSync}
 import {spawn} from 'node:child_process';
 import {dirname,isAbsolute,join,relative,resolve} from 'node:path';
 import {launch,stop,connect,directory} from './harness.mjs';
+import {loopbackRunnable,notRunnableUnderSilence,silenceSummary} from './loopback.mjs';
 
 mkdirSync(directory,{recursive:true});
 const backing=join(directory,'native-authored-backing.wav'),saved=join(directory,'native-audio.tabplayer');
@@ -38,17 +39,23 @@ try {
   // The Selection tab's string, Fret and Set note are the cursor string and the palette's 'fret N'.
   await writeNote(page,6,5);await idle();await ready();
   await button('Show instrument');const instrument=page.getByRole('region',{name:'Instrument view'});await instrument.getByRole('group',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('g[data-note-id]').count(),0);
-  const helper=resolve('src-tauri/target/debug/examples/capture_loopback.exe');if(!existsSync(helper))throw new Error('Build the capture_loopback Cargo example before this native smoke.');
-  const capturedPath=join(directory,'native-app-loopback.wav');const readyDevice=await status();const capture=spawn(helper,[capturedPath,readyDevice.deviceId],{windowsHide:true});let captureLog='';
-  const captureFinished=new Promise((resolve,reject)=>{capture.on('error',reject);capture.on('exit',code=>code===0?resolve():reject(new Error(`Loopback capture failed: ${code}; ${captureLog}`)));});
-  void captureFinished.catch(()=>{});
-  await new Promise((resolve,reject)=>{const until=setTimeout(()=>reject(new Error('Loopback capture did not become ready.')),5000);capture.stdout.on('data',bytes=>{captureLog+=bytes.toString();if(captureLog.includes('"ready":true')){clearTimeout(until);resolve();}});capture.stderr.on('data',bytes=>{captureLog+=bytes.toString();});capture.on('error',error=>{clearTimeout(until);reject(error);});});
+  const capturedPath=join(directory,'native-app-loopback.wav');const readyDevice=await status();let captureLog='',captureFinished=null;
+  if(loopbackRunnable()){
+    const helper=resolve('src-tauri/target/debug/examples/capture_loopback.exe');if(!existsSync(helper))throw new Error('Build the capture_loopback Cargo example before this native smoke.');
+    const capture=spawn(helper,[capturedPath,readyDevice.deviceId],{windowsHide:true});
+    captureFinished=new Promise((resolve,reject)=>{capture.on('error',reject);capture.on('exit',code=>code===0?resolve():reject(new Error(`Loopback capture failed: ${code}; ${captureLog}`)));});
+    void captureFinished.catch(()=>{});
+    await new Promise((resolve,reject)=>{const until=setTimeout(()=>reject(new Error('Loopback capture did not become ready.')),5000);capture.stdout.on('data',bytes=>{captureLog+=bytes.toString();if(captureLog.includes('"ready":true')){clearTimeout(until);resolve();}});capture.stderr.on('data',bytes=>{captureLog+=bytes.toString();});capture.on('error',error=>{clearTimeout(until);reject(error);});});
+  }else notRunnableUnderSilence('the loopback recording of the played A4: device, finite samples, peak and RMS, 2.5 to 3.5 s duration, onset within 0.5 s and pitch within 3 percent of 440 Hz');
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001);
   await instrument.locator('g[data-note-id][data-string="6"][data-fret="5"][data-key="69"]').waitFor({state:'visible'});
   const played=await status();assert.ok(played.deviceId);const cursor=page.locator('.at-cursor-beat').first();await cursor.waitFor({state:'visible'});const first=await cursor.boundingBox();
   await waitStatus(s=>s.seconds>.8);
   const later=await cursor.boundingBox();assert.ok(first&&later&&(first.x!==later.x||first.y!==later.y),'The native clock must move the public notation cursor.');
-  await captureFinished;const captured=JSON.parse(readFileSync(capturedPath.replace(/\.wav$/,'.json'),'utf8'));assert.equal(captured.deviceId,played.deviceId);assert.equal(captured.finite,true);assert.ok(captured.peak>.001&&captured.rms>.0001);assert.ok(captured.durationSeconds>2.5&&captured.durationSeconds<3.5);assert.ok(captured.onsetFrame/captured.sampleRate<.5);assert.ok(Math.abs(captured.frequencyHz/440-1)<.03,`Captured A4 pitch: ${captured.frequencyHz}`);
+  // Under silent output the rendered meter stands in for the recording: the app counted frames and metered a level while it played.
+  let captured=null;
+  if(captureFinished){await captureFinished;captured=JSON.parse(readFileSync(capturedPath.replace(/\.wav$/,'.json'),'utf8'));assert.equal(captured.deviceId,played.deviceId);assert.equal(captured.finite,true);assert.ok(captured.peak>.001&&captured.rms>.0001);assert.ok(captured.durationSeconds>2.5&&captured.durationSeconds<3.5);assert.ok(captured.onsetFrame/captured.sampleRate<.5);assert.ok(Math.abs(captured.frequencyHz/440-1)<.03,`Captured A4 pitch: ${captured.frequencyHz}`);}
+  else{assert.ok(played.renderedFrames>4096&&played.outputPeak>.001,`the rendered meter saw the played note: ${JSON.stringify({frames:played.renderedFrames,peak:played.outputPeak})}`);}
   await revealLeftTask(page,'Sound');await page.getByRole('combobox',{name:/^Sound preset/}).selectOption('lead');await idle();assert.equal((await status()).generation,played.generation);assert.equal((await status()).playing,true);
   await revealDock(page,'Mixer');const mute=page.locator('.track-channel[aria-label^="Channel 1"]').getByLabel('Mute',{exact:true});
   const waitMute=checked=>page.waitForFunction(checked=>document.querySelector('.track-channel[aria-label^="Channel 1"] input[type="checkbox"]')?.checked===checked,checked);
@@ -94,7 +101,8 @@ try {
   assert.equal((await page.evaluate(()=>window.__nativeAudioSmoke)).webAudioSamples,0,'External media mode must never emit a second synthesizer stream.');
   const result={actualNativeCallbacks:true,played,captured,capturedPath,cursorMoved:true,noSecondSynth:true,settingsUndoPreservesPlayback:true,inclusiveLoop:true,instrumentViewsFollowSelectedTrack:true,instrumentViewsPauseStudyAndStop:true,instrumentViewModes:true,musicalEditStopsAndRefreshesPlayback:true,backingTransaction:true,selfContainedBackingRestartReopen:true,authoredBackingUnavailableDuringReopen:true,reopenedBackingSignal,newClearsTransport:true,offlineWebview:true,blockedExternal:[...new Set(blockedExternal)]};
   writeFileSync(join(directory,'native-audio-result.json'),JSON.stringify(result,null,2));await page.screenshot({path:join(directory,'native-audio.png')});
-  console.log('Native CPAL playback and independent bounded WASAPI loopback PCM, cursor, pause/seek/loop/speed, sound history, backing transaction, self-contained offline restart/reopen and New passed.',captured);
+  if(silenceSummary())console.log(silenceSummary());
+  console.log(`Native CPAL playback and ${captured?'independent bounded WASAPI loopback PCM':'the rendered output meter (no loopback recording was made under silent output)'}, cursor, pause/seek/loop/speed, sound history, backing transaction, self-contained offline restart/reopen and New passed.`,captured);
 } catch(error) {
   if(page){const failure=await page.evaluate(async()=>({status:await window.__TAURI_INTERNALS__.invoke('audio_status'),body:document.body.innerText.slice(0,12000)})).catch(()=>null);writeFileSync(join(directory,'native-audio-failure.json'),JSON.stringify(failure,null,2));console.log('Native smoke diagnostic:',failure);}
   throw error;

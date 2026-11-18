@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,propertiesSection} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,rmSync } from 'node:fs';
@@ -17,7 +17,8 @@ try{
   const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   await button('Open');
-  await page.locator('summary').filter({hasText:'Beat notation'}).first().evaluate(node=>{node.parentElement.open=true;});
+  // The beat's wah pedal is in the Properties dialog's Beat notation section; Apply, Export and Undo close the dialog, so the section is opened again before each read.
+  await propertiesSection(page,'Beat notation');
   const wah=page.getByRole('combobox',{name:/^Wah pedal/});
   assert.equal(await wah.inputValue(),'0');
   await wah.selectOption('2');await button('Apply beat gestures');
@@ -27,7 +28,7 @@ try{
   const wahs=await page.evaluate(async bytes=>{const {importer,Settings}=await import('/alphatab/alphaTab.mjs');const score=importer.ScoreLoader.loadScoreFromBytes(Uint8Array.from(bytes),new Settings());
     return score.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.filter(beat=>beat.wahPedal!==0).map(beat=>`${track.name}:${bar.index}:${beat.index}=${beat.wahPedal}`)))));},[...readFileSync(exported)]);
   assert.deepEqual(wahs,[`Guitar9:${edit.target.bar}:${edit.target.beat}=2`]);
-  await button('Undo');
+  await button('Undo');await propertiesSection(page,'Beat notation');
   assert.equal(await wah.inputValue(),'0');
   assert.deepEqual(errors,[]);
   console.log(`wah: exported ${wahs.join(', ')}; undo cleared it.`);

@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,revealLeftTask} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,revealLeftTask,soundPanel} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
@@ -27,7 +27,7 @@ async function session(run){
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
     await clickWorkstationButton(page,'Open');await waitForWorkspaceIdle(page);
-    await revealLeftTask(page,'Sound');const panel=page.getByRole('region',{name:'Track sound'});
+    await revealLeftTask(page,'Sound');const panel=soundPanel(page);
     const click=async(name,scope=panel)=>{await scope.getByRole('button',{name,exact:true}).click();await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
     await run({page,panel,click});
     assert.deepEqual(errors,[]);

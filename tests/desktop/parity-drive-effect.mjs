@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask,soundPanel} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { mkdir,readdir,readFile,writeFile } from 'node:fs/promises';
@@ -49,7 +49,7 @@ try{
     await new Promise(r=>setTimeout(r,300));return leftChannel(await readFile(join(folder,file)));
   };
   const dry=await exportWav('dry');
-  await revealLeftTask(page,'Sound');const panel=page.getByRole('region',{name:'Track sound'});
+  await revealLeftTask(page,'Sound');const panel=soundPanel(page);
   const details=panel.locator('details.sound-block').filter({has:page.locator('.sound-block-name',{hasText:/^Drive$/})});
   if(!await details.evaluate(node=>node.open))await details.locator('summary').click();
   const field=async(name,value)=>{const input=panel.getByLabel(`drive ${name}`,{exact:true});await input.fill(String(value));await input.blur();await waitForWorkspaceIdle(page);};

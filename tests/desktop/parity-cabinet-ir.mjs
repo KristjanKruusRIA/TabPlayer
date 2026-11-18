@@ -105,7 +105,7 @@ export async function runCabinetIrAcceptance({buildPath}={}){
     assert.ok(existsSync(path),`${name}.wav was written`);await dialog.waitFor({state:'detached',timeout:30000}).catch(()=>{});await idle();await sleep(300);
     return readFileSync(path);
   };
-  const panel=()=>page.getByRole('region',{name:'Track sound'});
+  const panel=()=>ui.soundPanel(page);
   const openSound=async()=>{
     await ui.revealLeftTask(page,'Sound');
     const details=panel().locator('details.sound-block').filter({has:page.locator('.sound-block-name',{hasText:/^Cabinet$/})});

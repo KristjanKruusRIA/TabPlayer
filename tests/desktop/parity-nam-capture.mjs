@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,revealLeftTask,soundPanel} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { mkdir,readdir,readFile,rm,writeFile } from 'node:fs/promises';
@@ -58,7 +58,7 @@ const open=async(env,file)=>{
     assert.ok(file,`${name}.wav was written`);await dialog.waitFor({state:'detached',timeout:30000}).catch(()=>{});await waitForWorkspaceIdle(page);
     await new Promise(r=>setTimeout(r,300));return readFile(join(exportDir,file));
   };
-  await revealLeftTask(page,'Sound');const panel=page.getByRole('region',{name:'Track sound'});
+  await revealLeftTask(page,'Sound');const panel=soundPanel(page);
   const details=panel.locator('details.sound-block').filter({has:page.locator('.sound-block-name',{hasText:/^Amp$/})});
   if(!await details.evaluate(node=>node.open))await details.locator('summary').click();
   return {page,button,status,waitStatus,exportWav,panel,errors};

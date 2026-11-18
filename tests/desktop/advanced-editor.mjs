@@ -31,7 +31,7 @@ const openTuning=async row=>{const rowButton=page.getByRole('button',{name:row})
 const notesOf=dialogBox=>dialogBox.getByLabel('Notes, high to low',{exact:true});
 const libraryPreset=async(dialogBox,id)=>{const [instrument,strings]=id.split('-');await dialogBox.getByLabel('Instrument',{exact:true}).selectOption(instrument);await dialogBox.getByLabel('Number of strings',{exact:true}).selectOption(strings);await dialogBox.getByLabel('Preset',{exact:true}).selectOption(id);};
 const finish=async(dialogBox,name)=>{await dialogBox.getByRole('button',{name,exact:true}).click();await dialogBox.waitFor({state:'hidden'});await idle();};
-const rowText=async row=>{const rowButton=page.getByRole('button',{name:row});await revealInspectorControl(page,rowButton);return (await rowButton.textContent()).trim();};
+const rowText=async row=>{const rowButton=page.getByRole('button',{name:row});if(!await addDialogOpen())await revealInspectorControl(page,rowButton);return (await rowButton.textContent()).trim();};
 const presetOfTrack=async()=>{const dialogBox=await openTuning(trackRow);const value=await dialogBox.getByLabel('Preset',{exact:true}).inputValue();await dialogBox.getByRole('button',{name:'Cancel',exact:true}).click();await dialogBox.waitFor({state:'hidden'});return value;};
 const trackCount=async()=>{await revealDock(page,'Mixer');return page.getByRole('button',{name:/^Track \d+: /}).count();};
 try {

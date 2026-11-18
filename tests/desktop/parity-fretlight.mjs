@@ -115,6 +115,10 @@ try {
   // Playing: the lights change with the music and the writing rate stays bounded.
   await pick('7'); await untilFrame(BEAT[0], 'back on the first beat');
   await reveal(); await panel.getByRole('combobox', { name: 'Lights show' }).selectOption('playing');
+  // A click in the score now also puts the transport on that beat (click-to-seek, e30b44a), and a transport sitting on a sought position counts as paused,
+  // so the playing notes are the ones at that position: the clicked first beat stays lit. Stop ends the paused state, and then nothing is playing.
+  await untilFrame(BEAT[0], 'a transport paused on the clicked beat shows that beat as the playing notes');
+  await page.getByRole('button', { name: 'Stop', exact: true }).first().click(); await waitForWorkspaceIdle(page);
   await untilFrame(OFF, 'nothing is playing, so nothing is lit');
   const before = (await log(true)).reports.length; assert.equal(before > 0, true);
   await revealPlaybackControls(page);

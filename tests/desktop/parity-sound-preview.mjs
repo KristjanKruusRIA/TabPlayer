@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,soundPanel} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { launch,connect,stop } from './harness.mjs';
@@ -17,7 +17,7 @@ try{
   const noAlerts=async()=>assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);
   await clickWorkstationButton(page,'Open');await waitForWorkspaceIdle(page);
   await page.waitForFunction(()=>(window.__tabplayerTestPrepares?.length??0)>0);
-  await revealLeftTask(page,'Sound');const panel=page.getByRole('region',{name:'Track sound'}),preview=panel.getByLabel('Preview sound',{exact:true});
+  await revealLeftTask(page,'Sound');const panel=soundPanel(page),preview=panel.getByLabel('Preview sound',{exact:true});
   const before=JSON.stringify((await readActiveDocument(page)).project);
   let saved;
   const ids=['base/0','base/1','base/2','base/3'],mixOf=(mixes,id)=>mixes[id]??{gain:1,pan:0,mute:false,solo:false},sameMixes=sent=>{for(const id of ids)assert.deepEqual(mixOf(sent,id),mixOf(saved.mixes,id),id);};

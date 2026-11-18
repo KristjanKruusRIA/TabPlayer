@@ -142,10 +142,17 @@ try {
   await moveCursor(page, { beat: clicked.beat });
   const reach = async wanted => { for (let press = 0; press < 12 && (await cursorPosition(page)).text !== wanted; press++) { await page.keyboard.press('ArrowUp'); await page.waitForTimeout(80); } return (await cursorPosition(page)).text; };
   assert.equal(await reach(clicked.text), clicked.text, 'the click and the keyboard name the same note');
-  // Arrow keys step between the notes of a drum beat; none of it edits.
-  const walked = new Set([(await cursorPosition(page)).text]); await scoreWorkspace(page).focus();
-  for (let press = 0; press < 3; press++) { await page.keyboard.press('ArrowUp'); await page.waitForTimeout(80); walked.add((await cursorPosition(page)).text); }
-  assert.ok(walked.size >= 2, `arrow keys move between the notes of the beat: ${[...walked]}`);
+  // Arrow keys follow the drawn tab lines (a3e294b, src/engraving/drum-tab-cursor.ts): Up goes to the hit on the nearest line above, Down to the one
+  // below, and the cursor stays at the top or bottom hit. None of it edits. Beat 3 of bar 1 is stored as kick 36 (Note 1, drawn on line 6, the bottom),
+  // crash 49 (Note 2, line 1, the top) and open hi-hat 46 (Note 3, line 3), so from the clicked crash Up has nowhere to go and Down reaches the hi-hat first.
+  const logBeforeWalk = (await edits()).length; await scoreWorkspace(page).focus();
+  const noteNow = async () => Number(/Note (\d+)/.exec((await cursorPosition(page)).text)?.[1]);
+  assert.equal(await noteNow(), 2, 'the walk starts on the crash (Note 2, the top line)');
+  for (const [key, expected, why] of [['ArrowUp', 2, 'Up from the top line stays on the crash'], ['ArrowDown', 3, 'Down from the crash (line 1) goes to the open hi-hat (line 3), skipping nothing drawn between'], ['ArrowDown', 1, 'Down from the hi-hat goes to the kick (line 6)'], ['ArrowDown', 1, 'Down from the bottom line stays on the kick'], ['ArrowUp', 3, 'Up from the kick goes back to the open hi-hat'], ['ArrowUp', 2, 'Up from the hi-hat goes back to the crash'], ['ArrowUp', 2, 'Up from the top line stays on the crash']]) {
+    await page.keyboard.press(key); await page.waitForTimeout(120);
+    assert.equal(await noteNow(), expected, `${why} (${key}): ${(await cursorPosition(page)).text}`);
+  }
+  assert.equal((await edits()).length, logBeforeWalk, 'walking the notes of a beat records no edit');
   const logAfterWalk = (await edits()).length;
 
   // 4. A note added from the drum kit appears as a number. Beat 1 of bar 1 has no snare.

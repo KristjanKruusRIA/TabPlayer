@@ -40,10 +40,11 @@ export async function runNotationEntryAcceptance({buildPath}={}){
   const native=()=>poll(()=>invoke('audio_status'),value=>{assert.equal(value.error,null);return value.ready&&value.generation===value.desiredGeneration;},'paused current native preparation');
   const idle=async()=>{owned();await ui.waitForWorkspaceIdle(page);healthy();};
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
-  const staff=()=>page.getByRole('group',{name:'Pitch entry staff',exact:true});
+  // The pitch entry panel is the Pitch entry tab of the Properties dialog (ec049ca); ui.entryPanel opens it again whenever Undo, Redo or another command has closed it.
+  const staff=()=>ui.entryPanel(page).getByRole('group',{name:'Pitch entry staff',exact:true});
   const entry=name=>staff().getByRole('button',{name,exact:true});
   // The palette repeats Key signature as an icon button; the entry staff's own button is the one with text.
-  const choose=name=>{const button=page.getByRole('button',{name,exact:true});return name==='Key signature'?button.and(page.locator(':not(.tp-glyph-btn)')):button;};
+  const choose=name=>{const button=ui.entryPanel(page).getByRole('button',{name,exact:true});return name==='Key signature'?button.and(page.locator(':not(.tp-glyph-btn)')):button;};
   const edits=async()=>(await record()).snapshot.project.edits;
   // An entry sends the expected commands, in order. Undo restores the record before them and Redo the one after;
   // `keep` leaves them applied, otherwise a last Undo removes them so the next probe starts from the same score.
@@ -117,7 +118,9 @@ export async function runNotationEntryAcceptance({buildPath}={}){
     await probe('pitched click removes',()=>entry('Remove E4').click(),[{type:'removeNoteByIndex',target:k,noteIndex:1}],true);
     await probe('keyboard sharp then letter',()=>press(['#','f']),[{type:'addPitchedNote',target:k,pitch:66}],true);
     await probe('keyboard octave up then letter',()=>press(['PageUp','a']),[{type:'addPitchedNote',target:k,pitch:81}],true);
-    await probe('keyboard cursor then Enter',()=>press(['ArrowDown','Enter']),[{type:'addPitchedNote',target:k,pitch:79}],true);
+    // The entry cursor, octave and accidental belong to the Pitch entry panel, which is a tab of the Properties dialog since ec049ca: Undo and Redo in the probe above close the dialog, and it opens
+    // with the cursor back on the staff's bottom line (E4 on the treble staff). One step up is F4, which this beat does not hold (D4 was added and E4 removed above), so Enter adds it.
+    await probe('keyboard cursor then Enter',()=>press(['ArrowUp','Enter']),[{type:'addPitchedNote',target:k,pitch:65}],true);
     await page.screenshot({path:resolve(paths.results,'02-pitched-staff.png')});result.screenshots.push('02-pitched-staff.png');
     step('Mouse and keyboard enter pitched notes with accidentals, octave keys and the cursor',{edits:result.edits});
 
@@ -134,7 +137,7 @@ export async function runNotationEntryAcceptance({buildPath}={}){
     assert.deepEqual(beat(0).map(note=>[note.string,note.fret]).sort((a,b)=>a[0]-b[0]),[[1,0],[flat.string,flat.fret],[8,1]].sort((a,b)=>a[0]-b[0]));
     const flatNote=beat(0).find(note=>note.string===flat.string);assert.equal(flatNote.displayValue,70,'Bb4 is drawn at the clicked pitch');assert.equal(flatNote.accidentalMode,5,'The flat spelling is saved');
     assert.equal(beat(1).find(note=>note.string===bass.string&&note.fret===bass.fret).displayValue,45,'The bass note is drawn at the clicked pitch');
-    assert.deepEqual(beat(3).map(note=>note.displayValue).sort((a,b)=>a-b),[60,62,66,67,79,81],'Keys notes are drawn at the clicked pitches');
+    assert.deepEqual(beat(3).map(note=>note.displayValue).sort((a,b)=>a-b),[60,62,65,66,67,81],'Keys notes are drawn at the clicked pitches');
     assert.deepEqual(await record(),final,'Export never edits');step('Exported GP reads back every entered and removed note with its display value and spelling',{exportPath,sha256:hashFile(exportPath)});
 
     // A new blank document draws guitars at sounding pitch (display transposition 0), so E4 is the open first string.

@@ -5,13 +5,22 @@ import { resolve } from 'node:path';
 import { assertSilentOutput, silentOutputEnvironment } from './silent-output.mjs';
 export const directory=resolve('.analysis/desktop-smoke');
 const executable=resolve(directory,'tabplayer.exe');
+let defaultAppData;
+/**
+ * The folder the app keeps its personal stores in (application settings, saved tunings). The desktop-test build refuses to read them
+ * unless TABPLAYER_TEST_APP_DATA_DIR names an absolute folder, and shows a "preferences could not be saved" notice when it is missing.
+ * A driver that sets its own (or runs under a shell that does) keeps it; otherwise every driver process gets one fresh folder, shared by
+ * the relaunches inside that run, as a person's settings are shared by their restarts.
+ */
+const appDataDirectory=environment=>environment.TABPLAYER_TEST_APP_DATA_DIR ?? process.env.TABPLAYER_TEST_APP_DATA_DIR ?? (defaultAppData??=mkdtempSync(resolve(directory,'appdata-')));
 /** Starts the test app hidden and returns its process id. `files` are passed on its command line, as a double-click does. */
 export function launch(environment={},files=[]) {
   const sessionDirectory=environment.TABPLAYER_TEST_SESSION_DIR ?? process.env.TABPLAYER_TEST_SESSION_DIR ?? mkdtempSync(resolve(directory,'session-'));
+  const appData=appDataDirectory(environment);
   const start=files.length?`$app=Start-Process -FilePath $env:TABPLAYER_SMOKE_EXE -ArgumentList (($env:TABPLAYER_SMOKE_FILES | ConvertFrom-Json) | ForEach-Object { '"' + $_ + '"' }) -WindowStyle Hidden -PassThru; $app.Id`
     :'$app=Start-Process -FilePath $env:TABPLAYER_SMOKE_EXE -WindowStyle Hidden -PassThru; $app.Id';
   return Number(execFileSync('powershell.exe',['-NoProfile','-Command',start],{
-    encoding:'utf8',env:{...process.env,...environment,TABPLAYER_SMOKE_FILES:JSON.stringify(files),TABPLAYER_SMOKE_EXE:executable,TABPLAYER_DESKTOP_TEST:'1',...silentOutputEnvironment(),TABPLAYER_TEST_SESSION_DIR:sessionDirectory,WEBVIEW2_USER_DATA_FOLDER:environment.WEBVIEW2_USER_DATA_FOLDER??resolve(directory,`profile-${Date.now()}`),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223'}
+    encoding:'utf8',env:{...process.env,...environment,TABPLAYER_SMOKE_FILES:JSON.stringify(files),TABPLAYER_SMOKE_EXE:executable,TABPLAYER_DESKTOP_TEST:'1',...silentOutputEnvironment(),TABPLAYER_TEST_SESSION_DIR:sessionDirectory,TABPLAYER_TEST_APP_DATA_DIR:appData,WEBVIEW2_USER_DATA_FOLDER:environment.WEBVIEW2_USER_DATA_FOLDER??resolve(directory,`profile-${Date.now()}`),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223'}
   }).trim());
 }
 export function stop(id) {

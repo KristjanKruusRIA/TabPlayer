@@ -40,6 +40,15 @@ try {
   assert.equal(await page.evaluate(()=>window.__reviewScore.tracks[0].staves[0].bars[0].voices[0].beats[0].playbackDuration),1680);
   await audible('reimported double dots');
   await click('Add track');await ready();await check('Mute',1,true);
+  // Add track selects the track it adds (d618af8; before, the selection stayed on track 1), so Remove track now removes the muted new track 2 and track 1 is what is left.
+  // Undo brings the muted track back and Redo takes it away again, leaving the unmuted one.
+  await click('Remove track');await click('Undo');await ready();
+  assert.equal(await page.getByLabel('Mute',{exact:true}).nth(0).isChecked(),false);
+  assert.equal(await page.getByLabel('Mute',{exact:true}).nth(1).isChecked(),true);
+  await click('Redo');await ready();assert.equal(await page.getByLabel('Mute',{exact:true}).count(),1);assert.equal(await page.getByLabel('Mute',{exact:true}).isChecked(),false);
+  await click('Undo');await ready();assert.equal(await page.getByLabel('Mute',{exact:true}).count(),2);
+  // The original check: with track 1 selected, removing it leaves the muted track, and Undo and Redo keep each track's own mute.
+  await click('Track 1: Guitar');
   await click('Remove track');await click('Undo');await ready();
   assert.equal(await page.getByLabel('Mute',{exact:true}).nth(0).isChecked(),false);
   assert.equal(await page.getByLabel('Mute',{exact:true}).nth(1).isChecked(),true);

@@ -30,6 +30,9 @@ try{
   const group=page.getByRole('group',{name:'Key',exact:true});
   const key=name=>group.getByRole('button',{name,exact:true});
   const shown=async()=>(await group.getByRole('status',{name:'Key shift'}).textContent()).trim();
+  // The readout is the page's own copy of the practice settings; it follows the native status when the page next reads it, so the driver's own audio_status read
+  // (what waitStatus sees) can be a poll ahead of it. The readout is waited for, and a readout that never agrees still fails with both values.
+  const readoutIs=async(read,expected)=>{const deadline=Date.now()+5000;let last;while(Date.now()<deadline){last=(await read()).trim();if(last===expected)return;await page.waitForTimeout(40);}assert.equal(last,expected,'the Key readout shows the shift native acknowledged');};
   // In a narrow window the Key group is folded into More playback; open it when it is not in the row.
   const reachKey=async()=>{if(!await group.isVisible())await revealPlaybackControls(page);assert.ok(await group.isVisible(),'the Key group cannot be reached');};
   const leaveKey=async()=>{await hidePlaybackControls(page);};
@@ -81,7 +84,7 @@ try{
       // The in-row buttons work, and the row keeps them in the window.
       const row=page.locator('.gp-toolbar .transport-primary>.transport-key');
       await row.getByRole('button',{name:'Raise the key',exact:true}).click();await waitStatus(value=>tonality(value)===1);await idle();
-      assert.equal((await row.getByRole('status',{name:'Key shift'}).textContent()).trim(),'+1');
+      await readoutIs(()=>row.getByRole('status',{name:'Key shift'}).textContent(),'+1');
       await row.getByRole('button',{name:'Original key',exact:true}).click();await waitStatus(value=>tonality(value)===0);await idle();
       // A real pointer double click is two steps: nothing moves under the pointer between the clicks.
       await row.getByRole('button',{name:'Raise the key',exact:true}).dblclick();await waitStatus(value=>tonality(value)===2);await idle();
@@ -94,7 +97,7 @@ try{
   await reachKey();for(const name of ['Lower the key','Raise the key','Original key'])assert.ok(await key(name).isVisible(),`${name} is not visible at 960 by 600`);await leaveKey();
 
   // A shift from the interface is acknowledged by the native status, one step per click.
-  assert.equal(tonality(await status()),0);await reachKey();assert.equal(await shown(),'0');
+  assert.equal(tonality(await status()),0);await reachKey();await readoutIs(shown,'0');
   assert.equal(await key('Original key').getAttribute('aria-disabled'),'true');
   const generation=(await status()).generation;
   // A real pointer double click on the folded Raise is two steps: the popover does not move between the clicks.
@@ -104,7 +107,7 @@ try{
     await key('Raise the key').click();
     await waitStatus(value=>tonality(value)===step&&value.ready);await idle();await reachKey();
   }
-  assert.equal(await shown(),'+3');
+  await readoutIs(shown,'+3');
   // The folded group leaves a labelled mark on the summary, and the summary grows to hold it: the mark is inside the window and inside the summary's box.
   const mark=await page.evaluate(()=>{const summary=document.querySelector('.transport-more>summary'),el=summary?.querySelector('.transport-keymark');if(!el)return null;const a=summary.getBoundingClientRect(),b=el.getBoundingClientRect();return {label:el.getAttribute('aria-label'),text:el.textContent,insideSummary:b.left>=a.left-0.5&&b.right<=a.right+0.5,insideWindow:b.right<=window.innerWidth+0.5&&b.left>=-0.5,overflow:summary.scrollWidth-summary.clientWidth};});
   assert.ok(mark,'a folded Key group leaves a mark on the More playback summary');assert.equal(mark.label,'Key +3');assert.ok(mark.insideSummary&&mark.insideWindow&&mark.overflow<=1,JSON.stringify(mark));
@@ -112,7 +115,7 @@ try{
   assert.equal((await status()).generation,generation,'a shift never prepares the score again');
   // A fast double click is two steps: the second waits for the first and both land.
   // Two activations in the same task, before native can answer the first (a pointer double click can miss the button when the layout moves under it): the second is queued behind the first and both land.
-  await key('Raise the key').evaluate(node=>{node.click();node.click();});await waitStatus(value=>tonality(value)===5);await idle();await reachKey();assert.equal(await shown(),'+5');
+  await key('Raise the key').evaluate(node=>{node.click();node.click();});await waitStatus(value=>tonality(value)===5);await idle();await reachKey();await readoutIs(shown,'+5');
   await key('Lower the key').click();await waitStatus(value=>tonality(value)===4);await idle();await reachKey();
   await key('Lower the key').click();await waitStatus(value=>tonality(value)===3);await idle();await leaveKey();
 
@@ -129,6 +132,9 @@ try{
   // Change the shift while playing: the loop and generation are kept, nothing stops, and the position stays inside the loop.
   await revealPlaybackControls(page);await page.getByLabel('Loop start',{exact:true}).fill('1');await page.getByLabel('Loop end',{exact:true}).fill('2');await hidePlaybackControls(page);
   await button('Loop');const looped=await waitStatus(value=>value.loop!==null);
+  // The page learns of a loop from the next native status, and Play pressed before it has done so starts a range from the cursor, which drops the loop (a product race, reported
+  // with the sweep: NativePlaybackController.play, b73ae93). A person cannot press that fast, so the driver waits for the Loop button to show the loop before it presses Play.
+  await page.locator('[data-action="loop"][aria-pressed="true"]').waitFor({state:'attached'});
   await button('Play');const playing=await waitStatus(value=>value.playing&&value.tick>0);
   await reachKey();await key('Raise the key').click();
   const shifted=await waitStatus(value=>tonality(value)===2&&value.playing);await idle();
@@ -140,7 +146,7 @@ try{
 
   // Reset returns to the original key and the control shows it.
   await reachKey();await key('Original key').click();await waitStatus(value=>tonality(value)===0);await idle();await reachKey();
-  assert.equal(await shown(),'0');assert.equal(await key('Original key').getAttribute('aria-disabled'),'true');
+  await readoutIs(shown,'0');assert.equal(await key('Original key').getAttribute('aria-disabled'),'true');
   await leaveKey();await button('Stop');
 
   // A session setting: no edit, nothing marked modified.

@@ -6,8 +6,9 @@ import { directory,launch,connect,stop } from './harness.mjs';
 import { buildInstrumentFixture,fixturePath,metadataPath } from './instrument-fixture.mjs';
 
 // ASCII tablature: Export score → ASCII tablature writes a .txt with Guitar9 and Bass6 (named by octave
-// where string names repeat), leaves out Drums and Keys, and every string line carries exactly the
-// fixture's frets in time order.
+// where string names repeat) and Drums as a six-line drum tab (Cr Rd HH Tm Sn Bd; a3e294b wrote drum tracks, before it they were left out),
+// leaves out Keys (a staff without strings), and every string line carries exactly the fixture's frets in time order and every drum line
+// its hits' sound numbers in time order.
 await buildInstrumentFixture();
 const metadata=JSON.parse(await readFile(metadataPath,'utf8'));
 const folder=join(directory,`export-${Date.now()}-ascii-tab`);await mkdir(folder,{recursive:true});
@@ -29,7 +30,8 @@ try{
   assert.equal(lines[0],'Authored instrument view fixture - TabPlayer desktop verification');assert.equal(metadata.title,'Authored instrument view fixture');
   assert.ok(lines.includes('Guitar9 [C#1 F#1 B1 E2 A2 D3 G3 B3 E4]'),text);
   assert.ok(lines.includes('Bass6 [B E A D G C]'),text);
-  assert.ok(!/Drums|Keys/.test(text),'Percussion and string-less tracks are left out.');
+  assert.ok(lines.includes('Drums [drum tab Cr Rd HH Tm Sn Bd]'),text);
+  assert.ok(!/Keys/.test(text),'A string-less pitched track is left out.');
   assert.ok(lines.every(line=>line.length<=80),'Systems wrap at 80 columns.');
   // Each string's line, joined across systems, holds that string's frets in time order.
   const strings={Guitar9:['E4','B3','G3','D3','A2','E2','B1','F#1','C#1'],Bass6:['C','G','D','A','E','B']};
@@ -42,6 +44,17 @@ try{
       assert.deepEqual(written,expected,`${name} ${label} string`);
     });
   }
+  // The drum tab: each hit is its sound number on the line of its kit piece (crash Cr, ride Rd, hi-hats HH, toms Tm, snare Sn, kick Bd); the fixture never strikes two hits of one line together.
+  {
+    const lineOf={36:'Bd',38:'Sn',41:'Tm',42:'HH',46:'HH',49:'Cr',51:'Rd'};
+    const start=lines.indexOf('Drums [drum tab Cr Rd HH Tm Sn Bd]'),end=lines.findIndex((line,at)=>at>start&&/^\S.* \[/.test(line)),block=lines.slice(start+1,end<0?undefined:end);
+    for(const label of ['Cr','Rd','HH','Tm','Sn','Bd']){
+      const written=block.filter(line=>line.startsWith(`${label}|`)).map(line=>line.slice(label.length+1)).join('').match(/\d+/g)?.map(Number)??[];
+      const expected=metadata.notes.filter(note=>note.track===2&&lineOf[note.key]===label).sort((a,b)=>a.startTick-b.startTick).map(note=>note.key);
+      assert.ok(expected.length>0,`the fixture strikes something on the ${label} line`);
+      assert.deepEqual(written,expected,`Drums ${label} line`);
+    }
+  }
   assert.deepEqual(errors,[]);
-  console.log(`ascii tab: ${file} ${lines.length} lines; Guitar9 and Bass6 frets match the fixture string by string.`);
+  console.log(`ascii tab: ${file} ${lines.length} lines; Guitar9 and Bass6 frets match the fixture string by string and the drum tab lines hold the fixture's hits.`);
 }finally{if(browser)await browser.close().catch(()=>{});stop(id);}

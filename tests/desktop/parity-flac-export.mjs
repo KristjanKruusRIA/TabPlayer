@@ -6,9 +6,10 @@ import { mkdir,readdir,readFile,stat,writeFile } from 'node:fs/promises';
 import { join,resolve } from 'node:path';
 import { exporter,model,Settings } from '@coderline/alphatab';
 import { directory,launch,connect,stop } from './harness.mjs';
+import { runDecodeAudio } from './decode-audio.mjs';
 
 // FLAC export: the Export dialog's File type writes mixed audio and stems as lossless FLAC. Symphonia's FLAC decoder,
-// run through the decode_audio example (DECODE_AUDIO names a built one; otherwise cargo builds it), reads the FLAC of a
+// run through the decode_audio example (see decode-audio.mjs: DECODE_AUDIO, the built release example, or cargo), reads the FLAC of a
 // chord as exactly the samples of the WAV of the same chord, which the test reads itself, and the FLAC is smaller.
 const fixture=resolve(directory,'flac-export-fixture.gp');
 {
@@ -25,8 +26,7 @@ const fixture=resolve(directory,'flac-export-fixture.gp');
 /** Symphonia's reading of `file`: its stream parameters and its samples as `bits`-bit integers. */
 async function decode(file,bits){
   const out=`${file}.samples`,args=[file,String(bits),out];
-  const json=process.env.DECODE_AUDIO?execFileSync(process.env.DECODE_AUDIO,args,{encoding:'utf8'})
-    :execFileSync('cargo',['run','--quiet','--release','--example','decode_audio','--',...args],{cwd:resolve('src-tauri'),encoding:'utf8'});
+  const json=runDecodeAudio(args);
   const bytes=await readFile(out),samples=new Int32Array(bytes.length/4);for(let i=0;i<samples.length;i++)samples[i]=bytes.readInt32LE(i*4);
   return {...JSON.parse(json),samples};
 }

@@ -7,6 +7,7 @@ import {dirname,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {validateStringCountArguments,assertStringCountBuild,assertStringCountPortFree,stringCountEnvironment,assertStringCountIdentity,buildStringCountFixture,assertStringCountMusic} from './parity-string-count.mjs';
 import {sha256} from './score-layout-fixture.mjs';
+import {silentOutputEnvironment} from './silent-output.mjs';
 import {assertScoreLayoutListener} from './parity-score-layouts.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
@@ -44,7 +45,7 @@ test('occupied port and changed process identity refuse before a connection',()=
   assert.doesNotThrow(()=>assertScoreLayoutListener(identity,profile,[{owner:50,chain}]));
   assert.throws(()=>assertScoreLayoutListener(identity,profile,[{owner:50,chain:chain.slice(0,1)}]));
   assert.throws(()=>assertScoreLayoutListener(identity,profile,[{owner:50,chain:[{pid:50,commandLine:`webview --user-data-dir="${profile}-foreign"`},chain[1]]}]));
-  const env=stringCountEnvironment({TABPLAYER_TEST_PLAY:'1',tabplayer_test_open:'foreign',KEEP:'yes'});assert.deepEqual(env,{KEEP:'yes'});
+  const env=stringCountEnvironment({TABPLAYER_TEST_PLAY:'1',tabplayer_test_open:'foreign',KEEP:'yes'});assert.deepEqual(env,{KEEP:'yes',...silentOutputEnvironment()});/* foreign TABPLAYER_TEST_ names are dropped; the launch's silent-output setting (91541d8) is the one TABPLAYER_TEST_ name added */
 });
 test('public fixture roundtrip checks all literal placements and independent pitches',async()=>{
   const {bytes,oracle}=await buildStringCountFixture();const {importer,Settings}=await import('@coderline/alphatab');

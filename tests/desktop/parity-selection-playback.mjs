@@ -6,6 +6,7 @@ import {execFileSync,spawn} from 'node:child_process';
 import {isAbsolute,relative,resolve} from 'node:path';
 import {connect,directory,launch,stop} from './harness.mjs';
 import {buildSelectionFixtures,selectionDirectory,sha256} from './selection-playback-fixture.mjs';
+import {loopbackRunnable,notRunnableUnderSilence,silenceSummary} from './loopback.mjs';
 
 // Root owns execution, the existing diagnostic build/CDP port and listening.
 // No settings changes, model injection or extra native diagnostic commands.
@@ -79,6 +80,7 @@ function stopCapture(child){
   execFileSync('powershell.exe',['-NoProfile','-Command','$p=Get-Process -Id $env:SELECTION_CAPTURE_PID -ErrorAction SilentlyContinue; if($p){if($p.Path -ne $env:SELECTION_CAPTURE_EXE){throw "Unexpected selection capture process"}; Stop-Process -Id $p.Id; $null=$p.WaitForExit(5000)}'],{windowsHide:true,env:{...process.env,SELECTION_CAPTURE_PID:String(child.pid),SELECTION_CAPTURE_EXE:helperPath}});
 }
 async function capture(name){
+  if(!loopbackRunnable())return {async finish(){return null;}};
   const path=output(`${name}.wav`),deviceId=(await status()).deviceId;assert.ok(deviceId);
   const child=spawn(helperPath,[path,deviceId],{windowsHide:true});captures.add(child);let log='',readyRecord;
   const done=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>code===0?resolve():reject(new Error(`Capture ${name} failed (${code}): ${log}`)));});void done.catch(()=>{});
@@ -120,22 +122,25 @@ try{
   const recreated=await waitStatus(value=>value.ready&&value.practice.phase==='paused');assert.equal(recreated.tick,paused.tick);assert.deepEqual(recreated.range,paused.range);await button('Play');
   const ended=await waitStatus(value=>!value.playing&&value.practice.phase==='ended');assert.equal(ended.tick,2880);assert.equal(ended.practice.completedPasses,0);assert.equal(ended.practice.countInRemaining,0);assert.equal(ended.practice.pulse,null);await page.waitForFunction(()=>document.querySelectorAll('.instrument-view g[data-note-id]').length===0);result.checks.finitePauseResumeHealthyDevice=ended;
   await stopPlayback();await selectTiePassage();const selectedCapture=await capture('one-shot');await button('Play selection');await assertRange(960,2880);await waitStatus(value=>value.practice.phase==='ended'&&value.tick===2880);const bounded=await selectedCapture.finish();
-  assert.ok(bounded.wave.rms(.2,.7)>.0001);assert.ok(bounded.wave.rms(2.2,2.9)<.0001,'Physical output is quiet after finite cutoff; native tests establish exact callback frame exclusivity');result.checks.finitePcmSilence=true;
+  if(bounded){assert.ok(bounded.wave.rms(.2,.7)>.0001);assert.ok(bounded.wave.rms(2.2,2.9)<.0001,'Physical output is quiet after finite cutoff; native tests establish exact callback frame exclusivity');result.checks.finitePcmSilence=true;}
+  else notRunnableUnderSilence('a finite selection is audible for its first 0.7 s and silent after its end (loopback RMS)');
 
   await stopPlayback();await cursor(1,4);await (await playbackCombo('Cursor occurrence')).selectOption({label:'Measure 1, occurrence 1'});const sentinelCapture=await capture('sentinel-positive-control');await button('Play from cursor');const sentinel=await sentinelCapture.finish();await stopPlayback();
-  const sentinelHz=fixture.expected.sentinelHz,positiveOnset=sentinel.wave.onset(),boundedOnset=bounded.wave.onset();
-  const positive=sentinel.wave.band(sentinelHz,positiveOnset+.05,positiveOnset+.25);
-  assert.ok(positive>.00005,'Exclusive-end sentinel has a detectable physical positive control');
-  const boundedBands=Array.from({length:9},(_,index)=>bounded.wave.band(sentinelHz,boundedOnset+.8+index*.1,boundedOnset+1+index*.1)),boundedMaximum=Math.max(...boundedBands);
-  assert.ok(boundedMaximum<positive*.1,`Exclusive-end sentinel must be absent around the onset-aligned cutoff: ${boundedMaximum} versus positive control ${positive}`);
-  result.checks.sentinelPositiveControl={sentinelHz,positiveOnset,boundedOnset,positive,boundedMaximum,ratio:boundedMaximum/positive,maximumRatio:.1};
+  if(bounded&&sentinel){
+    const sentinelHz=fixture.expected.sentinelHz,positiveOnset=sentinel.wave.onset(),boundedOnset=bounded.wave.onset();
+    const positive=sentinel.wave.band(sentinelHz,positiveOnset+.05,positiveOnset+.25);
+    assert.ok(positive>.00005,'Exclusive-end sentinel has a detectable physical positive control');
+    const boundedBands=Array.from({length:9},(_,index)=>bounded.wave.band(sentinelHz,boundedOnset+.8+index*.1,boundedOnset+1+index*.1)),boundedMaximum=Math.max(...boundedBands);
+    assert.ok(boundedMaximum<positive*.1,`Exclusive-end sentinel must be absent around the onset-aligned cutoff: ${boundedMaximum} versus positive control ${positive}`);
+    result.checks.sentinelPositiveControl={sentinelHz,positiveOnset,boundedOnset,positive,boundedMaximum,ratio:boundedMaximum/positive,maximumRatio:.1};
+  }else notRunnableUnderSilence('the exclusive-end sentinel tone is absent around the cutoff and present in the positive control (loopback band energy)');
 
   // Explicit Seek must win even though the canonical cursor points elsewhere.
   await cursor(1,2);await (await playbackField('Seek measure')).fill('3');await button('Seek');await waitStatus(value=>value.tick===11520);assert.equal(await page.getByRole('button',{name:'Play',exact:true}).getAttribute('title'),'Play from transport position');await button('Play');await waitStatus(value=>value.playing&&value.tick>=11520&&value.tick<12500&&value.range===null);await stopPlayback();result.checks.explicitSeekPriority=true;
 
   await practice('fixed',{'Fixed tempo (BPM)':240,'Count-in bars':1,'Metronome volume (%)':0},{'Visual metronome':true,'Count in between loops':true});await selectTiePassage();await button('Play selection');const counting=await waitStatus(value=>value.practice.phase==='countIn');assert.equal(counting.tick,960);assert.deepEqual(counting.range,{startTick:960,endTick:2880});await button('Pause');const countPaused=await waitStatus(value=>value.practice.phase==='paused'&&value.practice.countInRemaining>0);await page.waitForTimeout(100);assert.equal((await status()).practice.countInRemaining,countPaused.practice.countInRemaining);await button('Play');await waitStatus(value=>value.practice.phase==='ended'&&value.tick===2880);assert.equal((await status()).practice.completedPasses,0);await stopPlayback();
   await button('Loop selection');await button('Play');const betweenLoops=await waitStatus(value=>value.practice.completedPasses===1&&value.practice.phase==='countIn');assert.equal(betweenLoops.tick,960);assert.equal(betweenLoops.range,null);assert.ok(betweenLoops.practice.countInRemaining>0);await stopPlayback();await button('Clear loop');result.checks.betweenLoopCount=true;
-  await practice('progressive',{'Starting speed (%)':100,'Finishing speed (%)':150,'Increment (percentage points)':25,'Repetitions per speed':1,'Count-in bars':0},{'Count in between loops':false});await selectTiePassage();await button('Loop selection');const loopCapture=await capture('partial-loop');await button('Play');const wrapped=await waitStatus(value=>value.practice.completedPasses>=2);assert.ok(wrapped.practice.effectiveRatio>=1.25);const loopAudio=await loopCapture.finish();assert.ok(loopAudio.wave.rms(.2,2.5)>.0001);await button('Clear loop');const clearedRunning=await waitStatus(value=>value.loop===null);assert.equal(clearedRunning.playing,true);assert.equal(clearedRunning.range,null);await stopPlayback();result.checks.fixedCountAndProgressiveLoop=true;
+  await practice('progressive',{'Starting speed (%)':100,'Finishing speed (%)':150,'Increment (percentage points)':25,'Repetitions per speed':1,'Count-in bars':0},{'Count in between loops':false});await selectTiePassage();await button('Loop selection');const loopCapture=await capture('partial-loop');await button('Play');const wrapped=await waitStatus(value=>value.practice.completedPasses>=2);assert.ok(wrapped.practice.effectiveRatio>=1.25);const loopAudio=await loopCapture.finish();if(loopAudio)assert.ok(loopAudio.wave.rms(.2,2.5)>.0001);else notRunnableUnderSilence('the looped passage is audible (loopback RMS)');await button('Clear loop');const clearedRunning=await waitStatus(value=>value.loop===null);assert.equal(clearedRunning.playing,true);assert.equal(clearedRunning.range,null);await stopPlayback();result.checks.fixedCountAndProgressiveLoop=true;
 
   await practice('relative',{'Relative speed (%)':100,'Count-in bars':0});await selectTiePassage();await button('Play selection');await assertRange(960,2880);
   // The existing measure button reads Loop while only a finite range is active.
@@ -160,8 +165,8 @@ try{
   // Selection/transport alone must leave even the redo slot untouched.
   const historyBefore=await snapshot();await selectTiePassage();await button('Loop selection');await button('Clear loop');await button('Play selection');await waitStatus(value=>value.practice.phase==='ended');await stopPlayback();assert.deepEqual(await snapshot(),historyBefore);result.checks.transportPreservesFullHistory=true;
   await button('Import backing');await waitStatus(value=>value.ready&&value.backingDurationSeconds===12);const backed=await snapshot();const backingEdit=backed.project.edits.findLast(edit=>edit.type==='setBacking');assert.equal(backingEdit.backing.assetId,fixture.backing.sha256);assert.equal(backed.project.assets[backingEdit.backing.assetId].byteLength,readFileSync(fixture.backing.path).length);
-  await selectTiePassage();const backingCapture=await capture('bounded-backing');await button('Play selection');await waitStatus(value=>value.practice.phase==='ended'&&value.tick===2880);const cutBacking=await backingCapture.finish();assert.ok(cutBacking.wave.rms(.2,.7)>.0001);assert.ok(cutBacking.wave.rms(2.2,2.9)<.0001);await stopPlayback();
-  await cursor(3,4);const tailCapture=await capture('unbounded-backing-tail');await button('Play from cursor');const beyondScore=await waitStatus(value=>value.playing&&value.tick>15360&&value.range===null);const tail=await tailCapture.finish();assert.ok(tail.wave.rms(.7,2.5)>.0001,'Null cursor start retains the longer backing tail');await stopPlayback();result.checks.backingBoundedVsOrdinaryEof={beyondScore};
+  await selectTiePassage();const backingCapture=await capture('bounded-backing');await button('Play selection');await waitStatus(value=>value.practice.phase==='ended'&&value.tick===2880);const cutBacking=await backingCapture.finish();if(cutBacking){assert.ok(cutBacking.wave.rms(.2,.7)>.0001);assert.ok(cutBacking.wave.rms(2.2,2.9)<.0001);}else notRunnableUnderSilence('the bounded backing is audible then cut at the selection end (loopback RMS)');await stopPlayback();
+  await cursor(3,4);const tailCapture=await capture('unbounded-backing-tail');await button('Play from cursor');const beyondScore=await waitStatus(value=>value.playing&&value.tick>15360&&value.range===null);const tail=await tailCapture.finish();if(tail)assert.ok(tail.wave.rms(.7,2.5)>.0001,'Null cursor start retains the longer backing tail');else notRunnableUnderSilence('a null cursor start keeps the backing tail audible past the score (loopback RMS)');await stopPlayback();result.checks.backingBoundedVsOrdinaryEof={beyondScore};
 
   await button('Save');const savedSnapshot=await snapshot(),stored=JSON.parse(readFileSync(saved,'utf8'));assert.equal(savedSnapshot.dirty,false);assert.deepEqual(stored.base,savedSnapshot.project.base);assert.deepEqual(stored.edits,savedSnapshot.project.edits);assert.deepEqual(stored.baselineEdits,savedSnapshot.project.baselineEdits);assert.equal(stored.schemaVersion,3);assert.equal(sha256(Buffer.from(stored.assets[backingEdit.backing.assetId].bytesBase64,'base64')),fixture.backing.sha256);const actualSaved=saved;
   saved=output('reopened-save.tabplayer');await open(actualSaved);assert.deepEqual((await snapshot()).project,savedSnapshot.project);assert.equal((await status()).range,null);assert.equal((await status()).loop,null);assert.equal((await status()).backingDurationSeconds,12);result.checks.nativeSaveRestartReopen=true;
@@ -177,7 +182,7 @@ try{
   for(const source of Object.values(fixture.fixtures))assert.equal(sha256(readFileSync(source.path)),source.sha256);assert.equal(sha256(readFileSync(fixture.backing.path)),fixture.backing.sha256);assert.deepEqual(errors,[]);
   result.actualDeviceRates=[...new Set(result.captures.map(value=>value.metrics.sampleRate))];result.checks.sourceBytesUnchanged=true;result.pageErrors=errors;
   result.limits.push('Queue saturation/stale-generation rejection, device fault recovery, fractional same-tick event ceilings and exact 44.1/48 kHz sample counts require native tests; this UI smoke does not induce faults or flood commands.','No numeric endpoint editor exists for collapsed-simile subdivisions; their rejection is covered by pure resolver tests.','Sparse-note pointer toggles/drag resize and original GP8 target comparison remain separate acceptance work.','Screenshots require root inspection; scripts do not assert visual fidelity.');
-  writeFileSync(output('result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+  if(silenceSummary())result.limits.push(silenceSummary());writeFileSync(output('result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));if(silenceSummary())console.log(silenceSummary());
 }catch(error){
   if(page){await page.screenshot({path:output('failure.png')}).catch(()=>{});const failure={error:String(error),status:await status().catch(()=>null),snapshot:await snapshot().catch(()=>null),body:await page.locator('body').innerText().catch(()=>null)};writeFileSync(output('failure.json'),JSON.stringify(failure,null,2));}
   throw error;

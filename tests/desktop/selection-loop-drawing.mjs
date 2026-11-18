@@ -57,7 +57,8 @@ try {
   await revealPlaybackControls(page);
   const summary=page.locator('summary').filter({hasText:/^Selected playback$/}).first();
   if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();
-  await page.getByRole('button',{name:'Loop selection',exact:true}).click();
+  // The transport row has a Loop selection toggle of its own now, so the panel's button is looked for inside the panel (both call the same player command).
+  await summary.locator('..').getByRole('button',{name:'Loop selection',exact:true}).click();
   const armed=await waitStatus(value=>value.loop!==null,'loop armed');
   result.checks.loop=armed.loop;
   await page.keyboard.press('Escape');

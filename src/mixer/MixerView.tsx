@@ -4,7 +4,8 @@ import type { model } from '@coderline/alphatab';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
 import { earlierFactorySound, earlierFactorySounds, factorySound, factorySounds } from '../audio/factory-sounds';
 import { MasterPanel } from '../audio/MasterPanel';
-import { automaticVoice, presetName, soundPreset, voiceNames } from '../audio/sound-model';
+import { presetName, resolvedGp8Set, soundPreset, voiceDisplayName } from '../audio/sound-model';
+import { getSoundbankStatus, useSoundbankStatus, type Gp8Status } from '../audio/soundbank-store';
 import { completeSound } from '../document-settings';
 import { defaultDrumElement, DRUM_KIT_ELEMENT_LABELS, DRUM_KIT_ELEMENTS } from '../audio/drum-kit';
 import type { ChannelMix, DrumElementMix, DrumKitElement, TrackSound } from '../edit-types';
@@ -33,14 +34,14 @@ function baseKey(kind:'factory'|'earlier'|'preset',id:string):string {
 /** Names the instrument source and tone currently set on `track`: a factory sound or preset as it was, or the preset it
  * started from marked as edited once a control has moved it. A track with no instrument chosen plays what the native
  * player picks by program (`automatic_voice_id` in voices.rs), and percussion is named Percussion, whichever kit plays it. */
-export function describeTrackSound(track:model.Track,sound?:TrackSound):{voice:string;tone:string} {
+export function describeTrackSound(track:model.Track,sound?:TrackSound,status:Gp8Status=getSoundbankStatus()):{voice:string;tone:string} {
   const program=track.playbackInfo.program;
-  const automatic=automaticVoice(program,track.isPercussion);
+  const gp8Auto=resolvedGp8Set(null,program,track.isPercussion,sound?.drumKit,status);
   const voice=sound?.voiceId
-    ?(voiceNames as Record<string,string>)[sound.voiceId]??sound.voiceId
+    ?voiceDisplayName(sound.voiceId,program,track.isPercussion,sound.drumKit,status)
     :track.isPercussion
-      ?'Percussion'
-      :automatic==='gm'?midiPrograms[program]??'Automatic instrument':voiceNames[automatic];
+      ?(gp8Auto?gp8Auto.name:'Percussion')
+      :(gp8Auto?gp8Auto.name:midiPrograms[program]??'Automatic instrument');
   if(!sound)return {voice,tone:presetName('gm')};
   const {presetId}=completeSound(sound),key=effectsKey(sound);
   const matched=factorySounds.find(item=>item.presetId===presetId&&baseKey('factory',item.id)===key);
@@ -71,6 +72,7 @@ export interface MixerViewProps {
  * moves; each gesture is saved as one undoable `setTrackMix` through the player, matching the dock mixer. */
 export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerViewProps):React.JSX.Element {
   const {t}=useI18n();
+  const soundbankStatus=useSoundbankStatus();
   const state=useSyncExternalStore(player?.subscribe??noSubscribe,player?.getState??noState);
   const live=useLivePreview(),focusFrom=useRef<number|null>(null);
   // Focus belongs to the selected track (by identity): selecting another track moves it there.
@@ -85,7 +87,7 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
   // A strip belongs to a track, not to a place in the list: a deleted or moved track takes its drag, and the sound it was heard at, with it.
   const ids=score.tracks.map(trackIdentity),idsKey=ids.join('|');
   useEffect(()=>()=>{void live.end();},[live,idsKey]);
-  const described=useMemo(()=>score.tracks.map(track=>describeTrackSound(track,sounds?.[trackIdentity(track)])),[score,sounds]);
+  const described=useMemo(()=>score.tracks.map(track=>describeTrackSound(track,sounds?.[trackIdentity(track)],soundbankStatus)),[score,sounds,soundbankStatus]);
   const selectedMix=score.tracks[selected]?player?.mix(score.tracks[selected]):undefined;
   const anySolo=score.tracks.some(track=>player?.mix(track)?.solo);
   const silent=Boolean(selectedMix?.mute||(anySolo&&!selectedMix?.solo));

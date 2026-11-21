@@ -8,6 +8,7 @@ import { earlierFactorySound, earlierFactorySounds, factorySound } from '../audi
 import { factorySounds } from '../audio/factory-sounds';
 import { DEFAULT_PRACTICE } from '../audio/practice-types';
 import { soundPreset } from '../audio/sound-model';
+import { resetSoundbankStoreForTest, setSoundbankStatusForTest, type Gp8Status } from '../audio/soundbank-store';
 import type { PlaybackState } from '../audio/types';
 import type { MasterSettings, TrackSound } from '../edit-types';
 import { previewEdit, trackIdentity } from '../engine';
@@ -15,7 +16,7 @@ import { blankProject } from '../project';
 import { midiPrograms } from '../midi-programs';
 import { MixerView, describeTrackSound } from './MixerView';
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); resetSoundbankStoreForTest(); });
 
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 const base=()=>previewEdit(blankProject(),{type:'setRest',target}).score;
@@ -315,20 +316,29 @@ it('selecting a track changes no strip layout: the Selected slot is always there
   expect(readFileSync('src/mixer/mixer.css','utf8')).toMatch(/\.mixer-strip-status\s*\{[^}]*height:16px/);
 });
 
-it('names the sound a track really plays when no instrument is chosen, by program, as the native player does', ()=>{
+it('names the sound a track really plays when no instrument is chosen, by GP8 status and GM program', ()=>{
   const track=(program:number,percussion=false)=>({isPercussion:percussion,playbackInfo:{program}}) as unknown as model.Track;
   const voice=(program:number,percussion=false)=>describeTrackSound(track(program,percussion)).voice;
-  // The table in voices.rs: 24-25 green guitar, 26-31 black guitar, 33 babyblue bass, 32 and 34-39 darkblack bass.
-  expect([24,25].map(p=>voice(p))).toEqual(['Green Guitar','Green Guitar']);
-  expect([26,29,31].map(p=>voice(p))).toEqual(['Black Guitar','Black Guitar','Black Guitar']);
-  expect(voice(33)).toBe('Babyblue Bass');
-  expect([32,34,39].map(p=>voice(p))).toEqual(['Darkblack Bass','Darkblack Bass','Darkblack Bass']);
-  // Anything else is the General MIDI sound for that program; percussion is its own.
-  expect(voice(0)).toBe(midiPrograms[0]);expect(voice(40)).toBe(midiPrograms[40]);expect(voice(23)).toBe(midiPrograms[23]);
+  // Without GP8 available, every pitched program names its General MIDI instrument and percussion names Percussion.
+  expect(voice(0)).toBe(midiPrograms[0]);expect(voice(27)).toBe(midiPrograms[27]);expect(voice(33)).toBe(midiPrograms[33]);expect(voice(40)).toBe(midiPrograms[40]);
   expect(voice(33,true)).toBe('Percussion');
-  // A chosen instrument wins over the program, and General MIDI is named as such.
+  // Legacy voice names still show gracefully when GP8 is absent, and General MIDI shows for 'gm'.
   expect(describeTrackSound(track(24),{voiceId:'black-guitar',presetId:'gm',effects:soundPreset('gm').effects}).voice).toBe('Black Guitar');
   expect(describeTrackSound(track(24),soundPreset('gm','gm')).voice).toBe('General MIDI');
+
+  // When GP8 is available, Automatic and legacy voices resolve to the active GP8 set name.
+  const gp8:Gp8Status={
+    enabled:true,available:true,configuredPath:null,resolvedPath:'C:/GP8',detectedDefaultPath:'C:/GP8',version:'2.0',setCount:3,error:null,
+    sets:[
+      {id:'Strat-Guitar',name:'Strat',instrumentSet:'electricGuitar',category:'guitars',pickups:['bridge','neck'],isPercussion:false},
+      {id:'Jazz-Bass',name:'Jazz Bass',instrumentSet:'electricBass',category:'basses',pickups:['bridge','neck'],isPercussion:false},
+      {id:'Drumkit-Custom',name:'Drums (Custom)',instrumentSet:'drumKit',category:'drums',pickups:[],isPercussion:true},
+    ],
+  };
+  expect(describeTrackSound(track(27),undefined,gp8).voice).toBe('Strat');
+  expect(describeTrackSound(track(33),undefined,gp8).voice).toBe('Jazz Bass');
+  expect(describeTrackSound(track(0,true),undefined,gp8).voice).toBe('Drums (Custom)');
+  expect(describeTrackSound(track(24),{voiceId:'green-guitar',presetId:'gm',effects:soundPreset('gm').effects},gp8).voice).toBe('Strat');
 });
 
 it('reads a tweaked sound as edited, and a restored one as its preset or factory sound again', ()=>{

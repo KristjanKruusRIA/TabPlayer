@@ -59,6 +59,8 @@ fn parameters(articulation: Articulation) -> VoiceParameters {
         loop_end: None,
         pitch_keytrack: 100.0,
         velocity_gain_high: 127,
+        tuning_cents: 0.0,
+        is_recorded_harmonic: false,
     }
 }
 fn energy(data: &[[f32; 2]]) -> f64 {
@@ -206,6 +208,42 @@ fn release_is_smooth_and_stops_voice() {
     let output: Vec<_> = (0..24_000).map(|_| voice.next_frame(0.0)).collect();
     assert!(energy(&output[20_000..]) < 1e-7);
     assert!(!voice.is_active());
+}
+
+fn synthetic_gp8_sets_guard() -> (
+    tempfile::TempDir,
+    tabplayer_lib::audio::gp8_soundbanks::ScopedOverride,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("META"), "Version=2.0.0-test\n").unwrap();
+    let sets = root.join("sets");
+    let banks = root.join("banks");
+    std::fs::create_dir_all(&sets).unwrap();
+    std::fs::create_dir_all(&banks).unwrap();
+    for (id, name, instrument_set) in [
+        ("Concerto-Nylon", "Concerto Nylon", "nylonGuitar"),
+        ("D-Steel", "D Steel", "steelGuitar"),
+        ("Strat-Guitar", "Strat", "electricGuitar"),
+        ("Jazz-Bass", "Jazz Bass", "electricBass"),
+    ] {
+        std::fs::write(banks.join(format!("{id}.gp7bank")), b"").unwrap();
+        let json = serde_json::json!({
+            "id": id,
+            "name": name,
+            "description": "",
+            "instrumentSet": instrument_set,
+            "soundbanks": [{"element": "Pitched", "soundbank": id}],
+        });
+        std::fs::write(sets.join(format!("{id}.json")), json.to_string()).unwrap();
+    }
+    let guard = tabplayer_lib::audio::gp8_soundbanks::scoped_override(
+        tabplayer_lib::app_settings::SoundbankSettings {
+            enabled: true,
+            path: Some(root.to_string_lossy().into_owned()),
+        },
+    );
+    (dir, guard)
 }
 
 fn renderer_fixture(
@@ -1063,8 +1101,14 @@ fn rest_only_recorded_track_keeps_bank_identity() {
     let (plan, _, settings) = renderer_fixture(false);
     let mut plan = (*plan).clone();
     plan.notes.clear();
+    assert!(resource_requests(&plan, &settings).is_empty());
+    let (_dir, _gp8) = synthetic_gp8_sets_guard();
     let requests = resource_requests(&plan, &settings);
-    assert!(requests.iter().any(|r| r.instrument_id == "green-guitar"));
+    assert!(
+        requests
+            .iter()
+            .any(|r| r.instrument_id == "gp8:Concerto-Nylon")
+    );
 }
 
 #[test]
@@ -1450,10 +1494,15 @@ fn automatic_program_changes_prepare_recorded_and_gm_attacks_and_seek() {
         audio::{renderer::Renderer, voices::resource_requests},
         settings::TrackSound,
     };
+    let (_dir, _gp8) = synthetic_gp8_sets_guard();
     let (_, mut resources, mut settings) = renderer_fixture(false);
     let bank = Arc::get_mut(&mut resources).unwrap();
+    bank.manifest.instruments[0].id = "gp8:D-Steel".into();
+    let mut strat = bank.manifest.instruments[0].clone();
+    strat.id = "gp8:Strat-Guitar".into();
+    bank.manifest.instruments.push(strat);
     let mut bass = bank.manifest.instruments[0].clone();
-    bass.id = "babyblue-bass".into();
+    bass.id = "gp8:Jazz-Bass".into();
     bass.regions[0].sample_id = "bass".into();
     bank.manifest.instruments.push(bass);
     let mut audio = (*tone()).clone();
@@ -1491,8 +1540,8 @@ fn automatic_program_changes_prepare_recorded_and_gm_attacks_and_seek() {
         "notes":notes,"midi":midi
     })).unwrap());
     let requests = resource_requests(&plan, &settings);
-    assert!(requests.iter().any(|r| r.instrument_id == "green-guitar"));
-    assert!(requests.iter().any(|r| r.instrument_id == "babyblue-bass"));
+    assert!(requests.iter().any(|r| r.instrument_id == "gp8:D-Steel"));
+    assert!(requests.iter().any(|r| r.instrument_id == "gp8:Jazz-Bass"));
     let mut automatic =
         Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
     let mut output = vec![[0.0; 2]; 144_000];
@@ -1531,10 +1580,12 @@ fn automatic_program_changes_prepare_recorded_and_gm_attacks_and_seek() {
     automatic.render_into(&mut seek);
     assert!((frequency(&seek[480..]) - 110.0).abs() < 1.0);
     settings.sounds.get_mut("a").unwrap().voice_id = Some("green-guitar".into());
+    let strat_reqs = resource_requests(&plan, &settings);
+    assert!(!strat_reqs.is_empty());
     assert!(
-        resource_requests(&plan, &settings)
+        strat_reqs
             .iter()
-            .all(|r| r.instrument_id == "green-guitar")
+            .all(|r| r.instrument_id == "gp8:Strat-Guitar")
     );
     let mut fixed = Renderer::new(plan, resources, settings, 48_000).unwrap();
     fixed.seek_tick(3840.0);
@@ -1971,6 +2022,7 @@ fn locked_track_sound_ignores_scheduled_program_changes_and_seek_while_unlocked_
             locked: false,
             drum_kit: None,
             plugin: None,
+            pickup: None,
         },
     );
     let mut unlocked_renderer =
@@ -1999,6 +2051,7 @@ fn locked_track_sound_ignores_scheduled_program_changes_and_seek_while_unlocked_
             locked: true,
             drum_kit: None,
             plugin: None,
+            pickup: None,
         },
     );
     let requests = resource_requests(&plan, &locked_settings);
@@ -2090,6 +2143,7 @@ fn gm_lock_settings(locked: bool) -> tabplayer_lib::settings::DocumentSettings {
             locked,
             drum_kit: None,
             plugin: None,
+            pickup: None,
         },
     );
     settings
@@ -2312,6 +2366,7 @@ fn unlocking_needs_the_samples_an_unlocked_track_asks_for_that_a_locked_bank_lac
                 locked,
                 drum_kit: None,
                 plugin: None,
+                pickup: None,
             },
         );
         settings
@@ -2322,11 +2377,14 @@ fn unlocking_needs_the_samples_an_unlocked_track_asks_for_that_a_locked_bank_lac
             .map(|r| r.instrument_id)
             .collect()
     };
-    assert_eq!(ids(true), ["green-guitar".to_string()].into());
-    assert_eq!(
-        ids(false),
-        ["babyblue-bass".to_string(), "green-guitar".to_string()].into()
-    );
+    {
+        let (_dir, _gp8) = synthetic_gp8_sets_guard();
+        assert_eq!(ids(true), ["gp8:D-Steel".to_string()].into());
+        assert_eq!(
+            ids(false),
+            ["gp8:D-Steel".to_string(), "gp8:Jazz-Bass".to_string()].into()
+        );
+    }
     // The bank loaded for the locked track cannot build the unlocked one: it must be loaded again for the new settings.
     let (_, mut resources, _) = renderer_fixture(false);
     assert!(Renderer::new(plan.clone(), resources.clone(), settings(true), 48_000).is_ok());
@@ -2343,6 +2401,7 @@ fn unlocking_needs_the_samples_an_unlocked_track_asks_for_that_a_locked_bank_lac
 #[test]
 fn a_locked_track_plays_the_articulation_its_start_sound_gives() {
     use tabplayer_lib::audio::voices::{resource_requests, with_locked_articulations};
+    let (_dir, _gp8) = synthetic_gp8_sets_guard();
     // The score switches a guitar to a bass, so the note is fingered; kept, it is picked as the guitar plays it.
     let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> = Arc::new(serde_json::from_value(serde_json::json!({
         "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
@@ -2364,6 +2423,7 @@ fn a_locked_track_plays_the_articulation_its_start_sound_gives() {
                 locked,
                 drum_kit: None,
                 plugin: None,
+                pickup: None,
             },
         );
         settings
@@ -2375,6 +2435,7 @@ fn a_locked_track_plays_the_articulation_its_start_sound_gives() {
             .collect()
     };
     assert!(articulations(false).contains(&"fingered".to_string()));
+    assert!(!articulations(true).is_empty());
     assert!(articulations(true).iter().all(|a| a == "picked"));
     use tabplayer_lib::audio::plan::Articulation;
     assert_eq!(
@@ -2441,6 +2502,7 @@ fn a_real_renderer_and_export_play_the_locked_articulation_only_when_locked() {
                 locked,
                 drum_kit: None,
                 plugin: None,
+                pickup: None,
             },
         );
         settings

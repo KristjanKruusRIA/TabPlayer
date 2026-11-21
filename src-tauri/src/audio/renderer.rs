@@ -15,9 +15,10 @@ use super::{
     },
     resources::{AudioResources, Region},
     voices::{
-        RECORDED_KIT, SampleVoice, VoiceParameters, articulation_name, automatic_voice_id,
-        effective_note_program, pitch_at, select_region, start_program, track_locked,
-        voice_id_for_note, voice_id_for_track, with_drum_kits, with_locked_articulations,
+        SampleVoice, VoiceParameters, articulation_name, drum_kit_for_track,
+        effective_note_program, is_drum_instrument, legacy_automatic_voice_id, pitch_at,
+        resolve_voice_id, select_region, select_region_by_name, start_program, track_locked,
+        with_drum_kits, with_locked_articulations,
     },
 };
 use crate::settings::{
@@ -402,6 +403,8 @@ impl VoiceSample {
             loop_end: region.loop_end,
             pitch_keytrack: region.pitch_keytrack,
             velocity_gain_high: region.velocity_gain_high,
+            tuning_cents: region.tuning_cents,
+            is_recorded_harmonic: region.articulation == "harmonic",
         };
         Ok(Self {
             audio,
@@ -543,8 +546,7 @@ struct Track {
     drum_used: bool,
     /// Whether a frame has been rendered since the last seek, which is when a kit level change has been heard to ramp.
     kit_rendered: bool,
-    automatic: bool,
-    fixed_recorded: bool,
+    recorded_programs: [bool; 128],
     locked: bool,
     /// The program each channel starts a seek or a render from: the track's own, or for a locked track the sound in effect at the start.
     start_programs: [u8; 16],
@@ -704,33 +706,53 @@ impl Track {
     /// only from the note.
     fn recorded_program(&self, program: u8) -> bool {
         !self.percussion
-            && (self.fixed_recorded
-                || self.automatic && automatic_voice_id(program, self.percussion).is_some())
+            && self
+                .recorded_programs
+                .get(program as usize)
+                .copied()
+                .unwrap_or(false)
     }
 }
-/// `settings` with the drum tracks that would play the recorded kit playing General MIDI instead, where the audio has no
-/// kit (as a test's own audio may not).
-fn without_missing_kit(
-    mut settings: DocumentSettings,
-    plan: &PlaybackPlan,
+
+fn resolve_renderer_voice(
+    track: &super::plan::PlanTrack,
+    settings: &DocumentSettings,
+    program: u8,
     resources: &AudioResources,
-) -> DocumentSettings {
-    if resources
+) -> Option<String> {
+    let has = |id: &str| resources.manifest.instruments.iter().any(|i| i.id == id);
+    let sound = settings.sounds.get(&track.id);
+    let voice_id = sound.and_then(|s| s.voice_id.as_deref());
+    let pickup = sound.and_then(|s| s.pickup.as_deref());
+    let drum_kit = drum_kit_for_track(track, settings);
+    if let Some(id) = resolve_voice_id(voice_id, pickup, track.percussion, drum_kit, program) {
+        if has(&id) {
+            return Some(id);
+        }
+        // If a GP8 voice failed or returned empty (e.g., partial perc kit), fall back cleanly to GM.
+        return None;
+    }
+    if voice_id == Some("gm") {
+        return None;
+    }
+    // Preserve strict error behavior when a caller supplies synthetic non-GP8 manifest instruments in tests.
+    let has_synthetic = resources
         .manifest
         .instruments
         .iter()
-        .any(|i| i.id == RECORDED_KIT)
-    {
-        return settings;
+        .any(|i| !i.id.starts_with("gp8:"));
+    if !has_synthetic {
+        return None;
     }
-    for track in plan.tracks.iter().filter(|t| t.percussion) {
-        let sound = settings.sounds.entry(track.id.clone()).or_default();
-        if sound.voice_id.is_none() {
-            sound.voice_id = Some("gm".into());
+    if let Some(explicit) = voice_id {
+        if !explicit.starts_with("gp8:") {
+            return Some(explicit.to_owned());
         }
+        return None;
     }
-    settings
+    legacy_automatic_voice_id(program, track.percussion).map(str::to_owned)
 }
+
 /// What a drum note plays from the recorded kit: the recording of its kit sound, by velocity and round robin. None, which
 /// plays it from General MIDI, for a sound the kit has no recording of, or a track on another kit.
 fn select_drum(
@@ -742,11 +764,20 @@ fn select_drum(
     sample_rate: u32,
     counters: &mut HashMap<(usize, usize, u8, u8, &'static str), usize>,
 ) -> Result<Option<SelectedNote>, String> {
-    let (Some(id), Some(sound)) = (voice_id_for_note(plan, note, settings), note.kit_sound) else {
+    let plan_track = &plan.tracks[track];
+    let Some(sound) = note.kit_sound else {
+        return Ok(None);
+    };
+    let Some(id) = resolve_renderer_voice(
+        plan_track,
+        settings,
+        effective_note_program(plan, note, settings),
+        resources,
+    ) else {
         return Ok(None);
     };
     // A guitar or bass voice chosen for a drum track has no drums; the track plays General MIDI.
-    if id != RECORDED_KIT {
+    if !is_drum_instrument(&id) {
         return Ok(None);
     }
     let index = resources
@@ -761,17 +792,35 @@ fn select_drum(
         .or_default();
     let sequence = *counter;
     *counter += 1;
+    let recorded_choke = if note.choke {
+        select_region_by_name(
+            instrument,
+            sound,
+            note.velocity,
+            "choke",
+            sequence,
+            "attack",
+        )
+        .filter(|r| (r.key_low..=r.key_high).contains(&sound))
+    } else {
+        None
+    };
     // Only the sound itself: a neighbouring key's recording would be another drum.
-    let Some(region) = select_region(
-        instrument,
-        sound,
-        note.velocity,
-        Articulation::Picked,
-        sequence,
-        "attack",
-    )
-    .filter(|r| (r.key_low..=r.key_high).contains(&sound)) else {
-        return Ok(None);
+    let (region, shorten_release) = if let Some(region) = recorded_choke {
+        (region, false)
+    } else {
+        let Some(region) = select_region(
+            instrument,
+            sound,
+            note.velocity,
+            Articulation::Picked,
+            sequence,
+            "attack",
+        )
+        .filter(|r| (r.key_low..=r.key_high).contains(&sound)) else {
+            return Ok(None);
+        };
+        (region, note.choke)
     };
     let mut attack = VoiceSample::new(
         resources,
@@ -780,7 +829,7 @@ fn select_drum(
         note.velocity,
         Articulation::Picked,
     )?;
-    if note.choke {
+    if shorten_release {
         attack.parameters.release_seconds = CHOKE_RELEASE_SECONDS;
     }
     SampleVoice::new(attack.audio.clone(), attack.parameters, sample_rate)?;
@@ -889,7 +938,6 @@ impl Renderer {
         sample_rate: u32,
     ) -> Result<Self, String> {
         let plan = with_drum_kits(with_locked_articulations(plan, &settings), &settings);
-        let settings = without_missing_kit(settings, &plan, &resources);
         let timeline = Timeline::new(&plan)?;
         let track_indices: HashMap<_, _> = plan
             .tracks
@@ -919,7 +967,9 @@ impl Renderer {
         let mut tracks = Vec::with_capacity(plan.tracks.len());
         for (track_index, track) in plan.tracks.iter().enumerate() {
             // A drum track loads only the kit sounds its notes ask for; any other voice on it plays General MIDI.
-            if let Some(id) = voice_id_for_track(track, &settings).filter(|_| !track.percussion) {
+            if let Some(id) = resolve_renderer_voice(track, &settings, track.program, &resources)
+                .filter(|_| !track.percussion)
+            {
                 if !resources.manifest.instruments.iter().any(|i| i.id == id) {
                     return Err(format!("Unknown recorded instrument {id}."));
                 }
@@ -927,10 +977,22 @@ impl Renderer {
             // A drum track keeps General MIDI for the sounds the recorded kit lacks.
             let has_gm = track.percussion
                 || knocks.contains(track.id.as_str())
-                || voice_id_for_track(track, &settings).is_none()
+                || resolve_renderer_voice(track, &settings, track.program, &resources).is_none()
                 || plan.notes.iter().any(|n| {
-                    n.track_id == track.id && voice_id_for_note(&plan, n, &settings).is_none()
+                    n.track_id == track.id
+                        && resolve_renderer_voice(
+                            track,
+                            &settings,
+                            effective_note_program(&plan, n, &settings),
+                            &resources,
+                        )
+                        .is_none()
                 });
+            let recorded_programs = std::array::from_fn(|p| {
+                !track.percussion
+                    && resolve_renderer_voice(track, &settings, p as u8, &resources)
+                        .is_some_and(|id| resources.manifest.instruments.iter().any(|i| i.id == id))
+            });
             let locked = track_locked(&settings, &track.id);
             let start_programs: [u8; 16] = std::array::from_fn(|channel| {
                 if locked {
@@ -973,16 +1035,7 @@ impl Renderer {
             tracks.push(Track {
                 synth,
                 drum_synths,
-                automatic: settings
-                    .sounds
-                    .get(&track.id)
-                    .and_then(|s| s.voice_id.as_ref())
-                    .is_none(),
-                fixed_recorded: settings
-                    .sounds
-                    .get(&track.id)
-                    .and_then(|s| s.voice_id.as_deref())
-                    .is_some_and(|id| id != "gm"),
+                recorded_programs,
                 locked,
                 start_programs,
                 kit_active: mix.channels[track_index].kit_active,
@@ -1064,7 +1117,12 @@ impl Renderer {
                 )?);
                 continue;
             }
-            if let Some(id) = voice_id_for_note(&plan, note, &settings) {
+            if let Some(id) = resolve_renderer_voice(
+                &plan.tracks[track],
+                &settings,
+                effective_note_program(&plan, note, &settings),
+                &resources,
+            ) {
                 let index = resources
                     .manifest
                     .instruments

@@ -77,8 +77,32 @@ impl Default for InstrumentViewSettings {
 
 /// The longest new-score default (UTF-16 units, as the editor and `project::NEW_SCORE_DEFAULT_LIMIT` count them).
 pub const NEW_SCORE_LIMIT: usize = 1000;
+/// Maximum byte length of a stored custom soundbank directory path.
+pub const MAX_SOUNDBANK_PATH: usize = 1024;
 const ZOOM_MIN: f64 = 25.0;
 const ZOOM_MAX: f64 = 300.0;
+
+/// Preferences for reading a user's locally installed Guitar Pro 8 standard soundbank at runtime.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SoundbankSettings {
+    pub enabled: bool,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
+impl Default for SoundbankSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            path: None,
+        }
+    }
+}
+
+fn valid_soundbank_path(text: &str) -> bool {
+    !text.is_empty() && text.len() <= MAX_SOUNDBANK_PATH && !text.chars().any(|c| c.is_control())
+}
 
 /// Whether measures that do not add up to their time signature are marked in the score. On unless turned off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +190,7 @@ pub struct AppSettings {
     pub score_errors: Option<ScoreErrorSettings>,
     pub new_score: Option<NewScoreSettings>,
     pub view_defaults: Option<ViewDefaultSettings>,
+    pub soundbanks: Option<SoundbankSettings>,
     pub read_only: bool,
 }
 
@@ -239,6 +264,18 @@ fn view_defaults_repaired(section: &Map<String, Value>) -> ViewDefaultSettings {
             .filter(|zoom| valid_zoom(*zoom))
             .unwrap_or(d.zoom),
         tracks: field(section, "tracks", d.tracks),
+    }
+}
+
+fn soundbanks_repaired(section: &Map<String, Value>) -> SoundbankSettings {
+    let d = SoundbankSettings::default();
+    SoundbankSettings {
+        enabled: field(section, "enabled", d.enabled),
+        path: section
+            .get("path")
+            .and_then(Value::as_str)
+            .filter(|text| valid_soundbank_path(text))
+            .map(str::to_owned),
     }
 }
 
@@ -341,6 +378,7 @@ fn settings_of(root: &Map<String, Value>) -> AppSettings {
         score_errors: section("scoreErrors").map(score_errors_repaired),
         new_score: section("newScore").map(new_score_repaired),
         view_defaults: section("viewDefaults").map(view_defaults_repaired),
+        soundbanks: section("soundbanks").map(soundbanks_repaired),
         read_only: false,
     }
 }
@@ -422,6 +460,16 @@ pub fn put_view_defaults(
         &["layout", "zoomMode", "zoom", "tracks"],
         value,
     )
+}
+
+/// Stores external soundbank preferences (enabled toggle and optional custom directory path).
+pub fn put_soundbanks(directory: &Path, value: SoundbankSettings) -> Result<AppSettings, String> {
+    if let Some(path) = &value.path {
+        if !valid_soundbank_path(path) {
+            return Err("Invalid soundbank folder path.".into());
+        }
+    }
+    put_section(directory, "soundbanks", &["enabled", "path"], value)
 }
 
 /// Stores one group of options. Choosing what is already stored writes nothing, and nothing is written until there
@@ -966,5 +1014,91 @@ mod tests {
             Err(TOO_LARGE.to_string())
         );
         assert_eq!(std::fs::read(file(root.path())).unwrap(), edge);
+    }
+
+    #[test]
+    fn soundbank_settings_round_trip_repair_and_validate() {
+        let root = tempdir().unwrap();
+        put_soundbanks(
+            root.path(),
+            SoundbankSettings {
+                enabled: false,
+                path: Some("C:/Custom/Soundbanks".into()),
+            },
+        )
+        .unwrap();
+        let stored_val = read_settings(root.path()).unwrap().soundbanks.unwrap();
+        assert_eq!(
+            stored_val,
+            SoundbankSettings {
+                enabled: false,
+                path: Some("C:/Custom/Soundbanks".into()),
+            }
+        );
+
+        // Clearing path back to None replaces the stored custom path.
+        let cleared = put_soundbanks(
+            root.path(),
+            SoundbankSettings {
+                enabled: true,
+                path: None,
+            },
+        )
+        .unwrap()
+        .soundbanks
+        .unwrap();
+        assert_eq!(cleared, SoundbankSettings::default());
+
+        // Invalid path (control chars / empty / oversized) is refused without writing.
+        assert!(
+            put_soundbanks(
+                root.path(),
+                SoundbankSettings {
+                    enabled: true,
+                    path: Some("".into()),
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            put_soundbanks(
+                root.path(),
+                SoundbankSettings {
+                    enabled: true,
+                    path: Some("bad\0path".into()),
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            put_soundbanks(
+                root.path(),
+                SoundbankSettings {
+                    enabled: true,
+                    path: Some("x".repeat(MAX_SOUNDBANK_PATH + 1)),
+                }
+            )
+            .is_err()
+        );
+
+        // Corrupt on-disk soundbank path repairs back to None while preserving enabled flag.
+        std::fs::write(
+            file(root.path()),
+            serde_json::to_vec(&json!({
+                "format": FORMAT,
+                "version": 1,
+                "soundbanks": { "enabled": false, "path": "bad\npath" }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let repaired = read_settings(root.path()).unwrap().soundbanks.unwrap();
+        assert_eq!(
+            repaired,
+            SoundbankSettings {
+                enabled: false,
+                path: None,
+            }
+        );
     }
 }

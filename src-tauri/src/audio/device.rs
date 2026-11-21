@@ -2032,6 +2032,7 @@ struct PreparedDocument {
         String,
         Result<crate::plugins::service::InsertPlan, crate::plugins::status::PluginStatus>,
     )>,
+    soundbank_epoch: u64,
 }
 impl PreparedDocument {
     /// The plan the renderer and its sample requests are built from: the stored plan moved by the practice key shift.
@@ -2662,6 +2663,7 @@ impl AudioService {
             return Err("A newer score preparation superseded this request.".into());
         }
         let plan = Arc::new(plan);
+        let soundbank_epoch = super::gp8_soundbanks::epoch();
         let resources = Arc::new(AudioResources::load_for_requests(
             &self.root,
             &resource_requests(&transposed_plan(&plan, practice.tonality), &settings),
@@ -2676,6 +2678,7 @@ impl AudioService {
             backing,
             practice,
             plugin_plans,
+            soundbank_epoch,
         };
         if state.producer.is_none() || self.shared.is_faulted() {
             // Validate music independently of the available device. Retain it after
@@ -2874,6 +2877,44 @@ impl AudioService {
     ) -> Result<(), String> {
         self.set_mix_inner(settings, generation, Some(backing_bytes), plugin_plans)
     }
+    pub fn reload_soundbanks(&self) -> Result<(), String> {
+        let current_epoch = super::gp8_soundbanks::epoch();
+        let mut state = self.control.lock().unwrap();
+        let Some(old) = state.document.as_ref().cloned() else {
+            return Ok(());
+        };
+        if old.soundbank_epoch == current_epoch {
+            return Ok(());
+        }
+        let resources = Arc::new(AudioResources::load_for_requests(
+            &self.root,
+            &resource_requests(&old.render_plan(), &old.settings),
+        )?);
+        let document = PreparedDocument {
+            plan: old.plan.clone(),
+            settings: old.settings.clone(),
+            resources,
+            backing: old.backing.clone(),
+            practice: old.practice,
+            plugin_plans: old.plugin_plans.clone(),
+            soundbank_epoch: current_epoch,
+        };
+        if state.producer.is_some() && !self.shared.is_faulted() {
+            let (renderer, route) = self.routed_renderer(&document, state.rate)?;
+            Self::enqueue(
+                &mut state,
+                CallbackCommand::Install {
+                    renderer,
+                    generation: old.plan.generation,
+                    preserve: true,
+                    practice: document.practice,
+                },
+            )?;
+            self.midi.commit(route);
+        }
+        state.document = Some(document);
+        Ok(())
+    }
     fn set_mix_inner(
         &self,
         settings: DocumentSettings,
@@ -2906,7 +2947,9 @@ impl AudioService {
         if reference_timing_changed(old.settings.backing.as_ref(), settings.backing.as_ref()) {
             return Err("Reference timing changes require a newly prepared playback plan.".into());
         }
-        let voice_changed = sound_source_changed(&old.plan, &old.settings, &settings);
+        let current_epoch = super::gp8_soundbanks::epoch();
+        let voice_changed = old.soundbank_epoch != current_epoch
+            || sound_source_changed(&old.plan, &old.settings, &settings);
         let map_changed = match (&old.settings.backing, &settings.backing) {
             (Some(a), Some(b)) => {
                 a.asset_id != b.asset_id
@@ -2955,6 +2998,7 @@ impl AudioService {
                 settings,
                 practice: old.practice,
                 plugin_plans,
+                soundbank_epoch: current_epoch,
             };
             let (renderer, route) = self.routed_renderer(&document, state.rate)?;
             Self::enqueue(
@@ -3047,6 +3091,7 @@ impl AudioService {
                 backing: document.backing.clone(),
                 practice: document.practice,
                 plugin_plans: document.plugin_plans.clone(),
+                soundbank_epoch: document.soundbank_epoch,
             };
             let frozen = self.synchronize_callback(&mut state, Duration::from_secs(1));
             // The old callback is frozen (or did not answer, and is not to be trusted) and will never release what it
@@ -3519,6 +3564,7 @@ mod reference_tests {
             })),
             practice: PracticeSettings::default(),
             plugin_plans: Vec::new(),
+            soundbank_epoch: crate::audio::gp8_soundbanks::epoch(),
         }
     }
     #[test]
@@ -3855,6 +3901,7 @@ mod reference_tests {
             backing: None,
             practice: PracticeSettings::default(),
             plugin_plans: Vec::new(),
+            soundbank_epoch: crate::audio::gp8_soundbanks::epoch(),
         }
     }
     fn settled(log: &Arc<Mutex<Vec<Vec<u8>>>>, mut done: impl FnMut(&[Vec<u8>]) -> bool) -> bool {
@@ -4333,6 +4380,8 @@ fn sound_source_changed(
         voice_id_for_track(track, new) != voice_id_for_track(track, old)
             || track_locked(new, &track.id) != track_locked(old, &track.id)
             || drum_kit_for_track(track, new) != drum_kit_for_track(track, old)
+            || new.sounds.get(&track.id).and_then(|s| s.pickup.as_deref())
+                != old.sounds.get(&track.id).and_then(|s| s.pickup.as_deref())
     })
 }
 
@@ -5228,6 +5277,7 @@ mod tests {
                 backing: None,
                 practice: PracticeSettings::default(),
                 plugin_plans: Vec::new(),
+                soundbank_epoch: crate::audio::gp8_soundbanks::epoch(),
             });
         }
         (service, controls)
@@ -5784,8 +5834,89 @@ mod tests {
         assert!((frequency - 880.0).abs() < 6.0, "{frequency}");
         assert!(moved.iter().all(|f| f[0].is_finite() && f[1].is_finite()));
     }
+    fn synthetic_gp8_guitar_guard() -> (
+        tempfile::TempDir,
+        crate::audio::gp8_soundbanks::ScopedOverride,
+    ) {
+        use std::io::Cursor;
+        use std::num::{NonZeroU8, NonZeroU32};
+        use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoderBuilder};
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::write(root.join("META"), "Version=2.0.0-test\n").unwrap();
+        std::fs::create_dir_all(root.join("sets")).unwrap();
+        std::fs::create_dir_all(root.join("banks")).unwrap();
+        std::fs::write(
+            root.join("sets").join("Strat-Guitar.json"),
+            serde_json::json!({
+                "id": "Strat-Guitar",
+                "name": "Strat",
+                "description": "",
+                "instrumentSet": "electricGuitar",
+                "soundbanks": [{"element": "Pitched", "soundbank": "Strat-Guitar"}],
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let rate = 44_100u32;
+        let frames: Vec<f32> = (0..(rate / 10) as usize)
+            .map(|i| (std::f64::consts::TAU * 220.0 * i as f64 / rate as f64).sin() as f32 * 0.4)
+            .collect();
+        let mut ogg = Cursor::new(Vec::new());
+        let mut enc = VorbisEncoderBuilder::new_with_serial(
+            NonZeroU32::new(rate).unwrap(),
+            NonZeroU8::new(1).unwrap(),
+            &mut ogg,
+            1,
+        )
+        .bitrate_management_strategy(VorbisBitrateManagementStrategy::QualityVbr {
+            target_quality: 0.4,
+        })
+        .build()
+        .unwrap();
+        for chunk in frames.chunks(512) {
+            enc.encode_audio_block([chunk]).unwrap();
+        }
+        enc.finish().unwrap();
+        let ogg_bytes = ogg.into_inner();
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?><SoundBank id="Strat-Guitar" name="Strat" type="electricGuitar" tuning="40 45 50 55 59 64"><SamplesTree><Node class="pick"><Node class="sustain"><Node class="down"><Samples><Sample midi="62" string="6" dynamic="f" option="none"><Wave pickup="bridge" file="tone.ogg" repitch="0" gain="0.0"/></Sample></Samples></Node></Node></Node></SamplesTree></SoundBank>"#;
+        let entries: [(&str, &[u8]); 2] = [("Samples.xml", xml), ("tone.ogg", &ogg_bytes)];
+        let header_size = 25usize;
+        let table_len: usize = entries.iter().map(|(n, _)| 12 + n.len() + 1).sum();
+        let mut data_offset = (header_size + table_len) as u64;
+        let mut table = Vec::new();
+        let mut payload = Vec::new();
+        for (name, data) in entries {
+            table.extend_from_slice(&data_offset.to_le_bytes());
+            table.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            table.extend_from_slice(name.as_bytes());
+            table.push(0);
+            payload.extend_from_slice(data);
+            data_offset += data.len() as u64;
+        }
+        let mut bank = Vec::with_capacity(header_size + table.len() + payload.len());
+        bank.extend_from_slice(b"AMARCHIVE");
+        bank.extend_from_slice(&1u32.to_le_bytes());
+        bank.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        bank.extend_from_slice(&(table.len() as u32).to_le_bytes());
+        bank.extend_from_slice(&(header_size as u32).to_le_bytes());
+        bank.extend_from_slice(&table);
+        bank.extend_from_slice(&payload);
+        std::fs::write(root.join("banks").join("Strat-Guitar.gp7bank"), bank).unwrap();
+
+        let guard =
+            crate::audio::gp8_soundbanks::scoped_override(crate::app_settings::SoundbankSettings {
+                enabled: true,
+                path: Some(root.to_string_lossy().into_owned()),
+            });
+        (dir, guard)
+    }
+
     #[test]
     fn a_sound_change_and_a_device_rebuild_keep_the_shift() {
+        let (_dir, _gp8) = synthetic_gp8_guitar_guard();
         let (service, controls) = keyed_service();
         let service = Arc::new(service);
         let transport = transport_for(&service);
@@ -5823,7 +5954,7 @@ mod tests {
         // The samples it loaded are those of the shifted key, which is what a device switch rebuilds from too.
         let requested: Vec<u8> = resource_requests(&document.render_plan(), &document.settings)
             .iter()
-            .filter(|request| request.instrument_id == "green-guitar")
+            .filter(|request| request.instrument_id == "gp8:Strat-Guitar")
             .map(|request| request.key)
             .collect();
         assert!(

@@ -1,13 +1,31 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import './plugin-test-support';
 import { SoundSummary } from './SoundSummary';
 import { soundPreset } from './sound-model';
+import { resetSoundbankStoreForTest, setSoundbankStatusForTest, type Gp8Status } from './soundbank-store';
 import { forgetSessionSoundLibrary, forgetSoundClipboard } from './sound-library';
 
-afterEach(() => { cleanup(); forgetSessionSoundLibrary(); forgetSoundClipboard(); localStorage.clear(); });
+const gp8Fixture: Gp8Status = {
+  enabled: true,
+  available: true,
+  configuredPath: null,
+  resolvedPath: 'C:/GP8',
+  detectedDefaultPath: 'C:/GP8',
+  version: '2.0.0-9',
+  setCount: 4,
+  error: null,
+  sets: [
+    { id: 'Strat-Guitar', name: 'Strat', instrumentSet: 'electricGuitar', category: 'guitars', pickups: ['bridge', 'middle', 'neck'], isPercussion: false },
+    { id: 'Jazz-Bass', name: 'Jazz Bass', instrumentSet: 'electricBass', category: 'basses', pickups: ['bridge', 'neck'], isPercussion: false },
+    { id: 'German-APiano', name: 'German Piano', instrumentSet: 'acousticPiano', category: 'keys', pickups: [], isPercussion: false },
+    { id: 'Drumkit-Custom', name: 'Drums (Custom)', instrumentSet: 'drumKit', category: 'drums', pickups: [], isPercussion: true },
+  ],
+};
+
+afterEach(() => { cleanup(); resetSoundbankStoreForTest(); forgetSessionSoundLibrary(); forgetSoundClipboard(); localStorage.clear(); });
 const recorded = (onEdit: ReturnType<typeof vi.fn>) => onEdit.mock.calls.at(-1)?.[0];
 
 it('shows the source, the preset and one chip for each pedal switched on, in the chain order, instead of every pedal row', () => {
@@ -21,32 +39,40 @@ it('shows the source, the preset and one chip for each pedal switched on, in the
 });
 
 it('the preset and the source record one setTrackSound each, and choosing the current one records nothing', () => {
+  setSoundbankStatusForTest(gp8Fixture);
   const onEdit = vi.fn();
-  render(<SoundSummary trackId="guitar" sound={soundPreset('lead')} onEdit={onEdit} />);
+  render(<SoundSummary trackId="guitar" program={27} sound={soundPreset('lead')} onEdit={onEdit} />);
   fireEvent.change(screen.getByLabelText('Sound preset'), { target: { value: 'clean' } });
   expect(onEdit).toHaveBeenCalledTimes(1);expect(recorded(onEdit)).toMatchObject({ type: 'setTrackSound', trackId: 'guitar', sound: soundPreset('clean') });
-  fireEvent.change(screen.getByLabelText('Sound source'), { target: { value: 'green-guitar' } });
-  expect(recorded(onEdit).sound).toMatchObject({ voiceId: 'green-guitar', presetId: 'lead' });
+  fireEvent.change(screen.getByLabelText('Sound source'), { target: { value: 'gp8:Jazz-Bass' } });
+  expect(recorded(onEdit).sound).toMatchObject({ voiceId: 'gp8:Jazz-Bass', presetId: 'lead' });
   expect(onEdit).toHaveBeenCalledTimes(2);
+  fireEvent.change(screen.getByLabelText('Pickup'), { target: { value: 'neck' } });
+  expect(recorded(onEdit).sound).toMatchObject({ voiceId: null, pickup: 'neck' });
 });
 
-it('a drum track names its automatic source as the recorded drum kit, in the summary and the editor, unless its kit is one the sound bank plays', () => {
+it('lists General MIDI and GP8 sound sets when available, falling back to General MIDI otherwise', () => {
   const { rerender } = render(<SoundSummary trackId="drums" percussion sound={soundPreset('gm')} onEdit={vi.fn()} />);
   const first = (select: HTMLElement) => (select as HTMLSelectElement).options[0];
-  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Recorded drum kit');expect(first(screen.getByLabelText('Sound source')).value).toBe('');
+  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic instrument');expect(first(screen.getByLabelText('Sound source')).value).toBe('');
   const offered = (select: HTMLElement) => [...(select as HTMLSelectElement).options].map(option => option.textContent);
-  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Recorded drum kit', 'General MIDI drums']);
-  fireEvent.click(screen.getByRole('button', { name: /Sound and pedalboard|Open/ }));
-  expect(first(within(screen.getByRole('dialog')).getByLabelText('Sound source')).textContent).toBe('Recorded drum kit');
-  fireEvent.keyDown(document, { key: 'Escape' });
-  rerender(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), drumKit: 8 }} onEdit={vi.fn()} />);
-  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic instrument');
-  // A guitar voice a drum track already stores stays in its list, so the list shows what is set.
+  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Automatic instrument', 'General MIDI drums']);
+  expect(screen.queryByLabelText('Pickup')).toBeNull();
+
+  // When GP8 is active, drums name Automatic (Drums (Custom)) and guitar shows Pickup choices.
+  act(() => { setSoundbankStatusForTest(gp8Fixture); });
+  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic (Drums (Custom))');
+  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Automatic (Drums (Custom))', 'General MIDI drums', 'Drums (Custom)']);
+
+  // A legacy guitar voice stored on a drum track stays in the list so the user can see what is set.
   rerender(<SoundSummary trackId="drums" percussion sound={{ ...soundPreset('gm'), voiceId: 'green-guitar' }} onEdit={vi.fn()} />);
-  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Recorded drum kit', 'General MIDI drums', 'Green Guitar']);expect(screen.getByLabelText('Sound source')).toHaveValue('green-guitar');
-  rerender(<SoundSummary trackId="guitar" sound={soundPreset('gm')} onEdit={vi.fn()} />);
-  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Automatic instrument', 'General MIDI', 'Green Guitar', 'Black Guitar', 'Darkblack Bass', 'Babyblue Bass']);
-  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic instrument');
+  expect(offered(screen.getByLabelText('Sound source'))).toEqual(['Automatic (Drums (Custom))', 'General MIDI drums', 'Strat', 'Drums (Custom)']);
+  expect(screen.getByLabelText('Sound source')).toHaveValue('green-guitar');
+
+  rerender(<SoundSummary trackId="guitar" program={27} sound={soundPreset('gm')} onEdit={vi.fn()} />);
+  expect(first(screen.getByLabelText('Sound source')).textContent).toBe('Automatic (Strat)');
+  expect(screen.getByLabelText('Pickup')).toBeInTheDocument();
+  expect(offered(screen.getByLabelText('Pickup'))).toEqual(['Default', 'Bridge', 'Middle', 'Neck']);
 });
 
 it('a chip opens the sound editor on that pedal; the editor holds everything the inspector held and Escape returns focus to the chip', () => {

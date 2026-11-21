@@ -1,4 +1,4 @@
-import { access, mkdir, copyFile, readdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, copyFile, readdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,6 +26,13 @@ const cargo=process.platform==='win32'?join(process.env.USERPROFILE,'.cargo/bin/
 const metadata=JSON.parse(execFileSync(cargo,['metadata','--locked','--format-version','1','--manifest-path','src-tauri/Cargo.toml'],{encoding:'utf8',maxBuffer:10*1024*1024}));
 for(const pkg of metadata.packages.filter(pkg=>pkg.source||pkg.name==='usvg'))await collect(dirname(pkg.manifest_path),pkg.name,pkg.version,pkg.license);
 const audio=JSON.parse(await readFile(new URL('../assets/audio/sources.json',import.meta.url),'utf8'));
+const audioNoticeRoot=new URL('audio/',output);
+await mkdir(audioNoticeRoot,{recursive:true});
+const expectedAudioIds=new Set(audio.sources.map(source=>source.id));
+for(const entry of await readdir(audioNoticeRoot,{withFileTypes:true})) {
+  if(entry.name==='sources.json'||expectedAudioIds.has(entry.name))continue;
+  await rm(new URL(entry.name,audioNoticeRoot),{recursive:true,force:true});
+}
 for(const source of audio.sources) {
   const destination=new URL(`audio/${source.id}/`,output);await mkdir(destination,{recursive:true});
   // An app-owned license is shipped from its pinned, byte-exact source; one the repository holds, from its recorded copy.

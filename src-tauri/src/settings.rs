@@ -443,6 +443,14 @@ pub struct TrackSound {
         deserialize_with = "crate::password_crypto::present"
     )]
     pub plugin: Option<PluginSlot>,
+    /// Which pickup recording a guitar or bass plays (`"bridge"`, `"middle"` or `"neck"`);
+    /// left out when using the voice's default or on instruments without pickup choices.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::password_crypto::present"
+    )]
+    pub pickup: Option<String>,
 }
 
 /// The formats a plug-in slot can hold. Only VST3 is hosted.
@@ -566,6 +574,32 @@ impl PluginSlot {
         Ok(())
     }
 }
+/// Valid pickup switch positions on GP8 electric guitars and basses.
+pub const VALID_PICKUPS: [&str; 3] = ["bridge", "middle", "neck"];
+/// Legacy bundled voice IDs still accepted in existing `.tabplayer` files for backward compatibility.
+pub const LEGACY_VOICE_IDS: [&str; 4] = [
+    "green-guitar",
+    "black-guitar",
+    "darkblack-bass",
+    "babyblue-bass",
+];
+
+pub fn valid_gp8_set_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 48
+        && id.trim() == id
+        && !id.contains("..")
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b' '))
+}
+
+pub fn valid_voice_id(id: &str) -> bool {
+    id == "gm"
+        || LEGACY_VOICE_IDS.contains(&id)
+        || id.strip_prefix("gp8:").is_some_and(valid_gp8_set_id)
+}
+
 /// The drum kits beyond Standard that the bundled sound bank carries (Room, Jazz, Brush), by the
 /// program that selects each. `src/audio/drum-kits.json` lists the same, and a test renders the bank
 /// to keep both true.
@@ -579,6 +613,7 @@ impl Default for TrackSound {
             locked: false,
             drum_kit: None,
             plugin: None,
+            pickup: None,
         }
     }
 }
@@ -596,17 +631,15 @@ impl TrackSound {
         if !["clean", "crunch", "lead", "bass", "gm"].contains(&self.preset_id.as_str()) {
             return Err("Unknown sound preset.".into());
         }
-        if self.voice_id.as_ref().is_some_and(|id| {
-            ![
-                "gm",
-                "green-guitar",
-                "black-guitar",
-                "darkblack-bass",
-                "babyblue-bass",
-            ]
-            .contains(&id.as_str())
-        }) {
+        if self.voice_id.as_ref().is_some_and(|id| !valid_voice_id(id)) {
             return Err("Unknown instrument voice.".into());
+        }
+        if self
+            .pickup
+            .as_ref()
+            .is_some_and(|pickup| !VALID_PICKUPS.contains(&pickup.as_str()))
+        {
+            return Err("Unknown pickup position.".into());
         }
         self.effects.validate()
     }
@@ -1167,6 +1200,67 @@ mod drum_map_tests {
             edit(serde_json::json!({"preset":"gm","keys":[[91,128]]}))
                 .validate()
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn track_sound_accepts_gp8_voices_pickups_and_legacy_voices_while_refusing_unsafe_ids() {
+        for voice in [
+            "gm",
+            "green-guitar",
+            "black-guitar",
+            "darkblack-bass",
+            "babyblue-bass",
+            "gp8:Strat-Guitar",
+            "gp8:5-Strings-Bass",
+            "gp8:Drumkit-Custom",
+            "gp8:German-APiano",
+        ] {
+            let sound = TrackSound {
+                voice_id: Some(voice.into()),
+                pickup: Some("bridge".into()),
+                ..TrackSound::default()
+            };
+            assert!(sound.validate().is_ok(), "{voice}");
+        }
+
+        for bad in [
+            "gp8:",
+            "gp8:../escape",
+            "gp8:a/b",
+            "gp8:a\\b",
+            "gp8: leading",
+            "gp8:with:colon",
+            "unknown-voice",
+        ] {
+            let sound = TrackSound {
+                voice_id: Some(bad.into()),
+                ..TrackSound::default()
+            };
+            assert!(sound.validate().is_err(), "{bad}");
+        }
+
+        let bad_pickup = TrackSound {
+            voice_id: Some("gp8:Strat-Guitar".into()),
+            pickup: Some("piezo".into()),
+            ..TrackSound::default()
+        };
+        assert!(bad_pickup.validate().is_err());
+
+        // Omitting pickup leaves legacy JSON format identical and deserializes safely; explicit null is refused.
+        let legacy: TrackSound = serde_json::from_str(
+            r#"{"voiceId":"green-guitar","presetId":"clean","effects":{"gate":{"enabled":false,"thresholdDb":-60,"releaseMs":50},"compressor":{"enabled":false,"thresholdDb":-20,"ratio":4,"attackMs":10,"releaseMs":100,"makeupDb":0},"amp":{"enabled":false,"model":"clean","drive":0.5,"gainDb":0},"cabinet":{"enabled":false,"model":"open"},"eq":{"enabled":false,"lowDb":0,"midDb":0,"highDb":0,"midHz":1000},"chorus":{"enabled":false,"rateHz":1,"depthMs":5,"mix":0.3},"delay":{"enabled":false,"model":"digital","quarterNotes":0.5,"feedback":0.3,"mix":0.2},"reverb":{"enabled":false,"model":"room","room":0.4,"damping":0.5,"mix":0.2},"vibrato":{"enabled":false,"rateHz":5,"depthCents":10},"phaser":{"enabled":false,"rateHz":1,"depth":0.5,"feedback":0.3,"stages":4,"mix":0.3},"flanger":{"enabled":false,"rateHz":0.5,"depthMs":3,"feedback":0.2,"mix":0.3},"tremolo":{"enabled":false,"rateHz":4,"depth":0.5,"shape":"sine"},"wah":{"enabled":false,"model":"classic","mode":"manual","position":0.5,"resonance":0.5,"sensitivity":0.5,"mix":0},"octaver":{"enabled":false,"octaveDown":0,"twoOctavesDown":0,"direct":1},"pitch":{"enabled":false,"semitones":0,"mix":0},"drive":{"enabled":false,"model":"overdrive","drive":0.5,"tone":0.5,"levelDb":0},"microphone":{"enabled":false,"placement":"standard","output":"stereo"},"graphicEq":{"enabled":false,"gainsDb":[0,0,0,0,0,0,0,0,0,0],"levelDb":0}}}"#,
+        )
+        .unwrap();
+        assert_eq!(legacy.pickup, None);
+        assert!(!serde_json::to_string(&legacy).unwrap().contains("pickup"));
+        assert!(
+            serde_json::from_str::<TrackSound>(&serde_json::to_string(&legacy).unwrap().replacen(
+                "{",
+                r#"{"pickup":null,"#,
+                1
+            ))
+            .is_err()
         );
     }
 }

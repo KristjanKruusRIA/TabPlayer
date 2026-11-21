@@ -88,30 +88,15 @@ export async function verifyPackage({packageRoot,referenceRoot=join(repository,'
   const bytes=await readFile(manifests[0]),reference=await readFile(join(referenceRoot,'manifest.json'));
   if(digest(bytes)!==digest(reference))throw new Error('Packaged audio manifest does not match the prepared offline reference');
   const manifest=JSON.parse(bytes),config=JSON.parse(await readFile(join(sourceRoot,'assets/audio/sources.json'),'utf8'));
-  if(manifest.schemaVersion!==1||!Array.isArray(manifest.samples)||!Array.isArray(manifest.instruments))throw new Error('Invalid packaged audio manifest');
+  if(manifest.schemaVersion!==1||!Array.isArray(manifest.sources)||!Array.isArray(manifest.samples)||!Array.isArray(manifest.instruments))throw new Error('Invalid packaged audio manifest');
+  if(!Array.isArray(config.sources)||config.sources.length>0||manifest.sources.length>0||manifest.samples.length>0||manifest.instruments.length>0)throw new Error('Packaged audio manifest contains unexpected bundled soundbank sources or samples');
   const allowed=new Set(['manifest.json','licenses/Apache-2.0.txt','soundfont/LICENSE']);
-  const sampleIds=new Set(manifest.samples.map(item=>item.id));
-  const sourceRevisions={};
-  for(const source of config.sources) {
-    const packaged=manifest.sources.find(item=>item.id===source.id);
-    const pins=new Map(JSON.parse(await readFile(join(sourceRoot,'assets/audio',source.inventoryPath),'utf8')).map(item=>[item.path,item.sha256]));
-    if(!packaged||packaged.repository!==source.repository||packaged.revision!==source.revision||packaged.license!==source.license||packaged.licenseSha256!==pins.get(source.licensePath))throw new Error(`Packaged source/license pin mismatch: ${source.id}`);
-    await verifyHash(audioRoot,packaged.licensePath,packaged.licenseSha256);allowed.add(packaged.licensePath);
-    sourceRevisions[source.id]=source.revision;
-    for(const sample of manifest.samples.filter(item=>item.id.startsWith(`${source.id}:`)))if(sample.sourceSha256!==pins.get(sample.id.slice(source.id.length+1)))throw new Error(`Packaged sample source pin mismatch: ${sample.id}`);
-  }
   if(manifest.soundFont.sha256!==config.soundFont.sha256)throw new Error('Packaged GM SoundFont pin mismatch');
-  for(const sample of [...manifest.samples,manifest.soundFont]) {
-    await verifyHash(audioRoot,sample.path,sample.sha256,sample.size);allowed.add(sample.path);
-  }
+  await verifyHash(audioRoot,manifest.soundFont.path,manifest.soundFont.sha256,manifest.soundFont.size);allowed.add(manifest.soundFont.path);
   for(const path of ['licenses/Apache-2.0.txt','soundfont/LICENSE']) {
     await verifyHash(audioRoot,path,await fileHash(await checkedPath(referenceRoot,path)));
   }
-  let regionCount=0;
-  for(const instrument of manifest.instruments)for(const region of instrument.regions) {
-    if(!sampleIds.has(region.sampleId))throw new Error(`Packaged region has no sample: ${region.sampleId}`);
-    regionCount++;
-  }
+  const regionCount=0,sourceRevisions={};
   for(const path of packageFiles) {
     const rel=relative(audioRoot,path).replaceAll('\\','/');
     if(rel!== '..'&&!rel.startsWith('../')&&!isAbsolute(rel)) {

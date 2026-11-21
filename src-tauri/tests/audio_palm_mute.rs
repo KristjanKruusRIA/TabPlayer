@@ -169,6 +169,8 @@ fn parameters(articulation: Articulation, key: u8, velocity: u8) -> VoiceParamet
         loop_end: None,
         pitch_keytrack: 100.0,
         velocity_gain_high: 127,
+        tuning_cents: 0.0,
+        is_recorded_harmonic: false,
     }
 }
 fn voice_output(

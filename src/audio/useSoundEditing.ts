@@ -2,7 +2,7 @@ import { getMessage, getResolvedLanguage } from '../i18n';
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import type React from 'react';
 import { chainOrder, completeSound, defaultEffects, effectBlocks, laterFields } from '../document-settings';
-import type { EditCommand, EffectBlock, FxSettings, TrackSound } from '../edit-types';
+import type { EditCommand, EffectBlock, FxSettings, PickupPosition, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo, AudioDiagnostics } from './bridge';
 import type { MessageKey } from '../i18n/en';
@@ -10,8 +10,8 @@ import { audioErrorKey } from './audio-errors';
 import { factorySound, factorySounds } from './factory-sounds';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
 import { drumKitFor } from '../editor/drum-kits';
-import { blockNames, presetName, soundPreset, voiceNames } from './sound-model';
-import type { VoiceId } from './sound-model';
+import { blockNames, presetName, soundPreset, voiceDisplayName } from './sound-model';
+import { useSoundbankStatus } from './soundbank-store';
 
 const noSubscribe=()=>()=>{},noState=()=>null;
 /** Whether `element` could take focus now: attached, not inert, not disabled, and neither it nor an ancestor hidden. Focusing one that is not does nothing, so the caller also confirms `document.activeElement`. */
@@ -37,6 +37,7 @@ const liveEveryMs=70;
 export const diagnosticsFollowUpMs=400;
 export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=true,diagnostics:withDiagnostics=false}:SoundEditingInput) {
   const playbackState=useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
+  const soundbankStatus=useSoundbankStatus();
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let alive=true;if(playback)void playback.devices().then(items=>{if(alive)setDevices(items);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[playback]);
   const [diagnostics, setDiagnostics] = useState<AudioDiagnostics | null>(null);
@@ -163,7 +164,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const entry=library.find(item=>item.name===chosen),savedSelect=useRef<HTMLSelectElement>(null);
   const [factoryChoice,setFactoryChoice]=useState(''),factory=factorySounds.find(item=>item.id===factoryChoice),factoryNote=useId();
   /** Applies a named factory sound to the track, keeping its instrument. */
-  const applyFactoryId=(id:string)=>{const found=factorySounds.find(item=>item.id===id);if(!found)return;const applied=found.name,appliedTo=trackId;const next=factorySound(found.id,current.voiceId)!;if(current.plugin)next.plugin=structuredClone(current.plugin);void save(next).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
+  const applyFactoryId=(id:string)=>{const found=factorySounds.find(item=>item.id===id);if(!found)return;const applied=found.name,appliedTo=trackId;const next=factorySound(found.id,current.voiceId)!;if(current.pickup)next.pickup=current.pickup;if(current.plugin)next.plugin=structuredClone(current.plugin);void save(next).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
   const applyFactory=()=>applyFactoryId(factoryChoice);
   /** Applies a saved sound by name. */
   const applySaved=(savedName:string)=>{const item=library.find(candidate=>candidate.name===savedName);if(!item)return;const applied=item.name,appliedTo=trackId;const next=structuredClone(item.sound);if(current.plugin)next.plugin=structuredClone(current.plugin);void save(next).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
@@ -187,8 +188,9 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     const named=factorySounds.find(item=>item.id===id);
     // A source previews the track's own sound through that source: only the instrument changes.
     const chosenSound=kind==='voice'?{...structuredClone(current),voiceId:id==='auto'?null:id}:kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
-    const heardSound=chosenSound?structuredClone(chosenSound):null;if(heardSound&&current.plugin&&kind!=='voice')heardSound.plugin=structuredClone(current.plugin);const heard=heardSound&&withLock(heardSound);
-    const label=kind==='voice'?(id==='auto'?'Automatic':voiceNames[id as VoiceId]??id):kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!heard)return;
+    if(chosenSound&&kind==='voice'&&id==='gm')delete chosenSound.pickup;
+    const heardSound=chosenSound?structuredClone(chosenSound):null;if(heardSound&&current.plugin&&kind!=='voice')heardSound.plugin=structuredClone(current.plugin);if(heardSound&&(kind==='preset'||kind==='factory')&&current.pickup)heardSound.pickup=current.pickup;const heard=heardSound&&withLock(heardSound);
+    const label=kind==='voice'?(id==='auto'?'Automatic':voiceDisplayName(id,0,false,undefined,soundbankStatus)):kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!heard)return;
     const request=++previewRequest.current,track=trackId;setPreviewChoice('');
     // A result that arrives after another choice, a cancel or a track change is dropped.
     void Promise.resolve(previewer.previewSound(track,structuredClone(heard))).then(()=>{if(request!==previewRequest.current||shownTrack.current!==track||previewer.soundPreview()?.track!==track)return;setPreviewChoice(value);setPreviewLabel(label);setError(null);setStatus(`Previewing ${label}. Keep it or cancel to go back to this track’s sound.`);},e=>{if(request===previewRequest.current)setError(String(e));});
@@ -227,7 +229,25 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     /** Locks or unlocks the track's sound against sound automations in the score, as one undoable edit; choosing the value it already has records nothing. */
     setLocked:(locked:boolean)=>locked===!!current.locked?Promise.resolve(false):save(current,locked),
     diagnostics, diagnosticsError, testToneMessage, testTone, refreshDiagnostics,
-    selectOutput,restorePreset:()=>{const next=soundPreset(current.presetId,current.voiceId);if(current.plugin)next.plugin=structuredClone(current.plugin);return save(next);},applyPreset:(id:TrackSound['presetId'])=>{const next=soundPreset(id,current.voiceId);if(current.plugin)next.plugin=structuredClone(current.plugin);return save(next);},setVoice:(voiceId:string|null)=>save({...current,voiceId}),
+    selectOutput,restorePreset:()=>{const next=soundPreset(current.presetId,current.voiceId);if(current.pickup)next.pickup=current.pickup;if(current.plugin)next.plugin=structuredClone(current.plugin);return save(next);},applyPreset:(id:TrackSound['presetId'])=>{const next=soundPreset(id,current.voiceId);if(current.pickup)next.pickup=current.pickup;if(current.plugin)next.plugin=structuredClone(current.plugin);return save(next);},
+    setVoice:(voiceId:string|null)=>{
+      if(voiceId===current.voiceId)return Promise.resolve(false);
+      const next:TrackSound={...current,voiceId};
+      if(voiceId==='gm') {
+        delete next.pickup;
+      } else if(voiceId?.startsWith('gp8:')&&soundbankStatus.available) {
+        const targetSet=soundbankStatus.sets.find(s=>s.id===voiceId.slice(4));
+        if(targetSet&&(!targetSet.pickups.length||(next.pickup&&!targetSet.pickups.includes(next.pickup))))delete next.pickup;
+      }
+      return save(next);
+    },
+    /** Sets or clears the pickup switch position (`bridge`, `middle`, `neck`, or undefined for default). */
+    setPickup:(pickup:PickupPosition|undefined)=>{
+      if(pickup===current.pickup)return Promise.resolve(false);
+      const next:TrackSound={...current};
+      if(pickup)next.pickup=pickup;else delete next.pickup;
+      return save(next);
+    },
     /** Plays a drum track as the kit with this program (0 is Standard, stored as no kit); a kit already in effect records nothing. One undoable edit that keeps the rest of the sound. */
     setDrumKit:(program:number)=>{if(busy||program===drumKitFor(current.drumKit).program)return Promise.resolve(false);return save(current,undefined,program===0?null:program);},
   };

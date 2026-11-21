@@ -5,13 +5,18 @@ import { resolvePercussionArticulation, standardPercussionCatalog } from '../edi
  * The recorded kit's sound for each standard Guitar Pro articulation, by its id. Most ids are General MIDI keys and sound
  * that key's recording; the rest borrow a recording of the same piece. 1 is the snare rim shot and 2 the half-open hi-hat,
  * which General MIDI lacks. `null` is a sound the kit has no recording of, which plays from the General MIDI set.
- * It must stay equal to the keys of assets/audio/drums/Programs/tabplayer-kit.sfz.
+ * It aligns with General MIDI percussion keys 35..87 plus rim shot (1) and half-open hi-hat (2).
  */
-const recorded = new Set([35, 36, 37, 38, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 67, 68, 69, 70, 71, 72, 73, 74, 75, 80, 81, 82, 83, 84]);
+const recorded = new Set([
+  1, 2,
+  ...Array.from({ length: 87 - 35 + 1 }, (_, i) => 35 + i),
+]);
+/** Standard GM percussion keys covered by the GP8 runtime drum/percussion kits. */
+export const RECORDED_KIT_SOUNDS: ReadonlySet<number> = recorded;
 const borrowed = new Map<number, number | null>([
-  [91, 1], [92, 2], [93, 51], [94, 51], [95, 55], [96, null], [97, 49], [98, 57], [99, 56], [100, 56], [101, 56], [102, 56],
+  [91, 1], [92, 2], [93, 59], [94, 51], [95, 55], [96, 52], [97, 49], [98, 57], [99, 56], [100, 56], [101, 56], [102, 56],
   [103, 56], [104, 60], [105, 60], [106, 61], [107, 61], [108, 64], [109, 64], [110, 63], [111, 54], [112, 54], [113, 54],
-  [114, null], [115, null], [116, null], [117, 69], [118, 70], [119, 70], [120, 70], [122, 82], [123, 84], [124, null], [125, null],
+  [114, 54], [115, 83], [116, 75], [117, 69], [118, 70], [119, 70], [120, 70], [122, 82], [123, 84], [124, null], [125, null],
   [126, 59], [127, 53], [29, 59], [30, null], [31, null], [33, null], [34, null],
 ]);
 /** The standard choke articulations: the cymbal is struck and stopped by hand when the note ends. */

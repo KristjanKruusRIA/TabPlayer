@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { model } from '@coderline/alphatab';
 import { standardPercussionCatalog } from '../editor/percussion-catalog';
-import { kitSound, standardArticulationId } from './kit-sound';
+import { kitSound, RECORDED_KIT_SOUNDS, standardArticulationId } from './kit-sound';
 
-const kitKeys = () => new Set([...readFileSync(resolve(__dirname, '../../assets/audio/drums/Programs/tabplayer-kit.sfz'), 'utf8').matchAll(/<group>\s*key=(\d+)/g)].map(match => Number(match[1])));
+const kitKeys = () => RECORDED_KIT_SOUNDS;
 const drums = (articulations: model.InstrumentArticulation[] = []) => { const track = new model.Track(); track.percussionArticulations = articulations; return track; };
 const copy = (id: number) => {
   const entry = standardPercussionCatalog.find(item => item.id === id)!;
@@ -30,10 +28,13 @@ describe('recorded kit sounds', () => {
     expect(kitSound(track, 94, 51)).toEqual({ kitSound: 51, choke: true });
     expect(kitSound(track, 97, 49)).toEqual({ kitSound: 49, choke: true });
     expect(kitSound(track, 84, 53)).toEqual({ kitSound: 84 });
-    // No recording: the china, its choke and the electric snare play General MIDI, which stops each at its note end as before.
-    expect(kitSound(track, 52, 52)).toEqual({});
-    expect(kitSound(track, 96, 52)).toEqual({ choke: true });
-    expect(kitSound(track, 40, 40)).toEqual({});
+    expect(kitSound(track, 52, 52)).toEqual({ kitSound: 52 });
+    expect(kitSound(track, 96, 52)).toEqual({ kitSound: 52, choke: true });
+    expect(kitSound(track, 40, 40)).toEqual({ kitSound: 40 });
+    // Unrecorded articulations (ticks/metronome/golpe) fall back to GM without a kitSound.
+    expect(kitSound(track, 30, 30)).toEqual({});
+    expect(kitSound(track, 33, 33)).toEqual({});
+    expect(kitSound(track, 124, 37)).toEqual({});
   });
   it("reads a track's own table by what each entry copies, not by its id", () => {
     // A Guitar Pro file numbers its own table: here 0 is the rim shot and 1 the ride choke.
@@ -42,9 +43,10 @@ describe('recorded kit sounds', () => {
     expect(standardArticulationId(track, 0)).toBe(91);
     expect(kitSound(track, 0, 38)).toEqual({ kitSound: 1 });
     expect(kitSound(track, 1, 51)).toEqual({ kitSound: 51, choke: true });
-    // An entry that copies no standard one sounds its own pitch, where the kit has it.
+    // An entry that copies no standard one sounds its own pitch, where the kit has it, else GM.
     expect(standardArticulationId(track, 2)).toBeUndefined();
     expect(kitSound(track, 2, 41)).toEqual({ kitSound: 41 });
-    expect(kitSound(track, 2, 40)).toEqual({});
+    expect(kitSound(track, 2, 40)).toEqual({ kitSound: 40 });
+    expect(kitSound(track, 2, 33)).toEqual({});
   });
 });

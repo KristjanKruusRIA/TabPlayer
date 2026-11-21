@@ -14,13 +14,26 @@ pub fn select_region<'a>(
     sequence: usize,
     trigger: &str,
 ) -> Option<&'a Region> {
-    let regions = super::resources::eligible_regions(
+    select_region_by_name(
         instrument,
         key,
         velocity,
         articulation_name(articulation),
+        sequence,
         trigger,
-    );
+    )
+}
+
+pub fn select_region_by_name<'a>(
+    instrument: &'a Instrument,
+    key: u8,
+    velocity: u8,
+    articulation: &str,
+    sequence: usize,
+    trigger: &str,
+) -> Option<&'a Region> {
+    let regions =
+        super::resources::eligible_regions(instrument, key, velocity, articulation, trigger);
     regions
         .iter()
         .copied()
@@ -47,19 +60,22 @@ pub fn articulation_name(articulation: Articulation) -> &'static str {
     }
 }
 
-pub fn voice_id_for_track<'a>(
+pub fn voice_id_for_track(
     track: &super::plan::PlanTrack,
-    settings: &'a crate::settings::DocumentSettings,
-) -> Option<&'a str> {
+    settings: &crate::settings::DocumentSettings,
+) -> Option<String> {
     voice_id_for_program(track, settings, track.program)
 }
 
-/// The recorded drum kit, which plays the standard kit. The sound bank's other kits (room, jazz, brush) stay General MIDI.
+/// Legacy constant retained for synthetic tests and backward compatibility.
 pub const RECORDED_KIT: &str = "virtuosity-kit";
 
-pub fn automatic_voice_id(program: u8, percussion: bool) -> Option<&'static str> {
+pub fn is_drum_instrument(id: &str) -> bool {
+    id == RECORDED_KIT || super::gp8_soundbanks::is_percussion_instrument_id(id)
+}
+
+pub fn legacy_automatic_voice_id(program: u8, percussion: bool) -> Option<&'static str> {
     if percussion {
-        // Programs the sound bank has no kit for sound its standard kit, so they play the recorded one too.
         return (!crate::settings::DRUM_KIT_PROGRAMS.contains(&program)).then_some(RECORDED_KIT);
     }
     match program {
@@ -71,19 +87,67 @@ pub fn automatic_voice_id(program: u8, percussion: bool) -> Option<&'static str>
     }
 }
 
-pub fn voice_id_for_program<'a>(
-    track: &super::plan::PlanTrack,
-    settings: &'a crate::settings::DocumentSettings,
+pub fn automatic_voice_id(program: u8, percussion: bool) -> Option<String> {
+    automatic_voice_id_with_kit(program, percussion, None, None)
+}
+
+pub fn automatic_voice_id_with_kit(
     program: u8,
-) -> Option<&'a str> {
-    if let Some(id) = settings
-        .sounds
-        .get(&track.id)
-        .and_then(|s| s.voice_id.as_deref())
-    {
-        return if id == "gm" { None } else { Some(id) };
+    percussion: bool,
+    drum_kit: Option<u8>,
+    pickup: Option<&str>,
+) -> Option<String> {
+    let set_id = super::gp8_soundbanks::default_set_for_program(program, percussion, drum_kit)?;
+    super::gp8_soundbanks::resolve_runtime_id(&set_id, pickup, percussion, drum_kit)
+}
+
+pub fn resolve_voice_id(
+    explicit: Option<&str>,
+    pickup: Option<&str>,
+    percussion: bool,
+    drum_kit: Option<u8>,
+    program: u8,
+) -> Option<String> {
+    if let Some(id) = explicit {
+        if id == "gm" {
+            return None;
+        }
+        if let Some((set_id, variant)) = super::gp8_soundbanks::parse_runtime_id(id) {
+            return super::gp8_soundbanks::resolve_runtime_id(
+                set_id,
+                variant.or(pickup),
+                percussion,
+                drum_kit,
+            );
+        }
+        if let Some(mapped) = super::gp8_soundbanks::legacy_voice_to_gp8(id) {
+            if let Some((set_id, variant)) = super::gp8_soundbanks::parse_runtime_id(&mapped) {
+                return super::gp8_soundbanks::resolve_runtime_id(
+                    set_id,
+                    variant.or(pickup),
+                    percussion,
+                    drum_kit,
+                );
+            }
+        }
+        return None;
     }
-    automatic_voice_id(program, track.percussion)
+    automatic_voice_id_with_kit(program, percussion, drum_kit, pickup)
+}
+
+pub fn voice_id_for_program(
+    track: &super::plan::PlanTrack,
+    settings: &crate::settings::DocumentSettings,
+    program: u8,
+) -> Option<String> {
+    let sound = settings.sounds.get(&track.id);
+    resolve_voice_id(
+        sound.and_then(|s| s.voice_id.as_deref()),
+        sound.and_then(|s| s.pickup.as_deref()),
+        track.percussion,
+        drum_kit_for_track(track, settings),
+        program,
+    )
 }
 
 pub fn note_program(plan: &super::plan::PlaybackPlan, note: &super::plan::PlanNote) -> u8 {
@@ -244,11 +308,11 @@ pub fn with_locked_articulations(
     Arc::new(changed)
 }
 
-pub fn voice_id_for_note<'a>(
+pub fn voice_id_for_note(
     plan: &super::plan::PlaybackPlan,
     note: &super::plan::PlanNote,
-    settings: &'a crate::settings::DocumentSettings,
-) -> Option<&'a str> {
+    settings: &crate::settings::DocumentSettings,
+) -> Option<String> {
     let track = plan.tracks.iter().find(|track| track.id == note.track_id)?;
     voice_id_for_program(
         track,
@@ -261,46 +325,55 @@ pub fn resource_requests(
     plan: &super::plan::PlaybackPlan,
     settings: &crate::settings::DocumentSettings,
 ) -> Vec<super::resources::SampleRequest> {
-    let mut requests: Vec<_> = plan
-        .notes
-        .iter()
-        .filter(|n| n.velocity > 0)
-        .filter_map(|note| {
-            let instrument_id = voice_id_for_note(plan, note, settings)?;
-            let drums = plan
-                .tracks
-                .iter()
-                .find(|track| track.id == note.track_id && track.percussion);
-            // A drum note asks for its own kit sound; one the kit has no recording of plays General MIDI, as does every
-            // note of a track on the Room, Jazz or Brush kit or with a guitar or bass voice.
-            if let Some(track) = drums {
-                if instrument_id != RECORDED_KIT
-                    || drum_kit_for_track(track, settings)
-                        .is_some_and(|kit| crate::settings::DRUM_KIT_PROGRAMS.contains(&kit))
-                {
-                    return None;
-                }
-                return Some(super::resources::SampleRequest {
-                    instrument_id: instrument_id.into(),
-                    key: note.kit_sound?,
+    let mut requests = Vec::new();
+    for note in plan.notes.iter().filter(|n| n.velocity > 0) {
+        let Some(instrument_id) = voice_id_for_note(plan, note, settings) else {
+            continue;
+        };
+        let drums = plan
+            .tracks
+            .iter()
+            .find(|track| track.id == note.track_id && track.percussion);
+        if let Some(track) = drums {
+            if !is_drum_instrument(&instrument_id)
+                || (instrument_id == RECORDED_KIT
+                    && drum_kit_for_track(track, settings)
+                        .is_some_and(|kit| crate::settings::DRUM_KIT_PROGRAMS.contains(&kit)))
+            {
+                continue;
+            }
+            let Some(sound) = note.kit_sound else {
+                continue;
+            };
+            if note.choke {
+                requests.push(super::resources::SampleRequest {
+                    instrument_id: instrument_id.clone(),
+                    key: sound,
                     velocity: note.velocity,
-                    articulation: "picked".into(),
+                    articulation: "choke".into(),
                 });
             }
-            Some(super::resources::SampleRequest {
-                instrument_id: instrument_id.into(),
-                key: note.key,
+            requests.push(super::resources::SampleRequest {
+                instrument_id,
+                key: sound,
                 velocity: note.velocity,
-                articulation: articulation_name(effective_articulation(note, settings)).into(),
-            })
-        })
-        .collect();
+                articulation: "picked".into(),
+            });
+            continue;
+        }
+        requests.push(super::resources::SampleRequest {
+            instrument_id,
+            key: note.key,
+            velocity: note.velocity,
+            articulation: articulation_name(effective_articulation(note, settings)).into(),
+        });
+    }
     // A drum track needs no placeholder: its notes play General MIDI unless they asked for a kit sound above.
     for track in plan.tracks.iter().filter(|track| !track.percussion) {
         if let Some(instrument_id) = voice_id_for_track(track, settings) {
             if !requests.iter().any(|r| r.instrument_id == instrument_id) {
                 requests.push(super::resources::SampleRequest {
-                    instrument_id: instrument_id.into(),
+                    instrument_id,
                     key: if (32..=39).contains(&track.program) {
                         40
                     } else {
@@ -328,6 +401,8 @@ pub struct VoiceParameters {
     pub loop_end: Option<u64>,
     pub pitch_keytrack: f64,
     pub velocity_gain_high: u8,
+    pub tuning_cents: f64,
+    pub is_recorded_harmonic: bool,
 }
 pub fn pitch_at(points: &[PitchPoint], tick: f64) -> f64 {
     if points.is_empty() {
@@ -455,6 +530,7 @@ impl SampleVoice {
             || params.release_seconds < 0.0
             || !params.gain_db.is_finite()
             || !params.pitch_keytrack.is_finite()
+            || !params.tuning_cents.is_finite()
             || !trims_db.0.is_finite()
             || !trims_db.1.is_finite()
             || !lead_frames.is_finite()
@@ -466,9 +542,17 @@ impl SampleVoice {
                 return Err("Invalid sample loop.".into());
             }
         }
-        let ratio = 2f64.powf(
-            (params.key as f64 - params.root_key as f64) * params.pitch_keytrack / 100.0 / 12.0,
-        );
+        let ratio = if params.tuning_cents != 0.0 {
+            2f64.powf(
+                ((params.key as f64 - params.root_key as f64) * params.pitch_keytrack / 100.0
+                    + params.tuning_cents / 100.0)
+                    / 12.0,
+            )
+        } else {
+            2f64.powf(
+                (params.key as f64 - params.root_key as f64) * params.pitch_keytrack / 100.0 / 12.0,
+            )
+        };
         let lead_seconds = if lead_frames > 0.0 && ratio > 0.0 {
             lead_frames / audio.sample_rate as f64 / ratio
         } else {
@@ -522,11 +606,20 @@ impl SampleVoice {
         } else {
             0.0
         };
-        let ratio = 2f64.powf(
-            ((self.key - self.params.root_key as f64) * self.params.pitch_keytrack / 100.0
-                + semitones)
-                / 12.0,
-        );
+        let ratio = if self.params.tuning_cents != 0.0 {
+            2f64.powf(
+                ((self.key - self.params.root_key as f64) * self.params.pitch_keytrack / 100.0
+                    + self.params.tuning_cents / 100.0
+                    + semitones)
+                    / 12.0,
+            )
+        } else {
+            2f64.powf(
+                ((self.key - self.params.root_key as f64) * self.params.pitch_keytrack / 100.0
+                    + semitones)
+                    / 12.0,
+            )
+        };
         self.position += self.audio.sample_rate as f64 / self.rate * ratio;
         if let (Some(start), Some(end)) = (self.params.loop_start, self.params.loop_end) {
             if self.position >= end as f64 {
@@ -568,7 +661,9 @@ impl SampleVoice {
         for c in 0..2 {
             self.filter[c] += coefficient * (x[c] as f64 - self.filter[c]);
             x[c] = self.filter[c] as f32;
-            if matches!(self.params.articulation, Articulation::Harmonic) {
+            if matches!(self.params.articulation, Articulation::Harmonic)
+                && !self.params.is_recorded_harmonic
+            {
                 let hp = 1.0 - (-std::f64::consts::TAU * 700.0 / self.rate).exp();
                 self.harmonic_low[c] += hp * (x[c] as f64 - self.harmonic_low[c]);
                 x[c] = (x[c] as f64 - self.harmonic_low[c] * 0.65) as f32;
@@ -668,13 +763,24 @@ impl SampleVoice {
         let seconds = seconds.max(0.0);
         self.age = seconds;
         self.fade_in_left = (self.rate * 0.003) as u32;
-        self.position = seconds
-            * self.audio.sample_rate as f64
-            * 2f64.powf(
-                ((self.key - self.params.root_key as f64) * self.params.pitch_keytrack / 100.0
-                    + semitones)
-                    / 12.0,
-            );
+        self.position = if self.params.tuning_cents != 0.0 {
+            seconds
+                * self.audio.sample_rate as f64
+                * 2f64.powf(
+                    ((self.key - self.params.root_key as f64) * self.params.pitch_keytrack / 100.0
+                        + self.params.tuning_cents / 100.0
+                        + semitones)
+                        / 12.0,
+                )
+        } else {
+            seconds
+                * self.audio.sample_rate as f64
+                * 2f64.powf(
+                    ((self.key - self.params.root_key as f64) * self.params.pitch_keytrack / 100.0
+                        + semitones)
+                        / 12.0,
+                )
+        };
         if let (Some(a), Some(b)) = (self.params.loop_start, self.params.loop_end) {
             if self.position >= b as f64 {
                 self.position = a as f64 + (self.position - a as f64) % (b - a) as f64;
@@ -985,6 +1091,8 @@ mod legacy_equivalence {
             loop_end: Some(80_000),
             pitch_keytrack: 100.0,
             velocity_gain_high: 127,
+            tuning_cents: 0.0,
+            is_recorded_harmonic: false,
         }
     }
 

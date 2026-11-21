@@ -1,4 +1,6 @@
 import { syncInstrumentViewPreferencesFromNative } from './instruments/view-preferences';
+import { refreshSoundbankStatus } from './audio/soundbank-store';
+import { SoundbankSettingsPanel } from './audio/SoundbankSettingsPanel';
 import { useCallback,useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
 import {model,Settings} from '@coderline/alphatab';
 import { DocumentClosedError,DocumentController } from './controller';
@@ -183,6 +185,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{const playback=new NativePlaybackController({quietMs:PLAN_QUIET_MS,bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
   // The person's instrument view options live in the app's native settings; the browser copy only serves the first paint. Read them once, whichever document is open.
   useEffect(()=>{void syncInstrumentViewPreferencesFromNative();},[]);
+  useEffect(()=>{void refreshSoundbankStatus();},[]);
   // So do the score error, new score and default view preferences; the browser copy serves the first paint, the native settings follow it.
   useEffect(()=>{void syncNativePreferences();},[]);
   const preferenceProblem=useSyncExternalStore(subscribePreferenceSettingsProblem,currentPreferenceSettingsProblem);
@@ -1357,6 +1360,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
         <MidiCapturePanel writeWhilePlaying={inputPrefs.writeWhilePlaying}/>
         <FretlightPanel trackStrings={trackStrings}/>
+        <SoundbankSettingsPanel/>
         <div className="language-setting-row"><label>{t('preferences.language')}: <select aria-label={t('preferences.language')} value={preference} onChange={e=>setPreference(e.target.value as LanguagePreference)}><option value="system">{t('preferences.lang_system')}</option><option value="en">{t('preferences.lang_en')}</option><option value="et">{t('preferences.lang_et')}</option><option value="de">{t('preferences.lang_de')}</option></select></label></div>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.window')}</summary><section aria-label={t('menu.window')}>
@@ -1434,7 +1438,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
         <TrackSettingsPanel staff={target.staff} bar={target.bar} key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} refusal={state.error} engraving={state.settings.engraving} drumTabLeftOff={drumTabLeftOff(state.score.tracks[target.track],projection.drumTab)} onEdit={edit} onAudition={auditionTuning} onStepTrack={stepTrack} onSelectStaff={staff=>{const bar=state.score.tracks[target.track].staves[staff]?.bars[target.bar],voice=bar?.voices[target.voice]?target.voice:0,beat=bar?.voices[voice]?.beats[target.beat]?target.beat:0;select({...target,staff,voice,beat});}}
-          sounds={view==='score'&&<SoundSummary request={soundRequest} onRequestHandled={()=>setSoundRequest(null)} trackId={trackId} percussion={selectedTrack.isPercussion} mix={state.settings.mixes[trackId]} usedDrumSounds={drumSounds} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}
+          sounds={view==='score'&&<SoundSummary request={soundRequest} onRequestHandled={()=>setSoundRequest(null)} trackId={trackId} program={selectedTrack.playbackInfo.program} percussion={selectedTrack.isPercussion} mix={state.settings.mixes[trackId]} usedDrumSounds={drumSounds} sound={state.settings.sounds[trackId]} onEdit={(command,asset)=>controller.edit(command,asset)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'} documentId={state.documentId} status={pluginStatuses.find(s=>s.trackId===trackId)?.status} onAllowConsent={()=>pluginConsentGrant(state.documentId)} onRetrySlot={()=>pluginRetry(state.documentId,trackId)}/>}
           interpretation={selectedTrack.staves.some(staff=>staff.isStringed)&&<section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>}
           midi={<section className="inspector-section"><details className="inspector-more midi-out-more"><summary>{t('inspector.midi_out')}</summary><MidiOutPanel key={trackId} percussion={selectedTrack.isPercussion} usedDrumSounds={drumSounds} keyShift={playbackState?.practice.settings.tonality??0} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></details></section>}/>
       </div>

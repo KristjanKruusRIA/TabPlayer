@@ -1,16 +1,20 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { delayDivisions, effectBlocks, modulationDivisions, syncedBlocks } from '../document-settings';
-import type { EditCommand, EffectBlock, TrackSound } from '../edit-types';
+import type { EditCommand, EffectBlock, PickupPosition, TrackSound } from '../edit-types';
 import { CabinetResponse } from './CabinetResponse';
 import { AmpCapture } from './AmpCapture';
 import type { NativePlaybackController } from './NativePlaybackController';
 import { factoryCategories, factorySounds } from './factory-sounds';
 import { chainOrder } from '../document-settings';
-import { ampModels, blockNames, playsRecordedKit, sourceChoices, voiceNames, cabinetModels, graphicBands, modelName, visibleParameters, localizedParamHint, presetIds, presetName, soundPreset, localizedBlockName, localizedPresetName, localizedAmpModelName, localizedCabinetModelName, localizedParamLabel } from './sound-model';
+import { ampModels, availablePickupsForVoice, blockNames, cabinetModels, graphicBands, visibleParameters, localizedParamHint, presetIds, soundPreset, localizedBlockName, localizedPresetName, localizedAmpModelName, localizedCabinetModelName, localizedParamLabel } from './sound-model';
 import { SoundLock } from './SoundLock';
-import { BusyFieldset, busyGuard } from '../ui';
+import { BusyFieldset, busyGuard, Dialog } from '../ui';
 import { useI18n } from '../i18n';
 import { DrumKitPicker } from './DrumKitPicker';
+import { PickupOptions, SoundSourceOptions } from './SoundSourceOptions';
+import { SoundbankSettingsPanel } from './SoundbankSettingsPanel';
+import { useSoundbankStatus } from './soundbank-store';
 import type { AssetCandidate } from '../project';
 import { useSoundEditing } from './useSoundEditing';
 import type { Board } from './useSoundEditing';
@@ -18,11 +22,14 @@ import './sound-panel.css';
 
 export { soundPreset };
 /** The inspector's Sound task: every control as a field. The rig in `src/rig` shows the same sound as hardware; both share `useSoundEditing`. */
-export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false,openBlock,onOpenPlugin}:{/** Opens the Plug-in dialog in place of this one: the small Plug-in… buttons beside the notes about a plug-in that replaces pedals or the kit. */onOpenPlugin?:()=>void;trackId:string;/** The pedal whose controls start unfolded and scrolled to, as when its slot in the sidebar's effect strip opened this. */openBlock?:EffectBlock;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand,asset?:AssetCandidate)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}) {
+export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false,program=0,openBlock,onOpenPlugin}:{/** Opens the Plug-in dialog in place of this one: the small Plug-in… buttons beside the notes about a plug-in that replaces pedals or the kit. */onOpenPlugin?:()=>void;trackId:string;/** The pedal whose controls start unfolded and scrolled to, as when its slot in the sidebar's effect strip opened this. */openBlock?:EffectBlock;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;program?:number;sound?:TrackSound;onEdit:(edit:EditCommand,asset?:AssetCandidate)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}) {
   const { lang, t } = useI18n();
+  const soundbankStatus=useSoundbankStatus();
+  const [soundbankDialogOpen,setSoundbankDialogOpen]=useState(false);
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown,diagnostics:true});
   const {playbackState,current,devices,diagnostics,diagnosticsError,testToneMessage,testTone,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
-    factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,previewer,previewChoice,previewLabel,showingPreview,previewSelect,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,first,second,save}=editing;
+    factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,previewer,previewChoice,previewLabel,showingPreview,previewSelect,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,first,second,save,setVoice,setPickup}=editing;
+  const pickups=availablePickupsForVoice(current.voiceId,program,percussion,current.drumKit,soundbankStatus);
   const chainRef=useRef<HTMLDivElement>(null),panel=useRef<HTMLElement>(null);
   // The wheel over a focused number field steps it natively, and a refused change does not put the number back; while busy the wheel is refused (React's own wheel listener is passive, so this one is native).
   useEffect(()=>{
@@ -65,7 +72,9 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
     <SoundLock editing={editing} className="check"/>
     {percussion&&<DrumKitPicker editing={editing} className="drum-kit" onOpenPlugin={onOpenPlugin}/>}
     <BusyFieldset busy={busy}>
-    <label>{t('sound.sound_source')}<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">{t(playsRecordedKit(0,percussion,current.drumKit)?'sound.recorded_drum_kit':'sound.automatic_instrument')}</option>{sourceChoices(percussion,current.voiceId).map(id=><option key={id} value={id}>{percussion&&id==='gm'?t('sound.general_midi_drums'):voiceNames[id]}</option>)}</select></label>
+    <label>{t('sound.sound_source')}<select value={current.voiceId??''} onChange={e=>void setVoice(e.target.value||null)}><SoundSourceOptions percussion={percussion} program={program} drumKit={current.drumKit} voiceId={current.voiceId} status={soundbankStatus}/></select></label>
+    {pickups.length>1&&<label>{t('sound.pickup')}<select value={current.pickup??''} onChange={e=>void setPickup((e.target.value||undefined) as PickupPosition|undefined)}><PickupOptions pickups={pickups}/></select></label>}
+    <button type="button" aria-haspopup="dialog" onClick={()=>setSoundbankDialogOpen(true)}>{t('soundbanks.settings_open')}</button>
     <label>{t('sound.sound_preset')}<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{localizedPresetName(id,lang)}</option>)}</select></label>
     <button onClick={()=>void editing.restorePreset()}>{t('sound.restore_preset')}</button>
     <label>{t('sound.factory_sound')}<select aria-label={t('sound.factory_sound')} aria-describedby={factoryNote} value={factoryChoice} onChange={e=>setFactoryChoice(e.target.value)}><option value="">{t('sound.choose_factory_sound')}</option>{factoryCategories.map(category=><optgroup key={category} label={category}>{factorySounds.filter(item=>item.category===category).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}</select></label>
@@ -99,5 +108,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
       {diagnosticsError&&<p role="alert" className="sound-diagnostics-error">{t(diagnosticsError)}</p>}
       {testToneMessage&&<p role="alert" className="sound-test-tone-message">{t(testToneMessage)}</p>}
     </BusyFieldset>}
-  {error&&<p role="alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert">{playbackState.error}</p>}</section>;
+  {error&&<p role="alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert">{playbackState.error}</p>}
+  {soundbankDialogOpen&&createPortal(<Dialog title={t('soundbanks.dialog_title')} onClose={()=>setSoundbankDialogOpen(false)} dismissOnBackdrop><SoundbankSettingsPanel embedded onConfigured={()=>{if(playback&&typeof playback.refreshSounds==='function')void playback.refreshSounds().catch(()=>{});}}/></Dialog>,document.body)}
+  </section>;
 }

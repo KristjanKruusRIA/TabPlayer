@@ -12,7 +12,7 @@ it('sound preset callbacks persist the complete finite effect settings',()=>{
   const onEdit=vi.fn();render(<SoundPanel trackId="base/0" sound={soundPreset('gm')} onEdit={onEdit}/>);
   fireEvent.change(screen.getByLabelText('Sound preset'),{target:{value:'lead'}});
   expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackSound',trackId:'base/0',sound:soundPreset('lead')});
-  fireEvent.change(screen.getByLabelText('Sound source'),{target:{value:'black-guitar'}});expect(onEdit.mock.calls.at(-1)?.[0].sound.voiceId).toBe('black-guitar');
+  fireEvent.change(screen.getByLabelText('Sound source'),{target:{value:'gm'}});expect(onEdit.mock.calls.at(-1)?.[0].sound.voiceId).toBe('gm');
   fireEvent.click(screen.getByLabelText('Enable chorus'));expect(onEdit.mock.calls.at(-1)?.[0].sound.effects.chorus.enabled).toBe(true);
 });
 it('backing import stages a transactional candidate and removal explicitly selects score-only',async()=>{

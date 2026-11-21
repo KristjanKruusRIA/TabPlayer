@@ -1,6 +1,7 @@
 import { getMessage, getResolvedLanguage, type SupportedLanguage, type MessageKey } from '../i18n';
 import { defaultEffects } from '../document-settings';
-import type { EffectBlock, FxSettings, TrackSound } from '../edit-types';
+import type { EffectBlock, FxSettings, PickupPosition, TrackSound } from '../edit-types';
+import { getSoundbankStatus, type Gp8SetInfo, type Gp8Status } from './soundbank-store';
 
 /** The sound a preset names; `gm` is no effects at all. */
 export function soundPreset(presetId:TrackSound['presetId'],voiceId:string|null=null):TrackSound {
@@ -141,29 +142,262 @@ export const parameters:Record<EffectBlock,NumericControl[]>={
 };
 
 /** The recorded and sampled sources a track can play through. `null` in a sound means Automatic. */
-export type VoiceId='gm'|'green-guitar'|'black-guitar'|'darkblack-bass'|'babyblue-bass';
-export const voiceIds:readonly VoiceId[]=['green-guitar','black-guitar','darkblack-bass','babyblue-bass','gm'];
-export const voiceNames:Record<VoiceId,string>={gm:'General MIDI','green-guitar':'Green Guitar','black-guitar':'Black Guitar','darkblack-bass':'Darkblack Bass','babyblue-bass':'Babyblue Bass'};
-/** What Automatic plays a track as. This mirrors `automatic_voice_id` in `src-tauri/src/audio/voices.rs`, which decides by the
- * track's General MIDI program: 24 and 25 the green guitar, 26 to 31 the black guitar, 33 the babyblue bass, the other bass
- * programs 32 and 34 to 39 the darkblack bass, and everything else the General MIDI sound set. Percussion is 'gm' here; whether
- * its notes play the recorded drum kit is `playsRecordedKit`. */
-export function automaticVoice(program:number,percussion:boolean):VoiceId {
-  if(percussion)return 'gm';
-  if(program===24||program===25)return 'green-guitar';
-  if(program>=26&&program<=31)return 'black-guitar';
-  if(program===33)return 'babyblue-bass';
-  if(program>=32&&program<=39)return 'darkblack-bass';
-  return 'gm';
+export type LegacyVoiceId='green-guitar'|'black-guitar'|'darkblack-bass'|'babyblue-bass';
+export type VoiceId='gm'|LegacyVoiceId|string;
+export const voiceIds:readonly VoiceId[]=['gm'];
+export const legacyVoiceIds:readonly LegacyVoiceId[]=['green-guitar','black-guitar','darkblack-bass','babyblue-bass'];
+export const legacyVoiceToGp8Set:Record<LegacyVoiceId,string>={
+  'green-guitar':'Strat-Guitar',
+  'black-guitar':'Metal-Guitar',
+  'darkblack-bass':'Jazz-Bass',
+  'babyblue-bass':'Pre-Bass',
+};
+export const voiceNames:Record<string,string>={
+  gm:'General MIDI',
+  'green-guitar':'Green Guitar',
+  'black-guitar':'Black Guitar',
+  'darkblack-bass':'Darkblack Bass',
+  'babyblue-bass':'Babyblue Bass',
+};
+
+const PITCHED_GM_DEFAULT_SETS:Readonly<Record<number,readonly string[]>>={
+  0:['German-APiano','Eastern-APiano'],
+  1:['Eastern-APiano','German-APiano'],
+  2:['CP-EPiano','MarkI-EPiano'],
+  3:['Upright-APiano','German-APiano'],
+  4:['MarkI-EPiano','200A-EPiano'],
+  5:['200A-EPiano','MarkI-EPiano'],
+  6:['Harpsichord-Key'],
+  7:['AddClavinet-Key','Harpsichord-Key'],
+  8:['Celesta-Tuned'],
+  9:['Vibraphone-Tuned','Celesta-Tuned'],
+  10:['Vibraphone-Tuned','Celesta-Tuned'],
+  11:['Vibraphone-Tuned','Celesta-Tuned'],
+  12:['Xylophone-Tuned','Vibraphone-Tuned'],
+  13:['Xylophone-Tuned','Vibraphone-Tuned'],
+  14:['Xylophone-Tuned','Vibraphone-Tuned'],
+  15:['Xylophone-Tuned','Vibraphone-Tuned'],
+  16:['Ballad-Organ','Full-Organ'],
+  17:['Jazz-Organ','Full-Organ'],
+  18:['Rock-Organ','Full-Organ'],
+  19:['Full-Organ','Ballad-Organ'],
+  20:['Full-Organ','Ballad-Organ'],
+  21:['Accordion','Bandoneon'],
+  22:['Harmonica'],
+  23:['Bandoneon','Accordion'],
+  24:['Concerto-Nylon'],
+  25:['D-Steel'],
+  26:['Jazz-Guitar','ES-Guitar','L4-Guitar'],
+  27:['Strat-Guitar','Tele-Guitar'],
+  28:['Strat-Guitar','Tele-Guitar'],
+  29:['Classic-Guitar','Strat-Guitar'],
+  30:['Metal-Guitar','Classic-Guitar'],
+  31:['Strat-Guitar'],
+  32:['Acoustic-Bass'],
+  33:['Jazz-Bass','Pre-Bass'],
+  34:['Pre-Bass','Jazz-Bass'],
+  35:['Fretless-Bass','Jazz-Bass'],
+  36:['Jazz-Bass','Modern-Bass'],
+  37:['Modern-Bass','Jazz-Bass'],
+  38:['FMSyn-Bass','OB-Bass'],
+  39:['OB-Bass','FMSyn-Bass'],
+  40:['Violin-Solo','Violin1-Ensemble'],
+  41:['Viola-Solo','Violin1-Ensemble'],
+  42:['Cello-Solo'],
+  43:['Contrabass-Solo'],
+  44:['Violin1-Ensemble'],
+  45:['Violin1-Ensemble-Pizz','Violin1-Ensemble'],
+  46:['Harp-Solo'],
+  47:['TimpaniLo-Tuned'],
+  48:['Violin1-Ensemble'],
+  49:['Violin1-Ensemble'],
+  50:['OBStrings-Pad','SolinaString-Pad'],
+  51:['OBStrings-Pad','SolinaString-Pad'],
+  52:['MetaChoir-Pad','Vocal-Pad'],
+  53:['MetaChoir-Pad','Vocal-Pad'],
+  54:['Vocal-Pad','MetaChoir-Pad'],
+  55:['SolinaString-Pad','OBStrings-Pad'],
+  56:['Trumpet-Solo'],
+  57:['Trombone-Solo'],
+  58:['BassTuba-Solo'],
+  59:['Trumpet-Sordino-Solo','Trumpet-Solo'],
+  60:['FrenchHorn-Solo'],
+  61:['Trumpet-Ensemble','Trumpet-Solo'],
+  62:['Simple-Brass','FM-Brass'],
+  63:['FM-Brass','Simple-Brass'],
+  64:['Soprano-Sax','Alto-Sax'],
+  65:['Alto-Sax'],
+  66:['Tenor-Sax'],
+  67:['Baritone-Sax'],
+  68:['Oboe-Solo'],
+  69:['EnglishHorn-Solo'],
+  70:['Bassoon-Solo'],
+  71:['Clarinet-Solo'],
+  72:['Piccolo-Solo','Flute-Solo'],
+  73:['Flute-Solo'],
+  74:['Recorder-Solo','Flute-Solo'],
+  75:['Recorder-Solo','Flute-Solo'],
+  76:['Recorder-Solo','Flute-Solo'],
+  77:['Recorder-Solo','Flute-Solo'],
+  78:['Recorder-Solo','Flute-Solo'],
+  79:['Recorder-Solo','Flute-Solo'],
+  80:['Classic-Lead'],
+  81:['Dist-Lead','Classic-Lead'],
+  82:['Brassy-Lead','Classic-Lead'],
+  83:['Brassy-Lead','Classic-Lead'],
+  84:['Dave-Lead','Classic-Lead'],
+  85:['Dave-Lead','Classic-Lead'],
+  86:['Dave-Lead','Classic-Lead'],
+  87:['Dave-Lead','Classic-Lead'],
+  88:['Warm-Pad','Lush-Pad'],
+  89:['Warm-Pad','Lush-Pad'],
+  90:['MetaChoir-Pad','Warm-Pad'],
+  91:['MetaChoir-Pad','Warm-Pad'],
+  92:['Lush-Pad','OBStrings-Pad','Warm-Pad'],
+  93:['Lush-Pad','OBStrings-Pad','Warm-Pad'],
+  94:['Lush-Pad','OBStrings-Pad','Warm-Pad'],
+  95:['Lush-Pad','OBStrings-Pad','Warm-Pad'],
+  104:['Electric-Sitar'],
+  105:['5-Banjo'],
+  106:['5-Banjo'],
+  107:['5-Banjo'],
+  108:['5-Banjo'],
+  109:['Bagpipe'],
+  110:['Violin-Solo'],
+  111:['Oboe-Solo'],
+};
+
+/** Returns the default GP8 set id for `program` / `percussion` / `drumKit` if installed and enabled, or null. */
+export function defaultGp8SetForProgram(
+  program:number,
+  percussion:boolean,
+  drumKit?:number|null,
+  status:Gp8Status=getSoundbankStatus(),
+):string|null {
+  if(!status.available)return null;
+  const availableIds=new Set(status.sets.map(s=>s.id));
+  const pick=(candidates:readonly string[])=>candidates.find(id=>availableIds.has(id))??null;
+  if(percussion) {
+    if(drumKit===8)return pick(['Drumkit-Oak','Drumkit-Master','Drumkit-Custom']);
+    if(drumKit===32)return pick(['Drumkit-Vintage','Drumkit-Star','Drumkit-Custom']);
+    if(drumKit===40)return pick(['Drumkit-Vintage','Drumkit-Custom']);
+    return pick(['Drumkit-Custom','Drumkit-Master']);
+  }
+  const direct=PITCHED_GM_DEFAULT_SETS[program];
+  if(direct)return pick(direct);
+  if(program>=96&&program<=103)return pick(['Harpy-Seq','Warm-Pad']);
+  if(program>=112&&program<=119)return pick(['Vibraphone-Tuned','Celesta-Tuned']);
+  return null;
 }
-/** Whether Automatic plays a drum track through the recorded kit, as `automatic_voice_id` in voices.rs does: every kit but
- * the sound bank's Room (8), Jazz (32) and Brush (40), which stay General MIDI. `drumKit` is the kit chosen in the rig. */
-/** The sources a track's source list offers besides Automatic. A drum track has no use for the guitar and bass voices (they have no
- * drums, so the track would play General MIDI), so it is offered General MIDI only, and a voice it already stores so that the list shows it. */
-export function sourceChoices(percussion:boolean,voiceId?:string|null):VoiceId[] {
-  const all:VoiceId[]=['gm','green-guitar','black-guitar','darkblack-bass','babyblue-bass'];
-  return percussion?all.filter(id=>id==='gm'||id===voiceId):all;
+
+/** Resolves the active GP8 set metadata for a track sound if GP8 is active and plays it, or null (GM fallback). */
+export function resolvedGp8Set(
+  voiceId:string|null|undefined,
+  program:number,
+  percussion:boolean,
+  drumKit:number|null|undefined,
+  status:Gp8Status=getSoundbankStatus(),
+):Gp8SetInfo|null {
+  if(!status.available||voiceId==='gm')return null;
+  let targetSetId:string|null=null;
+  if(voiceId) {
+    if(voiceId.startsWith('gp8:'))targetSetId=voiceId.slice(4);
+    else if(Object.hasOwn(legacyVoiceToGp8Set,voiceId))targetSetId=legacyVoiceToGp8Set[voiceId as LegacyVoiceId];
+  } else {
+    targetSetId=defaultGp8SetForProgram(program,percussion,drumKit,status);
+  }
+  if(!targetSetId)return null;
+  return status.sets.find(s=>s.id===targetSetId)??null;
 }
-export function playsRecordedKit(program:number,percussion:boolean,drumKit?:number|null):boolean {
-  return percussion&&![8,32,40].includes(drumKit??program);
+
+/** What Automatic plays a track as: `gp8:<set>` when GP8 is available and covers it, otherwise `'gm'`. */
+export function automaticVoice(
+  program:number,
+  percussion:boolean,
+  status:Gp8Status=getSoundbankStatus(),
+  drumKit?:number|null,
+):VoiceId {
+  const gp8Id=defaultGp8SetForProgram(program,percussion,drumKit,status);
+  return gp8Id?`gp8:${gp8Id}`:'gm';
+}
+
+export function voiceDisplayName(
+  voiceId:string|null|undefined,
+  program:number,
+  percussion:boolean,
+  drumKit?:number|null,
+  status:Gp8Status=getSoundbankStatus(),
+):string {
+  if(!voiceId) {
+    const set=resolvedGp8Set(null,program,percussion,drumKit,status);
+    return set?set.name:voiceNames.gm;
+  }
+  if(voiceId==='gm')return voiceNames.gm;
+  if(voiceId.startsWith('gp8:')) {
+    const id=voiceId.slice(4);
+    return status.sets.find(s=>s.id===id)?.name??id;
+  }
+  const legacySet=resolvedGp8Set(voiceId,program,percussion,drumKit,status);
+  if(legacySet)return legacySet.name;
+  return voiceNames[voiceId]??voiceId;
+}
+
+export const GP8_CATEGORY_ORDER=['guitars','basses','drums','keys','strings','winds','synths','percussion','other'] as const;
+
+export function gp8SetGroups(
+  status:Gp8Status,
+  percussion:boolean,
+):Array<{category:string;sets:Gp8SetInfo[]}> {
+  if(!status.available||status.sets.length===0)return [];
+  const filtered=status.sets.filter(s=>percussion?s.isPercussion:!s.isPercussion);
+  const byCategory=new Map<string,Gp8SetInfo[]>();
+  for(const set of filtered) {
+    const list=byCategory.get(set.category)??[];
+    list.push(set);
+    byCategory.set(set.category,list);
+  }
+  return GP8_CATEGORY_ORDER
+    .filter(cat=>byCategory.has(cat))
+    .map(cat=>({category:cat,sets:byCategory.get(cat)!}));
+}
+
+export function availablePickupsForVoice(
+  voiceId:string|null|undefined,
+  program:number,
+  percussion:boolean,
+  drumKit?:number|null,
+  status:Gp8Status=getSoundbankStatus(),
+):readonly PickupPosition[] {
+  if(percussion)return [];
+  const set=resolvedGp8Set(voiceId,program,false,drumKit,status);
+  return set&&set.pickups.length>1?set.pickups:[];
+}
+
+/** Explicit non-automatic source options (`gm`, active/stored voiceId, plus installed GP8 sets). */
+export function sourceChoices(
+  percussion:boolean,
+  voiceId?:string|null,
+  status:Gp8Status=getSoundbankStatus(),
+):VoiceId[] {
+  const result:VoiceId[]=['gm'];
+  if(status.available) {
+    for(const group of gp8SetGroups(status,percussion)) {
+      for(const set of group.sets)result.push(`gp8:${set.id}`);
+    }
+  }
+  if(voiceId&&voiceId!=='gm'&&!result.includes(voiceId)) {
+    result.push(voiceId);
+  }
+  return result;
+}
+
+export function playsRecordedKit(
+  program:number,
+  percussion:boolean,
+  drumKit?:number|null,
+  status:Gp8Status=getSoundbankStatus(),
+):boolean {
+  void program;
+  void drumKit;
+  return percussion&&status.available&&defaultGp8SetForProgram(program,true,drumKit,status)!==null;
 }

@@ -69,6 +69,7 @@ export const completeSound = (sound: TrackSound): TrackSound => {
   if (!completed.locked) delete completed.locked;
   if (completed.drumKit===undefined) delete completed.drumKit;
   if (completed.plugin===undefined) delete completed.plugin;
+  if (completed.pickup===undefined) delete completed.pickup;
   return completed;
 };
 /** Echo durations in quarter notes with their names: straight, dotted and triplet divisions. */
@@ -148,19 +149,28 @@ export function pluginSlotProblem(value:unknown):string|null {
   if(typeof slot.state!=='string'||!/^[0-9a-f]{64}$/.test(slot.state))return 'Invalid plug-in settings reference.';
   return null;
 }
+export const validGp8SetId = (id: string): boolean =>
+  id.length > 0 && id.length <= 48 && id === id.trim() && !id.includes('..') && /^[A-Za-z0-9 _.-]+$/.test(id);
+
+export const validVoiceId = (id: string): boolean =>
+  id === 'gm' ||
+  ['green-guitar', 'black-guitar', 'darkblack-bass', 'babyblue-bass'].includes(id) ||
+  (id.startsWith('gp8:') && validGp8SetId(id.slice(4)));
+
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
 export function soundProblem(sound: TrackSound): string|null {
   if (!sound||typeof sound!=='object') return 'Invalid sound.';
   // Three keys are required; the others are written only when they have something to say.
   const keys = Object.keys(sound);
-  if (!['effects','presetId','voiceId'].every(key=>keys.includes(key))||!keys.every(key=>['effects','presetId','voiceId','locked','drumKit','plugin'].includes(key))) return 'Invalid sound.';
+  if (!['effects','presetId','voiceId'].every(key=>keys.includes(key))||!keys.every(key=>['effects','presetId','voiceId','locked','drumKit','plugin','pickup'].includes(key))) return 'Invalid sound.';
   if (Object.hasOwn(sound,'locked')&&typeof (sound as {locked?:unknown}).locked!=='boolean') return 'Invalid sound.';
   // Only a kit beyond Standard is stored; the native player refuses any other number.
   if (Object.hasOwn(sound,'drumKit')&&!([8,32,40] as unknown[]).includes((sound as {drumKit?:unknown}).drumKit)) return 'Unknown drum kit.';
+  if (Object.hasOwn(sound,'pickup')&&!(['bridge','middle','neck'] as unknown[]).includes((sound as {pickup?:unknown}).pickup)) return 'Unknown pickup position.';
   if (Object.hasOwn(sound,'plugin')) { const problem=pluginSlotProblem((sound as {plugin?:unknown}).plugin); if (problem) return problem; }
   if (!sound.effects||typeof sound.effects!=='object') return 'Invalid sound.';
   if (!['gm','clean','crunch','lead','bass'].includes(sound.presetId)) return 'Invalid sound preset.';
-  if (sound.voiceId!==null && !['gm','green-guitar','black-guitar','darkblack-bass','babyblue-bass'].includes(sound.voiceId)) return 'Unknown instrument voice.';
+  if (sound.voiceId!==null && !validVoiceId(sound.voiceId)) return 'Unknown instrument voice.';
   return effectsProblem(completeSound(sound).effects,true);
 }
 /** Why a completed pedalboard cannot be played, or null. Only the track's own board may hold a second one. */

@@ -326,6 +326,57 @@ async fn app_settings_put_view_defaults(
 }
 
 #[tauri::command]
+async fn soundbanks_status() -> audio::gp8_soundbanks::Gp8Status {
+    tauri::async_runtime::spawn_blocking(audio::gp8_soundbanks::status)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn soundbanks_configure(
+    app: AppHandle,
+    enabled: bool,
+    path: Option<String>,
+) -> Result<audio::gp8_soundbanks::Gp8Status, String> {
+    let directory = personal_data_directory(&app)?;
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let trimmed_path = path.map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
+        let saved = app_settings::put_soundbanks(
+            &directory,
+            app_settings::SoundbankSettings {
+                enabled,
+                path: trimmed_path,
+            },
+        )?;
+        let status = audio::gp8_soundbanks::configure(saved.soundbanks.unwrap_or_default());
+        if let Some(audio_state) = app_handle.try_state::<runtime::NativeAudio>() {
+            let _ = audio_state.service.reload_soundbanks();
+        }
+        Ok(status)
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn soundbanks_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app.dialog().file();
+        if let Some(window) = app.get_webview_window("main") {
+            dialog = dialog.set_parent(&window);
+        }
+        let Some(selected) = dialog.blocking_pick_folder() else {
+            return Ok(None);
+        };
+        let path = selected.into_path().map_err(|e| e.to_string())?;
+        Ok(Some(path.to_string_lossy().into_owned()))
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 async fn tuning_library_read(app: AppHandle) -> Result<tuning_library::TuningLibrary, String> {
     let directory = personal_data_directory(&app)?;
     tauri::async_runtime::spawn_blocking(move || tuning_library::read_library(&directory))
@@ -1159,6 +1210,13 @@ pub fn run() {
             if let Ok(directory) = audio::nam_library::library_directory(app.handle()) {
                 audio::nam_library::install(directory);
             }
+            // Optional Guitar Pro 8 standard soundbanks resolve locally on startup using saved settings or defaults.
+            let initial_soundbanks = personal_data_directory(app.handle())
+                .ok()
+                .and_then(|dir| app_settings::read_settings(&dir).ok())
+                .and_then(|s| s.soundbanks)
+                .unwrap_or_default();
+            audio::gp8_soundbanks::configure(initial_soundbanks);
             // Printed scores left in the cache by an earlier run are plain copies of the score; none outlives a run.
             clear_print_cache(app.handle());
             let directory = session::session_directory(app.path().app_data_dir()?)?;
@@ -1363,6 +1421,9 @@ pub fn run() {
         app_settings_put_score_errors,
         app_settings_put_new_score,
         app_settings_put_view_defaults,
+        soundbanks_status,
+        soundbanks_configure,
+        soundbanks_pick_folder,
         tuning_library_read,
         tuning_library_put,
         tuning_library_remove,
@@ -1495,6 +1556,9 @@ pub fn run() {
         app_settings_put_score_errors,
         app_settings_put_new_score,
         app_settings_put_view_defaults,
+        soundbanks_status,
+        soundbanks_configure,
+        soundbanks_pick_folder,
         tuning_library_read,
         tuning_library_put,
         tuning_library_remove,

@@ -11,13 +11,12 @@ async function fixture() {
   const referenceRoot=join(sourceRoot,'reference');const packageRoot=join(sourceRoot,'unpacked');
   const audio=join(packageRoot,'usr/lib/tabplayer/audio');
   await mkdir(join(sourceRoot,'assets/audio'),{recursive:true});
-  for(const path of ['samples/fixture','licenses','soundfont'])await mkdir(join(referenceRoot,path),{recursive:true});
-  const wave=Buffer.from('authored fixture PCM bytes'),license=Buffer.from('CC0 fixture license\n'),sf=Buffer.from('fixture font bytes');
-  for(const [path,bytes] of [['samples/fixture/note.wav',wave],['licenses/fixture.txt',license],['licenses/Apache-2.0.txt','Apache fixture\n'],['soundfont/sonivox.sf2',sf],['soundfont/LICENSE','Sonivox fixture\n']])await writeFile(join(referenceRoot,path),bytes);
-  const manifest={schemaVersion:1,preparationId:'fixture',sources:[{id:'fixture',repository:'fixture/public',revision:'1'.repeat(40),license:'CC0-1.0',licensePath:'licenses/fixture.txt',licenseSha256:hash(license)}],instruments:[{id:'guitar',regions:[{sampleId:'fixture:Samples/note.wav'}]}],samples:[{id:'fixture:Samples/note.wav',path:'samples/fixture/note.wav',size:wave.length,sha256:hash(wave),sourceSha256:hash(wave)}],soundFont:{path:'soundfont/sonivox.sf2',size:sf.length,sha256:hash(sf)}};
+  for(const path of ['licenses','soundfont'])await mkdir(join(referenceRoot,path),{recursive:true});
+  const sf=Buffer.from('fixture font bytes');
+  for(const [path,bytes] of [['licenses/Apache-2.0.txt','Apache fixture\n'],['soundfont/sonivox.sf2',sf],['soundfont/LICENSE','Sonivox fixture\n']])await writeFile(join(referenceRoot,path),bytes);
+  const manifest={schemaVersion:1,preparationId:'fixture',sources:[],instruments:[],samples:[],soundFont:{path:'soundfont/sonivox.sf2',size:sf.length,sha256:hash(sf)}};
   await writeFile(join(referenceRoot,'manifest.json'),JSON.stringify(manifest));
-  await writeFile(join(sourceRoot,'assets/audio/sources.json'),JSON.stringify({sources:[{id:'fixture',repository:'fixture/public',revision:'1'.repeat(40),license:'CC0-1.0',licensePath:'LICENSE',inventoryPath:'fixture-inventory.json'}],soundFont:{sha256:hash(sf)}}));
-  await writeFile(join(sourceRoot,'assets/audio/fixture-inventory.json'),JSON.stringify([{path:'Samples/note.wav',sha256:hash(wave)},{path:'LICENSE',sha256:hash(license)}]));
+  await writeFile(join(sourceRoot,'assets/audio/sources.json'),JSON.stringify({schemaVersion:1,sources:[],soundFont:{sha256:hash(sf)}}));
   await cp(referenceRoot,audio,{recursive:true});
   const library=join(packageRoot,'usr/lib/tabplayer/library');
   await cp(new URL('../assets/library/',import.meta.url),join(sourceRoot,'assets/library'),{recursive:true});
@@ -44,8 +43,8 @@ async function fixture() {
 test('extracted_package_contains_all_pinned_recordings_and_exact_licenses',async()=> {
   const {verifyPackage}=await api();const options=await fixture();
   const report=await verifyPackage(options);
-  assert.equal(report.sampleCount,1);assert.equal(report.regionCount,1);assert.equal(report.sourceRevisions.fixture,'1'.repeat(40));
-  assert.equal(report.encodedSampleBytes,26);
+  assert.equal(report.sampleCount,0);assert.equal(report.regionCount,0);assert.deepEqual(report.sourceRevisions,{});
+  assert.equal(report.encodedSampleBytes,0);
   assert.equal(report.library.templateCount,10);assert.equal(report.library.exampleCount,3);assert.equal(report.library.fileCount,16);
   assert.equal(report.cabinetIrs.count,2);assert.match(report.cabinetIrs.manifestSha256,/^[a-f0-9]{64}$/);
 });
@@ -126,11 +125,11 @@ test('outside_library_links_remain_untraversed_and_do_not_change_the_resource_po
 
 test('package_missing_or_corrupt_resources_are_rejected_without_network',async()=> {
   const {verifyPackage}=await api();const options=await fixture();
-  await writeFile(join(options.audio,'samples/fixture/note.wav'),'damaged');
+  await writeFile(join(options.audio,'soundfont/sonivox.sf2'),'damaged');
   await assert.rejects(verifyPackage(options),/hash|size/i);
-  const missing=await fixture();await unlink(join(missing.audio,'samples/fixture/note.wav'));
+  const missing=await fixture();await unlink(join(missing.audio,'soundfont/sonivox.sf2'));
   await assert.rejects(verifyPackage(missing),/ENOENT|missing/i);
-  const other=await fixture();await writeFile(join(other.audio,'licenses/fixture.txt'),'wrong license');
+  const other=await fixture();await writeFile(join(other.audio,'soundfont/LICENSE'),'wrong license');
   await assert.rejects(verifyPackage(other),/hash|license/i);
   const absent=await fixture();await writeFile(join(absent.audio,'manifest.json'),'{}');
   await assert.rejects(verifyPackage(absent),/manifest/i);
@@ -143,7 +142,7 @@ test('package_omissions_private_scores_and_path_escape_are_rejected',async()=> {
   const extra=await fixture();await writeFile(join(extra.audio,'unlisted.wav'),'extra');
   await assert.rejects(verifyPackage(extra),/unlisted|unexpected/i);
   const escaped=await fixture();const manifest=JSON.parse(await readFile(join(escaped.referenceRoot,'manifest.json')));
-  manifest.samples[0].path='../outside.wav';
+  manifest.soundFont.path='../outside.sf2';
   for(const root of [escaped.referenceRoot,escaped.audio])await writeFile(join(root,'manifest.json'),JSON.stringify(manifest));
   await assert.rejects(verifyPackage(escaped),/path|escape/i);
 });

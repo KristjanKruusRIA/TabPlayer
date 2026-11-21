@@ -12,13 +12,31 @@ import { useState } from 'react';
 import type { EditCommand, TrackSound } from '../edit-types';
 import { effectBlocks } from '../document-settings';
 import { blockNames, soundPreset } from '../audio/sound-model';
+import { resetSoundbankStoreForTest, setSoundbankStatusForTest, type Gp8Status } from '../audio/soundbank-store';
 import { factoryCategories, factorySound, factorySounds } from '../audio/factory-sounds';
 import { forgetSessionSoundLibrary, saveSoundPreset, copyPedal, copySound } from '../audio/sound-library';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
 import { SoundRig } from './SoundRig';
 
+const gp8RigStatus: Gp8Status = {
+  enabled: true,
+  available: true,
+  configuredPath: null,
+  resolvedPath: 'C:/GP8',
+  detectedDefaultPath: 'C:/GP8',
+  version: '2.0',
+  setCount: 4,
+  error: null,
+  sets: [
+    { id: 'Strat-Guitar', name: 'Strat', instrumentSet: 'electricGuitar', category: 'guitars', pickups: ['bridge', 'middle', 'neck'], isPercussion: false },
+    { id: 'Classic-Guitar', name: 'Classic', instrumentSet: 'electricGuitar', category: 'guitars', pickups: ['bridge', 'neck'], isPercussion: false },
+    { id: 'Jazz-Bass', name: 'Jazz Bass', instrumentSet: 'electricBass', category: 'basses', pickups: ['bridge', 'neck'], isPercussion: false },
+    { id: 'Drumkit-Custom', name: 'Drums (Custom)', instrumentSet: 'drumKit', category: 'drums', pickups: [], isPercussion: true },
+  ],
+};
+
 beforeEach(()=>localStorage.clear());
-afterEach(()=>{cleanup();forgetSessionSoundLibrary();localStorage.clear();});
+afterEach(()=>{cleanup();resetSoundbankStoreForTest();forgetSessionSoundLibrary();localStorage.clear();});
 
 /** A stand-in for the native playback controller's preview and device surface. */
 function playback() {
@@ -318,8 +336,8 @@ it('copies a pedal and pastes it on the same kind of pedal, and copies and paste
 it('sets the sound source, applies presets and restores the preset, each as one edit', async()=>{
   const {last,edits}=mount(soundPreset('lead','green-guitar'));
   const sources=screen.getByRole('radiogroup',{name:'Sound source'});
-  await userEvent.click(within(sources).getByRole('radio',{name:'Darkblack Bass'}));
-  expect(last().voiceId).toBe('darkblack-bass');expect(last().presetId).toBe('lead');
+  await userEvent.click(within(sources).getByRole('radio',{name:'General MIDI'}));
+  expect(last().voiceId).toBe('gm');expect(last().presetId).toBe('lead');
   await userEvent.click(within(sources).getByRole('radio',{name:/^Automatic instrument/}));expect(last().voiceId).toBeNull();
   const presets=screen.getByRole('radiogroup',{name:'Sound preset'});
   expect(within(presets).getAllByRole('radio').map(radio=>radio.textContent)).toEqual(['Bypass','Clean','Crunch','Lead','Bass']);
@@ -381,11 +399,11 @@ it('keeps focus on source options across consecutive arrow edits while busy, and
   sources[0].focus();expect(sources[0]).toHaveFocus();
   await user.keyboard('{ArrowRight}');
   expect(sources[1]).toHaveFocus();
+  await user.keyboard('{ArrowLeft}');
+  expect(sources[0]).toHaveFocus();
   await user.keyboard('{ArrowRight}');
-  expect(sources[2]).toHaveFocus();
-  await user.keyboard('{ArrowRight}');
-  expect(sources[3]).toHaveFocus();
-  expect(edits.map(e=>e.sound.voiceId)).toEqual(['green-guitar','black-guitar','darkblack-bass']);
+  expect(sources[1]).toHaveFocus();
+  expect(edits.map(e=>e.sound.voiceId)).toEqual(['gm',null,'gm']);
   const footswitch=screen.getByRole('switch',{name:/Enable amp/});
   footswitch.focus();expect(footswitch).toHaveFocus();
   await user.keyboard(' ');
@@ -723,65 +741,70 @@ it('never sends one track\'s sound to another track when a request is still in f
 });
 
 // The instrument picker.
-it('draws every source the engine has, and Automatic, as a radio group named Sound source', ()=>{
+it('draws Automatic, General MIDI (plus active custom voice and GP8 selectors) as Sound source', ()=>{
   mount(soundPreset('lead','green-guitar'));
   const group=screen.getByRole('radiogroup',{name:'Sound source'});
   const radios=within(group).getAllByRole('radio');
-  expect(radios.map(radio=>radio.getAttribute('aria-label'))).toEqual(['Automatic instrument, plays as Black Guitar','Green Guitar','Black Guitar','Darkblack Bass','Babyblue Bass','General MIDI']);
+  expect(radios.map(radio=>radio.getAttribute('aria-label'))).toEqual(['Automatic instrument, plays as General MIDI','Green Guitar','General MIDI']);
   expect(within(group).getByRole('radio',{name:'Green Guitar'})).toBeChecked();
-  // Each is a drawing, not a form control.
   for(const radio of radios)expect(radio.querySelector('svg')).not.toBeNull();
 });
 
-it('says what Automatic plays the track as, by the track\'s program, and changes with the track', async()=>{
+it('says what Automatic plays the track as, by GP8 status and program, and updates with the track', async()=>{
+  setSoundbankStatusForTest(gp8RigStatus);
   mount(soundPreset('lead',null) as TrackSound);
   const group=screen.getByRole('radiogroup',{name:'Sound source'});
-  expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as Black Guitar'})).toBeChecked();
-  expect(group).toHaveTextContent('Auto→Black');
+  expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as Classic'})).toBeChecked();
+  expect(group).toHaveTextContent('Auto→Classic');
   const strip=screen.getByRole('radiogroup',{name:'Track'});
   await userEvent.click(within(strip).getByRole('radio',{name:'Bass'}));
-  expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as Babyblue Bass'})).toBeInTheDocument();
+  expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as Jazz Bass'})).toBeInTheDocument();
+  expect(screen.getByLabelText('Pickup')).toBeInTheDocument();
   await userEvent.click(within(strip).getByRole('radio',{name:'Drums'}));
-  // A drum track plays the recorded kit, unless the rig chose one of the sound bank's own kits.
-  expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as the recorded drum kit'})).toBeInTheDocument();
-  expect(group).toHaveTextContent('Auto→Kit');
+  expect(within(group).getByRole('radio',{name:'Recorded drum kit'})).toBeInTheDocument();
+  expect(group).toHaveTextContent('Auto→Drums (Custom)');
 });
 
-it('moves between sources with the arrow keys and chooses each as one edit', async()=>{
-  const user=userEvent.setup(),{edits,last}=mount(soundPreset('lead','green-guitar'));
+it('moves between sources with the arrow keys and chooses GP8 voice and pickup as single edits', async()=>{
+  setSoundbankStatusForTest(gp8RigStatus);
+  const user=userEvent.setup(),{edits,last}=mount(soundPreset('lead',null) as TrackSound);
   const group=screen.getByRole('radiogroup',{name:'Sound source'});
-  within(group).getByRole('radio',{name:'Green Guitar'}).focus();
+  within(group).getByRole('radio',{name:/Automatic instrument/}).focus();
   await user.keyboard('{ArrowRight}');
-  expect(within(group).getByRole('radio',{name:'Black Guitar'})).toHaveFocus();expect(last().voiceId).toBe('black-guitar');
-  await user.keyboard('{End}');expect(last().voiceId).toBe('gm');expect(edits).toHaveLength(2);
+  expect(within(group).getByRole('radio',{name:'General MIDI'})).toHaveFocus();expect(last().voiceId).toBe('gm');
+  await user.selectOptions(screen.getByLabelText('GP8 voice'),'gp8:Strat-Guitar');
+  expect(last().voiceId).toBe('gp8:Strat-Guitar');
+  await user.selectOptions(screen.getByLabelText('Pickup'),'neck');
+  expect(last().pickup).toBe('neck');
+  expect(edits).toHaveLength(3);
   expect(within(group).getAllByRole('radio').filter(radio=>radio.tabIndex===0)).toHaveLength(1);
 });
 
 it('previews a source with Hear without recording an edit, and keeps it or cancels', async()=>{
   const {edits,player,last}=mount(soundPreset('lead','green-guitar'));
-  const babyblueHear=screen.getByRole('button',{name:'Hear Babyblue Bass'});
-  await userEvent.click(babyblueHear);
-  expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',{...soundPreset('lead','green-guitar'),voiceId:'babyblue-bass'});
+  const gmHear=screen.getByRole('button',{name:'Hear General MIDI'});
+  await userEvent.click(gmHear);
+  expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',{...soundPreset('lead'),voiceId:'gm'});
   expect(edits).toHaveLength(0);
-  expect(await screen.findByRole('group',{name:'Sound preview'})).toHaveTextContent('Previewing Babyblue Bass');
-  expect(babyblueHear).toHaveAttribute('aria-pressed','true');
+  expect(await screen.findByRole('group',{name:'Sound preview'})).toHaveTextContent('Previewing General MIDI');
+  expect(gmHear).toHaveAttribute('aria-pressed','true');
   await userEvent.click(screen.getByRole('button',{name:'Keep previewed sound'}));
-  expect(edits).toHaveLength(1);expect(last().voiceId).toBe('babyblue-bass');
+  expect(edits).toHaveLength(1);expect(last().voiceId).toBe('gm');
 });
 
 it('gives each source option its own audition button in the same row without hover layout shifts', async()=>{
   const user=userEvent.setup();
   const {player}=mountHeld({guitar:soundPreset('lead','green-guitar'),bass:soundPreset('bass','babyblue-bass')});
   const greenHear=screen.getByRole('button',{name:'Hear Green Guitar'});
-  const blackHear=screen.getByRole('button',{name:'Hear Black Guitar'});
+  const gmHear=screen.getByRole('button',{name:'Hear General MIDI'});
   expect(greenHear).toBeVisible();
-  expect(blackHear).toBeVisible();
+  expect(gmHear).toBeVisible();
   greenHear.focus();
   expect(greenHear).toHaveFocus();
   await user.keyboard(' ');
   expect(player.previewSound).toHaveBeenLastCalledWith('guitar',expect.objectContaining({voiceId:'green-guitar'}));
   const strip=screen.getByRole('radiogroup',{name:'Track'});
-  await user.click(within(strip).getByRole('radio',{name:'Bass'}));
+  await userEvent.click(within(strip).getByRole('radio',{name:'Bass'}));
   const bassHear=screen.getByRole('button',{name:'Hear Babyblue Bass'});
   expect(bassHear).toBeVisible();
   await user.click(bassHear);
@@ -876,17 +899,17 @@ it('records one edit when Keep previewed sound is pressed twice, and none while 
 
 it('returns focus to the Hear button that started a preview after Keep, Cancel and Escape', async()=>{
   const user=userEvent.setup(),{edits}=mount(soundPreset('clean','green-guitar'));
-  const hearBlack=screen.getByRole('button',{name:'Hear Black Guitar'});
-  await user.click(hearBlack);
-  await user.click(await screen.findByRole('button',{name:'Keep previewed sound'}));
-  await waitForNoPreview();expect(edits).toHaveLength(1);expect(hearBlack).toHaveFocus();
   const hearGreen=screen.getByRole('button',{name:'Hear Green Guitar'});
+  const hearGm=screen.getByRole('button',{name:'Hear General MIDI'});
   await user.click(hearGreen);
   await user.click(await screen.findByRole('button',{name:'Cancel preview'}));
   await waitForNoPreview();expect(hearGreen).toHaveFocus();
-  await user.click(hearBlack);await screen.findByRole('group',{name:'Sound preview'});
+  await user.click(hearGm);await screen.findByRole('group',{name:'Sound preview'});
   await user.keyboard('{Escape}');
-  await waitForNoPreview();expect(hearBlack).toHaveFocus();expect(edits).toHaveLength(1);
+  await waitForNoPreview();expect(hearGm).toHaveFocus();
+  await user.click(hearGm);
+  await user.click(await screen.findByRole('button',{name:'Keep previewed sound'}));
+  await waitForNoPreview();expect(edits).toHaveLength(1);expect(hearGm).toHaveFocus();
 });
 
 it('falls back to the checked source when the Hear button that started a preview is gone', async()=>{
@@ -956,7 +979,7 @@ it('lays the preview strip out whether or not a preview runs, so starting one mo
   const strip=document.querySelector<HTMLElement>('.rig-preview')!;
   expect(strip).not.toBeNull();expect(strip.style.visibility).toBe('hidden');expect(strip.hasAttribute('inert')).toBe(true);
   expect(screen.queryByRole('button',{name:'Keep previewed sound'})).toBeNull();
-  await user.click(screen.getByRole('button',{name:'Hear Black Guitar'}));
+  await user.click(screen.getByRole('button',{name:'Hear General MIDI'}));
   await screen.findByRole('group',{name:'Sound preview'});
   expect(document.querySelector('.rig-preview')).toBe(strip);expect(strip.style.visibility).toBe('visible');expect(strip.hasAttribute('inert')).toBe(false);
 });
@@ -964,9 +987,9 @@ it('lays the preview strip out whether or not a preview runs, so starting one mo
 it('puts the Hear buttons beside the source radios, not inside them, and the sources and presets in one wrapping row', ()=>{
   mount();
   const radios=screen.getByRole('radiogroup',{name:'Sound source'});
-  expect(within(radios).getAllByRole('radio')).toHaveLength(6);expect(within(radios).queryAllByRole('button')).toHaveLength(0);
+  expect(within(radios).getAllByRole('radio')).toHaveLength(3);expect(within(radios).queryAllByRole('button')).toHaveLength(0);
   const hears=screen.getByRole('group',{name:'Hear a source'});
-  expect(within(hears).getAllByRole('button')).toHaveLength(6);expect(hears.contains(radios)).toBe(false);
+  expect(within(hears).getAllByRole('button')).toHaveLength(3);expect(hears.contains(radios)).toBe(false);
   // Sources and presets are both in the header row, which wraps; neither is positioned out of the flow.
   const head=document.querySelector<HTMLElement>('.rig-head')!,presets=screen.getByRole('radiogroup',{name:'Sound preset'});
   const picker=radios.closest<HTMLElement>('.rig-source-picker')!;

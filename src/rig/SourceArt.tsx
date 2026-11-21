@@ -64,11 +64,31 @@ function Keys({id}:{id:string}) {
   </>;
 }
 /** One source as a drawing. `viewBox` is 120 by 56 for every source, so they line up in a row. */
-export function SourceArt({source,className}:{source:VoiceId;className?:string}) {
+export function SourceArt({source,category,percussion=false,className}:{source:VoiceId;category?:string;percussion?:boolean;className?:string}) {
   const id=uid(useId());
-  return <svg className={className} viewBox="0 0 120 56" aria-hidden="true" focusable="false">
-    {source==='gm'?<Keys id={id}/>:<Plucked id={id} finish={finishes[source]} bass={source==='darkblack-bass'||source==='babyblue-bass'}/>}
-  </svg>;
+  if(source==='green-guitar'||source==='black-guitar'||source==='darkblack-bass'||source==='babyblue-bass') {
+    return <svg className={className} viewBox="0 0 120 56" aria-hidden="true" focusable="false">
+      <Plucked id={id} finish={finishes[source]} bass={source==='darkblack-bass'||source==='babyblue-bass'}/>
+    </svg>;
+  }
+  if(source==='gm') {
+    return <svg className={className} viewBox="0 0 120 56" aria-hidden="true" focusable="false"><Keys id={id}/></svg>;
+  }
+  if(category==='drums'||category==='percussion'||percussion) {
+    return <svg className={className} viewBox="0 0 120 56" aria-hidden="true" focusable="false">
+      <defs><radialGradient id={`${id}h`} cx=".4" cy=".3" r=".8"><stop offset="0" stopColor="#fffdf3"/><stop offset="1" stopColor="#9a9d98"/></radialGradient><linearGradient id={`${id}sh`} x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#4e090d"/><stop offset=".45" stopColor="#e34240"/><stop offset="1" stopColor="#3d090d"/></linearGradient><radialGradient id={`${id}s`}><stop offset="0" stopColor="#000" stopOpacity=".55"/><stop offset="1" stopColor="#000" stopOpacity="0"/></radialGradient></defs>
+      <ellipse cx="60" cy="52" rx="42" ry="4" fill={`url(#${id}s)`}/>
+      <path d="M22 28V44C22 50 98 50 98 44V28Z" fill={`url(#${id}sh)`} stroke="#222" strokeWidth=".8"/><ellipse cx="60" cy="28" rx="38" ry="12" fill={`url(#${id}h)`} stroke="#8a9399" strokeWidth="2"/>
+      <path d="M30 14L52 26M90 14L68 26" stroke="#e8e4d4" strokeWidth="2" strokeLinecap="round"/>
+    </svg>;
+  }
+  if(category==='guitars') {
+    return <svg className={className} viewBox="0 0 120 56" aria-hidden="true" focusable="false"><Plucked id={id} finish={finishes['green-guitar']} bass={false}/></svg>;
+  }
+  if(category==='basses') {
+    return <svg className={className} viewBox="0 0 120 56" aria-hidden="true" focusable="false"><Plucked id={id} finish={finishes['darkblack-bass']} bass={true}/></svg>;
+  }
+  return <svg className={className} viewBox="0 0 120 56" aria-hidden="true" focusable="false"><Keys id={id}/></svg>;
 }
 
 /** A track as a small drawing of what plays it: a guitar, a bass, drums or keys, by the track's General MIDI program. */

@@ -752,7 +752,7 @@ it('selects rendered notes and enters frets on empty strings to form chords',asy
   paletteCommand('make rest');await waitFor(()=>expect(currentBeat(c,1).isRest).toBe(true));
 });
 it('persists selected track sound and mixer without replacing the score identity',async()=>{
-  const c=await setup(),score=c.getState().score;change('Sound source','green-guitar');await waitFor(()=>expect(c.getState().settings.sounds['base/0'].voiceId).toBe('green-guitar'));expect(c.getState().score).toBe(score);
+  const c=await setup(),score=c.getState().score;change('Sound source','gm');await waitFor(()=>expect(c.getState().settings.sounds['base/0'].voiceId).toBe('gm'));expect(c.getState().score).toBe(score);
   fireEvent.click(exposeFunctionalControl(screen.getByLabelText('Mute')));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));expect(c.getState().score).toBe(score);
   expect(integration.beforeScoreChange).not.toHaveBeenCalled();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score,settings:c.getState().settings}),0,0);
 });
@@ -786,7 +786,7 @@ it('shows the Sound rig over the whole workspace while the transport stays, and 
 });
 it('shows the Mixer view as the third View option while the transport stays, and edits mix through the same undoable history',async()=>{
   const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28]}]});
-  change('Sound source','green-guitar');await waitFor(()=>expect(c.getState().settings.sounds['base/0'].voiceId).toBe('green-guitar'));
+  change('Sound source','gm');await waitFor(()=>expect(c.getState().settings.sounds['base/0'].voiceId).toBe('gm'));
   const score=c.getState().score,before=c.getState().snapshot.project.edits.length;
   const view=screen.getByRole('radiogroup',{name:'View'});
   expect(within(view).getAllByRole('radio').map(r=>r.textContent)).toEqual(['Score','Sound','Mixer']);
@@ -796,7 +796,7 @@ it('shows the Mixer view as the third View option while the transport stays, and
   const mixer=screen.getByRole('region',{name:'Mixer'});
   expect(within(mixer).getByRole('region',{name:'Focus'})).toBeInTheDocument();
   const strip1=within(mixer).getByRole('region',{name:'Channel 1: Guitar'});
-  expect(within(strip1).getByText('Green Guitar')).toBeInTheDocument();
+  expect(within(strip1).getByText('General MIDI')).toBeInTheDocument();
   expect(within(strip1).getByText('Bypass')).toBeInTheDocument();
   const volume=within(strip1).getByRole('slider',{name:'Volume Guitar'});
   expect(volume).toHaveAttribute('aria-orientation','vertical');

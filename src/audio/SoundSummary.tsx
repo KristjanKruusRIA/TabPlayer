@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ChannelMix, EditCommand, EffectBlock, TrackSound } from '../edit-types';
+import type { ChannelMix, EditCommand, EffectBlock, PickupPosition, TrackSound } from '../edit-types';
 import type { AssetCandidate } from '../project';
 import { useI18n } from '../i18n';
 import { Dialog } from '../ui/Dialog';
@@ -10,12 +10,14 @@ import { busyGuard, busySelect } from '../ui/useBusyGuard';
 import { AmpGlyph } from '../shell/glyphs';
 import { SoundPanel } from './SoundPanel';
 import { PluginPanel } from './PluginPanel';
+import { PickupOptions, SoundSourceOptions } from './SoundSourceOptions';
+import { useSoundbankStatus } from './soundbank-store';
 import { useSoundEditing } from './useSoundEditing';
-import { playsRecordedKit, sourceChoices, presetIds, soundPreset, localizedBlockName, localizedPresetName, voiceNames } from './sound-model';
+import { availablePickupsForVoice, presetIds, soundPreset, localizedBlockName, localizedPresetName } from './sound-model';
 import type { NativePlaybackController } from './NativePlaybackController';
 import { statusLabelKey, type PluginStatus } from './plugin-host';
 
-type Props = { trackId: string; percussion?: boolean; sound?: TrackSound; onEdit: (edit: EditCommand, asset?: AssetCandidate) => void | Promise<void>; playback?: NativePlaybackController | null; busy?: boolean; shown?: boolean; documentId?: string; status?: PluginStatus; onAllowConsent?: () => void | Promise<unknown>; onRetrySlot?: () => void | Promise<unknown>; mix?: ChannelMix; usedDrumSounds?: readonly number[];
+type Props = { trackId: string; program?: number; percussion?: boolean; sound?: TrackSound; onEdit: (edit: EditCommand, asset?: AssetCandidate) => void | Promise<void>; playback?: NativePlaybackController | null; busy?: boolean; shown?: boolean; documentId?: string; status?: PluginStatus; onAllowConsent?: () => void | Promise<unknown>; onRetrySlot?: () => void | Promise<unknown>; mix?: ChannelMix; usedDrumSounds?: readonly number[];
   /** Opens the Plug-in dialog, as the Sound menu's Plug-in… does; `onRequestHandled` tells the app it has been taken. */
   request?: 'plugin' | null; onRequestHandled?: () => void };
 
@@ -27,9 +29,11 @@ type Props = { trackId: string; percussion?: boolean; sound?: TrackSound; onEdit
  */
 export function SoundSummary(props: Props) {
   const { lang, t } = useI18n();
-  const { trackId, sound, onEdit, playback, busy = false, shown = true, percussion = false, status } = props;
+  const { trackId, program = 0, sound, onEdit, playback, busy = false, shown = true, percussion = false, status } = props;
+  const soundbankStatus = useSoundbankStatus();
   const editing = useSoundEditing({ trackId, sound, onEdit, playback, busy, shown });
-  const { current, order, first, save } = editing;
+  const { current, order, first, save, setVoice, setPickup } = editing;
+  const pickups = availablePickupsForVoice(current.voiceId, program, percussion, current.drumKit, soundbankStatus);
   const [open, setOpen] = useState<{ kind: 'sound'; block?: EffectBlock } | { kind: 'plugin' } | null>(null);
   const { request, onRequestHandled } = props;
   useEffect(() => { if (request === 'plugin') { setOpen({ kind: 'plugin' }); onRequestHandled?.(); } }, [request]);
@@ -38,7 +42,8 @@ export function SoundSummary(props: Props) {
   const active = order.filter(block => first.effects[block].enabled);
   return <div className="sound-summary">
     <BusyFieldset busy={busy} className="sound-choices">
-      <label>{t('sound.sound_source')}<CommitSelect value={current.voiceId ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : save({ ...current, voiceId: chosen || null }))}>{/* A drum track's automatic choice is the recorded kit (unless its kit is Room, Jazz or Brush), so the option says so. */}<option value="">{t(playsRecordedKit(0, percussion, current.drumKit) ? 'sound.recorded_drum_kit' : 'sound.automatic_instrument')}</option>{sourceChoices(percussion, current.voiceId).map(id => <option key={id} value={id}>{percussion && id === 'gm' ? t('sound.general_midi_drums') : voiceNames[id]}</option>)}</CommitSelect></label>
+      <label>{t('sound.sound_source')}<CommitSelect value={current.voiceId ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : setVoice(chosen || null))}><SoundSourceOptions percussion={percussion} program={program} drumKit={current.drumKit} voiceId={current.voiceId} status={soundbankStatus}/></CommitSelect></label>
+      {pickups.length > 1 && <label>{t('sound.pickup')}<CommitSelect value={current.pickup ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : setPickup((chosen || undefined) as PickupPosition | undefined))}><PickupOptions pickups={pickups}/></CommitSelect></label>}
       <label>{t('sound.sound_preset')}<CommitSelect value={current.presetId} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : save(soundPreset(chosen as TrackSound['presetId'], current.voiceId)))}>{presetIds.map(id => <option value={id} key={id}>{localizedPresetName(id, lang)}</option>)}</CommitSelect></label>
     </BusyFieldset>
     <div className="sound-plugin-row">

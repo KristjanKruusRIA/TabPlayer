@@ -1,16 +1,51 @@
-import {expect,it} from 'vitest';
-import {automaticVoice,playsRecordedKit} from './sound-model';
+import { expect, it } from 'vitest';
+import { automaticVoice, playsRecordedKit } from './sound-model';
+import type { Gp8Status } from './soundbank-store';
 
-/** The same table as `automatic_voice_id` in src-tauri/src/audio/voices.rs; if the native rule changes, change both. */
-it('picks the source Automatic plays by the General MIDI program, as the native player does',()=>{
-  const expected:[number,string][]=[[0,'gm'],[23,'gm'],[24,'green-guitar'],[25,'green-guitar'],[26,'black-guitar'],[29,'black-guitar'],[31,'black-guitar'],[32,'darkblack-bass'],[33,'babyblue-bass'],[34,'darkblack-bass'],[39,'darkblack-bass'],[40,'gm'],[127,'gm']];
-  for(const [program,voice] of expected)expect(automaticVoice(program,false)).toBe(voice);
-  for(const program of [0,29,33])expect(automaticVoice(program,true)).toBe('gm');
+const mockGp8: Gp8Status = {
+  enabled: true,
+  available: true,
+  configuredPath: null,
+  resolvedPath: 'C:/ProgramData/Arobas Music/Soundbanks/com.arobas-music.soundbank.standard',
+  detectedDefaultPath: 'C:/ProgramData/Arobas Music/Soundbanks/com.arobas-music.soundbank.standard',
+  version: '2.0.0-9',
+  setCount: 6,
+  error: null,
+  sets: [
+    { id: 'German-APiano', name: 'German Piano', instrumentSet: 'acousticPiano', category: 'keys', pickups: [], isPercussion: false },
+    { id: 'Concerto-Nylon', name: 'Nylon Concerto', instrumentSet: 'nylonGuitar', category: 'guitars', pickups: [], isPercussion: false },
+    { id: 'Strat-Guitar', name: 'Strat', instrumentSet: 'electricGuitar', category: 'guitars', pickups: ['bridge', 'middle', 'neck'], isPercussion: false },
+    { id: 'Metal-Guitar', name: 'Metal', instrumentSet: 'electricGuitar', category: 'guitars', pickups: ['bridge', 'neck'], isPercussion: false },
+    { id: 'Jazz-Bass', name: 'Jazz Bass', instrumentSet: 'electricBass', category: 'basses', pickups: ['bridge', 'neck'], isPercussion: false },
+    { id: 'Drumkit-Custom', name: 'Drums (Custom)', instrumentSet: 'drumKit', category: 'drums', pickups: [], isPercussion: true },
+    { id: 'Drumkit-Vintage', name: 'Drums (Vintage)', instrumentSet: 'drumKit', category: 'drums', pickups: [], isPercussion: true },
+  ],
+};
+
+it('falls back to General MIDI for Automatic when GP8 soundbanks are not available', () => {
+  for (const program of [0, 24, 27, 30, 33, 40, 127]) {
+    expect(automaticVoice(program, false)).toBe('gm');
+    expect(automaticVoice(program, true)).toBe('gm');
+  }
+  expect(playsRecordedKit(0, true)).toBe(false);
+  expect(playsRecordedKit(0, false)).toBe(false);
 });
-it('plays drum tracks through the recorded kit except on the Room, Jazz and Brush kits',()=>{
-  expect([0,1,16,24,25,48].map(program=>playsRecordedKit(program,true))).toEqual([true,true,true,true,true,true]);
-  expect([8,32,40].map(program=>playsRecordedKit(program,true))).toEqual([false,false,false]);
-  expect(playsRecordedKit(0,true,32)).toBe(false);
-  expect(playsRecordedKit(8,true,null)).toBe(false);
-  expect(playsRecordedKit(0,false)).toBe(false);
+
+it('picks GP8 sets for Automatic by General MIDI program and drum kit when GP8 is available', () => {
+  const expected: [number, string][] = [
+    [0, 'gp8:German-APiano'],
+    [24, 'gp8:Concerto-Nylon'],
+    [27, 'gp8:Strat-Guitar'],
+    [30, 'gp8:Metal-Guitar'],
+    [33, 'gp8:Jazz-Bass'],
+    [125, 'gm'],
+  ];
+  for (const [program, voice] of expected) {
+    expect(automaticVoice(program, false, mockGp8)).toBe(voice);
+  }
+  expect(automaticVoice(0, true, mockGp8)).toBe('gp8:Drumkit-Custom');
+  expect(automaticVoice(0, true, mockGp8, 32)).toBe('gp8:Drumkit-Vintage');
+  expect(playsRecordedKit(0, true, null, mockGp8)).toBe(true);
+  expect(playsRecordedKit(0, true, 32, mockGp8)).toBe(true);
+  expect(playsRecordedKit(0, false, null, mockGp8)).toBe(false);
 });

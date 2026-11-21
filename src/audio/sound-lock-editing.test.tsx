@@ -27,8 +27,8 @@ it('keeps a track locked through a preset, Restore preset and a changed source',
   expect(lastSound(onEdit)).toEqual(locked(soundPreset('crunch', 'green-guitar')));
   fireEvent.click(screen.getByRole('button', { name: 'Restore preset' }));
   expect(lastSound(onEdit)).toEqual(locked(soundPreset('lead', 'green-guitar')));
-  fireEvent.change(screen.getByLabelText('Sound source'), { target: { value: 'black-guitar' } });
-  expect(lastSound(onEdit)).toEqual(locked(soundPreset('lead', 'black-guitar')));
+  fireEvent.change(screen.getByLabelText('Sound source'), { target: { value: 'gm' } });
+  expect(lastSound(onEdit)).toEqual(locked(soundPreset('lead', 'gm')));
 });
 
 it('keeps a track locked through a factory sound', () => {

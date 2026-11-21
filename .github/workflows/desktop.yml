@@ -109,8 +109,6 @@ jobs:
       - name: Native core, rendering, persistence and export tests
         run: |
           cargo test --locked --workspace --manifest-path src-tauri/Cargo.toml
-          cargo test --locked --manifest-path src-tauri/Cargo.toml --test audio_resources selected_real_100bar_fourtrack_resource_budget -- --ignored --nocapture
-          node scripts/cargo-test-ran.mjs audio_recorded_kit recorded_kit_kick_pairs recorded_kit_loads_every_sound_by_request recorded_kit_meets_its_produced_targets
           cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
       - name: Native plug-in host integration tests
         if: runner.os == 'Windows'

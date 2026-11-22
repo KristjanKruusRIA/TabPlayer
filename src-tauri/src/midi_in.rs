@@ -346,6 +346,7 @@ type TestSlot = Arc<Mutex<Option<RawSink>>>;
 /// is an error, never an empty list, and is tried again next time. A listing already in progress is waited for for up to
 /// `wait`, polling, and then reported; it is never waited for without end, so a listing the driver never finishes cannot
 /// queue up every later Refresh behind it.
+#[cfg(test)]
 fn list_inputs(
     slot: &Mutex<Option<midir::MidiInput>>,
     create: &dyn Fn() -> Result<midir::MidiInput, String>,

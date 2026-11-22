@@ -101,6 +101,7 @@ fn issue(message: String) -> RecoveryIssue {
 }
 
 impl SessionRuntime {
+    #[cfg(test)]
     pub(crate) fn open(
         directory: PathBuf,
         publish: Arc<dyn Fn(RecoveryStatus) + Send + Sync>,

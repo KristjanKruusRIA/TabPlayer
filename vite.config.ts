@@ -12,7 +12,24 @@ const MAX_WORKERS = 6;
 export default defineConfig({
   clearScreen: false,
   optimizeDeps: { exclude: ['@coderline/alphatab'] },
-  build: { rollupOptions: { external: ['@coderline/alphatab'] } },
+  build: {
+    // Local Tauri desktop bundle (served from embedded assets, not over a network); leaf vendor and locale
+    // catalogs are split into separate chunks while the core editor/UI shell stays in one main chunk.
+    chunkSizeWarningLimit: 2000,
+    rolldownOptions: {
+      external: ['@coderline/alphatab'],
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'vendor', test: /[\\/]node_modules[\\/]/, includeDependenciesRecursively: false },
+            { name: 'i18n-en', test: /[\\/]src[\\/]i18n[\\/](?:help-)?en\.ts$/, includeDependenciesRecursively: false },
+            { name: 'i18n-et', test: /[\\/]src[\\/]i18n[\\/](?:help-)?et\.ts$/, includeDependenciesRecursively: false },
+            { name: 'i18n-de', test: /[\\/]src[\\/]i18n[\\/](?:help-)?de\.ts$/, includeDependenciesRecursively: false },
+          ],
+        },
+      },
+    },
+  },
   test: {
     include: ['src/**/*.test.{ts,tsx}'], setupFiles: ['tests/xml-dom.mjs'],
     maxWorkers: Math.max(1, Math.min(MAX_WORKERS, availableParallelism() - 1)),

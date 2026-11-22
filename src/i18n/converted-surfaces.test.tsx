@@ -9,6 +9,7 @@ import { OpenPasswordDialog, ProtectionDialog, UnlockEditingDialog } from '../pr
 import { ViewDefaultsPanel } from '../workspace/ViewDefaultsPanel';
 import { standardViewDefaults } from '../workspace/view-defaults';
 import { MidiImportDialog } from '../workspace/MidiImportDialog';
+import { DiImportDialog } from '../workspace/DiImportDialog';
 import { AsciiTabImportDialog } from '../workspace/AsciiTabImportDialog';
 import { DocumentTabs } from '../workspace/DocumentTabs';
 import { BarWidthsPanel } from '../engraving/BarWidthsPanel';
@@ -45,8 +46,12 @@ const allowed: Record<'all' | SupportedLanguage, ReadonlySet<string>> = {
     'Bravura', 'Petaluma', 'Leland', 'Noto Sans', 'Noto Serif', 'Noto Sans Mono',          // font family names
     'Guitar Pro 6 (.gpx)', 'MusicXML (.xml .musicxml .mxl)', 'Simile']),   // file format names and a musical term, the same in every language
   en: new Set(),
-  et: new Set(['ASCII tab', 'Filter', 'Standard']),                     // the Estonian catalog keeps this format name as it is
-  de: new Set(['Interpretation', 'Normal', 'Zoom (%)', 'Filter', 'Cents', 'Solo', 'Standard', 'Horizontal', 'Notation']),      // the German words are spelled the same
+  et: new Set(['ASCII tab', 'Filter', 'Standard',
+    // international guitar/bass tuning preset names kept verbatim in the Estonian catalog
+    'Standard E', 'D standard', 'Drop D', 'Drop C#', 'Drop C', 'DADGAD', 'Standard B', 'Drop A', 'A standard', 'Drop G', 'Standard F#', 'Drop E', 'E standard', 'Standard C#', 'Drop B']),
+  de: new Set(['Interpretation', 'Normal', 'Zoom (%)', 'Filter', 'Cents', 'Solo', 'Standard', 'Horizontal', 'Notation',
+    // international guitar/bass tuning preset names kept verbatim in the German catalog
+    'Standard E', 'Drop D', 'Drop C#', 'Drop C', 'DADGAD', 'Drop A', 'Drop G', 'Drop E', 'Standard F#', 'Standard C#']),
 };
 /** Strings with no letters (numbers, symbols, units alone) cannot be English or Estonian. */
 const hasWords = (text: string) => /\p{L}{2,}/u.test(text.replace(/\b(?:BPM|MIDI|dB|Hz|ms|WAV|%)\b/g, ''));
@@ -88,6 +93,7 @@ const surfaces: Array<{ title: string; mount: () => ReturnType<typeof render> }>
   { title: 'ProtectionDialog', mount: () => render(<ProtectionDialog protection={protection} dirty={false} onRequest={async () => {}} onClose={noop} />) },
   { title: 'ViewDefaultsPanel', mount: () => render(<ViewDefaultsPanel current={{ zoom: 150, trackView: { kind: 'all' }, scoreDisplay: { layout: 'verticalPage', zoomMode: 'fitWidth' } }} load={() => standardViewDefaults} onSave={() => true} />) },
   { title: 'MidiImportDialog', mount: () => render(<MidiImportDialog busy={false} onImport={async () => true} onClose={noop} />) },
+  { title: 'DiImportDialog', mount: () => render(<DiImportDialog busy={false} onImport={async () => true} onClose={noop} />) },
   { title: 'AsciiTabImportDialog', mount: () => render(<AsciiTabImportDialog busy={false} onImport={async () => true} onClose={noop} />) },
   { title: 'DocumentTabs', mount: () => render(<DocumentTabs tabs={[tab('a', 'Untitled', true), tab('b', 'Untitled', false)]} activeId="a" disabled={false} onActivate={noop} onClose={noop} />) },
   { title: 'BarWidthsPanel', mount: () => render(<BarWidthsPanel value={withBarScale(defaultEngraving(), 1, 1.5)} design={false} onDesign={noop} busy={false} honoured onEdit={noop} />) },

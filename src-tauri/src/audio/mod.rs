@@ -26,5 +26,6 @@ pub mod resources;
 pub mod silent_output;
 pub mod tonality;
 pub mod tone;
+pub mod transcribe;
 pub mod voices;
 pub mod waveform;

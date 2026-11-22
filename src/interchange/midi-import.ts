@@ -4,11 +4,29 @@ import { resolveInputDrumMap } from '../audio/drum-map';
 import type { MessageKey } from '../i18n';
 import { midiPrograms } from '../midi-programs';
 import { stripCdataEnd,type MidiSong } from './midi-smf';
+import {
+  MEASURE_LIMIT,
+  SPAN,
+  WHOLE,
+  barIndex,
+  buildTargetBars as buildTargetRhythmBars,
+  createRhythmGrid,
+  placeChords,
+  safeScoreFileName,
+  snapHitsToGrid,
+  type RhythmBar,
+  type RhythmQuantization,
+  type RhythmStats,
+  type RhythmTupletMode,
+  type TargetBar,
+  type TimedHit,
+  writeQuantizedStaffBars,
+} from './quantize-bars';
 
 /** Smallest note value a note may start or stop on, as the denominator of a whole note. */
-export type MidiQuantization=4|8|16|32|64;
-export type MidiTupletMode='none'|'triplets'|'triplets-quintuplets';
-export interface MidiTargetBar { numerator:number;denominator:number }
+export type MidiQuantization = RhythmQuantization;
+export type MidiTupletMode = RhythmTupletMode;
+export type MidiTargetBar = TargetBar;
 export interface MidiPartInfo {
   index:number;name:string;channel:number;program:number;defaultPercussion:boolean;
   noteCount:number;keys:readonly {key:number;count:number}[];
@@ -51,24 +69,18 @@ export interface MidiImportSummary {
 }
 export interface MidiImport {score:model.Score;summary:MidiImportSummary}
 
-const MEASURE_LIMIT=3000,TRACK_LIMIT=32,NAME_BYTES=190;
-/** Units per whole note: divisible by every note value to a 64th and by 3 and 5, so tuplets stay whole numbers. */
-const WHOLE=960,SPAN=WHOLE/4;
+const TRACK_LIMIT=32;
 const settings=new Settings();
 const fail=(message:string):never=>{throw new Error(message);};
 
 /** Open strings from the lowest, as MIDI keys. */
 const guitarStrings=[40,45,50,55,59,64],bassStrings=[28,33,38,43];
-const targetDenominators=new Set([1,2,4,8,16,32,64]);
 
-interface Bar {start:number;length:number;numerator:number;denominator:number}
-interface Lattice {step:number;n:number;m:number}
-interface Hit {key:number;start:number;end:number}
+type Bar = RhythmBar;
+type Hit = TimedHit;
+type Stats = RhythmStats;
 interface Chord {start:number;end:number;keys:number[];voice:number}
 interface Source {partIndex:number;displayName:string;rawPartName:string;multiChannel:boolean;channel:number;program:number;percussion:boolean;notes:{key:number;start:number;end:number}[];laterPrograms:number}
-interface Stats {shortened:number;merged:number}
-
-const tuplet=(step:number,n:number,m:number):Lattice=>({step,n,m});
 
 function buildBars(song:MidiSong,notes:MidiImportNote[]):Bar[] {
   const wholeTicks=song.division*4,bars:Bar[]=[];
@@ -88,79 +100,6 @@ function buildBars(song:MidiSong,notes:MidiImportNote[]):Bar[] {
   }while(tick<song.endTick);
   if(deferred)notes.push({code:'deferred_meters',count:deferred});
   return bars;
-}
-
-const barIndex=(bars:Bar[],unit:number)=>{
-  let low=0,high=bars.length-1;
-  while(low<high){const middle=(low+high+1)>>1;if(bars[middle].start<=unit)low=middle;else high=middle-1;}
-  return low;
-};
-
-interface Grid {bars:Bar[];straight:Lattice;lattices:Map<number,Lattice>}
-
-/** Chooses, for each quarter note of a track, whether its onsets fit the straight grid or a tuplet grid better. */
-function chooseLattices(grid:Grid,hits:Hit[],options:MidiImportOptions) {
-  const step=WHOLE/options.quantization,candidates=[grid.straight];
-  if(options.tuplets!=='none'&&options.quantization>=8)candidates.push(tuplet(step*2/3,3,2));
-  if(options.tuplets==='triplets-quintuplets'&&options.quantization>=16)candidates.push(tuplet(step*4/5,5,4));
-  if(candidates.length===1)return;
-  const total=grid.bars.at(-1)!.start+grid.bars.at(-1)!.length;
-  const votes=new Map<number,number[]>();
-  const vote=(unit:number)=>{
-    if(unit<0||unit>=total)return;
-    const bar=grid.bars[barIndex(grid.bars,unit)],span=Math.floor((unit-bar.start)/SPAN),at=bar.start+span*SPAN;
-    if((span+1)*SPAN>bar.length)return;
-    const list=votes.get(at);if(list)list.push(unit-at);else votes.set(at,[unit-at]);
-  };
-  for(const hit of hits){vote(hit.start);vote(hit.end);}
-  for(const [at,offsets] of votes){
-    const cost=(lattice:Lattice)=>offsets.reduce((sum,offset)=>sum+Math.abs(offset-Math.round(offset/lattice.step)*lattice.step),0)
-      +(lattice.n===0?0:(lattice.n===3?0.06:0.1)*step*(offsets.length+1));
-    let best=grid.straight,bestCost=cost(best);
-    for(const lattice of candidates.slice(1)){const value=cost(lattice);if(value<bestCost){best=lattice;bestCost=value;}}
-    if(best!==grid.straight)grid.lattices.set(at,best);
-  }
-}
-
-/** Start of the quarter-note span holding a unit, counted from its bar line. */
-function spanStart(bars:Bar[],unit:number):number {
-  const bar=bars[barIndex(bars,unit)];
-  return bar.start+Math.floor((unit-bar.start)/SPAN)*SPAN;
-}
-
-/** Snaps to the nearest grid point, never past the bar line that ends the unit's bar. */
-function snap(grid:Grid,unit:number):number {
-  const at=spanStart(grid.bars,unit),lattice=grid.lattices.get(at)??grid.straight,bar=grid.bars[barIndex(grid.bars,unit)];
-  return Math.min(at+Math.round((unit-at)/lattice.step)*lattice.step,bar.start+bar.length);
-}
-
-function snapDown(grid:Grid,unit:number):number {
-  const at=spanStart(grid.bars,unit),lattice=grid.lattices.get(at)??grid.straight;
-  return at+Math.floor((unit-at)/lattice.step)*lattice.step;
-}
-
-/** Sorted by start; notes that start together and last as long join one chord, the rest go to free voices. */
-function placeChords(hits:Hit[],limit:number,stats:Stats):Chord[] {
-  const lanes:Chord[][]=Array.from({length:limit},()=>[]);
-  const ordered=[...hits].sort((a,b)=>a.start-b.start||b.key-a.key||a.end-b.end);
-  for(const hit of ordered){
-    const lastOf=(voice:number)=>lanes[voice].at(-1);
-    let target=lanes.findIndex(lane=>{const last=lane.at(-1);return !!last&&last.start===hit.start&&last.end===hit.end&&!last.keys.includes(hit.key);});
-    if(target<0)target=lanes.findIndex(lane=>!lane.length||lane.at(-1)!.end<=hit.start);
-    if(target>=0){
-      const last=lastOf(target);
-      if(last&&last.start===hit.start&&last.end===hit.end)last.keys.push(hit.key);
-      else lanes[target].push({start:hit.start,end:hit.end,keys:[hit.key],voice:target});
-      continue;
-    }
-    // Every voice is busy. A note starting with a chord joins it; otherwise the voice that frees soonest is cut short.
-    const sameStart=lanes.findIndex(lane=>lane.at(-1)!.start===hit.start);
-    if(sameStart>=0){const chord=lastOf(sameStart)!;if(!chord.keys.includes(hit.key)){chord.keys.push(hit.key);if(chord.end!==hit.end)stats.merged++;}continue;}
-    let victim=0;for(let voice=1;voice<lanes.length;voice++)if(lastOf(voice)!.end<lastOf(victim)!.end)victim=voice;
-    lastOf(victim)!.end=hit.start;stats.shortened++;
-    lanes[victim].push({start:hit.start,end:hit.end,keys:[hit.key],voice:victim});
-  }
-  return lanes.flat().sort((a,b)=>a.start-b.start||a.voice-b.voice);
 }
 
 /** Fingers every chord on the strings: low frets, near the previous chord, and no string sounding twice. Null when a chord cannot be played. */
@@ -185,41 +124,6 @@ function fingerChords(chords:Chord[],open:number[]):Map<Chord,Map<number,number>
     result.set(chord,chosen);
     let total=0;for(const [key,string] of chosen){total+=key-open[string];busy[string]=chord.end;}
     reference=total/chosen.size;
-  }
-  return result;
-}
-
-const straightValues:[number,number,number][]=[[1440,1,1],[960,1,0],[720,2,1],[480,2,0],[360,4,1],[240,4,0],[180,8,1],[120,8,0],[90,16,1],[60,16,0],[45,32,1],[30,32,0],[15,64,0]];
-function straightParts(length:number):{den:number;dots:number}[] {
-  const parts:{den:number;dots:number}[]=[];
-  while(length>0){
-    const value=straightValues.find(entry=>entry[0]<=length);
-    if(!value)return fail('A rhythm in this file does not fit a 64th-note grid.');
-    parts.push({den:value[1],dots:value[2]});length-=value[0];
-  }
-  return parts;
-}
-const slotCounts=[24,16,12,8,6,4,3,2,1];
-function tupletParts(slots:number,quantization:number):{den:number;dots:number}[] {
-  const parts:{den:number;dots:number}[]=[];
-  while(slots>0){
-    const count=slotCounts.find(entry=>entry<=slots)!,dotted=count%3===0,base=dotted?count/3*2:count;
-    parts.push({den:quantization/base,dots:dotted?1:0});slots-=count;
-  }
-  return parts;
-}
-
-interface Piece {start:number;end:number;chord:Chord|null;tied:boolean}
-
-function splitAt(segments:Piece[],cuts:number[]):Piece[] {
-  const result:Piece[]=[];
-  for(const segment of segments){
-    let start=segment.start,tied=segment.tied;
-    let low=0,high=cuts.length;while(low<high){const middle=(low+high)>>1;if(cuts[middle]<=start)low=middle+1;else high=middle;}
-    for(let index=low;index<cuts.length&&cuts[index]<segment.end;index++){
-      result.push({start,end:cuts[index],chord:segment.chord,tied});start=cuts[index];tied=!!segment.chord;
-    }
-    result.push({start,end:segment.end,chord:segment.chord,tied});
   }
   return result;
 }
@@ -262,31 +166,9 @@ export function inspectMidiParts(song:MidiSong):MidiPartInfo[] {
 }
 
 function buildTargetBars(targetBars:readonly MidiTargetBar[],maxNoteStart:number,quantization:MidiQuantization,notes:MidiImportNote[]):Bar[] {
-  if(!targetBars.length)fail('Target score has no measures.');
-  if(targetBars.length>MEASURE_LIMIT)fail(`MIDI import is limited to ${MEASURE_LIMIT} measures.`);
-  const bars:Bar[]=[];let start=0;
-  for(const meter of targetBars){
-    if(!Number.isInteger(meter.numerator)||meter.numerator<1||meter.numerator>64||!targetDenominators.has(meter.denominator)){
-      fail('Unsupported target measure time signature.');
-    }
-    const length=meter.numerator*WHOLE/meter.denominator;
-    bars.push({start,length,numerator:meter.numerator,denominator:meter.denominator});
-    start+=length;
-  }
-  const existingEnd=start;
-  const overhang=Math.max((WHOLE/quantization)/2,WHOLE/64);
-  if(maxNoteStart>=existingEnd+overhang){
-    const last=targetBars.at(-1)!;
-    const extraLength=last.numerator*WHOLE/last.denominator;
-    let appended=0;
-    while(start<=maxNoteStart){
-      if(bars.length>=MEASURE_LIMIT)fail(`MIDI import is limited to ${MEASURE_LIMIT} measures.`);
-      bars.push({start,length:extraLength,numerator:last.numerator,denominator:last.denominator});
-      start+=extraLength;appended++;
-    }
-    if(appended)notes.push({code:'appended_measures',count:appended});
-  }
-  return bars;
+  const built=buildTargetRhythmBars(targetBars,maxNoteStart,quantization,`MIDI import is limited to ${MEASURE_LIMIT} measures.`);
+  if(built.appended)notes.push({code:'appended_measures',count:built.appended});
+  return built.bars;
 }
 
 function note(key:number,string:number|undefined,open:number[]|null,percussion:boolean,tied:boolean):model.Note {
@@ -297,8 +179,6 @@ function note(key:number,string:number|undefined,open:number[]|null,percussion:b
   if(tied)value.isTieDestination=true;
   return value;
 }
-
-const emptyVoice=()=>{const voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);return voice;};
 
 /** Converts a parsed MIDI file into an editable score: quantized rhythm, tuplets, voices, programs and tempo. */
 export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiImportOptions,fallbackTitle=''):MidiImport {
@@ -355,27 +235,9 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
   const channelsInUse=new Set<number>([9]);
   const nextChannel=()=>{let value=0;while(channelsInUse.has(value))value++;channelsInUse.add(value);return value;};
   for(const {source,percussion,name,hits:rawHits} of mappedSources){
-    const straight=tuplet(WHOLE/options.quantization,0,0),grid:Grid={bars,straight,lattices:new Map()};
-    let hits=rawHits;
-    if(!hits.length)continue;
-    chooseLattices(grid,hits,options);
-    const quantum=straight.step;
-    hits=hits.map(hit=>{
-      let start=snap(grid,hit.start),end=snap(grid,hit.end);
-      // A note starting so near the end that it rounds onto the last bar line starts on the last grid point before it.
-      if(start>=total)start=snapDown(grid,total-1);
-      if(end<=start){const bar=bars[barIndex(bars,start)];end=Math.min(start+(grid.lattices.get(spanStart(bars,start))?.step??quantum),bar.start+bar.length);}
-      return {key:hit.key,start,end:Math.min(end,total)};
-    }).filter(hit=>hit.end>hit.start);
-    if(percussion){
-      // A drum hit has no useful length: it lasts until the next hit, up to the end of its quarter note.
-      const onsets=[...new Set(hits.map(hit=>hit.start))].sort((a,b)=>a-b),after=new Map(onsets.map((onset,index)=>[onset,onsets[index+1]]));
-      // The hit also stops at its own bar line: where the bar is not a whole number of quarters (or is shorter than one) the quarter it
-      // started in runs on into the next bars, and the end that gave could be off a tuplet grid there (THE-210).
-      hits=hits.map(hit=>{const bar=bars[barIndex(bars,hit.start)];return {key:hit.key,start:hit.start,end:Math.min(spanStart(bars,hit.start)+SPAN,bar.start+bar.length,after.get(hit.start)??total,total)};});
-    }
-    const merged=new Map<string,Hit>();for(const hit of hits){const id=`${hit.key}/${hit.start}`,other=merged.get(id);if(!other||hit.end>other.end)merged.set(id,hit);}
-    hits=[...merged.values()];
+    if(!rawHits.length)continue;
+    const grid=createRhythmGrid(bars,rawHits,options.quantization,options.tuplets);
+    const hits=snapHitsToGrid(grid,rawHits,percussion);
     const chords=placeChords(hits,percussion?1:options.voices,stats);
     const voicesUsed=chords.reduce((most,chord)=>Math.max(most,chord.voice),0)+1;
 
@@ -388,15 +250,6 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
       if(fingering){open=strings;kind=program>=32?'bass':'guitar';}else unplayable++;
     }
 
-    // Spans written as tuplets are those where some note starts or stops off the straight grid.
-    const edges=new Map<number,boolean>();
-    for(const chord of chords)for(const point of [chord.start,chord.end]){
-      const at=spanStart(bars,point);
-      if(grid.lattices.has(at)&&point>at&&point<at+SPAN&&(point-at)%quantum!==0)edges.set(at,true);
-    }
-    const notated=[...edges.keys()].sort((a,b)=>a-b),cuts=[...bars.map(bar=>bar.start),...notated.flatMap(at=>[at,at+SPAN])];
-    const cutPoints=[...new Set(cuts)].sort((a,b)=>a-b);
-
     const track=new model.Track();track.name=name;track.shortName=name.slice(0,12);
     track.playbackInfo.program=percussion?0:program;
     track.playbackInfo.primaryChannel=percussion?9:nextChannel();track.playbackInfo.secondaryChannel=percussion?9:nextChannel();
@@ -407,43 +260,12 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     const keysAll=hits.map(hit=>hit.key).sort((a,b)=>a-b),median=keysAll[keysAll.length>>1];
     const clef=percussion?model.Clef.Neutral:median<57?model.Clef.F4:model.Clef.G2;
 
-    const timelines:Piece[][]=Array.from({length:voicesUsed},(_,voice)=>{
-      const pieces:Piece[]=[];let cursor=0;
-      for(const chord of chords.filter(item=>item.voice===voice)){
-        if(chord.start>cursor)pieces.push({start:cursor,end:chord.start,chord:null,tied:false});
-        pieces.push({start:chord.start,end:chord.end,chord,tied:false});cursor=chord.end;
+    writeQuantizedStaffBars(staff,bars,grid,chords,voicesUsed,options.quantization,clef,(piece,beat,partIndex)=>{
+      const fingers=fingering?.get(piece.chord!);
+      for(const keyValue of [...piece.chord!.keys].sort((a,b)=>a-b)){
+        beat.addNote(note(keyValue,fingers?.get(keyValue),open,percussion,piece.tied||partIndex>0));
       }
-      if(cursor<total)pieces.push({start:cursor,end:total,chord:null,tied:false});
-      return splitAt(pieces,cutPoints);
     });
-    const pointers=timelines.map(()=>0);
-    for(const bar of bars){
-      const barEnd=bar.start+bar.length,staffBar=new model.Bar();staffBar.clef=clef;
-      for(const [voiceIndex,timeline] of timelines.entries()){
-        const voice=new model.Voice(),beats:model.Beat[]=[];let sounded=false;
-        while(pointers[voiceIndex]<timeline.length&&timeline[pointers[voiceIndex]].start<barEnd){
-          const piece=timeline[pointers[voiceIndex]++],at=spanStart(bars,piece.start);
-          const lattice=edges.has(at)&&piece.end<=at+SPAN?grid.lattices.get(at)!:null;
-          const slots=lattice?(piece.end-piece.start)/lattice.step:0;
-          if(lattice&&!Number.isInteger(slots))fail('A rhythm in this file could not be placed on the tuplet grid.');
-          const parts=lattice?tupletParts(slots,options.quantization):straightParts(piece.end-piece.start);
-          for(const [partIndex,part] of parts.entries()){
-            const beat=new model.Beat();beat.duration=part.den as model.Duration;beat.dots=part.dots;
-            if(lattice){beat.tupletNumerator=lattice.n;beat.tupletDenominator=lattice.m;}
-            if(piece.chord){
-              sounded=true;
-              const fingers=fingering?.get(piece.chord);
-              for(const keyValue of [...piece.chord.keys].sort((a,b)=>a-b))beat.addNote(note(keyValue,fingers?.get(keyValue),open,percussion,piece.tied||partIndex>0));
-            }
-            beats.push(beat);
-          }
-        }
-        if(voiceIndex>0&&!sounded){staffBar.addVoice(emptyVoice());continue;}
-        for(const beat of beats)voice.addBeat(beat);
-        staffBar.addVoice(voice);
-      }
-      staff.addBar(staffBar);
-    }
     summary.push({partIndex:source.partIndex,name,kind,program:percussion?0:program,notes:hits.length,voices:voicesUsed});
   }
   if(!summary.length)fail('This MIDI file has no notes this import can read.');
@@ -486,8 +308,5 @@ export function formatMidiImportNote(note:MidiImportNote|string,t:(key:MessageKe
 
 /** The score file name for an import: the MIDI file's name with a .gp extension, short enough for the native limit. */
 export function midiImportFileName(source:string):string {
-  let base=source.replace(/\.[^.\\/]*$/,'').replace(/[\\/:*?"<>|\p{Cc}]+/gu,' ').trim();
-  const encoder=new TextEncoder();
-  while(encoder.encode(base).length>NAME_BYTES)base=[...base].slice(0,-1).join('').trimEnd();
-  return `${base||'Imported MIDI'}.gp`;
+  return safeScoreFileName(source,'Imported MIDI');
 }

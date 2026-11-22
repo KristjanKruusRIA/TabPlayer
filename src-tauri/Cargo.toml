@@ -50,6 +50,8 @@ subtle = "2.6"
 tauri-plugin-single-instance = "=2.5.5"
 # The VST3 hosting wire protocol. The app never links plug-in code; it only speaks this protocol to the helper.
 tabplayer-plugin-protocol = { path = "plugin-protocol" }
+# Local offline neural pitch transcription (Spotify Basic Pitch nmp.onnx) for DI guitar tabbing.
+tract-onnx = "=0.22.5"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -85,6 +87,12 @@ usvg = { path = "../vendor/usvg" }
 opt-level = 3
 
 [profile.dev.package.blake2]
+opt-level = 3
+
+[profile.dev.package.tract-core]
+opt-level = 3
+
+[profile.dev.package.tract-linalg]
 opt-level = 3
 
 # Every file in tests/ links the whole app into its own binary. Keeping line tables for backtraces and no debug info for dependencies stops those links exhausting memory.

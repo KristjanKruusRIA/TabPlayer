@@ -103,6 +103,7 @@ TabPlayer is an independent application. It contains no Guitar Pro application c
   ```
 - React, React DOM, Scheduler, Tauri and their dependencies retain their respective licences. Build-generated licence copies and package inventory are in `licenses/`.
 - fflate 0.8.3, Copyright (c) 2026 Arjun Barrett, is distributed under MIT. Its complete license is packaged in `licenses/fflate-0.8.3/LICENSE`.
+- Automatic DI guitar transcription embeds Spotify Basic Pitch (`nmp.onnx` from https://github.com/spotify/basic-pitch, `basic_pitch/saved_models/icassp_2022/nmp.onnx`, SHA-256 `2c3c1d144bfa61ad236e92e169c13535c880469a12a047d4e73451f2c059a0ec`, Copyright 2022-2024 Spotify AB, Apache License 2.0; full text in `licenses/Apache-2.0.txt`) executed locally via `tract-onnx` 0.22.5 (MIT OR Apache-2.0; complete licence files in `licenses/`).
 - Neural Amp Modeler capture playback (`src-tauri/src/audio/nam/`) is TabPlayer's own Rust port of the inference code of NAM Core (https://github.com/sdatkinson/NeuralAmpModelerCore), Copyright (c) 2023 Steven Atkinson, distributed under MIT. The `.nam` file format and test fixtures also come from the NAM trainer (https://github.com/sdatkinson/neural-amp-modeler, Copyright (c) 2019-2025 Steven Atkinson, MIT); fixture provenance and both licence texts are in `src-tauri/tests/fixtures/nam/README.md`. The `nam-rs` crate (MIT) is a development-only dependency used to cross-check output and is not shipped. NAM Core's licence:
 
   ```text

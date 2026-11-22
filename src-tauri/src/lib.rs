@@ -1187,6 +1187,7 @@ pub fn run() {
         .manage(line_in::LineInState::default())
         .manage(midi_in::MidiInState::default())
         .manage(fretlight::FretlightState::default())
+        .manage(audio::transcribe::DiTranscriptionState::default())
         .setup(|app| {
             // Files named on the command line, as an associated file's double-click passes them.
             if let Ok(directory) = std::env::current_dir() {
@@ -1493,7 +1494,10 @@ pub fn run() {
         fretlight::fretlight_connect,
         fretlight::fretlight_frame,
         fretlight::fretlight_disconnect,
-        fretlight::fretlight_status
+        fretlight::fretlight_status,
+        audio::transcribe::di_transcribe_pick_and_analyze,
+        audio::transcribe::di_transcribe_decode,
+        audio::transcribe::di_transcribe_clear
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1632,6 +1636,9 @@ pub fn run() {
         fretlight::fretlight_disconnect,
         fretlight::fretlight_status,
         fretlight::fretlight_test_log,
+        audio::transcribe::di_transcribe_pick_and_analyze,
+        audio::transcribe::di_transcribe_decode,
+        audio::transcribe::di_transcribe_clear,
         plugins::commands::plugin_test_set_parameter,
         desktop_test_io,
         desktop_test_silent_output

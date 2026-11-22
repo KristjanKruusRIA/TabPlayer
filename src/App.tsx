@@ -83,6 +83,7 @@ import { SectionsPanel } from './editor/SectionsPanel';
 import { listSections } from './editor/sections';
 import { CommandPalette } from './editor/CommandPalette';
 import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
+import { DiImportDialog } from './workspace/DiImportDialog';
 import { MidiImportDialog } from './workspace/MidiImportDialog';
 import { BatchConvertDialog } from './batch/BatchConvertDialog';
 import { HelpDialog } from './help/HelpDialog';
@@ -473,17 +474,17 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [protectionDialog,setProtectionDialog]=useState<'manage'|'unlock'|null>(null),protectionReturn=useRef<HTMLElement|null>(null);
   const openProtection=(kind:'manage'|'unlock')=>{protectionReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setProtectionDialog(kind);};
   const closeProtection=()=>{setProtectionDialog(null);const back=protectionReturn.current;protectionReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
-  const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false),[batchOpen,setBatchOpen]=useState(false);
+  const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false),[diOpen,setDiOpen]=useState(false),[batchOpen,setBatchOpen]=useState(false);
   const [helpTopic,setHelpTopic]=useState<HelpTopicId|null>(null),[helpSection,setHelpSection]=useState<string|undefined>(undefined),helpReturn=useRef<HTMLElement|null>(null);
   /** Opens help on the topic for what had focus; help only reads, so open scores and edits are untouched. */
   const openHelp=(topic?:HelpTopicId,section?:string)=>{const focused=document.activeElement instanceof HTMLElement?document.activeElement:null;helpReturn.current=focused;closeCommands(false);const target:HelpTarget=topic?{topic,section}:helpTargetFor(focused);setHelpSection(target.section);setHelpTopic(target.topic);};
-  // F1 is heard on the window so it works with nothing focused. It opens help over the Export, MIDI import, ASCII import and Batch convert dialogs (at their own topic) and over no other dialog.
+  // F1 is heard on the window so it works with nothing focused. It opens help over the Export, MIDI import, DI import, ASCII import and Batch convert dialogs (at their own topic) and over no other dialog.
   const helpKey=useRef<(event:globalThis.KeyboardEvent)=>void>(()=>{});
   helpKey.current=event=>{
     if(event.key!=='F1'||event.ctrlKey||event.metaKey||event.altKey||event.shiftKey)return;
     event.preventDefault();
     if(event.repeat||helpTopic!==null)return;
-    const over:HelpTarget|null=exportOpen?{topic:'export',section:'start'}:asciiOpen||midiOpen?{topic:'files',section:'import'}:batchOpen?{topic:'files',section:'batch'}:null;
+    const over:HelpTarget|null=exportOpen?{topic:'export',section:'start'}:asciiOpen||midiOpen||diOpen?{topic:'files',section:'import'}:batchOpen?{topic:'files',section:'batch'}:null;
     if(over){if(harmonyOpen||scaleOpen||paletteOpen||document.querySelectorAll('[role="dialog"]').length!==1)return;openHelp(over.topic,over.section);return;}
     if(harmonyOpen||scaleOpen||paletteOpen||document.querySelector('[role="dialog"]'))return;
     openHelp();
@@ -503,9 +504,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   },[helpTopic]);
   const openAscii=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setAsciiOpen(true);};
   const openMidi=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setMidiOpen(true);};
+  const openDi=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setDiOpen(true);};
   const openBatch=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setBatchOpen(true);};
   const closeBatch=()=>{setBatchOpen(false);closeAscii();};
   const closeMidi=()=>{setMidiOpen(false);closeAscii();};
+  const closeDi=()=>{setDiOpen(false);closeAscii();};
   const closeAscii=()=>{setAsciiOpen(false);const back=asciiReturn.current;asciiReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const openPalette=()=>{paletteReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setPaletteOpen(true);};
   const closePalette=()=>{
@@ -890,7 +893,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
    */
   const captureState=():'off'|'menu'|'blocked'|'ok'=>{
     if(!noteEntryOn||view!=='score')return 'off';
-    if(exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null||document.querySelector('[role="dialog"]'))return 'blocked';
+    if(exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||diOpen||batchOpen||helpTopic!==null||document.querySelector('[role="dialog"]'))return 'blocked';
     if(commandBar.current?.querySelector('details[open]'))return 'menu';
     if(textEntry(document.activeElement??document.body))return 'blocked';
     return 'ok';
@@ -1179,7 +1182,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
    * takes typed text: a text field, textarea, select, contenteditable, a checkbox, radio, color or file input, the checkbox, switch, radio, menu item and option roles, a disclosure's summary; and while a modal dialog or an open menu or list box is up.
    */
   const spacePlays=(target:EventTarget|null)=>{
-    if(exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null)return false;
+    if(exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||diOpen||batchOpen||helpTopic!==null)return false;
     if(document.querySelector('[role="dialog"],[aria-modal="true"],dialog[open]'))return false;
     if(commandBar.current?.querySelector('details[open]')||shell.current?.querySelector('[role="menu"],[role="listbox"]'))return false;
     if(!(target instanceof Element))return true;
@@ -1209,7 +1212,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(Date.now()-pending.at>SPACE_PENDING_MS||pending.documentId!==state.documentId||pending.epoch!==state.documentEpoch||pending.cursor!==JSON.stringify(target)||!spacePlays(document.activeElement)){clearPlayPending();return;}
     const button=shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]');
     if(button&&!button.disabled&&button.getAttribute('aria-disabled')!=='true'){clearPlayPending();button.click();}
-  },[playbackState?.ready,playbackState?.practicePending,controlsBusy,state.documentId,state.documentEpoch,target.track,target.staff,target.bar,target.voice,target.beat,exportOpen,harmonyOpen,scaleOpen,paletteOpen,asciiOpen,midiOpen,batchOpen,helpTopic]);
+  },[playbackState?.ready,playbackState?.practicePending,controlsBusy,state.documentId,state.documentEpoch,target.track,target.staff,target.bar,target.voice,target.beat,exportOpen,harmonyOpen,scaleOpen,paletteOpen,asciiOpen,midiOpen,diOpen,batchOpen,helpTopic]);
   useEffect(()=>{if(!playPending.current)return;const timer=setTimeout(clearPlayPending,SPACE_PENDING_MS);return()=>clearTimeout(timer);});
   useEffect(()=>()=>{playPending.current=null;},[]);
   // Whatever starts, pauses or stops playback (a button, the scrubber, a key) makes a Space that was still waiting stale.
@@ -1232,8 +1235,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   function selectionKeys(event:KeyboardEvent){
     if(event.key==='Escape')clearPlayPending();
     if(plainSpace(event)&&!event.defaultPrevented&&spacePlays(event.target)){event.preventDefault();if(!event.repeat)playOrStop();return;}
-    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!midiOpen&&!batchOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
-    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
+    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!midiOpen&&!diOpen&&!batchOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
+    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||diOpen||batchOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
     if((event.ctrlKey||event.metaKey)&&!event.altKey&&['n','o','s','z','y'].includes(key)){
       event.preventDefault();if(key==='z'||key==='y')clearEntryQueue();
@@ -1301,6 +1304,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>{t('action.open')}</button>
       {onImportConverted&&<button disabled={controlsBusy} onClick={openAscii}>{t('action.import_ascii')}</button>}
       {onImportConverted&&<button disabled={controlsBusy} onClick={openMidi}>{t('action.import_midi')}</button>}
+      {onImportConverted&&<button disabled={controlsBusy} onClick={openDi}>{t('action.import_di_guitar')}</button>}
       <button disabled={controlsBusy} onClick={openBatch}>{t('action.batch_convert')}</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save())}>{t('action.save')}</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save(true))}>{t('action.save_as')}</button>
@@ -1474,6 +1478,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {protectionDialog==='manage'&&<ProtectionDialog protection={state.snapshot.protection??{edit:'none',open:false}} dirty={state.snapshot.dirty} onRequest={request=>controller.protect(request)} onClose={closeProtection}/>}
     {protectionDialog==='unlock'&&<UnlockEditingDialog onTry={async password=>{await controller.protect({kind:'unlockEditing',password});closeProtection();}} onClose={closeProtection}/>}
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} currentScore={state.score} selectedTrack={target.track} locked={editLocked} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onImportIntoScore={async command=>{const ok=await edit(command,score=>{const chosen=command.targetTrack??Math.max(0,score.tracks.length-1);if(score.tracks[chosen])select({track:chosen,staff:0,bar:0,voice:0,beat:0},score.tracks[chosen].staves[0].tuning.length);});if(!ok){const reason=controller.getState().error;if(reason)throw new Error(reason);}return ok;}} onClose={closeMidi}/>}
+    {diOpen&&onImportConverted&&<DiImportDialog busy={controlsBusy} currentScore={state.score} selectedTrack={target.track} locked={editLocked} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onImportIntoScore={async command=>{const ok=await edit(command,score=>{const chosen=command.targetTrack??Math.max(0,score.tracks.length-1);if(score.tracks[chosen])select({track:chosen,staff:0,bar:0,voice:0,beat:0},score.tracks[chosen].staves[0].tuning.length);});if(!ok){const reason=controller.getState().error;if(reason)throw new Error(reason);}return ok;}} onClose={closeDi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound',key:{shift:playbackState?.keyTarget??playbackState?.practice.settings.tonality??0,ready:playbackState?.ready??false}}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onNote={editLocked?undefined:instrumentEdit} onAudition={auditionHarmony} auditionUnavailable={playbackRunning} onClose={closeModal}/>}
     {/* Last, so help paints above every dialog it can open over: they share one z-index and the later one wins. */}

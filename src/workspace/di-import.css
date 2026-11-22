@@ -1,0 +1,80 @@
+.tp-dialog.di-import {
+  width: min(640px, calc(100vw - 32px));
+}
+.di-import .di-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.di-import .di-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tp-muted);
+  font-size: 12px;
+}
+.di-import .di-destination {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.di-import .di-replace-targets,
+.di-import .di-timing-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+.di-import .di-replace-targets select,
+.di-import .di-tuning-row select,
+.di-import .di-timing-row select {
+  width: 100%;
+  min-width: 0;
+}
+.di-import .di-inline-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.di-import .di-inline-input input {
+  width: 84px;
+  min-width: 0;
+}
+.di-import .di-inline-input button {
+  flex: none;
+  white-space: nowrap;
+}
+.di-import .di-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.di-import .di-options .di-full-row {
+  grid-column: 1 / -1;
+}
+.di-import .di-finetune > summary {
+  min-height: 28px;
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.di-import .di-finetune-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  padding-top: 8px;
+}
+.di-import .di-finetune-body .check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+.di-import .di-finetune-body .check input {
+  width: auto;
+}

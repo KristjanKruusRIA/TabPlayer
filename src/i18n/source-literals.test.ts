@@ -40,6 +40,7 @@ export const sweepFiles = [
   'src/engraving/TrackDisplayControls.tsx',
   'src/protection/PasswordDialogs.tsx',
   'src/workspace/AsciiTabImportDialog.tsx',
+  'src/workspace/DiImportDialog.tsx',
   'src/workspace/DocumentTabs.tsx',
   'src/workspace/MidiImportDialog.tsx',
   'src/workspace/ViewDefaultsPanel.tsx',

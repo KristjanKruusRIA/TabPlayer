@@ -3,7 +3,7 @@ import type { LyricsCommand } from './editor/lyrics-types';
 import type { GestureCommand, BarGestureCommand } from './editor/gestures-types';
 import type { RangeCommand } from './editor/range-types';
 import type { MeasureCommand } from './editor/measures-types';
-import type { ClipboardCommand } from './editor/clipboard-types';
+import type { ClipboardCommand, MusicClip } from './editor/clipboard-types';
 import type { EngravingCommand,EngravingOverrides,PageLayout } from './engraving/types';
 import type { HarmonyCommand } from './editor/harmony-types';
 import type { ScaleDiagramCommand } from './harmony/scale-diagram';
@@ -182,7 +182,9 @@ export type SingleCommand = LyricsCommand | GestureCommand | BarGestureCommand |
   | { type: 'setTrackMix'; trackId: string; mix: ChannelMix }
   | { type: 'setBacking'; backing: BackingSettings|null }
   | { type: 'setPrintLayout'; layout: PrintLayout }
-  | { type: 'setMaster'; master: MasterSettings };
+  | { type: 'setMaster'; master: MasterSettings }
+  /** Imports tracks from a validated score clip into the open project: appends when `targetTrack` is absent, or replaces `targetTrack` in place. */
+  | { type: 'importTracks'; clip: MusicClip; targetTrack?: number };
 
 export type SettingsEdit = Extract<EditCommand,{type:'setTrackSound'|'setTrackMix'|'setBacking'|'setPrintLayout'|'setEngraving'|'setPageLayout'|'setMaster'}>;
 export const isSettingsEdit = (edit: EditCommand): edit is SettingsEdit =>

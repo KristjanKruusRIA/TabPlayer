@@ -426,7 +426,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       captureUndo.current=null;captureEnd.current=null;
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
-      if(command.type==='pasteMusic')setNoteIndex(null);
+      if(command.type==='pasteMusic'||command.type==='importTracks')setNoteIndex(null);
       after?.(score);
       if(!('selection'in command)||command.type==='eraseSelection'||command.type==='cutSelection')editorSelection(null);
       // Hearing an entered note is a courtesy: only note-setting edits, and only while nothing is playing.
@@ -1473,7 +1473,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {batchOpen&&<BatchConvertDialog busy={controlsBusy} onClose={closeBatch}/>}
     {protectionDialog==='manage'&&<ProtectionDialog protection={state.snapshot.protection??{edit:'none',open:false}} dirty={state.snapshot.dirty} onRequest={request=>controller.protect(request)} onClose={closeProtection}/>}
     {protectionDialog==='unlock'&&<UnlockEditingDialog onTry={async password=>{await controller.protect({kind:'unlockEditing',password});closeProtection();}} onClose={closeProtection}/>}
-    {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
+    {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} currentScore={state.score} selectedTrack={target.track} locked={editLocked} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onImportIntoScore={async command=>{const ok=await edit(command,score=>{const chosen=command.targetTrack??Math.max(0,score.tracks.length-1);if(score.tracks[chosen])select({track:chosen,staff:0,bar:0,voice:0,beat:0},score.tracks[chosen].staves[0].tuning.length);});if(!ok){const reason=controller.getState().error;if(reason)throw new Error(reason);}return ok;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound',key:{shift:playbackState?.keyTarget??playbackState?.practice.settings.tonality??0,ready:playbackState?.ready??false}}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onNote={editLocked?undefined:instrumentEdit} onAudition={auditionHarmony} auditionUnavailable={playbackRunning} onClose={closeModal}/>}
     {/* Last, so help paints above every dialog it can open over: they share one z-index and the later one wins. */}

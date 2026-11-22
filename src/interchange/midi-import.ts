@@ -1,12 +1,18 @@
 import { model,Settings } from '@coderline/alphatab';
+import type { DrumMapRef } from '../edit-types';
+import { resolveInputDrumMap } from '../audio/drum-map';
 import type { MessageKey } from '../i18n';
-import { standardPercussionCatalog } from '../editor/percussion-catalog';
 import { midiPrograms } from '../midi-programs';
 import { stripCdataEnd,type MidiSong } from './midi-smf';
 
 /** Smallest note value a note may start or stop on, as the denominator of a whole note. */
 export type MidiQuantization=4|8|16|32|64;
 export type MidiTupletMode='none'|'triplets'|'triplets-quintuplets';
+export interface MidiTargetBar { numerator:number;denominator:number }
+export interface MidiPartInfo {
+  index:number;name:string;channel:number;program:number;defaultPercussion:boolean;
+  noteCount:number;keys:readonly {key:number;count:number}[];
+}
 export interface MidiImportOptions {
   quantization:MidiQuantization;
   tuplets:MidiTupletMode;
@@ -14,6 +20,16 @@ export interface MidiImportOptions {
   voices:1|2|3|4;
   /** Guitar and bass programs become tablature staves when every note can be fingered. */
   tablature:boolean;
+  /** 0-based planned part indices forced to percussion even if not on MIDI channel 10. */
+  drumParts?:readonly number[];
+  /** When present, only these 0-based planned part indices are imported. */
+  selectedParts?:readonly number[];
+  /** Source drum map translating incoming drum MIDI keys to standard articulations (General MIDI when absent). */
+  drumMap?:DrumMapRef;
+  /** Per-key overrides applied on top of `drumMap` (`null` skips that incoming MIDI key). */
+  drumKeyOverrides?:Readonly<Record<number,number|null>>;
+  /** Existing score measure time signatures to quantize against instead of reading meters from the MIDI file. */
+  targetBars?:readonly MidiTargetBar[];
 }
 export const defaultMidiImportOptions:MidiImportOptions={quantization:16,tuplets:'triplets',voices:2,tablature:true};
 
@@ -25,10 +41,11 @@ export type MidiImportNote=
   |{code:'unplayable_tab';count:number}
   |{code:'dropped_drum_notes';count:number}
   |{code:'shortened_notes';count:number}
-  |{code:'merged_notes';count:number};
+  |{code:'merged_notes';count:number}
+  |{code:'appended_measures';count:number};
 export interface MidiImportSummary {
   title:string;format:0|1;measures:number;tempo:number;
-  tracks:{name:string;kind:MidiTrackKind;program:number;notes:number;voices:number}[];
+  tracks:{partIndex?:number;name:string;kind:MidiTrackKind;program:number;notes:number;voices:number}[];
   /** Short sentences about what the import changed or left out. */
   notes:MidiImportNote[];
 }
@@ -42,13 +59,13 @@ const fail=(message:string):never=>{throw new Error(message);};
 
 /** Open strings from the lowest, as MIDI keys. */
 const guitarStrings=[40,45,50,55,59,64],bassStrings=[28,33,38,43];
-const percussionKeys=new Set(standardPercussionCatalog.map(entry=>entry.id).filter(id=>id>=35&&id<=81));
+const targetDenominators=new Set([1,2,4,8,16,32,64]);
 
 interface Bar {start:number;length:number;numerator:number;denominator:number}
 interface Lattice {step:number;n:number;m:number}
 interface Hit {key:number;start:number;end:number}
 interface Chord {start:number;end:number;keys:number[];voice:number}
-interface Source {name:string;channel:number;program:number;percussion:boolean;notes:{key:number;start:number;end:number}[];laterPrograms:number}
+interface Source {partIndex:number;displayName:string;rawPartName:string;multiChannel:boolean;channel:number;program:number;percussion:boolean;notes:{key:number;start:number;end:number}[];laterPrograms:number}
 interface Stats {shortened:number;merged:number}
 
 const tuplet=(step:number,n:number,m:number):Lattice=>({step,n,m});
@@ -87,8 +104,10 @@ function chooseLattices(grid:Grid,hits:Hit[],options:MidiImportOptions) {
   if(options.tuplets!=='none'&&options.quantization>=8)candidates.push(tuplet(step*2/3,3,2));
   if(options.tuplets==='triplets-quintuplets'&&options.quantization>=16)candidates.push(tuplet(step*4/5,5,4));
   if(candidates.length===1)return;
+  const total=grid.bars.at(-1)!.start+grid.bars.at(-1)!.length;
   const votes=new Map<number,number[]>();
   const vote=(unit:number)=>{
+    if(unit<0||unit>=total)return;
     const bar=grid.bars[barIndex(grid.bars,unit)],span=Math.floor((unit-bar.start)/SPAN),at=bar.start+span*SPAN;
     if((span+1)*SPAN>bar.length)return;
     const list=votes.get(at);if(list)list.push(unit-at);else votes.set(at,[unit-at]);
@@ -207,23 +226,67 @@ function splitAt(segments:Piece[],cuts:number[]):Piece[] {
 
 function programName(program:number,percussion:boolean){return percussion?'Drums':midiPrograms[program]??`Instrument ${program+1}`;}
 
-function plan(song:MidiSong,notes:MidiImportNote[]):Source[] {
+function sourceDisplayName(rawPartName:string,multiChannel:boolean,program:number,percussion:boolean):string {
+  const label=programName(program,percussion);
+  return multiChannel?(rawPartName?`${rawPartName} (${label})`:label):rawPartName||label;
+}
+
+function plan(song:MidiSong):Source[] {
   const sources:Source[]=[];
   for(const part of song.parts){
     const channels=[...new Set(part.notes.map(note=>note.channel))].sort((a,b)=>a-b);
+    const multiChannel=channels.length>1;
     for(const channel of channels){
       const mine=part.notes.filter(note=>note.channel===channel),first=mine.reduce((least,note)=>Math.min(least,note.start),Infinity);
       const changes=song.programs.filter(change=>change.channel===channel);
       const before=changes.filter(change=>change.tick<=first).at(-1)??changes[0],program=before?.program??0;
-      const percussion=channel===9,label=programName(program,percussion);
-      const name=channels.length>1?(part.name?`${part.name} (${label})`:label):part.name||label;
-      sources.push({name,channel,program,percussion,laterPrograms:changes.filter(change=>change.tick>(before?.tick??0)&&change.program!==program).length,notes:mine.map(note=>({key:note.key,start:note.start,end:note.end}))});
+      const percussion=channel===9,displayName=sourceDisplayName(part.name,multiChannel,program,percussion);
+      sources.push({partIndex:sources.length,displayName,rawPartName:part.name,multiChannel,channel,program,percussion,laterPrograms:changes.filter(change=>change.tick>(before?.tick??0)&&change.program!==program).length,notes:mine.map(note=>({key:note.key,start:note.start,end:note.end}))});
     }
   }
   if(sources.length>TRACK_LIMIT)fail(`MIDI import is limited to ${TRACK_LIMIT} instrument parts; this file has ${sources.length}.`);
-  const later=sources.reduce((sum,source)=>sum+source.laterPrograms,0);
-  if(later)notes.push({code:'later_instruments',count:later});
   return sources;
+}
+
+/** Lists every instrument part (MIDI track + channel) in the file along with the MIDI keys it uses and their hit counts. */
+export function inspectMidiParts(song:MidiSong):MidiPartInfo[] {
+  return plan(song).map(source=>{
+    const counts=new Map<number,number>();
+    for(const item of source.notes)counts.set(item.key,(counts.get(item.key)??0)+1);
+    const keys=[...counts.entries()].sort((a,b)=>a[0]-b[0]).map(([key,count])=>({key,count}));
+    return {
+      index:source.partIndex,name:source.displayName,channel:source.channel,program:source.program,
+      defaultPercussion:source.percussion,noteCount:source.notes.length,keys,
+    };
+  });
+}
+
+function buildTargetBars(targetBars:readonly MidiTargetBar[],maxNoteStart:number,quantization:MidiQuantization,notes:MidiImportNote[]):Bar[] {
+  if(!targetBars.length)fail('Target score has no measures.');
+  if(targetBars.length>MEASURE_LIMIT)fail(`MIDI import is limited to ${MEASURE_LIMIT} measures.`);
+  const bars:Bar[]=[];let start=0;
+  for(const meter of targetBars){
+    if(!Number.isInteger(meter.numerator)||meter.numerator<1||meter.numerator>64||!targetDenominators.has(meter.denominator)){
+      fail('Unsupported target measure time signature.');
+    }
+    const length=meter.numerator*WHOLE/meter.denominator;
+    bars.push({start,length,numerator:meter.numerator,denominator:meter.denominator});
+    start+=length;
+  }
+  const existingEnd=start;
+  const overhang=Math.max((WHOLE/quantization)/2,WHOLE/64);
+  if(maxNoteStart>=existingEnd+overhang){
+    const last=targetBars.at(-1)!;
+    const extraLength=last.numerator*WHOLE/last.denominator;
+    let appended=0;
+    while(start<=maxNoteStart){
+      if(bars.length>=MEASURE_LIMIT)fail(`MIDI import is limited to ${MEASURE_LIMIT} measures.`);
+      bars.push({start,length:extraLength,numerator:last.numerator,denominator:last.denominator});
+      start+=extraLength;appended++;
+    }
+    if(appended)notes.push({code:'appended_measures',count:appended});
+  }
+  return bars;
 }
 
 function note(key:number,string:number|undefined,open:number[]|null,percussion:boolean,tied:boolean):model.Note {
@@ -239,9 +302,40 @@ const emptyVoice=()=>{const voice=new model.Voice(),beat=new model.Beat();beat.i
 
 /** Converts a parsed MIDI file into an editable score: quantized rhythm, tuplets, voices, programs and tempo. */
 export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiImportOptions,fallbackTitle=''):MidiImport {
-  const notes:MidiImportNote[]=[],bars=buildBars(song,notes),wholeTicks=song.division*4,toUnits=(tick:number)=>tick*WHOLE/wholeTicks;
-  const total=bars.at(-1)!.start+bars.at(-1)!.length,stats:Stats={shortened:0,merged:0};
-  const sources=plan(song,notes);
+  const notes:MidiImportNote[]=[],wholeTicks=song.division*4,toUnits=(tick:number)=>tick*WHOLE/wholeTicks;
+  const stats:Stats={shortened:0,merged:0};
+  const allSources=plan(song);
+  const selectedSet=options.selectedParts?new Set(options.selectedParts):null;
+  const activeSources=selectedSet?allSources.filter(source=>selectedSet.has(source.partIndex)):allSources;
+  const drumSet=new Set(options.drumParts??[]);
+  const later=activeSources.reduce((sum,source)=>sum+source.laterPrograms,0);
+  if(later)notes.push({code:'later_instruments',count:later});
+
+  const prepared=activeSources.map(source=>{
+    const percussion=source.percussion||drumSet.has(source.partIndex);
+    const name=sourceDisplayName(source.rawPartName,source.multiChannel,source.program,percussion);
+    return {source,percussion,name};
+  });
+  const inputDrumMap=prepared.some(item=>item.percussion)?resolveInputDrumMap(options.drumMap,options.drumKeyOverrides):null;
+  let dropped=0;
+  const mappedSources=prepared.map(item=>{
+    let hits:Hit[]=item.source.notes.map(entry=>({key:entry.key,start:toUnits(entry.start),end:toUnits(entry.end)}));
+    if(item.percussion&&inputDrumMap){
+      const kept:Hit[]=[];
+      for(const hit of hits){
+        const mapped=inputDrumMap[hit.key&127];
+        if(mapped===null)dropped++;
+        else kept.push({key:mapped,start:hit.start,end:hit.end});
+      }
+      hits=kept;
+    }
+    return {...item,hits};
+  });
+  let maxNoteStart=-1;
+  for(const item of mappedSources)for(const hit of item.hits)if(hit.start>maxNoteStart)maxNoteStart=hit.start;
+
+  const bars=options.targetBars?buildTargetBars(options.targetBars,maxNoteStart,options.quantization,notes):buildBars(song,notes);
+  const total=bars.at(-1)!.start+bars.at(-1)!.length;
   const score=new model.Score();score.title=stripCdataEnd(song.title||fallbackTitle);score.artist='';
   for(const bar of bars){const master=new model.MasterBar();master.timeSignatureNumerator=bar.numerator;master.timeSignatureDenominator=bar.denominator;score.addMasterBar(master);}
 
@@ -257,15 +351,12 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     if(!lastTempo)firstTempo=bpm;
     lastTempo=bpm;
   }
-  const summary:MidiImportSummary['tracks']=[];let unplayable=0,dropped=0;
+  const summary:MidiImportSummary['tracks']=[];let unplayable=0;
   const channelsInUse=new Set<number>([9]);
   const nextChannel=()=>{let value=0;while(channelsInUse.has(value))value++;channelsInUse.add(value);return value;};
-  for(const source of sources){
+  for(const {source,percussion,name,hits:rawHits} of mappedSources){
     const straight=tuplet(WHOLE/options.quantization,0,0),grid:Grid={bars,straight,lattices:new Map()};
-    let hits:Hit[]=source.notes.map(item=>({key:item.key,start:toUnits(item.start),end:toUnits(item.end)}));
-    if(source.percussion){
-      const before=hits.length;hits=hits.filter(hit=>percussionKeys.has(hit.key));dropped+=before-hits.length;
-    }
+    let hits=rawHits;
     if(!hits.length)continue;
     chooseLattices(grid,hits,options);
     const quantum=straight.step;
@@ -276,7 +367,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
       if(end<=start){const bar=bars[barIndex(bars,start)];end=Math.min(start+(grid.lattices.get(spanStart(bars,start))?.step??quantum),bar.start+bar.length);}
       return {key:hit.key,start,end:Math.min(end,total)};
     }).filter(hit=>hit.end>hit.start);
-    if(source.percussion){
+    if(percussion){
       // A drum hit has no useful length: it lasts until the next hit, up to the end of its quarter note.
       const onsets=[...new Set(hits.map(hit=>hit.start))].sort((a,b)=>a-b),after=new Map(onsets.map((onset,index)=>[onset,onsets[index+1]]));
       // The hit also stops at its own bar line: where the bar is not a whole number of quarters (or is shorter than one) the quarter it
@@ -285,13 +376,13 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     }
     const merged=new Map<string,Hit>();for(const hit of hits){const id=`${hit.key}/${hit.start}`,other=merged.get(id);if(!other||hit.end>other.end)merged.set(id,hit);}
     hits=[...merged.values()];
-    const chords=placeChords(hits,source.percussion?1:options.voices,stats);
+    const chords=placeChords(hits,percussion?1:options.voices,stats);
     const voicesUsed=chords.reduce((most,chord)=>Math.max(most,chord.voice),0)+1;
 
     // Kind of staff.
     const program=source.program;
-    let kind:MidiTrackKind=source.percussion?'drums':'keys',open:number[]|null=null,fingering:Map<Chord,Map<number,number>>|null=null;
-    if(!source.percussion&&options.tablature&&program>=24&&program<=39){
+    let kind:MidiTrackKind=percussion?'drums':'keys',open:number[]|null=null,fingering:Map<Chord,Map<number,number>>|null=null;
+    if(!percussion&&options.tablature&&program>=24&&program<=39){
       const strings=program>=32?bassStrings:guitarStrings;
       fingering=fingerChords(chords,strings);
       if(fingering){open=strings;kind=program>=32?'bass':'guitar';}else unplayable++;
@@ -306,15 +397,15 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     const notated=[...edges.keys()].sort((a,b)=>a-b),cuts=[...bars.map(bar=>bar.start),...notated.flatMap(at=>[at,at+SPAN])];
     const cutPoints=[...new Set(cuts)].sort((a,b)=>a-b);
 
-    const track=new model.Track();track.name=source.name;track.shortName=source.name.slice(0,12);
-    track.playbackInfo.program=source.percussion?0:program;
-    track.playbackInfo.primaryChannel=source.percussion?9:nextChannel();track.playbackInfo.secondaryChannel=source.percussion?9:nextChannel();
+    const track=new model.Track();track.name=name;track.shortName=name.slice(0,12);
+    track.playbackInfo.program=percussion?0:program;
+    track.playbackInfo.primaryChannel=percussion?9:nextChannel();track.playbackInfo.secondaryChannel=percussion?9:nextChannel();
     const staff=new model.Staff();
-    staff.isPercussion=source.percussion;staff.showStandardNotation=true;staff.showTablature=!!open;
+    staff.isPercussion=percussion;staff.showStandardNotation=true;staff.showTablature=!!open;
     if(open)staff.stringTuning.tunings=[...open].reverse();
     track.addStaff(staff);score.addTrack(track);
     const keysAll=hits.map(hit=>hit.key).sort((a,b)=>a-b),median=keysAll[keysAll.length>>1];
-    const clef=source.percussion?model.Clef.Neutral:median<57?model.Clef.F4:model.Clef.G2;
+    const clef=percussion?model.Clef.Neutral:median<57?model.Clef.F4:model.Clef.G2;
 
     const timelines:Piece[][]=Array.from({length:voicesUsed},(_,voice)=>{
       const pieces:Piece[]=[];let cursor=0;
@@ -342,7 +433,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
             if(piece.chord){
               sounded=true;
               const fingers=fingering?.get(piece.chord);
-              for(const keyValue of [...piece.chord.keys].sort((a,b)=>a-b))beat.addNote(note(keyValue,fingers?.get(keyValue),open,source.percussion,piece.tied||partIndex>0));
+              for(const keyValue of [...piece.chord.keys].sort((a,b)=>a-b))beat.addNote(note(keyValue,fingers?.get(keyValue),open,percussion,piece.tied||partIndex>0));
             }
             beats.push(beat);
           }
@@ -353,7 +444,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
       }
       staff.addBar(staffBar);
     }
-    summary.push({name:source.name,kind,program:source.percussion?0:program,notes:hits.length,voices:voicesUsed});
+    summary.push({partIndex:source.partIndex,name,kind,program:percussion?0:program,notes:hits.length,voices:voicesUsed});
   }
   if(!summary.length)fail('This MIDI file has no notes this import can read.');
   if(unplayable)notes.push({code:'unplayable_tab',count:unplayable});
@@ -388,6 +479,8 @@ export function formatMidiImportNote(note:MidiImportNote|string,t:(key:MessageKe
       return t(note.count===1?'midi_import.note_shortened_notes_one':'midi_import.note_shortened_notes_other',{count:note.count});
     case 'merged_notes':
       return t(note.count===1?'midi_import.note_merged_notes_one':'midi_import.note_merged_notes_other',{count:note.count});
+    case 'appended_measures':
+      return t(note.count===1?'midi_import.note_appended_measures_one':'midi_import.note_appended_measures_other',{count:note.count});
   }
 }
 

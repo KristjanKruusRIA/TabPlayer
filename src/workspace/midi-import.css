@@ -1,5 +1,5 @@
 .tp-dialog.midi-import {
-  width: min(560px, calc(100vw - 32px));
+  width: min(620px, calc(100vw - 32px));
 }
 .midi-import .midi-file {
   display: flex;
@@ -13,6 +13,20 @@
   white-space: nowrap;
   color: var(--tp-muted);
   font-size: 12px;
+}
+.midi-import .midi-destination {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.midi-import .midi-replace-targets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+.midi-import .midi-replace-targets select {
+  width: 100%;
+  min-width: 0;
 }
 .midi-import .midi-options {
   display: grid;
@@ -28,11 +42,101 @@
 .midi-import .midi-options .check {
   flex-direction: row;
   align-items: center;
-  grid-column: 1 / -1;
   gap: 8px;
 }
 .midi-import .midi-options .check input {
   width: auto;
+}
+.midi-import .midi-drum-mapping {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--tp-line-subtle);
+}
+.midi-import .midi-drum-map-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.midi-import .midi-drum-map-row label {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.midi-import .midi-drum-map-row select {
+  width: 100%;
+  min-width: 0;
+}
+.midi-import .midi-drum-map-row button {
+  flex: none;
+  white-space: nowrap;
+}
+.midi-import .midi-drum-map-note {
+  font-size: 11px;
+  line-height: 1.35;
+}
+.midi-import .midi-drum-keys > summary {
+  min-height: 28px;
+  padding: 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.midi-import .midi-drum-key-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  max-height: 15em;
+  overflow: auto;
+}
+.midi-import .midi-drum-key-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-height: 32px;
+  padding: 2px 0;
+  border-bottom: 1px solid var(--tp-line-subtle);
+  font-size: 12px;
+}
+.midi-import .midi-drum-key-id {
+  font-family: var(--tp-font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.midi-import .midi-drum-key-hits {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.midi-import .midi-drum-key-row select {
+  width: 100%;
+  min-width: 0;
+}
+.midi-import .midi-drum-key-state {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.midi-import .midi-drum-key-changed {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--tp-text);
+}
+.midi-import .midi-drum-key-state button {
+  min-height: 24px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+.midi-import .midi-drum-keys-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
 }
 .midi-import .midi-parts {
   margin: 0;
@@ -41,4 +145,22 @@
   overflow: auto;
   font-size: 12px;
   color: var(--tp-text);
+}
+.midi-import .midi-part-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.midi-import .midi-part-drums-toggle {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tp-muted);
+}
+.midi-import .midi-part-drums-toggle input {
+  width: auto;
 }

@@ -1087,6 +1087,15 @@ pub enum EditCommand {
         clip: MusicClip,
         options: PasteOptions,
     },
+    ImportTracks {
+        clip: MusicClip,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        target_track: Option<u32>,
+    },
     AddTrack {
         name: String,
         tuning: Vec<i32>,
@@ -1630,6 +1639,9 @@ impl EditCommand {
             Self::PasteMusic { clip, options } => {
                 clip.validate()?;
                 options.validate()?;
+            }
+            Self::ImportTracks { clip, .. } => {
+                clip.validate()?;
             }
             Self::EraseSelection { selection }
             | Self::CutSelection { selection }
@@ -3563,6 +3575,35 @@ mod tests {
             rejected(
                 &json!({"type": "replaceTempoAutomations", "points": [{"bar": 0, "ratio": 0.0, "bpm": 100.0, "linear": false, "unit": unit}]}),
             );
+        }
+    }
+
+    #[test]
+    fn import_tracks_validates_clip_and_optional_target_track() {
+        let clip = json!({
+            "format": "TabPlayerClip",
+            "version": 1,
+            "engineVersion": "1.8.4",
+            "mode": "singleTrack",
+            "kind": "bars",
+            "scoreJson": "{}",
+            "links": []
+        });
+        let append = json!({"type": "importTracks", "clip": clip});
+        assert_eq!(serde_json::to_value(accepted(&append)).unwrap(), append);
+
+        let replace = json!({"type": "importTracks", "clip": clip, "targetTrack": 5});
+        assert_eq!(serde_json::to_value(accepted(&replace)).unwrap(), replace);
+
+        for invalid in [
+            json!({"type": "importTracks", "clip": clip, "targetTrack": null}),
+            json!({"type": "importTracks", "clip": clip, "targetTrack": -1}),
+            json!({"type": "importTracks", "clip": clip, "targetTrack": 1.5}),
+            json!({"type": "importTracks", "clip": clip, "targetTrack": "5"}),
+            json!({"type": "importTracks", "clip": clip, "extra": true}),
+            json!({"type": "importTracks", "clip": {"format": "Wrong"}}),
+        ] {
+            rejected(&invalid);
         }
     }
 }

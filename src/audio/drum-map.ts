@@ -168,3 +168,80 @@ export function usedDrumSounds(track: model.Track): number[] {
   }
   return [...used].sort((a, b) => a - b);
 }
+
+const KIT_HITS = [36, 38, 42, 46, 44, 49, 57, 51, 53, 52, 55, 48, 45, 47, 43, 41, 50, 35, 37] as const;
+const KIT_TECHNIQUES = [91, 92, 93, 97, 98, 96, 95, 94] as const;
+const KIT_SECONDARY = [59, 126, 127, 29, 31, 30] as const;
+const GM_PRIMARY = new Set(maps.sounds.filter(([id, key]) => id === key).map(([id]) => id));
+const KIT_HIT_INDEX = new Map<number, number>(KIT_HITS.map((id, index) => [id, index]));
+const KIT_TECHNIQUE_INDEX = new Map<number, number>(KIT_TECHNIQUES.map((id, index) => [id, index]));
+const KIT_SECONDARY_INDEX = new Map<number, number>(KIT_SECONDARY.map((id, index) => [id, index]));
+
+/**
+ * Resolves a reverse drum map for incoming MIDI keys 0..127 -> standard articulation id (or null to skip),
+ * inverting the selected drum map layout, falling back to preset candidate keys for unused MIDI keys,
+ * and applying explicit per-key overrides last.
+ */
+export function resolveInputDrumMap(
+  map: DrumMapRef | undefined | null,
+  overrides?: Readonly<Record<number, number | null>>,
+): readonly (number | null)[] {
+  const customIds = new Set((map?.keys ?? []).map(([id]) => id));
+  const isGmBase = !map || map.preset === 'gm';
+  const rank = (id: number, key: number): number => {
+    if (isGmBase && !customIds.has(id) && id === key && GM_PRIMARY.has(id)) return 0;
+    const hitIndex = KIT_HIT_INDEX.get(id);
+    if (hitIndex !== undefined) return 10 + hitIndex;
+    const techniqueIndex = KIT_TECHNIQUE_INDEX.get(id);
+    if (techniqueIndex !== undefined) return 100 + techniqueIndex;
+    const secondaryIndex = KIT_SECONDARY_INDEX.get(id);
+    if (secondaryIndex !== undefined) return 200 + secondaryIndex;
+    if (GM_PRIMARY.has(id)) return 300 + id;
+    return 500 + id;
+  };
+  const compete = (best: (number | null)[], ranks: number[], id: number, key: number) => {
+    if (key < 0 || key > 127 || !Number.isInteger(key)) return;
+    const nextRank = rank(id, key);
+    if (nextRank < ranks[key]) {
+      ranks[key] = nextRank;
+      best[key] = id;
+    }
+  };
+
+  const tables = resolveDrumMap(map, true);
+  const primary: (number | null)[] = Array.from({ length: 128 }, () => null);
+  const primaryRanks = Array.from({ length: 128 }, () => Infinity);
+  for (const [id] of maps.sounds) {
+    const key = tables.byId[id];
+    if (key < 128) compete(primary, primaryRanks, id, key);
+  }
+
+  const fallback: (number | null)[] = Array.from({ length: 128 }, () => null);
+  if (map && map.preset !== 'gm') {
+    const preset = loaded.presets.find(entry => entry.id === map.preset);
+    if (preset?.candidates) {
+      const silenced = new Set((map.keys ?? []).filter(([, key]) => key === null).map(([id]) => id));
+      const fallbackRanks = Array.from({ length: 128 }, () => Infinity);
+      for (const [id, candidateKeys] of preset.candidates) {
+        if (!isStandardArticulation(id) || silenced.has(id)) continue;
+        for (const candidateKey of candidateKeys) {
+          if (candidateKey >= 0 && candidateKey < 128 && primary[candidateKey] === null) {
+            compete(fallback, fallbackRanks, id, candidateKey);
+          }
+        }
+      }
+    }
+  }
+
+  const result: (number | null)[] = Array.from({ length: 128 }, (_, key) => primary[key] ?? fallback[key] ?? null);
+  if (overrides) {
+    for (const [keyStr, articulation] of Object.entries(overrides)) {
+      if (!/^\d{1,3}$/.test(keyStr)) continue;
+      const key = Number(keyStr);
+      if (key < 0 || key > 127) continue;
+      if (articulation === null) result[key] = null;
+      else if (typeof articulation === 'number' && isStandardArticulation(articulation)) result[key] = articulation;
+    }
+  }
+  return result;
+}

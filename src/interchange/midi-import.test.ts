@@ -1,6 +1,6 @@
 import { describe,expect,it } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
-import { defaultMidiImportOptions,formatMidiImportNote,importMidi,midiImportFileName,type MidiImport,type MidiImportNote,type MidiImportOptions } from './midi-import';
+import { defaultMidiImportOptions,formatMidiImportNote,importMidi,inspectMidiParts,midiImportFileName,type MidiImport,type MidiImportNote,type MidiImportOptions } from './midi-import';
 import { getMessage } from '../i18n';
 import { readMidiFile } from './midi-smf';
 import { exportGpInterchange,loadInterchangeScore } from './gp';
@@ -453,5 +453,80 @@ describe('importMidi drum hits that start in the short last quarter of a bar',()
     const {score}=run(drums(4,4,[[0,60],[160,60],[320,60],[480,60]]),{quantization:8,tuplets:'triplets',voices:4});
     expect(shape(beatsOf(score,0,0,0)).slice(0,4)).toEqual(['8t3*','8t3*','8t3*','4*']);
     expect(clockOf(score).every(difference=>difference===0)).toBe(true);expect(tied(score)).toEqual([]);
+  });
+});
+
+describe('importMidi drum mapping, drumParts and targetBars',()=>{
+  const tr=(lang:'en'|'et'|'de')=>(key:any,params?:any)=>getMessage(lang,key,params);
+  const clockOf=(score:model.Score)=>score.tracks.flatMap(item=>item.staves.flatMap(staff=>staff.bars.flatMap((bar,index)=>bar.voices.filter(voice=>!voice.isEmpty).map(voice=>voice.beats.reduce((sum,beat)=>sum+beat.playbackDuration,0)-score.masterBars[index].calculateDuration()))));
+
+  it('inspects MIDI parts and key counts across channels',()=>{
+    const raw:Ev[]=[[0,program(25,0)],[0,on(60,0)],[480,off(60,0)],[0,on(36,9)],[120,on(36,9)],[120,on(38,9)],[120,off(36,9)],[0,off(36,9)],[0,off(38,9)]];
+    const parts=inspectMidiParts(readMidiFile(file(0,480,[track(raw)])));
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toMatchObject({index:0,channel:0,program:25,defaultPercussion:false,noteCount:1,keys:[{key:60,count:1}]});
+    expect(parts[1]).toMatchObject({index:1,channel:9,defaultPercussion:true,noteCount:3,keys:[{key:36,count:2},{key:38,count:1}]});
+  });
+
+  it('imports a channel-0 MIDI part as drums when named in drumParts',()=>{
+    const unnamed=file(0,480,[track(line([[0,60,36],[480,60,38],[960,60,42]],0))]);
+    const {score,summary}=run(unnamed,{drumParts:[0]});
+    expect(score.tracks[0].isPercussion).toBe(true);
+    expect(score.tracks[0].name).toBe('Drums');
+    expect(score.tracks[0].playbackInfo.primaryChannel).toBe(9);
+    expect(summary.tracks[0].kind).toBe('drums');
+    const arts=beatsOf(score,0,0,0).filter(b=>b.notes.length).map(b=>b.notes[0].percussionArticulation);
+    expect(arts).toEqual([36,38,42]);
+  });
+
+  it('translates drum MIDI keys through non-GM drumMap presets, candidates and per-key overrides with deduplication',()=>{
+    // EZdrummer 3 layout: key 22 -> closed hi-hat (42, candidate), key 24 -> half hi-hat (92), key 36 -> kick (36), key 50 -> crash high choke (97), key 66 -> unmapped.
+    // Override 66 -> 52 (China), 36 -> null (skip), and map 48 & 50 both to 49 at the same beat (deduplicated).
+    const hits=line([[0,60,36],[480,60,22],[960,60,24],[1440,60,66],[1440,60,50]],9);
+    const bytes=file(1,480,[track(hits)]);
+    const base=run(bytes,{drumMap:{preset:'ezdrummer-3'}});
+    expect(base.summary.notes).toEqual([{code:'dropped_drum_notes',count:1}]);
+    expect(beatsOf(base.score,0,0,0).filter(b=>b.notes.length).map(b=>b.notes[0].percussionArticulation)).toEqual([36,42,92,97]);
+
+    const sameBeatDup=file(1,480,[track(line([[0,60,48],[0,60,50],[480,60,66],[960,60,36]],9))]);
+    const overridden=run(sameBeatDup,{
+      drumMap:{preset:'ezdrummer-3'},
+      drumKeyOverrides:{48:49,50:49,66:52,36:null},
+    });
+    expect(overridden.summary.notes).toEqual([{code:'dropped_drum_notes',count:1}]);
+    const notes0=beatsOf(overridden.score,0,0,0).filter(b=>b.notes.length);
+    expect(notes0.map(b=>b.notes.map(n=>n.percussionArticulation))).toEqual([[49],[52]]);
+  });
+
+  it('aligns imported hits to targetBars mixed meters, snaps humanized overhang into the final bar, and appends measures when notes extend past it',()=>{
+    // Target meters: 4/4 (1920 ticks @480), 5/4 (2400 ticks), 3/4 (1440 ticks) => total 5760 ticks @480 (11520 @960).
+    // Place a humanized final hit 26 ticks past 5760 (@480 => 53 ticks @960 => 13.25 units < 15 overhang).
+    const targetBars=[{numerator:4,denominator:4},{numerator:5,denominator:4},{numerator:3,denominator:4}];
+    const withinOverhang=file(0,960,[track(line([[0,120,36],[3840,120,38],[8640,120,42],[11573,120,49]],0))]);
+    const snapped=run(withinOverhang,{quantization:16,drumParts:[0],targetBars});
+    expect(snapped.score.masterBars).toHaveLength(3);
+    expect(snapped.score.masterBars.map(b=>`${b.timeSignatureNumerator}/${b.timeSignatureDenominator}`)).toEqual(['4/4','5/4','3/4']);
+    expect(clockOf(snapped.score).every(d=>d===0)).toBe(true);
+    expect(snapped.summary.notes).toEqual([]);
+    const lastHitBar2=beatsOf(snapped.score,0,2,0).filter(b=>b.notes.length).at(-1)!;
+    expect(lastHitBar2.notes[0].percussionArticulation).toBe(49);
+
+    // Notes clearly past the end (at tick 13440 @960 = 2 quarters into an extra 3/4 bar) append measures using the last target meter.
+    const pastEnd=file(0,960,[track(line([[0,120,36],[13440,120,57]],0))]);
+    const extended=run(pastEnd,{quantization:16,drumParts:[0],targetBars});
+    expect(extended.score.masterBars).toHaveLength(4);
+    expect(extended.score.masterBars[3].timeSignatureNumerator).toBe(3);
+    expect(extended.score.masterBars[3].timeSignatureDenominator).toBe(4);
+    expect(clockOf(extended.score).every(d=>d===0)).toBe(true);
+    expect(extended.summary.notes).toEqual([{code:'appended_measures',count:1}]);
+  });
+
+  it('formats appended_measures note in en, et and de',()=>{
+    expect(formatMidiImportNote({code:'appended_measures',count:1},tr('en'))).toBe('1 measure was appended to hold notes past the end of the current score.');
+    expect(formatMidiImportNote({code:'appended_measures',count:3},tr('en'))).toBe('3 measures were appended to hold notes past the end of the current score.');
+    expect(formatMidiImportNote({code:'appended_measures',count:1},tr('et'))).toBe('Praeguse partituuri lõpu järele lisati 1 takt, et mahutada hilisemad noodid.');
+    expect(formatMidiImportNote({code:'appended_measures',count:3},tr('et'))).toBe('Praeguse partituuri lõpu järele lisati 3 takti, et mahutada hilisemad noodid.');
+    expect(formatMidiImportNote({code:'appended_measures',count:1},tr('de'))).toBe('Am Ende der aktuellen Partitur wurde 1 Takt angefügt, um spätere Noten aufzunehmen.');
+    expect(formatMidiImportNote({code:'appended_measures',count:3},tr('de'))).toBe('Am Ende der aktuellen Partitur wurden 3 Takte angefügt, um spätere Noten aufzunehmen.');
   });
 });

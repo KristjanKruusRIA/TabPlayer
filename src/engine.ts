@@ -28,6 +28,7 @@ import { addTicks,trimStart,voiceTicks,writtenTicks,type Fraction } from './edit
 import { planMeasureMap,mapBackingMeasures } from './editor/measures';
 import { mapLyricsMeasures } from './editor/lyrics-measures';
 import { preparePasteMusic } from './editor/clipboard-paste';
+import { prepareImportTracks } from './interchange/import-tracks';
 import { shortenCrossingBeat } from './editor/fit-shorten';
 import { duplicateStylesheetTrack,remapStylesheetTracks,validateEngravingTracks } from './engraving/projection';
 import { mapEngravingBars } from './engraving/bar-widths';
@@ -454,6 +455,11 @@ export function* buildDocumentSteps(value: ProjectInput, canRedo = false, from?:
       for(let added=0;added<(prepared.addedTracks??0);added++)identities.push(`added/${index}/paste/${added}`);
       if(prepared.addedTracks)forgetTrackOrderedEntries(score);
       mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);documentSettings.engraving=mapEngravingBars(documentSettings.engraving,prepared.barMap.oldToNew);
+    }else if(edit.type==='importTracks'){
+      const prepared=prepareImportTracks(yield* rebuildSteps(score),edit);score=yield* rebuildSteps(prepared.score);
+      for(let added=0;added<prepared.addedTracks;added++)identities.push(`added/${index}/import/${added}`);
+      if(prepared.addedTracks)forgetTrackOrderedEntries(score);
+      mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);documentSettings.engraving=mapEngravingBars(documentSettings.engraving,prepared.barMap.oldToNew);
     }else if(edit.type==='transposeHarmony')score=prepareHarmonyTranspose(yield* rebuildSteps(score),edit,index);
     else {
       if(!previous&&['setOttava','setCrescendo','setFermata','setSustainPedal','setSimile','eraseSelection','cutSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','tieSelectionToEarlierPitch','insertMeasures','removeMeasures'].includes(edit.type))score=yield* rebuildSteps(score);
@@ -484,7 +490,7 @@ export function* buildDocumentSteps(value: ProjectInput, canRedo = false, from?:
 export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument):BuiltDocument {
   const project=validateProject(value);const next=defaultDocumentSettings();
   // A duplicated track's copied settings come from the full build, which tracks identities through track edits.
-  if(projectCommands(project).some(edit=>edit.type==='pasteMusic'||edit.type==='duplicateTrack'||edit.type==='setBacking'&&edit.backing?.referenceSync))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
+  if(projectCommands(project).some(edit=>edit.type==='pasteMusic'||edit.type==='importTracks'||edit.type==='duplicateTrack'||edit.type==='setBacking'&&edit.backing?.referenceSync))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
   const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project,false).score.masterBars.length);
   let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));

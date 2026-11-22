@@ -1,46 +1,14 @@
 import { useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { model } from '@coderline/alphatab';
 import { defaultMix } from '../document-settings';
 import type { ChannelMix, DrumMapRef, EditCommand } from '../edit-types';
-import { standardPercussionCatalog } from '../editor/percussion-catalog';
-import { drumPieces, instrumentHits, percussionInstruments, type Instrument } from '../instruments/drum-kit';
 import { catalogs, useI18n, type MessageKey } from '../i18n';
 import { BusyFieldset, CommitField, Segmented, busyGuard, busySelect } from '../ui';
 import maps from './drum-maps.json';
 import { SILENT, drumMapPresets, resolveDrumMap, withDrumMap } from './drum-map';
 import { drumMapFiles, exportedName, fileProblem, mapFromImport } from './drum-map-file';
+import { localizedDrumSoundGroups, type DrumSoundRow as Row } from './drum-map-groups';
 import { noteName } from './tuner';
-
-/** `piece` is the kit piece's label, which a flat list names the sound by; `sound` is the whole name that assistive technology reads. */
-interface Row { id: number; piece: string; name: string; sound: string; plain: number }
-interface Group { id: string; label: string; kit: boolean; rows: Row[] }
-
-let built: Group[] | undefined;
-/**
- * Every standard sound under the piece that owns it, in the order of the drum kit and then the other percussion, named as the note-entry
- * view names them (the piece's label and the hit's name). A sound nobody owns, which the catalogue does not have today, would be
- * listed last so that no row of a map is out of reach.
- */
-function groups(): Group[] {
-  if (built) return built;
-  const blank = new model.Track(), standard = new Set(maps.sounds.map(([id]) => id)), seen = new Set<number>(), out: Group[] = [];
-  const add = (items: readonly Instrument[], kit: boolean) => {
-    for (const item of items) {
-      const hits = instrumentHits(blank, item).filter(hit => standard.has(hit.id) && !seen.has(hit.id));
-      if (!hits.length) continue;
-      const plain = instrumentHits(blank, item).find(hit => hit.id === item.hit);
-      for (const hit of hits) seen.add(hit.id);
-      out.push({ id: item.id, label: item.label, kit, rows: hits.map(hit => ({ id: hit.id, piece: item.label, name: hit.name, sound: `${item.label} ${hit.name}`, plain: plain ? plain.id : hit.id })) });
-    }
-  };
-  add(drumPieces, true);
-  add(percussionInstruments, false);
-  const rest = [...standard].filter(id => !seen.has(id));
-  if (rest.length) out.push({ id: 'other', label: '', kit: false, rows: rest.map(id => ({ id, piece: '', name: standardPercussionCatalog.find(entry => entry.id === id)?.label ?? String(id), sound: standardPercussionCatalog.find(entry => entry.id === id)?.label ?? String(id), plain: id })) });
-  built = out;
-  return out;
-}
 const SOUND_COUNT = maps.sounds.length;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 /** What a key field holds as text: the key, or nothing for no sound. */
@@ -90,11 +58,7 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
     const key = Object.keys(catalogs.en).find(name => name.startsWith('drum_map.source_text_') && (catalogs.en as Record<string, string>)[name] === english);
     return key ? say(key, english) : english;
   };
-  const localized = (item: Row, groupId: string): Row => {
-    const name = say(`drum_sound.${item.id}`, item.name), piece = item.piece ? say(`drum_piece.${groupId}`, item.piece) : '';
-    return { ...item, piece, name, sound: piece ? `${piece} ${name}` : name };
-  };
-  const everything = groups().map(group => ({ ...group, label: group.label ? say(`drum_piece.${group.id}`, group.label) : '', rows: group.rows.map(item => localized(item, group.id)) }));
+  const everything = localizedDrumSoundGroups(t);
   const usedSet = new Set(used);
   const silent = used.filter(id => tables.byId[id] === SILENT).length;
   const shown = view === 'track' ? everything.map(group => ({ ...group, rows: group.rows.filter(row => usedSet.has(row.id)) })).filter(group => group.rows.length) : everything;

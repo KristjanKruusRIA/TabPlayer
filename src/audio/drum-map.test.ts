@@ -9,7 +9,7 @@ import { defaultMix, validateBackingSettings, validateMix } from '../document-se
 import { blankProject } from '../project';
 import fixture from '../../tests/drum-map-protocol.json';
 import { brandWords, namesBrand } from './drum-map-brands.test.helper';
-import { cleanDrumMap, drumMapPresets, drumMapProblem, isStandardArticulation, mapArticulationId, mappedKey, readPresets, resolveDrumMap, withDrumMap } from './drum-map';
+import { cleanDrumMap, drumMapPresets, drumMapProblem, isStandardArticulation, mapArticulationId, mappedKey, readPresets, resolveDrumMap, resolveInputDrumMap, withDrumMap } from './drum-map';
 
 const table = () => [...new Map(standardPercussionCatalog.map(entry => [entry.id, entry.outputMidiNumber])).entries()].sort((a, b) => a[0] - b[0]);
 
@@ -252,4 +252,82 @@ it('names the libraries nowhere in the app apart from the layouts file', () => {
   };
   walk('src'); walk('src-tauri/src');
   expect(found).toEqual([]);
+});
+
+it('inverts General MIDI and library layouts for incoming MIDI keys, including candidate keys and overrides', () => {
+  // General MIDI: exactly the 51 GM percussion keys 35..82 and 85..87 map to themselves; all other keys are unmapped.
+  const gm = resolveInputDrumMap(undefined);
+  expect(gm).toHaveLength(128);
+  for (let key = 0; key < 128; key++) {
+    const expected = (key >= 35 && key <= 82) || (key >= 85 && key <= 87) ? key : null;
+    expect(gm[key], `GM key ${key}`).toBe(expected);
+  }
+
+  // EZdrummer 3: primary rows and candidate fallback keys (closed hi-hat 22/61, open hi-hat 25/26, half-open 24, pedal 44/10).
+  const ezd = resolveInputDrumMap({ preset: 'ezdrummer-3' });
+  expect(ezd[36]).toBe(36);
+  expect(ezd[38]).toBe(38);
+  expect(ezd[42]).toBe(42);
+  expect(ezd[22]).toBe(42);
+  expect(ezd[61]).toBe(42);
+  expect(ezd[24]).toBe(92);
+  expect(ezd[25]).toBe(46);
+  expect(ezd[26]).toBe(46);
+  expect(ezd[21]).toBe(44);
+  expect(ezd[44]).toBe(44);
+  expect(ezd[10]).toBe(44);
+  expect(ezd[50]).toBe(97);
+  expect(ezd[66]).toBeNull();
+
+  // Superior Drummer 3: Ride edge 59 beats Ride 2 (59) via KIT_TECHNIQUES; kick 36 beats 35; China 52 beats Splash 55.
+  const sd3 = resolveInputDrumMap({ preset: 'superior-drummer-3' });
+  expect(sd3[36]).toBe(36);
+  expect(sd3[35]).toBe(35);
+  expect(sd3[59]).toBe(93);
+  expect(sd3[52]).toBe(52);
+  expect(sd3[118]).toBe(94);
+
+  // GetGood Drums Modern & Massive: kick 24 -> 36, snare 26 -> 38, shared rack tom 33 -> 48, ride 72/73/74 -> 51/59/53.
+  const mm = resolveInputDrumMap({ preset: 'ggd-modern-and-massive' });
+  expect(mm[24]).toBe(36);
+  expect(mm[26]).toBe(38);
+  expect(mm[30]).toBe(37);
+  expect(mm[33]).toBe(48);
+  expect(mm[47]).toBe(42);
+  expect(mm[45]).toBe(42);
+  expect(mm[43]).toBe(44);
+  expect(mm[54]).toBe(46);
+  expect(mm[72]).toBe(51);
+  expect(mm[73]).toBe(93);
+  expect(mm[74]).toBe(53);
+
+  // GetGood Drums Invasion and Architects: distinct tom layouts and primary cymbals.
+  const inv = resolveInputDrumMap({ preset: 'ggd-invasion' });
+  expect(inv[24]).toBe(36);
+  expect(inv[22]).toBe(36);
+  expect(inv[26]).toBe(38);
+  expect(inv[33]).toBe(50);
+  expect(inv[34]).toBe(48);
+  expect(inv[35]).toBe(47);
+  expect(inv[36]).toBe(45);
+  expect(inv[37]).toBe(43);
+  expect(inv[38]).toBe(41);
+
+  const arch = resolveInputDrumMap({ preset: 'ggd-okw-architects' });
+  expect(arch[24]).toBe(36);
+  expect(arch[35]).toBe(48);
+  expect(arch[36]).toBe(43);
+  expect(arch[37]).toBe(41);
+  expect(arch[64]).toBe(94);
+
+  // Custom DrumMapRef + per-key overrides (remap key, skip key, ignore invalid key/id).
+  const overridden = resolveInputDrumMap(
+    { preset: 'ezdrummer-3', keys: [[49, 100], [57, null]] },
+    { 66: 52, 36: null, 127: 38, 999: 38 as unknown as number },
+  );
+  expect(overridden[100]).toBe(49);
+  expect(overridden[57]).toBeNull();
+  expect(overridden[66]).toBe(52);
+  expect(overridden[36]).toBeNull();
+  expect(overridden[127]).toBe(38);
 });

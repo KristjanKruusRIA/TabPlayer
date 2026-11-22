@@ -42,6 +42,7 @@ const shapes:Record<string,readonly string[]>={
   setSelectionStrokes:['selection','technique','pattern'],setSelectionTies:['selection','tied'],tieSelectionToEarlierPitch:['selection'],
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
   pasteMusic:['clip','options'],
+  importTracks:['clip'],
   setEngraving:['engraving'],setPageLayout:['layout'],setMaster:['master'],
   setBeatText:['target','text'],setHarmonyChord:['target','chord','fillEmptyBeat'],setScaleDiagram:['target','diagram'],
   transposeHarmony:['selection','interval','includeKeySignatures','includeChords'],
@@ -195,7 +196,8 @@ export function validateParityCommand(value:unknown):void {
   const preserving=type==='setScoreInfo'&&Object.hasOwn(candidate,'preserveOpeningMark');
   const hasCrossVoice=type==='setStringCount'&&Object.hasOwn(candidate,'crossVoice');
   const hasShorten=type==='fitVoice'&&Object.hasOwn(candidate,'shorten');
-  const edit=exact(value,['type',...shapes[type],...(named?['tuningName']:[]),...(preserving?['preserveOpeningMark']:[]),...(hasKeep?['keepPitch']:[]),...(hasCrossVoice?['crossVoice']:[]),...(hasShorten?['shorten']:[])]);
+  const hasTargetTrack=type==='importTracks'&&Object.hasOwn(candidate,'targetTrack');
+  const edit=exact(value,['type',...shapes[type],...(named?['tuningName']:[]),...(preserving?['preserveOpeningMark']:[]),...(hasKeep?['keepPitch']:[]),...(hasCrossVoice?['crossVoice']:[]),...(hasShorten?['shorten']:[]),...(hasTargetTrack?['targetTrack']:[])]);
   if(hasShorten&&edit.shorten!==true)throw new Error('Invalid edit fields.');
   if(preserving&&typeof edit.preserveOpeningMark!=='boolean')throw new Error('Invalid edit fields.');
   if(hasCrossVoice)flag(edit.crossVoice);
@@ -234,6 +236,7 @@ export function validateParityCommand(value:unknown):void {
   if(type==='insertMeasures'){integer(edit.beforeBar);integer(edit.count,1000);if(edit.count===0)throw new Error('Insert at least one measure.');}
   if(type==='removeMeasures'){integer(edit.firstBar);integer(edit.lastBar);if(Number(edit.firstBar)>Number(edit.lastBar))throw new Error('Invalid measure range.');}
   if(type==='pasteMusic'){validateMusicClipEnvelope(edit.clip);pasteOptions(edit.options);}
+  if(type==='importTracks'){validateMusicClipEnvelope(edit.clip);if(hasTargetTrack)integer(edit.targetTrack);}
   if(type==='setEngraving')validateEngraving(edit.engraving);
   if(type==='setPageLayout')validatePageLayout(edit.layout);
   if(type==='setMaster'){const problem=masterProblem(edit.master);if(problem)throw new Error(problem);}

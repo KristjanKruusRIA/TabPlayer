@@ -3,8 +3,14 @@ import { afterEach,expect,it,vi } from 'vitest';
 import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { Settings } from '@coderline/alphatab';
-import { MidiImportDialog } from './MidiImportDialog';
+import { MidiImportDialog, type MidiImportDialogProps } from './MidiImportDialog';
+import { readMusicClip, scoreFromMusicClip } from '../editor/clipboard-source';
+import { defaultMix } from '../document-settings';
+import type { EditCommand } from '../edit-types';
+import { buildDocument, previewEdit } from '../engine';
 import { loadInterchangeScore } from '../interchange/gp';
+import type { ImportTracksCommand } from '../interchange/import-tracks';
+import { blankProject } from '../project';
 import { setLanguagePreference } from '../i18n';
 
 afterEach(() => { cleanup(); setLanguagePreference('en'); });
@@ -144,4 +150,222 @@ it('translates MIDI import summary notes across supported languages', async () =
   const de = setup();
   choose(de.input, midiUnplayable);
   await waitFor(() => expect(screen.getByText('1 Gitarren- oder Bass-Part enthält Noten, die auf Saiten nicht gegriffen werden können, und wurde daher nur als Notation importiert.')).toBeInTheDocument());
+});
+
+const vlq = (value: number) => {
+  const out = [value & 0x7f];
+  while ((value >>= 7) > 0) out.unshift((value & 0x7f) | 0x80);
+  return out;
+};
+const makeTrack = (events: [number, number[]][]) => {
+  const body = events.flatMap(([delta, data]) => [...vlq(delta), ...data]);
+  body.push(0, 0xff, 0x2f, 0);
+  return [0x4d, 0x54, 0x72, 0x6b, body.length >>> 24, (body.length >> 16) & 255, (body.length >> 8) & 255, body.length & 255, ...body];
+};
+const makeMidi = (format: number, division: number, tracks: number[][]) =>
+  new Uint8Array([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, format, 0, tracks.length, division >> 8, division & 255, ...tracks.flat()]);
+const noteLine = (notes: [number, number, number][], channel = 0): [number, number[]][] => {
+  const events = notes
+    .flatMap(([start, len, key]) => [[start, [0x90 | channel, key, 100]], [start + len, [0x80 | channel, key, 0]]] as [number, number[]][])
+    .sort((a, b) => a[0] - b[0] || (a[1][0] & 0xf0) - (b[1][0] & 0xf0));
+  let last = 0;
+  return events.map(([at, data]) => {
+    const delta = at - last;
+    last = at;
+    return [delta, data] as [number, number[]];
+  });
+};
+
+const setupWithScore = (extra: Partial<MidiImportDialogProps> = {}) => {
+  const project = {
+    ...blankProject(),
+    edits: [{ type: 'addPercussionTrack', name: 'Drumkit', program: 0 }] as EditCommand[],
+  };
+  void defaultMix;
+  const built = buildDocument(project);
+  const onImport = vi.fn(async () => true);
+  const onImportIntoScore = vi.fn(async (_cmd: ImportTracksCommand) => true);
+  const onClose = vi.fn();
+  render(
+    <MidiImportDialog
+      busy={false}
+      currentScore={built.score}
+      selectedTrack={0}
+      onImport={onImport}
+      onImportIntoScore={onImportIntoScore}
+      onClose={onClose}
+      {...extra}
+    />,
+  );
+  return {
+    built,
+    onImport,
+    onImportIntoScore,
+    onClose,
+    input: document.querySelector<HTMLInputElement>('input[type="file"]')!,
+    importButton: document.querySelector<HTMLButtonElement>('button[type="submit"]')!,
+  };
+};
+
+it('shows destination choices with a current score, disables add/replace when locked, and handles channel-10 on melodic replace', async () => {
+  const lockedView = setupWithScore({ locked: true });
+  const dest = screen.getByRole('radiogroup', { name: 'Destination' });
+  expect(within(dest).getByRole('radio', { name: 'New score' })).toBeChecked();
+  expect(within(dest).getByRole('radio', { name: 'Add to current score' })).toHaveAttribute('aria-disabled', 'true');
+  expect(within(dest).getByRole('radio', { name: 'Replace track' })).toHaveAttribute('aria-disabled', 'true');
+  expect(screen.getByText('Unlock editing on the current score to add or replace tracks.')).toBeInTheDocument();
+  cleanup();
+
+  // Unlocked score with channel-10 MIDI: replacing track 0 (melodic) shows mismatch and blocks Import; track 1 (drums) succeeds.
+  const drumCh10 = makeMidi(0, 480, [makeTrack(noteLine([[0, 60, 36], [480, 60, 38]], 9))]);
+  const { input, importButton, onImportIntoScore } = setupWithScore();
+  choose(input, drumCh10, 'kit.mid');
+  await waitFor(() => expect(status()).toHaveTextContent('Format 0, 1 part, 1 measure'));
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Destination' })).getByRole('radio', { name: 'Replace track' }));
+  // Smart default selects Drumkit (track 1)!
+  expect(screen.getByLabelText('Target track')).toHaveValue('1');
+  expect(screen.getByLabelText('Import as drums')).toBeChecked();
+  expect(screen.getByLabelText('Import as drums')).toHaveAttribute('aria-disabled', 'true');
+
+  // Switch Target track to Guitar (track 0): channel 10 drum MIDI is refused.
+  fireEvent.change(screen.getByLabelText('Target track'), { target: { value: '0' } });
+  await waitFor(() => expect(status()).toHaveTextContent('Choose a drum target track to import a channel 10 drum part'));
+  expect(importButton).toHaveAttribute('aria-disabled', 'true');
+
+  // Switch back to Drumkit (track 1) and submit importTracks command.
+  fireEvent.change(screen.getByLabelText('Target track'), { target: { value: '1' } });
+  await waitFor(() => expect(importButton).not.toHaveAttribute('aria-disabled'));
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onImportIntoScore).toHaveBeenCalledTimes(1));
+  expect(onImportIntoScore.mock.calls[0][0]).toMatchObject({ type: 'importTracks', targetTrack: 1 });
+});
+
+it('supports Import as drums on channel-0 MIDI, per-part drum toggles, and appending tracks following current score meters', async () => {
+  const multiCh0 = makeMidi(1, 480, [
+    makeTrack([[0, [0xc0, 25]], ...noteLine([[0, 480, 60]], 0)]),
+    makeTrack([[0, [0xff, 0x03, 5, ...[...'Drums'].map(c => c.charCodeAt(0))]], ...noteLine([[0, 60, 36], [480, 60, 38]], 0)]),
+  ]);
+  const { input, importButton, onImportIntoScore } = setupWithScore();
+  choose(input, multiCh0, 'song.mid');
+  await waitFor(() => expect(status()).toHaveTextContent('Format 1, 2 parts'));
+
+  // Toggle only the second part as drums.
+  const secondPartToggle = screen.getByRole('checkbox', { name: 'Import Drums as drums' });
+  fireEvent.click(secondPartToggle);
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Drums: drums, 2 notes'));
+  expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Acoustic Guitar (steel): guitar tab, 1 note');
+
+  // Switch Destination to Add to current score and import.
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Destination' })).getByRole('radio', { name: 'Add to current score' }));
+  expect(screen.getByText('Follows the current score\'s measures and time signatures.')).toBeInTheDocument();
+  await waitFor(() => expect(importButton).not.toHaveAttribute('aria-disabled'));
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onImportIntoScore).toHaveBeenCalledTimes(1));
+  const cmd = onImportIntoScore.mock.calls[0][0];
+  expect(cmd.targetTrack).toBeUndefined();
+  const clipScore = scoreFromMusicClip(readMusicClip(cmd.clip));
+  expect(clipScore.tracks).toHaveLength(2);
+  expect(clipScore.tracks[1].isPercussion).toBe(true);
+});
+
+it('offers source drum map presets, file loading with error handling, per-key remapping, skipping, reset, and Escape disclosure handling', async () => {
+  // Channel-0 drum MIDI with key 22 (EZdrummer closed hat candidate), key 36 (kick), and key 66 (unmapped in EZdrummer 3).
+  const ch0Drums = makeMidi(0, 480, [makeTrack(noteLine([[0, 60, 36], [480, 60, 22], [960, 60, 66]], 0))]);
+  let nextMap: { name: string; base: string | null; keys: [number, number | null][] } | Error | null = {
+    name: 'Studio Map',
+    base: 'gm',
+    keys: [[52, 66], [36, 36]],
+  };
+  const onImportDrumMap = vi.fn(async () => {
+    if (nextMap instanceof Error) throw nextMap;
+    return nextMap;
+  });
+  const { input, importButton, onImportIntoScore, onClose } = setupWithScore({ onImportDrumMap });
+  choose(input, ch0Drums, 'drums.mid');
+  await waitFor(() => expect(status()).toHaveTextContent('Format 0, 1 part'));
+
+  // Enable Import as drums.
+  fireEvent.click(screen.getByLabelText('Import as drums'));
+  const mapSelect = screen.getByLabelText('Source drum map');
+  expect(mapSelect).toHaveValue('gm');
+
+  // Switch to EZdrummer 3 layout.
+  fireEvent.change(mapSelect, { target: { value: 'ezdrummer-3' } });
+  expect(screen.getByText(/Layout numbers come from third-party notes/)).toBeInTheDocument();
+  expect(screen.getByText('2 of 3 MIDI keys mapped; 1 skipped.')).toBeInTheDocument();
+
+  // Open Map MIDI keys and verify Escape closes details before closing the dialog.
+  const summary = screen.getByText('Map MIDI keys (3, 1 unmapped)');
+  fireEvent.click(summary);
+  const details = summary.closest('details')!;
+  expect(details).toHaveAttribute('open');
+  const key66Select = screen.getByLabelText('Drum sound for MIDI key 66 (F#4)');
+  expect(key66Select).toHaveValue('');
+  key66Select.focus();
+  fireEvent.keyDown(key66Select, { key: 'Escape' });
+  expect(details).not.toHaveAttribute('open');
+  expect(summary).toHaveFocus();
+  expect(onClose).not.toHaveBeenCalled();
+
+  // Re-open, remap key 66 -> China (52), skip key 36, then reset key 36 and verify focus returns to key 36 select.
+  fireEvent.click(summary);
+  fireEvent.change(screen.getByLabelText('Drum sound for MIDI key 66 (F#4)'), { target: { value: '52' } });
+  const key36Select = screen.getByLabelText('Drum sound for MIDI key 36 (C2)');
+  fireEvent.change(key36Select, { target: { value: '' } });
+  expect(screen.getByText('Map MIDI keys (3, 2 changed)')).toBeInTheDocument();
+
+  const resetKey36 = screen.getByRole('button', { name: 'Reset MIDI key 36 to the source map' });
+  fireEvent.click(resetKey36);
+  expect(key36Select).toHaveValue('36');
+  expect(key36Select).toHaveFocus();
+  expect(screen.getByText('3 of 3 MIDI keys mapped.')).toBeInTheDocument();
+
+  // Reset all overrides.
+  fireEvent.click(screen.getByRole('button', { name: 'Reset key changes' }));
+  expect(screen.getByText('2 of 3 MIDI keys mapped; 1 skipped.')).toBeInTheDocument();
+
+  // Load a drum map file: first test error alert, then test valid import mapping key 66 -> 52.
+  nextMap = new Error('bad_shape');
+  fireEvent.click(screen.getByRole('button', { name: 'Load map file…' }));
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('not a TabPlayer drum map'));
+
+  nextMap = { name: 'Studio Map', base: 'gm', keys: [[52, 66], [66, null]] };
+  fireEvent.click(screen.getByRole('button', { name: 'Load map file…' }));
+  await waitFor(() => expect(mapSelect).toHaveValue('__file__'));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Drum sound for MIDI key 66 (F#4)')).toHaveValue('52');
+
+  // Replace Drumkit (track 1) and verify resulting track plays China (52) & Kick (36).
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Destination' })).getByRole('radio', { name: 'Replace track' }));
+  await waitFor(() => expect(importButton).not.toHaveAttribute('aria-disabled'));
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onImportIntoScore).toHaveBeenCalledTimes(1));
+  const cmd = onImportIntoScore.mock.calls[0][0];
+  expect(cmd.targetTrack).toBe(1);
+  const project = { ...blankProject(), edits: [{ type: 'addPercussionTrack' as const, name: 'Drumkit', program: 0 }] };
+  const applied = previewEdit(project, cmd);
+  const notes = applied.score.tracks[1].staves[0].bars[0].voices[0].beats.flatMap(b => b.notes.map(n => n.percussionArticulation));
+  expect(notes).toEqual([36, 52]);
+});
+
+it('translates new destination and drum mapping controls into Estonian and German', () => {
+  try {
+    setLanguagePreference('et');
+    const et = setupWithScore();
+    expect(screen.getByRole('radiogroup', { name: 'Sihtkoht' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Impordi trummidena')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Impordi trummidena'));
+    expect(screen.getByLabelText('Lähte-trummikaart')).toBeInTheDocument();
+    cleanup();
+
+    setLanguagePreference('de');
+    setupWithScore();
+    expect(screen.getByRole('radiogroup', { name: 'Ziel' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Als Schlagzeug importieren')).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Als Schlagzeug importieren'));
+    expect(screen.getByLabelText('Quell-Drum-Map')).toBeInTheDocument();
+    void et;
+  } finally {
+    setLanguagePreference('en');
+  }
 });

@@ -122,6 +122,7 @@ describe('DiImportDialog', () => {
       minPitch: 36,
       maxPitch: 86,
       suppressOvertones: true,
+      openTuning: [62, 57, 53, 48, 43, 36],
     });
     await waitFor(() =>
       expect(status()).toHaveTextContent('3 notes (2 palm-muted), 1 measure at 140 BPM.'),
@@ -232,6 +233,78 @@ describe('DiImportDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Choose audio file…' }));
     await waitFor(() =>
       expect(status()).toHaveTextContent('The audio file could not be decoded: invalid WAV chunk'),
+    );
+  });
+
+  it('supports custom arbitrary tuning via TuningDialog and Escape closes TuningDialog alone', async () => {
+    const transcriber = makeTranscriber([
+      {
+        startSec: 0.2,
+        endSec: 0.4,
+        pitch: 26, // D1 — only reachable on Drop D1 custom tuning, not presets
+        onsetConfidence: 0.85,
+        frameConfidence: 0.72,
+        velocity: 100,
+        palmMuteScore: 0.85,
+        bendSemitones: 0,
+      },
+      {
+        startSec: 0.62857,
+        endSec: 0.9,
+        pitch: 52, // E3 open string
+        onsetConfidence: 0.82,
+        frameConfidence: 0.78,
+        velocity: 96,
+        palmMuteScore: 0.08,
+        bendSemitones: 0,
+      },
+    ]);
+    const onClose = vi.fn();
+    render(
+      <DiImportDialog
+        busy={false}
+        transcriber={transcriber}
+        onImport={vi.fn(async () => true)}
+        onClose={onClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Choose audio file…' }));
+    await waitFor(() => expect(transcriber.decode).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(status()).toHaveTextContent('1 note (0 palm-muted), 1 measure at 140 BPM.'),
+    );
+
+    // Open TuningDialog via Custom…, test Escape closes TuningDialog without closing DiImportDialog.
+    fireEvent.click(screen.getByRole('button', { name: 'Custom…' }));
+    const tuningDialog = screen.getByRole('dialog', { name: 'Tuning' });
+    fireEvent.keyDown(tuningDialog, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Tuning' })).not.toBeInTheDocument());
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Open TuningDialog again and type custom Drop D1 tuning: E3 B2 G2 D2 A1 D1 ([52, 47, 43, 38, 33, 26]).
+    fireEvent.click(screen.getByRole('button', { name: 'Custom…' }));
+    const notesInput = screen.getByLabelText('Notes, high to low');
+    fireEvent.change(notesInput, { target: { value: 'E3 B2 G2 D2 A1 D1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use tuning' }));
+
+    await waitFor(() => expect(transcriber.decode).toHaveBeenCalledTimes(2));
+    expect(transcriber.decode).toHaveBeenLastCalledWith('di-1', {
+      onsetThreshold: 0.45,
+      frameThreshold: 0.28,
+      minNoteMs: 55,
+      minPitch: 26,
+      maxPitch: 76,
+      suppressOvertones: true,
+      openTuning: [52, 47, 43, 38, 33, 26],
+    });
+    const tuningSelect = screen.getByLabelText('Guitar / bass tuning') as HTMLSelectElement;
+    expect(tuningSelect.value).toBe('__custom__');
+    expect(tuningSelect.options[tuningSelect.selectedIndex].textContent).toBe(
+      'Custom (E3 B2 G2 D2 A1 D1)',
+    );
+    await waitFor(() =>
+      expect(status()).toHaveTextContent('2 notes (1 palm-muted), 1 measure at 140 BPM.'),
     );
   });
 });

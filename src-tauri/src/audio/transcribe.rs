@@ -1,8 +1,8 @@
 //! Local, offline automatic transcription for DI guitar and bass audio tracks.
 //!
-//! Uses Spotify's embedded Basic Pitch ONNX model (`nmp.onnx`, ICASSP 2022) executed via pure-Rust `tract-onnx`,
-//! followed by rock/metal DI post-processing (tight chug re-articulation, overtone ghost suppression, palm-mute
-//! attack/brightness scoring, and beat-grid tempo estimation).
+//! Combines TabPlayer's multi-resolution harmonic-stack ONNX model (`di_guitar_net.onnx`, `DiGuitarNetV4`)
+//! with Spotify's Basic Pitch ONNX model (`nmp.onnx`, ICASSP 2022) executed in parallel via pure-Rust `tract-onnx`,
+//! followed by Stage 1 tail-gating, self-similarity riff pooling, fretboard playability filtering, and palm-mute / bend extraction.
 
 use crate::audio::decode::decode_audio;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use std::{
     path::Path,
     sync::{
         Arc, Mutex, OnceLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 use tauri::State;
@@ -40,18 +40,29 @@ const HOP_SIZE: usize = AUDIO_N_SAMPLES - OVERLAP_LEN; // 36_164
 const N_PITCH_BINS: usize = 88;
 const N_CONTOUR_BINS: usize = 264;
 const MIDI_OFFSET: usize = 21;
-const MIN_PITCH_IDX: usize = 0;
-const MAX_PITCH_IDX: usize = N_PITCH_BINS - 1;
-const ENERGY_TOL_FRAMES: usize = 4;
-const N_DIFF_ONSET: usize = 2;
 const CONTOUR_BINS_PER_SEMITONE: usize = 3;
 const RESAMPLE_RADIUS: isize = 16;
+
+const DI_N_LO: usize = 4096;
+const DI_N_MID: usize = 1024;
+const DI_N_HI: usize = 512;
+const DI_MIDI_MIN: usize = 24;
+const DI_N_SEMITONES: usize = 72;
+const DI_SUB_BINS: usize = 3;
+const DI_N_FREQ_BINS: usize = DI_N_SEMITONES * DI_SUB_BINS; // 216
+const DI_CHUNK_FRAMES: usize = 344;
+const DI_CHUNK_SAMPLES: usize = (DI_CHUNK_FRAMES - 1) * FFT_HOP; // 87_808
+const DI_OVERLAP_FRAMES: usize = 44;
+const DI_HOP_FRAMES: usize = DI_CHUNK_FRAMES - DI_OVERLAP_FRAMES; // 300
+const DI_HOP_SAMPLES: usize = DI_HOP_FRAMES * FFT_HOP; // 76_800
+const DI_N_CHANNELS: usize = 8;
 
 const OUTLET_NOTE: &str = "StatefulPartitionedCall:1";
 const OUTLET_ONSET: &str = "StatefulPartitionedCall:2";
 const OUTLET_CONTOUR: &str = "StatefulPartitionedCall:0";
 
 static NMP_ONNX: &[u8] = include_bytes!("../../assets/basic-pitch/nmp.onnx");
+static DI_NET_ONNX: &[u8] = include_bytes!("../../assets/di-guitar-net/di_guitar_net.onnx");
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,17 +85,20 @@ pub struct DiDecodeParams {
     pub min_pitch: u8,
     pub max_pitch: u8,
     pub suppress_overtones: bool,
+    #[serde(default)]
+    pub open_tuning: Vec<u8>,
 }
 
 impl Default for DiDecodeParams {
     fn default() -> Self {
         Self {
             onset_threshold: 0.45,
-            frame_threshold: 0.30,
+            frame_threshold: 0.28,
             min_note_ms: 55.0,
             min_pitch: 28,
             max_pitch: 96,
             suppress_overtones: true,
+            open_tuning: Vec::new(),
         }
     }
 }
@@ -102,6 +116,17 @@ pub struct TranscribedDiNote {
     pub bend_semitones: f32,
 }
 
+#[derive(Default)]
+struct DiNetPosteriors {
+    n_frames: usize,
+    /// Shape `[72, n_frames]` row-major `(semitone_bin, frame)` for MIDI `24..=95`.
+    frame_p: Vec<f32>,
+    /// Shape `[72, n_frames]` row-major `(semitone_bin, frame)` for MIDI `24..=95`.
+    onset_p: Vec<f32>,
+    attack_p: Vec<f32>,
+    pm_p: Vec<f32>,
+}
+
 pub(crate) struct CachedDiAnalysis {
     analysis_id: String,
     mono_22k: Vec<f32>,
@@ -112,6 +137,7 @@ pub(crate) struct CachedDiAnalysis {
     /// Shape `[n_frames * 264]`, row-major `(frame, contour_bin)`.
     contours: Vec<f32>,
     n_frames: usize,
+    di_net: DiNetPosteriors,
     ref_attack_rms: f32,
 }
 
@@ -132,6 +158,7 @@ impl Default for DiTranscriptionState {
 type TractPlan = Arc<TypedSimplePlan<TypedModel>>;
 
 static MODEL_PLAN: OnceLock<Result<TractPlan, String>> = OnceLock::new();
+static DI_NET_PLAN: OnceLock<Result<TractPlan, String>> = OnceLock::new();
 
 fn build_plan() -> Result<TractPlan, String> {
     let err = |e: tract_onnx::prelude::TractError| format!("model_failed: {e}");
@@ -164,6 +191,46 @@ fn build_plan() -> Result<TractPlan, String> {
 
 fn shared_plan() -> Result<&'static TractPlan, String> {
     match MODEL_PLAN.get_or_init(build_plan) {
+        Ok(plan) => Ok(plan),
+        Err(message) => Err(message.clone()),
+    }
+}
+
+fn build_di_net_plan() -> Result<TractPlan, String> {
+    let err = |e: tract_onnx::prelude::TractError| format!("model_failed: {e}");
+    let mut model = tract_onnx::onnx()
+        .model_for_read(&mut Cursor::new(DI_NET_ONNX))
+        .map_err(err)?;
+    let outlets = model.output_outlets().map_err(err)?.to_vec();
+    let find = |label: &str| {
+        outlets
+            .iter()
+            .copied()
+            .find(|&outlet| model.outlet_label(outlet) == Some(label))
+            .ok_or_else(|| format!("model_failed: missing di_net output outlet {label}"))
+    };
+    let selected = [
+        find("frame_logits")?,
+        find("onset_logits")?,
+        find("attack_logits")?,
+        find("palm_mute_logits")?,
+    ];
+    model.set_output_outlets(&selected).map_err(err)?;
+    let optimized = model
+        .with_input_fact(
+            0,
+            InferenceFact::dt_shape(
+                f32::datum_type(),
+                tvec!(1, DI_N_CHANNELS, DI_N_FREQ_BINS, DI_CHUNK_FRAMES),
+            ),
+        )
+        .and_then(InferenceModelExt::into_optimized)
+        .map_err(err)?;
+    Ok(Arc::new(optimized.into_runnable().map_err(err)?))
+}
+
+fn shared_di_net_plan() -> Result<&'static TractPlan, String> {
+    match DI_NET_PLAN.get_or_init(build_di_net_plan) {
         Ok(plan) => Ok(plan),
         Err(message) => Err(message.clone()),
     }
@@ -288,53 +355,85 @@ fn infer_posteriorgrams(mono_22k: &[f32]) -> Result<(Vec<f32>, Vec<f32>, Vec<f32
     padded.resize(HALF_OVERLAP_SAMPLES, 0.0_f32);
     padded.extend_from_slice(&model_audio);
 
-    let mut notes = Vec::new();
-    let mut onsets = Vec::new();
-    let mut contours = Vec::new();
-    let mut window_buf = vec![0.0_f32; AUDIO_N_SAMPLES];
+    let offsets: Vec<usize> = (0..padded.len()).step_by(HOP_SIZE).collect();
+    let n_chunks = offsets.len();
+    let next_idx = AtomicUsize::new(0);
+    let n_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(1, 4)
+        .min(n_chunks);
+    let slots: Vec<Mutex<Option<Result<(Vec<f32>, Vec<f32>, Vec<f32>), String>>>> =
+        (0..n_chunks).map(|_| Mutex::new(None)).collect();
 
-    let mut offset = 0usize;
-    while offset < padded.len() {
-        let take = (padded.len() - offset).min(AUDIO_N_SAMPLES);
-        window_buf[..take].copy_from_slice(&padded[offset..offset + take]);
-        if take < AUDIO_N_SAMPLES {
-            window_buf[take..].fill(0.0);
-        }
-
-        let input = Tensor::from_shape(&[1, AUDIO_N_SAMPLES, 1], &window_buf)
+    let extract_out = |tensor: &Tensor, expected_cols: usize| -> Result<Vec<f32>, String> {
+        let view = tensor
+            .to_array_view::<f32>()
             .map_err(|e| format!("model_failed: {e}"))?;
-        let outputs = plan
-            .run(tvec!(input.into()))
-            .map_err(|e| format!("model_failed: {e}"))?;
-        if outputs.len() != 3 {
+        let shape = view.shape();
+        if shape != [1, ANNOT_N_FRAMES, expected_cols] {
             return Err(format!(
-                "model_failed: expected 3 outputs, got {}",
-                outputs.len()
+                "model_failed: unexpected output shape {shape:?} (expected [1, {ANNOT_N_FRAMES}, {expected_cols}])"
             ));
         }
+        let slice = view
+            .as_slice()
+            .ok_or_else(|| "model_failed: non-contiguous output tensor".to_string())?;
+        let start = HALF_OVERLAP_FRAMES * expected_cols;
+        let end = (ANNOT_N_FRAMES - HALF_OVERLAP_FRAMES) * expected_cols;
+        Ok(slice[start..end].to_vec())
+    };
 
-        let extract = |index: usize, expected_cols: usize| -> Result<Vec<f32>, String> {
-            let view = outputs[index]
-                .to_array_view::<f32>()
-                .map_err(|e| format!("model_failed: {e}"))?;
-            let shape = view.shape();
-            if shape != [1, ANNOT_N_FRAMES, expected_cols] {
-                return Err(format!(
-                    "model_failed: unexpected output shape {shape:?} (expected [1, {ANNOT_N_FRAMES}, {expected_cols}])"
-                ));
-            }
-            let slice = view
-                .as_slice()
-                .ok_or_else(|| "model_failed: non-contiguous output tensor".to_string())?;
-            let start = HALF_OVERLAP_FRAMES * expected_cols;
-            let end = (ANNOT_N_FRAMES - HALF_OVERLAP_FRAMES) * expected_cols;
-            Ok(slice[start..end].to_vec())
-        };
+    std::thread::scope(|scope| {
+        for _ in 0..n_threads {
+            scope.spawn(|| {
+                let mut window_buf = vec![0.0_f32; AUDIO_N_SAMPLES];
+                loop {
+                    let wi = next_idx.fetch_add(1, Ordering::Relaxed);
+                    if wi >= n_chunks {
+                        break;
+                    }
+                    let offset = offsets[wi];
+                    let take = (padded.len() - offset).min(AUDIO_N_SAMPLES);
+                    window_buf[..take].copy_from_slice(&padded[offset..offset + take]);
+                    if take < AUDIO_N_SAMPLES {
+                        window_buf[take..].fill(0.0);
+                    }
+                    let res = (|| {
+                        let input = Tensor::from_shape(&[1, AUDIO_N_SAMPLES, 1], &window_buf)
+                            .map_err(|e| format!("model_failed: {e}"))?;
+                        let outputs = plan
+                            .run(tvec!(input.into()))
+                            .map_err(|e| format!("model_failed: {e}"))?;
+                        if outputs.len() != 3 {
+                            return Err(format!(
+                                "model_failed: expected 3 outputs, got {}",
+                                outputs.len()
+                            ));
+                        }
+                        Ok((
+                            extract_out(&outputs[0], N_PITCH_BINS)?,
+                            extract_out(&outputs[1], N_PITCH_BINS)?,
+                            extract_out(&outputs[2], N_CONTOUR_BINS)?,
+                        ))
+                    })();
+                    *slots[wi].lock().unwrap_or_else(|e| e.into_inner()) = Some(res);
+                }
+            });
+        }
+    });
 
-        notes.extend_from_slice(&extract(0, N_PITCH_BINS)?);
-        onsets.extend_from_slice(&extract(1, N_PITCH_BINS)?);
-        contours.extend_from_slice(&extract(2, N_CONTOUR_BINS)?);
-        offset += HOP_SIZE;
+    let mut notes = Vec::with_capacity(n_chunks * UNWRAPPED_WINDOW_FRAMES * N_PITCH_BINS);
+    let mut onsets = Vec::with_capacity(n_chunks * UNWRAPPED_WINDOW_FRAMES * N_PITCH_BINS);
+    let mut contours = Vec::with_capacity(n_chunks * UNWRAPPED_WINDOW_FRAMES * N_CONTOUR_BINS);
+    for slot in slots {
+        let (n, o, c) = slot
+            .into_inner()
+            .unwrap_or_else(|e| e.into_inner())
+            .ok_or_else(|| "model_failed: missing worker output".to_string())??;
+        notes.extend_from_slice(&n);
+        onsets.extend_from_slice(&o);
+        contours.extend_from_slice(&c);
     }
 
     let expected_frames = (((orig_len as f64) / (HOP_SIZE as f64))
@@ -509,54 +608,473 @@ fn estimate_tempo_and_offset(onsets: &[f32], mono_22k: &[f32], n_frames: usize) 
     (estimated_bpm, (best_offset * 1000.0).round() / 1000.0)
 }
 
-/// Minimal in-place radix-2 FFT for palm-mute spectral brightness measurement.
-fn fft_magnitude_bins(samples: &[f32]) -> Vec<f64> {
-    const N: usize = 512;
-    let mut re = [0.0_f64; N];
-    let mut im = [0.0_f64; N];
-    let take = samples.len().min(N);
-    let denom = take.saturating_sub(1).max(1) as f64;
-    for i in 0..take {
-        let hann = 0.5 * (1.0 - (TAU * i as f64 / denom).cos());
-        re[i] = f64::from(samples[i]) * hann;
-    }
+/// Reusable radix-2 FFT plan with precomputed bit-reversal, twiddle, and symmetric Hann tables.
+struct Radix2Fft {
+    nfft: usize,
+    bit_rev: Vec<usize>,
+    cos_tbl: Vec<f64>,
+    sin_tbl: Vec<f64>,
+    hann: Vec<f64>,
+}
 
-    let mut j = 0usize;
-    for i in 1..N {
-        let mut bit = N >> 1;
-        while j & bit != 0 {
+impl Radix2Fft {
+    fn new(nfft: usize) -> Self {
+        debug_assert!(nfft.is_power_of_two() && nfft >= 4);
+        let mut bit_rev = vec![0usize; nfft];
+        let mut j = 0usize;
+        for i in 1..nfft {
+            let mut bit = nfft >> 1;
+            while j & bit != 0 {
+                j ^= bit;
+                bit >>= 1;
+            }
             j ^= bit;
-            bit >>= 1;
+            bit_rev[i] = j;
         }
-        j ^= bit;
-        if i < j {
-            re.swap(i, j);
+        let half = nfft / 2;
+        let mut cos_tbl = Vec::with_capacity(half);
+        let mut sin_tbl = Vec::with_capacity(half);
+        for i in 0..half {
+            let ang = -TAU * i as f64 / nfft as f64;
+            cos_tbl.push(ang.cos());
+            sin_tbl.push(ang.sin());
+        }
+        let denom = (nfft - 1).max(1) as f64;
+        let hann: Vec<f64> = (0..nfft)
+            .map(|i| 0.5 * (1.0 - (TAU * i as f64 / denom).cos()))
+            .collect();
+        Self {
+            nfft,
+            bit_rev,
+            cos_tbl,
+            sin_tbl,
+            hann,
         }
     }
 
-    let mut len = 2usize;
-    while len <= N {
-        let half = len / 2;
-        let step = TAU / len as f64;
-        for start in (0..N).step_by(len) {
-            for k in 0..half {
-                let angle = -step * k as f64;
-                let (wr, wi) = (angle.cos(), angle.sin());
-                let (p, q) = (start + k, start + k + half);
-                let tr = re[q] * wr - im[q] * wi;
-                let ti = re[q] * wi + im[q] * wr;
-                re[q] = re[p] - tr;
-                im[q] = im[p] - ti;
-                re[p] += tr;
-                im[p] += ti;
+    fn log_rfft_frame(
+        &self,
+        samples: &[f32],
+        frame_start_signed: isize,
+        re: &mut [f64],
+        im: &mut [f64],
+        out_log: &mut [f32],
+    ) {
+        let len = samples.len();
+        for i in 0..self.nfft {
+            let src = frame_start_signed + i as isize;
+            let sample = if src >= 0 && (src as usize) < len {
+                f64::from(samples[src as usize])
+            } else {
+                0.0
+            };
+            let dest = self.bit_rev[i];
+            re[dest] = sample * self.hann[i];
+            im[dest] = 0.0;
+        }
+
+        let mut size = 2usize;
+        while size <= self.nfft {
+            let half = size / 2;
+            let step = self.nfft / size;
+            for base in (0..self.nfft).step_by(size) {
+                for j in 0..half {
+                    let tw = j * step;
+                    let wr = self.cos_tbl[tw];
+                    let wi = self.sin_tbl[tw];
+                    let p = base + j;
+                    let q = p + half;
+                    let tr = re[q] * wr - im[q] * wi;
+                    let ti = re[q] * wi + im[q] * wr;
+                    re[q] = re[p] - tr;
+                    im[q] = im[p] - ti;
+                    re[p] += tr;
+                    im[p] += ti;
+                }
+            }
+            size <<= 1;
+        }
+
+        let norm = 2.0 / self.nfft as f64;
+        for (k, slot) in out_log.iter_mut().enumerate().take(self.nfft / 2 + 1) {
+            let mag = (re[k] * re[k] + im[k] * im[k]).sqrt() * norm;
+            *slot = ((mag as f32) * 40.0).ln_1p();
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SpecRes {
+    Lo,
+    Mid,
+    Hi,
+}
+
+#[derive(Clone, Copy)]
+struct InterpPoint {
+    res: SpecRes,
+    i0: u16,
+    frac: f32,
+    valid: f32,
+}
+
+impl InterpPoint {
+    fn new(freq_hz: f64, harm: f64, force_hi: bool) -> Self {
+        let fh = freq_hz * harm;
+        let (res, nfft) = if force_hi || fh >= 1_500.0 {
+            (SpecRes::Hi, DI_N_HI)
+        } else if fh >= 380.0 {
+            (SpecRes::Mid, DI_N_MID)
+        } else {
+            (SpecRes::Lo, DI_N_LO)
+        };
+        let bin_hz = f64::from(TARGET_SAMPLE_RATE) / nfft as f64;
+        let pos = fh / bin_hz;
+        let max_bin = nfft / 2;
+        let valid = if pos >= 1.0 && pos <= max_bin as f64 - 1.001 {
+            1.0_f32
+        } else {
+            0.0_f32
+        };
+        let pos_clipped = pos.clamp(1.0, max_bin as f64 - 1.001);
+        let i0 = pos_clipped.floor() as usize;
+        let frac = (pos_clipped - i0 as f64) as f32;
+        Self {
+            res,
+            i0: i0 as u16,
+            frac,
+            valid,
+        }
+    }
+
+    #[inline]
+    fn sample(self, log_lo: &[f32], log_mid: &[f32], log_hi: &[f32]) -> f32 {
+        let spec = match self.res {
+            SpecRes::Lo => log_lo,
+            SpecRes::Mid => log_mid,
+            SpecRes::Hi => log_hi,
+        };
+        let idx = usize::from(self.i0);
+        ((1.0 - self.frac) * spec[idx] + self.frac * spec[idx + 1]) * self.valid
+    }
+}
+
+struct DiFrontendSpec {
+    fft_lo: Radix2Fft,
+    fft_mid: Radix2Fft,
+    fft_hi: Radix2Fft,
+    harm_tbl: Vec<[InterpPoint; DI_N_FREQ_BINS]>,
+    flux_tbl: [InterpPoint; DI_N_FREQ_BINS],
+    bright_tbl: [InterpPoint; DI_N_FREQ_BINS],
+}
+
+impl DiFrontendSpec {
+    fn build() -> Self {
+        const HARMONICS: [f64; 6] = [0.5, 1.0, 2.0, 3.0, 4.0, 5.0];
+        let mut freqs = [0.0_f64; DI_N_FREQ_BINS];
+        for (k, freq) in freqs.iter_mut().enumerate() {
+            let midi_f = (k as f64 - 1.0) / DI_SUB_BINS as f64 + DI_MIDI_MIN as f64;
+            *freq = 440.0 * 2.0_f64.powf((midi_f - 69.0) / 12.0);
+        }
+        let harm_tbl: Vec<[InterpPoint; DI_N_FREQ_BINS]> = HARMONICS
+            .iter()
+            .map(|&h| std::array::from_fn(|k| InterpPoint::new(freqs[k], h, false)))
+            .collect();
+        let flux_tbl = std::array::from_fn(|k| InterpPoint::new(freqs[k], 2.0, true));
+        let bright_tbl = std::array::from_fn(|k| InterpPoint::new(freqs[k], 4.0, true));
+
+        Self {
+            fft_lo: Radix2Fft::new(DI_N_LO),
+            fft_mid: Radix2Fft::new(DI_N_MID),
+            fft_hi: Radix2Fft::new(DI_N_HI),
+            harm_tbl,
+            flux_tbl,
+            bright_tbl,
+        }
+    }
+}
+
+static DI_FRONTEND_SPEC: OnceLock<DiFrontendSpec> = OnceLock::new();
+
+fn di_frontend_spec() -> &'static DiFrontendSpec {
+    DI_FRONTEND_SPEC.get_or_init(DiFrontendSpec::build)
+}
+
+struct DiFrontendScratch {
+    x_norm: Vec<f32>,
+    re: Vec<f64>,
+    im: Vec<f64>,
+    log_lo: Vec<f32>,
+    log_mid: Vec<f32>,
+    log_hi: Vec<f32>,
+    flux_base: Vec<f32>,
+}
+
+impl DiFrontendScratch {
+    fn new() -> Self {
+        Self {
+            x_norm: vec![0.0_f32; DI_CHUNK_SAMPLES],
+            re: vec![0.0_f64; DI_N_LO],
+            im: vec![0.0_f64; DI_N_LO],
+            log_lo: vec![0.0_f32; DI_N_LO / 2 + 1],
+            log_mid: vec![0.0_f32; DI_N_MID / 2 + 1],
+            log_hi: vec![0.0_f32; DI_N_HI / 2 + 1],
+            flux_base: vec![0.0_f32; DI_N_FREQ_BINS * DI_CHUNK_FRAMES],
+        }
+    }
+
+    fn extract_chunk(&mut self, chunk: &[f32], out_features: &mut [f32]) {
+        debug_assert_eq!(chunk.len(), DI_CHUNK_SAMPLES);
+        debug_assert_eq!(
+            out_features.len(),
+            DI_N_CHANNELS * DI_N_FREQ_BINS * DI_CHUNK_FRAMES
+        );
+        let spec = di_frontend_spec();
+
+        let sum_sq: f64 = chunk.iter().map(|&v| f64::from(v) * f64::from(v)).sum();
+        let rms = ((sum_sq / DI_CHUNK_SAMPLES as f64) + 1e-10).sqrt() as f32;
+        let scale = 0.1_f32 / rms.max(1e-3);
+        for (dst, &src) in self.x_norm.iter_mut().zip(chunk.iter()) {
+            *dst = (src * scale).clamp(-4.0, 4.0);
+        }
+        out_features.fill(0.0);
+
+        let bin_stride = DI_CHUNK_FRAMES;
+        let chan_stride = DI_N_FREQ_BINS * DI_CHUNK_FRAMES;
+
+        for t in 0..DI_CHUNK_FRAMES {
+            let center = (t * FFT_HOP) as isize;
+            spec.fft_lo.log_rfft_frame(
+                &self.x_norm,
+                center - (DI_N_LO / 2) as isize,
+                &mut self.re[..DI_N_LO],
+                &mut self.im[..DI_N_LO],
+                &mut self.log_lo,
+            );
+            spec.fft_mid.log_rfft_frame(
+                &self.x_norm,
+                center - (DI_N_MID / 2) as isize,
+                &mut self.re[..DI_N_MID],
+                &mut self.im[..DI_N_MID],
+                &mut self.log_mid,
+            );
+            spec.fft_hi.log_rfft_frame(
+                &self.x_norm,
+                center - (DI_N_HI / 2) as isize,
+                &mut self.re[..DI_N_HI],
+                &mut self.im[..DI_N_HI],
+                &mut self.log_hi,
+            );
+
+            for ci in 0..6 {
+                let tbl = &spec.harm_tbl[ci];
+                let chan_off = ci * chan_stride;
+                for k in 0..DI_N_FREQ_BINS {
+                    out_features[chan_off + k * bin_stride + t] =
+                        tbl[k].sample(&self.log_lo, &self.log_mid, &self.log_hi);
+                }
+            }
+
+            for k in 0..DI_N_FREQ_BINS {
+                let s_flux = spec.flux_tbl[k].sample(&self.log_lo, &self.log_mid, &self.log_hi);
+                let fk = k * bin_stride;
+                self.flux_base[fk + t] = s_flux;
+                if t >= 2 {
+                    let prev_max = self.flux_base[fk + t - 1].max(self.flux_base[fk + t - 2]);
+                    out_features[6 * chan_stride + fk + t] = (s_flux - prev_max).max(0.0) * 2.5;
+                }
+                out_features[7 * chan_stride + fk + t] =
+                    spec.bright_tbl[k].sample(&self.log_lo, &self.log_mid, &self.log_hi);
             }
         }
-        len <<= 1;
+    }
+}
+
+#[inline]
+fn sigmoid_f32(x: f32) -> f32 {
+    let xc = x.clamp(-30.0, 30.0);
+    1.0 / (1.0 + (-xc).exp())
+}
+
+fn extract_di_net_2d(tensor: &Tensor) -> Result<Vec<f32>, String> {
+    let view = tensor
+        .to_array_view::<f32>()
+        .map_err(|e| format!("model_failed: {e}"))?;
+    if view.shape() != [1, DI_N_SEMITONES, DI_CHUNK_FRAMES] {
+        return Err(format!(
+            "model_failed: unexpected di_net 2d shape {:?}",
+            view.shape()
+        ));
+    }
+    let slice = view
+        .as_slice()
+        .ok_or_else(|| "model_failed: non-contiguous di_net tensor".to_string())?;
+    Ok(slice.iter().map(|&v| sigmoid_f32(v)).collect())
+}
+
+fn extract_di_net_1d(tensor: &Tensor) -> Result<Vec<f32>, String> {
+    let view = tensor
+        .to_array_view::<f32>()
+        .map_err(|e| format!("model_failed: {e}"))?;
+    if view.shape() != [1, DI_CHUNK_FRAMES] {
+        return Err(format!(
+            "model_failed: unexpected di_net 1d shape {:?}",
+            view.shape()
+        ));
+    }
+    let slice = view
+        .as_slice()
+        .ok_or_else(|| "model_failed: non-contiguous di_net tensor".to_string())?;
+    Ok(slice.iter().map(|&v| sigmoid_f32(v)).collect())
+}
+
+struct ChunkDiNetOut {
+    fp: Vec<f32>,
+    op: Vec<f32>,
+    ap: Vec<f32>,
+    pp: Vec<f32>,
+}
+
+fn infer_di_net_posteriorgrams(mono_22k: &[f32]) -> Result<DiNetPosteriors, String> {
+    let n_samples = mono_22k.len();
+    if n_samples == 0 {
+        return Ok(DiNetPosteriors::default());
+    }
+    let plan = shared_di_net_plan()?;
+    let n_frames = n_samples.div_ceil(FFT_HOP) + 1;
+
+    let mut starts = Vec::new();
+    let limit = n_samples.saturating_sub(DI_CHUNK_SAMPLES) + 1;
+    let mut s = 0usize;
+    while s < limit {
+        starts.push(s);
+        s += DI_HOP_SAMPLES;
+    }
+    if starts.is_empty() || *starts.last().unwrap() + DI_CHUNK_SAMPLES < n_samples {
+        starts.push(n_samples.saturating_sub(DI_CHUNK_SAMPLES));
     }
 
-    (0..=N / 2)
-        .map(|k| (re[k] * re[k] + im[k] * im[k]).sqrt())
-        .collect()
+    let n_chunks = starts.len();
+    let next_idx = AtomicUsize::new(0);
+    let n_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(1, 8)
+        .min(n_chunks);
+    let slots: Vec<Mutex<Option<Result<ChunkDiNetOut, String>>>> =
+        (0..n_chunks).map(|_| Mutex::new(None)).collect();
+
+    std::thread::scope(|scope| {
+        for _ in 0..n_threads {
+            scope.spawn(|| {
+                let mut scratch = DiFrontendScratch::new();
+                let mut chunk_buf = vec![0.0_f32; DI_CHUNK_SAMPLES];
+                let mut feat_buf = vec![0.0_f32; DI_N_CHANNELS * DI_N_FREQ_BINS * DI_CHUNK_FRAMES];
+                loop {
+                    let ci = next_idx.fetch_add(1, Ordering::Relaxed);
+                    if ci >= n_chunks {
+                        break;
+                    }
+                    let s0 = starts[ci];
+                    let take = (n_samples - s0).min(DI_CHUNK_SAMPLES);
+                    chunk_buf[..take].copy_from_slice(&mono_22k[s0..s0 + take]);
+                    if take < DI_CHUNK_SAMPLES {
+                        chunk_buf[take..].fill(0.0);
+                    }
+                    scratch.extract_chunk(&chunk_buf, &mut feat_buf);
+                    let res = (|| {
+                        let input = Tensor::from_shape(
+                            &[1, DI_N_CHANNELS, DI_N_FREQ_BINS, DI_CHUNK_FRAMES],
+                            &feat_buf,
+                        )
+                        .map_err(|e| format!("model_failed: {e}"))?;
+                        let outputs = plan
+                            .run(tvec!(input.into()))
+                            .map_err(|e| format!("model_failed: {e}"))?;
+                        if outputs.len() != 4 {
+                            return Err(format!(
+                                "model_failed: expected 4 di_net outputs, got {}",
+                                outputs.len()
+                            ));
+                        }
+                        Ok(ChunkDiNetOut {
+                            fp: extract_di_net_2d(&outputs[0])?,
+                            op: extract_di_net_2d(&outputs[1])?,
+                            ap: extract_di_net_1d(&outputs[2])?,
+                            pp: extract_di_net_1d(&outputs[3])?,
+                        })
+                    })();
+                    *slots[ci].lock().unwrap_or_else(|e| e.into_inner()) = Some(res);
+                }
+            });
+        }
+    });
+
+    let mut win_t = [1.0_f32; DI_CHUNK_FRAMES];
+    for i in 0..DI_OVERLAP_FRAMES {
+        let r = 0.05 + (0.95 * i as f32) / (DI_OVERLAP_FRAMES - 1) as f32;
+        win_t[i] = r;
+        win_t[DI_CHUNK_FRAMES - 1 - i] = r;
+    }
+
+    let mut frame_p = vec![0.0_f32; DI_N_SEMITONES * n_frames];
+    let mut onset_p = vec![0.0_f32; DI_N_SEMITONES * n_frames];
+    let mut attack_p = vec![0.0_f32; n_frames];
+    let mut pm_p = vec![0.0_f32; n_frames];
+    let mut w_acc = vec![0.0_f32; n_frames];
+
+    for (ci, slot) in slots.into_iter().enumerate() {
+        let chunk_out = slot
+            .into_inner()
+            .unwrap_or_else(|e| e.into_inner())
+            .ok_or_else(|| "model_failed: missing di_net worker output".to_string())??;
+        let f0 = starts[ci] / FFT_HOP;
+        if f0 >= n_frames {
+            continue;
+        }
+        let f1 = (f0 + DI_CHUNK_FRAMES).min(n_frames);
+        let k = f1 - f0;
+        let mut w = [0.0_f32; DI_CHUNK_FRAMES];
+        w[..k].copy_from_slice(&win_t[..k]);
+        if ci == 0 {
+            w[..k.min(DI_OVERLAP_FRAMES)].fill(1.0);
+        }
+        if ci == n_chunks - 1 {
+            w[k.saturating_sub(DI_OVERLAP_FRAMES)..k].fill(1.0);
+        }
+        for b in 0..DI_N_SEMITONES {
+            let src_off = b * DI_CHUNK_FRAMES;
+            let dst_off = b * n_frames + f0;
+            for t in 0..k {
+                frame_p[dst_off + t] += chunk_out.fp[src_off + t] * w[t];
+                onset_p[dst_off + t] += chunk_out.op[src_off + t] * w[t];
+            }
+        }
+        for t in 0..k {
+            attack_p[f0 + t] += chunk_out.ap[t] * w[t];
+            pm_p[f0 + t] += chunk_out.pp[t] * w[t];
+            w_acc[f0 + t] += w[t];
+        }
+    }
+
+    for f in 0..n_frames {
+        let w = w_acc[f].max(1e-6);
+        attack_p[f] /= w;
+        pm_p[f] /= w;
+        for b in 0..DI_N_SEMITONES {
+            let idx = b * n_frames + f;
+            frame_p[idx] /= w;
+            onset_p[idx] /= w;
+        }
+    }
+
+    Ok(DiNetPosteriors {
+        n_frames,
+        frame_p,
+        onset_p,
+        attack_p,
+        pm_p,
+    })
 }
 
 fn slice_rms(samples: &[f32], start: usize, end: usize) -> f32 {
@@ -570,64 +1088,6 @@ fn slice_rms(samples: &[f32], start: usize, end: usize) -> f32 {
         .map(|&v| f64::from(v) * f64::from(v))
         .sum();
     (sum_sq / (clamped_end - clamped_start) as f64).sqrt() as f32
-}
-
-/// Estimates how strongly a plucked note sounds palm-muted (`0.0` = open/ringing, `1.0` = heavy mute).
-fn score_palm_mute(mono_22k: &[f32], start_sec: f64, end_sec: f64, pitch: u8) -> f32 {
-    let dur_ms = (end_sec - start_sec) * 1000.0;
-    if dur_ms > 550.0 {
-        return 0.0;
-    }
-    let s0 = seconds_to_sample_22k(start_sec);
-    let win_attack = (TARGET_SAMPLE_RATE as usize * 28) / 1000;
-    let s_tail_start = s0 + (TARGET_SAMPLE_RATE as usize * 40) / 1000;
-    let s_tail_end = s0 + (TARGET_SAMPLE_RATE as usize * 110) / 1000;
-    let attack_rms = slice_rms(mono_22k, s0, s0 + win_attack);
-    if attack_rms < 1e-4 {
-        return 0.0;
-    }
-    let tail_rms = slice_rms(mono_22k, s_tail_start, s_tail_end);
-    let decay_ratio = (tail_rms / attack_rms).clamp(0.0, 2.0);
-    // Open sustained strings retain ~50-90%+ energy at 40..110 ms; palm mutes damp sharply (< 28%).
-    let decay_score = ((0.42 - decay_ratio) / 0.34).clamp(0.0, 1.0);
-
-    // High-harmonic damping: compare post-transient spectrum [12ms..48ms] upper vs lower bands.
-    let spec_start = s0 + (TARGET_SAMPLE_RATE as usize * 10) / 1000;
-    let spec_end = (spec_start + 512).min(mono_22k.len());
-    let brightness_damping = if spec_end - spec_start >= 128 {
-        let mags = fft_magnitude_bins(&mono_22k[spec_start..spec_end]);
-        let bin_hz = TARGET_SAMPLE_RATE as f64 / 512.0;
-        let f0 = 440.0 * 2.0_f64.powf((f64::from(pitch) - 69.0) / 12.0);
-        let low_lo = (0.8 * f0 / bin_hz).floor().max(1.0) as usize;
-        let low_hi = ((2.8 * f0).max(800.0) / bin_hz).ceil().min(255.0) as usize;
-        let high_lo = ((3.5 * f0).max(1_200.0) / bin_hz)
-            .floor()
-            .max(low_hi as f64 + 1.0) as usize;
-        let high_hi = (6_500.0 / bin_hz).ceil().min(256.0) as usize;
-        let low_energy: f64 = mags[low_lo..=low_hi].iter().map(|&m| m * m).sum();
-        let high_energy: f64 = if high_hi > high_lo {
-            mags[high_lo..=high_hi].iter().map(|&m| m * m).sum()
-        } else {
-            0.0
-        };
-        if low_energy > 1e-12 {
-            let hf_ratio = (high_energy / low_energy) as f32;
-            // Bright open plucks have significant upper harmonics; muted plucks roll off strongly above 1 kHz.
-            ((0.22 - hf_ratio) / 0.20).clamp(0.0, 1.0)
-        } else {
-            0.5
-        }
-    } else {
-        0.5
-    };
-
-    let dur_weight = if dur_ms <= 240.0 {
-        1.0
-    } else {
-        ((550.0 - dur_ms as f32) / 310.0).clamp(0.0, 1.0)
-    };
-    let raw = (0.62 * decay_score + 0.38 * brightness_damping) * dur_weight;
-    raw.clamp(0.0, 1.0)
 }
 
 fn estimate_bend_semitones(
@@ -650,9 +1110,9 @@ fn estimate_bend_semitones(
         let row = &contours[frame * N_CONTOUR_BINS..(frame + 1) * N_CONTOUR_BINS];
         let mut best_bin = center_bin;
         let mut best_val = 0.15_f32;
-        for bin in lo..=hi {
-            if row[bin] > best_val {
-                best_val = row[bin];
+        for (bin, &val) in row.iter().enumerate().take(hi + 1).skip(lo) {
+            if val > best_val {
+                best_val = val;
                 best_bin = bin as isize;
             }
         }
@@ -666,331 +1126,511 @@ fn estimate_bend_semitones(
     ((weighted_max * 100.0).round() / 100.0) as f32
 }
 
-#[derive(Clone)]
-struct RawDecodedNote {
-    start_frame: usize,
-    end_frame: usize,
-    pitch: u8,
-    onset_confidence: f32,
-    frame_confidence: f32,
+#[inline]
+fn di_frame_to_seconds(frame: usize) -> f64 {
+    (frame * FFT_HOP) as f64 / f64::from(TARGET_SAMPLE_RATE)
 }
 
-fn build_inferred_onsets(onsets: &[f32], frames: &[f32], n_frames: usize) -> Vec<f32> {
-    let total = n_frames * N_PITCH_BINS;
-    let mut diff = vec![0.0_f32; total];
-    let mut max_diff = 0.0_f32;
-    let mut max_onset = 0.0_f32;
-
-    for &v in onsets {
-        if v > max_onset {
-            max_onset = v;
-        }
+#[inline]
+fn sec_to_bp_frame(sec: f64, bp_n_frames: usize) -> usize {
+    if bp_n_frames == 0 {
+        return 0;
     }
-    for t in N_DIFF_ONSET..n_frames {
-        for f in 0..N_PITCH_BINS {
-            let cur = frames[t * N_PITCH_BINS + f];
-            let mut min_delta = f32::INFINITY;
-            for step in 1..=N_DIFF_ONSET {
-                let prev = frames[(t - step) * N_PITCH_BINS + f];
-                min_delta = min_delta.min(cur - prev);
-            }
-            let pos = min_delta.max(0.0);
-            diff[t * N_PITCH_BINS + f] = pos;
-            if pos > max_diff {
-                max_diff = pos;
-            }
-        }
-    }
-
-    let scale = if max_diff > 1e-6 && max_onset > 0.0 {
-        max_onset / max_diff
-    } else {
-        0.0
-    };
-    let mut merged = vec![0.0_f32; total];
-    for idx in 0..total {
-        merged[idx] = onsets[idx].max(diff[idx] * scale);
-    }
-    merged
-}
-
-fn decode_raw_notes(
-    frames_in: &[f32],
-    onsets_in: &[f32],
-    n_frames: usize,
-    params: &DiDecodeParams,
-) -> Vec<RawDecodedNote> {
-    if n_frames < 3 {
-        return Vec::new();
-    }
-    let min_bin = params
-        .min_pitch
-        .saturating_sub(MIDI_OFFSET as u8)
-        .min(MAX_PITCH_IDX as u8) as usize;
-    let max_bin = params
-        .max_pitch
-        .saturating_sub(MIDI_OFFSET as u8)
-        .min(MAX_PITCH_IDX as u8) as usize;
-    if min_bin > max_bin {
-        return Vec::new();
-    }
-
-    let total = n_frames * N_PITCH_BINS;
-    let mut frames = frames_in.to_vec();
-    let mut onsets = onsets_in.to_vec();
-    for t in 0..n_frames {
-        let base = t * N_PITCH_BINS;
-        for f in 0..N_PITCH_BINS {
-            if f < min_bin || f > max_bin {
-                frames[base + f] = 0.0;
-                onsets[base + f] = 0.0;
-            }
-        }
-    }
-
-    let inferred = build_inferred_onsets(&onsets, &frames, n_frames);
-    let min_note_frames = ((f64::from(params.min_note_ms.max(15.0)) / 1000.0)
-        * (TARGET_SAMPLE_RATE as f64 / FFT_HOP as f64))
+    let s = sec.max(0.0) * f64::from(TARGET_SAMPLE_RATE);
+    let w = (s / HOP_SIZE as f64).floor() as usize;
+    let rem = s - (w * HOP_SIZE) as f64;
+    let l = (rem / FFT_HOP as f64)
         .round()
-        .max(2.0) as usize;
+        .clamp(0.0, (UNWRAPPED_WINDOW_FRAMES - 1) as f64) as usize;
+    (w * UNWRAPPED_WINDOW_FRAMES + l).min(bp_n_frames - 1)
+}
 
-    // Collect local onset maxima along time in reverse chronological order so repeated notes cut off cleanly.
-    let mut peaks = Vec::<(usize, usize, f32)>::new();
-    for t in 1..n_frames - 1 {
-        let row = &inferred[t * N_PITCH_BINS..(t + 1) * N_PITCH_BINS];
-        let prev = &inferred[(t - 1) * N_PITCH_BINS..t * N_PITCH_BINS];
-        let next = &inferred[(t + 1) * N_PITCH_BINS..(t + 2) * N_PITCH_BINS];
-        for f in min_bin..=max_bin {
-            let val = row[f];
-            if val >= params.onset_threshold && val > prev[f] && val >= next[f] {
-                peaks.push((t, f, onsets[t * N_PITCH_BINS + f].max(val * 0.85)));
+#[derive(Clone, Copy)]
+struct ScoredPitchCand {
+    pitch: u8,
+    score: f32,
+    body: f32,
+    onset: f32,
+}
+
+fn best_fret_pen(pitches: &[u8], open_tuning: &[u8], max_fret: i16) -> Option<f32> {
+    if pitches.len() > open_tuning.len() {
+        return None;
+    }
+    let mut opts_per_pitch: Vec<(usize, Vec<(usize, i16)>)> = Vec::with_capacity(pitches.len());
+    for (idx, &pitch) in pitches.iter().enumerate() {
+        let p_i16 = i16::from(pitch);
+        let mut opts = Vec::new();
+        for (s_idx, &open) in open_tuning.iter().enumerate() {
+            let fr = p_i16 - i16::from(open);
+            if (0..=max_fret).contains(&fr) {
+                opts.push((s_idx, fr));
+            }
+        }
+        if opts.is_empty() {
+            return None;
+        }
+        opts_per_pitch.push((idx, opts));
+    }
+    opts_per_pitch.sort_by_key(|a| a.1.len());
+
+    let mut best: Option<f32> = None;
+    let mut used = vec![false; open_tuning.len()];
+    let mut chosen = Vec::with_capacity(pitches.len());
+
+    fn dfs(
+        depth: usize,
+        opts_per_pitch: &[(usize, Vec<(usize, i16)>)],
+        used: &mut [bool],
+        chosen: &mut Vec<i16>,
+        best: &mut Option<f32>,
+    ) {
+        if depth == opts_per_pitch.len() {
+            let mut min_f = i16::MAX;
+            let mut max_f = i16::MIN;
+            let mut fretted = 0usize;
+            for &fr in chosen.iter() {
+                if fr > 0 {
+                    min_f = min_f.min(fr);
+                    max_f = max_f.max(fr);
+                    fretted += 1;
+                }
+            }
+            let pen = if fretted >= 2 {
+                let sp = max_f - min_f;
+                let max_span = if min_f >= 9 { 6 } else { 5 };
+                if sp > max_span {
+                    return;
+                }
+                if sp <= 4 {
+                    sp as f32 * 0.015
+                } else {
+                    0.08 + (sp - 4) as f32 * 0.12
+                }
+            } else {
+                0.0
+            };
+            if best.is_none_or(|b| pen < b) {
+                *best = Some(pen);
+            }
+            return;
+        }
+        for &(s_idx, fr) in &opts_per_pitch[depth].1 {
+            if !used[s_idx] {
+                used[s_idx] = true;
+                chosen.push(fr);
+                dfs(depth + 1, opts_per_pitch, used, chosen, best);
+                chosen.pop();
+                used[s_idx] = false;
             }
         }
     }
-    peaks.reverse();
 
-    let mut remaining = frames.clone();
-    let mut out = Vec::<RawDecodedNote>::new();
-
-    for (start_t, freq_idx, onset_conf) in peaks {
-        if start_t >= n_frames - 1 {
-            continue;
-        }
-        let mut i = start_t + 1;
-        let mut quiet_run = 0usize;
-        while i < n_frames - 1 && quiet_run < ENERGY_TOL_FRAMES {
-            if remaining[i * N_PITCH_BINS + freq_idx] < params.frame_threshold {
-                quiet_run += 1;
-            } else {
-                quiet_run = 0;
-            }
-            i += 1;
-        }
-        let end_t = i.saturating_sub(quiet_run);
-        if end_t.saturating_sub(start_t) < min_note_frames {
-            continue;
-        }
-        let sum_frame: f32 = (start_t..end_t)
-            .map(|t| remaining[t * N_PITCH_BINS + freq_idx])
-            .sum();
-        let mean_frame = sum_frame / (end_t - start_t) as f32;
-        for t in start_t..end_t {
-            remaining[t * N_PITCH_BINS + freq_idx] = 0.0;
-            if freq_idx < MAX_PITCH_IDX {
-                remaining[t * N_PITCH_BINS + freq_idx + 1] = 0.0;
-            }
-            if freq_idx > MIN_PITCH_IDX {
-                remaining[t * N_PITCH_BINS + freq_idx - 1] = 0.0;
-            }
-        }
-        out.push(RawDecodedNote {
-            start_frame: start_t,
-            end_frame: end_t,
-            pitch: (freq_idx + MIDI_OFFSET) as u8,
-            onset_confidence: onset_conf.clamp(0.0, 1.0),
-            frame_confidence: mean_frame.clamp(0.0, 1.0),
-        });
-    }
-
-    // Melodia trick: pick up legato / un-attacked sustained notes whose frame confidence stays strong.
-    loop {
-        let mut best_idx = 0usize;
-        let mut best_val = 0.0_f32;
-        for (idx, &val) in remaining.iter().enumerate().take(total) {
-            if val > best_val {
-                best_val = val;
-                best_idx = idx;
-            }
-        }
-        if best_val <= params.frame_threshold {
-            break;
-        }
-        let mid_t = best_idx / N_PITCH_BINS;
-        let freq_idx = best_idx % N_PITCH_BINS;
-        remaining[best_idx] = 0.0;
-
-        let mut i = mid_t + 1;
-        let mut quiet = 0usize;
-        while i < n_frames - 1 && quiet < ENERGY_TOL_FRAMES {
-            let idx = i * N_PITCH_BINS + freq_idx;
-            if remaining[idx] < params.frame_threshold {
-                quiet += 1;
-            } else {
-                quiet = 0;
-            }
-            remaining[idx] = 0.0;
-            if freq_idx < MAX_PITCH_IDX {
-                remaining[idx + 1] = 0.0;
-            }
-            if freq_idx > MIN_PITCH_IDX {
-                remaining[idx - 1] = 0.0;
-            }
-            i += 1;
-        }
-        let i_end = i.saturating_sub(1 + quiet);
-
-        let mut rev = mid_t;
-        let mut quiet_back = 0usize;
-        while rev > 0 && quiet_back < ENERGY_TOL_FRAMES {
-            rev -= 1;
-            let idx = rev * N_PITCH_BINS + freq_idx;
-            if remaining[idx] < params.frame_threshold {
-                quiet_back += 1;
-            } else {
-                quiet_back = 0;
-            }
-            remaining[idx] = 0.0;
-            if freq_idx < MAX_PITCH_IDX {
-                remaining[idx + 1] = 0.0;
-            }
-            if freq_idx > MIN_PITCH_IDX {
-                remaining[idx - 1] = 0.0;
-            }
-        }
-        let i_start = rev + quiet_back;
-        if i_end <= i_start || i_end - i_start < min_note_frames {
-            continue;
-        }
-        let sum_frame: f32 = (i_start..i_end)
-            .map(|t| frames[t * N_PITCH_BINS + freq_idx])
-            .sum();
-        let mean_frame = sum_frame / (i_end - i_start) as f32;
-        out.push(RawDecodedNote {
-            start_frame: i_start,
-            end_frame: i_end,
-            pitch: (freq_idx + MIDI_OFFSET) as u8,
-            onset_confidence: onsets[i_start * N_PITCH_BINS + freq_idx].clamp(0.0, 1.0),
-            frame_confidence: mean_frame.clamp(0.0, 1.0),
-        });
-    }
-
-    out.sort_by(|a, b| {
-        a.start_frame
-            .cmp(&b.start_frame)
-            .then(a.pitch.cmp(&b.pitch))
-    });
-    out
+    dfs(0, &opts_per_pitch, &mut used, &mut chosen, &mut best);
+    best
 }
 
 fn build_transcribed_notes(
     cached: &CachedDiAnalysis,
     params: &DiDecodeParams,
 ) -> Vec<TranscribedDiNote> {
-    let raw = decode_raw_notes(&cached.notes, &cached.onsets, cached.n_frames, params);
-    if raw.is_empty() {
+    let di = &cached.di_net;
+    let n_frames = di.n_frames;
+    let min_pitch = params.min_pitch.clamp(MIDI_OFFSET as u8, 108);
+    let max_pitch = params.max_pitch.clamp(min_pitch, 108);
+    if n_frames < 5 || params.min_pitch > params.max_pitch {
         return Vec::new();
     }
 
-    // Deduplicate identical-pitch notes whose onsets start within 25 ms (~2 frames).
-    let mut deduped: Vec<RawDecodedNote> = Vec::with_capacity(raw.len());
-    for item in raw {
-        if let Some(prev) = deduped
-            .iter_mut()
-            .rev()
-            .find(|other| other.pitch == item.pitch && item.start_frame <= other.start_frame + 2)
-        {
-            if item.end_frame > prev.end_frame {
-                prev.end_frame = item.end_frame;
+    let atk_thr = (0.40 + (params.onset_threshold - 0.45) * 0.70).clamp(0.24, 0.62);
+    let pitch_thr =
+        (0.48 + 0.5 * (params.onset_threshold - 0.45) + 0.5 * (params.frame_threshold - 0.28))
+            .clamp(0.28, 0.68);
+    let frame_thr = (0.34 + (params.frame_threshold - 0.28) * 0.75).clamp(0.18, 0.52);
+    let onset_gate = (0.16 + (params.onset_threshold - 0.45) * 0.45).clamp(0.06, 0.30);
+    let nms_radius = ((f64::from(params.min_note_ms.max(25.0)) / 1000.0)
+        * (f64::from(TARGET_SAMPLE_RATE) / FFT_HOP as f64)
+        * 0.65)
+        .round()
+        .clamp(2.0, 6.0) as usize;
+
+    let mut v4_atk = vec![0.0_f32; n_frames];
+    let mut bp_atk = vec![0.0_f32; n_frames];
+    let v4_lo = usize::from(min_pitch).saturating_sub(DI_MIDI_MIN);
+    let v4_hi = (usize::from(max_pitch).saturating_sub(DI_MIDI_MIN)).min(DI_N_SEMITONES - 1);
+    let has_v4_range = usize::from(min_pitch) < DI_MIDI_MIN + DI_N_SEMITONES
+        && usize::from(max_pitch) >= DI_MIDI_MIN;
+    let bp_lo = usize::from(min_pitch) - MIDI_OFFSET;
+    let bp_hi = (usize::from(max_pitch) - MIDI_OFFSET).min(N_PITCH_BINS - 1);
+
+    for f in 0..n_frames {
+        let mut mx = 0.0_f32;
+        if has_v4_range {
+            for b in v4_lo..=v4_hi {
+                mx = mx.max(di.onset_p[b * n_frames + f]);
             }
-            prev.onset_confidence = prev.onset_confidence.max(item.onset_confidence);
-            prev.frame_confidence = prev.frame_confidence.max(item.frame_confidence);
-        } else {
-            deduped.push(item);
+        }
+        v4_atk[f] = di.attack_p[f].max(0.90 * mx);
+        if cached.n_frames > 0 {
+            let bp_f = sec_to_bp_frame(di_frame_to_seconds(f), cached.n_frames);
+            let row = &cached.onsets[bp_f * N_PITCH_BINS..(bp_f + 1) * N_PITCH_BINS];
+            let mut bp_mx = 0.0_f32;
+            for &v in &row[bp_lo..=bp_hi] {
+                bp_mx = bp_mx.max(v);
+            }
+            bp_atk[f] = 0.68 * bp_mx;
         }
     }
 
-    let kept_mask: Vec<bool> = if params.suppress_overtones {
-        let simultaneous_tol_frames = 3usize; // ~35 ms
-        (0..deduped.len())
-            .map(|i| {
-                let candidate = &deduped[i];
-                for j in 0..deduped.len() {
-                    if i == j {
-                        continue;
-                    }
-                    let root = &deduped[j];
-                    if root.start_frame.abs_diff(candidate.start_frame) > simultaneous_tol_frames {
-                        continue;
-                    }
-                    let interval = candidate.pitch.saturating_sub(root.pitch);
-                    if interval == 12 {
-                        // A genuine power chord has a strong +7 fifth alongside the +12 octave.
-                        let has_fifth = deduped.iter().any(|fifth| {
-                            fifth.pitch == root.pitch + 7
-                                && fifth.start_frame.abs_diff(root.start_frame)
-                                    <= simultaneous_tol_frames
-                                && fifth.frame_confidence >= 0.40
-                        });
-                        if !has_fifth
-                            && candidate.onset_confidence < 0.42
-                            && candidate.frame_confidence < root.frame_confidence * 0.58
-                        {
-                            return false;
-                        }
-                    } else if interval == 19
-                        && candidate.onset_confidence < 0.48
-                        && candidate.frame_confidence < root.frame_confidence * 0.65
-                    {
-                        return false;
-                    }
-                }
-                true
-            })
-            .collect()
-    } else {
-        vec![true; deduped.len()]
-    };
+    let mut cands = Vec::<(usize, f32)>::new();
+    for f in 2..n_frames - 2 {
+        let v4_sc = v4_atk[f];
+        let bp_sc = bp_atk[f];
+        let ap = di.attack_p[f];
+        let is_v4_peak = v4_sc >= atk_thr
+            && ap >= di.attack_p[f - 1] - 0.04
+            && (ap >= di.attack_p[f - 1].max(di.attack_p[f + 1]) || v4_sc >= atk_thr + 0.08);
+        let is_bp_peak = bp_sc >= atk_thr
+            && bp_sc >= bp_atk[f - 1]
+            && bp_sc >= bp_atk[f + 1]
+            && (bp_sc > bp_atk[f - 1] || bp_sc > bp_atk[f + 1]);
+        if is_v4_peak || is_bp_peak {
+            cands.push((f, v4_sc.max(bp_sc)));
+        }
+    }
+    cands.sort_by(|a, b| b.1.total_cmp(&a.1));
 
-    let mut result = Vec::with_capacity(deduped.len());
-    for (idx, item) in deduped.into_iter().enumerate() {
-        if !kept_mask[idx] {
+    let mut events = Vec::new();
+    let mut suppressed = vec![false; n_frames];
+    for (f, _) in cands {
+        if suppressed[f] {
             continue;
         }
-        let start_sec = frame_to_seconds(item.start_frame);
-        let end_sec = frame_to_seconds(item.end_frame).max(start_sec + 0.02);
-        let s0 = seconds_to_sample_22k(start_sec);
-        let attack_len = (TARGET_SAMPLE_RATE as usize * 30) / 1000;
-        let local_rms = slice_rms(&cached.mono_22k, s0, s0 + attack_len);
-        let vel_norm = (local_rms / cached.ref_attack_rms.max(1e-4)).clamp(0.1, 1.0);
-        let velocity = (vel_norm * 127.0).round().clamp(1.0, 127.0) as u8;
-        let palm_mute_score = score_palm_mute(&cached.mono_22k, start_sec, end_sec, item.pitch);
-        let bend_semitones = estimate_bend_semitones(
-            &cached.contours,
-            item.start_frame,
-            item.end_frame,
-            item.pitch,
-        );
-        result.push(TranscribedDiNote {
-            start_sec,
-            end_sec,
-            pitch: item.pitch,
-            onset_confidence: item.onset_confidence,
-            frame_confidence: item.frame_confidence,
-            velocity,
-            palm_mute_score,
-            bend_semitones,
+        events.push(f);
+        let lo = f.saturating_sub(nms_radius);
+        let hi = (f + nms_radius).min(n_frames - 1);
+        suppressed[lo..=hi].fill(true);
+    }
+    events.sort_unstable();
+    if events.is_empty() {
+        return Vec::new();
+    }
+
+    let n_pitches = usize::from(max_pitch - min_pitch) + 1;
+    struct EvBuf {
+        ev_f: usize,
+        next_ev_f: usize,
+        scores: Vec<f32>,
+        bodies: Vec<f32>,
+        onsets: Vec<f32>,
+        sim_vec: Vec<f32>,
+        pm_val: f32,
+    }
+
+    let mut ev_objs = Vec::with_capacity(events.len());
+    for (idx, &ev_f) in events.iter().enumerate() {
+        let next_ev_f = events.get(idx + 1).copied().unwrap_or(n_frames - 1);
+        let fr_hi = (ev_f + 2).max((ev_f + 6).min(next_ev_f)).min(n_frames);
+        let bp_f = sec_to_bp_frame(di_frame_to_seconds(ev_f), cached.n_frames);
+
+        let pm_hi = (ev_f + 5).min(n_frames);
+        let pm_val = if pm_hi > ev_f {
+            di.pm_p[ev_f..pm_hi].iter().sum::<f32>() / (pm_hi - ev_f) as f32
+        } else {
+            0.0
+        };
+
+        let mut scores = vec![0.0_f32; n_pitches];
+        let mut bodies = vec![0.0_f32; n_pitches];
+        let mut onsets = vec![0.0_f32; n_pitches];
+        let mut sim_vec = vec![0.0_f32; n_pitches];
+        let mut sim_sq = 0.0_f64;
+
+        for p_off in 0..n_pitches {
+            let pitch = min_pitch + p_off as u8;
+            let bp_bin = usize::from(pitch) - MIDI_OFFSET;
+
+            let (bp_on, bp_body) = if cached.n_frames > 0 && bp_bin < N_PITCH_BINS {
+                let mut b_mo = 0.0_f32;
+                let b_lo = bp_f.saturating_sub(1);
+                let b_hi = (bp_f + 2).min(cached.n_frames - 1);
+                for t in b_lo..=b_hi {
+                    b_mo = b_mo.max(cached.onsets[t * N_PITCH_BINS + bp_bin]);
+                }
+                let mut b_sf = 0.0_f32;
+                let mut b_mf = 0.0_f32;
+                let mut b_cnt = 0usize;
+                let fr_end = (bp_f + 4).min(cached.n_frames - 1);
+                for t in bp_f..=fr_end {
+                    let v = cached.notes[t * N_PITCH_BINS + bp_bin];
+                    b_sf += v;
+                    b_mf = b_mf.max(v);
+                    b_cnt += 1;
+                }
+                (b_mo, 0.55 * (b_sf / b_cnt.max(1) as f32) + 0.45 * b_mf)
+            } else {
+                (0.0, 0.0)
+            };
+
+            let (mo, body, pre_f) =
+                if (DI_MIDI_MIN..DI_MIDI_MIN + DI_N_SEMITONES).contains(&usize::from(pitch)) {
+                    let v4_b = usize::from(pitch) - DI_MIDI_MIN;
+                    let on_lo = ev_f.saturating_sub(1);
+                    let on_hi = (ev_f + 3).min(n_frames);
+                    let mut v4_on = 0.0_f32;
+                    for t in on_lo..on_hi {
+                        v4_on = v4_on.max(di.onset_p[v4_b * n_frames + t]);
+                    }
+                    let mut v4_sf = 0.0_f32;
+                    let mut v4_mf = 0.0_f32;
+                    let mut v4_cnt = 0usize;
+                    for t in ev_f..fr_hi {
+                        let v = di.frame_p[v4_b * n_frames + t];
+                        v4_sf += v;
+                        v4_mf = v4_mf.max(v);
+                        v4_cnt += 1;
+                    }
+                    let v4_body = 0.55 * (v4_sf / v4_cnt.max(1) as f32) + 0.45 * v4_mf;
+                    let pre = di.frame_p[v4_b * n_frames + ev_f.saturating_sub(2)]
+                        .min(di.frame_p[v4_b * n_frames + ev_f.saturating_sub(1)]);
+                    if cached.n_frames > 0 {
+                        let bp_w = if pitch >= 40 {
+                            0.35_f32
+                        } else {
+                            (0.05 + 0.30 * ((f32::from(pitch) - 26.0).max(0.0) / 14.0))
+                                .clamp(0.05, 0.35)
+                        };
+                        let v4_w = 1.0 - bp_w;
+                        (
+                            v4_w * v4_on + bp_w * bp_on,
+                            v4_w * v4_body + bp_w * bp_body,
+                            pre,
+                        )
+                    } else {
+                        (v4_on, v4_body, pre)
+                    }
+                } else {
+                    (bp_on, bp_body, 0.0)
+                };
+
+            let mut sc = 0.55 * mo + 0.45 * body;
+            if pre_f > 0.45 && mo < 0.16 && body <= pre_f + 0.04 {
+                sc *= 0.48;
+            }
+            scores[p_off] = sc;
+            bodies[p_off] = body;
+            onsets[p_off] = mo;
+            sim_vec[p_off] = body;
+            sim_sq += f64::from(body) * f64::from(body);
+        }
+
+        let norm = (sim_sq.sqrt() as f32).max(1e-6);
+        for v in &mut sim_vec {
+            *v /= norm;
+        }
+        ev_objs.push(EvBuf {
+            ev_f,
+            next_ev_f,
+            scores,
+            bodies,
+            onsets,
+            sim_vec,
+            pm_val,
         });
     }
+
+    // Stage 1 Self-Similarity Riff Pooling
+    let n_evs = ev_objs.len();
+    if n_evs > 1 {
+        let mut blended_scores: Vec<Vec<f32>> = ev_objs.iter().map(|e| e.scores.clone()).collect();
+        let half_window = if n_evs <= 3000 { n_evs } else { 800 };
+        for i in 0..n_evs {
+            let lo_j = i.saturating_sub(half_window);
+            let hi_j = (i + half_window + 1).min(n_evs);
+            let vi = &ev_objs[i].sim_vec;
+            let mut nbrs: Vec<(usize, f32)> = Vec::new();
+            for (j, other) in ev_objs.iter().enumerate().take(hi_j).skip(lo_j) {
+                if j == i {
+                    continue;
+                }
+                let mut dot = 0.0_f32;
+                for (a, b) in vi.iter().zip(other.sim_vec.iter()) {
+                    dot += a * b;
+                }
+                if dot >= 0.945 {
+                    nbrs.push((j, dot));
+                }
+            }
+            if nbrs.is_empty() {
+                continue;
+            }
+            nbrs.sort_by(|a, b| b.1.total_cmp(&a.1));
+            nbrs.truncate(6);
+            let w_sum: f32 = nbrs.iter().map(|x| x.1).sum();
+            let alpha = (nbrs.len() as f32 * 0.055).min(0.22);
+            for p_off in 0..n_pitches {
+                let mut avg = 0.0_f32;
+                for &(j, dot) in &nbrs {
+                    avg += (dot / w_sum.max(1e-6)) * ev_objs[j].scores[p_off];
+                }
+                blended_scores[i][p_off] = (1.0 - alpha) * ev_objs[i].scores[p_off] + alpha * avg;
+            }
+        }
+        for (ev, b_sc) in ev_objs.iter_mut().zip(blended_scores.into_iter()) {
+            ev.scores = b_sc;
+        }
+    }
+
+    let mut result = Vec::with_capacity(n_evs * 2);
+    let attack_len = (TARGET_SAMPLE_RATE as usize * 30) / 1000;
+    let stop_floor = frame_thr * 0.65;
+
+    for ev in &ev_objs {
+        let mut pitch_cands = Vec::<ScoredPitchCand>::new();
+        for p_off in 0..n_pitches {
+            let sc = ev.scores[p_off];
+            let body = ev.bodies[p_off];
+            let onset = ev.onsets[p_off];
+            if sc >= pitch_thr && body >= frame_thr * 0.70 && onset >= onset_gate {
+                pitch_cands.push(ScoredPitchCand {
+                    pitch: min_pitch + p_off as u8,
+                    score: sc,
+                    body,
+                    onset,
+                });
+            }
+        }
+        pitch_cands.sort_by(|a, b| b.score.total_cmp(&a.score));
+
+        if params.suppress_overtones && pitch_cands.len() > 1 {
+            let snapshot = pitch_cands.clone();
+            pitch_cands.retain(|cand| {
+                !snapshot.iter().any(|root| {
+                    root.score > cand.score
+                        && matches!(cand.pitch.checked_sub(root.pitch), Some(12) | Some(19))
+                        && cand.body < frame_thr * 0.95
+                        && cand.onset < pitch_thr * 0.72
+                })
+            });
+        }
+
+        if !params.open_tuning.is_empty() && pitch_cands.len() > 1 {
+            let pool_len = pitch_cands.len().min(7);
+            let pool = &pitch_cands[..pool_len];
+            let max_poly = params.open_tuning.len().min(5);
+            let mut best_obj = f32::NEG_INFINITY;
+            let mut best_mask = 0usize;
+            for mask in 1..(1usize << pool_len) {
+                let count = mask.count_ones() as usize;
+                if count > max_poly {
+                    continue;
+                }
+                let mut sub_pitches = Vec::with_capacity(count);
+                let mut obj = 0.0_f32;
+                for (i, item) in pool.iter().enumerate() {
+                    if mask & (1 << i) != 0 {
+                        sub_pitches.push(item.pitch);
+                        obj += item.score - pitch_thr * 0.85;
+                    }
+                }
+                if let Some(pen) = best_fret_pen(&sub_pitches, &params.open_tuning, 24) {
+                    let net = obj - pen;
+                    if net > best_obj {
+                        best_obj = net;
+                        best_mask = mask;
+                    }
+                }
+            }
+            if best_mask != 0 {
+                pitch_cands = pool
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, item)| (best_mask & (1 << i) != 0).then_some(*item))
+                    .collect();
+            } else {
+                pitch_cands.truncate(max_poly);
+            }
+        } else {
+            pitch_cands.truncate(6);
+        }
+
+        for item in pitch_cands {
+            let in_v4 =
+                (DI_MIDI_MIN..DI_MIDI_MIN + DI_N_SEMITONES).contains(&usize::from(item.pitch));
+            let mut end_f = (ev.ev_f + 2).min(ev.next_ev_f);
+            let mut quiet = 0usize;
+            if in_v4 {
+                let v4_b = usize::from(item.pitch) - DI_MIDI_MIN;
+                while end_f < ev.next_ev_f && quiet < 3 {
+                    if di.frame_p[v4_b * n_frames + end_f] < stop_floor {
+                        quiet += 1;
+                    } else {
+                        quiet = 0;
+                    }
+                    end_f += 1;
+                }
+            } else if cached.n_frames > 0 {
+                let bp_bin = usize::from(item.pitch) - MIDI_OFFSET;
+                while end_f < ev.next_ev_f && quiet < 3 {
+                    let bp_t = sec_to_bp_frame(di_frame_to_seconds(end_f), cached.n_frames);
+                    if cached.notes[bp_t * N_PITCH_BINS + bp_bin] < stop_floor {
+                        quiet += 1;
+                    } else {
+                        quiet = 0;
+                    }
+                    end_f += 1;
+                }
+            }
+
+            let start_sec = di_frame_to_seconds(ev.ev_f);
+            let clean_end_f = end_f
+                .saturating_sub(quiet)
+                .max((ev.ev_f + 2).min(ev.next_ev_f));
+            let end_sec = di_frame_to_seconds(clean_end_f).max(start_sec + 0.04);
+            let dur_ms = (end_sec - start_sec) * 1000.0;
+
+            let palm_mute_score = if dur_ms <= 650.0 {
+                ev.pm_val
+            } else if dur_ms >= 900.0 {
+                0.0
+            } else {
+                ev.pm_val * ((900.0 - dur_ms as f32) / 250.0)
+            }
+            .clamp(0.0, 1.0);
+
+            let s0 = seconds_to_sample_22k(start_sec);
+            let local_rms = slice_rms(&cached.mono_22k, s0, s0 + attack_len);
+            let vel_norm = (local_rms / cached.ref_attack_rms.max(1e-4)).clamp(0.1, 1.0);
+            let velocity = (vel_norm * 127.0).round().clamp(1.0, 127.0) as u8;
+
+            let bend_semitones = if cached.n_frames > 0 {
+                let bp_start_f = sec_to_bp_frame(start_sec, cached.n_frames);
+                let bp_end_f = sec_to_bp_frame(end_sec, cached.n_frames)
+                    .max(bp_start_f + 1)
+                    .min(cached.n_frames);
+                estimate_bend_semitones(&cached.contours, bp_start_f, bp_end_f, item.pitch)
+            } else {
+                0.0
+            };
+
+            result.push(TranscribedDiNote {
+                start_sec,
+                end_sec,
+                pitch: item.pitch,
+                onset_confidence: item.onset.clamp(0.0, 1.0),
+                frame_confidence: item.body.clamp(0.0, 1.0),
+                velocity,
+                palm_mute_score,
+                bend_semitones,
+            });
+        }
+    }
+
+    result.sort_by(|a, b| {
+        a.start_sec
+            .total_cmp(&b.start_sec)
+            .then(a.pitch.cmp(&b.pitch))
+    });
     result
 }
 
@@ -1006,6 +1646,7 @@ pub(crate) fn analyze_samples_22k(
         return Err("too_long".into());
     }
     let (notes, onsets, contours, n_frames) = infer_posteriorgrams(&mono_22k)?;
+    let di_net = infer_di_net_posteriorgrams(&mono_22k)?;
     let ref_attack_rms = compute_reference_attack_rms(&mono_22k);
     let (estimated_bpm, estimated_offset_sec) =
         estimate_tempo_and_offset(&onsets, &mono_22k, n_frames);
@@ -1025,6 +1666,7 @@ pub(crate) fn analyze_samples_22k(
         onsets,
         contours,
         n_frames,
+        di_net,
         ref_attack_rms,
     };
     Ok((summary, cached))
@@ -1304,6 +1946,65 @@ mod tests {
     }
 
     #[test]
+    fn di_net_frontend_matches_python_reference() {
+        let mut sig = vec![0.0_f32; DI_CHUNK_SAMPLES];
+        let start = TARGET_SAMPLE_RATE as usize;
+        for (i, sample) in sig.iter_mut().enumerate().skip(start) {
+            let dt = (i - start) as f64 / f64::from(TARGET_SAMPLE_RATE);
+            let env = (-dt * 4.0).exp();
+            for &midi in &[26_u8, 56, 57] {
+                let f0 = midi_to_hz(midi);
+                for h in 1..=6usize {
+                    *sample +=
+                        ((env / (h as f64).powf(0.7)) * (TAU * f0 * h as f64 * dt).sin()) as f32;
+                }
+            }
+        }
+        let mut scratch = DiFrontendScratch::new();
+        let mut feats = vec![0.0_f32; DI_N_CHANNELS * DI_N_FREQ_BINS * DI_CHUNK_FRAMES];
+        scratch.extract_chunk(&sig, &mut feats);
+        assert!(feats.iter().all(|v| v.is_finite()));
+
+        let chan_stride = DI_N_FREQ_BINS * DI_CHUNK_FRAMES;
+        let t_atk = (1.02 * f64::from(TARGET_SAMPLE_RATE) / FFT_HOP as f64).round() as usize;
+        let bin_of = |midi: usize| (midi - DI_MIDI_MIN) * DI_SUB_BINS + 1;
+        let ch1_val = |midi: usize| feats[chan_stride + bin_of(midi) * DI_CHUNK_FRAMES + t_atk];
+        assert!(
+            (ch1_val(26) - 1.575_846).abs() < 1e-3,
+            "D1 (26) fundamental mismatch vs Python reference: {}",
+            ch1_val(26)
+        );
+        assert!(
+            (ch1_val(45) - 0.994_016).abs() < 1e-3,
+            "A2 (45, 3rd harmonic of D1) mismatch vs Python reference: {}",
+            ch1_val(45)
+        );
+        assert!(
+            (ch1_val(56) - 1.477_884).abs() < 1e-3,
+            "G#3 (56) fundamental mismatch vs Python reference: {}",
+            ch1_val(56)
+        );
+        assert!(
+            (ch1_val(57) - 1.738_550).abs() < 1e-3,
+            "A3 (57) fundamental mismatch vs Python reference: {}",
+            ch1_val(57)
+        );
+        assert!(ch1_val(26) > ch1_val(45) && ch1_val(56) > ch1_val(45));
+
+        let t_flux = (1.00 * f64::from(TARGET_SAMPLE_RATE) / FFT_HOP as f64).round() as usize;
+        let flux_d1 = feats[6 * chan_stride + bin_of(26) * DI_CHUNK_FRAMES + t_flux];
+        let flux_gs3 = feats[6 * chan_stride + bin_of(56) * DI_CHUNK_FRAMES + t_flux];
+        assert!(
+            (flux_d1 - 4.972_637).abs() < 1e-3,
+            "D1 flux mismatch vs Python reference: {flux_d1}"
+        );
+        assert!(
+            (flux_gs3 - 3.217_673).abs() < 1e-3,
+            "G#3 flux mismatch vs Python reference: {flux_gs3}"
+        );
+    }
+
+    #[test]
     fn palm_mute_score_separates_muted_chug_from_open_ring() {
         let mut muted = vec![0.0_f32; TARGET_SAMPLE_RATE as usize * 2];
         let mut open = vec![0.0_f32; TARGET_SAMPLE_RATE as usize * 2];
@@ -1321,15 +2022,138 @@ mod tests {
         // Open ringing string: slow decay, rich upper harmonics.
         synth_pluck(&mut open, 0.30, 0.90, 40, 0.85, 1.5, 8, TARGET_SAMPLE_RATE);
 
-        let pm_score = score_palm_mute(&muted, 0.30, 0.44, 40);
-        let open_score = score_palm_mute(&open, 0.30, 1.20, 40);
+        let (_sm, c_muted) = analyze_samples_22k(
+            "t-pm-muted".into(),
+            "muted.wav".into(),
+            TARGET_SAMPLE_RATE,
+            1,
+            muted,
+        )
+        .unwrap();
+        let (_so, c_open) = analyze_samples_22k(
+            "t-pm-open".into(),
+            "open.wav".into(),
+            TARGET_SAMPLE_RATE,
+            1,
+            open,
+        )
+        .unwrap();
+        let pm_notes = build_transcribed_notes(&c_muted, &DiDecodeParams::default());
+        let open_notes = build_transcribed_notes(&c_open, &DiDecodeParams::default());
+        let pm_hit = pm_notes
+            .iter()
+            .find(|n| n.pitch == 40 && (n.start_sec - 0.30).abs() < 0.08)
+            .expect("muted E2 note missing");
+        let open_hit = open_notes
+            .iter()
+            .find(|n| n.pitch == 40 && (n.start_sec - 0.30).abs() < 0.08)
+            .expect("open E2 note missing");
         assert!(
-            pm_score > 0.60,
-            "expected high palm mute score, got {pm_score}"
+            pm_hit.palm_mute_score > 0.50,
+            "expected high palm mute score, got {}",
+            pm_hit.palm_mute_score
         );
         assert!(
-            open_score < 0.20,
-            "expected low open score, got {open_score}"
+            open_hit.palm_mute_score < 0.30,
+            "expected low open score, got {}",
+            open_hit.palm_mute_score
+        );
+    }
+
+    #[test]
+    fn preserves_minor_second_dissonant_dyad() {
+        let mut audio = vec![0.0_f32; TARGET_SAMPLE_RATE as usize * 2];
+        synth_pluck(&mut audio, 0.35, 0.45, 56, 0.72, 2.5, 6, TARGET_SAMPLE_RATE);
+        synth_pluck(&mut audio, 0.35, 0.45, 57, 0.72, 2.5, 6, TARGET_SAMPLE_RATE);
+        let (_summary, cached) = analyze_samples_22k(
+            "t-dyad".into(),
+            "dyad.wav".into(),
+            TARGET_SAMPLE_RATE,
+            1,
+            audio,
+        )
+        .unwrap();
+        let params = DiDecodeParams {
+            onset_threshold: 0.45,
+            frame_threshold: 0.28,
+            min_note_ms: 55.0,
+            min_pitch: 40,
+            max_pitch: 76,
+            suppress_overtones: true,
+            open_tuning: Vec::new(),
+        };
+        let detected = build_transcribed_notes(&cached, &params);
+        let has = |p: u8| {
+            detected
+                .iter()
+                .any(|n| n.pitch == p && (n.start_sec - 0.35).abs() < 0.08)
+        };
+        assert!(has(56), "missed G#3 (56) in minor-2nd dyad: {detected:?}");
+        assert!(has(57), "missed A3 (57) in minor-2nd dyad: {detected:?}");
+    }
+
+    #[test]
+    fn detects_ultra_low_drop_d1_power_chord() {
+        let mut audio = vec![0.0_f32; TARGET_SAMPLE_RATE as usize * 2];
+        synth_pluck(
+            &mut audio,
+            0.35,
+            0.60,
+            26,
+            0.80,
+            2.8,
+            10,
+            TARGET_SAMPLE_RATE,
+        );
+        synth_pluck(&mut audio, 0.35, 0.60, 33, 0.72, 2.8, 9, TARGET_SAMPLE_RATE);
+        let (_summary, cached) = analyze_samples_22k(
+            "t-dropd1".into(),
+            "dropd1.wav".into(),
+            TARGET_SAMPLE_RATE,
+            1,
+            audio,
+        )
+        .unwrap();
+        let params = DiDecodeParams {
+            onset_threshold: 0.45,
+            frame_threshold: 0.28,
+            min_note_ms: 55.0,
+            min_pitch: 26,
+            max_pitch: 76,
+            suppress_overtones: true,
+            open_tuning: Vec::new(),
+        };
+        let detected = build_transcribed_notes(&cached, &params);
+        let near = |p: u8| {
+            detected
+                .iter()
+                .any(|n| n.pitch == p && (n.start_sec - 0.35).abs() < 0.08)
+        };
+        assert!(near(26), "missed D1 (26): {detected:?}");
+        assert!(near(33), "missed A1 (33): {detected:?}");
+        assert!(
+            !near(38),
+            "false +12 octave ghost D2 (38) leaked on Drop D1 power chord: {detected:?}"
+        );
+    }
+
+    #[test]
+    fn does_not_retrigger_long_sustained_open_note() {
+        let mut audio = vec![0.0_f32; TARGET_SAMPLE_RATE as usize * 4];
+        synth_pluck(&mut audio, 0.35, 2.50, 40, 0.80, 1.2, 7, TARGET_SAMPLE_RATE);
+        let (_summary, cached) = analyze_samples_22k(
+            "t-sustain".into(),
+            "sustain.wav".into(),
+            TARGET_SAMPLE_RATE,
+            1,
+            audio,
+        )
+        .unwrap();
+        let detected = build_transcribed_notes(&cached, &DiDecodeParams::default());
+        let e2_count = detected.iter().filter(|n| n.pitch == 40).count();
+        assert_eq!(
+            e2_count, 1,
+            "expected single sustained E2 (40) note without tail retriggers, got {detected:?}"
         );
     }
 

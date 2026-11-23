@@ -40,6 +40,10 @@
   width: 84px;
   min-width: 0;
 }
+.di-import .di-inline-input select {
+  flex: 1;
+  min-width: 0;
+}
 .di-import .di-inline-input button {
   flex: none;
   white-space: nowrap;

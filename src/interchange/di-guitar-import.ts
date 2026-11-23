@@ -60,7 +60,7 @@ export interface DiGuitarImportOptions {
 
 export const defaultDiGuitarImportOptions: DiGuitarImportOptions = {
   quantization: 16,
-  tuplets: 'triplets',
+  tuplets: 'none',
   voices: 1,
   bpm: 120,
   timeSignature: { numerator: 4, denominator: 4 },
@@ -252,8 +252,8 @@ function scoreChordCandidate(
     if (frets.length >= 2 && frets.every(fret => fret === frets[0])) {
       cost -= 1.2; // Barre / Drop-tuning one-finger power chord bonus
     }
-    if (openCount > 0 && fretted.length > 0 && Math.max(...fretted) > 6) {
-      cost += 2.2; // Avoid wide stretch mixing open string + high fretted notes unless necessary
+    if (openCount > 0 && fretted.length >= 2 && Math.max(...fretted) - Math.min(...fretted) > 4) {
+      cost += 1.4; // Penalize wide left-hand stretch on the fretted notes, not open drone pairings
     }
   }
 

@@ -230,6 +230,25 @@ describe('di-guitar-import', () => {
     expect(undone.score.tracks[0].staves[0].bars[0].voices[0].beats.every(b => b.notes.length === 0)).toBe(true);
   });
 
+  it('allows open-string drone pairings with high fretted notes on custom Drop D1 tuning', () => {
+    const DROP_D1 = [52, 47, 43, 38, 33, 26] as const;
+    // Open D2 (38, s3f0) paired with high-fret 7th+ dyad [54, 59] (s5f7 + s6f7) must keep string 3 open (fret 0).
+    const chords = [
+      { start: 0, end: 120, keys: [38, 54, 59], voice: 0 },
+      { start: 120, end: 240, keys: [38, 53, 58], voice: 0 },
+    ];
+    const solved = solveGuitarFingering(chords, DROP_D1, 0, 24, 'auto');
+    expect(solved.unplayableCount).toBe(0);
+    const p0 = solved.placements.get(chords[0])!;
+    expect(p0.get(38)).toEqual({ string: 3, fret: 0 });
+    expect(p0.get(54)).toEqual({ string: 5, fret: 7 });
+    expect(p0.get(59)).toEqual({ string: 6, fret: 7 });
+    const p1 = solved.placements.get(chords[1])!;
+    expect(p1.get(38)).toEqual({ string: 3, fret: 0 });
+    expect(p1.get(53)).toEqual({ string: 5, fret: 6 });
+    expect(p1.get(58)).toEqual({ string: 6, fret: 6 });
+  });
+
   it('counts unplayable notes beyond maxFret and sanitizes exported filename', () => {
     const res = importDiGuitarNotes(
       [note(40, 0.0, 0.4), note(108, 0.5, 0.9)],

@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Settings, type model } from '@coderline/alphatab';
+import type { TuningAudition } from '../audio/audition';
 import {
   diProblem,
   diTranscribe,
@@ -25,6 +26,8 @@ import {
 } from '../interchange/di-guitar-import';
 import { exportGpInterchange } from '../interchange/gp';
 import { buildImportClip, type ImportTracksCommand } from '../interchange/import-tracks';
+import { formatTuning } from '../tuning';
+import { TuningDialog } from '../tuning/TuningDialog';
 import { tuningGroupTitle, tuningPresetName, tuningPresets, type TuningPreset } from '../tuning-presets';
 import { Dialog } from '../ui/Dialog';
 import { Segmented } from '../ui/Segmented';
@@ -39,13 +42,16 @@ export interface DiImportDialogProps {
   currentScore?: model.Score;
   selectedTrack?: number;
   locked?: boolean;
+  onAudition?: TuningAudition;
   onImport: (name: string, bytes: Uint8Array) => Promise<boolean>;
   onImportIntoScore?: (command: ImportTracksCommand) => Promise<boolean>;
   transcriber?: DiTranscriber;
   onClose: () => void;
 }
 
-const DEFAULT_PRESET_ID = 'guitar-6-standard-e';
+const DEFAULT_TUNING = [64, 59, 55, 50, 45, 40] as const;
+const sameTuning = (a: readonly number[], b: readonly number[]) =>
+  a.length === b.length && a.every((pitch, index) => pitch === b[index]);
 const TIME_SIGNATURES: readonly { id: string; label: string; meter: DiTargetBar }[] = [
   { id: '4/4', label: '4/4', meter: { numerator: 4, denominator: 4 } },
   { id: '3/4', label: '3/4', meter: { numerator: 3, denominator: 4 } },
@@ -72,6 +78,7 @@ export function DiImportDialog({
   currentScore,
   selectedTrack = 0,
   locked = false,
+  onAudition,
   onImport,
   onImportIntoScore,
   transcriber = diTranscribe,
@@ -137,12 +144,14 @@ export function DiImportDialog({
   const [targetTrack, setTargetTrack] = useState<number>(() =>
     scoreTrackCount > 0 ? Math.max(0, Math.min(selectedTrack, scoreTrackCount - 1)) : 0,
   );
-  const [presetId, setPresetId] = useState<string>(DEFAULT_PRESET_ID);
+  const [tuningPitches, setTuningPitches] = useState<number[]>(() => [...DEFAULT_TUNING]);
+  const [tuningName, setTuningName] = useState<string>('');
+  const [tuningDialogOpen, setTuningDialogOpen] = useState<boolean>(false);
   const [bpmInput, setBpmInput] = useState<string>('120');
   const [timeSignatureId, setTimeSignatureId] = useState<string>('4/4');
   const [offsetMsInput, setOffsetMsInput] = useState<string>('0');
   const [quantization, setQuantization] = useState<DiGuitarQuantization>(16);
-  const [tuplets, setTuplets] = useState<DiTupletMode>('triplets');
+  const [tuplets, setTuplets] = useState<DiTupletMode>('none');
   const [voices, setVoices] = useState<1 | 2>(1);
   const [sensitivity, setSensitivity] = useState<DiSensitivity>('balanced');
   const [position, setPosition] = useState<DiFretPosition>('auto');
@@ -175,11 +184,19 @@ export function DiImportDialog({
     targetStaff.tuning.length > 0;
   const allowStringTechniques = !(activeDestination === 'replace' && !targetIsStringed);
 
-  const chosenPreset = tuningPresets.find(preset => preset.id === presetId) ?? tuningPresets[0];
-  const effectiveTuning = useMemo<readonly number[]>(
-    () => (targetIsStringed && targetStaff ? [...targetStaff.tuning] : [...chosenPreset.tuning]),
-    [targetIsStringed, targetStaff, chosenPreset],
+  const matchedPreset = useMemo(
+    () =>
+      tuningGroups
+        .flatMap(group => group.items)
+        .find(preset => sameTuning(preset.tuning, tuningPitches)),
+    [tuningGroups, tuningPitches],
   );
+  const effectiveTuning = useMemo<readonly number[]>(
+    () => (targetIsStringed && targetStaff ? [...targetStaff.tuning] : [...tuningPitches]),
+    [targetIsStringed, targetStaff, tuningPitches],
+  );
+  const isCustomBass =
+    (tuningPitches.at(-1) ?? 40) <= 31 && tuningPitches.length <= 6;
   const effectiveCapo = targetIsStringed && targetStaff ? targetStaff.capo : 0;
   const effectiveTransposition = targetIsStringed && targetStaff ? targetStaff.transpositionPitch : 0;
 
@@ -197,8 +214,19 @@ export function DiImportDialog({
       minPitch,
       maxPitch,
       suppressOvertones,
+      openTuning: effectiveTuning.map(pitch =>
+        Math.max(0, Math.min(127, pitch + effectiveCapo - effectiveTransposition)),
+      ),
     }),
-    [sensitivity, minPitch, maxPitch, suppressOvertones],
+    [
+      sensitivity,
+      minPitch,
+      maxPitch,
+      suppressOvertones,
+      effectiveTuning,
+      effectiveCapo,
+      effectiveTransposition,
+    ],
   );
 
   useEffect(() => {
@@ -571,33 +599,65 @@ export function DiImportDialog({
           <div className="di-tuning-row di-full-row">
             <label>
               {t('di_import.tuning')}
-              <select
-                value={targetIsStringed ? '__target__' : chosenPreset.id}
-                {...busySelect(controlsLocked || targetIsStringed)}
-                onChange={event => {
-                  if (controlsLocked || targetIsStringed) return;
-                  setImportProblem(null);
-                  setPresetId(event.target.value);
-                }}
-              >
-                {targetIsStringed && (
-                  <option value="__target__">
-                    {t('di_import.target_track_tuning', {
-                      name: targetTrackObj?.name ?? '',
-                      strings: effectiveTuning.length,
-                    })}
-                  </option>
-                )}
-                {tuningGroups.map(group => (
-                  <optgroup key={group.key} label={group.title}>
-                    {group.items.map(preset => (
-                      <option key={preset.id} value={preset.id}>
-                        {tuningPresetName(preset, lang)}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <div className="di-inline-input">
+                <select
+                  value={
+                    targetIsStringed
+                      ? '__target__'
+                      : matchedPreset?.id ?? '__custom__'
+                  }
+                  {...busySelect(controlsLocked || targetIsStringed)}
+                  onChange={event => {
+                    if (controlsLocked || targetIsStringed) return;
+                    const picked = tuningPresets.find(p => p.id === event.target.value);
+                    if (!picked) return;
+                    setImportProblem(null);
+                    setTuningPitches([...picked.tuning]);
+                    setTuningName(picked.name);
+                  }}
+                >
+                  {targetIsStringed && (
+                    <option value="__target__">
+                      {t('di_import.target_track_tuning', {
+                        name: targetTrackObj?.name ?? '',
+                        strings: effectiveTuning.length,
+                      })}
+                    </option>
+                  )}
+                  {!targetIsStringed && !matchedPreset && (
+                    <option value="__custom__">
+                      {tuningName.trim()
+                        ? t('di_import.custom_tuning_named', {
+                            name: tuningName.trim(),
+                            notes: formatTuning(tuningPitches),
+                          })
+                        : t('di_import.custom_tuning_option', {
+                            notes: formatTuning(tuningPitches),
+                          })}
+                    </option>
+                  )}
+                  {tuningGroups.map(group => (
+                    <optgroup key={group.key} label={group.title}>
+                      {group.items.map(preset => (
+                        <option key={preset.id} value={preset.id}>
+                          {tuningPresetName(preset, lang)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  aria-haspopup="dialog"
+                  {...busyGuard({
+                    busy: controlsLocked || targetIsStringed,
+                    className: 'tp-button',
+                    onClick: () => setTuningDialogOpen(true),
+                  })}
+                >
+                  {t('di_import.custom_tuning_btn')}
+                </button>
+              </div>
             </label>
           </div>
 
@@ -863,6 +923,24 @@ export function DiImportDialog({
           </p>
         )}
       </div>
+      {tuningDialogOpen && !targetIsStringed && (
+        <TuningDialog
+          mode="draft"
+          pitches={tuningPitches}
+          name={matchedPreset ? tuningPresetName(matchedPreset, lang) : tuningName}
+          onAudition={
+            onAudition &&
+            ((list, strum) =>
+              onAudition({ program: isCustomBass ? 33 : 29 }, list, strum))
+          }
+          onApply={choice => {
+            setImportProblem(null);
+            setTuningPitches(choice.pitches);
+            setTuningName(choice.name);
+          }}
+          onClose={() => setTuningDialogOpen(false)}
+        />
+      )}
     </Dialog>
   );
 }

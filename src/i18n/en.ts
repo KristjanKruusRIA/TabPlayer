@@ -2186,6 +2186,9 @@ export const en = {
   'di_import.error_stale': 'The previous audio analysis is no longer active. Choose the audio file again.',
   'di_import.error_unreadable': 'The audio file could not be read: {detail}',
   'di_import.error_unknown': 'DI transcription failed: {detail}',
+  'di_import.custom_tuning_btn': 'Custom…',
+  'di_import.custom_tuning_option': 'Custom ({notes})',
+  'di_import.custom_tuning_named': '{name} ({notes})',
 
   // Workspace Document Tabs
   'workspace.open_scores': 'Open scores',

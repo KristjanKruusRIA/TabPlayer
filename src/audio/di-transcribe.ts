@@ -18,6 +18,7 @@ export interface DiDecodeParams {
   minPitch: number;
   maxPitch: number;
   suppressOvertones: boolean;
+  openTuning?: number[];
 }
 
 export interface TranscribedDiNote {

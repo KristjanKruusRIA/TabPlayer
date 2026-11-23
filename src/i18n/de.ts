@@ -2187,6 +2187,9 @@ export const de: MessageCatalog = {
   'di_import.error_stale': 'Die vorherige Audioanalyse ist nicht mehr aktiv. Wählen Sie die Datei erneut aus.',
   'di_import.error_unreadable': 'Die Audiodatei konnte nicht gelesen werden: {detail}',
   'di_import.error_unknown': 'DI-Transkription fehlgeschlagen: {detail}',
+  'di_import.custom_tuning_btn': 'Benutzerdefiniert…',
+  'di_import.custom_tuning_option': 'Benutzerdefiniert ({notes})',
+  'di_import.custom_tuning_named': '{name} ({notes})',
 
   // Workspace Document Tabs
   'workspace.open_scores': 'Offene Partituren',

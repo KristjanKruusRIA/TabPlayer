@@ -2187,6 +2187,9 @@ export const et: MessageCatalog = {
   'di_import.error_stale': 'Eelmine helianalüüs ei ole enam aktiivne. Vali helifail uuesti.',
   'di_import.error_unreadable': 'Helifaili lugemine ebaõnnestus: {detail}',
   'di_import.error_unknown': 'DI transkribeerimine ebaõnnestus: {detail}',
+  'di_import.custom_tuning_btn': 'Kohandatud…',
+  'di_import.custom_tuning_option': 'Kohandatud ({notes})',
+  'di_import.custom_tuning_named': '{name} ({notes})',
 
   // Workspace Document Tabs
   'workspace.open_scores': 'Avatud partituurid',

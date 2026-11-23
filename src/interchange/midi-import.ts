@@ -47,6 +47,10 @@ export interface MidiImportOptions {
   voices:1|2|3|4;
   /** Guitar and bass programs become tablature staves when every note can be fingered. */
   tablature:boolean;
+  /** Use the MIDI meter map for a new score. When false, quantize in 4/4. */
+  importTimeSignatures?:boolean;
+  importKeySignatures?:boolean;
+  importTempo?:boolean;
   /** 0-based planned part indices forced to percussion even if not on MIDI channel 10. */
   drumParts?:readonly number[];
   /** When present, only these 0-based planned part indices are imported. */
@@ -93,10 +97,11 @@ type Stats = RhythmStats;
 interface Chord {start:number;end:number;keys:number[];voice:number}
 interface Source {partIndex:number;displayName:string;rawPartName:string;multiChannel:boolean;channel:number;program:number;percussion:boolean;notes:{key:number;start:number;end:number}[];laterPrograms:number}
 
-function buildBars(song:MidiSong,notes:MidiImportNote[]):Bar[] {
+function buildBars(song:MidiSong,notes:MidiImportNote[],importTimeSignatures:boolean):Bar[] {
   const wholeTicks=song.division*4,bars:Bar[]=[];
-  const meters=song.meters.filter(meter=>meter.numerator>=1&&meter.numerator<=32&&meter.denominator>=1&&meter.denominator<=32);
-  if(meters.length<song.meters.length)notes.push({code:'unsupported_meters'});
+  const sourceMeters=importTimeSignatures?song.meters:[];
+  const meters=sourceMeters.filter(meter=>meter.numerator>=1&&meter.numerator<=32&&meter.denominator>=1&&meter.denominator<=32);
+  if(meters.length<sourceMeters.length)notes.push({code:'unsupported_meters'});
   let tick=0,start=0,next=0,numerator=4,denominator=4,deferred=0;
   do{
     // A time signature that starts inside a bar takes effect at the next bar line.
@@ -233,14 +238,15 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
   let maxNoteStart=-1;
   for(const item of mappedSources)for(const hit of item.hits)if(hit.start>maxNoteStart)maxNoteStart=hit.start;
 
-  const bars=options.targetBars?buildTargetBars(options.targetBars,maxNoteStart,options.quantization,notes):buildBars(song,notes);
+  const bars=options.targetBars?buildTargetBars(options.targetBars,maxNoteStart,options.quantization,notes):buildBars(song,notes,options.importTimeSignatures!==false);
   const total=bars.at(-1)!.start+bars.at(-1)!.length;
   const score=new model.Score();score.title=stripCdataEnd(song.title||fallbackTitle);score.artist='';
   for(const bar of bars){const master=new model.MasterBar();master.timeSignatureNumerator=bar.numerator;master.timeSignatureDenominator=bar.denominator;score.addMasterBar(master);}
 
   // Tempo: bar-level automations at the bar-relative position of each change.
   // Until the first tempo event a MIDI file plays at 120 BPM.
-  const tempos=song.tempos[0]?.tick===0?song.tempos:[{tick:0,microsPerQuarter:500000},...song.tempos];
+  const sourceTempos=options.importTempo===false?[]:song.tempos;
+  const tempos=sourceTempos[0]?.tick===0?sourceTempos:[{tick:0,microsPerQuarter:500000},...sourceTempos];
   let lastTempo=0,firstTempo=120;
   for(const tempo of tempos){
     const bpm=Math.max(1,Math.min(999,Math.round(60e6/tempo.microsPerQuarter)));
@@ -316,7 +322,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
   if(stats.shortened)notes.push({code:'shortened_notes',count:stats.shortened});
   if(stats.merged)notes.push({code:'merged_notes',count:stats.merged});
   // Key signatures carry on from the bar they start in. The setter reads the staves, so it runs once they exist.
-  let key=0,minor=false,keyIndex=0;const keys=song.keys;
+  let key=0,minor=false,keyIndex=0;const keys=options.importKeySignatures===false?[]:song.keys;
   for(const [index,master] of score.masterBars.entries()){
     while(keyIndex<keys.length&&toUnits(keys[keyIndex].tick)<=bars[index].start+bars[index].length/2){key=Math.max(-7,Math.min(7,keys[keyIndex].sharps));minor=keys[keyIndex].minor;keyIndex++;}
     master.keySignature=key as model.KeySignature;master.keySignatureType=minor?model.KeySignatureType.Minor:model.KeySignatureType.Major;

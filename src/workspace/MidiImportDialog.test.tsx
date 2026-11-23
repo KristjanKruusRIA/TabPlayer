@@ -22,6 +22,17 @@ const setup=(busy=false,result:()=>Promise<boolean>=async()=>true)=>{
   return {onImport,onClose,input:document.querySelector<HTMLInputElement>('input[type="file"]')!,importButton:document.querySelector<HTMLButtonElement>('button[type="submit"]')!};
 };
 const status=()=>screen.getByRole('status');
+const openInstrument = (name: string | RegExp) => {
+  const button = screen.getByRole('button', { name });
+  button.focus();
+  fireEvent.click(button);
+  return within(screen.getByRole('dialog', { name }));
+};
+const assignInstrument = (part: string, kind: string) => {
+  const picker = openInstrument(`Instrument for ${part}`);
+  fireEvent.click(picker.getByRole('radio', { name: kind }));
+  fireEvent.click(picker.getByRole('button', { name: 'Apply' }));
+};
 const choose=(input:HTMLInputElement,bytes:Uint8Array,name='riff.mid')=>fireEvent.change(input,{target:{files:[new File([bytes as BlobPart],name)]}});
 
 it('starts with nothing to import, focus on the file button and the default options',()=>{
@@ -50,6 +61,52 @@ it('applies the chosen options to the score it imports',async()=>{
   await waitFor(()=>expect(screen.getByRole('list',{name:'Parts'})).toHaveTextContent('notation'));
   fireEvent.click(importButton);await waitFor(()=>expect(onImport).toHaveBeenCalled());
   expect(loadInterchangeScore(onImport.mock.calls[0][1],new Settings()).tracks[0].staves[0].showTablature).toBe(false);
+});
+
+it('previews a one-bar meter change and writes it to the imported score', async () => {
+  const { onImport, input, importButton } = setup();
+  const change = (numerator: number) => [0xff, 0x58, 4, numerator, 2, 24, 8];
+  choose(input, makeMidi(1, 480, [
+    makeTrack([[0, change(4)], [1920, change(2)], [960, change(4)]]),
+    makeTrack(noteLine([[0, 60, 36], [1920, 60, 38], [2880, 60, 36]], 0)),
+  ]));
+  const shortBar = await screen.findByRole('button', { name: 'Measure 2 · 2/4' });
+  fireEvent.click(shortBar);
+  expect(shortBar).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('img', { name: 'Score preview' }).querySelector('svg')).toHaveAttribute('viewBox', expect.stringMatching(/^0 0 /));
+  expect(screen.getByRole('button', { name: 'Measure 3 · 4/4' })).toBeInTheDocument();
+  const meters = screen.getByRole('checkbox', { name: 'Import time signatures' });
+  fireEvent.click(meters);
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Measure 2 · 2/4' })).toBeNull());
+  fireEvent.click(meters);
+  await screen.findByRole('button', { name: 'Measure 2 · 2/4' });
+  const picker = openInstrument(/Instrument for/);
+  fireEvent.change(picker.getByRole('listbox', { name: 'Sound family' }), { target: { value: '1' } });
+  fireEvent.change(picker.getByRole('listbox', { name: 'MIDI instrument' }), { target: { value: '12' } });
+  fireEvent.click(picker.getByRole('button', { name: 'Apply' }));
+  await waitFor(() => expect(importButton).not.toHaveAttribute('aria-disabled'));
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onImport).toHaveBeenCalled());
+  const score = loadInterchangeScore(onImport.mock.calls[0][1], new Settings());
+  expect(score.masterBars.map(bar => bar.timeSignatureNumerator)).toEqual([4, 2, 4]);
+  expect(score.tracks[0].playbackInfo.program).toBe(12);
+});
+
+it('can omit MIDI tempo and key signatures from a new score', async () => {
+  const { onImport, input, importButton } = setup();
+  choose(input, makeMidi(1, 480, [
+    makeTrack([[0, [0xff, 0x51, 3, 0x09, 0x27, 0xc0]], [0, [0xff, 0x59, 2, 0xfe, 0]]]),
+    makeTrack(noteLine([[0, 480, 60]], 0)),
+  ]));
+  await waitFor(() => expect(status()).toHaveTextContent('100 BPM'));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Import key signatures' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Import tempo' }));
+  await waitFor(() => expect(status()).toHaveTextContent('120 BPM'));
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onImport).toHaveBeenCalledOnce());
+  const score = loadInterchangeScore(onImport.mock.calls[0][1], new Settings());
+  expect(score.masterBars[0].keySignature).toBe(0);
+  expect(score.masterBars[0].tempoAutomations[0].value).toBe(120);
 });
 
 it('disables the tuplet kinds the chosen quantization cannot hold',()=>{
@@ -240,7 +297,7 @@ it('shows destination choices with a current score, disables add/replace when lo
   expect(onImportIntoScore.mock.calls[0][0]).toMatchObject({ type: 'importTracks', targetTrack: 1 });
 });
 
-it('supports Import as drums on channel-0 MIDI, per-part drum toggles, and appending tracks following current score meters', async () => {
+it('supports Import as drums on channel-0 MIDI, per-part drum assignment, and appending tracks following current score meters', async () => {
   const multiCh0 = makeMidi(1, 480, [
     makeTrack([[0, [0xc0, 25]], ...noteLine([[0, 480, 60]], 0)]),
     makeTrack([[0, [0xff, 0x03, 5, ...[...'Drums'].map(c => c.charCodeAt(0))]], ...noteLine([[0, 60, 36], [480, 60, 38]], 0)]),
@@ -250,8 +307,7 @@ it('supports Import as drums on channel-0 MIDI, per-part drum toggles, and appen
   await waitFor(() => expect(status()).toHaveTextContent('Format 1, 2 parts'));
 
   // Toggle only the second part as drums.
-  const secondPartToggle = screen.getByRole('checkbox', { name: 'Import Drums as drums' });
-  fireEvent.click(secondPartToggle);
+  assignInstrument('Drums', 'Drums');
   await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Drums: drums, 2 notes'));
   expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Acoustic Guitar (steel): guitar tab, 1 note');
 
@@ -410,6 +466,38 @@ it('imports program-0 bass MIDI as bass tab with auto-fitted Drop D tuning and s
   expect(gtrScore.tracks[0].staves[0].tuning).toEqual([52, 47, 43, 38, 33, 26]);
 });
 
+it('previews and imports checked tracks, and cancels an instrument edit without changing the sound', async () => {
+  const named = (name: string, key: number) => makeTrack([
+    [0, [0xff, 0x03, name.length, ...Array.from(name, letter => letter.charCodeAt(0))]],
+    ...noteLine([[0, 480, key]], 0),
+  ]);
+  const { onImport, input, importButton } = setup();
+  choose(input, makeMidi(1, 480, [named('Lead', 60), named('Backing', 64)]));
+  await waitFor(() => expect(status()).toHaveTextContent('2 parts'));
+  const audition = openInstrument('Instrument for Backing');
+  fireEvent.change(audition.getByRole('listbox', { name: 'Sound family' }), { target: { value: '3' } });
+  fireEvent.click(audition.getByRole('button', { name: 'Cancel' }));
+  expect(screen.getByRole('button', { name: 'Instrument for Backing' })).toHaveTextContent('Acoustic Grand Piano');
+  expect(screen.getByRole('button', { name: 'Instrument for Backing' })).toHaveFocus();
+
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Include Lead' }));
+  await waitFor(() => expect(status()).toHaveTextContent('1 part'));
+  expect(screen.getByRole('checkbox', { name: 'All tracks' })).toBePartiallyChecked();
+  expect(screen.getByRole('checkbox', { name: 'Include Lead' })).not.toBeChecked();
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Include Backing' }));
+  await waitFor(() => expect(status()).toHaveTextContent('Select a track to import'));
+  expect(importButton).toHaveAttribute('aria-disabled', 'true');
+
+  fireEvent.click(screen.getByRole('checkbox', { name: 'All tracks' }));
+  await waitFor(() => expect(status()).toHaveTextContent('2 parts'));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Include Lead' }));
+  await waitFor(() => expect(status()).toHaveTextContent('1 part'));
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onImport).toHaveBeenCalledOnce());
+  const score = loadInterchangeScore(onImport.mock.calls[0][1], new Settings());
+  expect(score.tracks.map(track => [track.name, track.playbackInfo.program])).toEqual([['Backing', 0]]);
+});
+
 it('assigns Guitar and Bass per part on multi-part program-0 MIDI and inherits stringed target track in Replace track mode', async () => {
   const twoParts = makeMidi(1, 480, [
     makeTrack([[0, [0xff, 0x03, 6, ...[...'Rhythm'].map(c => c.charCodeAt(0))]], ...noteLine([[0, 480, 40], [480, 480, 52]], 0)]),
@@ -419,8 +507,8 @@ it('assigns Guitar and Bass per part on multi-part program-0 MIDI and inherits s
   choose(input, twoParts, 'band.mid');
   await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Rhythm: notation, 2 notes'));
 
-  fireEvent.change(screen.getByLabelText('Instrument for Rhythm'), { target: { value: 'guitar' } });
-  fireEvent.change(screen.getByLabelText('Instrument for LowBass'), { target: { value: 'bass' } });
+  assignInstrument('Rhythm', 'Guitar');
+  assignInstrument('LowBass', 'Bass');
   await waitFor(() => {
     const list = screen.getByRole('list', { name: 'Parts' });
     expect(list).toHaveTextContent('Rhythm: guitar tab, 2 notes');

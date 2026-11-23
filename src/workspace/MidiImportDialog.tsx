@@ -1,6 +1,6 @@
 import { useDeferredValue, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Settings, type model } from '@coderline/alphatab';
+import { rendering, Settings, type model } from '@coderline/alphatab';
 import type { TuningAudition } from '../audio/audition';
 import { drumMapPresets, resolveInputDrumMap } from '../audio/drum-map';
 import { drumMapFiles, fileProblem as drumMapFileProblem, mapFromImport, type ImportedDrumMap } from '../audio/drum-map-file';
@@ -25,6 +25,8 @@ import {
   type MidiTupletMode,
 } from '../interchange/midi-import';
 import { MIDI_FILE_LIMIT, readMidiFile, type MidiSong } from '../interchange/midi-smf';
+import { midiPrograms } from '../midi-programs';
+import { MidiInstrumentPicker, type MidiInstrumentChoice, type MidiInstrumentSelection } from './MidiInstrumentPicker';
 import { formatPitch, formatTuning } from '../tuning';
 import { TuningDialog } from '../tuning/TuningDialog';
 import { tuningGroupTitle, tuningPresetName, tuningPresets, type TuningPreset } from '../tuning-presets';
@@ -34,7 +36,6 @@ import { busyGuard, busySelect } from '../ui/useBusyGuard';
 import './midi-import.css';
 
 export type MidiImportDestination = 'new' | 'append' | 'replace';
-type MidiInstrumentChoice = 'auto' | 'guitar' | 'bass' | 'keys';
 
 export interface MidiImportDialogProps {
   busy: boolean;
@@ -93,6 +94,30 @@ const groupInstrumentPresets = (instrument: 'guitar' | 'bass', lang: SupportedLa
   return groups;
 };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+function renderPreview(score: model.Score, track: number, bar: number): string {
+  const settings = new Settings();
+  settings.core.engine = 'svg';
+  settings.core.enableLazyLoading = false;
+  settings.display.startBar = Math.max(1, bar);
+  settings.display.barCount = 4;
+  settings.display.padding = [12];
+  const renderer = new rendering.ScoreRenderer(settings);
+  renderer.width = 480;
+  const systems: string[] = [];
+  renderer.partialRenderFinished.on(event => {
+    if (event.firstMasterBarIndex >= 0 && typeof event.renderResult === 'string') {
+      systems.push(event.renderResult.replace('<svg ', `<svg viewBox="0 0 ${event.width} ${event.height}" `));
+    }
+  });
+  try {
+    renderer.renderScore(score, [track]);
+    return systems.join('');
+  } catch {
+    return '';
+  } finally {
+    renderer.destroy();
+  }
+}
 const voiceOptions = [
   { value: '1', label: '1' },
   { value: '2', label: '2' },
@@ -166,9 +191,13 @@ export function MidiImportDialog({
   );
   const [sourcePart, setSourcePart] = useState(0);
   const [options, setOptions] = useState<MidiImportOptions>(defaultMidiImportOptions);
+  const [excludedParts, setExcludedParts] = useState<readonly number[]>([]);
+  const [editingInstrument, setEditingInstrument] = useState<MidiPartInfo | null>(null);
+  const [previewBar, setPreviewBar] = useState(0);
+  const [previewTrack, setPreviewTrack] = useState(0);
 
   const [instrumentOverride, setInstrumentOverride] = useState<MidiInstrumentChoice>('auto');
-  const [partInstruments, setPartInstruments] = useState<Record<number, MidiInstrumentChoice>>({});
+  const [partInstruments, setPartInstruments] = useState<Record<number, MidiInstrumentSelection>>({});
   const [octaveShift, setOctaveShift] = useState<number>(0);
   const [guitarTuning, setGuitarTuning] = useState<number[]>(() => [...DEFAULT_GUITAR_TUNING]);
   const [guitarTuningName, setGuitarTuningName] = useState('');
@@ -179,7 +208,6 @@ export function MidiImportDialog({
   const [editingTuningFor, setEditingTuningFor] = useState<'guitar' | 'bass' | null>(null);
 
   const [forceAllDrums, setForceAllDrums] = useState(false);
-  const [partDrums, setPartDrums] = useState<readonly number[]>([]);
   const [drumMapPreset, setDrumMapPreset] = useState<string>('gm');
   const [loadedDrumMap, setLoadedDrumMap] = useState<{ name: string; map: DrumMapRef | undefined } | null>(null);
   const [drumKeyOverrides, setDrumKeyOverrides] = useState<Record<number, number | null>>({});
@@ -190,6 +218,7 @@ export function MidiImportDialog({
   const loadingDrumMap = useRef(false);
   const hint = useId();
   const status = useId();
+  const previewHeading = useId();
 
   const song = useMemo<{ value: MidiSong } | { error: string } | null>(() => {
     if (!file) return null;
@@ -231,24 +260,28 @@ export function MidiImportDialog({
   const replaceMismatch =
     activeDestination === 'replace' && targetIsMelodic && !!chosenPart?.defaultPercussion;
 
-  const partDrumsSet = useMemo(() => new Set(partDrums), [partDrums]);
+  const isDrumPart = (part: MidiPartInfo) => {
+    const kind = partInstruments[part.index]?.kind ?? 'auto';
+    return kind === 'drums' || (kind === 'auto' && part.defaultPercussion);
+  };
   const activeParts = useMemo(
-    () => (activeDestination === 'replace' ? (chosenPart ? [chosenPart] : []) : parts),
-    [activeDestination, chosenPart, parts],
+    () => activeDestination === 'replace'
+      ? (chosenPart ? [chosenPart] : [])
+      : parts.filter(part => !excludedParts.includes(part.index)),
+    [activeDestination, chosenPart, excludedParts, parts],
   );
   const activeDrumPartIndices = useMemo(() => {
     if (activeDestination === 'replace') {
       return targetIsPercussion && chosenPart ? [chosenPart.index] : [];
     }
-    if (forceAllDrums) return parts.map(part => part.index);
-    return parts.filter(part => part.defaultPercussion || partDrumsSet.has(part.index)).map(part => part.index);
-  }, [activeDestination, targetIsPercussion, chosenPart, forceAllDrums, parts, partDrumsSet]);
+    return activeParts.filter(part => {
+      const kind = partInstruments[part.index]?.kind ?? 'auto';
+      return forceAllDrums || kind === 'drums' || (kind === 'auto' && part.defaultPercussion);
+    }).map(part => part.index);
+  }, [activeDestination, targetIsPercussion, chosenPart, forceAllDrums, activeParts, partInstruments]);
   const activeDrumSet = useMemo(() => new Set(activeDrumPartIndices), [activeDrumPartIndices]);
-
-  const isDrumsActive =
-    activeDestination === 'replace'
-      ? targetIsPercussion
-      : forceAllDrums || activeParts.some(part => part.defaultPercussion || partDrumsSet.has(part.index));
+  const isDrumsActive = targetIsPercussion || activeDrumPartIndices.length > 0 ||
+    (forceAllDrums && activeDestination !== 'replace' && parts.length === 0);
 
   const effectiveDrumMap = useMemo<DrumMapRef | undefined>(() => {
     if (drumMapPreset === FILE_PRESET_ID && loadedDrumMap) return loadedDrumMap.map;
@@ -284,14 +317,10 @@ export function MidiImportDialog({
         continue;
       }
       if (activeDrumSet.has(part.index)) continue;
-      const chosen = instrumentOverride !== 'auto' ? instrumentOverride : (partInstruments[part.index] ?? 'auto');
-      const inferred: 'guitar' | 'bass' | null = part.defaultPercussion
-        ? null
-        : part.program >= 32 && part.program <= 39
-          ? 'bass'
-          : part.program >= 24 && part.program <= 31
-            ? 'guitar'
-            : null;
+      const selection = activeDestination === 'replace' ? undefined : partInstruments[part.index];
+      const chosen = selection && selection.kind !== 'auto' ? selection.kind : instrumentOverride;
+      const program = selection?.program ?? part.program;
+      const inferred = program >= 32 && program <= 39 ? 'bass' : program >= 24 && program <= 31 ? 'guitar' : null;
       const eff = chosen !== 'auto' ? chosen : inferred;
       if (eff === 'guitar') gParts.push(part);
       else if (eff === 'bass') bParts.push(part);
@@ -308,6 +337,7 @@ export function MidiImportDialog({
       } else if (inferred === 'bass' && !sameTuning(bassTuning, DEFAULT_BASS_TUNING)) {
         entry = { tuning: bassTuning };
       }
+      if (selection?.program != null) entry = { ...entry, program };
       if (octaveShift !== 0) {
         entry = { ...entry, octaveShift };
       }
@@ -324,6 +354,7 @@ export function MidiImportDialog({
     replaceMismatch,
     instrumentOverride,
     partInstruments,
+    activeDestination,
     guitarTuning,
     bassTuning,
     octaveShift,
@@ -334,6 +365,7 @@ export function MidiImportDialog({
     const hasPartOverrides = Object.keys(partOverrides).length > 0;
     const needsCustomFields =
       activeDestination !== 'new' ||
+      excludedParts.length > 0 ||
       activeDrumPartIndices.length > 0 ||
       effectiveDrumMap !== undefined ||
       hasDrumOverrides ||
@@ -341,7 +373,9 @@ export function MidiImportDialog({
     if (!needsCustomFields) return options;
     return {
       ...options,
-      ...(activeDestination === 'replace' && chosenPart ? { selectedParts: [chosenPart.index] } : {}),
+      ...(activeDestination !== 'new' ? { importTempo: true, importKeySignatures: true } : {}),
+      ...(activeDestination === 'replace' || excludedParts.length > 0
+        ? { selectedParts: activeParts.map(part => part.index) } : {}),
       ...(activeDrumPartIndices.length > 0 ? { drumParts: activeDrumPartIndices } : {}),
       ...(hasPartOverrides ? { partOverrides } : {}),
       ...(effectiveDrumMap ? { drumMap: effectiveDrumMap } : {}),
@@ -351,7 +385,8 @@ export function MidiImportDialog({
   }, [
     options,
     activeDestination,
-    chosenPart,
+    activeParts,
+    excludedParts,
     activeDrumPartIndices,
     partOverrides,
     effectiveDrumMap,
@@ -362,7 +397,7 @@ export function MidiImportDialog({
   // Converting a long file takes a moment, so it follows the option controls rather than blocking them.
   const settled = useDeferredValue(effectiveOptions);
   const result = useMemo<{ value: MidiImport } | { error: string } | null>(() => {
-    if (!file || !song || !('value' in song)) return null;
+    if (!file || !song || !('value' in song) || settled.selectedParts?.length === 0) return null;
     try {
       return { value: importMidi(song.value, settled, file.name.replace(/\.[^.]*$/, '')) };
     } catch (error) {
@@ -371,6 +406,20 @@ export function MidiImportDialog({
   }, [file, song, settled]);
 
   const imported = settled === effectiveOptions && result && 'value' in result ? result.value : null;
+  const previewScore = imported?.score;
+  const meters = useMemo(() => previewScore?.masterBars.flatMap((bar, index, bars) => {
+    const previous = bars[index - 1];
+    return previous?.timeSignatureNumerator === bar.timeSignatureNumerator &&
+      previous.timeSignatureDenominator === bar.timeSignatureDenominator
+      ? []
+      : [{ index, signature: `${bar.timeSignatureNumerator}/${bar.timeSignatureDenominator}` }];
+  }) ?? [], [previewScore]);
+  const activePreviewBar = meters.some(meter => meter.index === previewBar) ? previewBar : 0;
+  const activePreviewTrack = Math.max(0, imported?.summary.tracks.findIndex(track => track.partIndex === previewTrack) ?? 0);
+  const preview = useMemo(
+    () => previewScore ? renderPreview(previewScore, activePreviewTrack, activePreviewBar) : '',
+    [previewScore, activePreviewTrack, activePreviewBar],
+  );
   const problem =
     importProblem ??
     fileProblem ??
@@ -423,7 +472,7 @@ export function MidiImportDialog({
     if (next === 'replace' && currentScore?.tracks.length) {
       const tracks = currentScore.tracks;
       const currentIsPercussion = tracks[effectiveTargetTrack]?.isPercussion ?? false;
-      const wantsDrums = forceAllDrums || parts.some(part => part.defaultPercussion || partDrumsSet.has(part.index));
+      const wantsDrums = forceAllDrums || parts.some(isDrumPart);
       const firstPercussionTrack = tracks.findIndex(track => track.isPercussion);
       const nextTarget =
         currentIsPercussion || !wantsDrums || firstPercussionTrack < 0
@@ -431,7 +480,7 @@ export function MidiImportDialog({
           : firstPercussionTrack;
       setTargetTrack(nextTarget);
       if (tracks[nextTarget]?.isPercussion) {
-        const firstDrumPart = parts.find(part => part.defaultPercussion || partDrumsSet.has(part.index));
+        const firstDrumPart = parts.find(isDrumPart);
         setSourcePart(firstDrumPart ? firstDrumPart.index : 0);
       } else {
         setSourcePart(0);
@@ -453,8 +502,10 @@ export function MidiImportDialog({
     reader.onload = () => {
       if (request !== reading.current) return;
       setFileProblem(null);
-      setPartDrums([]);
       setPartInstruments({});
+      setExcludedParts([]);
+      setPreviewBar(0);
+      setPreviewTrack(0);
       setOctaveShift(0);
       setSourcePart(0);
       const bytes = new Uint8Array(reader.result as ArrayBuffer);
@@ -643,7 +694,6 @@ export function MidiImportDialog({
         : t('midi_import.drum_keys_toggle', { count: drumKeys.length });
 
   const canToggleGlobalDrums = activeDestination !== 'replace';
-  const showPartDrumsToggle = activeDestination !== 'replace' && parts.length > 1;
   const showTargetTuning = options.tablature && targetIsStringed;
   const showGuitarTuning =
     options.tablature &&
@@ -860,7 +910,7 @@ export function MidiImportDialog({
                       setImportProblem(null);
                       setTargetTrack(nextTrack);
                       if (currentScore.tracks[nextTrack]?.isPercussion) {
-                        const firstDrum = parts.find(part => part.defaultPercussion || partDrumsSet.has(part.index));
+                        const firstDrum = parts.find(isDrumPart);
                         if (firstDrum) setSourcePart(firstDrum.index);
                       }
                     }}
@@ -911,7 +961,108 @@ export function MidiImportDialog({
           </div>
         )}
 
+        <div className="midi-layout">
+        <div className="midi-setup">
+        {parts.length > 0 && (
+          <section className="midi-track-list">
+            <h3>{t('midi_import.parts')}</h3>
+            {activeDestination !== 'replace' && (
+              <label className="midi-track-check midi-track-check-all">
+                <input
+                  type="checkbox"
+                  checked={excludedParts.length === 0}
+                  ref={input => {
+                    if (input) input.indeterminate = excludedParts.length > 0 && activeParts.length > 0;
+                  }}
+                  disabled={importing}
+                  onChange={event => {
+                    setImportProblem(null);
+                    setExcludedParts(event.target.checked ? [] : parts.map(part => part.index));
+                  }}
+                />
+                {t('midi_import.all_tracks')}
+              </label>
+            )}
+            <ul className="midi-parts" aria-label={t('midi_import.parts')}>
+              {(activeDestination === 'replace' ? activeParts : parts).map(part => {
+                const included = !excludedParts.includes(part.index) || activeDestination === 'replace';
+                const converted = imported?.summary.tracks.find(track => track.partIndex === part.index);
+                const drum = activeDrumSet.has(part.index) || (!included && (forceAllDrums || isDrumPart(part)));
+                const program = converted?.program ?? partInstruments[part.index]?.program ?? part.program;
+                const name = converted?.name ?? part.name;
+                const count = converted?.notes ?? part.noteCount;
+                const notes = t(count === 1 ? 'midi_import.part_notes_one' : 'midi_import.part_notes_other', { count });
+                const voices = converted && converted.voices > 1
+                  ? `, ${t('midi_import.part_voices', { count: converted.voices })}`
+                  : '';
+                const details = converted ? `${kinds[converted.kind]}, ${notes}${voices}` : notes;
+                return (
+                  <li key={part.index} className="midi-part-item">
+                    <div className="midi-part-source">
+                      {activeDestination !== 'replace' && (
+                        <input
+                          type="checkbox"
+                          checked={included}
+                          disabled={importing}
+                          aria-label={t('midi_import.include_track', { name: part.name })}
+                          onChange={event => {
+                            const checked = event.target.checked;
+                            setImportProblem(null);
+                            setExcludedParts(previous => checked
+                              ? previous.filter(index => index !== part.index)
+                              : [...previous, part.index]);
+                          }}
+                        />
+                      )}
+                      <span>{name}: {details}</span>
+                    </div>
+                    {activeDestination !== 'replace' && (
+                      <button
+                        type="button"
+                        className="tp-button midi-part-picker"
+                        disabled={importing || forceAllDrums}
+                        aria-label={t('midi_import.part_instrument_aria', { name: part.name })}
+                        onClick={() => setEditingInstrument(part)}
+                      >
+                        {drum ? kinds.drums : midiPrograms[program]}
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {!!imported?.summary.notes.length && (
+              <p className="muted">{imported.summary.notes.map(note => formatMidiImportNote(note, t)).join(' ')}</p>
+            )}
+          </section>
+        )}
+
+        <section className="midi-settings" aria-label={t('midi_import.settings')}>
+          <h3>{t('midi_import.settings')}</h3>
         <fieldset className="midi-options">
+          {activeDestination === 'new' && (
+            <fieldset className="midi-score-options midi-full-row">
+              <legend>{t('midi_import.score_options')}</legend>
+              {([
+                ['importTimeSignatures', 'midi_import.import_time_signatures'],
+                ['importKeySignatures', 'midi_import.import_key_signatures'],
+                ['importTempo', 'midi_import.import_tempo'],
+              ] as const).map(([option, label]) => (
+                <label key={option} className="check">
+                  <input
+                    type="checkbox"
+                    checked={options[option] !== false}
+                    aria-disabled={importing || undefined}
+                    onChange={event => {
+                      if (!importing) choice(option, event.target.checked);
+                    }}
+                  />
+                  {t(label)}
+                </label>
+              ))}
+            </fieldset>
+          )}
+
           <div className="tp-field midi-full-row">
             <span className="tp-field-label" aria-hidden="true">
               {t('midi_import.quantization')}
@@ -973,7 +1124,7 @@ export function MidiImportDialog({
                 setInstrumentOverride(val);
                 if (val !== 'auto') setForceAllDrums(false);
                 const melodic = activeParts.filter(
-                  part => !part.defaultPercussion && !partDrumsSet.has(part.index),
+                  part => !isDrumPart(part),
                 );
                 if (val === 'guitar' && !guitarTuningCustom && melodic.length > 0) {
                   setGuitarTuning(autoFitPreset('guitar', melodic));
@@ -1236,6 +1387,10 @@ export function MidiImportDialog({
           </section>
         )}
 
+        </section>
+        </div>
+        <section className="midi-preview" aria-labelledby={previewHeading}>
+          <h3 id={previewHeading}>{t('midi_import.preview')}</h3>
         <p id={status} role="status" className={problem ? 'error' : 'muted'}>
           {problem ??
             (importing
@@ -1248,116 +1403,81 @@ export function MidiImportDialog({
                 ? t('midi_import.updating')
                 : imported
                   ? summary
-                  : t('midi_import.nothing_yet'))}
+                  : parts.length > 0 && activeParts.length === 0
+                    ? t('midi_import.select_tracks')
+                    : t('midi_import.nothing_yet'))}
         </p>
 
-        {imported && !problem && (
-          <>
-            <ul className="midi-parts" aria-label={t('midi_import.parts')}>
-              {imported.summary.tracks.map((part, index) => {
-                const matchingSource =
-                  part.partIndex !== undefined
-                    ? parts.find(entry => entry.index === part.partIndex)
-                    : activeParts[index];
-                const canTogglePart =
-                  showPartDrumsToggle &&
-                  !forceAllDrums &&
-                  matchingSource &&
-                  !matchingSource.defaultPercussion;
-                const canAssignPartInstrument =
-                  canTogglePart &&
-                  instrumentOverride === 'auto' &&
-                  !partDrumsSet.has(matchingSource.index);
-                const partText = `${part.name}: ${kinds[part.kind]}, ${t(
-                  part.notes === 1 ? 'midi_import.part_notes_one' : 'midi_import.part_notes_other',
-                  { count: part.notes },
-                )}${part.voices > 1 ? `, ${t('midi_import.part_voices', { count: part.voices })}` : ''}`;
-                return (
-                  <li key={index} className="midi-part-item">
-                    <span>{partText}</span>
-                    {canTogglePart && (
-                      <div className="midi-part-controls">
-                        {canAssignPartInstrument && (
-                          <select
-                            className="midi-part-instrument"
-                            value={partInstruments[matchingSource.index] ?? 'auto'}
-                            aria-label={t('midi_import.part_instrument_aria', {
-                              name: matchingSource.name,
-                            })}
-                            {...busySelect(importing)}
-                            onChange={event => {
-                              if (importing) return;
-                              setImportProblem(null);
-                              const nextVal = event.target.value as MidiInstrumentChoice;
-                              setPartInstruments(prev => {
-                                const next = { ...prev };
-                                if (nextVal === 'auto') delete next[matchingSource.index];
-                                else next[matchingSource.index] = nextVal;
-                                return next;
-                              });
-                              if (nextVal === 'guitar' && !guitarTuningCustom) {
-                                setGuitarTuning(
-                                  autoFitPreset('guitar', [
-                                    ...guitarParts.filter(p => p.index !== matchingSource.index),
-                                    matchingSource,
-                                  ]),
-                                );
-                                setGuitarTuningName('');
-                              } else if (nextVal === 'bass' && !bassTuningCustom) {
-                                setBassTuning(
-                                  autoFitPreset('bass', [
-                                    ...bassParts.filter(p => p.index !== matchingSource.index),
-                                    matchingSource,
-                                  ]),
-                                );
-                                setBassTuningName('');
-                              }
-                            }}
-                          >
-                            {instrumentOptions.map(opt => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                        <label className="midi-part-drums-toggle">
-                          <input
-                            type="checkbox"
-                            checked={partDrumsSet.has(matchingSource.index)}
-                            aria-label={t('midi_import.part_as_drums_aria', {
-                              name: matchingSource.name,
-                            })}
-                            aria-disabled={importing || undefined}
-                            onChange={event => {
-                              if (importing) return;
-                              setImportProblem(null);
-                              const checked = event.target.checked;
-                              setPartDrums(prev => {
-                                const next = new Set(prev);
-                                if (checked) next.add(matchingSource.index);
-                                else next.delete(matchingSource.index);
-                                return [...next].sort((a, b) => a - b);
-                              });
-                            }}
-                          />
-                          {t('midi_import.part_as_drums')}
-                        </label>
-                      </div>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-            {imported.summary.notes.length > 0 && (
-              <p className="muted">
-                {imported.summary.notes.map(note => formatMidiImportNote(note, t)).join(' ')}
-              </p>
-            )}
-          </>
-        )}
+          {imported && (
+            <>
+              {imported.summary.tracks.length > 1 && (
+                <label>
+                  {t('midi_import.preview_track')}
+                  <select
+                    value={activePreviewTrack}
+                    onChange={event => setPreviewTrack(imported.summary.tracks[Number(event.target.value)].partIndex ?? 0)}
+                  >
+                    {imported.summary.tracks.map((track, index) => (
+                      <option key={index} value={index}>{track.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <div className="midi-meter-list" role="group" aria-label={t('midi_import.time_signatures')}>
+                {meters.map(({ index, signature }) => (
+                  <button
+                    key={index}
+                    type="button"
+                    className="tp-button"
+                    aria-pressed={activePreviewBar === index}
+                    onClick={() => setPreviewBar(index)}
+                  >
+                    {t('midi_import.meter_at_measure', { measure: index + 1, signature })}
+                  </button>
+                ))}
+              </div>
+              {preview && (
+                <div
+                  className="midi-preview-notation"
+                  role="img"
+                  aria-label={t('midi_import.preview')}
+                  dangerouslySetInnerHTML={{ __html: preview }}
+                />
+              )}
+            </>
+          )}
+        </section>
+        </div>
       </div>
     </Dialog>
+    {editingInstrument && (
+      <MidiInstrumentPicker
+        part={editingInstrument}
+        initial={partInstruments[editingInstrument.index]}
+        defaultKind={instrumentOverride}
+        onAudition={onAudition}
+        onClose={() => setEditingInstrument(null)}
+        onApply={selection => {
+          setImportProblem(null);
+          setPartInstruments(previous => ({ ...previous, [editingInstrument.index]: selection }));
+          const part = editingInstrument;
+          const program = selection.program ?? part.program;
+          const kind = selection.kind !== 'auto' ? selection.kind
+            : instrumentOverride !== 'auto' ? instrumentOverride
+            : part.defaultPercussion ? 'drums'
+            : program >= 32 && program <= 39 ? 'bass' : program >= 24 && program <= 31 ? 'guitar' : 'keys';
+          if (kind === 'guitar' && !guitarTuningCustom) {
+            setGuitarTuning(autoFitPreset('guitar', [...guitarParts.filter(p => p.index !== part.index), part]));
+            setGuitarTuningName('');
+          } else if (kind === 'bass' && !bassTuningCustom) {
+            setBassTuning(autoFitPreset('bass', [...bassParts.filter(p => p.index !== part.index), part]));
+            setBassTuningName('');
+          }
+          setPreviewTrack(part.index);
+          setEditingInstrument(null);
+        }}
+      />
+    )}
     {editingTuningFor && !showTargetTuning && (
       <TuningDialog
         mode="draft"

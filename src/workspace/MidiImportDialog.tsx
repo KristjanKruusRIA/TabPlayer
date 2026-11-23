@@ -99,6 +99,13 @@ const voiceOptions = [
   { value: '3', label: '3' },
   { value: '4', label: '4' },
 ] as const;
+const octaveShiftOptions = [
+  { value: '-2', label: '−2' },
+  { value: '-1', label: '−1' },
+  { value: '0', label: '0' },
+  { value: '1', label: '+1' },
+  { value: '2', label: '+2' },
+] as const;
 
 /**
  * Reads a Standard MIDI File, lets the destination, quantization, tuplet, voice, tablature and drum mapping options be
@@ -162,6 +169,7 @@ export function MidiImportDialog({
 
   const [instrumentOverride, setInstrumentOverride] = useState<MidiInstrumentChoice>('auto');
   const [partInstruments, setPartInstruments] = useState<Record<number, MidiInstrumentChoice>>({});
+  const [octaveShift, setOctaveShift] = useState<number>(0);
   const [guitarTuning, setGuitarTuning] = useState<number[]>(() => [...DEFAULT_GUITAR_TUNING]);
   const [guitarTuningName, setGuitarTuningName] = useState('');
   const [guitarTuningCustom, setGuitarTuningCustom] = useState(false);
@@ -271,6 +279,7 @@ export function MidiImportDialog({
           kind: targetIsBass ? 'bass' : 'guitar',
           program: targetTrackObj.playbackInfo.program,
           tuning: [...targetStaff.tuning],
+          ...(octaveShift !== 0 ? { octaveShift } : {}),
         };
         continue;
       }
@@ -287,17 +296,22 @@ export function MidiImportDialog({
       if (eff === 'guitar') gParts.push(part);
       else if (eff === 'bass') bParts.push(part);
 
+      let entry: MidiPartOverride | undefined;
       if (chosen === 'guitar') {
-        overrides[part.index] = { kind: 'guitar', tuning: guitarTuning };
+        entry = { kind: 'guitar', tuning: guitarTuning };
       } else if (chosen === 'bass') {
-        overrides[part.index] = { kind: 'bass', tuning: bassTuning };
+        entry = { kind: 'bass', tuning: bassTuning };
       } else if (chosen === 'keys') {
-        overrides[part.index] = { kind: 'keys' };
+        entry = { kind: 'keys' };
       } else if (inferred === 'guitar' && !sameTuning(guitarTuning, DEFAULT_GUITAR_TUNING)) {
-        overrides[part.index] = { tuning: guitarTuning };
+        entry = { tuning: guitarTuning };
       } else if (inferred === 'bass' && !sameTuning(bassTuning, DEFAULT_BASS_TUNING)) {
-        overrides[part.index] = { tuning: bassTuning };
+        entry = { tuning: bassTuning };
       }
+      if (octaveShift !== 0) {
+        entry = { ...entry, octaveShift };
+      }
+      if (entry) overrides[part.index] = entry;
     }
     return { guitarParts: gParts, bassParts: bParts, partOverrides: overrides };
   }, [
@@ -312,6 +326,7 @@ export function MidiImportDialog({
     partInstruments,
     guitarTuning,
     bassTuning,
+    octaveShift,
   ]);
 
   const effectiveOptions = useMemo<MidiImportOptions>(() => {
@@ -440,6 +455,7 @@ export function MidiImportDialog({
       setFileProblem(null);
       setPartDrums([]);
       setPartInstruments({});
+      setOctaveShift(0);
       setSourcePart(0);
       const bytes = new Uint8Array(reader.result as ArrayBuffer);
       try {
@@ -647,6 +663,52 @@ export function MidiImportDialog({
       : 'guitar'
     : instrumentOverride;
 
+  const renderNoteRangeAndHint = (
+    range: { low: number; high: number } | null,
+    pitches: readonly number[],
+  ) => {
+    if (!range || pitches.length === 0) return null;
+    const effLow = range.low + octaveShift * 12;
+    const effHigh = range.high + octaveShift * 12;
+    const lowestStr = Math.min(...pitches);
+    const highestStr = Math.max(...pitches);
+    const showOctaveHint =
+      octaveShift === 0 &&
+      effLow - lowestStr >= 12 &&
+      effLow - 12 >= lowestStr &&
+      effHigh - 12 <= highestStr + 24;
+    return (
+      <>
+        <p className="muted midi-note-range">
+          {t('midi_import.note_range', {
+            low: formatPitch(Math.max(0, Math.min(127, effLow))),
+            high: formatPitch(Math.max(0, Math.min(127, effHigh))),
+          })}
+        </p>
+        {showOctaveHint && (
+          <div className="midi-octave-hint">
+            <span className="muted">
+              {t('midi_import.octave_high_hint', { note: formatPitch(lowestStr) })}
+            </span>
+            <button
+              type="button"
+              {...busyGuard({
+                busy: importing,
+                className: 'tp-button',
+                onClick: () => {
+                  setImportProblem(null);
+                  setOctaveShift(-1);
+                },
+              })}
+            >
+              {t('midi_import.shift_down_octave')}
+            </button>
+          </div>
+        )}
+      </>
+    );
+  };
+
   const renderTuningRow = (instrument: 'guitar' | 'bass') => {
     const isBass = instrument === 'bass';
     const pitches = isBass ? bassTuning : guitarTuning;
@@ -715,14 +777,7 @@ export function MidiImportDialog({
             </button>
           </div>
         </label>
-        {range && (
-          <p className="muted midi-note-range">
-            {t('midi_import.note_range', {
-              low: formatPitch(range.low),
-              high: formatPitch(range.high),
-            })}
-          </p>
-        )}
+        {renderNoteRangeAndHint(range, pitches)}
       </div>
     );
   };
@@ -974,10 +1029,27 @@ export function MidiImportDialog({
                     </option>
                   </select>
                 </label>
+                {!replaceMismatch &&
+                  renderNoteRangeAndHint(noteRangeOf(activeParts), targetStaff.tuning)}
               </div>
             )}
             {showGuitarTuning && renderTuningRow('guitar')}
             {showBassTuning && renderTuningRow('bass')}
+            <div className="tp-field">
+              <span className="tp-field-label" aria-hidden="true">
+                {t('midi_import.octave_shift')}
+              </span>
+              <Segmented
+                label={t('midi_import.octave_shift')}
+                disabled={importing}
+                value={String(octaveShift)}
+                options={octaveShiftOptions}
+                onChange={val => {
+                  setImportProblem(null);
+                  setOctaveShift(Number(val));
+                }}
+              />
+            </div>
           </section>
         )}
 
@@ -1290,6 +1362,7 @@ export function MidiImportDialog({
       <TuningDialog
         mode="draft"
         pitches={editingPitches}
+        defaultInstrument={editingIsBass ? 'bass' : 'guitar'}
         name={
           editingMatched
             ? tuningPresetName(editingMatched, lang)

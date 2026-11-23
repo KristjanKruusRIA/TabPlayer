@@ -97,7 +97,7 @@ function StringRow({ index, pitch, revision, onPitch, onInvalid, onPlay, playabl
 }
 
 /** The tuning editor. Mounted only while open, so Cancel and Escape discard every change; nothing is recorded until Keep fingering or Keep pitch. */
-export function TuningDialog({ pitches, name, mode = 'track', staff, staffCount = 1, busy = false, locked = false, refusal = null, onApply, onClose, onAudition }: {
+export function TuningDialog({ pitches, name, mode = 'track', staff, staffCount = 1, busy = false, locked = false, refusal = null, defaultInstrument, onApply, onClose, onAudition }: {
   pitches: readonly number[];
   name: string;
   /** `track` retunes a track that has notes (Keep fingering, Keep pitch, string count). `draft` fills in a tuning for something not made yet: one Use tuning button, any string count. */
@@ -110,6 +110,7 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, staffCount 
   locked?: boolean;
   /** The app's reason for refusing the last edit. It is shown in the dialog, beside the draft it refused, once an apply comes back refused. */
   refusal?: string | null;
+  defaultInstrument?: PresetInstrument;
   /** May return the edit's promise: the dialog then stays open, draft intact, until it lands, and keeps the draft if the edit is refused. */
   onApply: (choice: TuningChoice) => unknown;
   onClose: () => void;
@@ -147,8 +148,20 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, staffCount 
     const exact = tuningPresets.filter(preset => same(preset.tuning, parsed));
     return exact.find(preset => preset.instrument === 'guitar' || preset.instrument === 'bass') ?? exact[0];
   }, [parsed]);
-  const [instrument, setInstrument] = useState<PresetInstrument>(matched?.instrument ?? 'guitar');
-  const [count, setCount] = useState(() => matched?.strings ?? (countsOf('guitar').includes(pitches.length) ? pitches.length : 6));
+  const initialInstrument: PresetInstrument = (() => {
+    if (matched) return matched.instrument;
+    if (defaultInstrument) return defaultInstrument;
+    const prog = staff?.track?.playbackInfo?.program;
+    if (prog !== undefined && prog >= 32 && prog <= 39) return 'bass';
+    if (pitches.length >= 4 && pitches.length <= 6 && Math.min(...pitches) <= 31) return 'bass';
+    return 'guitar';
+  })();
+  const [instrument, setInstrument] = useState<PresetInstrument>(initialInstrument);
+  const [count, setCount] = useState(() => {
+    if (matched) return matched.strings;
+    const valid = countsOf(initialInstrument);
+    return valid.includes(pitches.length) ? pitches.length : valid[0];
+  });
   const groupPresets = tuningPresets.filter(preset => preset.instrument === instrument && preset.strings === count);
   const selectedPreset = parsed ? groupPresets.find(preset => same(preset.tuning, parsed)) : undefined;
 

@@ -37,6 +37,8 @@ export interface MidiPartOverride {
   program?:number;
   /** Open string MIDI pitches, highest string first (matching `staff.tuning` and `tuningPresets`). */
   tuning?:readonly number[];
+  /** Whole-octave transpose applied to incoming note keys before fingering or notation (e.g. `-1` for Kontakt C3=60 exports). */
+  octaveShift?:number;
 }
 export interface MidiImportOptions {
   quantization:MidiQuantization;
@@ -184,7 +186,7 @@ function note(key:number,string:number|undefined,open:number[]|null,percussion:b
   const value=new model.Note();
   if(percussion)value.percussionArticulation=key;
   else if(string!==undefined&&open){value.string=string+1;value.fret=key-open[string];}
-  else{value.octave=Math.floor(key/12);value.tone=key%12;}
+  else{const safeKey=Math.max(0,Math.min(127,key));value.octave=Math.floor(safeKey/12);value.tone=safeKey%12;}
   if(tied)value.isTieDestination=true;
   return value;
 }
@@ -215,7 +217,8 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
   const inputDrumMap=prepared.some(item=>item.percussion)?resolveInputDrumMap(options.drumMap,options.drumKeyOverrides):null;
   let dropped=0;
   const mappedSources=prepared.map(item=>{
-    let hits:Hit[]=item.source.notes.map(entry=>({key:entry.key,start:toUnits(entry.start),end:toUnits(entry.end)}));
+    const shift=!item.percussion&&item.override?.octaveShift?Math.trunc(item.override.octaveShift)*12:0;
+    let hits:Hit[]=item.source.notes.map(entry=>({key:entry.key+shift,start:toUnits(entry.start),end:toUnits(entry.end)}));
     if(item.percussion&&inputDrumMap){
       const kept:Hit[]=[];
       for(const hit of hits){

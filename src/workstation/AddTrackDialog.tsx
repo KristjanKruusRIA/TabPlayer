@@ -45,6 +45,6 @@ export function AddTrackDialog({ busy, locked = false, onAdd, onAudition, onClos
       </BusyFieldset>
       <NotationTrackControls busy={busy || locked} onEdit={add} />
     </div>
-    {tuningOpen && <TuningDialog mode="draft" pitches={parseTuning(tuning)} name={tuningName} onApply={choice => { setTuning(formatTuning(choice.pitches)); setTuningName(choice.name); }} onClose={() => setTuningOpen(false)} onAudition={onAudition && ((list, strum) => onAudition({ program: instrument }, list, strum))} />}
+    {tuningOpen && <TuningDialog mode="draft" pitches={parseTuning(tuning)} name={tuningName} defaultInstrument={instrument >= 32 && instrument <= 39 ? 'bass' : undefined} onApply={choice => { setTuning(formatTuning(choice.pitches)); setTuningName(choice.name); }} onClose={() => setTuningOpen(false)} onAudition={onAudition && ((list, strum) => onAudition({ program: instrument }, list, strum))} />}
   </Dialog>;
 }

@@ -203,3 +203,19 @@
   min-width: 0;
   font-size: 12px;
 }
+.midi-import .midi-octave-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.midi-import .midi-octave-hint button {
+  flex: none;
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}

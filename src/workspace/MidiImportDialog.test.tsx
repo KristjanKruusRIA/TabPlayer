@@ -450,3 +450,44 @@ it('assigns Guitar and Bass per part on multi-part program-0 MIDI and inherits s
   const clipScore = scoreFromMusicClip(readMusicClip(cmd.clip));
   expect(clipScore.tracks[0].staves[0].showTablature).toBe(true);
 });
+
+it('keeps Bass and 5-string count in TuningDialog for custom Drop F#0 bass and shifts Kontakt octave down cleanly', async () => {
+  const kontaktDropFsharp = makeMidi(0, 480, [
+    makeTrack(noteLine([[0, 480, 31], [480, 480, 32], [960, 480, 37], [1440, 480, 42]], 0)),
+  ]);
+  const { onImport, onClose, input, importButton } = setup();
+  choose(input, kontaktDropFsharp, 'Sineater_bass.mid');
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Acoustic Grand Piano: notation, 4 notes'));
+
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Instrument' })).getByRole('radio', { name: 'Bass' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Custom…' }));
+  fireEvent.change(screen.getByLabelText('Notes, high to low'), { target: { value: 'E2 B1 F#1 C#1 F#0' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Use tuning' }));
+
+  await waitFor(() => expect((screen.getByLabelText('Bass tuning') as HTMLSelectElement).value).toBe('__custom__'));
+
+  // Re-opening TuningDialog for this custom 5-string Drop F#0 tuning stays on Bass · 5 strings (never Guitar · 6 strings).
+  fireEvent.click(screen.getByRole('button', { name: 'Custom…' }));
+  const tuningDialog = screen.getByRole('dialog', { name: 'Tuning' });
+  expect(within(tuningDialog).getByLabelText('Instrument')).toHaveValue('bass');
+  expect(within(tuningDialog).getByLabelText('Number of strings')).toHaveValue('5');
+  fireEvent.click(within(tuningDialog).getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Tuning' })).not.toBeInTheDocument());
+
+  expect(screen.getByText(/All notes are an octave or more above F#0/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Shift −1 octave' }));
+
+  await waitFor(() => {
+    expect(screen.getByText('MIDI note range: G0–F#1')).toBeInTheDocument();
+    expect(within(screen.getByRole('radiogroup', { name: 'Octave shift' })).getByRole('radio', { name: '−1' })).toBeChecked();
+  });
+  await waitFor(() => expect(status()).not.toHaveTextContent('Updating…'));
+
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  const bassScore = loadInterchangeScore(onImport.mock.calls[0][1], new Settings());
+  const staff = bassScore.tracks[0].staves[0];
+  expect(staff.tuning).toEqual([40, 35, 30, 25, 18]);
+  const placements = staff.bars[0].voices[0].beats.map(b => [b.notes[0].string, b.notes[0].fret]);
+  expect(placements).toEqual([[1, 1], [1, 2], [2, 0], [3, 0]]);
+});

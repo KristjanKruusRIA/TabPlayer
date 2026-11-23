@@ -929,6 +929,7 @@ export function DiImportDialog({
       <TuningDialog
         mode="draft"
         pitches={tuningPitches}
+        defaultInstrument={isCustomBass ? 'bass' : 'guitar'}
         name={matchedPreset ? tuningPresetName(matchedPreset, lang) : tuningName}
         onAudition={
           onAudition &&

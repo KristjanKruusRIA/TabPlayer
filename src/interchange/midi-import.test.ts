@@ -572,4 +572,18 @@ describe('importMidi partOverrides (guitar/bass/keys and custom tunings)',()=>{
     expect(res2.summary.tracks[0]).toMatchObject({kind:'keys',program:0});
     expect(res2.score.tracks[0].staves[0].showTablature).toBe(false);
   });
+
+  it('applies octaveShift before fingering custom 5-string Drop F#0 Kontakt bass MIDI',()=>{
+    const kontaktBass=file(0,480,[track(line([[0,480,31],[480,480,32],[960,480,37],[1440,480,42],[1920,480,64]]))]);
+    const {score,summary}=run(kontaktBass,{
+      partOverrides:{0:{kind:'bass',tuning:[40,35,30,25,18],octaveShift:-1}},
+    });
+    expect(summary.tracks[0]).toMatchObject({kind:'bass',program:33});
+    const staff=score.tracks[0].staves[0];
+    expect(staff.tuning).toEqual([40,35,30,25,18]);
+    expect(staff.bars[0].voices[0].beats.map(b=>[b.notes[0].string,b.notes[0].fret])).toEqual([
+      [1,1],[1,2],[2,0],[3,0],
+    ]);
+    expect(staff.bars[1].voices[0].beats[0].notes.map(n=>[n.string,n.fret])).toEqual([[5,12]]);
+  });
 });

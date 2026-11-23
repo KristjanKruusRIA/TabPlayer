@@ -184,7 +184,7 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
       {drumTabLeftOff > 0 && <p className="notation-note" role="note">{t('track_settings.drum_tab_left_off', { count: drumTabLeftOff })}</p>}
     </>}
     <TuningRow label={t('track_settings.tuning_row')} notes={pitches} title={savedName ? `${savedName}: ${pitches}` : pitches} unavailable={tuningUnavailable} busy={busy} locked={locked} onOpen={() => { setCapoRefusal(null); setTuningFor(trackIdentity(current)); }} onPlay={onAudition && (() => audition([...tuned.tuning], true))} playDisabled={strings > 12} />
-    {dialogTrack && <TuningDialog pitches={dialogBase!.tuning} name={dialogBase!.stringTuning.name} staff={dialogTrack.staves[dialogStaffIndex]} staffCount={dialogTrack.staves.length} busy={busy} locked={locked} refusal={capoRefusal ?? refusal} onApply={applyTuning} onClose={() => setTuningFor(null)} onAudition={onAudition && ((list, strum) => onAudition({ trackId: trackIdentity(dialogTrack) }, list, strum))} />}
+    {dialogTrack && <TuningDialog pitches={dialogBase!.tuning} name={dialogBase!.stringTuning.name} staff={dialogTrack.staves[dialogStaffIndex]} staffCount={dialogTrack.staves.length} busy={busy} locked={locked} refusal={capoRefusal ?? refusal} defaultInstrument={dialogTrack.playbackInfo.program >= 32 && dialogTrack.playbackInfo.program <= 39 ? 'bass' : undefined} onApply={applyTuning} onClose={() => setTuningFor(null)} onAudition={onAudition && ((list, strum) => onAudition({ trackId: trackIdentity(dialogTrack) }, list, strum))} />}
     <BusyFieldset busy={busy} className="track-notation-more">
       <details className="inspector-more">
         <summary>{t('inspector.more')}</summary>

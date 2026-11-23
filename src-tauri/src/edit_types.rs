@@ -393,6 +393,224 @@ impl MusicClip {
         }
         Ok(())
     }
+
+    /// Strips default-valued AlphaTab properties and derived timing caches from `score_json` in place.
+    pub fn compact_score_json(&mut self) {
+        let Ok(serde_json::Value::Object(mut root)) = serde_json::from_str(&self.score_json) else {
+            return;
+        };
+        let keep_only = ["masterbars", "tracks"];
+        root.retain(|k, _| keep_only.contains(&k.as_str()));
+
+        if let Some(serde_json::Value::Array(masters)) = root.get_mut("masterbars") {
+            for m in masters {
+                if let serde_json::Value::Object(map) = m {
+                    map.retain(|k, v| match k.as_str() {
+                        "start" => false,
+                        "alternateendings" | "repeatcount" | "tripletfeel" => {
+                            v != &serde_json::json!(0)
+                        }
+                        "isdoublebar"
+                        | "isrepeatstart"
+                        | "timesignaturecommon"
+                        | "isfreetime"
+                        | "isanacrusis" => v != &serde_json::json!(false),
+                        "timesignaturenumerator" | "timesignaturedenominator" => {
+                            v != &serde_json::json!(4)
+                        }
+                        "tempoautomations" => v != &serde_json::json!([]),
+                        "displayscale" => v != &serde_json::json!(1),
+                        "displaywidth" => v != &serde_json::json!(-1),
+                        _ => !v.is_null(),
+                    });
+                }
+            }
+        }
+
+        if let Some(serde_json::Value::Array(tracks)) = root.get_mut("tracks") {
+            for t in tracks {
+                if let serde_json::Value::Object(tmap) = t {
+                    tmap.retain(|k, v| match k.as_str() {
+                        "staves" => true,
+                        "color" => v != &serde_json::json!(-3670016),
+                        "defaultsystemslayout" => v != &serde_json::json!(3),
+                        "systemslayout" | "percussionarticulations" => v != &serde_json::json!([]),
+                        "isvisibleonmultitrack" => v != &serde_json::json!(true),
+                        "name" | "shortname" => v != &serde_json::json!(""),
+                        _ => !v.is_null(),
+                    });
+                    if let Some(serde_json::Value::Object(pb)) = tmap.get_mut("playbackinfo") {
+                        pb.retain(|k, v| match k.as_str() {
+                            "volume" => v != &serde_json::json!(15),
+                            "balance" => v != &serde_json::json!(8),
+                            "port" => v != &serde_json::json!(1),
+                            "program" | "bank" | "primarychannel" | "secondarychannel" => {
+                                v != &serde_json::json!(0)
+                            }
+                            "ismute" | "issolo" => v != &serde_json::json!(false),
+                            _ => !v.is_null(),
+                        });
+                        if pb.is_empty() {
+                            tmap.remove("playbackinfo");
+                        }
+                    }
+                    if let Some(serde_json::Value::Array(staves)) = tmap.get_mut("staves") {
+                        for s in staves {
+                            if let serde_json::Value::Object(smap) = s {
+                                smap.retain(|k, v| match k.as_str() {
+                                    "bars" => true,
+                                    "capo" | "transpositionpitch" | "displaytranspositionpitch" => {
+                                        v != &serde_json::json!(0)
+                                    }
+                                    "showslash" | "shownumbered" | "ispercussion" => {
+                                        v != &serde_json::json!(false)
+                                    }
+                                    "showtablature" | "showstandardnotation" => {
+                                        v != &serde_json::json!(true)
+                                    }
+                                    "standardnotationlinecount" => v != &serde_json::json!(5),
+                                    _ => !v.is_null(),
+                                });
+                                if let Some(serde_json::Value::Array(bars)) = smap.get_mut("bars") {
+                                    for b in bars {
+                                        if let serde_json::Value::Object(bmap) = b {
+                                            bmap.retain(|k, v| match k.as_str() {
+                                                "id" | "voices" => true,
+                                                "clef" => v != &serde_json::json!(1),
+                                                "clefottava" => v != &serde_json::json!(2),
+                                                "similemark" | "barlineleft" | "barlineright"
+                                                | "keysignature" | "keysignaturetype" => {
+                                                    v != &serde_json::json!(0)
+                                                }
+                                                "displayscale" => v != &serde_json::json!(1),
+                                                "displaywidth" => v != &serde_json::json!(-1),
+                                                "sustainpedals" => v != &serde_json::json!([]),
+                                                _ => !v.is_null(),
+                                            });
+                                            if let Some(serde_json::Value::Array(voices)) =
+                                                bmap.get_mut("voices")
+                                            {
+                                                for v in voices {
+                                                    if let serde_json::Value::Object(vmap) = v {
+                                                        vmap.retain(|k, val| match k.as_str() {
+                                                            "id" | "beats" => true,
+                                                            "isempty" => {
+                                                                val != &serde_json::json!(false)
+                                                            }
+                                                            _ => !val.is_null(),
+                                                        });
+                                                        if let Some(serde_json::Value::Array(
+                                                            beats,
+                                                        )) = vmap.get_mut("beats")
+                                                        {
+                                                            for bt in beats {
+                                                                if let serde_json::Value::Object(
+                                                                    btmap,
+                                                                ) = bt
+                                                                {
+                                                                    btmap.retain(|k, val| match k.as_str() {
+                                                                        "id" | "notes" | "duration" | "automations" => true,
+                                                                        "displaystart" | "playbackstart" | "displayduration" | "playbackduration" => false,
+                                                                        "isempty" | "islegatoorigin" | "pop" | "slap" | "tap" | "slashed" | "deadslapped" | "iscontinuedwhammy" | "invertbeamdirection" | "showtimer" => val != &serde_json::json!(false),
+                                                                        "whammystyle" | "dots" | "fade" | "brushtype" | "brushduration" | "whammybartype" | "vibrato" | "gracetype" | "pickstroke" | "crescendo" | "golpe" | "beamingmode" | "wahpedal" | "barreshape" | "rasgueado" => val != &serde_json::json!(0),
+                                                                        "ottava" => val != &serde_json::json!(2),
+                                                                        "tupletdenominator" | "tupletnumerator" | "barrefret" => val != &serde_json::json!(-1),
+                                                                        "dynamics" => val != &serde_json::json!(5),
+                                                                        "lyrics" | "text" | "chordid" | "preferredbeamdirection" | "timer" => !val.is_null(),
+                                                                        _ => !val.is_null(),
+                                                                    });
+                                                                    if let Some(
+                                                                        serde_json::Value::Array(
+                                                                            notes,
+                                                                        ),
+                                                                    ) = btmap.get_mut("notes")
+                                                                    {
+                                                                        for n in notes {
+                                                                            if let serde_json::Value::Object(nmap) = n {
+                                                                                nmap.retain(|k, val| match k.as_str() {
+                                                                                    "id" | "dynamics" => true,
+                                                                                    "accentuated" | "bendtype" | "bendstyle" | "harmonictype" | "harmonicvalue" | "slideintype" | "slideouttype" | "vibrato" | "accidentalmode" | "ornament" => val != &serde_json::json!(0),
+                                                                                    "iscontinuedbend" | "showstringnumber" | "islefthandtapped" | "ishammerpullorigin" | "isslurdestination" | "isghost" | "isletring" | "ispalmmute" | "isdead" | "isstaccato" | "istiedestination" => val != &serde_json::json!(false),
+                                                                                    "isvisible" => val != &serde_json::json!(true),
+                                                                                    "fret" | "string" | "octave" | "tone" | "percussionarticulation" | "trillvalue" => val != &serde_json::json!(-1),
+                                                                                    "lefthandfinger" | "righthandfinger" => val != &serde_json::json!(-2),
+                                                                                    "trillspeed" => val != &serde_json::json!(32),
+                                                                                    "durationpercent" => val != &serde_json::json!(1) && val != &serde_json::json!(1.0),
+                                                                                    _ => !val.is_null(),
+                                                                                });
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(compact) = serde_json::to_string(&serde_json::Value::Object(root)) {
+            if compact.len() < self.score_json.len() {
+                self.score_json = compact;
+            }
+        }
+    }
+
+    /// Replaces the notes of every bar in `score_json` with a single empty rest beat while preserving
+    /// `masterbars` and track/staff count & percussion flags so a deleted or replaced `importTracks`
+    /// step keeps its exact structural replay effect (track identity and measure count) in a few kilobytes.
+    pub fn hollow_dead_import_bars(&mut self) {
+        let Ok(serde_json::Value::Object(mut root)) = serde_json::from_str(&self.score_json) else {
+            return;
+        };
+        let mut next_id = 1_u64;
+        if let Some(serde_json::Value::Array(tracks)) = root.get_mut("tracks") {
+            for t in tracks {
+                if let serde_json::Value::Object(tmap) = t {
+                    if let Some(serde_json::Value::Array(staves)) = tmap.get_mut("staves") {
+                        for s in staves {
+                            if let serde_json::Value::Object(smap) = s {
+                                smap.remove("chords");
+                                if let Some(serde_json::Value::Array(bars)) = smap.get_mut("bars") {
+                                    for b in bars {
+                                        let bid = next_id;
+                                        next_id += 1;
+                                        *b = serde_json::json!({
+                                            "id": bid,
+                                            "voices": [{
+                                                "id": bid,
+                                                "beats": [{
+                                                    "id": bid,
+                                                    "duration": 4,
+                                                    "isempty": true,
+                                                    "notes": [],
+                                                    "automations": []
+                                                }]
+                                            }]
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Ok(compact) = serde_json::to_string(&serde_json::Value::Object(root)) {
+            self.score_json = compact;
+            self.links.clear();
+            self.harmony = None;
+            self.held = None;
+            self.version = 1;
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2020,6 +2238,20 @@ impl EditCommand {
             _ => {}
         }
         Ok(())
+    }
+
+    pub fn compact_music_clips(&mut self) {
+        match self {
+            Self::ImportTracks { clip, .. } | Self::PasteMusic { clip, .. } => {
+                clip.compact_score_json();
+            }
+            Self::Sequence { commands } => {
+                for cmd in commands {
+                    cmd.compact_music_clips();
+                }
+            }
+            _ => {}
+        }
     }
 }
 

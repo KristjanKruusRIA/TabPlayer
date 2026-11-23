@@ -2202,6 +2202,14 @@ export const de: MessageCatalog = {
   'di_import.custom_tuning_btn': 'Benutzerdefiniert…',
   'di_import.custom_tuning_option': 'Benutzerdefiniert ({notes})',
   'di_import.custom_tuning_named': '{name} ({notes})',
+  'di_import.model': 'Transkriptionsmodell',
+  'di_import.model_builtin': 'Integriert (DiGuitarNet)',
+  'di_import.model_custom': 'Benutzerdefiniert: {name}',
+  'di_import.load_model_btn': 'Eigenes Modell laden…',
+  'di_import.use_builtin_model_btn': 'Integriertes nutzen',
+  'di_import.loading_model': 'Transkriptionsmodell wird geladen…',
+  'di_import.error_invalid_model': 'Die gewählte ONNX-Datei ist kein kompatibles DiGuitarNet-Modell: {detail}',
+  'di_import.error_model_too_large': 'Das gewählte ONNX-Modell überschreitet das 64-MB-Limit.',
 
   // Workspace Document Tabs
   'workspace.open_scores': 'Offene Partituren',

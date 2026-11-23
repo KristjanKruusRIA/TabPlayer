@@ -931,6 +931,89 @@ impl ProjectSession {
         self.path = Some(path);
     }
 
+    /// Compacts committed `importTracks` and `pasteMusic` clips up to `cursor` (stripping default-valued
+    /// AlphaTab JSON fields and hollowing out note payloads of imported tracks that were subsequently
+    /// deleted by `removeTrack` or overwritten by `importTracks(targetTrack)`).
+    pub fn compact_committed_history(&mut self) {
+        for edit in self
+            .project
+            .baseline_edits
+            .iter_mut()
+            .chain(&mut self.project.edits[..self.cursor])
+        {
+            edit.compact_music_clips();
+        }
+
+        // Only trace single-track blank-base histories without track duplications or measure mutations.
+        let BaseDocument::Blank { .. } = &self.project.base else {
+            return;
+        };
+        if !self.project.baseline_edits.is_empty() {
+            return;
+        }
+        let mut tracks: Vec<Option<usize>> = vec![None];
+        let mut dead_imports: BTreeSet<usize> = BTreeSet::new();
+        for (idx, edit) in self.project.edits[..self.cursor].iter().enumerate() {
+            match edit {
+                EditCommand::ImportTracks { clip, target_track } => {
+                    let n_tracks = serde_json::from_str::<serde_json::Value>(&clip.score_json)
+                        .ok()
+                        .and_then(|v| v.get("tracks")?.as_array().map(Vec::len))
+                        .unwrap_or(0);
+                    if n_tracks != 1 {
+                        return;
+                    }
+                    if let Some(target) = target_track {
+                        let t_idx = *target as usize;
+                        if t_idx >= tracks.len() {
+                            return;
+                        }
+                        if let Some(prev_import) = tracks[t_idx].replace(idx) {
+                            dead_imports.insert(prev_import);
+                        }
+                    } else {
+                        tracks.push(Some(idx));
+                    }
+                }
+                EditCommand::AddTrack { .. }
+                | EditCommand::AddPitchedTrack { .. }
+                | EditCommand::AddPercussionTrack { .. } => {
+                    tracks.push(None);
+                }
+                EditCommand::RemoveTrack { track } => {
+                    let t_idx = *track as usize;
+                    if t_idx >= tracks.len() {
+                        return;
+                    }
+                    if let Some(prev_import) = tracks.remove(t_idx) {
+                        dead_imports.insert(prev_import);
+                    }
+                }
+                EditCommand::MoveTrack { track, to } => {
+                    let from_idx = *track as usize;
+                    let to_idx = *to as usize;
+                    if from_idx >= tracks.len() || to_idx >= tracks.len() {
+                        return;
+                    }
+                    let item = tracks.remove(from_idx);
+                    tracks.insert(to_idx, item);
+                }
+                EditCommand::DuplicateTrack { .. }
+                | EditCommand::Sequence { .. }
+                | EditCommand::PasteMusic { .. } => {
+                    return;
+                }
+                _ => {}
+            }
+        }
+        for idx in dead_imports {
+            if let Some(EditCommand::ImportTracks { clip, .. }) = self.project.edits.get_mut(idx) {
+                clip.hollow_dead_import_bars();
+                clip.compact_score_json();
+            }
+        }
+    }
+
     pub fn stored_project(&self) -> Project {
         let edits = self.project.edits[..self.cursor].to_vec();
         let assets = self

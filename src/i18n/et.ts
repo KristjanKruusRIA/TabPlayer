@@ -2202,6 +2202,14 @@ export const et: MessageCatalog = {
   'di_import.custom_tuning_btn': 'Kohandatud…',
   'di_import.custom_tuning_option': 'Kohandatud ({notes})',
   'di_import.custom_tuning_named': '{name} ({notes})',
+  'di_import.model': 'Transkribeerimismudel',
+  'di_import.model_builtin': 'Sisseehitatud (DiGuitarNet)',
+  'di_import.model_custom': 'Kohandatud: {name}',
+  'di_import.load_model_btn': 'Laadi oma mudel…',
+  'di_import.use_builtin_model_btn': 'Kasuta sisseehitatut',
+  'di_import.loading_model': 'Transkribeerimismudeli laadimine…',
+  'di_import.error_invalid_model': 'Valitud ONNX-fail ei ole ühilduv DiGuitarNet-mudel: {detail}',
+  'di_import.error_model_too_large': 'Valitud ONNX-mudel ületab 64 MB piiri.',
 
   // Workspace Document Tabs
   'workspace.open_scores': 'Avatud partituurid',

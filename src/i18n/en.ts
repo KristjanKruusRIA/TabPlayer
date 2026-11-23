@@ -2201,6 +2201,14 @@ export const en = {
   'di_import.custom_tuning_btn': 'Custom…',
   'di_import.custom_tuning_option': 'Custom ({notes})',
   'di_import.custom_tuning_named': '{name} ({notes})',
+  'di_import.model': 'Transcription model',
+  'di_import.model_builtin': 'Built-in (DiGuitarNet)',
+  'di_import.model_custom': 'Custom: {name}',
+  'di_import.load_model_btn': 'Load custom model…',
+  'di_import.use_builtin_model_btn': 'Use built-in',
+  'di_import.loading_model': 'Loading transcription model…',
+  'di_import.error_invalid_model': 'The selected ONNX file is not a compatible DiGuitarNet model: {detail}',
+  'di_import.error_model_too_large': 'The selected ONNX model exceeds the 64 MB limit.',
 
   // Workspace Document Tabs
   'workspace.open_scores': 'Open scores',

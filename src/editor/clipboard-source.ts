@@ -19,6 +19,65 @@ const object=(value:unknown):RecordValue=>{if(!value||typeof value!=='object'||A
 const array=(value:unknown,min=0,max=0xffffffff):unknown[]=>{if(!Array.isArray(value)||value.length<min||value.length>max)throw new Error('Invalid clipboard model arrays or counts.');return value;};
 const json=(score:model.Score)=>model.JsonConverter.scoreToJson(score);
 const settings=()=>new Settings();
+const COMPUTED_MASTER_KEYS=new Set(['start']);
+const COMPUTED_BEAT_KEYS=new Set(['displaystart','playbackstart','displayduration','playbackduration']);
+let cachedClipDefaults:{root:RecordValue;master:RecordValue;track:RecordValue;playback:RecordValue;staff:RecordValue;bar:RecordValue;voice:RecordValue;beat:RecordValue;note:RecordValue}|null=null;
+function clipDefaults(){
+  if(cachedClipDefaults)return cachedClipDefaults;
+  const s=new model.Score();s.addMasterBar(new model.MasterBar());
+  const tr=new model.Track(),st=new model.Staff(),b=new model.Bar(),v=new model.Voice(),bt=new model.Beat();
+  bt.addNote(new model.Note());v.addBeat(bt);b.addVoice(v);st.addBar(b);tr.addStaff(st);s.addTrack(tr);
+  const root=object(JSON.parse(json(s))),master=object(array(root.masterbars)[0]),track=object(array(root.tracks)[0]);
+  const playback=object(track.playbackinfo),staff=object(array(track.staves)[0]),bar=object(array(staff.bars)[0]);
+  const voice=object(array(bar.voices)[0]),beat=object(array(voice.beats)[0]),note=object(array(beat.notes)[0]);
+  cachedClipDefaults={root,master,track,playback,staff,bar,voice,beat,note};
+  return cachedClipDefaults;
+}
+function stripDefaultFields(raw:RecordValue,def:RecordValue,keep:readonly string[],drop?:ReadonlySet<string>):RecordValue{
+  const out:RecordValue={};
+  for(const [k,v]of Object.entries(raw)){
+    if(drop?.has(k))continue;
+    if(keep.includes(k)){out[k]=v;continue;}
+    if(k in def&&JSON.stringify(v)===JSON.stringify(def[k]))continue;
+    out[k]=v;
+  }
+  return out;
+}
+/** Compacts a serialized AlphaTab score JSON string by omitting default-valued scalar/array properties and derived timing caches. */
+export function compactClipScoreJson(rawJson:string):string{
+  const raw=object(JSON.parse(rawJson)),defs=clipDefaults(),out:RecordValue={};
+  for(const [k,v]of Object.entries(raw)){
+    if(k==='masterbars'||k==='tracks')continue;
+    if(!(k in defs.root)||JSON.stringify(v)!==JSON.stringify(defs.root[k]))out[k]=v;
+  }
+  out.masterbars=array(raw.masterbars).map(m=>stripDefaultFields(object(m),defs.master,[],COMPUTED_MASTER_KEYS));
+  out.tracks=array(raw.tracks).map(t=>{
+    const tr=object(t),ctr=stripDefaultFields(tr,defs.track,['staves']);
+    if(tr.playbackinfo!==undefined){
+      const cpb=stripDefaultFields(object(tr.playbackinfo),defs.playback,[]);
+      if(Object.keys(cpb).length)ctr.playbackinfo=cpb;else delete ctr.playbackinfo;
+    }
+    ctr.staves=array(tr.staves).map(s=>{
+      const st=object(s),cst=stripDefaultFields(st,defs.staff,['bars']);
+      cst.bars=array(st.bars).map(b=>{
+        const bar=object(b),cb=stripDefaultFields(bar,defs.bar,['id','voices']);
+        cb.voices=array(bar.voices).map(v=>{
+          const voice=object(v),cv=stripDefaultFields(voice,defs.voice,['id','beats']);
+          cv.beats=array(voice.beats).map(bt=>{
+            const beat=object(bt),cbt=stripDefaultFields(beat,defs.beat,['id','notes','duration','automations'],COMPUTED_BEAT_KEYS);
+            cbt.notes=array(beat.notes).map(n=>stripDefaultFields(object(n),defs.note,['id','dynamics']));
+            return cbt;
+          });
+          return cv;
+        });
+        return cb;
+      });
+      return cst;
+    });
+    return ctr;
+  });
+  return JSON.stringify(out);
+}
 function scalarFields(raw:RecordValue,defaults:object) {
   for(const [key,defaultValue]of Object.entries(defaults)){const serialized=key.toLowerCase();if(!Object.hasOwn(raw,serialized)||!['number','boolean','string'].includes(typeof defaultValue))continue;
     if(typeof raw[serialized]!==typeof defaultValue)throw new Error(`Invalid clipboard ${serialized} value type.`);
@@ -43,15 +102,17 @@ function validateStructure(raw:RecordValue,clip:MusicClip) {
   if(clip.kind==='phrase'&&(clip.mode!=='singleTrack'||tracks.length!==1))throw new Error('Phrase clipboard requires one track.');
   const ids=new Map<string,Set<number>>();
   const id=(kind:string,value:unknown)=>{if(typeof value!=='number'||!integer(value,0,0xffffffff))throw new Error('Clipboard model IDs must be unsigned integers.');const seen=ids.get(kind)??new Set<number>();if(seen.has(value))throw new Error(`Duplicate clipboard ${kind} ID.`);seen.add(value);ids.set(kind,seen);};
-  for(const t of tracks){const track=object(t),staves=array(track.staves,1);scalarFields(track,new model.Track());scalarFields(object(track.playbackinfo),new model.PlaybackInformation());if(clip.kind==='phrase'&&staves.length!==1)throw new Error('Phrase clipboard requires one staff.');
+  for(const t of tracks){const track=object(t),staves=array(track.staves,1);scalarFields(track,new model.Track());if(track.playbackinfo!==undefined)scalarFields(object(track.playbackinfo),new model.PlaybackInformation());if(clip.kind==='phrase'&&staves.length!==1)throw new Error('Phrase clipboard requires one staff.');
     for(const s of staves){const staff=object(s),bars=array(staff.bars,masters.length,masters.length);scalarFields(staff,new model.Staff());
       for(const b of bars){const bar=object(b);id('bar',bar.id);const voices=array(bar.voices,1,4);
         for(const v of voices){const voice=object(v);id('voice',voice.id);for(const b of array(voice.beats)){const beat=object(b);id('beat',beat.id);scalarFields(beat,new model.Beat());
-          if(beat.text!==null&&typeof beat.text!=='string'||beat.chordid!==null&&typeof beat.chordid!=='string')throw new Error('Invalid clipboard beat text or chord ID.');
+          if(beat.text!==undefined&&beat.text!==null&&typeof beat.text!=='string'||beat.chordid!==undefined&&beat.chordid!==null&&typeof beat.chordid!=='string')throw new Error('Invalid clipboard beat text or chord ID.');
           if(Object.hasOwn(beat,'overridedisplayduration')&&(typeof beat.overridedisplayduration!=='number'||!integer(beat.overridedisplayduration,1,0xffffffff)))throw new Error('Invalid clipboard rhythm override.');
-          for(const automation of array(beat.automations))scalarFields(object(automation),new model.Automation());
-          for(const n of array(beat.notes)){const note=object(n);id('note',note.id);scalarFields(note,new model.Note());if(staff.ispercussion!==true&&typeof note.percussionarticulation==='number'&&note.percussionarticulation>=0)throw new Error('Invalid clipboard articulation on a melodic staff.');
-            enumValue(note.bendtype as number,model.BendType,'clipboard bend');enumValue(note.harmonictype as number,model.HarmonicType,'clipboard harmonic');enumValue(note.slideouttype as number,model.SlideOutType,'clipboard slide');
+          for(const automation of beat.automations===undefined?[]:array(beat.automations))scalarFields(object(automation),new model.Automation());
+          for(const n of beat.notes===undefined?[]:array(beat.notes)){const note=object(n);id('note',note.id);scalarFields(note,new model.Note());if(staff.ispercussion!==true&&typeof note.percussionarticulation==='number'&&note.percussionarticulation>=0)throw new Error('Invalid clipboard articulation on a melodic staff.');
+            if(note.bendtype!==undefined)enumValue(note.bendtype as number,model.BendType,'clipboard bend');
+            if(note.harmonictype!==undefined)enumValue(note.harmonictype as number,model.HarmonicType,'clipboard harmonic');
+            if(note.slideouttype!==undefined)enumValue(note.slideouttype as number,model.SlideOutType,'clipboard slide');
             if(note.iscontinuedbend&&!clip.links.some(link=>link.to===note.id&&link.kind==='tie'))throw new Error('Continued bend requires its internal origin.');
             if(note.istiedestination&&!clip.links.some(link=>link.to===note.id&&link.kind==='tie')||note.isslurdestination&&!clip.links.some(link=>link.to===note.id&&link.kind==='slur')||note.ishammerpullorigin&&!clip.links.some(link=>link.from===note.id&&link.kind==='hammerPull')||[model.SlideOutType.Shift,model.SlideOutType.Legato].includes(note.slideouttype as number)&&!clip.links.some(link=>link.from===note.id&&link.kind==='slide'))throw new Error('Clipboard contains an orphan note link flag.');
           }
@@ -159,7 +220,7 @@ function installClipHarmony(score:model.Score,clip:MusicClip) {
 export function scoreFromMusicClip(clip:MusicClip):model.Score {
   const score=scoreFromJson(clip.scoreJson,settings()),raw=object(JSON.parse(clip.scoreJson)),events=new Map<number,model.Automation[]>();
   for(const t of array(raw.tracks))for(const s of array(object(t).staves))for(const b of array(object(s).bars))for(const v of array(object(b).voices))for(const b of array(object(v).beats)){
-    const beat=object(b);events.set(beat.id as number,array(beat.automations).map(value=>{const automation=object(value);return Object.assign(new model.Automation(),{isLinear:automation.islinear,type:automation.type,value:automation.value,ratioPosition:automation.ratioposition,text:automation.text,isVisible:automation.isvisible});}));
+    const beat=object(b);events.set(beat.id as number,(beat.automations===undefined?[]:array(beat.automations)).map(value=>{const automation=object(value);return Object.assign(new model.Automation(),{isLinear:automation.islinear??false,type:automation.type,value:automation.value,ratioPosition:automation.ratioposition??0,text:automation.text??'',isVisible:automation.isvisible??true});}));
   }
   for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)beat.automations=events.get(beat.id)??[];
   restoreNoteLinks(score,clip.links.map(link=>({...link,slideOutType:link.slideOutType??undefined})));installClipHarmony(score,clip);return score;
@@ -291,6 +352,6 @@ export function makeMusicClip(source:model.Score,selection:MusicSelection,mode:C
   // A note that continues a tie takes its audio settings from the first note of the tie, so a cut piece still tied on keeps none of its own.
   for(const note of allNotes(snapshot))if(pieces.has(note.id)&&note.isTieDestination)setNoteAudio(note,null);
   const held=kind==='phrase'?heldNotes(score,snapshot,keptIds):null;
-  const base={format:'TabPlayerClip' as const,engineVersion:'1.8.4' as const,mode,kind:kind as MusicClip['kind'],scoreJson:json(snapshot),links,...held?{held}:{}};
+  const base={format:'TabPlayerClip' as const,engineVersion:'1.8.4' as const,mode,kind:kind as MusicClip['kind'],scoreJson:compactClipScoreJson(json(snapshot)),links,...held?{held}:{}};
   const clip:MusicClip=harmony.length?{...base,version:2,harmony}:{...base,version:1};return readMusicClip(clip);
 }

@@ -310,4 +310,73 @@ describe('DiImportDialog', () => {
       expect(status()).toHaveTextContent('2 notes (1 palm-muted), 1 measure at 140 BPM.'),
     );
   });
+
+  it('loads a custom ONNX model, re-analyzes/decodes, resets to built-in, and surfaces invalid_model errors', async () => {
+    const baseSummary = {
+      analysisId: 'di-1',
+      fileName: 'chugs.wav',
+      durationSec: 4.5,
+      sampleRate: 48_000,
+      channels: 1,
+      estimatedBpm: 140,
+      estimatedOffsetSec: 0.2,
+    };
+    const customModel = {
+      fileName: 'band_v1.onnx',
+      path: 'C:\\models\\band_v1.onnx',
+    };
+    const transcriber: DiTranscriber & {
+      pickAndAnalyze: ReturnType<typeof vi.fn>;
+      decode: ReturnType<typeof vi.fn>;
+      clear: ReturnType<typeof vi.fn>;
+      getModel: ReturnType<typeof vi.fn>;
+      pickModel: ReturnType<typeof vi.fn>;
+      clearModel: ReturnType<typeof vi.fn>;
+    } = {
+      ...makeTranscriber(),
+      pickAndAnalyze: vi.fn(async () => baseSummary),
+      getModel: vi.fn(async () => null),
+      pickModel: vi.fn(async () => ({
+        model: customModel,
+        analysis: { ...baseSummary, analysisId: 'di-2' },
+      })),
+      clearModel: vi.fn(async () => ({
+        model: null,
+        analysis: { ...baseSummary, analysisId: 'di-3' },
+      })),
+    };
+
+    render(
+      <DiImportDialog
+        busy={false}
+        transcriber={transcriber}
+        onImport={async () => true}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Built-in (DiGuitarNet)')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Choose audio file…' }));
+    await waitFor(() => expect(transcriber.decode).toHaveBeenCalledTimes(1));
+
+    const fineTune = document.querySelector<HTMLDetailsElement>('details.di-finetune')!;
+    fineTune.open = true;
+    fireEvent.click(screen.getByRole('button', { name: 'Load custom model…' }));
+    await waitFor(() => expect(screen.getByText('Custom: band_v1.onnx')).toBeInTheDocument());
+    await waitFor(() => expect(transcriber.decode).toHaveBeenCalledTimes(2));
+    expect(transcriber.decode).toHaveBeenLastCalledWith('di-2', expect.any(Object));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use built-in' }));
+    await waitFor(() => expect(screen.getByText('Built-in (DiGuitarNet)')).toBeInTheDocument());
+    await waitFor(() => expect(transcriber.decode).toHaveBeenCalledTimes(3));
+    expect(transcriber.decode).toHaveBeenLastCalledWith('di-3', expect.any(Object));
+
+    transcriber.pickModel.mockRejectedValueOnce(new Error('invalid_model: missing di_net output outlet frame_logits'));
+    fireEvent.click(screen.getByRole('button', { name: 'Load custom model…' }));
+    await waitFor(() =>
+      expect(status()).toHaveTextContent(
+        'The selected ONNX file is not a compatible DiGuitarNet model: missing di_net output outlet frame_logits',
+      ),
+    );
+  });
 });

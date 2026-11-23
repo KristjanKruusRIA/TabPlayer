@@ -228,3 +228,65 @@ fn discarding_after_an_undo_never_pairs_the_saved_edits_with_a_marker() {
     let kept = clean.saved_checkpoint().unwrap();
     assert!(kept.project.edits.is_empty() && kept.project.partial_capo);
 }
+
+#[test]
+fn compact_committed_history_strips_default_alphatab_fields_and_hollows_deleted_imports() {
+    use tabplayer_lib::edit_types::{ClipboardKind, ClipboardMode, MusicClip};
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let verbose_score_json = r#"{"album":"","artist":"","masterbars":[{"start":0,"timesignaturenumerator":4,"timesignaturedenominator":4,"isdoublebar":false,"tempoautomations":[]}],"tracks":[{"name":"Guitar DI","color":-3670016,"playbackinfo":{"volume":15,"balance":8,"port":1,"program":29,"bank":0,"primarychannel":0,"secondarychannel":1,"ismute":false,"issolo":false},"staves":[{"capo":0,"showtablature":true,"showstandardnotation":true,"bars":[{"id":10,"clef":1,"clefottava":2,"voices":[{"id":20,"isempty":false,"beats":[{"id":30,"duration":16,"isempty":false,"displaystart":0,"playbackstart":0,"displayduration":240,"playbackduration":240,"automations":[],"notes":[{"id":40,"fret":5,"string":2,"dynamics":5,"bendtype":0,"islefthandtapped":false,"ispalmmute":true}]}]}]}]}]}]}"#.to_string();
+
+    let make_clip = || MusicClip {
+        format: "TabPlayerClip".into(),
+        version: 1,
+        engine_version: "1.8.4".into(),
+        mode: ClipboardMode::SingleTrack,
+        kind: ClipboardKind::Bars,
+        score_json: verbose_score_json.clone(),
+        links: vec![],
+        harmony: None,
+        held: None,
+    };
+
+    // Edit 0: import track 1 (which will be removed in Edit 1)
+    session
+        .apply_edit(EditCommand::ImportTracks {
+            clip: make_clip(),
+            target_track: None,
+        })
+        .unwrap();
+    // Edit 1: remove track 1 (the imported track from Edit 0)
+    session
+        .apply_edit(EditCommand::RemoveTrack { track: 1 })
+        .unwrap();
+    // Edit 2: import track 1 (surviving active track)
+    session
+        .apply_edit(EditCommand::ImportTracks {
+            clip: make_clip(),
+            target_track: None,
+        })
+        .unwrap();
+
+    session.compact_committed_history();
+    let stored = session.stored_project();
+    let EditCommand::ImportTracks {
+        clip: dead_clip, ..
+    } = &stored.edits[0]
+    else {
+        panic!("expected ImportTracks at 0");
+    };
+    let EditCommand::ImportTracks {
+        clip: live_clip, ..
+    } = &stored.edits[2]
+    else {
+        panic!("expected ImportTracks at 2");
+    };
+    // Dead clip has its note payload hollowed out
+    assert!(!dead_clip.score_json.contains("\"ispalmmute\""));
+    assert!(dead_clip.score_json.contains("\"isempty\":true"));
+    // Live clip keeps its notes and non-default properties (fret, string, ispalmmute, dynamics) while stripping defaults
+    assert!(live_clip.score_json.len() < verbose_score_json.len());
+    assert!(live_clip.score_json.contains("\"ispalmmute\":true"));
+    assert!(live_clip.score_json.contains("\"fret\":5"));
+    assert!(!live_clip.score_json.contains("\"displaystart\""));
+    assert!(!live_clip.score_json.contains("\"islefthandtapped\""));
+}

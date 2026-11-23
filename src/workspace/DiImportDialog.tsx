@@ -6,6 +6,7 @@ import {
   diProblem,
   diTranscribe,
   type DiAnalysisSummary,
+  type DiCustomModelInfo,
   type DiDecodeParams,
   type DiTranscriber,
   type TranscribedDiNote,
@@ -135,8 +136,10 @@ export function DiImportDialog({
   const [analysis, setAnalysis] = useState<DiAnalysisSummary | null>(null);
   const [rawNotes, setRawNotes] = useState<readonly TranscribedDiNote[] | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [switchingModel, setSwitchingModel] = useState(false);
   const [decoding, setDecoding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [customModel, setCustomModel] = useState<DiCustomModelInfo | null>(null);
   const [fileProblem, setFileProblem] = useState<string | null>(null);
   const [importProblem, setImportProblem] = useState<string | null>(null);
 
@@ -168,6 +171,18 @@ export function DiImportDialog({
     },
     [],
   );
+  useEffect(() => {
+    let cancelled = false;
+    void transcriber
+      .getModel?.()
+      .then(info => {
+        if (!cancelled) setCustomModel(info);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [transcriber]);
 
   const hint = useId();
   const status = useId();
@@ -357,7 +372,48 @@ export function DiImportDialog({
     validationError ??
     (result && 'error' in result ? result.error : null);
 
-  const controlsLocked = analyzing || importing;
+  const controlsLocked = analyzing || switchingModel || importing;
+
+  const pickCustomModel = () => {
+    if (controlsLocked || !transcriber.pickModel) return;
+    setImportProblem(null);
+    setFileProblem(null);
+    setSwitchingModel(true);
+    void transcriber
+      .pickModel()
+      .then(res => {
+        if (!res) return;
+        setCustomModel(res.model);
+        if (res.analysis) setAnalysis(res.analysis);
+      })
+      .catch(reason => {
+        const { key, detail } = diProblem(reason);
+        setFileProblem(t(key, { detail }));
+      })
+      .finally(() => {
+        setSwitchingModel(false);
+      });
+  };
+
+  const resetToBuiltinModel = () => {
+    if (controlsLocked || !transcriber.clearModel || !customModel) return;
+    setImportProblem(null);
+    setFileProblem(null);
+    setSwitchingModel(true);
+    void transcriber
+      .clearModel()
+      .then(res => {
+        setCustomModel(res.model);
+        if (res.analysis) setAnalysis(res.analysis);
+      })
+      .catch(reason => {
+        const { key, detail } = diProblem(reason);
+        setFileProblem(t(key, { detail }));
+      })
+      .finally(() => {
+        setSwitchingModel(false);
+      });
+  };
 
   const pickAndAnalyzeFile = () => {
     if (controlsLocked) return;
@@ -462,6 +518,7 @@ export function DiImportDialog({
   const importUnavailable =
     !imported ||
     analyzing ||
+    switchingModel ||
     decoding ||
     !!problem ||
     (activeDestination !== 'new' && locked);
@@ -898,6 +955,40 @@ export function DiImportDialog({
               />
               {t('di_import.suppress_overtones')}
             </label>
+            <div className="tp-field di-model-row di-full-row">
+              <span className="tp-field-label">{t('di_import.model')}</span>
+              <div className="di-model-controls">
+                <span className="di-model-name" title={customModel?.path}>
+                  {customModel
+                    ? t('di_import.model_custom', { name: customModel.fileName })
+                    : t('di_import.model_builtin')}
+                </span>
+                <button
+                  type="button"
+                  {...busyGuard({
+                    busy: controlsLocked,
+                    unavailable: !transcriber.pickModel,
+                    className: 'tp-button',
+                    onClick: pickCustomModel,
+                  })}
+                >
+                  {t('di_import.load_model_btn')}
+                </button>
+                {customModel && (
+                  <button
+                    type="button"
+                    {...busyGuard({
+                      busy: controlsLocked,
+                      unavailable: !transcriber.clearModel,
+                      className: 'tp-button',
+                      onClick: resetToBuiltinModel,
+                    })}
+                  >
+                    {t('di_import.use_builtin_model_btn')}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </details>
 
@@ -905,17 +996,19 @@ export function DiImportDialog({
           {problem ??
             (analyzing
               ? t('di_import.analyzing')
-              : decoding
-                ? t('di_import.decoding')
-                : importing
-                  ? t(
-                      activeDestination === 'new'
-                        ? 'midi_import.opening'
-                        : 'midi_import.importing_into_score',
-                    )
-                  : imported
-                    ? summaryText
-                    : t('midi_import.nothing_yet'))}
+              : switchingModel
+                ? t('di_import.loading_model')
+                : decoding
+                  ? t('di_import.decoding')
+                  : importing
+                    ? t(
+                        activeDestination === 'new'
+                          ? 'midi_import.opening'
+                          : 'midi_import.importing_into_score',
+                      )
+                    : imported
+                      ? summaryText
+                      : t('midi_import.nothing_yet'))}
         </p>
 
         {imported && !problem && imported.summary.notes.length > 0 && (

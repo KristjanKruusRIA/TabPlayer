@@ -1,6 +1,6 @@
 //! Local, offline automatic transcription for DI guitar and bass audio tracks.
 //!
-//! Combines TabPlayer's multi-resolution harmonic-stack ONNX model (`di_guitar_net.onnx`, `DiGuitarNetV4`)
+//! Combines TabPlayer's multi-resolution harmonic-stack ONNX model (`di_guitar_net.onnx`, `DiGuitarNetV5`)
 //! with Spotify's Basic Pitch ONNX model (`nmp.onnx`, ICASSP 2022) executed in parallel via pure-Rust `tract-onnx`,
 //! followed by Stage 1 tail-gating, self-similarity riff pooling, fretboard playability filtering, and palm-mute / bend extraction.
 
@@ -23,6 +23,7 @@ use tract_onnx::prelude::{
 
 pub const TARGET_SAMPLE_RATE: u32 = 22_050;
 pub const MAX_DI_FILE_BYTES: u64 = 128 * 1024 * 1024;
+pub const MAX_CUSTOM_MODEL_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_DI_DURATION_SEC: f64 = 900.0;
 
 const FFT_HOP: usize = 256;
@@ -127,8 +128,28 @@ struct DiNetPosteriors {
     pm_p: Vec<f32>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiCustomModelInfo {
+    pub file_name: String,
+    pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiModelSwitchResult {
+    pub model: Option<DiCustomModelInfo>,
+    pub analysis: Option<DiAnalysisSummary>,
+}
+
+struct LoadedCustomModel {
+    info: DiCustomModelInfo,
+    plan: TractPlan,
+}
+
 pub(crate) struct CachedDiAnalysis {
     analysis_id: String,
+    summary: DiAnalysisSummary,
     mono_22k: Vec<f32>,
     /// Shape `[n_frames * 88]`, row-major `(frame, pitch_bin)`.
     notes: Vec<f32>,
@@ -143,6 +164,7 @@ pub(crate) struct CachedDiAnalysis {
 
 pub struct DiTranscriptionState {
     cached: Mutex<Option<CachedDiAnalysis>>,
+    custom_model: Mutex<Option<LoadedCustomModel>>,
     next_id: AtomicU64,
 }
 
@@ -150,6 +172,7 @@ impl Default for DiTranscriptionState {
     fn default() -> Self {
         Self {
             cached: Mutex::new(None),
+            custom_model: Mutex::new(None),
             next_id: AtomicU64::new(1),
         }
     }
@@ -196,18 +219,21 @@ fn shared_plan() -> Result<&'static TractPlan, String> {
     }
 }
 
-fn build_di_net_plan() -> Result<TractPlan, String> {
-    let err = |e: tract_onnx::prelude::TractError| format!("model_failed: {e}");
+fn build_di_net_plan_from_bytes(bytes: &[u8], err_prefix: &str) -> Result<TractPlan, String> {
+    let err = |e: tract_onnx::prelude::TractError| format!("{err_prefix}: {e}");
     let mut model = tract_onnx::onnx()
-        .model_for_read(&mut Cursor::new(DI_NET_ONNX))
+        .model_for_read(&mut Cursor::new(bytes))
         .map_err(err)?;
+    if model.input_outlets().map_err(err)?.len() != 1 {
+        return Err(format!("{err_prefix}: expected 1 input tensor"));
+    }
     let outlets = model.output_outlets().map_err(err)?.to_vec();
     let find = |label: &str| {
         outlets
             .iter()
             .copied()
             .find(|&outlet| model.outlet_label(outlet) == Some(label))
-            .ok_or_else(|| format!("model_failed: missing di_net output outlet {label}"))
+            .ok_or_else(|| format!("{err_prefix}: missing di_net output outlet {label}"))
     };
     let selected = [
         find("frame_logits")?,
@@ -226,7 +252,32 @@ fn build_di_net_plan() -> Result<TractPlan, String> {
         )
         .and_then(InferenceModelExt::into_optimized)
         .map_err(err)?;
+    let expected_shapes: [&[usize]; 4] = [
+        &[1, DI_N_SEMITONES, DI_CHUNK_FRAMES],
+        &[1, DI_N_SEMITONES, DI_CHUNK_FRAMES],
+        &[1, DI_CHUNK_FRAMES],
+        &[1, DI_CHUNK_FRAMES],
+    ];
+    for (idx, expected_shape) in expected_shapes.iter().enumerate() {
+        let fact = optimized.output_fact(idx).map_err(err)?;
+        if fact.datum_type != f32::datum_type() {
+            return Err(format!(
+                "{err_prefix}: unexpected output #{idx} dtype {:?}",
+                fact.datum_type
+            ));
+        }
+        if fact.shape.as_concrete() != Some(*expected_shape) {
+            return Err(format!(
+                "{err_prefix}: unexpected output #{idx} shape {:?} (expected {:?})",
+                fact.shape, expected_shape
+            ));
+        }
+    }
     Ok(Arc::new(optimized.into_runnable().map_err(err)?))
+}
+
+fn build_di_net_plan() -> Result<TractPlan, String> {
+    build_di_net_plan_from_bytes(DI_NET_ONNX, "model_failed")
 }
 
 fn shared_di_net_plan() -> Result<&'static TractPlan, String> {
@@ -236,16 +287,41 @@ fn shared_di_net_plan() -> Result<&'static TractPlan, String> {
     }
 }
 
-fn read_bounded_file(path: &Path) -> Result<Vec<u8>, String> {
+fn read_bounded_file_with_limit(
+    path: &Path,
+    max_bytes: u64,
+    too_large_code: &str,
+) -> Result<Vec<u8>, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("unreadable: {e}"))?;
     let mut bytes = Vec::new();
-    file.take(MAX_DI_FILE_BYTES + 1)
+    file.take(max_bytes + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| format!("unreadable: {e}"))?;
-    if bytes.len() as u64 > MAX_DI_FILE_BYTES {
-        return Err("too_large".into());
+    if bytes.len() as u64 > max_bytes {
+        return Err(too_large_code.into());
     }
     Ok(bytes)
+}
+
+fn read_bounded_file(path: &Path) -> Result<Vec<u8>, String> {
+    read_bounded_file_with_limit(path, MAX_DI_FILE_BYTES, "too_large")
+}
+
+pub(crate) fn load_custom_model_from_path(
+    path: &Path,
+) -> Result<(DiCustomModelInfo, TractPlan), String> {
+    let bytes = read_bounded_file_with_limit(path, MAX_CUSTOM_MODEL_BYTES, "model_too_large")?;
+    let plan = build_di_net_plan_from_bytes(&bytes, "invalid_model")?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("custom.onnx")
+        .to_string();
+    let info = DiCustomModelInfo {
+        file_name,
+        path: path.to_string_lossy().into_owned(),
+    };
+    Ok((info, plan))
 }
 
 fn sinc(x: f64) -> f64 {
@@ -935,12 +1011,14 @@ struct ChunkDiNetOut {
     pp: Vec<f32>,
 }
 
-fn infer_di_net_posteriorgrams(mono_22k: &[f32]) -> Result<DiNetPosteriors, String> {
+fn infer_di_net_posteriorgrams_with_plan(
+    mono_22k: &[f32],
+    plan: &TractPlan,
+) -> Result<DiNetPosteriors, String> {
     let n_samples = mono_22k.len();
     if n_samples == 0 {
         return Ok(DiNetPosteriors::default());
     }
-    let plan = shared_di_net_plan()?;
     let n_frames = n_samples.div_ceil(FFT_HOP) + 1;
 
     let mut starts = Vec::new();
@@ -1154,14 +1232,18 @@ struct ScoredPitchCand {
 }
 
 fn best_fret_pen(pitches: &[u8], open_tuning: &[u8], max_fret: i16) -> Option<f32> {
-    if pitches.len() > open_tuning.len() {
+    if pitches.len() > open_tuning.len() || open_tuning.is_empty() {
         return None;
     }
-    let mut opts_per_pitch: Vec<(usize, Vec<(usize, i16)>)> = Vec::with_capacity(pitches.len());
-    for (idx, &pitch) in pitches.iter().enumerate() {
+    // Sort open strings low-to-high so string indices 0..N-1 follow physical pitch order.
+    let mut open_low_to_high: Vec<u8> = open_tuning.to_vec();
+    open_low_to_high.sort_unstable();
+
+    let mut opts_per_pitch: Vec<(u8, Vec<(usize, i16)>)> = Vec::with_capacity(pitches.len());
+    for &pitch in pitches {
         let p_i16 = i16::from(pitch);
         let mut opts = Vec::new();
-        for (s_idx, &open) in open_tuning.iter().enumerate() {
+        for (s_idx, &open) in open_low_to_high.iter().enumerate() {
             let fr = p_i16 - i16::from(open);
             if (0..=max_fret).contains(&fr) {
                 opts.push((s_idx, fr));
@@ -1170,33 +1252,43 @@ fn best_fret_pen(pitches: &[u8], open_tuning: &[u8], max_fret: i16) -> Option<f3
         if opts.is_empty() {
             return None;
         }
-        opts_per_pitch.push((idx, opts));
+        opts_per_pitch.push((pitch, opts));
     }
     opts_per_pitch.sort_by_key(|a| a.1.len());
 
     let mut best: Option<f32> = None;
-    let mut used = vec![false; open_tuning.len()];
-    let mut chosen = Vec::with_capacity(pitches.len());
+    let mut used = vec![false; open_low_to_high.len()];
+    let mut chosen: Vec<(usize, u8, i16)> = Vec::with_capacity(pitches.len());
 
     fn dfs(
         depth: usize,
-        opts_per_pitch: &[(usize, Vec<(usize, i16)>)],
+        opts_per_pitch: &[(u8, Vec<(usize, i16)>)],
         used: &mut [bool],
-        chosen: &mut Vec<i16>,
+        chosen: &mut Vec<(usize, u8, i16)>,
         best: &mut Option<f32>,
     ) {
         if depth == opts_per_pitch.len() {
+            let mut by_string = chosen.clone();
+            by_string.sort_unstable_by_key(|x| x.0);
+            for i in 0..by_string.len() {
+                for j in (i + 1)..by_string.len() {
+                    if by_string[i].1 > by_string[j].1 {
+                        return; // Reject pitch-to-string inversions
+                    }
+                }
+            }
+
             let mut min_f = i16::MAX;
             let mut max_f = i16::MIN;
             let mut fretted = 0usize;
-            for &fr in chosen.iter() {
+            for &(_, _, fr) in &by_string {
                 if fr > 0 {
                     min_f = min_f.min(fr);
                     max_f = max_f.max(fr);
                     fretted += 1;
                 }
             }
-            let pen = if fretted >= 2 {
+            let mut pen = if fretted >= 2 {
                 let sp = max_f - min_f;
                 let max_span = if min_f >= 9 { 6 } else { 5 };
                 if sp > max_span {
@@ -1210,15 +1302,38 @@ fn best_fret_pen(pitches: &[u8], open_tuning: &[u8], max_fret: i16) -> Option<f3
             } else {
                 0.0
             };
+
+            for i in 0..by_string.len().saturating_sub(1) {
+                let gap = by_string[i + 1].0.saturating_sub(by_string[i].0 + 1);
+                if gap > 0 {
+                    pen += gap as f32 * 0.08;
+                }
+            }
+
+            for &(s_open, _, fr_open) in &by_string {
+                if fr_open == 0 {
+                    let mut max_lower_fret = 0_i16;
+                    for &(s_other, _, fr_other) in &by_string {
+                        if s_other < s_open && fr_other >= 5 {
+                            max_lower_fret = max_lower_fret.max(fr_other);
+                        }
+                    }
+                    if max_lower_fret >= 5 {
+                        pen += 0.25 + (max_lower_fret - 4) as f32 * 0.08;
+                    }
+                }
+            }
+
             if best.is_none_or(|b| pen < b) {
                 *best = Some(pen);
             }
             return;
         }
+        let pitch = opts_per_pitch[depth].0;
         for &(s_idx, fr) in &opts_per_pitch[depth].1 {
             if !used[s_idx] {
                 used[s_idx] = true;
-                chosen.push(fr);
+                chosen.push((s_idx, pitch, fr));
                 dfs(depth + 1, opts_per_pitch, used, chosen, best);
                 chosen.pop();
                 used[s_idx] = false;
@@ -1320,10 +1435,13 @@ fn build_transcribed_notes(
     struct EvBuf {
         ev_f: usize,
         next_ev_f: usize,
+        atk_peak: f32,
+        raw_scores: Vec<f32>,
         scores: Vec<f32>,
         bodies: Vec<f32>,
         onsets: Vec<f32>,
         sim_vec: Vec<f32>,
+        nbrs: Vec<usize>,
         pm_val: f32,
     }
 
@@ -1332,6 +1450,12 @@ fn build_transcribed_notes(
         let next_ev_f = events.get(idx + 1).copied().unwrap_or(n_frames - 1);
         let fr_hi = (ev_f + 2).max((ev_f + 6).min(next_ev_f)).min(n_frames);
         let bp_f = sec_to_bp_frame(di_frame_to_seconds(ev_f), cached.n_frames);
+        let atk_lo = ev_f.saturating_sub(1);
+        let atk_hi = (ev_f + 2).min(n_frames);
+        let mut atk_peak = 0.0_f32;
+        for t in atk_lo..atk_hi {
+            atk_peak = atk_peak.max(di.attack_p[t]);
+        }
 
         let pm_hi = (ev_f + 5).min(n_frames);
         let pm_val = if pm_hi > ev_f {
@@ -1352,8 +1476,8 @@ fn build_transcribed_notes(
 
             let (bp_on, bp_body) = if cached.n_frames > 0 && bp_bin < N_PITCH_BINS {
                 let mut b_mo = 0.0_f32;
-                let b_lo = bp_f.saturating_sub(1);
-                let b_hi = (bp_f + 2).min(cached.n_frames - 1);
+                let b_lo = bp_f.saturating_sub(2);
+                let b_hi = (bp_f + 3).min(cached.n_frames - 1);
                 for t in b_lo..=b_hi {
                     b_mo = b_mo.max(cached.onsets[t * N_PITCH_BINS + bp_bin]);
                 }
@@ -1375,8 +1499,9 @@ fn build_transcribed_notes(
             let (mo, body, pre_f) =
                 if (DI_MIDI_MIN..DI_MIDI_MIN + DI_N_SEMITONES).contains(&usize::from(pitch)) {
                     let v4_b = usize::from(pitch) - DI_MIDI_MIN;
-                    let on_lo = ev_f.saturating_sub(1);
-                    let on_hi = (ev_f + 3).min(n_frames);
+                    // Strum-aware onset window [-2, +4) (~70 ms) captures all 6-7 strings across a fast down/up-strum.
+                    let on_lo = ev_f.saturating_sub(2);
+                    let on_hi = (ev_f + 4).min(n_frames);
                     let mut v4_on = 0.0_f32;
                     for t in on_lo..on_hi {
                         v4_on = v4_on.max(di.onset_p[v4_b * n_frames + t]);
@@ -1414,7 +1539,8 @@ fn build_transcribed_notes(
                 };
 
             let mut sc = 0.55 * mo + 0.45 * body;
-            if pre_f > 0.45 && mo < 0.16 && body <= pre_f + 0.04 {
+            // Suppress sustained tail re-triggers when the global attack is weak, while preserving re-strummed chord notes.
+            if atk_peak < 0.65 && pre_f > 0.45 && mo < 0.14 && body <= pre_f + 0.04 {
                 sc *= 0.48;
             }
             scores[p_off] = sc;
@@ -1428,13 +1554,17 @@ fn build_transcribed_notes(
         for v in &mut sim_vec {
             *v /= norm;
         }
+        let raw_scores = scores.clone();
         ev_objs.push(EvBuf {
             ev_f,
             next_ev_f,
+            atk_peak,
+            raw_scores,
             scores,
             bodies,
             onsets,
             sim_vec,
+            nbrs: Vec::new(),
             pm_val,
         });
     }
@@ -1443,6 +1573,8 @@ fn build_transcribed_notes(
     let n_evs = ev_objs.len();
     if n_evs > 1 {
         let mut blended_scores: Vec<Vec<f32>> = ev_objs.iter().map(|e| e.scores.clone()).collect();
+        let mut blended_bodies: Vec<Vec<f32>> = ev_objs.iter().map(|e| e.bodies.clone()).collect();
+        let mut all_nbrs: Vec<Vec<usize>> = vec![Vec::new(); n_evs];
         let half_window = if n_evs <= 3000 { n_evs } else { 800 };
         for i in 0..n_evs {
             let lo_j = i.saturating_sub(half_window);
@@ -1467,31 +1599,55 @@ fn build_transcribed_notes(
             nbrs.sort_by(|a, b| b.1.total_cmp(&a.1));
             nbrs.truncate(6);
             let w_sum: f32 = nbrs.iter().map(|x| x.1).sum();
-            let alpha = (nbrs.len() as f32 * 0.055).min(0.22);
+            let alpha = (nbrs.len() as f32 * 0.075).min(0.32);
             for p_off in 0..n_pitches {
-                let mut avg = 0.0_f32;
+                let mut avg_sc = 0.0_f32;
+                let mut avg_bd = 0.0_f32;
                 for &(j, dot) in &nbrs {
-                    avg += (dot / w_sum.max(1e-6)) * ev_objs[j].scores[p_off];
+                    let w = dot / w_sum.max(1e-6);
+                    avg_sc += w * ev_objs[j].scores[p_off];
+                    avg_bd += w * ev_objs[j].bodies[p_off];
                 }
-                blended_scores[i][p_off] = (1.0 - alpha) * ev_objs[i].scores[p_off] + alpha * avg;
+                blended_scores[i][p_off] =
+                    (1.0 - alpha) * ev_objs[i].scores[p_off] + alpha * avg_sc;
+                blended_bodies[i][p_off] =
+                    (1.0 - alpha) * ev_objs[i].bodies[p_off] + alpha * avg_bd;
             }
+            all_nbrs[i] = nbrs.into_iter().map(|(j, _)| j).collect();
         }
-        for (ev, b_sc) in ev_objs.iter_mut().zip(blended_scores.into_iter()) {
+        for ((ev, (b_sc, b_bd)), nbrs) in ev_objs
+            .iter_mut()
+            .zip(blended_scores.into_iter().zip(blended_bodies.into_iter()))
+            .zip(all_nbrs.into_iter())
+        {
             ev.scores = b_sc;
+            ev.bodies = b_bd;
+            ev.nbrs = nbrs;
         }
     }
 
     let mut result = Vec::with_capacity(n_evs * 2);
     let attack_len = (TARGET_SAMPLE_RATE as usize * 30) / 1000;
     let stop_floor = frame_thr * 0.65;
+    let max_poly = if !params.open_tuning.is_empty() {
+        params.open_tuning.len().min(7)
+    } else {
+        6
+    };
 
+    let mut selected_per_ev: Vec<Vec<ScoredPitchCand>> = Vec::with_capacity(n_evs);
     for ev in &ev_objs {
         let mut pitch_cands = Vec::<ScoredPitchCand>::new();
         for p_off in 0..n_pitches {
             let sc = ev.scores[p_off];
             let body = ev.bodies[p_off];
             let onset = ev.onsets[p_off];
-            if sc >= pitch_thr && body >= frame_thr * 0.70 && onset >= onset_gate {
+            let eff_gate = if ev.atk_peak >= 0.70 && body >= 0.65 {
+                onset_gate.min(0.08)
+            } else {
+                onset_gate
+            };
+            if sc >= pitch_thr && body >= frame_thr * 0.70 && onset >= eff_gate {
                 pitch_cands.push(ScoredPitchCand {
                     pitch: min_pitch + p_off as u8,
                     score: sc,
@@ -1508,16 +1664,14 @@ fn build_transcribed_notes(
                 !snapshot.iter().any(|root| {
                     root.score > cand.score
                         && matches!(cand.pitch.checked_sub(root.pitch), Some(12) | Some(19))
-                        && cand.body < frame_thr * 0.95
-                        && cand.onset < pitch_thr * 0.72
+                        && (cand.body < frame_thr * 1.15 || cand.onset < pitch_thr * 0.78)
                 })
             });
         }
 
         if !params.open_tuning.is_empty() && pitch_cands.len() > 1 {
-            let pool_len = pitch_cands.len().min(7);
+            let pool_len = pitch_cands.len().min(8);
             let pool = &pitch_cands[..pool_len];
-            let max_poly = params.open_tuning.len().min(5);
             let mut best_obj = f32::NEG_INFINITY;
             let mut best_mask = 0usize;
             for mask in 1..(1usize << pool_len) {
@@ -1551,10 +1705,71 @@ fn build_transcribed_notes(
                 pitch_cands.truncate(max_poly);
             }
         } else {
-            pitch_cands.truncate(6);
+            pitch_cands.truncate(max_poly);
         }
+        selected_per_ev.push(pitch_cands);
+    }
 
-        for item in pitch_cands {
+    // Stage 2 Riff Chord Consensus: stabilize repeated multi-note chords (>= 3 notes) across high-similarity riff clusters.
+    if n_evs > 1 {
+        let snapshot_cands = selected_per_ev.clone();
+        for (i, ev) in ev_objs.iter().enumerate() {
+            if snapshot_cands[i].len() < 3 || ev.nbrs.len() < 3 {
+                continue;
+            }
+            let cluster_len = 1 + ev.nbrs.len();
+            let mut counts = vec![0usize; n_pitches];
+            for item in &snapshot_cands[i] {
+                counts[usize::from(item.pitch - min_pitch)] += 1;
+            }
+            for &j in &ev.nbrs {
+                for item in &snapshot_cands[j] {
+                    counts[usize::from(item.pitch - min_pitch)] += 1;
+                }
+            }
+
+            let mut consensus_cands = Vec::<ScoredPitchCand>::new();
+            for (p_off, &cnt) in counts.iter().enumerate() {
+                if cnt == 0 {
+                    continue;
+                }
+                let pitch = min_pitch + p_off as u8;
+                let existing = snapshot_cands[i].iter().find(|c| c.pitch == pitch).copied();
+                let keep = if cnt * 2 >= cluster_len {
+                    ev.bodies[p_off] >= frame_thr * 0.70
+                } else {
+                    existing.is_some() && ev.raw_scores[p_off] >= pitch_thr + 0.14
+                };
+                if keep {
+                    consensus_cands.push(existing.unwrap_or(ScoredPitchCand {
+                        pitch,
+                        score: ev.scores[p_off],
+                        body: ev.bodies[p_off],
+                        onset: ev.onsets[p_off],
+                    }));
+                }
+            }
+            consensus_cands.sort_by(|a, b| b.score.total_cmp(&a.score));
+            consensus_cands.truncate(max_poly);
+            if consensus_cands.len() >= 3 {
+                let playable = if !params.open_tuning.is_empty() {
+                    let sub_pitches: Vec<u8> = consensus_cands.iter().map(|c| c.pitch).collect();
+                    best_fret_pen(&sub_pitches, &params.open_tuning, 24).is_some()
+                } else {
+                    true
+                };
+                if playable {
+                    selected_per_ev[i] = consensus_cands;
+                }
+            }
+        }
+    }
+
+    for (ev, pitch_cands) in ev_objs.iter().zip(selected_per_ev.into_iter()) {
+        // Compute a unified chord end frame across all notes of a multi-note chord so simultaneous chord tones
+        // share one rhythmic duration instead of splintering into 2 voices or cutting adjacent chord notes short.
+        let mut end_frames = Vec::with_capacity(pitch_cands.len());
+        for item in &pitch_cands {
             let in_v4 =
                 (DI_MIDI_MIN..DI_MIDI_MIN + DI_N_SEMITONES).contains(&usize::from(item.pitch));
             let mut end_f = (ev.ev_f + 2).min(ev.next_ev_f);
@@ -1581,28 +1796,43 @@ fn build_transcribed_notes(
                     end_f += 1;
                 }
             }
-
-            let start_sec = di_frame_to_seconds(ev.ev_f);
             let clean_end_f = end_f
                 .saturating_sub(quiet)
                 .max((ev.ev_f + 2).min(ev.next_ev_f));
-            let end_sec = di_frame_to_seconds(clean_end_f).max(start_sec + 0.04);
-            let dur_ms = (end_sec - start_sec) * 1000.0;
+            end_frames.push(clean_end_f);
+        }
 
-            let palm_mute_score = if dur_ms <= 650.0 {
-                ev.pm_val
-            } else if dur_ms >= 900.0 {
-                0.0
-            } else {
-                ev.pm_val * ((900.0 - dur_ms as f32) / 250.0)
-            }
-            .clamp(0.0, 1.0);
+        let unified_end_f = if end_frames.len() >= 2 {
+            let mut sorted_ends = end_frames.clone();
+            sorted_ends.sort_unstable();
+            // Upper-quartile chord duration (e.g. 75th percentile) preserves the ringing body of a strummed chord.
+            sorted_ends[(sorted_ends.len() * 3) / 4]
+        } else {
+            end_frames
+                .first()
+                .copied()
+                .unwrap_or((ev.ev_f + 2).min(ev.next_ev_f))
+        };
 
-            let s0 = seconds_to_sample_22k(start_sec);
-            let local_rms = slice_rms(&cached.mono_22k, s0, s0 + attack_len);
-            let vel_norm = (local_rms / cached.ref_attack_rms.max(1e-4)).clamp(0.1, 1.0);
-            let velocity = (vel_norm * 127.0).round().clamp(1.0, 127.0) as u8;
+        let start_sec = di_frame_to_seconds(ev.ev_f);
+        let end_sec = di_frame_to_seconds(unified_end_f).max(start_sec + 0.04);
+        let dur_ms = (end_sec - start_sec) * 1000.0;
 
+        let palm_mute_score = if dur_ms <= 650.0 {
+            ev.pm_val
+        } else if dur_ms >= 900.0 {
+            0.0
+        } else {
+            ev.pm_val * ((900.0 - dur_ms as f32) / 250.0)
+        }
+        .clamp(0.0, 1.0);
+
+        let s0 = seconds_to_sample_22k(start_sec);
+        let local_rms = slice_rms(&cached.mono_22k, s0, s0 + attack_len);
+        let vel_norm = (local_rms / cached.ref_attack_rms.max(1e-4)).clamp(0.1, 1.0);
+        let velocity = (vel_norm * 127.0).round().clamp(1.0, 127.0) as u8;
+
+        for item in pitch_cands {
             let bend_semitones = if cached.n_frames > 0 {
                 let bp_start_f = sec_to_bp_frame(start_sec, cached.n_frames);
                 let bp_end_f = sec_to_bp_frame(end_sec, cached.n_frames)
@@ -1634,19 +1864,20 @@ fn build_transcribed_notes(
     result
 }
 
-pub(crate) fn analyze_samples_22k(
+pub(crate) fn analyze_samples_22k_with_plan(
     analysis_id: String,
     file_name: String,
     sample_rate: u32,
     channels: u16,
     mono_22k: Vec<f32>,
+    di_plan: &TractPlan,
 ) -> Result<(DiAnalysisSummary, CachedDiAnalysis), String> {
     let duration_sec = mono_22k.len() as f64 / TARGET_SAMPLE_RATE as f64;
     if !duration_sec.is_finite() || duration_sec > MAX_DI_DURATION_SEC {
         return Err("too_long".into());
     }
     let (notes, onsets, contours, n_frames) = infer_posteriorgrams(&mono_22k)?;
-    let di_net = infer_di_net_posteriorgrams(&mono_22k)?;
+    let di_net = infer_di_net_posteriorgrams_with_plan(&mono_22k, di_plan)?;
     let ref_attack_rms = compute_reference_attack_rms(&mono_22k);
     let (estimated_bpm, estimated_offset_sec) =
         estimate_tempo_and_offset(&onsets, &mono_22k, n_frames);
@@ -1661,6 +1892,7 @@ pub(crate) fn analyze_samples_22k(
     };
     let cached = CachedDiAnalysis {
         analysis_id,
+        summary: summary.clone(),
         mono_22k,
         notes,
         onsets,
@@ -1672,9 +1904,29 @@ pub(crate) fn analyze_samples_22k(
     Ok((summary, cached))
 }
 
-pub(crate) fn analyze_file(
+#[cfg(test)]
+pub(crate) fn analyze_samples_22k(
+    analysis_id: String,
+    file_name: String,
+    sample_rate: u32,
+    channels: u16,
+    mono_22k: Vec<f32>,
+) -> Result<(DiAnalysisSummary, CachedDiAnalysis), String> {
+    let di_plan = shared_di_net_plan()?;
+    analyze_samples_22k_with_plan(
+        analysis_id,
+        file_name,
+        sample_rate,
+        channels,
+        mono_22k,
+        di_plan,
+    )
+}
+
+pub(crate) fn analyze_file_with_plan(
     path: &Path,
     analysis_id: String,
+    di_plan: &TractPlan,
 ) -> Result<(DiAnalysisSummary, CachedDiAnalysis), String> {
     let bytes = read_bounded_file(path)?;
     let hint = path.extension().and_then(|ext| ext.to_str());
@@ -1694,13 +1946,64 @@ pub(crate) fn analyze_file(
         .and_then(|name| name.to_str())
         .unwrap_or("guitar-di.wav")
         .to_string();
-    analyze_samples_22k(
+    analyze_samples_22k_with_plan(
         analysis_id,
         file_name,
         decoded.sample_rate,
         decoded.channels,
         mono_22k,
+        di_plan,
     )
+}
+
+#[cfg(test)]
+pub(crate) fn analyze_file(
+    path: &Path,
+    analysis_id: String,
+) -> Result<(DiAnalysisSummary, CachedDiAnalysis), String> {
+    let di_plan = shared_di_net_plan()?;
+    analyze_file_with_plan(path, analysis_id, di_plan)
+}
+
+fn active_di_net_plan(state: &DiTranscriptionState) -> Result<TractPlan, String> {
+    let guard = state.custom_model.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(custom) = guard.as_ref() {
+        return Ok(custom.plan.clone());
+    }
+    Ok(shared_di_net_plan()?.clone())
+}
+
+async fn reanalyze_cached_with_plan(
+    state: &DiTranscriptionState,
+    plan: TractPlan,
+) -> Result<Option<DiAnalysisSummary>, String> {
+    let snapshot = {
+        let guard = state.cached.lock().unwrap_or_else(|e| e.into_inner());
+        guard
+            .as_ref()
+            .map(|c| (c.mono_22k.clone(), c.analysis_id.clone(), c.summary.clone()))
+    };
+    let Some((mono_22k, old_id, mut summary)) = snapshot else {
+        return Ok(None);
+    };
+    let di_net = tauri::async_runtime::spawn_blocking(move || {
+        infer_di_net_posteriorgrams_with_plan(&mono_22k, &plan)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let mut guard = state.cached.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(cached) = guard.as_mut() else {
+        return Ok(None);
+    };
+    if cached.analysis_id != old_id {
+        return Ok(Some(cached.summary.clone()));
+    }
+    let new_id = format!("di-{}", state.next_id.fetch_add(1, Ordering::Relaxed));
+    cached.di_net = di_net;
+    cached.analysis_id = new_id.clone();
+    summary.analysis_id = new_id;
+    cached.summary = summary.clone();
+    Ok(Some(summary))
 }
 
 #[tauri::command]
@@ -1720,15 +2023,76 @@ pub async fn di_transcribe_pick_and_analyze(
         return Ok(None);
     };
     let path = file_path.into_path().map_err(|e| e.to_string())?;
+    let di_plan = active_di_net_plan(&state)?;
     let id_num = state.next_id.fetch_add(1, Ordering::Relaxed);
     let analysis_id = format!("di-{id_num}");
-    let (summary, cached) =
-        tauri::async_runtime::spawn_blocking(move || analyze_file(&path, analysis_id))
-            .await
-            .map_err(|e| e.to_string())??;
+    let (summary, cached) = tauri::async_runtime::spawn_blocking(move || {
+        analyze_file_with_plan(&path, analysis_id, &di_plan)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let mut guard = state.cached.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(cached);
     Ok(Some(summary))
+}
+
+#[tauri::command]
+pub fn di_transcribe_get_model(
+    state: State<'_, DiTranscriptionState>,
+) -> Option<DiCustomModelInfo> {
+    let guard = state.custom_model.lock().unwrap_or_else(|e| e.into_inner());
+    guard.as_ref().map(|m| m.info.clone())
+}
+
+#[tauri::command]
+pub async fn di_transcribe_pick_model(
+    app: tauri::AppHandle,
+    state: State<'_, DiTranscriptionState>,
+) -> Result<Option<DiModelSwitchResult>, String> {
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("ONNX transcription model", &["onnx"])
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(file_path) = selected else {
+        return Ok(None);
+    };
+    let path = file_path.into_path().map_err(|e| e.to_string())?;
+    let (info, plan) =
+        tauri::async_runtime::spawn_blocking(move || load_custom_model_from_path(&path))
+            .await
+            .map_err(|e| e.to_string())??;
+    {
+        let mut guard = state.custom_model.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = Some(LoadedCustomModel {
+            info: info.clone(),
+            plan: plan.clone(),
+        });
+    }
+    let analysis = reanalyze_cached_with_plan(&state, plan).await?;
+    Ok(Some(DiModelSwitchResult {
+        model: Some(info),
+        analysis,
+    }))
+}
+
+#[tauri::command]
+pub async fn di_transcribe_clear_model(
+    state: State<'_, DiTranscriptionState>,
+) -> Result<DiModelSwitchResult, String> {
+    {
+        let mut guard = state.custom_model.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = None;
+    }
+    let plan = shared_di_net_plan()?.clone();
+    let analysis = reanalyze_cached_with_plan(&state, plan).await?;
+    Ok(DiModelSwitchResult {
+        model: None,
+        analysis,
+    })
 }
 
 #[tauri::command]
@@ -1891,7 +2255,7 @@ mod tests {
                 40,
                 0.85,
                 18.0,
-                4,
+                6,
                 TARGET_SAMPLE_RATE,
             );
             synth_pluck(
@@ -1901,7 +2265,7 @@ mod tests {
                 40,
                 0.55,
                 22.0,
-                3,
+                5,
                 TARGET_SAMPLE_RATE,
             );
             synth_pluck(
@@ -1911,7 +2275,7 @@ mod tests {
                 40,
                 0.60,
                 22.0,
-                3,
+                5,
                 TARGET_SAMPLE_RATE,
             );
         }
@@ -2016,7 +2380,7 @@ mod tests {
             40,
             0.85,
             24.0,
-            3,
+            5,
             TARGET_SAMPLE_RATE,
         );
         // Open ringing string: slow decay, rich upper harmonics.
@@ -2190,5 +2554,46 @@ mod tests {
         let state = DiTranscriptionState::default();
         let guard = state.cached.lock().unwrap();
         assert!(guard.is_none());
+    }
+
+    #[test]
+    fn custom_onnx_model_loads_validates_and_infers() {
+        let dir = tempfile::tempdir().unwrap();
+        let model_path = dir.path().join("band_custom.onnx");
+        std::fs::write(&model_path, DI_NET_ONNX).unwrap();
+
+        let (info, plan) = load_custom_model_from_path(&model_path).unwrap();
+        assert_eq!(info.file_name, "band_custom.onnx");
+        assert!(info.path.ends_with("band_custom.onnx"));
+
+        let mut audio = vec![0.0_f32; TARGET_SAMPLE_RATE as usize];
+        synth_pluck(&mut audio, 0.20, 0.50, 40, 0.75, 2.5, 6, TARGET_SAMPLE_RATE);
+        let posteriors = infer_di_net_posteriorgrams_with_plan(&audio, &plan).unwrap();
+        assert!(posteriors.n_frames >= 80 && posteriors.n_frames <= 90);
+        assert_eq!(
+            posteriors.frame_p.len(),
+            DI_N_SEMITONES * posteriors.n_frames
+        );
+        assert!(posteriors.frame_p.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn custom_onnx_model_rejects_corrupt_and_incompatible_onnx() {
+        let dir = tempfile::tempdir().unwrap();
+        let corrupt = dir.path().join("corrupt.onnx");
+        std::fs::write(&corrupt, b"not an onnx protobuf").unwrap();
+        let err_corrupt = load_custom_model_from_path(&corrupt).err().unwrap();
+        assert!(
+            err_corrupt.starts_with("invalid_model:"),
+            "unexpected error for corrupt ONNX: {err_corrupt}"
+        );
+
+        let wrong_model = dir.path().join("wrong_nmp.onnx");
+        std::fs::write(&wrong_model, NMP_ONNX).unwrap();
+        let err_wrong = load_custom_model_from_path(&wrong_model).err().unwrap();
+        assert!(
+            err_wrong.starts_with("invalid_model:"),
+            "unexpected error for incompatible ONNX: {err_wrong}"
+        );
     }
 }

@@ -255,4 +255,25 @@ describe('importTracks', () => {
     const threeFour = importMidi(readMidiFile(file(1, 480, [track([[0, [0xff, 0x58, 4, 3, 2, 24, 8]]]), track(line([[0, 480, 60]], 0))]))).score;
     expect(() => prepareImportTracks(built.score, { type: 'importTracks', clip: buildImportClip(threeFour) })).toThrow(/meter/i);
   });
+
+  it('produces compact default-stripped scoreJson in buildImportClip while round-tripping identically', () => {
+    const midi = file(0, 480, [track([[0, [0xc0, 29]], ...line([[0, 240, 40], [240, 480, 47], [480, 720, 52], [720, 960, 55]], 0)])]);
+    const imported = importMidi(readMidiFile(midi), {
+      quantization: 16,
+      tuplets: 'none',
+      voices: 1,
+      tablature: true,
+    });
+    const fullJson = model.JsonConverter.scoreToJson(imported.score);
+    const clip = buildImportClip(imported.score);
+    expect(clip.scoreJson.length).toBeLessThan(fullJson.length * 0.45);
+    expect(clip.scoreJson).not.toContain('"displaystart"');
+    expect(clip.scoreJson).not.toContain('"islefthandtapped"');
+
+    const base = blankProject();
+    const built0 = buildDocument(base);
+    const next = previewEdit(base, { type: 'importTracks', clip }, built0);
+    const notes = next.score.tracks[1].staves[0].bars[0].voices[0].beats.flatMap(b => b.notes.map(n => n.realValue));
+    expect(notes).toEqual([40, 47, 52, 55]);
+  });
 });

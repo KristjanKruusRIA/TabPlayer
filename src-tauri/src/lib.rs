@@ -1497,7 +1497,10 @@ pub fn run() {
         fretlight::fretlight_status,
         audio::transcribe::di_transcribe_pick_and_analyze,
         audio::transcribe::di_transcribe_decode,
-        audio::transcribe::di_transcribe_clear
+        audio::transcribe::di_transcribe_clear,
+        audio::transcribe::di_transcribe_get_model,
+        audio::transcribe::di_transcribe_pick_model,
+        audio::transcribe::di_transcribe_clear_model
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1639,6 +1642,9 @@ pub fn run() {
         audio::transcribe::di_transcribe_pick_and_analyze,
         audio::transcribe::di_transcribe_decode,
         audio::transcribe::di_transcribe_clear,
+        audio::transcribe::di_transcribe_get_model,
+        audio::transcribe::di_transcribe_pick_model,
+        audio::transcribe::di_transcribe_clear_model,
         plugins::commands::plugin_test_set_parameter,
         desktop_test_io,
         desktop_test_silent_output

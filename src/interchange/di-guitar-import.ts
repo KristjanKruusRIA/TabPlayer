@@ -99,8 +99,8 @@ export interface FretPlacement {
 const settings = new Settings();
 const TICKS_PER_QUARTER = 960;
 const UNITS_PER_ALPHA_TICK = SPAN / TICKS_PER_QUARTER; // 0.25 (240 / 960)
-const MAX_CANDIDATES_PER_CHORD = 16;
-const MAX_BRANCH_EVALUATIONS = 96;
+const MAX_CANDIDATES_PER_CHORD = 24;
+const MAX_BRANCH_EVALUATIONS = 512;
 
 const fail = (message: string): never => {
   throw new Error(message);
@@ -220,7 +220,10 @@ function scoreChordCandidate(
 
   if (fretted.length >= 2) {
     const span = Math.max(...fretted) - Math.min(...fretted);
-    cost += span <= 4 ? span * 0.35 : 3.0 + (span - 4) * 2.5;
+    cost +=
+      span <= 4
+        ? span * 0.35
+        : 3.0 + (span - 4) * 2.8 + (span >= 6 ? (span - 5) * 2.5 : 0);
   }
 
   for (const item of items) {
@@ -236,6 +239,16 @@ function scoreChordCandidate(
     const byString = [...items].sort((a, b) => a.string - b.string);
     let skippedStrings = 0;
     let powerShapeMatches = 0;
+    let inversionPenalty = 0;
+    for (let i = 0; i < byString.length; i++) {
+      for (let j = i + 1; j < byString.length; j++) {
+        if (byString[i].key > byString[j].key) {
+          inversionPenalty += 3.8 + (byString[i].key - byString[j].key) * 0.18;
+        }
+      }
+    }
+    cost += inversionPenalty;
+
     for (let i = 0; i < byString.length - 1; i++) {
       const low = byString[i];
       const high = byString[i + 1];
@@ -254,6 +267,23 @@ function scoreChordCandidate(
     }
     if (openCount > 0 && fretted.length >= 2 && Math.max(...fretted) - Math.min(...fretted) > 4) {
       cost += 1.4; // Penalize wide left-hand stretch on the fretted notes, not open drone pairings
+    }
+    const openStrings = byString.filter(it => it.fret === 0);
+    const frettedItems = byString.filter(it => it.fret > 0);
+    for (const openItem of openStrings) {
+      let maxLowerFret = 0;
+      let maxAnyFret = 0;
+      for (const frettedItem of frettedItems) {
+        if (frettedItem.fret > maxAnyFret) maxAnyFret = frettedItem.fret;
+        if (frettedItem.string < openItem.string && frettedItem.fret >= 5) {
+          if (frettedItem.fret > maxLowerFret) maxLowerFret = frettedItem.fret;
+        }
+      }
+      if (maxLowerFret >= 5) {
+        cost += 1.8 + (maxLowerFret - 4) * 0.45;
+      } else if (maxAnyFret >= 10) {
+        cost += 2.2 + (maxAnyFret - 9) * 0.55;
+      }
     }
   }
 
@@ -289,11 +319,11 @@ function generateChordCandidates(
   let bestCount = 0;
   let branches = 0;
 
-  // First try placing every note; only if zero full voicings exist allow dropping unplayable ones.
-  const runSearch = (allowDrops: boolean) => {
+  // First try placing every note cleanly (no pitch inversions, span <= 5); relax only when no compact full voicing exists.
+  const runSearch = (allowDrops: boolean, compactOnly: boolean) => {
     branches = 0;
     const search = (index: number, dropped: number) => {
-      if (branches >= MAX_BRANCH_EVALUATIONS && candidates.length >= 4) return;
+      if (branches >= MAX_BRANCH_EVALUATIONS && candidates.length >= 16) return;
       if (index === perPitch.length) {
         branches++;
         if (current.length > bestCount) bestCount = current.length;
@@ -304,6 +334,28 @@ function generateChordCandidates(
       let triedString = false;
       for (const opt of opts) {
         if (used.has(opt.string)) continue;
+        if (compactOnly) {
+          let inverted = false;
+          let minF = opt.fret > 0 ? opt.fret : Infinity;
+          let maxF = opt.fret > 0 ? opt.fret : -Infinity;
+          let fCount = opt.fret > 0 ? 1 : 0;
+          for (const prev of current) {
+            if (
+              (prev.string < opt.string && prev.key > opt.key) ||
+              (prev.string > opt.string && prev.key < opt.key)
+            ) {
+              inverted = true;
+              break;
+            }
+            if (prev.fret > 0) {
+              if (prev.fret < minF) minF = prev.fret;
+              if (prev.fret > maxF) maxF = prev.fret;
+              fCount++;
+            }
+          }
+          if (inverted) continue;
+          if (fCount >= 2 && maxF - minF > 5) continue;
+        }
         triedString = true;
         used.add(opt.string);
         current.push({ key: opt.key, string: opt.string, fret: opt.fret });
@@ -318,9 +370,12 @@ function generateChordCandidates(
     search(0, 0);
   };
 
-  runSearch(false);
+  runSearch(false, true);
   if (!candidates.length) {
-    runSearch(true);
+    runSearch(false, false);
+  }
+  if (!candidates.length) {
+    runSearch(true, false);
   }
   if (!candidates.length) {
     return [scoreChordCandidate([], strings, position, keys.length)];
@@ -380,6 +435,24 @@ function transitionCost(
           cost += 0.9;
         }
       }
+    }
+  } else {
+    let shared = 0;
+    let matched = 0;
+    for (const [key, p1] of prev.placements) {
+      const p2 = cur.placements.get(key);
+      if (p2) {
+        shared++;
+        if (p1.string === p2.string && p1.fret === p2.fret) {
+          matched++;
+          cost -= 0.45;
+        } else {
+          cost += 0.35;
+        }
+      }
+    }
+    if (shared === prev.placements.size && shared === cur.placements.size) {
+      cost += matched === shared ? -1.0 : 0.9;
     }
   }
 
@@ -582,6 +655,35 @@ export function importDiGuitarNotes(
 
   const grid = createRhythmGrid(bars, rawHits, options.quantization, options.tuplets);
   const hits = snapHitsToGrid(grid, rawHits, false);
+
+  // When multiple notes snap to the same quantized start slot within a fast strummed chord,
+  // unify their quantized end slot when their ends are within one quarter-note span so they form one clean chord beat.
+  const byStart = new Map<number, TimedHit[]>();
+  for (const hit of hits) {
+    const list = byStart.get(hit.start);
+    if (list) list.push(hit);
+    else byStart.set(hit.start, [hit]);
+  }
+  const nextStarts = [...byStart.keys()].sort((a, b) => a - b);
+  const nextStartMap = new Map<number, number>();
+  for (let i = 0; i < nextStarts.length - 1; i++) {
+    nextStartMap.set(nextStarts[i], nextStarts[i + 1]);
+  }
+  for (const [start, group] of byStart) {
+    if (group.length < 2) continue;
+    const minEnd = Math.min(...group.map(h => h.end));
+    const maxEnd = Math.max(...group.map(h => h.end));
+    if (maxEnd > minEnd && maxEnd - minEnd <= SPAN) {
+      const sortedEnds = group.map(h => h.end).sort((a, b) => a - b);
+      const nextOnset = nextStartMap.get(start) ?? Infinity;
+      const unifiedEnd = Math.min(sortedEnds[Math.floor((sortedEnds.length * 3) / 4)], nextOnset);
+      if (unifiedEnd > start) {
+        for (const h of group) {
+          h.end = unifiedEnd;
+        }
+      }
+    }
+  }
 
   // Align per-note attributes (velocity & palm-mute score) onto quantized `(pitch, start)` pairs.
   const totalUnits = bars.at(-1)!.start + bars.at(-1)!.length;

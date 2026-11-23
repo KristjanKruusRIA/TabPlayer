@@ -46,10 +46,10 @@ const allowed: Record<'all' | SupportedLanguage, ReadonlySet<string>> = {
     'Bravura', 'Petaluma', 'Leland', 'Noto Sans', 'Noto Serif', 'Noto Sans Mono',          // font family names
     'Guitar Pro 6 (.gpx)', 'MusicXML (.xml .musicxml .mxl)', 'Simile']),   // file format names and a musical term, the same in every language
   en: new Set(),
-  et: new Set(['ASCII tab', 'Filter', 'Standard',
+  et: new Set(['ASCII tab', 'Filter', 'Standard', 'Instrument',
     // international guitar/bass tuning preset names kept verbatim in the Estonian catalog
     'Standard E', 'D standard', 'Drop D', 'Drop C#', 'Drop C', 'DADGAD', 'Standard B', 'Drop A', 'A standard', 'Drop G', 'Standard F#', 'Drop E', 'E standard', 'Standard C#', 'Drop B']),
-  de: new Set(['Interpretation', 'Normal', 'Zoom (%)', 'Filter', 'Cents', 'Solo', 'Standard', 'Horizontal', 'Notation',
+  de: new Set(['Interpretation', 'Normal', 'Zoom (%)', 'Filter', 'Cents', 'Solo', 'Standard', 'Horizontal', 'Notation', 'Instrument',
     // international guitar/bass tuning preset names kept verbatim in the German catalog
     'Standard E', 'Drop D', 'Drop C#', 'Drop C', 'DADGAD', 'Drop A', 'Drop G', 'Drop E', 'Standard F#', 'Standard C#']),
 };

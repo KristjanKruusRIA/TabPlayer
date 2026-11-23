@@ -249,6 +249,78 @@ describe('di-guitar-import', () => {
     expect(p1.get(58)).toEqual({ string: 6, fret: 6 });
   });
 
+  it('avoids inverted open-treble voicings and wide stretches on 7-string Drop F#1 while keeping open-bass drones', () => {
+    const SEVEN_STRING_DROP_FS = [61, 56, 52, 47, 42, 37, 30] as const;
+
+    // 1. Dissonant chord [56, 61, 62] (G#3, C#4, D4): must NOT invert strings via s5:f10 + s6:f0 + s7:f0.
+    const diss = [{ start: 0, end: 120, keys: [56, 61, 62], voice: 0 }];
+    const dissSolved = solveGuitarFingering(diss, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
+    expect(dissSolved.unplayableCount).toBe(0);
+    const dissPlaced = [...dissSolved.placements.get(diss[0])!.entries()].sort(
+      (a, b) => a[1].string - b[1].string,
+    );
+    for (let i = 0; i < dissPlaced.length - 1; i++) {
+      expect(dissPlaced[i][0]).toBeLessThan(dissPlaced[i + 1][0]);
+    }
+    const dissFretted = dissPlaced.map(([, p]) => p.fret).filter(f => f > 0);
+    if (dissFretted.length >= 2) {
+      expect(Math.max(...dissFretted) - Math.min(...dissFretted)).toBeLessThanOrEqual(4);
+    }
+
+    // 2. Open bass drone chord [37, 49, 56] preserves open C#1 (s2:f0) below fretted upper strings s3:f7 + s4:f9.
+    const drone = [{ start: 0, end: 120, keys: [37, 49, 56], voice: 0 }];
+    const droneSolved = solveGuitarFingering(drone, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
+    expect(droneSolved.unplayableCount).toBe(0);
+    const pDrone = droneSolved.placements.get(drone[0])!;
+    expect(pDrone.get(37)).toEqual({ string: 2, fret: 0 });
+    expect(pDrone.get(49)).toEqual({ string: 3, fret: 7 });
+    expect(pDrone.get(56)).toEqual({ string: 4, fret: 9 });
+
+    // 3. 5-note 7-string chord [44, 52, 61, 66, 71] finds a compact playable shape (span <= 4) instead of an 8-fret stretch.
+    const fiveNote = [{ start: 0, end: 120, keys: [44, 52, 61, 66, 71], voice: 0 }];
+    const fiveSolved = solveGuitarFingering(fiveNote, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
+    expect(fiveSolved.unplayableCount).toBe(0);
+    const fiveFretted = [...fiveSolved.placements.get(fiveNote[0])!.values()]
+      .map(p => p.fret)
+      .filter(f => f > 0);
+    expect(Math.max(...fiveFretted) - Math.min(...fiveFretted)).toBeLessThanOrEqual(4);
+
+    // 4. Repeated identical multi-note chords lock to the same (string, fret) voicing across hits.
+    const repeated = [
+      { start: 0, end: 120, keys: [56, 61, 62], voice: 0 },
+      { start: 120, end: 240, keys: [56, 61, 62], voice: 0 },
+      { start: 240, end: 360, keys: [56, 61, 62], voice: 0 },
+    ];
+    const repSolved = solveGuitarFingering(repeated, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
+    const shape0 = [...repSolved.placements.get(repeated[0])!.entries()];
+    expect([...repSolved.placements.get(repeated[1])!.entries()]).toEqual(shape0);
+    expect([...repSolved.placements.get(repeated[2])!.entries()]).toEqual(shape0);
+
+    // 5. Fast strummed 6-note chord with slightly ragged per-note release times unifies into a single clean chord beat.
+    const fastChordNotes = [
+      note(42, 0.0, 0.21),
+      note(45, 0.0, 0.23),
+      note(52, 0.0, 0.14),
+      note(57, 0.0, 0.24),
+      note(61, 0.0, 0.22),
+      note(66, 0.0, 0.23),
+    ];
+    const fastImport = importDiGuitarNotes(
+      fastChordNotes,
+      {
+        ...defaultDiGuitarImportOptions,
+        tuning: SEVEN_STRING_DROP_FS,
+        bpm: 130,
+        quantization: 16,
+        voices: 1,
+      },
+      'FastChord',
+    );
+    const beat0 = fastImport.score.tracks[0].staves[0].bars[0].voices[0].beats[0];
+    expect(beat0.notes.length).toBe(6);
+    expect(fastImport.summary.notes.find(n => n.code === 'merged_notes')).toBeUndefined();
+  });
+
   it('counts unplayable notes beyond maxFret and sanitizes exported filename', () => {
     const res = importDiGuitarNotes(
       [note(40, 0.0, 0.4), note(108, 0.5, 0.9)],

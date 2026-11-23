@@ -921,6 +921,7 @@ impl DocumentWorkspace {
         let revision = self.check_mutation(address)?;
         self.protect_destination(address, &path)?;
         let entry = self.entry_mut(&address.document_id)?;
+        entry.session.compact_committed_history();
         let digest = files::write_project_with_digest(&path, &entry.session.stored_project())?;
         entry.session.mark_saved(path);
         entry.saved_file_sha256 = Some(digest);

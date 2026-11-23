@@ -369,3 +369,84 @@ it('translates new destination and drum mapping controls into Estonian and Germa
     setLanguagePreference('en');
   }
 });
+
+it('imports program-0 bass MIDI as bass tab with auto-fitted Drop D tuning and supports custom TuningDialog on Guitar', async () => {
+  const bassDropDNoProg = makeMidi(0, 480, [makeTrack([[0, [0xff, 0x51, 3, 0x07, 0x08, 0x00]], ...noteLine([[0, 480, 26], [480, 480, 33]], 0)])]);
+  const { onImport, onClose, input, importButton } = setup();
+  choose(input, bassDropDNoProg, 'Sineater_bass.mid');
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Acoustic Grand Piano: notation, 2 notes'));
+
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Instrument' })).getByRole('radio', { name: 'Bass' }));
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Electric Bass (finger): bass tab, 2 notes'));
+  expect(screen.getByText('MIDI note range: D1–A1')).toBeInTheDocument();
+  expect((screen.getByLabelText('Bass tuning') as HTMLSelectElement).value).toBe('bass-4-drop-d');
+
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  const importedScore = loadInterchangeScore(onImport.mock.calls[0][1], new Settings());
+  expect(importedScore.tracks[0].playbackInfo.program).toBe(33);
+  expect(importedScore.tracks[0].staves[0].showTablature).toBe(true);
+  expect(importedScore.tracks[0].staves[0].tuning).toEqual([43, 38, 33, 26]);
+
+  // Now verify custom Guitar tuning (Drop D1) via TuningDialog on a program-0 file containing D1 + E3.
+  cleanup();
+  const second = setup();
+  const gtrDropD1 = makeMidi(0, 480, [makeTrack(noteLine([[0, 480, 26], [480, 480, 52]], 0))]);
+  choose(second.input, gtrDropD1, 'baritone.mid');
+  await waitFor(() => expect(second.importButton).not.toHaveAttribute('aria-disabled'));
+
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Instrument' })).getByRole('radio', { name: 'Guitar' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Custom…' }));
+  fireEvent.change(screen.getByLabelText('Notes, high to low'), { target: { value: 'E3 B2 G2 D2 A1 D1' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Use tuning' }));
+
+  await waitFor(() => expect((screen.getByLabelText('Guitar tuning') as HTMLSelectElement).value).toBe('__custom__'));
+  await waitFor(() => expect(status()).not.toHaveTextContent('Updating…'));
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Acoustic Guitar (steel): guitar tab, 2 notes'));
+  fireEvent.click(second.importButton);
+  await waitFor(() => expect(second.onClose).toHaveBeenCalledTimes(1));
+  const gtrScore = loadInterchangeScore(second.onImport.mock.calls[0][1], new Settings());
+  expect(gtrScore.tracks[0].playbackInfo.program).toBe(25);
+  expect(gtrScore.tracks[0].staves[0].tuning).toEqual([52, 47, 43, 38, 33, 26]);
+});
+
+it('assigns Guitar and Bass per part on multi-part program-0 MIDI and inherits stringed target track in Replace track mode', async () => {
+  const twoParts = makeMidi(1, 480, [
+    makeTrack([[0, [0xff, 0x03, 6, ...[...'Rhythm'].map(c => c.charCodeAt(0))]], ...noteLine([[0, 480, 40], [480, 480, 52]], 0)]),
+    makeTrack([[0, [0xff, 0x03, 7, ...[...'LowBass'].map(c => c.charCodeAt(0))]], ...noteLine([[0, 480, 28], [480, 480, 33]], 0)]),
+  ]);
+  const { onImport, onClose, input, importButton } = setup();
+  choose(input, twoParts, 'band.mid');
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Rhythm: notation, 2 notes'));
+
+  fireEvent.change(screen.getByLabelText('Instrument for Rhythm'), { target: { value: 'guitar' } });
+  fireEvent.change(screen.getByLabelText('Instrument for LowBass'), { target: { value: 'bass' } });
+  await waitFor(() => {
+    const list = screen.getByRole('list', { name: 'Parts' });
+    expect(list).toHaveTextContent('Rhythm: guitar tab, 2 notes');
+    expect(list).toHaveTextContent('LowBass: bass tab, 2 notes');
+  });
+
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  const bandScore = loadInterchangeScore(onImport.mock.calls[0][1], new Settings());
+  expect(bandScore.tracks.map(t => t.staves[0].showTablature)).toEqual([true, true]);
+  expect(bandScore.tracks.map(t => t.playbackInfo.program)).toEqual([25, 33]);
+
+  // Replace track targeting Track 0 (6-string Guitar in blankProject) imports program-0 MIDI as guitar tab automatically.
+  cleanup();
+  const repl = setupWithScore();
+  const riffNoProg = makeMidi(0, 480, [makeTrack(noteLine([[0, 480, 40], [480, 480, 52]], 0))]);
+  choose(repl.input, riffNoProg, 'riff-no-prog.mid');
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Acoustic Grand Piano: notation, 2 notes'));
+
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Destination' })).getByRole('radio', { name: 'Replace track' }));
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('guitar tab, 2 notes'));
+  expect(screen.getByLabelText('Guitar / bass tuning')).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(repl.importButton);
+  await waitFor(() => expect(repl.onImportIntoScore).toHaveBeenCalledTimes(1));
+  const cmd = repl.onImportIntoScore.mock.calls[0][0];
+  expect(cmd.targetTrack).toBe(0);
+  const clipScore = scoreFromMusicClip(readMusicClip(cmd.clip));
+  expect(clipScore.tracks[0].staves[0].showTablature).toBe(true);
+});

@@ -259,12 +259,13 @@ describe('DiImportDialog', () => {
         bendSemitones: 0,
       },
     ]);
+    const onImport = vi.fn(async () => true);
     const onClose = vi.fn();
     render(
       <DiImportDialog
         busy={false}
         transcriber={transcriber}
-        onImport={vi.fn(async () => true)}
+        onImport={onImport}
         onClose={onClose}
       />,
     );
@@ -289,6 +290,8 @@ describe('DiImportDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use tuning' }));
 
     await waitFor(() => expect(transcriber.decode).toHaveBeenCalledTimes(2));
+    expect(onImport).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
     expect(transcriber.decode).toHaveBeenLastCalledWith('di-1', {
       onsetThreshold: 0.45,
       frameThreshold: 0.28,

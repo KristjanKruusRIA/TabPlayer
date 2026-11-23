@@ -31,6 +31,13 @@ export interface MidiPartInfo {
   index:number;name:string;channel:number;program:number;defaultPercussion:boolean;
   noteCount:number;keys:readonly {key:number;count:number}[];
 }
+export type MidiPartInstrument='auto'|'guitar'|'bass'|'keys'|'drums';
+export interface MidiPartOverride {
+  kind?:MidiTrackKind;
+  program?:number;
+  /** Open string MIDI pitches, highest string first (matching `staff.tuning` and `tuningPresets`). */
+  tuning?:readonly number[];
+}
 export interface MidiImportOptions {
   quantization:MidiQuantization;
   tuplets:MidiTupletMode;
@@ -42,6 +49,8 @@ export interface MidiImportOptions {
   drumParts?:readonly number[];
   /** When present, only these 0-based planned part indices are imported. */
   selectedParts?:readonly number[];
+  /** Per-part instrument kind, GM program and tuning overrides indexed by 0-based planned part index. */
+  partOverrides?:Readonly<Record<number,MidiPartOverride>>;
   /** Source drum map translating incoming drum MIDI keys to standard articulations (General MIDI when absent). */
   drumMap?:DrumMapRef;
   /** Per-key overrides applied on top of `drumMap` (`null` skips that incoming MIDI key). */
@@ -192,9 +201,16 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
   if(later)notes.push({code:'later_instruments',count:later});
 
   const prepared=activeSources.map(source=>{
-    const percussion=source.percussion||drumSet.has(source.partIndex);
-    const name=sourceDisplayName(source.rawPartName,source.multiChannel,source.program,percussion);
-    return {source,percussion,name};
+    const override=options.partOverrides?.[source.partIndex];
+    const percussion=override?.kind!==undefined?override.kind==='drums':source.percussion||drumSet.has(source.partIndex);
+    const effectiveProgram=percussion?0
+      :override?.program!==undefined?override.program
+      :override?.kind==='guitar'?(source.program>=24&&source.program<=31?source.program:25)
+      :override?.kind==='bass'?(source.program>=32&&source.program<=39?source.program:33)
+      :override?.kind==='keys'?(source.program>=24&&source.program<=39?0:source.program)
+      :source.program;
+    const name=sourceDisplayName(source.rawPartName,source.multiChannel,effectiveProgram,percussion);
+    return {source,percussion,effectiveProgram,override,name};
   });
   const inputDrumMap=prepared.some(item=>item.percussion)?resolveInputDrumMap(options.drumMap,options.drumKeyOverrides):null;
   let dropped=0;
@@ -234,7 +250,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
   const summary:MidiImportSummary['tracks']=[];let unplayable=0;
   const channelsInUse=new Set<number>([9]);
   const nextChannel=()=>{let value=0;while(channelsInUse.has(value))value++;channelsInUse.add(value);return value;};
-  for(const {source,percussion,name,hits:rawHits} of mappedSources){
+  for(const {source,percussion,effectiveProgram,override,name,hits:rawHits} of mappedSources){
     if(!rawHits.length)continue;
     const grid=createRhythmGrid(bars,rawHits,options.quantization,options.tuplets);
     const hits=snapHitsToGrid(grid,rawHits,percussion);
@@ -242,12 +258,27 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     const voicesUsed=chords.reduce((most,chord)=>Math.max(most,chord.voice),0)+1;
 
     // Kind of staff.
-    const program=source.program;
+    const program=effectiveProgram;
+    const targetInstrument:'guitar'|'bass'|null=percussion||override?.kind==='keys'
+      ?null
+      :override?.kind==='guitar'
+        ?'guitar'
+        :override?.kind==='bass'
+          ?'bass'
+          :program>=32&&program<=39
+            ?'bass'
+            :program>=24&&program<=31
+              ?'guitar'
+              :null;
     let kind:MidiTrackKind=percussion?'drums':'keys',open:number[]|null=null,fingering:Map<Chord,Map<number,number>>|null=null;
-    if(!percussion&&options.tablature&&program>=24&&program<=39){
-      const strings=program>=32?bassStrings:guitarStrings;
+    if(!percussion&&options.tablature&&targetInstrument){
+      const strings=override?.tuning&&override.tuning.length>0
+        ?[...override.tuning].reverse()
+        :targetInstrument==='bass'
+          ?bassStrings
+          :guitarStrings;
       fingering=fingerChords(chords,strings);
-      if(fingering){open=strings;kind=program>=32?'bass':'guitar';}else unplayable++;
+      if(fingering){open=strings;kind=targetInstrument;}else unplayable++;
     }
 
     const track=new model.Track();track.name=name;track.shortName=name.slice(0,12);
@@ -258,7 +289,15 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     if(open)staff.stringTuning.tunings=[...open].reverse();
     track.addStaff(staff);score.addTrack(track);
     const keysAll=hits.map(hit=>hit.key).sort((a,b)=>a-b),median=keysAll[keysAll.length>>1];
-    const clef=percussion?model.Clef.Neutral:median<57?model.Clef.F4:model.Clef.G2;
+    const clef=percussion
+      ?model.Clef.Neutral
+      :targetInstrument==='bass'
+        ?model.Clef.F4
+        :targetInstrument==='guitar'
+          ?model.Clef.G2
+          :median<57
+            ?model.Clef.F4
+            :model.Clef.G2;
 
     writeQuantizedStaffBars(staff,bars,grid,chords,voicesUsed,options.quantization,clef,(piece,beat,partIndex)=>{
       const fingers=fingering?.get(piece.chord!);

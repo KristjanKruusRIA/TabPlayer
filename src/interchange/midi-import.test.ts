@@ -530,3 +530,46 @@ describe('importMidi drum mapping, drumParts and targetBars',()=>{
     expect(formatMidiImportNote({code:'appended_measures',count:3},tr('de'))).toBe('Am Ende der aktuellen Partitur wurden 3 Takte angefügt, um spätere Noten aufzunehmen.');
   });
 });
+
+describe('importMidi partOverrides (guitar/bass/keys and custom tunings)',()=>{
+  it('converts a program-0 MIDI part into 4-string bass tablature on F4 clef with Electric Bass program',()=>{
+    const bytes=file(0,480,[track(line([[0,480,28],[480,480,33]]))]);
+    const {score,summary}=run(bytes,{partOverrides:{0:{kind:'bass'}}});
+    expect(summary.tracks[0]).toMatchObject({kind:'bass',program:33,name:'Electric Bass (finger)'});
+    expect(score.tracks[0].playbackInfo.program).toBe(33);
+    const staff=score.tracks[0].staves[0];
+    expect(staff.showTablature).toBe(true);
+    expect(staff.tuning).toEqual([43,38,33,28]);
+    expect(staff.bars[0].clef).toBe(model.Clef.F4);
+    expect(staff.bars[0].voices[0].beats[0].notes.map(n=>[n.string,n.fret])).toEqual([[1,0]]);
+  });
+
+  it('fingers 5-string bass B0 (23) and Drop D guitar D2 (38) using custom partOverrides tunings',()=>{
+    const bass5=file(0,480,[track(line([[0,480,23],[480,480,28]]))]);
+    const bassRes=run(bass5,{partOverrides:{0:{kind:'bass',tuning:[43,38,33,28,23]}}});
+    expect(bassRes.summary.tracks[0].kind).toBe('bass');
+    const bassStaff=bassRes.score.tracks[0].staves[0];
+    expect(bassStaff.tuning).toEqual([43,38,33,28,23]);
+    expect(bassStaff.bars[0].voices[0].beats[0].notes.map(n=>[n.string,n.fret])).toEqual([[1,0]]);
+
+    const dropD=file(0,480,[track(line([[0,480,38],[480,480,45]]))]);
+    const gtrRes=run(dropD,{partOverrides:{0:{kind:'guitar',tuning:[64,59,55,50,45,38]}}});
+    expect(gtrRes.summary.tracks[0]).toMatchObject({kind:'guitar',program:25});
+    const gtrStaff=gtrRes.score.tracks[0].staves[0];
+    expect(gtrStaff.tuning).toEqual([64,59,55,50,45,38]);
+    expect(gtrStaff.bars[0].clef).toBe(model.Clef.G2);
+    expect(gtrStaff.bars[0].voices[0].beats[0].notes.map(n=>[n.string,n.fret])).toEqual([[1,0]]);
+  });
+
+  it('preserves existing matching GM programs and lets keys override force notation on GM guitar',()=>{
+    const distDropD=file(1,480,[track([[0,program(30)],...line([[0,480,38]])])]);
+    const res1=run(distDropD,{partOverrides:{0:{kind:'guitar',tuning:[64,59,55,50,45,38]}}});
+    expect(res1.score.tracks[0].playbackInfo.program).toBe(30);
+    expect(res1.summary.tracks[0].kind).toBe('guitar');
+
+    const gtrToKeys=file(1,480,[track([[0,program(25)],...line([[0,480,60]])])]);
+    const res2=run(gtrToKeys,{partOverrides:{0:{kind:'keys'}}});
+    expect(res2.summary.tracks[0]).toMatchObject({kind:'keys',program:0});
+    expect(res2.score.tracks[0].staves[0].showTablature).toBe(false);
+  });
+});

@@ -1,12 +1,13 @@
 import { useDeferredValue, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Settings, type model } from '@coderline/alphatab';
+import type { TuningAudition } from '../audio/audition';
 import { drumMapPresets, resolveInputDrumMap } from '../audio/drum-map';
 import { drumMapFiles, fileProblem as drumMapFileProblem, mapFromImport, type ImportedDrumMap } from '../audio/drum-map-file';
 import { localizedDrumSoundGroups } from '../audio/drum-map-groups';
 import { noteName } from '../audio/tuner';
 import type { DrumMapRef } from '../edit-types';
-import { useI18n } from '../i18n';
+import { useI18n, type SupportedLanguage } from '../i18n';
 import { exportGpInterchange } from '../interchange/gp';
 import { buildImportClip, type ImportTracksCommand } from '../interchange/import-tracks';
 import {
@@ -18,23 +19,29 @@ import {
   type MidiImport,
   type MidiImportOptions,
   type MidiPartInfo,
+  type MidiPartOverride,
   type MidiQuantization,
   type MidiTrackKind,
   type MidiTupletMode,
 } from '../interchange/midi-import';
 import { MIDI_FILE_LIMIT, readMidiFile, type MidiSong } from '../interchange/midi-smf';
+import { formatPitch, formatTuning } from '../tuning';
+import { TuningDialog } from '../tuning/TuningDialog';
+import { tuningGroupTitle, tuningPresetName, tuningPresets, type TuningPreset } from '../tuning-presets';
 import { Dialog } from '../ui/Dialog';
 import { Segmented } from '../ui/Segmented';
 import { busyGuard, busySelect } from '../ui/useBusyGuard';
 import './midi-import.css';
 
 export type MidiImportDestination = 'new' | 'append' | 'replace';
+type MidiInstrumentChoice = 'auto' | 'guitar' | 'bass' | 'keys';
 
 export interface MidiImportDialogProps {
   busy: boolean;
   currentScore?: model.Score;
   selectedTrack?: number;
   locked?: boolean;
+  onAudition?: TuningAudition;
   onImport: (name: string, bytes: Uint8Array) => Promise<boolean>;
   onImportIntoScore?: (command: ImportTracksCommand) => Promise<boolean>;
   onImportDrumMap?: () => Promise<ImportedDrumMap | null>;
@@ -42,6 +49,49 @@ export interface MidiImportDialogProps {
 }
 
 const FILE_PRESET_ID = '__file__';
+const DEFAULT_GUITAR_TUNING = [64, 59, 55, 50, 45, 40] as const;
+const DEFAULT_BASS_TUNING = [43, 38, 33, 28] as const;
+const sameTuning = (a: readonly number[], b: readonly number[]) =>
+  a.length === b.length && a.every((pitch, index) => pitch === b[index]);
+const noteRangeOf = (partsList: readonly MidiPartInfo[]): { low: number; high: number } | null => {
+  let low = Infinity;
+  let high = -Infinity;
+  for (const part of partsList) {
+    for (const entry of part.keys) {
+      if (entry.key < low) low = entry.key;
+      if (entry.key > high) high = entry.key;
+    }
+  }
+  return low === Infinity ? null : { low, high };
+};
+const autoFitPreset = (instrument: 'guitar' | 'bass', relevantParts: readonly MidiPartInfo[]): number[] => {
+  const fallback = instrument === 'bass' ? [...DEFAULT_BASS_TUNING] : [...DEFAULT_GUITAR_TUNING];
+  const range = noteRangeOf(relevantParts);
+  if (!range) return fallback;
+  const matched = tuningPresets.find(
+    preset =>
+      preset.instrument === instrument &&
+      Math.min(...preset.tuning) <= range.low &&
+      Math.max(...preset.tuning) + 24 >= range.high,
+  );
+  return matched ? [...matched.tuning] : fallback;
+};
+const groupInstrumentPresets = (instrument: 'guitar' | 'bass', lang: SupportedLanguage) => {
+  const groups: { key: string; title: string; items: TuningPreset[] }[] = [];
+  const byKey = new Map<string, { key: string; title: string; items: TuningPreset[] }>();
+  for (const preset of tuningPresets) {
+    if (preset.instrument !== instrument) continue;
+    const key = `${preset.instrument}-${preset.strings}`;
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, title: tuningGroupTitle(preset.instrument, preset.strings, lang), items: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.items.push(preset);
+  }
+  return groups;
+};
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const voiceOptions = [
   { value: '1', label: '1' },
@@ -60,12 +110,13 @@ export function MidiImportDialog({
   currentScore,
   selectedTrack = 0,
   locked = false,
+  onAudition,
   onImport,
   onImportIntoScore,
   onImportDrumMap,
   onClose,
 }: MidiImportDialogProps) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const quantizationOptions = [
     { value: '4', label: t('midi_import.quant_4') },
     { value: '8', label: t('midi_import.quant_8') },
@@ -78,12 +129,21 @@ export function MidiImportDialog({
     ['triplets', t('midi_import.tuplets_triplets')],
     ['triplets-quintuplets', t('midi_import.tuplets_quintuplets')],
   ];
+  const instrumentOptions: readonly { value: MidiInstrumentChoice; label: string }[] = [
+    { value: 'auto', label: t('midi_import.instrument_auto') },
+    { value: 'guitar', label: t('midi_import.instrument_guitar') },
+    { value: 'bass', label: t('midi_import.instrument_bass') },
+    { value: 'keys', label: t('midi_import.instrument_keys') },
+  ];
   const kinds: Record<MidiTrackKind, string> = {
     guitar: t('midi_import.kind_guitar'),
     bass: t('midi_import.kind_bass'),
     keys: t('midi_import.kind_keys'),
     drums: t('midi_import.kind_drums'),
   };
+
+  const guitarGroups = useMemo(() => groupInstrumentPresets('guitar', lang), [lang]);
+  const bassGroups = useMemo(() => groupInstrumentPresets('bass', lang), [lang]);
 
   const canImportIntoScore = !!currentScore && !!onImportIntoScore;
   const scoreTrackCount = currentScore?.tracks.length ?? 0;
@@ -99,6 +159,16 @@ export function MidiImportDialog({
   );
   const [sourcePart, setSourcePart] = useState(0);
   const [options, setOptions] = useState<MidiImportOptions>(defaultMidiImportOptions);
+
+  const [instrumentOverride, setInstrumentOverride] = useState<MidiInstrumentChoice>('auto');
+  const [partInstruments, setPartInstruments] = useState<Record<number, MidiInstrumentChoice>>({});
+  const [guitarTuning, setGuitarTuning] = useState<number[]>(() => [...DEFAULT_GUITAR_TUNING]);
+  const [guitarTuningName, setGuitarTuningName] = useState('');
+  const [guitarTuningCustom, setGuitarTuningCustom] = useState(false);
+  const [bassTuning, setBassTuning] = useState<number[]>(() => [...DEFAULT_BASS_TUNING]);
+  const [bassTuningName, setBassTuningName] = useState('');
+  const [bassTuningCustom, setBassTuningCustom] = useState(false);
+  const [editingTuningFor, setEditingTuningFor] = useState<'guitar' | 'bass' | null>(null);
 
   const [forceAllDrums, setForceAllDrums] = useState(false);
   const [partDrums, setPartDrums] = useState<readonly number[]>([]);
@@ -135,8 +205,19 @@ export function MidiImportDialog({
   const activeDestination: MidiImportDestination = canImportIntoScore ? destination : 'new';
   const effectiveTargetTrack = scoreTrackCount > 0 ? Math.max(0, Math.min(targetTrack, scoreTrackCount - 1)) : 0;
   const targetTrackObj = currentScore?.tracks[effectiveTargetTrack];
+  const targetStaff = targetTrackObj?.staves[0];
   const targetIsPercussion = activeDestination === 'replace' && !!targetTrackObj?.isPercussion;
   const targetIsMelodic = activeDestination === 'replace' && !!targetTrackObj && !targetTrackObj.isPercussion;
+  const targetIsStringed =
+    activeDestination === 'replace' &&
+    !!targetStaff &&
+    !targetStaff.isPercussion &&
+    targetStaff.tuning.length > 0;
+  const targetIsBass =
+    targetIsStringed && !!targetStaff && !!targetTrackObj
+      ? (targetTrackObj.playbackInfo.program >= 32 && targetTrackObj.playbackInfo.program <= 39) ||
+        ((targetStaff.tuning.at(-1) ?? 40) <= 31 && targetStaff.tuning.length <= 6)
+      : false;
   const chosenPart = parts.find(part => part.index === sourcePart) ?? parts[0];
 
   const replaceMismatch =
@@ -154,6 +235,7 @@ export function MidiImportDialog({
     if (forceAllDrums) return parts.map(part => part.index);
     return parts.filter(part => part.defaultPercussion || partDrumsSet.has(part.index)).map(part => part.index);
   }, [activeDestination, targetIsPercussion, chosenPart, forceAllDrums, parts, partDrumsSet]);
+  const activeDrumSet = useMemo(() => new Set(activeDrumPartIndices), [activeDrumPartIndices]);
 
   const isDrumsActive =
     activeDestination === 'replace'
@@ -179,23 +261,88 @@ export function MidiImportDialog({
     }));
   }, [activeDestination, currentScore]);
 
+  const { guitarParts, bassParts, partOverrides } = useMemo(() => {
+    const gParts: MidiPartInfo[] = [];
+    const bParts: MidiPartInfo[] = [];
+    const overrides: Record<number, MidiPartOverride> = {};
+    for (const part of activeParts) {
+      if (targetIsStringed && targetStaff && targetTrackObj && !replaceMismatch) {
+        overrides[part.index] = {
+          kind: targetIsBass ? 'bass' : 'guitar',
+          program: targetTrackObj.playbackInfo.program,
+          tuning: [...targetStaff.tuning],
+        };
+        continue;
+      }
+      if (activeDrumSet.has(part.index)) continue;
+      const chosen = instrumentOverride !== 'auto' ? instrumentOverride : (partInstruments[part.index] ?? 'auto');
+      const inferred: 'guitar' | 'bass' | null = part.defaultPercussion
+        ? null
+        : part.program >= 32 && part.program <= 39
+          ? 'bass'
+          : part.program >= 24 && part.program <= 31
+            ? 'guitar'
+            : null;
+      const eff = chosen !== 'auto' ? chosen : inferred;
+      if (eff === 'guitar') gParts.push(part);
+      else if (eff === 'bass') bParts.push(part);
+
+      if (chosen === 'guitar') {
+        overrides[part.index] = { kind: 'guitar', tuning: guitarTuning };
+      } else if (chosen === 'bass') {
+        overrides[part.index] = { kind: 'bass', tuning: bassTuning };
+      } else if (chosen === 'keys') {
+        overrides[part.index] = { kind: 'keys' };
+      } else if (inferred === 'guitar' && !sameTuning(guitarTuning, DEFAULT_GUITAR_TUNING)) {
+        overrides[part.index] = { tuning: guitarTuning };
+      } else if (inferred === 'bass' && !sameTuning(bassTuning, DEFAULT_BASS_TUNING)) {
+        overrides[part.index] = { tuning: bassTuning };
+      }
+    }
+    return { guitarParts: gParts, bassParts: bParts, partOverrides: overrides };
+  }, [
+    activeParts,
+    activeDrumSet,
+    targetIsStringed,
+    targetIsBass,
+    targetStaff,
+    targetTrackObj,
+    replaceMismatch,
+    instrumentOverride,
+    partInstruments,
+    guitarTuning,
+    bassTuning,
+  ]);
+
   const effectiveOptions = useMemo<MidiImportOptions>(() => {
-    const hasOverrides = Object.keys(drumKeyOverrides).length > 0;
+    const hasDrumOverrides = Object.keys(drumKeyOverrides).length > 0;
+    const hasPartOverrides = Object.keys(partOverrides).length > 0;
     const needsCustomFields =
       activeDestination !== 'new' ||
       activeDrumPartIndices.length > 0 ||
       effectiveDrumMap !== undefined ||
-      hasOverrides;
+      hasDrumOverrides ||
+      hasPartOverrides;
     if (!needsCustomFields) return options;
     return {
       ...options,
       ...(activeDestination === 'replace' && chosenPart ? { selectedParts: [chosenPart.index] } : {}),
       ...(activeDrumPartIndices.length > 0 ? { drumParts: activeDrumPartIndices } : {}),
+      ...(hasPartOverrides ? { partOverrides } : {}),
       ...(effectiveDrumMap ? { drumMap: effectiveDrumMap } : {}),
-      ...(hasOverrides ? { drumKeyOverrides } : {}),
+      ...(hasDrumOverrides ? { drumKeyOverrides } : {}),
       ...(targetBars ? { targetBars } : {}),
     };
-  }, [options, activeDestination, chosenPart, activeDrumPartIndices, effectiveDrumMap, drumKeyOverrides, targetBars]);
+  }, [
+    options,
+    activeDestination,
+    chosenPart,
+    activeDrumPartIndices,
+    partOverrides,
+    effectiveDrumMap,
+    drumKeyOverrides,
+    targetBars,
+  ]);
 
   // Converting a long file takes a moment, so it follows the option controls rather than blocking them.
   const settled = useDeferredValue(effectiveOptions);
@@ -292,11 +439,25 @@ export function MidiImportDialog({
       if (request !== reading.current) return;
       setFileProblem(null);
       setPartDrums([]);
+      setPartInstruments({});
       setSourcePart(0);
       const bytes = new Uint8Array(reader.result as ArrayBuffer);
       try {
         const parsed = readMidiFile(bytes);
         const inspected = inspectMidiParts(parsed);
+        const melodic = inspected.filter(part => !part.defaultPercussion);
+        if (!guitarTuningCustom) {
+          setGuitarTuning(
+            instrumentOverride === 'guitar' ? autoFitPreset('guitar', melodic) : [...DEFAULT_GUITAR_TUNING],
+          );
+          setGuitarTuningName('');
+        }
+        if (!bassTuningCustom) {
+          setBassTuning(
+            instrumentOverride === 'bass' ? autoFitPreset('bass', melodic) : [...DEFAULT_BASS_TUNING],
+          );
+          setBassTuningName('');
+        }
         if (activeDestination === 'replace' && targetIsPercussion) {
           const firstDrum = inspected.find(part => part.defaultPercussion);
           if (firstDrum) setSourcePart(firstDrum.index);
@@ -467,10 +628,117 @@ export function MidiImportDialog({
 
   const canToggleGlobalDrums = activeDestination !== 'replace';
   const showPartDrumsToggle = activeDestination !== 'replace' && parts.length > 1;
+  const showTargetTuning = options.tablature && targetIsStringed;
+  const showGuitarTuning =
+    options.tablature &&
+    !targetIsPercussion &&
+    !forceAllDrums &&
+    !showTargetTuning &&
+    (instrumentOverride === 'guitar' || guitarParts.length > 0);
+  const showBassTuning =
+    options.tablature &&
+    !targetIsPercussion &&
+    !forceAllDrums &&
+    !showTargetTuning &&
+    (instrumentOverride === 'bass' || bassParts.length > 0);
+  const displayedInstrument: MidiInstrumentChoice = targetIsStringed
+    ? targetIsBass
+      ? 'bass'
+      : 'guitar'
+    : instrumentOverride;
+
+  const renderTuningRow = (instrument: 'guitar' | 'bass') => {
+    const isBass = instrument === 'bass';
+    const pitches = isBass ? bassTuning : guitarTuning;
+    const customName = isBass ? bassTuningName : guitarTuningName;
+    const groups = isBass ? bassGroups : guitarGroups;
+    const matched = tuningPresets.find(
+      preset => preset.instrument === instrument && sameTuning(preset.tuning, pitches),
+    );
+    const range = noteRangeOf(isBass ? bassParts : guitarParts);
+    return (
+      <div className="midi-tuning-row">
+        <label>
+          {t(isBass ? 'midi_import.bass_tuning' : 'midi_import.guitar_tuning')}
+          <div className="midi-inline-input">
+            <select
+              value={matched?.id ?? '__custom__'}
+              {...busySelect(importing)}
+              onChange={event => {
+                if (importing) return;
+                const picked = tuningPresets.find(preset => preset.id === event.target.value);
+                if (!picked) return;
+                setImportProblem(null);
+                if (isBass) {
+                  setBassTuning([...picked.tuning]);
+                  setBassTuningName('');
+                  setBassTuningCustom(true);
+                } else {
+                  setGuitarTuning([...picked.tuning]);
+                  setGuitarTuningName('');
+                  setGuitarTuningCustom(true);
+                }
+              }}
+            >
+              {!matched && (
+                <option value="__custom__">
+                  {customName.trim()
+                    ? t('di_import.custom_tuning_named', {
+                        name: customName.trim(),
+                        notes: formatTuning(pitches),
+                      })
+                    : t('di_import.custom_tuning_option', {
+                        notes: formatTuning(pitches),
+                      })}
+                </option>
+              )}
+              {groups.map(group => (
+                <optgroup key={group.key} label={group.title}>
+                  {group.items.map(preset => (
+                    <option key={preset.id} value={preset.id}>
+                      {tuningPresetName(preset, lang)}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+            <button
+              type="button"
+              aria-haspopup="dialog"
+              {...busyGuard({
+                busy: importing,
+                className: 'tp-button',
+                onClick: () => setEditingTuningFor(instrument),
+              })}
+            >
+              {t('di_import.custom_tuning_btn')}
+            </button>
+          </div>
+        </label>
+        {range && (
+          <p className="muted midi-note-range">
+            {t('midi_import.note_range', {
+              low: formatPitch(range.low),
+              high: formatPitch(range.high),
+            })}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const editingIsBass = editingTuningFor === 'bass';
+  const editingPitches = editingIsBass ? bassTuning : guitarTuning;
+  const editingMatched = editingTuningFor
+    ? tuningPresets.find(
+        preset => preset.instrument === editingTuningFor && sameTuning(preset.tuning, editingPitches),
+      )
+    : undefined;
 
   return (
-    <Dialog
-      title={t('midi_import.title')}
+    <>
+      <Dialog
+        title={t('midi_import.title')}
       onClose={onClose}
       ariaDescribedBy={hint}
       busy={importing}
@@ -636,6 +904,32 @@ export function MidiImportDialog({
               onChange={val => choice('voices', Number(val) as MidiImportOptions['voices'])}
             />
           </div>
+          <div className="tp-field midi-full-row">
+            <span className="tp-field-label" aria-hidden="true">
+              {t('midi_import.instrument')}
+            </span>
+            <Segmented
+              label={t('midi_import.instrument')}
+              disabled={importing || targetIsPercussion || targetIsStringed}
+              value={displayedInstrument}
+              options={instrumentOptions}
+              onChange={val => {
+                setImportProblem(null);
+                setInstrumentOverride(val);
+                if (val !== 'auto') setForceAllDrums(false);
+                const melodic = activeParts.filter(
+                  part => !part.defaultPercussion && !partDrumsSet.has(part.index),
+                );
+                if (val === 'guitar' && !guitarTuningCustom && melodic.length > 0) {
+                  setGuitarTuning(autoFitPreset('guitar', melodic));
+                  setGuitarTuningName('');
+                } else if (val === 'bass' && !bassTuningCustom && melodic.length > 0) {
+                  setBassTuning(autoFitPreset('bass', melodic));
+                  setBassTuningName('');
+                }
+              }}
+            />
+          </div>
           <label className="check">
             <input
               type="checkbox"
@@ -657,12 +951,35 @@ export function MidiImportDialog({
                   if (importing || targetIsPercussion) return;
                   setImportProblem(null);
                   setForceAllDrums(event.target.checked);
+                  if (event.target.checked) setInstrumentOverride('auto');
                 }}
               />
               {t('midi_import.import_as_drums')}
             </label>
           )}
         </fieldset>
+
+        {(showTargetTuning || showGuitarTuning || showBassTuning) && (
+          <section className="midi-tuning-section">
+            {showTargetTuning && targetStaff && (
+              <div className="midi-tuning-row">
+                <label>
+                  {t('di_import.tuning')}
+                  <select value="__target__" {...busySelect(true)} onChange={() => {}}>
+                    <option value="__target__">
+                      {t('di_import.target_track_tuning', {
+                        name: targetTrackObj?.name ?? '',
+                        strings: targetStaff.tuning.length,
+                      })}
+                    </option>
+                  </select>
+                </label>
+              </div>
+            )}
+            {showGuitarTuning && renderTuningRow('guitar')}
+            {showBassTuning && renderTuningRow('bass')}
+          </section>
+        )}
 
         {isDrumsActive && (
           <section className="midi-drum-mapping">
@@ -875,6 +1192,10 @@ export function MidiImportDialog({
                   !forceAllDrums &&
                   matchingSource &&
                   !matchingSource.defaultPercussion;
+                const canAssignPartInstrument =
+                  canTogglePart &&
+                  instrumentOverride === 'auto' &&
+                  !partDrumsSet.has(matchingSource.index);
                 const partText = `${part.name}: ${kinds[part.kind]}, ${t(
                   part.notes === 1 ? 'midi_import.part_notes_one' : 'midi_import.part_notes_other',
                   { count: part.notes },
@@ -883,28 +1204,74 @@ export function MidiImportDialog({
                   <li key={index} className="midi-part-item">
                     <span>{partText}</span>
                     {canTogglePart && (
-                      <label className="midi-part-drums-toggle">
-                        <input
-                          type="checkbox"
-                          checked={partDrumsSet.has(matchingSource.index)}
-                          aria-label={t('midi_import.part_as_drums_aria', {
-                            name: matchingSource.name,
-                          })}
-                          aria-disabled={importing || undefined}
-                          onChange={event => {
-                            if (importing) return;
-                            setImportProblem(null);
-                            const checked = event.target.checked;
-                            setPartDrums(prev => {
-                              const next = new Set(prev);
-                              if (checked) next.add(matchingSource.index);
-                              else next.delete(matchingSource.index);
-                              return [...next].sort((a, b) => a - b);
-                            });
-                          }}
-                        />
-                        {t('midi_import.part_as_drums')}
-                      </label>
+                      <div className="midi-part-controls">
+                        {canAssignPartInstrument && (
+                          <select
+                            className="midi-part-instrument"
+                            value={partInstruments[matchingSource.index] ?? 'auto'}
+                            aria-label={t('midi_import.part_instrument_aria', {
+                              name: matchingSource.name,
+                            })}
+                            {...busySelect(importing)}
+                            onChange={event => {
+                              if (importing) return;
+                              setImportProblem(null);
+                              const nextVal = event.target.value as MidiInstrumentChoice;
+                              setPartInstruments(prev => {
+                                const next = { ...prev };
+                                if (nextVal === 'auto') delete next[matchingSource.index];
+                                else next[matchingSource.index] = nextVal;
+                                return next;
+                              });
+                              if (nextVal === 'guitar' && !guitarTuningCustom) {
+                                setGuitarTuning(
+                                  autoFitPreset('guitar', [
+                                    ...guitarParts.filter(p => p.index !== matchingSource.index),
+                                    matchingSource,
+                                  ]),
+                                );
+                                setGuitarTuningName('');
+                              } else if (nextVal === 'bass' && !bassTuningCustom) {
+                                setBassTuning(
+                                  autoFitPreset('bass', [
+                                    ...bassParts.filter(p => p.index !== matchingSource.index),
+                                    matchingSource,
+                                  ]),
+                                );
+                                setBassTuningName('');
+                              }
+                            }}
+                          >
+                            {instrumentOptions.map(opt => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <label className="midi-part-drums-toggle">
+                          <input
+                            type="checkbox"
+                            checked={partDrumsSet.has(matchingSource.index)}
+                            aria-label={t('midi_import.part_as_drums_aria', {
+                              name: matchingSource.name,
+                            })}
+                            aria-disabled={importing || undefined}
+                            onChange={event => {
+                              if (importing) return;
+                              setImportProblem(null);
+                              const checked = event.target.checked;
+                              setPartDrums(prev => {
+                                const next = new Set(prev);
+                                if (checked) next.add(matchingSource.index);
+                                else next.delete(matchingSource.index);
+                                return [...next].sort((a, b) => a - b);
+                              });
+                            }}
+                          />
+                          {t('midi_import.part_as_drums')}
+                        </label>
+                      </div>
                     )}
                   </li>
                 );
@@ -919,5 +1286,37 @@ export function MidiImportDialog({
         )}
       </div>
     </Dialog>
+    {editingTuningFor && !showTargetTuning && (
+      <TuningDialog
+        mode="draft"
+        pitches={editingPitches}
+        name={
+          editingMatched
+            ? tuningPresetName(editingMatched, lang)
+            : editingIsBass
+              ? bassTuningName
+              : guitarTuningName
+        }
+        onAudition={
+          onAudition &&
+          ((list, strum) =>
+            onAudition({ program: editingIsBass ? 33 : 25 }, list, strum))
+        }
+        onApply={choice => {
+          setImportProblem(null);
+          if (editingIsBass) {
+            setBassTuning(choice.pitches);
+            setBassTuningName(choice.name);
+            setBassTuningCustom(true);
+          } else {
+            setGuitarTuning(choice.pitches);
+            setGuitarTuningName(choice.name);
+            setGuitarTuningCustom(true);
+          }
+        }}
+        onClose={() => setEditingTuningFor(null)}
+      />
+    )}
+    </>
   );
 }

@@ -164,3 +164,42 @@
 .midi-import .midi-part-drums-toggle input {
   width: auto;
 }
+.midi-import .midi-tuning-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--tp-line-subtle);
+}
+.midi-import .midi-tuning-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.midi-import .midi-inline-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.midi-import .midi-inline-input select {
+  flex: 1;
+  min-width: 0;
+}
+.midi-import .midi-inline-input button {
+  flex: none;
+  white-space: nowrap;
+}
+.midi-import .midi-note-range {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.midi-import .midi-part-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.midi-import .midi-part-instrument {
+  min-width: 0;
+  font-size: 12px;
+}

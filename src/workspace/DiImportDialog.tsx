@@ -517,8 +517,9 @@ export function DiImportDialog({
     : '';
 
   return (
-    <Dialog
-      title={t('di_import.title')}
+    <>
+      <Dialog
+        title={t('di_import.title')}
       onClose={onClose}
       ariaDescribedBy={hint}
       busy={controlsLocked}
@@ -923,24 +924,25 @@ export function DiImportDialog({
           </p>
         )}
       </div>
-      {tuningDialogOpen && !targetIsStringed && (
-        <TuningDialog
-          mode="draft"
-          pitches={tuningPitches}
-          name={matchedPreset ? tuningPresetName(matchedPreset, lang) : tuningName}
-          onAudition={
-            onAudition &&
-            ((list, strum) =>
-              onAudition({ program: isCustomBass ? 33 : 29 }, list, strum))
-          }
-          onApply={choice => {
-            setImportProblem(null);
-            setTuningPitches(choice.pitches);
-            setTuningName(choice.name);
-          }}
-          onClose={() => setTuningDialogOpen(false)}
-        />
-      )}
     </Dialog>
+    {tuningDialogOpen && !targetIsStringed && (
+      <TuningDialog
+        mode="draft"
+        pitches={tuningPitches}
+        name={matchedPreset ? tuningPresetName(matchedPreset, lang) : tuningName}
+        onAudition={
+          onAudition &&
+          ((list, strum) =>
+            onAudition({ program: isCustomBass ? 33 : 29 }, list, strum))
+        }
+        onApply={choice => {
+          setImportProblem(null);
+          setTuningPitches(choice.pitches);
+          setTuningName(choice.name);
+        }}
+        onClose={() => setTuningDialogOpen(false)}
+      />
+    )}
+    </>
   );
 }

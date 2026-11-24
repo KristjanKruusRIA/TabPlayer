@@ -115,6 +115,28 @@ export function restoreVolumeAfterFades(generator: midi.MidiFileGenerator, handl
   };
   return ramps;
 }
+/** Guitar Pro RSE holds palm-muted notes for their full written duration (including ties and legato slides), suppressing only let-ring
+ * extension, whereas alphaTab's public MIDI generator truncates every palm mute to ~80 ms (`_defaultDurationPalmMute`). */
+export function preservePalmMuteDuration(generator: midi.MidiFileGenerator) {
+  const hooked = generator as unknown as {
+    _getNoteDuration(note: model.Note, beatPlayDuration: number, tempoOnBeatStart: number): {
+      beatDurationFactor: number; noteOnly: number; untilTieOrSlideEnd: number; letRingEnd: number;
+    };
+  };
+  const original = hooked._getNoteDuration.bind(generator);
+  hooked._getNoteDuration = (note, beatPlayDuration, tempoOnBeatStart) => {
+    if (!note.isPalmMute || note.isDead) return original(note, beatPlayDuration, tempoOnBeatStart);
+    const savedLetRing = note.isLetRing;
+    note.isPalmMute = false;
+    note.isLetRing = false;
+    try {
+      return original(note, beatPlayDuration, tempoOnBeatStart);
+    } finally {
+      note.isPalmMute = true;
+      note.isLetRing = savedLetRing;
+    }
+  };
+}
 /** The volume events of the mix automation and the fades, with each fade run in the level in force instead of the written one.
  * The generator writes a ramp from the track's written volume, so on an automated track the level jumped at the fade start and a
  * fade in ended above the automated level. Here every step is the fade's share of the level in force at its tick, and a volume
@@ -149,7 +171,9 @@ export function fadeMixControllers(ramps: readonly FadeRamp[], automated: readon
   return [...automated.filter(e => !dropped.has(e)), ...added].map((e, index) => ({ e, index })).sort((a, b) => a.e.tick - b.e.tick || a.index - b.index).map(({ e }) => e);
 }
 function generate(score: model.Score) {
-  const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events), ramps = restoreVolumeAfterFades(generator, events); generator.generate();
+  const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events);
+  preservePalmMuteDuration(generator);
+  const ramps = restoreVolumeAfterFades(generator, events); generator.generate();
   return { events, lookup: generator.tickLookup, restores: ramps };
 }
 

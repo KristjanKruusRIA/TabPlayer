@@ -1,20 +1,20 @@
-//! Palm mutes and dead notes (THE-214): no string-release recording, a damped ring-out instead of an 83 ms cut, a darker
-//! tone, and an audible thud below the lowest sampled root. Everything here runs on synthetic recordings, so it needs
-//! neither the fetched audio nor the owner's scores.
+//! Palm mutes and dead notes: GP8-faithful damped ring over written duration (dynamic 3-pole low-pass sweep, unfiltered
+//! initial pick transient, low-string 82 Hz resonance, exponential damping), no string-release recording, and dead-note thud
+//! below the lowest sampled root. Everything here runs on synthetic recordings, so it needs neither fetched audio nor
+//! private scores.
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
-    collections::HashMap,
-    io::Cursor,
     sync::Arc,
 };
 use tabplayer_lib::{
     audio::{
         decode::DecodedAudio,
-        plan::{Articulation, PlaybackPlan},
+        plan::Articulation,
         renderer::Renderer,
-        resources::{AudioResources, Instrument, InstrumentManifest, Region},
-        voices::{SampleVoice, VoiceParameters},
+        voices::{
+            DEFAULT_PALM_MUTE_STRENGTH, HEAVY_PALM_MUTE_STRENGTH, SampleVoice, VoiceParameters,
+        },
     },
     settings::DocumentSettings,
 };
@@ -78,8 +78,29 @@ fn bright_ratio(x: &[f32], split: f64) -> f64 {
     high / low.max(1e-30)
 }
 
-/// 83 ms, the length alphaTab gives every palm-muted note.
-const MUTE: f64 = 0.0833;
+/// Energy of `x` in frequency band `[lo_hz, hi_hz)` by Hann-windowed DFT at 10 Hz spacing.
+fn band_energy(x: &[f32], rate: u32, lo_hz: f64, hi_hz: f64) -> f64 {
+    let len = x.len().max(1);
+    let mut sum = 0.0;
+    let mut hz = lo_hz;
+    while hz < hi_hz {
+        let (mut s, mut c) = (0.0, 0.0);
+        for (n, &v) in x.iter().enumerate() {
+            let w = 0.5 - 0.5 * (std::f64::consts::TAU * n as f64 / len as f64).cos();
+            let a = std::f64::consts::TAU * hz * n as f64 / rate as f64;
+            s += v as f64 * w * a.sin();
+            c += v as f64 * w * a.cos();
+        }
+        sum += s * s + c * c;
+        hz += 10.0;
+    }
+    sum / len as f64
+}
+
+/// Written quarter note at 155 BPM (about 387 ms); half note ~774 ms, eighth note ~193 ms.
+const MUTE_QUARTER: f64 = 0.35;
+const MUTE_HALF: f64 = 0.774;
+const MUTE_EIGHTH: f64 = 0.193;
 /// 31 ms, a dead note.
 const DEAD: f64 = 0.03125;
 
@@ -87,9 +108,9 @@ const DEAD: f64 = 0.03125;
 fn muted_and_dead_notes_fire_no_release_recording() {
     // Palm mutes and dead notes only: the loud release recording must change nothing.
     let notes: [Note; 4] = [
-        (0.1, MUTE, 26, "muted", 1, None),
+        (0.1, MUTE_QUARTER, 26, "muted", 1, None),
         (0.8, DEAD, 26, "dead", 1, None),
-        (1.5, MUTE, 40, "muted", 2, None),
+        (1.5, MUTE_QUARTER, 40, "muted", 2, None),
         (2.2, DEAD, 45, "dead", 2, None),
     ];
     let with = render(&notes, 3.0, true);
@@ -107,28 +128,75 @@ fn muted_and_dead_notes_fire_no_release_recording() {
 #[test]
 fn palm_mute_rings_like_a_damped_string_and_is_gone_soon_after() {
     for key in [26u8, 33, 40, 47] {
-        let x = render(&[(0.1, MUTE, key, "muted", 1, None)], 1.5, true);
-        let frame = |from: f64| rms(&x[at(0.1 + from)..at(0.1 + from + 0.01)]);
-        let loudest = (0..30)
-            .map(|i| frame(i as f64 * 0.01))
+        // Note: `palm_common`'s synthetic `"stac"` clip is 0.6 s at root E2 (so ~0.40 s at B2) with a fast 0.12 s decay.
+        // Verify full renderer behavior past the old 200 ms cutoff AND test sustained GP8-length half/eighth notes directly.
+        let half = render(&[(0.1, MUTE_HALF, key, "muted", 1, None)], 1.6, true);
+        let frame = |buf: &[f32], from: f64| rms(&buf[at(0.1 + from)..at(0.1 + from + 0.02)]);
+        let loudest = (0..25)
+            .map(|i| frame(&half, i as f64 * 0.01))
             .fold(0.0f64, f64::max);
-        // About 100 ms after the strike the string is still ringing, far above an 83 ms cut (about -28 dB there) but well down.
-        let level = db(frame(0.1)) - db(loudest);
+        let at_100 = db(frame(&half, 0.1)) - db(loudest);
+        let at_220 = db(frame(&half, 0.22)) - db(loudest);
+        let at_320 = db(frame(&half, 0.32)) - db(loudest);
         assert!(
-            (-17.0..=-3.0).contains(&level),
-            "key {key}: {level:.1} dB at +100 ms"
+            at_100 > -17.0 && at_220 > -36.0,
+            "key {key}: half note cut off early (+100ms={at_100:.1}, +220ms={at_220:.1} dB)"
         );
-        // Silent by 400 ms: the ring is bounded at 200 ms plus its release.
-        let late = db(rms(&x[at(0.1 + 0.4)..at(0.1 + 1.2)])) - db(loudest);
-        assert!(late < -50.0, "key {key}: {late:.1} dB after 400 ms");
+        assert!(
+            at_320 < at_100 - 3.0,
+            "key {key}: half note did not decay with damping (+100ms={at_100:.1}, +320ms={at_320:.1} dB)"
+        );
+        let after_half = db(rms(&half[at(0.1 + MUTE_HALF + 0.25)..at(1.55)])) - db(loudest);
+        assert!(
+            after_half < -45.0,
+            "key {key}: half note lingered {after_half:.1} dB after release"
+        );
+
+        // With a sustained guitar-length recording (1.8 s), the half note rings with GP8 damping through +400 ms and +550 ms.
+        let sustained = pluck(1.8, 0.5);
+        let sus_half = voice_output_with(
+            &sustained,
+            Articulation::Muted,
+            key,
+            100,
+            Some(0),
+            DEFAULT_PALM_MUTE_STRENGTH,
+            MUTE_HALF,
+            1.4,
+        );
+        let sus_eighth = voice_output_with(
+            &sustained,
+            Articulation::Muted,
+            key,
+            100,
+            Some(0),
+            DEFAULT_PALM_MUTE_STRENGTH,
+            MUTE_EIGHTH,
+            1.4,
+        );
+        let vframe = |buf: &[f32], from: f64| rms(&buf[at(from)..at(from + 0.02)]);
+        let sus_peak = (0..25)
+            .map(|i| vframe(&sus_half, i as f64 * 0.01))
+            .fold(0.0f64, f64::max);
+        let h400 = db(vframe(&sus_half, 0.40)) - db(sus_peak);
+        let e400 = db(vframe(&sus_eighth, 0.40)) - db(sus_peak);
+        assert!(
+            h400 > -32.0 && h400 > e400 + 15.0,
+            "key {key}: sustained half note at +400ms ({h400:.1} dB) vs released eighth ({e400:.1} dB)"
+        );
+        let after_sus_half = db(rms(&sus_half[at(MUTE_HALF + 0.30)..at(1.35)])) - db(sus_peak);
+        assert!(
+            after_sus_half < -45.0,
+            "key {key}: sustained half note lingered {after_sus_half:.1} dB after release"
+        );
     }
 }
 
 #[test]
 fn striking_the_string_again_cuts_a_ringing_palm_mute_within_a_few_milliseconds() {
-    // The same string struck again at 0.22 s: the first mute's ring is gone by 0.24 s on every voice (the bass recordings release over a quarter
-    // of a second, so a cut that used the recording's release would still be ringing). The first note alone is a mute ringing until about 0.34 s.
-    let first: Note = (0.1, MUTE, 33, "muted", 1, None);
+    // The same string struck again at 0.22 s while a quarter-note mute is ringing: cut_ring() fades it in 4 ms on every voice
+    // (including bass recordings whose normal release is 0.25 s).
+    let first: Note = (0.1, 0.5, 33, "muted", 1, None);
     let strike: Note = (0.22, 0.05, 33, "dead", 1, None);
     let on_another_string: Note = (0.22, 0.05, 33, "dead", 2, None);
     for program in [30u8, 24, 33, 34] {
@@ -173,16 +241,19 @@ fn parameters(articulation: Articulation, key: u8, velocity: u8) -> VoiceParamet
         is_recorded_harmonic: false,
     }
 }
-fn voice_output(
+fn voice_output_with(
     audio: &Arc<DecodedAudio>,
     articulation: Articulation,
     key: u8,
     velocity: u8,
+    string_idx: Option<u8>,
+    strength: f64,
     release_at: f64,
     seconds: f64,
 ) -> Vec<f32> {
-    let mut voice =
-        SampleVoice::new(audio.clone(), parameters(articulation, key, velocity), RATE).unwrap();
+    let mut voice = SampleVoice::new(audio.clone(), parameters(articulation, key, velocity), RATE)
+        .unwrap()
+        .with_palm_mute(string_idx, strength);
     (0..at(seconds))
         .map(|n| {
             if n == at(release_at) {
@@ -192,27 +263,57 @@ fn voice_output(
         })
         .collect()
 }
+fn voice_output(
+    audio: &Arc<DecodedAudio>,
+    articulation: Articulation,
+    key: u8,
+    velocity: u8,
+    release_at: f64,
+    seconds: f64,
+) -> Vec<f32> {
+    voice_output_with(
+        audio,
+        articulation,
+        key,
+        velocity,
+        Some(0),
+        DEFAULT_PALM_MUTE_STRENGTH,
+        release_at,
+        seconds,
+    )
+}
 
 #[test]
 fn palm_mute_is_darker_than_open_and_not_far_from_it_in_level_dry() {
     let stac = pluck(0.6, 0.12);
     let open = pluck(1.2, 0.5);
-    // The owner's low range and the standard-tuned range from E2 up. Measured -5.1 dB at D1 falling to -7.3 dB at E3 on this synthetic pair; the
-    // window is that range plus about 1.5 dB. The old gain 0.8, 1 kHz low-pass and cut at 83 ms gave -13.5 dB at D1 and would fail it.
-    for key in [26u8, 33, 39, 40, 45, 52] {
-        let muted = voice_output(&stac, Articulation::Muted, key, 100, MUTE, 0.4);
-        let picked = voice_output(&open, Articulation::Picked, key, 100, 0.222, 0.4);
+    let lead_root = tabplayer_lib::audio::voices::lead_in_frames(&stac) / RATE as f64;
+    for (key, str_idx) in [(26u8, 0u8), (33, 1), (39, 0), (40, 0), (45, 1), (52, 2)] {
+        let muted = voice_output_with(
+            &stac,
+            Articulation::Muted,
+            key,
+            100,
+            Some(str_idx),
+            DEFAULT_PALM_MUTE_STRENGTH,
+            MUTE_QUARTER,
+            0.4,
+        );
+        let picked = voice_output(&open, Articulation::Picked, key, 100, MUTE_QUARTER, 0.4);
         let level = db(rms(&muted[..at(0.25)])) - db(rms(&picked[..at(0.25)]));
         assert!(
-            (-8.5..=-4.0).contains(&level),
-            "key {key}: palm mute {level:.1} dB against the open note"
+            (-9.5..=0.5).contains(&level),
+            "key {key} str {str_idx}: palm mute {level:.1} dB against the open note"
         );
+        // After the 3.6 ms unfiltered GP8 pick transient, the 3-pole low-pass sweep leaves the body far darker than an open note.
+        let lead_s = lead_root / 2f64.powf((key as f64 - ROOT as f64) / 12.0);
+        let body_start = at(lead_s + 0.015);
         let split = 440.0 * 2f64.powf((key as f64 - 69.0) / 12.0) * 6.0;
-        let darker =
-            bright_ratio(&muted[..at(0.25)], split) / bright_ratio(&picked[..at(0.25)], split);
+        let darker = bright_ratio(&muted[body_start..at(0.25)], split)
+            / bright_ratio(&picked[body_start..at(0.25)], split);
         assert!(
-            darker < 0.5,
-            "key {key}: bright-to-low energy {darker:.2} times the open note's"
+            darker < 0.25,
+            "key {key}: body bright-to-low energy {darker:.3} times the open note's"
         );
     }
 }
@@ -239,25 +340,62 @@ fn dead_notes_are_a_thud_that_is_heard_below_the_lowest_sampled_root() {
 
 #[test]
 fn palm_mute_light_normal_and_heavy_stay_distinct() {
-    // Light is a staccato note, Normal a palm mute, Heavy the palm mute at 0.8 of the velocity (src/audio/interpretation.ts).
-    let stac = pluck(0.6, 0.12);
-    let light = voice_output(&stac, Articulation::Staccato, 33, 100, MUTE, 0.4);
-    let normal = voice_output(&stac, Articulation::Muted, 33, 100, MUTE, 0.4);
-    let heavy = voice_output(&stac, Articulation::Muted, 33, 80, MUTE, 0.4);
-    let level = |x: &[f32]| db(rms(&x[..at(0.25)]));
-    assert!(
-        (level(&normal) - level(&heavy)).abs() > 1.5,
-        "heavy is not softer than normal"
+    // Light is a staccato note, Normal a palm mute at default strength 0.3, Heavy a stronger 0.65 palm mute at 0.8 velocity.
+    let stac = pluck(0.8, 0.16);
+    let light = voice_output_with(
+        &stac,
+        Articulation::Staccato,
+        33,
+        100,
+        Some(1),
+        DEFAULT_PALM_MUTE_STRENGTH,
+        MUTE_QUARTER,
+        0.5,
     );
-    let bright = |x: &[f32]| bright_ratio(&x[..at(0.25)], 400.0);
+    let normal = voice_output_with(
+        &stac,
+        Articulation::Muted,
+        33,
+        100,
+        Some(1),
+        DEFAULT_PALM_MUTE_STRENGTH,
+        MUTE_QUARTER,
+        0.5,
+    );
+    let heavy = voice_output_with(
+        &stac,
+        Articulation::Muted,
+        33,
+        80,
+        Some(1),
+        HEAVY_PALM_MUTE_STRENGTH,
+        MUTE_QUARTER,
+        0.5,
+    );
+    let level = |x: &[f32]| db(rms(&x[..at(0.30)]));
+    assert!(
+        level(&normal) - level(&heavy) > 2.0,
+        "heavy ({:.1} dB) is not softer than normal ({:.1} dB)",
+        level(&heavy),
+        level(&normal)
+    );
+    let bright = |x: &[f32]| bright_ratio(&x[at(0.04)..at(0.30)], 400.0);
     assert!(
         bright(&light) > bright(&normal) * 3.0,
         "light is not brighter than normal"
     );
-    let tail = |x: &[f32]| db(rms(&x[at(0.12)..at(0.25)])) - level(x);
+    let tail = |x: &[f32]| db(rms(&x[at(0.15)..at(0.35)])) - level(x);
+    assert!(
+        tail(&heavy) < tail(&normal) - 1.5,
+        "heavy does not damp faster than normal (normal {:.1}, heavy {:.1})",
+        tail(&normal),
+        tail(&heavy)
+    );
     assert!(
         tail(&normal) > tail(&light) + 3.0,
-        "normal does not ring longer than light"
+        "normal ({:.1}) does not ring longer than light ({:.1})",
+        tail(&normal),
+        tail(&light)
     );
 }
 
@@ -294,12 +432,12 @@ fn ring_cut_touches_only_a_ringing_palm_mute() {
 #[test]
 fn rendering_muted_and_dead_notes_touches_no_heap() {
     let notes: [Note; 6] = [
-        (0.0, MUTE, 26, "muted", 1, None),
-        (0.125, MUTE, 33, "muted", 1, None),
+        (0.0, MUTE_EIGHTH, 26, "muted", 1, None),
+        (0.125, MUTE_EIGHTH, 33, "muted", 1, None),
         (0.25, DEAD, 26, "dead", 2, None),
-        (0.375, MUTE, 40, "muted", 1, None),
+        (0.375, MUTE_QUARTER, 40, "muted", 1, None),
         (0.5, 0.2, 45, "picked", 3, None),
-        (0.8, MUTE, 38, "muted", 2, None),
+        (0.8, MUTE_QUARTER, 38, "muted", 2, None),
     ];
     let mut renderer = Renderer::new(
         plan(&notes, 2.0, 30),
@@ -322,8 +460,8 @@ fn rendering_muted_and_dead_notes_touches_no_heap() {
 fn palm_mutes_and_dead_notes_keep_their_own_balance_on_each_voice() {
     // The same recordings under each voice: only the technique trim differs. Black guitar (program 30) is the reference;
     // the acoustic and the two basses sit lower so they stay near the open-note balance they had before THE-214.
-    let open: [Note; 1] = [(0.1, 0.2, 33, "picked", 1, None)];
-    let muted: [Note; 1] = [(0.1, MUTE, 33, "muted", 1, None)];
+    let open: [Note; 1] = [(0.1, MUTE_QUARTER, 33, "picked", 1, None)];
+    let muted: [Note; 1] = [(0.1, MUTE_QUARTER, 33, "muted", 1, None)];
     let dead: [Note; 1] = [(0.1, DEAD, 33, "dead", 1, None)];
     // The peak, which the voices' different release times (the bass recordings release over a quarter of a second) do not touch.
     let level = |program: u8, notes: &[Note]| db(peak(&render_program(program, notes, 1.0, false)));
@@ -351,7 +489,10 @@ fn palm_mutes_and_dead_notes_keep_their_own_balance_on_each_voice() {
     // On the black guitar a palm mute is not louder than an open note dry, and a dead note is well under it.
     let energy = |notes: &[Note]| db(rms(&render_program(30, notes, 1.0, false)));
     let (open_rms, muted_rms, dead_rms) = (energy(&open), energy(&muted), energy(&dead));
-    assert!(muted_rms - open_rms < 0.0 && muted_rms - open_rms > -6.0);
+    assert!(
+        muted_rms - open_rms < 0.0 && muted_rms - open_rms > -8.0,
+        "muted {muted_rms:.2} vs open {open_rms:.2}"
+    );
     assert!(dead_rms < open_rms - 3.0);
 }
 
@@ -376,7 +517,7 @@ fn muted_dead_and_open_notes_sound_their_pick_at_the_same_time() {
         };
         let (open, muted, dead) = (
             note("picked", 0.222),
-            note("muted", MUTE),
+            note("muted", MUTE_EIGHTH),
             note("dead", DEAD),
         );
         for (name, got) in [("open", open), ("muted", muted), ("dead", dead)] {
@@ -542,7 +683,7 @@ fn starting_and_seeking_muted_and_dead_notes_measures_no_lead_in_on_the_audio_th
     .enumerate()
     .flat_map(|(i, &(start, key))| {
         [
-            (start, MUTE, key, "muted", i as u32 + 1, None),
+            (start, MUTE_QUARTER, key, "muted", i as u32 + 1, None),
             (start + 0.5, DEAD, key, "dead", i as u32 + 1, None),
         ]
     })
@@ -720,4 +861,117 @@ fn joins_glide_the_gain_and_the_decay_not_just_the_low_pass() {
         "{} against {level}: a dead-to-dead join across the root jumped",
         next[0]
     );
+}
+
+#[test]
+fn low_strings_have_gp8_palm_mute_chug_resonance() {
+    let open = pluck(1.2, 0.5);
+    for key in [26u8, 40] {
+        let low_band = |str_idx: u8| {
+            let out = voice_output_with(
+                &open,
+                Articulation::Muted,
+                key,
+                100,
+                Some(str_idx),
+                DEFAULT_PALM_MUTE_STRENGTH,
+                0.5,
+                0.55,
+            );
+            band_energy(&out[at(0.10)..at(0.25)], RATE, 60.0, 110.0)
+        };
+        let s0 = low_band(0);
+        let s1 = low_band(1);
+        let s2 = low_band(2);
+        assert!(
+            s0 > s1 * 1.5 && s1 > s2 * 1.3,
+            "key {key}: expected 82 Hz chug resonance str0 ({s0:.3e}) > str1 ({s1:.3e}) > str2 ({s2:.3e})"
+        );
+    }
+}
+
+#[test]
+fn palm_mute_preserves_initial_pick_transient() {
+    let open = pluck(1.2, 0.5);
+    let muted = voice_output_with(
+        &open,
+        Articulation::Muted,
+        40,
+        100,
+        Some(0),
+        DEFAULT_PALM_MUTE_STRENGTH,
+        0.35,
+        0.4,
+    );
+    let picked = voice_output(&open, Articulation::Picked, 40, 100, 0.35, 0.4);
+    // In `pluck()`, the pick and noise burst open at 20 ms (`lead_seconds` = 19 ms at root 40); the first 3.6 ms after pick pass unfiltered.
+    let pick_win = at(0.020)..at(0.0235);
+    let body_win = at(0.080)..at(0.220);
+    let pick_high_m = band_energy(&muted[pick_win.clone()], RATE, 1000.0, 8000.0);
+    let pick_high_p = band_energy(&picked[pick_win], RATE, 1000.0, 8000.0);
+    assert!(
+        pick_high_m > pick_high_p * 0.5,
+        "initial pick transient was muffled: muted {pick_high_m:.3e} vs picked {pick_high_p:.3e}"
+    );
+    let body_high_m = band_energy(&muted[body_win.clone()], RATE, 1000.0, 8000.0);
+    let body_high_p = band_energy(&picked[body_win], RATE, 1000.0, 8000.0);
+    assert!(
+        body_high_m < body_high_p * 0.05,
+        "body high frequencies were not rolled off: muted {body_high_m:.3e} vs picked {body_high_p:.3e}"
+    );
+}
+
+#[test]
+fn palm_mute_behavior_is_sample_rate_independent() {
+    let open = pluck(1.2, 0.5);
+    for key in [26u8, 40] {
+        let render_at = |rate: u32| -> [f64; 3] {
+            let mut voice = SampleVoice::new(
+                open.clone(),
+                parameters(Articulation::Muted, key, 100),
+                rate,
+            )
+            .unwrap()
+            .with_palm_mute(Some(0), DEFAULT_PALM_MUTE_STRENGTH);
+            let total = (0.55 * rate as f64) as usize;
+            let samples: Vec<f32> = (0..total).map(|_| voice.next_frame(0.0)[0]).collect();
+            let slice_db = |a: f64, b: f64| {
+                db(rms(
+                    &samples[(a * rate as f64) as usize..(b * rate as f64) as usize]
+                ))
+            };
+            [
+                slice_db(0.0, 0.10),
+                slice_db(0.10, 0.25),
+                slice_db(0.25, 0.50),
+            ]
+        };
+        let base = render_at(44_100);
+        for rate in [48_000u32, 96_000] {
+            let got = render_at(rate);
+            for (w, (g, b)) in got.iter().zip(base).enumerate() {
+                assert!(
+                    (g - b).abs() < 1.5,
+                    "key {key} rate {rate} window {w}: {g:.2} dB vs 44.1 kHz {b:.2} dB"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn six_string_palm_muted_chord_stays_off_the_limiter() {
+    for keys in [[40u8, 45, 50, 55, 59, 64], [26, 33, 38, 43, 47, 52]] {
+        let notes: Vec<Note> = keys
+            .iter()
+            .enumerate()
+            .map(|(i, &k)| (0.1, 0.4, k, "muted", i as u32 + 1, None))
+            .collect();
+        let chord = render(&notes, 0.8, false);
+        let pk = peak(&chord);
+        assert!(
+            pk > 0.02 && pk < 0.9,
+            "6-string palm-muted chord peak {pk:.3} out of safe dry headroom"
+        );
+    }
 }

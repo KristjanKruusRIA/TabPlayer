@@ -143,12 +143,15 @@ it('lets strings ring to the next pluck on the same string or the end of the bar
   const score = authored(2); note(score, 0, 0, 2, 3); note(score, 0, 2, 2, 5); note(score, 0, 1, 3, 3); note(score, 0, 3, 4, 3).isPalmMute = true; note(score, 1, 0, 2, 3);
   const normal = planOf(score), ringing = planOf(score, { letRing: true });
   const ends = (plan: PlaybackPlan) => plan.notes.map(n => [n.startTick, n.endTick]);
-  expect(ends(normal)).toEqual([[0, 960], [960, 1920], [1920, 2880], [2880, 3040], [3840, 4800]]);
-  // The first note rings until the same string is plucked on beat three, the second to the end of its bar, the palm mute not at all.
-  expect(ends(ringing)).toEqual([[0, 1920], [960, 3840], [1920, 3840], [2880, 3040], [3840, 7680]]);
+  expect(ends(normal)).toEqual([[0, 960], [960, 1920], [1920, 2880], [2880, 3840], [3840, 4800]]);
+  // The first note rings until the same string is plucked on beat three, the second to the end of its bar, the palm mute keeps its written duration.
+  expect(ends(ringing)).toEqual([[0, 1920], [960, 3840], [1920, 3840], [2880, 3840], [3840, 7680]]);
   expect(ringing.notes[3].articulation).toBe('muted');
   expect(ringing.durationTick).toBeGreaterThanOrEqual(7680);
   expect(sounding(ringing).off).toEqual(ringing.notes.map(n => [n.endTick, n.key]).sort());
+  // A palm mute on an earlier beat is not extended into a rest or later beats even under letRing.
+  const earlierMute = authored(1); note(earlierMute, 0, 1, 4, 3).isPalmMute = true;
+  expect(ends(planOf(earlierMute, { letRing: true }))).toEqual([[960, 1920]]);
 });
 
 it('measures a distinct playback for each setting without rewriting the score', () => {

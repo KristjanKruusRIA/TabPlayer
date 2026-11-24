@@ -4912,7 +4912,7 @@ exports[`prepatch full-plan golden: staves-voices-grace-links 1`] = `
     {
       "channel": 2,
       "key": 49,
-      "tick": 4120,
+      "tick": 4920,
       "trackId": "added/8/stable-1",
       "type": "noteOff",
       "velocity": 95,
@@ -5061,7 +5061,7 @@ exports[`prepatch full-plan golden: staves-voices-grace-links 1`] = `
     {
       "articulation": "muted",
       "channel": 2,
-      "endTick": 4120,
+      "endTick": 4920,
       "id": "added/8/stable-1/0/1/1/0/0/1/0/0",
       "key": 49,
       "legatoFrom": null,

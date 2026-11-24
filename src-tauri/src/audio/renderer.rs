@@ -15,15 +15,16 @@ use super::{
     },
     resources::{AudioResources, Region},
     voices::{
-        SampleVoice, VoiceParameters, articulation_name, drum_kit_for_track,
-        effective_note_program, is_drum_instrument, legacy_automatic_voice_id, pitch_at,
-        resolve_voice_id, select_region, select_region_by_name, start_program, track_locked,
-        with_drum_kits, with_locked_articulations,
+        DEFAULT_PALM_MUTE_STRENGTH, HEAVY_PALM_MUTE_STRENGTH, SampleVoice, VoiceParameters,
+        articulation_name, drum_kit_for_track, effective_note_program, is_drum_instrument,
+        legacy_automatic_voice_id, pitch_at, resolve_voice_id, select_region,
+        select_region_by_name, start_program, track_locked, with_drum_kits,
+        with_locked_articulations,
     },
 };
 use crate::settings::{
-    BackingProcessing, ChannelMix, DocumentSettings, DrumKitMix, KitElement, SlotKind,
-    gm_kit_element,
+    BackingProcessing, ChannelMix, DocumentSettings, DrumKitMix, KitElement, PalmMuteIntensity,
+    SlotKind, gm_kit_element,
 };
 use rustysynth::{Synthesizer, SynthesizerSettings};
 use std::{
@@ -377,6 +378,8 @@ struct VoiceSample {
     /// looked up while preparing, so starting a note on the audio thread scans nothing.
     lead_frames: f64,
     trims_db: (f64, f64),
+    palm_mute_string: Option<u8>,
+    palm_mute_strength: f64,
 }
 impl VoiceSample {
     fn new(
@@ -412,6 +415,8 @@ impl VoiceSample {
             release_decay: region.release_decay_db_per_second,
             lead_frames: 0.0,
             trims_db: (0.0, 0.0),
+            palm_mute_string: None,
+            palm_mute_strength: DEFAULT_PALM_MUTE_STRENGTH,
         })
     }
     fn instantiate(&self, rate: u32) -> SampleVoice {
@@ -423,6 +428,7 @@ impl VoiceSample {
             self.trims_db,
         )
         .expect("sample validated during preparation")
+        .with_palm_mute(self.palm_mute_string, self.palm_mute_strength)
     }
 }
 #[derive(Clone)]
@@ -1167,6 +1173,20 @@ impl Renderer {
                     note.articulation,
                 )?;
                 attack.trims_db = super::voices::technique_trims_db(&instrument.id);
+                attack.palm_mute_string = note
+                    .source
+                    .string
+                    .checked_sub(1)
+                    .map(|s| s.min(u8::MAX as u32) as u8);
+                attack.palm_mute_strength = match settings
+                    .mixes
+                    .get(&note.track_id)
+                    .and_then(|m| m.interpretation.as_ref())
+                    .and_then(|i| i.palm_mute)
+                {
+                    Some(PalmMuteIntensity::Heavy) => HEAVY_PALM_MUTE_STRENGTH,
+                    _ => DEFAULT_PALM_MUTE_STRENGTH,
+                };
                 if matches!(note.articulation, Articulation::Muted | Articulation::Dead) {
                     // One measurement per recording, however many notes use it.
                     attack.lead_frames = *lead_cache
@@ -1179,7 +1199,8 @@ impl Renderer {
                     sample_rate,
                     attack.lead_frames,
                     attack.trims_db,
-                )?;
+                )?
+                .with_palm_mute(attack.palm_mute_string, attack.palm_mute_strength);
                 // A palm mute or dead note ends with the string stopped by the hand: no string-release recording.
                 let release = select_region(
                     instrument,

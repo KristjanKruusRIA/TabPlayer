@@ -904,3 +904,36 @@ it('a_fade_on_a_track_written_at_volume_0_ramps_in_the_automated_level', () => {
   // Without automation the track stays at 0 throughout, as before.
   for (const fade of FADES) expect(zeroTrack(fade, false).every(e => e[1] === 0)).toBe(true);
 });
+
+it('preserves written duration for palm-muted notes across values and ties while suppressing let-ring extension', () => {
+  const score = authored(2);
+  score.masterBars[0].tempoAutomations = [model.Automation.buildTempoAutomation(false, 0, 155, 2)];
+  const b0 = score.tracks[0].staves[0].bars[0].voices[0].beats;
+  b0[0].duration = model.Duration.Eighth;
+  b0[1].duration = model.Duration.Quarter;
+  b0[2].duration = model.Duration.Half;
+  b0[3].duration = model.Duration.Quarter; b0[3].dots = 1;
+  const n0 = new model.Note(); n0.string = 6; n0.fret = 0; n0.isPalmMute = true; b0[0].addNote(n0);
+  const n1 = new model.Note(); n1.string = 6; n1.fret = 0; n1.isPalmMute = true; n1.isLetRing = true; b0[1].addNote(n1);
+  const n2 = new model.Note(); n2.string = 6; n2.fret = 0; n2.isPalmMute = true; b0[2].addNote(n2);
+  const n3 = new model.Note(); n3.string = 6; n3.fret = 0; n3.isPalmMute = true; b0[3].addNote(n3);
+
+  const b1 = score.tracks[0].staves[0].bars[1].voices[0].beats;
+  const tiedA = new model.Note(); tiedA.string = 6; tiedA.fret = 2; tiedA.isPalmMute = true; b1[0].addNote(tiedA);
+  const tiedB = new model.Note(); tiedB.string = 6; tiedB.fret = 2; tiedB.isPalmMute = true; tiedB.isTieDestination = true; tiedB.tieOrigin = tiedA; tiedA.tieDestination = tiedB; b1[1].addNote(tiedB);
+  const dead = new model.Note(); dead.string = 6; dead.fret = 0; dead.isDead = true; b1[2].addNote(dead);
+  score.finish(settings);
+
+  const plan = buildPlaybackPlan(score, 7);
+  expect(plan.notes.map(n => [n.articulation, n.endTick - n.startTick])).toEqual([
+    ['muted', 480],
+    ['muted', 960],
+    ['muted', 1920],
+    ['muted', 1440],
+    ['muted', 1920],
+    ['dead', plan.notes[5].endTick - plan.notes[5].startTick],
+  ]);
+  expect(plan.notes[5].endTick - plan.notes[5].startTick).toBeLessThan(200);
+  const noteOffTicks = plan.midi.filter(e => e.type === 'noteOff').map(e => e.tick);
+  expect(noteOffTicks).toEqual(plan.notes.map(n => n.endTick));
+});

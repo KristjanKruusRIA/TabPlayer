@@ -433,10 +433,8 @@ pub struct SampleVoice {
     filter: [f64; 2],
     harmonic_low: [f64; 2],
     fade_in_left: u32,
-    /// A palm-muted note whose end came before `MUTED_RING_SECONDS`: it keeps ringing, damped, until then.
+    /// A muted or dead note whose end came before its minimum pick hold: keeps sounding until then unless cut.
     ring_pending: bool,
-    /// Low-pass of a palm mute: a few harmonics of the sounding note, so a low string stays dark and a high one is not dulled.
-    muted_cutoff: f64,
     /// Seconds from the start of a muted or dead note's recording to its pick, at the sounding pitch. The recording keeps its lead-in (as every
     /// note's does, so notes stay in time with each other); the decay, the ring and the cut count from the pick, not from the start.
     lead_seconds: f64,
@@ -455,12 +453,252 @@ pub struct SampleVoice {
     last_envelope: f64,
     /// Gain of a dead note at the key it sounds: `DEAD_GAIN` from its recording's root up, ramping down below it.
     dead_gain: f64,
+    /// 0-based string index from the lowest string on the track, used for GP8 palm-mute EQ resonance.
+    palm_mute_string: Option<u8>,
+    /// Palm-mute damping strength in `[0.0, 1.0]` (`0.3` default, matching GP8 RSE).
+    palm_mute_strength: f64,
+    /// Guitar Pro 8 RSE–style palm-mute filter state (zero-allocation inline DSP).
+    palm_mute: PalmMuteFilter,
 }
 #[derive(Clone, Copy)]
 struct Blend {
     cutoff: f64,
     gain: f64,
     envelope: f64,
+    pm_mix: f64,
+}
+#[derive(Clone, Copy)]
+struct BilinearOnePole {
+    b0: f64,
+    b1: f64,
+    a1: f64,
+    x1: [f64; 2],
+    y1: [f64; 2],
+}
+impl BilinearOnePole {
+    fn new() -> Self {
+        Self {
+            b0: 1.0,
+            b1: 0.0,
+            a1: 0.0,
+            x1: [0.0; 2],
+            y1: [0.0; 2],
+        }
+    }
+    fn set_cutoff(&mut self, fc_hz: f64, sample_rate: f64) {
+        let w = std::f64::consts::TAU * fc_hz.clamp(1.0, sample_rate * 0.45);
+        let a = 2.0 * sample_rate;
+        let inv = 1.0 / (w + a);
+        self.b0 = w * inv;
+        self.b1 = self.b0;
+        self.a1 = (a - w) * inv;
+    }
+    fn prime(&mut self, value: [f64; 2]) {
+        self.x1 = value;
+        self.y1 = value;
+    }
+    fn process_sample(&mut self, c: usize, x: f64) -> f64 {
+        let y = self.b0 * x + self.b1 * self.x1[c] + self.a1 * self.y1[c];
+        self.x1[c] = x;
+        self.y1[c] = y;
+        y
+    }
+    fn process_mono(&mut self, x: f64) -> f64 {
+        self.process_sample(0, x)
+    }
+}
+#[derive(Clone, Copy)]
+struct BilinearPeakingEq {
+    b0: f64,
+    b1: f64,
+    b2: f64,
+    a1: f64,
+    a2: f64,
+    x1: [f64; 2],
+    x2: [f64; 2],
+    y1: [f64; 2],
+    y2: [f64; 2],
+}
+impl BilinearPeakingEq {
+    fn new() -> Self {
+        Self {
+            b0: 1.0,
+            b1: 0.0,
+            b2: 0.0,
+            a1: 0.0,
+            a2: 0.0,
+            x1: [0.0; 2],
+            x2: [0.0; 2],
+            y1: [0.0; 2],
+            y2: [0.0; 2],
+        }
+    }
+    fn set_params(&mut self, gain_db: f64, fc_hz: f64, q: f64, sample_rate: f64) {
+        let g = 10f64.powf(gain_db / 20.0);
+        let w0 = std::f64::consts::TAU * fc_hz.min(sample_rate * 0.45);
+        let c = 2.0 * sample_rate;
+        let c2 = c * c;
+        let w2 = w0 * w0;
+        let bw = (w0 / q.max(0.1)) * c;
+        if gain_db >= 0.0 {
+            let a0 = c2 + bw + w2;
+            self.b0 = (c2 + g * bw + w2) / a0;
+            self.b1 = 2.0 * (w2 - c2) / a0;
+            self.b2 = (c2 - g * bw + w2) / a0;
+            self.a1 = 2.0 * (w2 - c2) / a0;
+            self.a2 = (c2 - bw + w2) / a0;
+        } else {
+            let inv_g = 1.0 / g.max(1e-6);
+            let a0 = c2 + inv_g * bw + w2;
+            self.b0 = (c2 + bw + w2) / a0;
+            self.b1 = 2.0 * (w2 - c2) / a0;
+            self.b2 = (c2 - bw + w2) / a0;
+            self.a1 = 2.0 * (w2 - c2) / a0;
+            self.a2 = (c2 - inv_g * bw + w2) / a0;
+        }
+    }
+    fn process_sample(&mut self, c: usize, x: f64) -> f64 {
+        let y = self.b0 * x + self.b1 * self.x1[c] + self.b2 * self.x2[c]
+            - self.a1 * self.y1[c]
+            - self.a2 * self.y2[c];
+        self.x2[c] = self.x1[c];
+        self.x1[c] = x;
+        self.y2[c] = self.y1[c];
+        self.y1[c] = y;
+        y
+    }
+}
+#[derive(Clone, Copy)]
+struct PalmMuteFilter {
+    rate: f64,
+    strength: f64,
+    string_idx: u8,
+    lp: [BilinearOnePole; 3],
+    lp_freq: [f64; 3],
+    eq: BilinearPeakingEq,
+    eq_gain_db: f64,
+    eq_q: f64,
+    gain_smoother: BilinearOnePole,
+    env_gain: f64,
+    prev_env_gain: f64,
+    last_raw: [f64; 2],
+    last_filtered: [f64; 2],
+    block_count: u32,
+    step_phase: f64,
+}
+impl PalmMuteFilter {
+    fn new(sample_rate: f64, string_index: Option<u8>, strength: f64) -> Self {
+        let strength = if strength.is_finite() {
+            strength.clamp(0.0, 1.0)
+        } else {
+            DEFAULT_PALM_MUTE_STRENGTH
+        };
+        let mut gain_smoother = BilinearOnePole::new();
+        gain_smoother.set_cutoff(PALM_MUTE_GAIN_SMOOTH_HZ, sample_rate);
+        gain_smoother.prime([1.0, 1.0]);
+        Self {
+            rate: sample_rate,
+            strength,
+            string_idx: string_index.unwrap_or(2),
+            lp: [BilinearOnePole::new(); 3],
+            lp_freq: [1000.0, 10_000.0, 20_000.0],
+            eq: BilinearPeakingEq::new(),
+            eq_gain_db: 0.0,
+            eq_q: 8.0,
+            gain_smoother,
+            env_gain: 1.0,
+            prev_env_gain: 1.0,
+            last_raw: [0.0; 2],
+            last_filtered: [0.0; 2],
+            block_count: 0,
+            step_phase: 0.0,
+        }
+    }
+    fn step_control(&mut self) {
+        if self.block_count == 5 {
+            for lpf in &mut self.lp {
+                lpf.prime(self.last_raw);
+            }
+        }
+        self.block_count = self.block_count.saturating_add(1);
+        let k_fast = self.strength * 0.07 + 0.02;
+        let k_slow = self.strength * 0.04 + 0.01;
+        self.lp_freq[0] -= k_fast * (self.lp_freq[0] - PALM_MUTE_BASE_FREQ);
+        self.lp_freq[1] -= k_slow * (self.lp_freq[1] - PALM_MUTE_SUB_FREQ);
+        self.lp_freq[2] -= k_slow * (self.lp_freq[2] - PALM_MUTE_SUB_FREQ);
+        for (lpf, &fc) in self.lp.iter_mut().zip(&self.lp_freq) {
+            lpf.set_cutoff(fc, self.rate);
+        }
+        if self.block_count > 40 && self.string_idx < 2 {
+            let k_eq = (self.strength + 1.0) * 0.01;
+            let target_db = if self.string_idx == 0 { 18.0 } else { 8.0 };
+            self.eq_gain_db += (target_db - self.eq_gain_db) * k_eq;
+            self.eq_q -= (self.eq_q - 1.3) * k_eq;
+            self.eq
+                .set_params(self.eq_gain_db, PALM_MUTE_BASE_FREQ, self.eq_q, self.rate);
+        }
+        self.prev_env_gain = self.env_gain;
+        if self.strength > 0.9 && self.block_count > 70 {
+            self.env_gain *= 0.95 - self.strength * 0.01;
+        } else if self.block_count > 30 {
+            self.env_gain *= 0.999 - self.strength * 0.007;
+        }
+    }
+    fn process_frame(
+        &mut self,
+        input: [f64; 2],
+        dt: f64,
+        active_since_pick: bool,
+    ) -> ([f64; 2], f64) {
+        if !active_since_pick {
+            self.last_raw = input;
+            self.last_filtered = input;
+            return (input, 1.0);
+        }
+        if self.block_count == 0 {
+            self.step_control();
+        } else {
+            self.step_phase += dt;
+            while self.step_phase >= PALM_MUTE_CONTROL_PERIOD {
+                self.step_phase -= PALM_MUTE_CONTROL_PERIOD;
+                self.step_control();
+            }
+        }
+        self.last_raw = input;
+        let mut out = input;
+        if self.block_count > 5 {
+            let eq_on = self.block_count > 40 && self.string_idx < 2;
+            for c in 0..2 {
+                let mut s = out[c];
+                for lpf in &mut self.lp {
+                    s = lpf.process_sample(c, s);
+                }
+                if eq_on {
+                    s = self.eq.process_sample(c, s);
+                }
+                out[c] = s;
+            }
+        }
+        self.last_filtered = out;
+        let frac = (self.step_phase / PALM_MUTE_CONTROL_PERIOD).clamp(0.0, 1.0);
+        let ramp = self.prev_env_gain + (self.env_gain - self.prev_env_gain) * frac;
+        let smoothed_gain = self.gain_smoother.process_mono(ramp);
+        (out, smoothed_gain)
+    }
+    fn fast_forward(&mut self, elapsed_since_pick: f64) {
+        *self = Self::new(self.rate, Some(self.string_idx), self.strength);
+        let elapsed = elapsed_since_pick.max(0.0);
+        if elapsed <= 0.0 {
+            return;
+        }
+        let blocks = ((elapsed / PALM_MUTE_CONTROL_PERIOD) as u32).min(20_000);
+        for _ in 0..blocks {
+            self.step_control();
+        }
+        self.step_phase = (elapsed - blocks as f64 * PALM_MUTE_CONTROL_PERIOD)
+            .clamp(0.0, PALM_MUTE_CONTROL_PERIOD);
+        self.gain_smoother.prime([self.env_gain; 2]);
+    }
 }
 thread_local! {
     static LEAD_IN_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -474,17 +712,16 @@ pub fn lead_in_scans() -> usize {
 const CUT_FADE_SECONDS: f64 = 0.004;
 /// A dead note's thud is held for this long after the pick before the note's end fades it.
 const DEAD_HOLD_SECONDS: f64 = 0.03;
-
-/// How long a palm-muted string rings before its note's end may stop it: a damped string, not a cut at the written
-/// length (alphaTab writes palm mutes as ~80 ms notes).
-pub const MUTED_RING_SECONDS: f64 = 0.2;
-/// Palm mute envelope and tone (was decay 0.10 s, a fixed 1 kHz low-pass, gain 0.8). The low-pass sits this many harmonics above the
-/// note, within these limits, so a low string is dark and a standard-tuned one is not boomy.
-const MUTED_DECAY_SECONDS: f64 = 0.30;
-const MUTED_GAIN: f64 = 1.0;
-const MUTED_CUTOFF_HARMONICS: f64 = 4.0;
-const MUTED_CUTOFF_MIN: f64 = 140.0;
-const MUTED_CUTOFF_MAX: f64 = 1000.0;
+/// Minimum hold after pick onset for a palm-muted note so leaded samples still sound on tiny subdivisions.
+const MUTED_MIN_HOLD_SECONDS: f64 = 0.03;
+/// Default palm-mute strength matching GP8's `<PalmMute>0.3</PalmMute>`.
+pub const DEFAULT_PALM_MUTE_STRENGTH: f64 = 0.3;
+/// Stronger palm-mute damping used for the Heavy palm-mute interpretation.
+pub const HEAVY_PALM_MUTE_STRENGTH: f64 = 0.65;
+const PALM_MUTE_CONTROL_PERIOD: f64 = 32.0 / 44_100.0;
+const PALM_MUTE_BASE_FREQ: f64 = 82.0;
+const PALM_MUTE_SUB_FREQ: f64 = PALM_MUTE_BASE_FREQ * 0.9;
+const PALM_MUTE_GAIN_SMOOTH_HZ: f64 = 159.15962;
 /// Dead note thud (was decay 0.025 s, gain 0.55). The pick now sounds inside the envelope on every string, so it needs little more than it had.
 const DEAD_DECAY_SECONDS: f64 = 0.05;
 const DEAD_GAIN: f64 = 1.6;
@@ -508,6 +745,18 @@ impl SampleVoice {
             0.0
         };
         Self::prepared(audio, params, sample_rate, lead, (0.0, 0.0))
+    }
+    /// Configures the GP8 palm-mute filter with the 0-based string index from the lowest string and damping strength `[0.0, 1.0]`.
+    pub fn with_palm_mute(mut self, string_index: Option<u8>, strength: f64) -> Self {
+        let clamped = if strength.is_finite() {
+            strength.clamp(0.0, 1.0)
+        } else {
+            DEFAULT_PALM_MUTE_STRENGTH
+        };
+        self.palm_mute_string = string_index;
+        self.palm_mute_strength = clamped;
+        self.palm_mute = PalmMuteFilter::new(self.rate, string_index, clamped);
+        self
     }
     /// A voice with what the renderer measured while preparing: `lead_frames` of recorded silence before the pick (see `lead_in_frames`) and
     /// the voice's palm mute and dead note trims in dB.
@@ -571,7 +820,6 @@ impl SampleVoice {
             harmonic_low: [0.0; 2],
             fade_in_left: 0,
             ring_pending: false,
-            muted_cutoff: muted_cutoff(params.key),
             lead_seconds,
             trim_muted: 10f64.powf(trims_db.0 / 20.0),
             trim_dead: 10f64.powf(trims_db.1 / 20.0),
@@ -583,6 +831,9 @@ impl SampleVoice {
             last_gain: 0.0,
             last_envelope: 1.0,
             dead_gain: dead_gain(params.key, params.root_key),
+            palm_mute_string: None,
+            palm_mute_strength: DEFAULT_PALM_MUTE_STRENGTH,
+            palm_mute: PalmMuteFilter::new(sample_rate as f64, None, DEFAULT_PALM_MUTE_STRENGTH),
             audio,
         })
     }
@@ -627,48 +878,92 @@ impl SampleVoice {
                     start as f64 + (self.position - start as f64) % (end - start) as f64;
             }
         }
-        let (decay, cutoff, technique_gain) = self.technique();
         // A muted or dead note's decay and ring count from its pick, which the recording's lead-in puts `lead_seconds` after the start.
         let envelope_age = if self.lead_seconds > 0.0 {
             (self.age - self.lead_seconds).max(0.0)
         } else {
             self.age
         };
-        let mut decay_term = (-envelope_age / decay).exp();
-        let (cutoff, technique_gain) = match &mut self.blend {
-            Some(blend) => {
-                let k = self.blend_coefficient;
-                blend.cutoff += (cutoff - blend.cutoff) * k;
-                blend.gain += (technique_gain - blend.gain) * k;
-                blend.envelope += (decay_term - blend.envelope) * k;
-                let now = (blend.cutoff, blend.gain);
-                let settled = (now.0 - cutoff).abs() < 0.5
-                    && (now.1 - technique_gain).abs() < 1e-4 * technique_gain.abs().max(1e-3)
-                    && (blend.envelope - decay_term).abs() < 1e-4;
-                decay_term = blend.envelope;
-                if settled {
-                    self.blend = None;
+        let (decay_term, technique_gain) = if self.params.articulation == Articulation::Muted {
+            let raw = [x[0] as f64, x[1] as f64];
+            let (pm_filtered, pm_env) =
+                self.palm_mute
+                    .process_frame(raw, dt, self.age >= self.lead_seconds);
+            let target_cutoff = self.palm_mute.lp_freq[0];
+            let target_gain = self.trim_muted;
+            let (cutoff, technique_gain, decay_term, pm_mix) = match &mut self.blend {
+                Some(blend) => {
+                    let k = self.blend_coefficient;
+                    blend.cutoff += (target_cutoff - blend.cutoff) * k;
+                    blend.gain += (target_gain - blend.gain) * k;
+                    blend.envelope += (pm_env - blend.envelope) * k;
+                    blend.pm_mix += (1.0 - blend.pm_mix) * k;
+                    let now = (blend.cutoff, blend.gain, blend.envelope, blend.pm_mix);
+                    let settled = (now.0 - target_cutoff).abs() < 0.5
+                        && (now.1 - target_gain).abs() < 1e-4 * target_gain.abs().max(1e-3)
+                        && (now.2 - pm_env).abs() < 1e-4
+                        && (now.3 - 1.0).abs() < 1e-4;
+                    if settled {
+                        self.blend = None;
+                    }
+                    now
                 }
-                now
+                None => (target_cutoff, target_gain, pm_env, 1.0),
+            };
+            self.last_cutoff = cutoff;
+            self.last_gain = technique_gain;
+            self.last_envelope = decay_term;
+            if pm_mix < 1.0 {
+                let coefficient =
+                    1.0 - (-std::f64::consts::TAU * cutoff.min(self.rate * 0.4) / self.rate).exp();
+                for c in 0..2 {
+                    self.filter[c] += coefficient * (raw[c] - self.filter[c]);
+                    x[c] = (self.filter[c] * (1.0 - pm_mix) + pm_filtered[c] * pm_mix) as f32;
+                }
+            } else {
+                self.filter = pm_filtered;
+                x = [pm_filtered[0] as f32, pm_filtered[1] as f32];
             }
-            None => (cutoff, technique_gain),
+            (decay_term, technique_gain)
+        } else {
+            let (decay, cutoff, technique_gain) = self.technique();
+            let mut decay_term = (-envelope_age / decay).exp();
+            let (cutoff, technique_gain) = match &mut self.blend {
+                Some(blend) => {
+                    let k = self.blend_coefficient;
+                    blend.cutoff += (cutoff - blend.cutoff) * k;
+                    blend.gain += (technique_gain - blend.gain) * k;
+                    blend.envelope += (decay_term - blend.envelope) * k;
+                    let now = (blend.cutoff, blend.gain);
+                    let settled = (now.0 - cutoff).abs() < 0.5
+                        && (now.1 - technique_gain).abs() < 1e-4 * technique_gain.abs().max(1e-3)
+                        && (blend.envelope - decay_term).abs() < 1e-4;
+                    decay_term = blend.envelope;
+                    if settled {
+                        self.blend = None;
+                    }
+                    now
+                }
+                None => (cutoff, technique_gain),
+            };
+            self.last_cutoff = cutoff;
+            self.last_gain = technique_gain;
+            self.last_envelope = decay_term;
+            let coefficient =
+                1.0 - (-std::f64::consts::TAU * cutoff.min(self.rate * 0.4) / self.rate).exp();
+            for c in 0..2 {
+                self.filter[c] += coefficient * (x[c] as f64 - self.filter[c]);
+                x[c] = self.filter[c] as f32;
+                if matches!(self.params.articulation, Articulation::Harmonic)
+                    && !self.params.is_recorded_harmonic
+                {
+                    let hp = 1.0 - (-std::f64::consts::TAU * 700.0 / self.rate).exp();
+                    self.harmonic_low[c] += hp * (x[c] as f64 - self.harmonic_low[c]);
+                    x[c] = (x[c] as f64 - self.harmonic_low[c] * 0.65) as f32;
+                }
+            }
+            (decay_term, technique_gain)
         };
-        self.last_cutoff = cutoff;
-        self.last_gain = technique_gain;
-        self.last_envelope = decay_term;
-        let coefficient =
-            1.0 - (-std::f64::consts::TAU * cutoff.min(self.rate * 0.4) / self.rate).exp();
-        for c in 0..2 {
-            self.filter[c] += coefficient * (x[c] as f64 - self.filter[c]);
-            x[c] = self.filter[c] as f32;
-            if matches!(self.params.articulation, Articulation::Harmonic)
-                && !self.params.is_recorded_harmonic
-            {
-                let hp = 1.0 - (-std::f64::consts::TAU * 700.0 / self.rate).exp();
-                self.harmonic_low[c] += hp * (x[c] as f64 - self.harmonic_low[c]);
-                x[c] = (x[c] as f64 - self.harmonic_low[c] * 0.65) as f32;
-            }
-        }
         let attack = if self.params.attack_seconds > 0.0 {
             (self.age / self.params.attack_seconds).min(1.0)
         } else {
@@ -712,11 +1007,7 @@ impl SampleVoice {
     /// The envelope's decay time, the low-pass and the gain of the technique the voice sounds now.
     fn technique(&self) -> (f64, f64, f64) {
         match self.params.articulation {
-            Articulation::Muted => (
-                MUTED_DECAY_SECONDS,
-                self.muted_cutoff,
-                MUTED_GAIN * self.trim_muted,
-            ),
+            Articulation::Muted => (f64::INFINITY, self.palm_mute.lp_freq[0], self.trim_muted),
             Articulation::Dead => (DEAD_DECAY_SECONDS, 650.0, self.dead_gain * self.trim_dead),
             Articulation::Ghost => (0.08, 1800.0, 0.4),
             Articulation::Staccato => (0.13, 7000.0, 1.0),
@@ -733,7 +1024,8 @@ impl SampleVoice {
     }
     pub fn transition(&mut self, key: u8, articulation: Articulation) {
         let ringing = |a: Articulation| matches!(a, Articulation::Muted | Articulation::Dead);
-        let was_ringing = ringing(self.params.articulation);
+        let prev_articulation = self.params.articulation;
+        let was_ringing = ringing(prev_articulation);
         let (last_cutoff, last_gain, last_envelope) =
             (self.last_cutoff, self.last_gain, self.last_envelope);
         self.params.key = key;
@@ -741,16 +1033,30 @@ impl SampleVoice {
         self.released = false;
         self.ring_pending = false;
         self.cut = false;
-        self.muted_cutoff = muted_cutoff(key);
         self.dead_gain = dead_gain(key, self.params.root_key);
+        if prev_articulation == Articulation::Muted && articulation != Articulation::Muted {
+            self.filter = self.palm_mute.last_filtered;
+        }
+        if prev_articulation != Articulation::Muted && articulation == Articulation::Muted {
+            self.palm_mute =
+                PalmMuteFilter::new(self.rate, self.palm_mute_string, self.palm_mute_strength);
+            for lpf in &mut self.palm_mute.lp {
+                lpf.prime(self.filter);
+            }
+            self.palm_mute.block_count = 6;
+            for (lpf, &fc) in self.palm_mute.lp.iter_mut().zip(&self.palm_mute.lp_freq) {
+                lpf.set_cutoff(fc, self.rate);
+            }
+        }
         // A join into or out of a palm mute or dead note (or between two of them, across the root key) glides the low-pass, the gain and the decay.
         if (was_ringing || ringing(articulation)) && last_gain > 0.0 {
             let (_, cutoff, gain) = self.technique();
-            if cutoff != last_cutoff || gain != last_gain {
+            if cutoff != last_cutoff || gain != last_gain || articulation == Articulation::Muted {
                 self.blend = Some(Blend {
                     cutoff: last_cutoff,
                     gain: last_gain,
                     envelope: last_envelope,
+                    pm_mix: 0.0,
                 });
             }
         }
@@ -763,6 +1069,10 @@ impl SampleVoice {
         let seconds = seconds.max(0.0);
         self.age = seconds;
         self.fade_in_left = (self.rate * 0.003) as u32;
+        if self.params.articulation == Articulation::Muted {
+            self.palm_mute
+                .fast_forward((seconds - self.lead_seconds).max(0.0));
+        }
         self.position = if self.params.tuning_cents != 0.0 {
             seconds
                 * self.audio.sample_rate as f64
@@ -790,7 +1100,7 @@ impl SampleVoice {
     }
     pub fn release(&mut self) {
         let hold = match self.params.articulation {
-            Articulation::Muted => MUTED_RING_SECONDS,
+            Articulation::Muted => MUTED_MIN_HOLD_SECONDS,
             Articulation::Dead => DEAD_HOLD_SECONDS,
             _ => 0.0,
         };
@@ -836,11 +1146,6 @@ fn dead_gain(key: u8, root: u8) -> f64 {
     let below = (root as f64 - key as f64).clamp(0.0, DEAD_RAMP_SEMITONES) / DEAD_RAMP_SEMITONES;
     let db = 20.0 * DEAD_GAIN.log10() * (1.0 - below) + 20.0 * DEAD_GAIN_BELOW_ROOT.log10() * below;
     10f64.powf(db / 20.0)
-}
-
-fn muted_cutoff(key: u8) -> f64 {
-    let f0 = 440.0 * 2f64.powf((key as f64 - 69.0) / 12.0);
-    (f0 * MUTED_CUTOFF_HARMONICS).clamp(MUTED_CUTOFF_MIN, MUTED_CUTOFF_MAX)
 }
 
 /// Frames before a recording's pick (its first sample 10% of the opening 100 ms peak, less 1 ms); recorded guitar notes open with about

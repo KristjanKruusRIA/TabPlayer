@@ -9,7 +9,7 @@ import './score-overview.css';
 
 export interface ScoreOverviewProps {
   model:ScoreOverviewModel;target:BeatTarget;playbackBar:number|null;
-  onSelect:(track:number,bar:number)=>void;onExit:()=>void;
+  onSelect:(track:number,bar:number,by?:'pointer')=>void;onExit:()=>void;
   /** Makes a track the active one, from a click or Enter/Space on its name; without it the name is plain text. */
   onSelectTrack?:(track:number,by?:'pointer')=>void;
   /** The bars a running loop plays, marked on the ruler and as a bracket down through every track; none, none marked. */
@@ -31,7 +31,7 @@ type Window={first:number;last:number};
 interface GridContentProps {
   model:ScoreOverviewModel;targetTrack:number;targetBar:number;focused:Position;loopBars:ReadonlySet<number>;
   columns:Window;rows:Window;nameWidth:number;colors?:readonly string[];controls?:ScoreOverviewProps['controls'];
-  onFocus:(position:Position)=>void;onSelect:(track:number,bar:number)=>void;onSelectTrack?:(track:number,by?:'pointer')=>void;
+  onFocus:(position:Position)=>void;onSelect:ScoreOverviewProps['onSelect'];onSelectTrack?:(track:number,by?:'pointer')=>void;
 }
 const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused,loopBars,columns,rows,nameWidth,colors,controls,onFocus,onSelect,onSelectTrack}:GridContentProps){
   const { t } = useI18n();
@@ -63,7 +63,7 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
             aria-selected={selected} tabIndex={focused.track===row&&focused.bar===bar?0:-1}
             data-overview-track={row} data-overview-bar={bar} data-content={content}
             className="score-overview-cell" style={{left:nameWidth+bar*cellSize}}
-            onFocus={()=>onFocus({track:row,bar})} onClick={event=>{event.currentTarget.focus();onSelect(track.index,bar);}}>
+            onFocus={()=>onFocus({track:row,bar})} onClick={event=>{event.currentTarget.focus();if(event.detail>0)onSelect(track.index,bar,'pointer');else onSelect(track.index,bar);}}>
             <span className="score-overview-occupancy" aria-hidden="true"/>
           </div>;
         })}
@@ -97,7 +97,7 @@ export function ScoreOverview({model,target,playbackBar,onSelect,onSelectTrack,o
     grid.current?.querySelector<HTMLElement>(`[data-overview-track="${focused.track}"][data-overview-bar="${focused.bar}"]`)?.focus({preventScroll:true});
   },[focused,viewport]);
   const focusPosition=useCallback((position:Position)=>setFocused(previous=>previous.track===position.track&&previous.bar===position.bar?previous:position),[]);
-  const select=useCallback((track:number,bar:number)=>callbacks.current.onSelect(track,bar),[]);
+  const select=useCallback((...position:Parameters<ScoreOverviewProps['onSelect']>)=>callbacks.current.onSelect(...position),[]);
   // Stable ranges let clock-only updates change the single playhead without regenerating grid contents.
   const columns=useMemo(()=>overviewWindow(viewport.left,Math.max(0,viewport.width-nameWidth),model.barCount,cellSize,2),[viewport.left,viewport.width,model.barCount]);
   const rows=useMemo(()=>overviewWindow(viewport.top,Math.max(0,viewport.height-cellSize),model.tracks.length,cellSize,2),[viewport.top,viewport.height,model.tracks.length]);
@@ -105,10 +105,10 @@ export function ScoreOverview({model,target,playbackBar,onSelect,onSelectTrack,o
     // A button inside the grid (a track's name, mute, solo) takes its own keys; the grid's cell keys are for the cells.
     if(event.target instanceof Element&&event.target.closest('button,input,select,[role="slider"]'))return;
     if(event.altKey||event.ctrlKey||event.metaKey||event.shiftKey)return;
-    if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Enter',' ','Escape'].includes(event.key))return;
+    if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End','Enter','Escape'].includes(event.key))return;
     event.preventDefault();event.stopPropagation();
     if(event.key==='Escape'){callbacks.current.onExit();return;}
-    if(event.key==='Enter'||event.key===' '){select(model.tracks[focused.track].index,focused.bar);return;}
+    if(event.key==='Enter'){select(model.tracks[focused.track].index,focused.bar);return;}
     const next={...focused};
     if(event.key==='ArrowLeft')next.bar=Math.max(0,next.bar-1);
     if(event.key==='ArrowRight')next.bar=Math.min(model.barCount-1,next.bar+1);

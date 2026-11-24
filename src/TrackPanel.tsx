@@ -170,7 +170,7 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
   score:model.Score;selected:number;busy:boolean;view:'overview'|'mixer';target:BeatTarget;onExitOverview:()=>void;
   /** The bars a running loop plays, marked on the overview. */
   loop?:LoopPassage|null;
-  onSelect:(track:number,by?:'pointer')=>void;onSelectPosition:(track:number,bar:number)=>void;
+  onSelect:(track:number,by?:'pointer')=>void;onSelectPosition:(track:number,bar:number,by?:'pointer')=>void;
   /** Tracks shown in the score; with `onToggleShown`, each dock row gets an eye that shows or hides its track. */
   shown?:readonly number[];onToggleShown?:(track:number)=>void;
   /** Shows a + button in the track list's header that starts adding a track. */

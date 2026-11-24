@@ -25,8 +25,8 @@ it('names real content and sections, keeps one tab stop, and selects empty/rest 
   expect(screen.getByRole('columnheader',{name:'Measure 3, Chorus'})).toBeInTheDocument();
   expect(cell('Guitar, measure 1, empty')).toHaveAttribute('tabindex','0');
   expect(screen.getAllByRole('gridcell').filter(node=>node.tabIndex===0)).toHaveLength(1);
-  fireEvent.click(cell('Guitar, measure 1, empty'));fireEvent.click(cell('Guitar, measure 2, rest'));
-  expect(onSelect.mock.calls).toEqual([[0,0],[0,1]]);expect(cell('Guitar, measure 2, rest')).toHaveFocus();
+  fireEvent.click(cell('Guitar, measure 1, empty'),{detail:1});fireEvent.click(cell('Guitar, measure 2, rest'),{detail:1});
+  expect(onSelect.mock.calls).toEqual([[0,0,'pointer'],[0,1,'pointer']]);expect(cell('Guitar, measure 2, rest')).toHaveFocus();
 });
 
 it('moves focus independently of selection and consumes all owned keys including bounds',()=>{
@@ -39,18 +39,18 @@ it('moves focus independently of selection and consumes all owned keys including
   key('ArrowDown');expect(cell('Drums, measure 2, music')).toHaveFocus();
   key('End');key('ArrowRight');key('ArrowDown');expect(cell('Drums, measure 4, rest')).toHaveFocus();
   key('Home');expect(cell('Drums, measure 1, rest')).toHaveFocus();
-  key('Enter');fireEvent.keyUp(document.activeElement!,{key:'Enter'});key(' ');fireEvent.keyUp(document.activeElement!,{key:' '});key('Escape');
-  expect(onSelect.mock.calls).toEqual([[1,0],[1,0]]);expect(onExit).toHaveBeenCalledTimes(1);expect(ancestor).not.toHaveBeenCalled();
+  key('Enter');fireEvent.keyUp(document.activeElement!,{key:'Enter'});key('Escape');
+  expect(onSelect.mock.calls).toEqual([[1,0]]);expect(onExit).toHaveBeenCalledTimes(1);expect(ancestor).not.toHaveBeenCalled();
 });
 
-it('leaves Tab and modified application shortcuts available to ancestors',()=>{
+it('leaves Tab, Space and modified application shortcuts available to ancestors',()=>{
   const ancestor=vi.fn(),onSelect=vi.fn(),onExit=vi.fn();
   render(<div onKeyDown={ancestor}><ScoreOverview model={small} target={target} playbackBar={null} onSelect={onSelect} onExit={onExit}/></div>);
   const first=cell('Guitar, measure 1, empty');
-  for(const init of [{key:'Tab'},{key:'ArrowRight',shiftKey:true},{key:' ',ctrlKey:true},{key:'Home',metaKey:true},{key:'Escape',altKey:true}]) {
+  for(const init of [{key:'Tab'},{key:' '},{key:'ArrowRight',shiftKey:true},{key:' ',ctrlKey:true},{key:'Home',metaKey:true},{key:'Escape',altKey:true}]) {
     const event=new KeyboardEvent('keydown',{...init,bubbles:true,cancelable:true});fireEvent(first,event);expect(event.defaultPrevented).toBe(false);
   }
-  expect(ancestor).toHaveBeenCalledTimes(5);expect(onSelect).not.toHaveBeenCalled();expect(onExit).not.toHaveBeenCalled();
+  expect(ancestor).toHaveBeenCalledTimes(6);expect(onSelect).not.toHaveBeenCalled();expect(onExit).not.toHaveBeenCalled();
 });
 
 it('updates a separate actual playback marker without moving focus or selection',()=>{

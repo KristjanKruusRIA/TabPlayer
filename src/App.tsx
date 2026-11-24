@@ -697,6 +697,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     cancelSeek();player.chooseCursorOccurrence?.(fixed);
     seekTimer.current=setTimeout(()=>{seekTimer.current=null;sendSeek(fixed);},SEEK_COALESCE_MS);
   };
+  const selectOverviewPosition=(track:number,bar:number,by?:'pointer')=>{
+    const point={track,staff:0,bar,voice:0,beat:0};
+    // Selected-track mode follows the cursor on its own. In a custom display, reveal the picked track alongside those already shown.
+    if(trackView.kind==='custom'&&!visibleTracks.includes(track))toggleShownTrack(track);
+    if(by==='pointer')selectByClick(point);
+    else select(point);
+  };
   useEffect(()=>{
     const wait=pendingSeek.current;if(!wait||!player||!playbackState?.ready)return;
     if(wait.documentId!==state.documentId||Date.now()-wait.at>SPACE_PENDING_MS||!sameBeat(wait.target,repairSelection(controller.getState().score,cursorNow.current))){pendingSeek.current=null;return;}
@@ -1459,7 +1466,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         {!dockCollapsed&&<DockResizeHandle height={dockHeight} min={dockMin} max={dockMax} onHeight={setDockSize} onReset={()=>setDockSize(null)}/>}
         <nav aria-label={t('dock.views_group')}><button aria-pressed={!dockPanelVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>{t('dock.overview')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>{t('dock.mixer')}</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>{t('dock.instrument')}</button><button aria-pressed={keyboardVisible} onClick={()=>chooseDock('keyboard')}>{t('dock.keyboard')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>{t('dock.backing')}</button><button className="dock-collapse" aria-label={t(dockCollapsed?'dock.expand_aria':'dock.hide_aria')} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{t(dockCollapsed?'dock.expand':'dock.hide')}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
-          <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} onMoveTrack={editLocked?undefined:(from,to)=>{if(editBusy)return false;act(edit({type:'moveTrack',track:from,to}));return true;}} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={selectTrack}/>}</div>
+          <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} onMoveTrack={editLocked?undefined:(from,to)=>{if(editBusy)return false;act(edit({type:'moveTrack',track:from,to}));return true;}} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={selectOverviewPosition} onSelect={selectTrack}/>}</div>
           {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           {keyboardVisible&&<LiveInstrumentView panel="keyboard" score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           <div className="workstation-dock-backing" hidden={dockPanelVisible||dockMode!=='backing'}>

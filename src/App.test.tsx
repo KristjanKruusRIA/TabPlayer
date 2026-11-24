@@ -1471,9 +1471,30 @@ it('discards an embedded source prepared after its backing was removed',async()=
     expect(waveformProps().source).toBeNull();expect(waveformProps().effectiveBacking).toBeNull();expect(c.getState()).toBe(before);expect(integration.commits).toHaveBeenCalledTimes(1);
   }finally{load.mockRestore();}
 });
-it('workstation Overview click Space and Escape preserve running playback history and musical range',async()=>{
+it('workstation Overview click Enter and Escape preserve running playback history and musical range',async()=>{
   integration.running=true;const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28]}]});click('Select bar');const before=c.getState(),range=engravingView.mock.lastCall?.[0].editorSelection,player=integration.players[0],native=player.getState(),prepared=player.built,generation=player.generation;expect(native.playing).toBe(true);const grid=screen.getByRole('grid',{name:'Written measure overview'}),cell=within(grid).getByRole('gridcell',{name:'Bass, measure 2, rest'});fireEvent.click(cell);expect(engravingView.mock.lastCall?.[0].editTarget).toEqual({track:1,staff:0,bar:1,voice:0,beat:0});expect(cell).toHaveFocus();
-  expect(fireEvent.keyDown(cell,{key:'ArrowRight'})).toBe(false);const focused=document.activeElement!;expect(engravingView.mock.lastCall?.[0].editTarget).toEqual({track:1,staff:0,bar:1,voice:0,beat:0});const selectView=vi.spyOn(testWorkspace,'setView');selectView.mockClear();expect(fireEvent.keyDown(focused,{key:' '})).toBe(false);expect(engravingView.mock.lastCall?.[0].editTarget).toEqual({track:1,staff:0,bar:2,voice:0,beat:0});expect(selectView).toHaveBeenCalledTimes(1);expect(fireEvent.keyDown(focused,{key:'Escape'})).toBe(false);expect(screen.getByRole('region',{name:'Score workspace'})).toHaveFocus();expect(engravingView.mock.lastCall?.[0].editorSelection).toBe(range);expect(c.getState()).toBe(before);expect(player.getState()).toBe(native);expect(player.built).toBe(prepared);expect(player.generation).toBe(generation);expect(integration.playerOptions).toHaveBeenCalledOnce();expect(integration.destroy).not.toHaveBeenCalled();expectSilentNavigation();
+  expect(fireEvent.keyDown(cell,{key:'ArrowRight'})).toBe(false);const focused=document.activeElement!;expect(engravingView.mock.lastCall?.[0].editTarget).toEqual({track:1,staff:0,bar:1,voice:0,beat:0});const selectView=vi.spyOn(testWorkspace,'setView');selectView.mockClear();expect(fireEvent.keyDown(focused,{key:'Enter'})).toBe(false);expect(engravingView.mock.lastCall?.[0].editTarget).toEqual({track:1,staff:0,bar:2,voice:0,beat:0});expect(selectView).toHaveBeenCalledTimes(1);expect(fireEvent.keyDown(focused,{key:'Escape'})).toBe(false);expect(screen.getByRole('region',{name:'Score workspace'})).toHaveFocus();expect(engravingView.mock.lastCall?.[0].editorSelection).toBe(range);expect(c.getState()).toBe(before);expect(player.getState()).toBe(native);expect(player.built).toBe(prepared);expect(player.generation).toBe(generation);expect(integration.playerOptions).toHaveBeenCalledOnce();expect(integration.destroy).not.toHaveBeenCalled();expectSilentNavigation();
+});
+it('reveals a hidden Overview track at the clicked bar and toggles playback from the focused cell',async()=>{
+  const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28]}]},undefined,
+    {view:{trackView:{kind:'custom',trackIds:['base/0']}}});
+  const before=c.getState(),player=integration.players[0],grid=screen.getByRole('grid',{name:'Written measure overview'});
+  const cell=within(grid).getByRole('gridcell',{name:'Bass, measure 2, rest'});
+  const target={track:1,staff:0,bar:1,voice:0,beat:0};
+  expect(engravingView.mock.lastCall?.[0].visibleTracks).toEqual([0]);
+  fireEvent.mouseDown(cell,{button:0,detail:1});fireEvent.click(cell,{button:0,detail:1});
+  expect(engravingView.mock.lastCall?.[0].editTarget).toEqual(target);
+  expect(engravingView.mock.lastCall?.[0].visibleTracks).toEqual([0,1]);
+  expect(cell).toHaveFocus();
+  expect(integration.chooseCursorOccurrence).toHaveBeenCalledWith(target);
+  await waitFor(()=>expect(integration.seekToCursor).toHaveBeenCalledWith(target));
+  fireEvent.keyDown(cell,{key:' '});
+  expect(integration.play).toHaveBeenCalledWith(target,expect.objectContaining({startTick:3840}));
+  act(()=>player.publish({playing:true}));
+  fireEvent.keyDown(cell,{key:' '});
+  expect(integration.pause).toHaveBeenCalledOnce();
+  expect(cell).toHaveFocus();
+  expect(c.getState()).toBe(before);
 });
 it('workstation marks actual editor operation busy without disabling permitted Stop',async()=>{
   await setup();const shell=document.querySelector('.app-shell')!;expect(shell).toHaveAttribute('aria-busy','false');let release!:()=>void;act(()=>{release=testWorkspace.beginEditorOperation(testWorkspace.getState().active.documentId);});expect(shell).toHaveAttribute('aria-busy','true');expect(screen.getByRole('button',{name:'Stop'})).toBeEnabled();act(()=>release());expect(shell).toHaveAttribute('aria-busy','false');

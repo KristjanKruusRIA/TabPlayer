@@ -97,7 +97,10 @@ try{
   await pick(dialog,'Quantization',grids[8]);
   await dialog.getByLabel('Tuplets').selectOption('none');
   await pick(dialog,'Voices per track','1');
-  await dialog.getByLabel('Guitar and bass as tablature').uncheck();
+  await dialog.getByRole('button',{name:'Choose instrument…'}).click();
+  const instrumentPicker=page.getByRole('dialog',{name:'Choose instrument…',exact:true});
+  await pick(instrumentPicker,'Notation','Standard');
+  await instrumentPicker.getByRole('button',{name:'Apply',exact:true}).click();
   await dialog.getByRole('list',{name:'Parts'}).getByText(/Acoustic Guitar \(steel\): notation/).waitFor();
   await dialog.getByRole('button',{name:'Import',exact:true}).click();
   await dialog.waitFor({state:'detached'});await waitForWorkspaceIdle(page);

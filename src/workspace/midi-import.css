@@ -232,7 +232,7 @@
   overflow: auto;
   font-size: 12px;
   color: var(--tp-text);
-  border-block-end: 1px solid var(--tp-line-subtle);
+  border-block: 1px solid var(--tp-line-subtle);
 }
 .midi-import .midi-track-list {
   display: grid;
@@ -243,25 +243,6 @@
 }
 .midi-import .midi-track-list > p {
   margin-block-start: 8px;
-}
-.midi-import label.midi-track-check {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-}
-.midi-import :is(.midi-track-check, .midi-part-source) input {
-  flex: none;
-  width: auto;
-  margin: 0;
-  accent-color: var(--tp-on);
-}
-.midi-import label.midi-track-check-all {
-  border-block: 1px solid var(--tp-line-subtle);
-  background: var(--tp-raised);
-  color: var(--tp-text);
-  font-weight: 600;
 }
 .midi-import .midi-part-item {
   display: grid;
@@ -317,7 +298,7 @@
   line-height: 1.35;
 }
 .tp-dialog.midi-instrument-picker {
-  width: min(670px, 100%);
+  width: min(740px, 100%);
 }
 .midi-instrument-form {
   display: grid;
@@ -325,6 +306,45 @@
 }
 .midi-instrument-form p {
   margin: 0;
+}
+.midi-instrument-categories .tp-segmented {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.midi-instrument-categories .tp-seg-option {
+  min-height: 40px;
+  white-space: normal;
+}
+.midi-import .midi-open-instrument {
+  justify-self: start;
+}
+.midi-instrument-details {
+  display: grid;
+  gap: 12px;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--tp-line-subtle);
+}
+.midi-instrument-details h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.midi-instrument-names, .midi-instrument-tuning {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+.midi-instrument-names label, .midi-instrument-tuning label {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+.midi-instrument-details :is(input, select) {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--tp-line-strong);
+  background: var(--tp-input);
+  color: var(--tp-text);
 }
 .midi-instrument-sounds {
   display: grid;
@@ -340,7 +360,7 @@
 .midi-instrument-sounds select {
   width: 100%;
   min-width: 0;
-  min-height: 13em;
+  min-height: 10em;
   padding: 4px;
   border: 1px solid var(--tp-line-strong);
   border-radius: var(--tp-radius-s);
@@ -356,7 +376,7 @@
   gap: 8px;
 }
 @media (max-width: 520px) {
-  .midi-instrument-sounds {
+  .midi-instrument-sounds, .midi-instrument-names {
     grid-template-columns: minmax(0, 1fr);
   }
   .midi-instrument-sounds select {

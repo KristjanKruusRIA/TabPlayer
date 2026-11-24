@@ -30,7 +30,11 @@ const openInstrument = (name: string | RegExp) => {
 };
 const assignInstrument = (part: string, kind: string) => {
   const picker = openInstrument(`Instrument for ${part}`);
-  fireEvent.click(picker.getByRole('radio', { name: kind }));
+  fireEvent.click(picker.getByRole('radio', { name: kind === 'Drums' ? 'Drums' : 'Stringed' }));
+  if (kind === 'Bass') {
+    fireEvent.change(picker.getByRole('listbox', { name: 'Sound family' }), { target: { value: '4' } });
+    fireEvent.change(picker.getByRole('listbox', { name: 'MIDI instrument' }), { target: { value: '33' } });
+  }
   fireEvent.click(picker.getByRole('button', { name: 'Apply' }));
 };
 const choose=(input:HTMLInputElement,bytes:Uint8Array,name='riff.mid')=>fireEvent.change(input,{target:{files:[new File([bytes as BlobPart],name)]}});
@@ -39,7 +43,7 @@ it('starts with nothing to import, focus on the file button and the default opti
   const {importButton}=setup();
   expect(screen.getByRole('button',{name:'Choose MIDI file…'})).toHaveFocus();expect(importButton).toHaveAttribute('aria-disabled','true');expect(status()).toHaveTextContent('Nothing to import yet.');
   expect(within(screen.getByRole('radiogroup',{name:'Quantization'})).getByRole('radio',{name:'16th note (1/16)'})).toBeChecked();expect(screen.getByLabelText('Tuplets')).toHaveValue('triplets');
-  expect(within(screen.getByRole('radiogroup',{name:'Voices per track'})).getByRole('radio',{name:'2'})).toBeChecked();expect(screen.getByLabelText('Guitar and bass as tablature')).toBeChecked();
+  expect(within(screen.getByRole('radiogroup',{name:'Voices per track'})).getByRole('radio',{name:'2'})).toBeChecked();expect(screen.getByRole('radio', { name: 'From MIDI' })).toBeChecked();
 });
 
 it('summarises a chosen file, imports it as a GP score named after it and closes once it opens',async()=>{
@@ -57,7 +61,9 @@ it('summarises a chosen file, imports it as a GP score named after it and closes
 it('applies the chosen options to the score it imports',async()=>{
   const {onImport,input,importButton}=setup();
   choose(input,midi);await waitFor(()=>expect(importButton).not.toHaveAttribute('aria-disabled'));
-  fireEvent.click(screen.getByLabelText('Guitar and bass as tablature'));
+  const picker = openInstrument('Choose instrument…');
+  fireEvent.click(picker.getByRole('radio', { name: /^Standard$/ }));
+  fireEvent.click(picker.getByRole('button', { name: 'Apply' }));
   await waitFor(()=>expect(screen.getByRole('list',{name:'Parts'})).toHaveTextContent('notation'));
   fireEvent.click(importButton);await waitFor(()=>expect(onImport).toHaveBeenCalled());
   expect(loadInterchangeScore(onImport.mock.calls[0][1],new Settings()).tracks[0].staves[0].showTablature).toBe(false);
@@ -161,7 +167,7 @@ it('closes from the backdrop, refuses presses while opening without losing focus
   const eighth=within(screen.getByRole('radiogroup',{name:'Quantization'})).getByRole('radio',{name:'Eighth note (1/8)'});
   fireEvent.click(eighth);expect(eighth).not.toBeChecked();
   fireEvent.change(screen.getByLabelText('Tuplets'),{target:{value:'none'}});expect(screen.getByLabelText('Tuplets')).toHaveValue('triplets');
-  fireEvent.click(screen.getByLabelText('Guitar and bass as tablature'));expect(screen.getByLabelText('Guitar and bass as tablature')).toBeChecked();
+  expect(screen.getByRole('button', { name: 'Choose instrument…' })).toBeDisabled();
   fireEvent.click(importButton);fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);
   expect(onImport).toHaveBeenCalledTimes(1);expect(onClose).not.toHaveBeenCalled();
   finish(false);
@@ -281,8 +287,8 @@ it('shows destination choices with a current score, disables add/replace when lo
   fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Destination' })).getByRole('radio', { name: 'Replace track' }));
   // Smart default selects Drumkit (track 1)!
   expect(screen.getByLabelText('Target track')).toHaveValue('1');
-  expect(screen.getByLabelText('Import as drums')).toBeChecked();
-  expect(screen.getByLabelText('Import as drums')).toHaveAttribute('aria-disabled', 'true');
+  expect(screen.getByRole('radio', { name: 'Drums' })).toBeChecked();
+  expect(screen.getByRole('radio', { name: 'Drums' })).toHaveAttribute('aria-disabled', 'true');
 
   // Switch Target track to Guitar (track 0): channel 10 drum MIDI is refused.
   fireEvent.change(screen.getByLabelText('Target track'), { target: { value: '0' } });
@@ -341,7 +347,7 @@ it('offers source drum map presets, file loading with error handling, per-key re
   await waitFor(() => expect(status()).toHaveTextContent('Format 0, 1 part'));
 
   // Enable Import as drums.
-  fireEvent.click(screen.getByLabelText('Import as drums'));
+  fireEvent.click(screen.getByRole('radio', { name: 'Drums' }));
   const mapSelect = screen.getByLabelText('Source drum map');
   expect(mapSelect).toHaveValue('gm');
 
@@ -409,16 +415,16 @@ it('translates new destination and drum mapping controls into Estonian and Germa
     setLanguagePreference('et');
     const et = setupWithScore();
     expect(screen.getByRole('radiogroup', { name: 'Sihtkoht' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Impordi trummidena')).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText('Impordi trummidena'));
+    expect(screen.getByRole('radio', { name: 'Trummid' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Trummid' }));
     expect(screen.getByLabelText('Lähte-trummikaart')).toBeInTheDocument();
     cleanup();
 
     setLanguagePreference('de');
     setupWithScore();
     expect(screen.getByRole('radiogroup', { name: 'Ziel' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Als Schlagzeug importieren')).toBeInTheDocument();
-    fireEvent.click(screen.getByLabelText('Als Schlagzeug importieren'));
+    expect(screen.getByRole('radio', { name: 'Schlagzeug' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'Schlagzeug' }));
     expect(screen.getByLabelText('Quell-Drum-Map')).toBeInTheDocument();
     void et;
   } finally {
@@ -466,36 +472,37 @@ it('imports program-0 bass MIDI as bass tab with auto-fitted Drop D tuning and s
   expect(gtrScore.tracks[0].staves[0].tuning).toEqual([52, 47, 43, 38, 33, 26]);
 });
 
-it('previews and imports checked tracks, and cancels an instrument edit without changing the sound', async () => {
-  const named = (name: string, key: number) => makeTrack([
-    [0, [0xff, 0x03, name.length, ...Array.from(name, letter => letter.charCodeAt(0))]],
-    ...noteLine([[0, 480, key]], 0),
-  ]);
+it('opens the instrument catalog before file selection and applies per-track settings only on Apply', async () => {
   const { onImport, input, importButton } = setup();
-  choose(input, makeMidi(1, 480, [named('Lead', 60), named('Backing', 64)]));
-  await waitFor(() => expect(status()).toHaveTextContent('2 parts'));
-  const audition = openInstrument('Instrument for Backing');
-  fireEvent.change(audition.getByRole('listbox', { name: 'Sound family' }), { target: { value: '3' } });
-  fireEvent.click(audition.getByRole('button', { name: 'Cancel' }));
-  expect(screen.getByRole('button', { name: 'Instrument for Backing' })).toHaveTextContent('Acoustic Grand Piano');
-  expect(screen.getByRole('button', { name: 'Instrument for Backing' })).toHaveFocus();
+  const defaults = openInstrument('Choose instrument…');
+  expect(defaults.getByRole('radio', { name: 'Orchestra' })).toBeInTheDocument();
+  expect(defaults.getByRole('radio', { name: 'MIDI' })).toBeChecked();
+  fireEvent.click(defaults.getByRole('button', { name: 'Cancel' }));
 
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Include Lead' }));
+  choose(input, midi);
   await waitFor(() => expect(status()).toHaveTextContent('1 part'));
-  expect(screen.getByRole('checkbox', { name: 'All tracks' })).toBePartiallyChecked();
-  expect(screen.getByRole('checkbox', { name: 'Include Lead' })).not.toBeChecked();
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Include Backing' }));
-  await waitFor(() => expect(status()).toHaveTextContent('Select a track to import'));
-  expect(importButton).toHaveAttribute('aria-disabled', 'true');
+  let picker = openInstrument(/Instrument for Acoustic Guitar/);
+  fireEvent.change(picker.getByRole('textbox', { name: 'Track name' }), { target: { value: 'Discarded' } });
+  fireEvent.click(picker.getByRole('button', { name: 'Cancel' }));
+  expect(screen.getByRole('button', { name: /Instrument for Acoustic Guitar/ })).toHaveFocus();
+  expect(screen.getByRole('list', { name: 'Parts' })).not.toHaveTextContent('Discarded');
 
-  fireEvent.click(screen.getByRole('checkbox', { name: 'All tracks' }));
-  await waitFor(() => expect(status()).toHaveTextContent('2 parts'));
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Include Lead' }));
-  await waitFor(() => expect(status()).toHaveTextContent('1 part'));
+  picker = openInstrument(/Instrument for Acoustic Guitar/);
+  fireEvent.click(picker.getByRole('radio', { name: 'Stringed' }));
+  fireEvent.change(picker.getByRole('textbox', { name: 'Track name' }), { target: { value: 'Lead guitar' } });
+  fireEvent.change(picker.getByRole('textbox', { name: 'Track short name' }), { target: { value: 'Lead' } });
+  fireEvent.click(picker.getByRole('radio', { name: /^Tablature$/ }));
+  fireEvent.change(picker.getByRole('combobox', { name: 'Tuning' }), { target: { value: 'guitar-6-drop-d' } });
+  fireEvent.click(picker.getByRole('button', { name: 'Apply' }));
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Lead guitar'));
   fireEvent.click(importButton);
   await waitFor(() => expect(onImport).toHaveBeenCalledOnce());
-  const score = loadInterchangeScore(onImport.mock.calls[0][1], new Settings());
-  expect(score.tracks.map(track => [track.name, track.playbackInfo.program])).toEqual([['Backing', 0]]);
+  const track = loadInterchangeScore(onImport.mock.calls[0][1], new Settings()).tracks[0];
+  expect(track.name).toBe('Lead guitar');
+  expect(track.shortName).toBe('Lead');
+  expect(track.staves[0].showTablature).toBe(true);
+  expect(track.staves[0].showStandardNotation).toBe(false);
+  expect(track.staves[0].tuning).toEqual([64, 59, 55, 50, 45, 38]);
 });
 
 it('assigns Guitar and Bass per part on multi-part program-0 MIDI and inherits stringed target track in Replace track mode', async () => {

@@ -35,6 +35,9 @@ export type MidiPartInstrument='auto'|'guitar'|'bass'|'keys'|'drums';
 export interface MidiPartOverride {
   kind?:MidiTrackKind;
   program?:number;
+  name?:string;
+  shortName?:string;
+  notation?:'both'|'score'|'tab';
   /** Open string MIDI pitches, highest string first (matching `staff.tuning` and `tuningPresets`). */
   tuning?:readonly number[];
   /** Whole-octave transpose applied to incoming note keys before fingering or notation (e.g. `-1` for Kontakt C3=60 exports). */
@@ -216,7 +219,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
       :override?.kind==='bass'?(source.program>=32&&source.program<=39?source.program:33)
       :override?.kind==='keys'?(source.program>=24&&source.program<=39?0:source.program)
       :source.program;
-    const name=sourceDisplayName(source.rawPartName,source.multiChannel,effectiveProgram,percussion);
+    const name=override?.name||sourceDisplayName(source.rawPartName,source.multiChannel,effectiveProgram,percussion);
     return {source,percussion,effectiveProgram,override,name};
   });
   const inputDrumMap=prepared.some(item=>item.percussion)?resolveInputDrumMap(options.drumMap,options.drumKeyOverrides):null;
@@ -280,7 +283,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
               ?'guitar'
               :null;
     let kind:MidiTrackKind=percussion?'drums':'keys',open:number[]|null=null,fingering:Map<Chord,Map<number,number>>|null=null;
-    if(!percussion&&options.tablature&&targetInstrument){
+    if(!percussion&&(override?.notation?override.notation!=='score':options.tablature)&&targetInstrument){
       const strings=override?.tuning&&override.tuning.length>0
         ?[...override.tuning].reverse()
         :targetInstrument==='bass'
@@ -290,11 +293,11 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
       if(fingering){open=strings;kind=targetInstrument;}else unplayable++;
     }
 
-    const track=new model.Track();track.name=name;track.shortName=name.slice(0,12);
+    const track=new model.Track();track.name=stripCdataEnd(name);track.shortName=stripCdataEnd(override?.shortName||name.slice(0,12));
     track.playbackInfo.program=percussion?0:program;
     track.playbackInfo.primaryChannel=percussion?9:nextChannel();track.playbackInfo.secondaryChannel=percussion?9:nextChannel();
     const staff=new model.Staff();
-    staff.isPercussion=percussion;staff.showStandardNotation=true;staff.showTablature=!!open;
+    staff.isPercussion=percussion;staff.showStandardNotation=!open||override?.notation!=='tab';staff.showTablature=!!open;
     if(open)staff.stringTuning.tunings=[...open].reverse();
     track.addStaff(staff);score.addTrack(track);
     const keysAll=hits.map(hit=>hit.key).sort((a,b)=>a-b),median=keysAll[keysAll.length>>1];

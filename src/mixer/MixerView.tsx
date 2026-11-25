@@ -60,13 +60,14 @@ export interface MixerViewProps {
   busy:boolean;
   /** `by` says a pointer chose it, so the host can hand the keys back to the score. */
   onSelect:(track:number,by?:'pointer')=>void;
+  onTrackContextMenu?:(track:number,point:{x:number;y:number})=>void;
   player:MixerPlayer|null;
 }
 
 /** The Mixer view: one channel strip per track with a vertical volume fader, pan knob, mute, solo, track selection and
  * current sound, session focus for the selected track, and the master output. A fader, pan or focus drag is heard as it
  * moves; each gesture is saved as one undoable `setTrackMix` through the player, matching the dock mixer. */
-export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerViewProps):React.JSX.Element {
+export function MixerView({score,sounds,selected,busy,onSelect,onTrackContextMenu,player}:MixerViewProps):React.JSX.Element {
   const {t}=useI18n();
   const soundbankStatus=useSoundbankStatus();
   const state=useSyncExternalStore(player?.subscribe??noSubscribe,player?.getState??noState);
@@ -143,7 +144,8 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         const isSelected=track.index===selected,off=busy||!player;
         const volumeControl=mixControl(track.index,gain=>({gain}),value=>player?.setTrackVolume(track.index,value));
         const panControl=mixControl(track.index,value=>({pan:value}),value=>player?.setPan(track.index,value));
-        return <section className={`mixer-strip${isSelected?' selected':''}`} data-selected={isSelected||undefined} key={ids[position]} aria-label={t('mixer.channel_track',{number:track.index+1,name:track.name})}>
+        return <section className={`mixer-strip${isSelected?' selected':''}`} data-selected={isSelected||undefined} key={ids[position]} aria-label={t('mixer.channel_track',{number:track.index+1,name:track.name})}
+          onContextMenu={onTrackContextMenu?event=>{event.preventDefault();event.stopPropagation();onTrackContextMenu(track.index,{x:event.clientX,y:event.clientY});}:undefined}>
           <div className="mixer-strip-head">
             <button type="button" title={track.name} aria-label={t('mixer.track_number_name',{number:track.index+1,name:track.name})} aria-pressed={isSelected} className="mixer-strip-select" onClick={event=>{if(event.detail>0)onSelect(track.index,'pointer');else onSelect(track.index);}}>
               <span className="track-color-swatch" aria-hidden="true" style={{backgroundColor:trackColorHex(track.color)}}/>

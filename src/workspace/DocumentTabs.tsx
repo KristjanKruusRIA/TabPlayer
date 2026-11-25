@@ -1,21 +1,25 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { DocumentTab } from './types';
 import { useI18n } from '../i18n';
+import { ContextMenu } from '../ui';
 
 export interface DocumentTabsProps {
   tabs:readonly DocumentTab[];activeId:string;disabled:boolean;
-  onActivate:(id:string)=>void;onClose:(id:string)=>void;onNew?:()=>void;
+  onActivate:(id:string)=>void;onClose:(id:string)=>void;onCloseAll?:()=>void;onNew?:()=>void;
 }
 
-export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose,onNew}:DocumentTabsProps){
+export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose,onCloseAll,onNew}:DocumentTabsProps){
   const { t } = useI18n();
   const [focusedId,setFocusedId]=useState(activeId);
+  const [tabMenu,setTabMenu]=useState<{tabId:string;x:number;y:number}|null>(null);
   const row=useRef<HTMLDivElement>(null);
   const buttons=useRef(new Map<string,HTMLButtonElement>());
   const previous=useRef({activeId,ids:tabs.map(tab=>tab.id)});
   const focusWithin=useRef(false);
   const focusId=tabs.some(tab=>tab.id===focusedId)?focusedId:activeId;
+
+  useEffect(()=>{if(disabled||!tabMenu||!tabs.some(tab=>tab.id===tabMenu.tabId))setTabMenu(null);},[disabled,tabs,tabMenu]);
 
   useLayoutEffect(()=>{
     const changed=previous.current.activeId!==activeId;
@@ -46,7 +50,8 @@ export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose,onNew}:D
       const title=tab.title.trim()?tab.title:t('workspace.untitled');
       const label=t('workspace.tab_label', { current: index + 1, total: tabs.length, title });
       const id=encodeURIComponent(tab.id),description=`${tab.path??t('workspace.unsaved_score')}${tab.dirty?`; ${t('workspace.unsaved_changes')}`:''}${tab.locked?`; ${t('workspace.finalized')}`:''}`;
-      return <div className="document-tab-item" role="presentation" key={tab.id} data-active={tab.id===activeId}>
+      return <div className="document-tab-item" role="presentation" key={tab.id} data-active={tab.id===activeId}
+        onContextMenu={event=>{if(disabled)return;event.preventDefault();event.stopPropagation();setTabMenu({tabId:tab.id,x:event.clientX,y:event.clientY});}}>
         <button ref={node=>{if(node)buttons.current.set(tab.id,node);else buttons.current.delete(tab.id);}}
           id={`document-tab-${id}`} role="tab" type="button" aria-label={label}
           aria-selected={tab.id===activeId} aria-controls={`document-panel-${id}`} aria-describedby={`document-description-${id}`}
@@ -64,5 +69,10 @@ export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose,onNew}:D
     })}
   </div>
     {onNew&&<button className="document-tab-new" type="button" aria-label={t('palette.command_new')} title={t('palette.command_new')} disabled={disabled} onClick={onNew}>+</button>}
+    {tabMenu&&<ContextMenu x={tabMenu.x} y={tabMenu.y} label={t('context_menu.tab_label')} onClose={()=>setTabMenu(null)} items={[
+      ...(onNew?[{kind:'item' as const,id:'new',label:t('palette.command_new'),shortcut:'Ctrl+N',onSelect:onNew},{kind:'separator' as const,id:'sep-1'}]:[]),
+      {kind:'item' as const,id:'close',label:t('action.close_score'),shortcut:'Ctrl+W',onSelect:()=>onClose(tabMenu.tabId)},
+      ...(onCloseAll?[{kind:'item' as const,id:'close-all',label:t('action.close_all_scores'),onSelect:onCloseAll}]:[]),
+    ]}/>}
   </div>;
 }

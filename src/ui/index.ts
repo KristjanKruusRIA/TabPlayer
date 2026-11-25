@@ -8,6 +8,8 @@ export { Segmented } from './Segmented';
 export type { SegmentedOption, SegmentedProps } from './Segmented';
 export { Dialog } from './Dialog';
 export type { DialogProps } from './Dialog';
+export { ContextMenu, isEditableContextTarget } from './ContextMenu';
+export type { ContextMenuItem, ContextMenuProps } from './ContextMenu';
 export { snapToStep, parseTyped } from './useRange';
 export { busyGuard, busyRegion, busySelect } from './useBusyGuard';
 export type { BusyGuardProps } from './useBusyGuard';

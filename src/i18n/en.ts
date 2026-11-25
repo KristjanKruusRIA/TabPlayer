@@ -3226,6 +3226,22 @@ export const en = {
   'drum_remap.reset_row': 'Reset',
   'drum_remap.apply': 'Apply',
   'drum_remap.cancel': 'Cancel',
+  // Context menus
+  'context_menu.score_label': 'Score actions',
+  'context_menu.track_label': 'Track actions',
+  'context_menu.measure_label': 'Measure actions',
+  'context_menu.tab_label': 'Tab actions',
+  'context_menu.cut': 'Cut',
+  'context_menu.copy': 'Copy',
+  'context_menu.paste': 'Paste',
+  'context_menu.all_track_cut': 'All-track cut',
+  'context_menu.all_track_copy': 'All-track copy',
+  'context_menu.special_paste': 'Special paste…',
+  'context_menu.remove_track_named': 'Remove {track}',
+  'context_menu.duplicate_track_named': 'Duplicate {track}',
+  'context_menu.move_track_up_named': 'Move {track} up',
+  'context_menu.move_track_down_named': 'Move {track} down',
+  'context_menu.go_to_measure': 'Go to measure {measure}',
 } as const;
 
 export type MessageKey = keyof typeof en;

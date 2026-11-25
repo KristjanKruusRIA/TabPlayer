@@ -12,6 +12,10 @@ export interface ScoreOverviewProps {
   onSelect:(track:number,bar:number,by?:'pointer')=>void;onExit:()=>void;
   /** Makes a track the active one, from a click or Enter/Space on its name; without it the name is plain text. */
   onSelectTrack?:(track:number,by?:'pointer')=>void;
+  /** Right-click on a track row header. */
+  onTrackContextMenu?:(track:number,point:{x:number;y:number})=>void;
+  /** Right-click on a measure cell or bar ruler header. */
+  onBarContextMenu?:(track:number,bar:number,point:{x:number;y:number})=>void;
   /** The bars a running loop plays, marked on the ruler and as a bracket down through every track; none, none marked. */
   loop?:LoopPassage|null;
   /** Track colours by row; written measures are tinted with their track's colour, as one band per track. */
@@ -32,8 +36,10 @@ interface GridContentProps {
   model:ScoreOverviewModel;targetTrack:number;targetBar:number;focused:Position;loopBars:ReadonlySet<number>;
   columns:Window;rows:Window;nameWidth:number;colors?:readonly string[];controls?:ScoreOverviewProps['controls'];
   onFocus:(position:Position)=>void;onSelect:ScoreOverviewProps['onSelect'];onSelectTrack?:(track:number,by?:'pointer')=>void;
+  onTrackContextMenu?:ScoreOverviewProps['onTrackContextMenu'];
+  onBarContextMenu?:ScoreOverviewProps['onBarContextMenu'];
 }
-const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused,loopBars,columns,rows,nameWidth,colors,controls,onFocus,onSelect,onSelectTrack}:GridContentProps){
+const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused,loopBars,columns,rows,nameWidth,colors,controls,onFocus,onSelect,onSelectTrack,onTrackContextMenu,onBarContextMenu}:GridContentProps){
   const { t } = useI18n();
   const bars=Array.from({length:columns.last-columns.first},(_,index)=>columns.first+index);
   const tracks=Array.from({length:rows.last-rows.first},(_,index)=>rows.first+index);
@@ -44,7 +50,8 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
       {bars.map(bar=>{
         const section=model.sections.find(section=>section.bar===bar);
         return <div key={bar} role="columnheader" aria-colindex={bar+2} aria-label={`Measure ${bar+1}${section?`, ${section.text}`:''}`}
-          className="score-overview-bar-label" data-loop={loopBars.has(bar)||undefined} style={{left:nameWidth+bar*cellSize}} title={section?.text}>
+          className="score-overview-bar-label" data-loop={loopBars.has(bar)||undefined} style={{left:nameWidth+bar*cellSize}} title={section?.text}
+          onContextMenu={onBarContextMenu?event=>{event.preventDefault();event.stopPropagation();onBarContextMenu(targetTrack,bar,{x:event.clientX,y:event.clientY});}:undefined}>
           {bar+1}{section&&<span className="score-overview-section">{section.text}</span>}
         </div>;
       })}
@@ -56,13 +63,15 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
       const Row=controls?.Row,Lead=controls?.Lead,color=colors?.[row];
       return <div key={row} role="row" aria-rowindex={row+2} className="score-overview-row" data-selected-track={targetTrack===track.index||undefined}
         style={{top:cellSize+row*cellSize,...(color?{'--overview-track':color}:{})} as CSSProperties}>
-        <div role="rowheader" aria-colindex={1} className="score-overview-track" title={track.name} style={{width:nameWidth}}>{Lead&&<Lead track={track.index}/>}<span className="score-overview-track-number" aria-hidden="true">{track.index+1}.</span>{onSelectTrack?<button type="button" className="score-overview-track-name" aria-pressed={targetTrack===track.index} aria-label={t('overview.select_track',{track:track.name})} onClick={event=>{if(event.detail>0)onSelectTrack(track.index,'pointer');else onSelectTrack(track.index);}}>{track.name}</button>:<span className="score-overview-track-name">{track.name}</span>}{Row&&<Row track={track.index}/>}</div>
+        <div role="rowheader" aria-colindex={1} className="score-overview-track" title={track.name} style={{width:nameWidth}}
+          onContextMenu={onTrackContextMenu?event=>{event.preventDefault();event.stopPropagation();onTrackContextMenu(track.index,{x:event.clientX,y:event.clientY});}:undefined}>{Lead&&<Lead track={track.index}/>}<span className="score-overview-track-number" aria-hidden="true">{track.index+1}.</span>{onSelectTrack?<button type="button" className="score-overview-track-name" aria-pressed={targetTrack===track.index} aria-label={t('overview.select_track',{track:track.name})} onClick={event=>{if(event.detail>0)onSelectTrack(track.index,'pointer');else onSelectTrack(track.index);}}>{track.name}</button>:<span className="score-overview-track-name">{track.name}</span>}{Row&&<Row track={track.index}/>}</div>
         {cells.map(bar=>{
           const content=track.cells[bar],selected=targetTrack===track.index&&targetBar===bar;
           return <div key={bar} role="gridcell" aria-colindex={bar+2} aria-label={t('overview.cell_label',{track:track.name,measure:bar+1,content})}
             aria-selected={selected} tabIndex={focused.track===row&&focused.bar===bar?0:-1}
             data-overview-track={row} data-overview-bar={bar} data-content={content}
             className="score-overview-cell" style={{left:nameWidth+bar*cellSize}}
+            onContextMenu={onBarContextMenu?event=>{event.preventDefault();event.stopPropagation();onBarContextMenu(track.index,bar,{x:event.clientX,y:event.clientY});}:undefined}
             onFocus={()=>onFocus({track:row,bar})} onClick={event=>{event.currentTarget.focus();if(event.detail>0)onSelect(track.index,bar,'pointer');else onSelect(track.index,bar);}}>
             <span className="score-overview-occupancy" aria-hidden="true"/>
           </div>;
@@ -72,7 +81,7 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
   </>;
 });
 
-export function ScoreOverview({model,target,playbackBar,onSelect,onSelectTrack,onExit,loop=null,colors,controls}:ScoreOverviewProps) {
+export function ScoreOverview({model,target,playbackBar,onSelect,onSelectTrack,onTrackContextMenu,onBarContextMenu,onExit,loop=null,colors,controls}:ScoreOverviewProps) {
   const nameWidth=controls?(controls.columnWidth??overviewNameWidth+defaultControlsWidth):overviewNameWidth;
   const { t } = useI18n();
   const grid=useRef<HTMLDivElement>(null),pendingFocus=useRef(false);
@@ -132,7 +141,7 @@ export function ScoreOverview({model,target,playbackBar,onSelect,onSelectTrack,o
     className="score-overview" onScroll={readViewport} onKeyDown={keyDown}>
     <div className="score-overview-content" style={{width:nameWidth+model.barCount*cellSize,height:(model.tracks.length+1)*cellSize}}>
       <GridContent model={model} targetTrack={target.track} targetBar={target.bar} focused={focused} loopBars={loopBars} columns={columns} rows={rows}
-        nameWidth={nameWidth} colors={colors} controls={controls} onFocus={focusPosition} onSelect={select} onSelectTrack={onSelectTrack}/>
+        nameWidth={nameWidth} colors={colors} controls={controls} onFocus={focusPosition} onSelect={select} onSelectTrack={onSelectTrack} onTrackContextMenu={onTrackContextMenu} onBarContextMenu={onBarContextMenu}/>
       {loopRuns.map(run=>{const last=Math.min(run.last,model.barCount-1),first=run.first;
         return <div key={first} role="img" aria-label={first===last?t('overview.loop_bar',{first:first+1}):t('overview.loop_bars',{first:first+1,last:last+1})} className="score-overview-loop"
           style={{left:nameWidth+first*cellSize,width:(last-first+1)*cellSize,height:model.tracks.length*cellSize}}/>;})}

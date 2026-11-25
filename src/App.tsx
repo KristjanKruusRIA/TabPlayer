@@ -30,7 +30,7 @@ import { useLoopPassage } from './audio/useLoopPassage';
 import { MixerView } from './mixer/MixerView';
 import { SoundRig } from './rig/SoundRig';
 import { CabinetResponse } from './audio/CabinetResponse';
-import { Segmented } from './ui';
+import { ContextMenu, Segmented, isEditableContextTarget, type ContextMenuItem } from './ui';
 import { AmpGlyph,ExportGlyph,FretboardGlyph,MarkGlyph,MixerGlyph,NoteEntryGlyph,PaletteGlyph,PanelBottomGlyph,PanelRightGlyph,PracticeGlyph,RedoGlyph,ScoreGlyph,UndoGlyph } from './shell/glyphs';
 import { InterpretationPanel } from './audio/InterpretationPanel';
 import { MidiOutPanel } from './audio/MidiOutPanel';
@@ -461,9 +461,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const auditionTuning:TuningAudition=(source,pitches,strum)=>{const heard=tuningAudition(pitches,strum);player?.audition(source,heard.notes,heard.durationMs);};
   // A chord or scale preview sounds through its track's own sound, and only while nothing is playing; it records no edit.
   const auditionHarmony:HarmonyAudition=(track,heard)=>{if(!player||player.getState().playing||player.getState().practice.phase==='countIn')return;const current=controller.getState();player.audition({trackId:trackIdentity(track)},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});};
+  const [contextMenu,setContextMenu]=useState<{kind:'score';x:number;y:number}|{kind:'track';track:number;x:number;y:number}|{kind:'measure';track:number;bar:number;x:number;y:number}|null>(null);
+  useEffect(()=>{setContextMenu(null);},[state.documentId,state.documentEpoch,view]);
   const copyMusic=(mode:ClipboardMode,cut=false)=>{
+    const multiBarFallback=mode==='multiTrack'&&!musicSelection?{kind:'bars' as const,tracks:state.score.tracks.map((_,index)=>index),firstBar:target.bar,lastBar:target.bar}:null;
     const cursorBeat=mode==='singleTrack'&&!musicSelection&&location.beat?singleBeatSelection(state.score,target):null;
-    const effectiveSelection=musicSelection??(cursorBeat?.kind==='range'?cursorBeat:null);
+    const effectiveSelection=musicSelection??multiBarFallback??(cursorBeat?.kind==='range'?cursorBeat:null);
     if(!effectiveSelection||controlsBusy||cut&&editLocked)return;setClipboardError(null);
     try{
       const scope=musicClipSelection(state.score,effectiveSelection,mode),bars=scope as Extract<MusicSelection,{kind:'bars'}>;
@@ -1387,7 +1390,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
   }
   const focusScore=()=>{scorePane.current?.focus({preventScroll:true});};
-  return <div ref={shell} className="app-shell" lang={lang} aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys} onKeyUp={spaceKeyUp} onClickCapture={event=>{if(playPending.current&&event.target instanceof Element&&event.target.closest('.transport-stopbutton'))clearPlayPending();}}>
+  return <div ref={shell} className="app-shell" lang={lang} aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onContextMenu={event=>{if(!isEditableContextTarget(event.target)){event.preventDefault();setContextMenu(null);}}} onKeyDown={selectionKeys} onKeyUp={spaceKeyUp} onClickCapture={event=>{if(playPending.current&&event.target instanceof Element&&event.target.closest('.transport-stopbutton'))clearPlayPending();}}>
     <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure&&!other.contains(disclosure)&&!disclosure.contains(other))other.open=false;});else if(event.target.closest('button')&&!event.target.closest('[data-menu-keep]'))closeCommands(true);}}><nav className="gp-menus" aria-label={t('menu.file_and_history')}><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>{t('action.new')}</button>
@@ -1519,7 +1522,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {!!state.takenBack && <div className="notice" role="status">{t(state.takenBack===1?'document.taken_back_one':'document.taken_back_other',{count:state.takenBack})}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label={t('workspace.score_workspace')} tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
-        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll" onMouseDown={event=>{if(event.target===event.currentTarget)focusScore();}}><div className="paper score-paper-host"><ScoreView holdDraw={drawHold} score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} documentEpoch={state.documentEpoch} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={selectByClick} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
+        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll" onMouseDown={event=>{if(event.target===event.currentTarget)focusScore();}} onContextMenu={event=>{if(event.target===event.currentTarget||(event.target instanceof Element&&event.target.classList.contains('score-paper-host'))){event.preventDefault();event.stopPropagation();setContextMenu({kind:'score',x:event.clientX,y:event.clientY});}}}><div className="paper score-paper-host"><ScoreView holdDraw={drawHold} score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} documentEpoch={state.documentEpoch} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={selectByClick} onContextMenu={point=>setContextMenu({kind:'score',...point})} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
         {lyricsCutNotice&&lyricsCutNotice.edits===state.snapshot.project.edits.length&&<div className="score-hint score-hint-lyrics-cut" role="status">{t(`editor.cut_lyrics_removed_${lyricsCutNotice.count===1?'one':'other'}` as MessageKey,{count:lyricsCutNotice.count})}</div>}
         {droppedNotice&&<div className="score-hint score-hint-dropped" role="status">{t(`editor.entry_queue_stale_${droppedNotice.count===1?'one':'other'}` as MessageKey,{count:droppedNotice.count})}</div>}
         {pendingFret!==null?<div className="score-hint score-hint-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</div>:inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}
@@ -1552,12 +1555,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}
         ampCapture={board=><AmpCapture value={board.effects.amp.capture} busy={editBusy} label={board.name} scope={`${trackId}:${board.name('Amp')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={capture=>{if(!editBusy)board.write(effects=>{if(capture)effects.amp.capture=capture;else delete effects.amp.capture;});}}/>}
         cabinetResponse={board=><CabinetResponse ir={board.effects.cabinet.ir} model={board.effects.cabinet.model} label={board.name} scope={`${trackId}:${board.name('Cabinet')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={ir=>{if(!editBusy)board.write(effects=>{if(ir)effects.cabinet.ir=ir;else delete effects.cabinet.ir;});}}/>}/>}
-      {view==='mixer'&&<MixerView score={state.score} sounds={state.settings.sounds} selected={target.track} busy={controlsBusy} player={player} onSelect={selectTrack}/>}
+      {view==='mixer'&&<MixerView score={state.score} sounds={state.settings.sounds} selected={target.track} busy={controlsBusy} player={player} onSelect={selectTrack} onTrackContextMenu={(trackIndex,point)=>setContextMenu({kind:'track',track:trackIndex,...point})}/>}
       <section className="workstation-dock" aria-label={t('workspace.bottom_dock')} hidden={!dockVisible}>
         {!dockCollapsed&&<DockResizeHandle height={dockHeight} min={dockMin} max={dockMax} onHeight={setDockSize} onReset={()=>setDockSize(null)}/>}
         <nav aria-label={t('dock.views_group')}><button aria-pressed={!dockPanelVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>{t('dock.overview')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>{t('dock.mixer')}</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>{t('dock.instrument')}</button><button aria-pressed={keyboardVisible} onClick={()=>chooseDock('keyboard')}>{t('dock.keyboard')}</button><button aria-pressed={!dockPanelVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>{t('dock.backing')}</button><button className="dock-collapse" aria-label={t(dockCollapsed?'dock.expand_aria':'dock.hide_aria')} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{t(dockCollapsed?'dock.expand':'dock.hide')}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
-          <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} onMoveTrack={editLocked?undefined:(from,to)=>{if(editBusy)return false;act(edit({type:'moveTrack',track:from,to}));return true;}} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={selectOverviewPosition} onSelect={selectTrack}/>}</div>
+          <div className="workstation-dock-tracks" hidden={dockPanelVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} loop={loopPassage} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} onAddTrack={editLocked?undefined:startAddTrack} onMoveTrack={editLocked?undefined:(from,to)=>{if(editBusy)return false;act(edit({type:'moveTrack',track:from,to}));return true;}} onTrackContextMenu={(trackIndex,point)=>setContextMenu({kind:'track',track:trackIndex,...point})} onBarContextMenu={(trackIndex,barIndex,point)=>setContextMenu({kind:'measure',track:trackIndex,bar:barIndex,...point})} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={selectOverviewPosition} onSelect={selectTrack}/>}</div>
           {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           {keyboardVisible&&<LiveInstrumentView panel="keyboard" score={state.score} track={target.track} staff={target.staff} target={target} noteIndex={noteIndex} player={player} onEdit={instrumentEdit} onSelect={selectFromInstrument} busy={controlsBusy} locked={editLocked} string={string}/>}
           <div className="workstation-dock-backing" hidden={dockPanelVisible||dockMode!=='backing'}>
@@ -1568,6 +1571,76 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         </div>
       </section>
     </div>
+    {contextMenu&&(()=>{
+      if(contextMenu.kind==='score'){
+        const hasNote=Boolean(location.beat&&noteAtCursor(location.beat));
+        const items:ContextMenuItem[]=[
+          {kind:'item',id:'cut',label:t('context_menu.cut'),shortcut:'Ctrl+X',disabled:controlsBusy||editLocked||(!musicSelection&&!location.beat),onSelect:()=>copyMusic('singleTrack',true)},
+          {kind:'item',id:'copy',label:t('context_menu.copy'),shortcut:'Ctrl+C',disabled:controlsBusy||(!musicSelection&&!location.beat),onSelect:()=>copyMusic('singleTrack')},
+          {kind:'item',id:'paste',label:t('context_menu.paste'),shortcut:'Ctrl+V',disabled:controlsBusy||editLocked||!clip,onSelect:()=>pasteMusic()},
+          {kind:'item',id:'all-cut',label:t('context_menu.all_track_cut'),shortcut:'Ctrl+Shift+X',disabled:controlsBusy||editLocked||(!musicSelection&&state.score.masterBars.length<=1),onSelect:()=>copyMusic('multiTrack',true)},
+          {kind:'item',id:'all-copy',label:t('context_menu.all_track_copy'),shortcut:'Ctrl+Shift+C',disabled:controlsBusy,onSelect:()=>copyMusic('multiTrack')},
+          {kind:'item',id:'special-paste',label:t('context_menu.special_paste'),shortcut:'Ctrl+Shift+V',disabled:controlsBusy||editLocked||!clip,onSelect:showClipboard},
+          {kind:'separator',id:'sep-1'},
+          {kind:'submenu',id:'bar',label:t('menu.bar'),items:[
+            {kind:'item',id:'bar-props',label:t('menu.bar_properties'),onSelect:()=>displayActions.current.measure(target.bar)},
+            {kind:'item',id:'tempo',label:t('menu.tempo_editor'),onSelect:()=>displayActions.current.tempo(target.bar)},
+            {kind:'separator',id:'bar-sep'},
+            {kind:'item',id:'insert-before',label:t('editor.insert_before'),disabled:editBusy||editLocked,onSelect:()=>act(edit({type:'insertMeasures',beforeBar:target.bar,count:1}))},
+            {kind:'item',id:'insert-after',label:t('editor.insert_after'),disabled:editBusy||editLocked,onSelect:()=>act(edit({type:'insertMeasures',beforeBar:target.bar+1,count:1}))},
+            {kind:'item',id:'remove-bar',label:t('palette.command_removeMeasure'),danger:true,disabled:editBusy||editLocked||state.score.masterBars.length<=1,onSelect:()=>act(edit({type:'removeMeasure',bar:target.bar}))},
+          ]},
+          {kind:'submenu',id:'note',label:t('menu.note'),items:[
+            {kind:'item',id:'note-props',label:t('menu.note_properties'),onSelect:()=>openProperties('note')},
+            {kind:'item',id:'beat-props',label:t('menu.beat_properties'),onSelect:()=>openProperties('beat')},
+            {kind:'separator',id:'note-sep'},
+            {kind:'item',id:'insert-beat',label:t('palette.command_insertBeat'),shortcut:'Insert',disabled:editBusy||editLocked,onSelect:()=>gp8Edit('insertBeat')},
+            {kind:'item',id:'delete',label:t('action.delete'),shortcut:'Delete',disabled:editBusy||editLocked,onSelect:()=>gp8Edit('deleteOrRemove')},
+          ]},
+          {kind:'submenu',id:'effects',label:t('menu.effects'),items:[
+            {kind:'item',id:'chord',label:t('menu.chord'),disabled:controlsBusy||!location.beat,onSelect:()=>openModal('harmony')},
+            {kind:'separator',id:'fx-sep-1'},
+            {kind:'item',id:'ghost',label:t('toolbar.toggle_ghost'),shortcut:'O',disabled:editBusy||editLocked||!hasNote,onSelect:()=>{const command=planTechniqueToggle(state.score,target,indexed?null:string,noteIndex,'ghost');if(command)act(edit(command));}},
+            ...([['palmMute','toolbar.toggle_pm','P'],['letRing','toolbar.toggle_lr','I'],['bend','toolbar.toggle_bend','B'],['vibrato','toolbar.toggle_vibrato','V'],['dead','toolbar.toggle_dead','X']] as const).map(([tech,labelKey,keyHint]):ContextMenuItem=>{
+              const command=editBusy||editLocked?null:planTechniqueToggle(state.score,target,indexed?null:string,noteIndex,tech);
+              return {kind:'item',id:tech,label:t(labelKey),shortcut:keyHint,disabled:!command,onSelect:()=>{if(command)act(edit(command));}};
+            }),
+            {kind:'separator',id:'fx-sep-2'},
+            {kind:'item',id:'palette',label:t('menu.palette_effects'),onSelect:()=>{setPaletteVisible(true);setView('score');}},
+          ]},
+        ];
+        return <ContextMenu x={contextMenu.x} y={contextMenu.y} label={t('context_menu.score_label')} items={items} onClose={()=>setContextMenu(null)}/>;
+      }
+      if(contextMenu.kind==='track'){
+        const ctxTrack=state.score.tracks[contextMenu.track];
+        if(!ctxTrack)return null;
+        const trackLabel=ctxTrack.name||t('track_display.track_fallback',{index:contextMenu.track+1});
+        const items:ContextMenuItem[]=[
+          {kind:'item',id:'add-track',label:t('menu.add_track'),shortcut:'Ctrl+Shift+Ins',disabled:controlsBusy||editLocked,onSelect:startAddTrack},
+          {kind:'item',id:'remove-track',label:t('context_menu.remove_track_named',{track:trackLabel}),shortcut:'Ctrl+Shift+Del',danger:true,disabled:editBusy||editLocked||state.score.tracks.length<=1,onSelect:()=>act(edit({type:'removeTrack',track:contextMenu.track}))},
+          {kind:'item',id:'duplicate-track',label:t('context_menu.duplicate_track_named',{track:trackLabel}),disabled:editBusy||editLocked,onSelect:()=>act(edit({type:'duplicateTrack',track:contextMenu.track}))},
+          {kind:'separator',id:'track-sep-1'},
+          {kind:'item',id:'move-up',label:t('context_menu.move_track_up_named',{track:trackLabel}),shortcut:'Ctrl+Alt+Up',disabled:editBusy||editLocked||contextMenu.track===0,onSelect:()=>act(edit({type:'moveTrack',track:contextMenu.track,to:contextMenu.track-1}))},
+          {kind:'item',id:'move-down',label:t('context_menu.move_track_down_named',{track:trackLabel}),shortcut:'Ctrl+Alt+Down',disabled:editBusy||editLocked||contextMenu.track>=state.score.tracks.length-1,onSelect:()=>act(edit({type:'moveTrack',track:contextMenu.track,to:contextMenu.track+1}))},
+          {kind:'separator',id:'track-sep-2'},
+          {kind:'item',id:'track-props',label:t('menu.track_properties'),onSelect:()=>{selectTrack(contextMenu.track,'pointer');openInspector('track');}},
+          {kind:'item',id:'track-sound',label:t('menu.show_sound'),onSelect:()=>{selectTrack(contextMenu.track,'pointer');setView('sound');}},
+          ...(ctxTrack.isPercussion?[{kind:'item' as const,id:'drum-map',label:t('menu.drum_mapping'),disabled:controlsBusy||editLocked,onSelect:()=>{selectTrack(contextMenu.track,'pointer');setDrumRemapOpen(true);}}]:[]),
+        ];
+        return <ContextMenu x={contextMenu.x} y={contextMenu.y} label={t('context_menu.track_label')} items={items} onClose={()=>setContextMenu(null)}/>;
+      }
+      if(!state.score.masterBars[contextMenu.bar])return null;
+      const items:ContextMenuItem[]=[
+        {kind:'item',id:'go-to',label:t('context_menu.go_to_measure',{measure:contextMenu.bar+1}),onSelect:()=>selectOverviewPosition(contextMenu.track,contextMenu.bar,'pointer')},
+        {kind:'item',id:'bar-props',label:t('menu.bar_properties'),onSelect:()=>{selectOverviewPosition(contextMenu.track,contextMenu.bar,'pointer');displayActions.current.measure(contextMenu.bar);}},
+        {kind:'item',id:'tempo',label:t('menu.tempo_editor'),onSelect:()=>displayActions.current.tempo(contextMenu.bar)},
+        {kind:'separator',id:'measure-sep'},
+        {kind:'item',id:'insert-before',label:t('editor.insert_before'),disabled:editBusy||editLocked,onSelect:()=>act(edit({type:'insertMeasures',beforeBar:contextMenu.bar,count:1}))},
+        {kind:'item',id:'insert-after',label:t('editor.insert_after'),disabled:editBusy||editLocked,onSelect:()=>act(edit({type:'insertMeasures',beforeBar:contextMenu.bar+1,count:1}))},
+        {kind:'item',id:'remove-bar',label:t('palette.command_removeMeasure'),danger:true,disabled:editBusy||editLocked||state.score.masterBars.length<=1,onSelect:()=>act(edit({type:'removeMeasure',bar:contextMenu.bar}))},
+      ];
+      return <ContextMenu x={contextMenu.x} y={contextMenu.y} label={t('context_menu.measure_label')} items={items} onClose={()=>setContextMenu(null)}/>;
+    })()}
     {preferencesOpen&&<Dialog title={t('preferences.title')} onClose={()=>setPreferencesOpen(false)} className="workspace-preferences">
         <AudioOutputSettingsPanel playback={player} busy={editBusy}/>
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>

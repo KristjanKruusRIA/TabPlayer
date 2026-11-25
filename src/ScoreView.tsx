@@ -90,7 +90,7 @@ const accoladeOverlay=(plan:AccoladePlan,metrics:AccoladeMetrics,systems:readonl
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,documentEpoch=0,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,autoFit=false,onAutoFit,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
+export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,loop=null,projection,trackIds,documentEpoch=0,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,editPendingFret=null,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,autoFit=false,onAutoFit,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus,onContextMenu}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -119,6 +119,8 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
   onFontStatus?:(status:{failed:string[];substituted:string[]})=>void;
   /** The document is being changed by several steps in a row (a two-digit fret is written, taken back and written again): nothing is drawn until they are done, so the score is drawn once. */
   holdDraw?:boolean;
+  /** Right-click on the score surface outside direct score symbols. */
+  onContextMenu?:(point:{x:number;y:number})=>void;
 }) {
   // System gaps and staff gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
   const renderKey=engravingRenderKey(engravingProp),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
@@ -939,8 +941,21 @@ export function ScoreView({holdDraw=false,score,track,zoom,profile,onSelect,play
     openSymbol({anchor:symbolAnchor(event),ref,view:symbols.locked?'menu':ref.kind==='clef'?'clef':'text'});
   };
   const symbolContextMenu=(event:ReactMouseEvent)=>{
-    if(!symbols)return;const ref=symbolAt(event);if(!ref)return;
-    event.preventDefault();event.stopPropagation();openSymbol({anchor:symbolAnchor(event),ref,view:'menu'});
+    if(symbols){const ref=symbolAt(event);if(ref){event.preventDefault();event.stopPropagation();openSymbol({anchor:symbolAnchor(event),ref,view:'menu'});return;}}
+    if(!onContextMenu)return;
+    event.preventDefault();event.stopPropagation();
+    if(!current.current.editorSelection){
+      pressPoint.current={x:event.clientX,y:event.clientY};
+      modifiers.current={shift:false,toggle:false,detail:1};
+      if(pagination&&arrangement&&wrapper.current){
+        const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(pagination,arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},editTarget);
+        if(hit){pointerActions.current.downBeat(hit.beat);if(hit.note)pointerActions.current.downNote(hit.note);}
+      }else if(api.current?.boundsLookup){
+        const bounds=api.current.uiFacade.getOffset(null,api.current.canvasElement),hit=api.current.boundsLookup.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);
+        if(hit)pointerActions.current.downBeat(hit);
+      }
+    }
+    onContextMenu({x:event.clientX,y:event.clientY});
   };
   /** The keyboard has no pointer: the menu lists the symbols at the edit target and opens beside its marker. */
   const openTargetMenu=()=>{

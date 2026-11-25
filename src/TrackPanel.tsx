@@ -167,7 +167,7 @@ function ChannelRanges({player,score,track,busy,volume,pan}:{player:DockPlayer;s
   </>;
 }
 
-export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,onSelect,onSelectPosition,player,shown=[],onToggleShown,onAddTrack,onMoveTrack}: {
+export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,onSelect,onSelectPosition,player,shown=[],onToggleShown,onAddTrack,onMoveTrack,onTrackContextMenu,onBarContextMenu}: {
   score:model.Score;selected:number;busy:boolean;view:'overview'|'mixer';target:BeatTarget;onExitOverview:()=>void;
   /** The bars a running loop plays, marked on the overview. */
   loop?:LoopPassage|null;
@@ -178,6 +178,8 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
   onAddTrack?:()=>void;
   /** Gives each dock row a grip that drags its track to a new position (and Alt+Up and Alt+Down on it); called once per drag, with the track's index and where it lands. */
   onMoveTrack?:(from:number,to:number)=>void|boolean;
+  onTrackContextMenu?:(track:number,point:{x:number;y:number})=>void;
+  onBarContextMenu?:(track:number,bar:number,point:{x:number;y:number})=>void;
   player:Pick<NativePlaybackController,'subscribe'|'getState'|'mix'|'setMute'|'setSolo'|'setTrackVolume'|'setPan'|'focus'|'setFocus'>&Partial<Pick<NativePlaybackController,'master'|'setMaster'|'previewMix'>>|null;
 }):React.JSX.Element {
   const state=useSyncExternalStore(player?.subscribe ?? noSubscribe,player?.getState ?? noState);
@@ -210,7 +212,7 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
   const phase=state?.practice?.phase;
   const playbackBar=state?.ready&&!state.error&&(phase==='playing'||phase==='paused')&&!state.practice.countInRemaining&&Number.isInteger(state.measure)&&state.measure>=0&&state.measure<score.masterBars.length?state.measure:null;
   return <section className="track-panel" aria-label="Tracks" style={{'--dock-track-width':`${controls.columnWidth}px`} as CSSProperties}>
-    <div className="track-panel-view" hidden={view!=='overview'}><PlaybackTick.Provider value={state}><DockRows.Provider value={dockRows}><DockShown.Provider value={dockShown}><ScoreOverview model={overview} colors={colors} controls={controls} target={target} loop={loop} playbackBar={playbackBar} onSelect={onSelectPosition} onSelectTrack={onSelect} onExit={onExitOverview}/></DockShown.Provider></DockRows.Provider></PlaybackTick.Provider>
+    <div className="track-panel-view" hidden={view!=='overview'}><PlaybackTick.Provider value={state}><DockRows.Provider value={dockRows}><DockShown.Provider value={dockShown}><ScoreOverview model={overview} colors={colors} controls={controls} target={target} loop={loop} playbackBar={playbackBar} onSelect={onSelectPosition} onSelectTrack={onSelect} onExit={onExitOverview} onTrackContextMenu={onTrackContextMenu} onBarContextMenu={onBarContextMenu}/></DockShown.Provider></DockRows.Provider></PlaybackTick.Provider>
       <div className="score-overview-master" role="group" aria-label={t('audio.master')}><span className="score-overview-master-name">{t('audio.master')}</span><span className="score-overview-mix score-overview-master-mix"><DockMasterControls master={player?.master?.()} disabled={busy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/></span></div></div>
     <div className="track-panel-view track-mixer" role="region" aria-label="Mixer" hidden={view!=='mixer'}>
       <section className="track-channel track-focus" aria-label="Focus">

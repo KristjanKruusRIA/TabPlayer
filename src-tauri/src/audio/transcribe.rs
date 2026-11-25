@@ -1688,8 +1688,9 @@ fn build_transcribed_notes(
                 !snapshot.iter().any(|root| {
                     let diff = cand.pitch.checked_sub(root.pitch);
                     let weak = cand.body < frame_thr * 1.15 || cand.onset < pitch_thr * 0.78;
-                    let strong_19th =
-                        diff == Some(19) && cand.body >= frame_thr * 1.45 && cand.onset >= onset_gate;
+                    let strong_19th = diff == Some(19)
+                        && cand.body >= frame_thr * 1.45
+                        && cand.onset >= onset_gate;
                     root.score > cand.score
                         && matches!(diff, Some(12) | Some(19))
                         && weak
@@ -1777,7 +1778,8 @@ fn build_transcribed_notes(
                 let avg_sc = sum_scores[p_off] / cluster_len as f32;
                 let avg_bd = sum_bodies[p_off] / cluster_len as f32;
                 let avg_on = sum_onsets[p_off] / cluster_len as f32;
-                let majority_keep = cnt > 0 && cnt * 2 >= cluster_len && ev.bodies[p_off] >= frame_thr * 0.70;
+                let majority_keep =
+                    cnt > 0 && cnt * 2 >= cluster_len && ev.bodies[p_off] >= frame_thr * 0.70;
                 let sustained_ring_keep = existing.is_none()
                     && ev.bodies[p_off] >= frame_thr * 1.25
                     && avg_bd >= frame_thr * 1.35
@@ -1790,7 +1792,11 @@ fn build_transcribed_notes(
                     && ev.bodies[p_off] >= frame_thr * 0.80;
                 let single_strong_keep =
                     existing.is_some() && ev.raw_scores[p_off] >= pitch_thr + 0.14;
-                if majority_keep || sustained_ring_keep || consensus_chord_keep || single_strong_keep {
+                if majority_keep
+                    || sustained_ring_keep
+                    || consensus_chord_keep
+                    || single_strong_keep
+                {
                     consensus_cands.push(existing.unwrap_or(ScoredPitchCand {
                         pitch,
                         score: ev.scores[p_off].max(avg_sc),

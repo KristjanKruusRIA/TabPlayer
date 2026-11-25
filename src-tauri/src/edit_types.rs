@@ -1838,14 +1838,12 @@ impl EditCommand {
             Self::RemapPercussion { map, .. } => {
                 if map.is_empty()
                     || map.len() > 128
-                    || map.iter().any(|(from, to)| {
-                        *from > 255 || to.is_some_and(|value| value > 255)
-                    })
+                    || map
+                        .iter()
+                        .any(|(from, to)| *from > 255 || to.is_some_and(|value| value > 255))
                     || map.windows(2).any(|pair| pair[0].0 >= pair[1].0)
                 {
-                    return Err(
-                        "Percussion remap needs 1 to 128 ordered distinct mappings.".into(),
-                    );
+                    return Err("Percussion remap needs 1 to 128 ordered distinct mappings.".into());
                 }
             }
             Self::SetHarmonyChord {

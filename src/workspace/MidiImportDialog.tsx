@@ -1,6 +1,7 @@
 import { useDeferredValue, useId, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { rendering, Settings, type model } from '@coderline/alphatab';
+import '../tremolo-guard';
 import type { TuningAudition } from '../audio/audition';
 import { drumMapPresets, resolveInputDrumMap } from '../audio/drum-map';
 import { drumMapFiles, fileProblem as drumMapFileProblem, mapFromImport, type ImportedDrumMap } from '../audio/drum-map-file';

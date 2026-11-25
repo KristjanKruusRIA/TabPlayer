@@ -463,8 +463,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const auditionHarmony:HarmonyAudition=(track,heard)=>{if(!player||player.getState().playing||player.getState().practice.phase==='countIn')return;const current=controller.getState();player.audition({trackId:trackIdentity(track)},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});};
   const [contextMenu,setContextMenu]=useState<{kind:'score';x:number;y:number}|{kind:'track';track:number;x:number;y:number}|{kind:'measure';track:number;bar:number;x:number;y:number}|null>(null);
   useEffect(()=>{setContextMenu(null);},[state.documentId,state.documentEpoch,view]);
-  const copyMusic=(mode:ClipboardMode,cut=false)=>{
-    const multiBarFallback=mode==='multiTrack'&&!musicSelection?{kind:'bars' as const,tracks:state.score.tracks.map((_,index)=>index),firstBar:target.bar,lastBar:target.bar}:null;
+  const copyMusic=(mode:ClipboardMode,cut=false,allowCurrentBar=false)=>{
+    const multiBarFallback=allowCurrentBar&&mode==='multiTrack'&&!musicSelection?{kind:'bars' as const,tracks:state.score.tracks.map((_,index)=>index),firstBar:target.bar,lastBar:target.bar}:null;
     const cursorBeat=mode==='singleTrack'&&!musicSelection&&location.beat?singleBeatSelection(state.score,target):null;
     const effectiveSelection=musicSelection??multiBarFallback??(cursorBeat?.kind==='range'?cursorBeat:null);
     if(!effectiveSelection||controlsBusy||cut&&editLocked)return;setClipboardError(null);
@@ -1578,8 +1578,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
           {kind:'item',id:'cut',label:t('context_menu.cut'),shortcut:'Ctrl+X',disabled:controlsBusy||editLocked||(!musicSelection&&!location.beat),onSelect:()=>copyMusic('singleTrack',true)},
           {kind:'item',id:'copy',label:t('context_menu.copy'),shortcut:'Ctrl+C',disabled:controlsBusy||(!musicSelection&&!location.beat),onSelect:()=>copyMusic('singleTrack')},
           {kind:'item',id:'paste',label:t('context_menu.paste'),shortcut:'Ctrl+V',disabled:controlsBusy||editLocked||!clip,onSelect:()=>pasteMusic()},
-          {kind:'item',id:'all-cut',label:t('context_menu.all_track_cut'),shortcut:'Ctrl+Shift+X',disabled:controlsBusy||editLocked||(!musicSelection&&state.score.masterBars.length<=1),onSelect:()=>copyMusic('multiTrack',true)},
-          {kind:'item',id:'all-copy',label:t('context_menu.all_track_copy'),shortcut:'Ctrl+Shift+C',disabled:controlsBusy,onSelect:()=>copyMusic('multiTrack')},
+          {kind:'item',id:'all-cut',label:t('context_menu.all_track_cut'),shortcut:'Ctrl+Shift+X',disabled:controlsBusy||editLocked||(!musicSelection&&state.score.masterBars.length<=1),onSelect:()=>copyMusic('multiTrack',true,true)},
+          {kind:'item',id:'all-copy',label:t('context_menu.all_track_copy'),shortcut:'Ctrl+Shift+C',disabled:controlsBusy,onSelect:()=>copyMusic('multiTrack',false,true)},
           {kind:'item',id:'special-paste',label:t('context_menu.special_paste'),shortcut:'Ctrl+Shift+V',disabled:controlsBusy||editLocked||!clip,onSelect:showClipboard},
           {kind:'separator',id:'sep-1'},
           {kind:'submenu',id:'bar',label:t('menu.bar'),items:[

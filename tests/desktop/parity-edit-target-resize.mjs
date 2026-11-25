@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 // THE-208: the blue edit-target box follows the score when the page moves without the score being drawn again. The page is centred in
 // the score area, so a resize of the window, or a panel opened or closed beside it, moves the page. After every such change the box
 // must sit on the first beat, where the green playback cursor is. Run from the checkout root after the desktop test build (see CLAUDE.md).
@@ -69,7 +70,7 @@ try{
   await page.waitForFunction(()=>document.querySelector('.score-hint')?.textContent?.includes('Beat 1'));
   // Zoom: a new render, so the box is placed by the render's own finish.
   await page.setViewportSize({width:1600,height:1000});await measure('1600x1000 before zoom');
-  const zoom=page.getByLabel('Zoom (%)',{exact:true});
+  await showScoreDisplay(page);const zoom=page.getByLabel('Zoom (%)',{exact:true});
   for(const value of [150,75,100]){await zoom.click({clickCount:3});await page.keyboard.type(String(value));await page.keyboard.press('Tab');await waitForWorkspaceIdle(page);await measure(`zoom ${value}`);}
   // Layout: another mode, and back.
   const mode=page.getByRole('combobox',{name:'Display mode',exact:true});

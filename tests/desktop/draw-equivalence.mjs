@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import { existsSync,readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -121,7 +122,7 @@ export async function runDrawEquivalence(page,cdp,{label='score'}={}) {
   await check('scrolled to the end',{changes:false});
   await page.evaluate(()=>{document.querySelector('.paper-scroll').scrollTop=0;});await sleep(500);await check('scrolled back',{changes:false});
   // Layouts that place the lines by content (the screen layouts) move their line breaks when a bar gets wider or narrower; the page layouts are painted whole.
-  const layout=async value=>{await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption(value);await sleep(700);await quiet();await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=0;host.scrollLeft=0;});await sleep(300);};
+  const layout=async value=>{await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption(value);await sleep(700);await quiet();await page.evaluate(()=>{const host=document.querySelector('.paper-scroll');host.scrollTop=0;host.scrollLeft=0;});await sleep(300);};
   for(const mode of ['verticalScreen','horizontalScreen','verticalPage']) {
     lazyLayout=mode==='verticalScreen';
     await layout(mode);await check(`${mode}: shown`,{changes:false});

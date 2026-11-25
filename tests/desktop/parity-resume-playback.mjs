@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import {execFile,execFileSync} from 'node:child_process';
 import {promisify} from 'node:util';
@@ -103,7 +104,7 @@ export async function runResumePlaybackAcceptance({execute=false,buildPath}={}){
     const profiles=readdirSync(directory).filter(name=>/^profile-[0-9]+$/.test(name)&&!profilesBefore.has(name));assert.equal(profiles.length,1,'One fresh profile from the unchanged harness');result.profileDirectory=resolve(directory,profiles[0]);
     // The cursor (read from the status bar) stands in for the Fret field's draft: it is state of the retained shell that a resume must not disturb.
     await moveCursor(page,{string:6});
-    for(const [beat,fret]of [[1,5],[2,7]]){await moveCursor(page,{beat});await setFret(page,fret);await idle();}await button('Undo');await moveCursor(page,{beat:1});await page.getByLabel('Zoom (%)',{exact:true}).fill(String(expectedView.zoom));assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),'115');const cursorBefore=(await cursorPosition(page)).text;
+    for(const [beat,fret]of [[1,5],[2,7]]){await moveCursor(page,{beat});await setFret(page,fret);await idle();}await button('Undo');await moveCursor(page,{beat:1});await showScoreDisplay(page);await page.getByLabel('Zoom (%)',{exact:true}).fill(String(expectedView.zoom));assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),'115');const cursorBefore=(await cursorPosition(page)).text;
     const before=await snapshot(),owner={...before.active},record=before.documents[0];assert.deepEqual(record.snapshot.project.edits,history.slice(0,1));assert.deepEqual(record.snapshot.redoEdit,history[1]);assert.equal(record.snapshot.dirty,true);assert.equal(record.snapshot.canRedo,true);const beforeNative=await nativeStatus(owner,value=>value.ready&&!value.error&&!value.playing&&value.tick===0),beforeCheckpoint=await running(before);step('Before close',{workspace:before,native:beforeNative,checkpoint:beforeCheckpoint,baseSha256:digest(JSON.stringify(record.snapshot.project.base))});
     await installDestroyFault();
     owned();step('WM_CLOSE',execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',closeHelper,'-AppProcessId',String(identity.pid),'-AppExecutable',executable,'-AppStartTicks',identity.startTicks],{encoding:'utf8',windowsHide:true,timeout:20000}).trim());owned();step('Actual Unsaved Discard',(await promisify(execFile)('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File',answerHelper,'-AppProcessId',String(identity.pid),'-AppExecutable',executable,'-AppStartTicks',identity.startTicks,'-Decision','Discard'],{encoding:'utf8',windowsHide:true,timeout:20000})).stdout.trim());

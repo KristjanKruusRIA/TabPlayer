@@ -252,14 +252,14 @@ it('steps bars from the toolbar and shows the selected track, bar, signature and
   fireEvent.click(screen.getByRole('button',{name:'First bar'}));expect(player.seekToMeasure).toHaveBeenLastCalledWith(0);
 });
 
-it('lets the position display change track, go to a bar, open measure settings and mark bar completion',()=>{
+it('lets the position display change track, go to a bar, open measure settings, open tempo editor and mark bar completion',()=>{
   const {player}=playerFor(snapshot({measure:1}));
-  const onTrack=vi.fn(),onGoTo=vi.fn(),onMeasure=vi.fn();
-  const view=render(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false} display={{track:'1. Guitar',tracks:['1. Guitar','2. Bass'],trackIndex:0,onTrack,onGoTo,onMeasure,signatureAt:()=>'4/4',completionAt:bar=>bar===1?{kind:'short',voice:2}:{kind:'complete'}}}/>);
+  const onTrack=vi.fn(),onGoTo=vi.fn(),onMeasure=vi.fn(),onTempo=vi.fn();
+  const view=render(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false} display={{track:'1. Guitar',tracks:['1. Guitar','2. Bass'],trackIndex:0,onTrack,onGoTo,onMeasure,onTempo,signatureAt:()=>'4/4',completionAt:bar=>bar===1?{kind:'short',voice:2}:{kind:'complete'}}}/>);
   fireEvent.change(screen.getByRole('combobox',{name:'Current track'}),{target:{value:'1'}});expect(onTrack).toHaveBeenCalledWith(1);
   expect(screen.getByRole('img',{name:'Voice 2 is too short'})).toHaveTextContent('!');
   fireEvent.click(screen.getByRole('button',{name:'Time signature 4/4 (click to change)'}));expect(onMeasure).toHaveBeenLastCalledWith(1);
-  fireEvent.click(screen.getByRole('button',{name:'Tempo 120 (click to change)'}));expect(onMeasure).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button',{name:'Tempo 120 (click to change)'}));expect(onTempo).toHaveBeenLastCalledWith(1);
   const bar=screen.getByRole('button',{name:/Bar 2/});fireEvent.click(bar);
   const goTo=screen.getByRole('dialog',{name:'Go to bar'});const input=screen.getByRole('spinbutton',{name:'Go to bar'});
   expect(input).toHaveValue(2);expect(input).toHaveFocus();
@@ -268,9 +268,9 @@ it('lets the position display change track, go to a bar, open measure settings a
   expect(screen.queryByRole('dialog',{name:'Go to bar'})).toBeNull();expect(bar).toHaveFocus();
   fireEvent.click(bar);fireEvent.keyDown(screen.getByRole('spinbutton',{name:'Go to bar'}),{key:'Escape'});
   expect(screen.queryByRole('dialog',{name:'Go to bar'})).toBeNull();expect(onGoTo).toHaveBeenCalledTimes(1);
-  view.rerender(<Transport cursor={cursor} selection={null} player={player} measures={4} busy display={{track:'1. Guitar',tracks:['1. Guitar','2. Bass'],trackIndex:0,onTrack,onGoTo,onMeasure,signatureAt:()=>'4/4'}}/>);
+  view.rerender(<Transport cursor={cursor} selection={null} player={player} measures={4} busy display={{track:'1. Guitar',tracks:['1. Guitar','2. Bass'],trackIndex:0,onTrack,onGoTo,onMeasure,onTempo,signatureAt:()=>'4/4'}}/>);
   fireEvent.change(screen.getByRole('combobox',{name:'Current track'}),{target:{value:'1'}});expect(onTrack).toHaveBeenCalledTimes(1);
-  fireEvent.click(screen.getByRole('button',{name:'Tempo 120 (click to change)'}));expect(onMeasure).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button',{name:'Tempo 120 (click to change)'}));expect(onTempo).toHaveBeenCalledTimes(1);
 });
 
 it('typed practice speed: sets on Enter or blur, restores on Escape, steps presets and updates the field',()=>{

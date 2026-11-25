@@ -34,7 +34,7 @@ function connectError(message: string, t: (key: MessageKey, params?: Record<stri
 /**
  * Lights the notes of the selected track on a wired Fretlight guitar (THE-77). Experimental: never tried on a real guitar.
  * Nothing is looked for or opened until Connect is pressed, never at launch and never because the section was opened. The
- * session lives outside the panel, so the lights follow the score while the View menu is closed.
+ * session lives outside the panel, so the lights follow the score while Preferences is closed.
  */
 export function FretlightPanel({ bridge = nativeFretlight, trackStrings }: FretlightPanelProps): React.JSX.Element {
   const { t } = useI18n();

@@ -230,6 +230,31 @@
         [42, [44, 41, 42]], [46, [46, 47]], [52, [65]], [57, [58]],
         [92, [46]], [96, [66]], [98, [59]]
       ]
+    },
+    {
+      "id": "ggd-okw-brutal-gm",
+      "name": "GetGood Drums One Kit Wonder: Brutal (GM)",
+      "state": "unverified",
+      "revision": 1,
+      "source": "Key numbers read from the library's General MIDI mapping settings screen. They are not from the maker's documentation and have not been checked against the library's official documentation.",
+      "rows": [
+        [29, null], [30, null], [31, 37], [33, null], [34, null], [35, 36], [36, 36], [37, 37],
+        [38, 38], [39, null], [40, 38], [41, 48], [42, 42], [43, 48], [44, 44], [45, 43],
+        [46, 46], [47, 43], [48, 50], [49, 49], [50, 50], [51, 51], [52, 52], [53, 53],
+        [54, null], [55, 55], [56, null], [57, 57], [58, null], [59, 51], [60, null], [61, null],
+        [62, null], [63, null], [64, null], [65, null], [66, null], [67, null], [68, null], [69, null],
+        [70, null], [71, null], [72, null], [73, null], [74, null], [75, null], [76, null], [77, null],
+        [78, null], [79, null], [80, null], [81, null], [82, null], [83, null], [84, null], [85, null],
+        [86, null], [87, null], [91, 38], [92, 58], [93, 51], [94, null], [95, null], [96, 74],
+        [97, 66], [98, 95], [99, null], [100, null], [101, null], [102, null], [103, null], [104, null],
+        [105, null], [106, null], [107, null], [108, null], [109, null], [110, null], [111, null], [112, null],
+        [113, null], [114, null], [115, 49], [116, 49], [117, null], [118, null], [119, null], [120, null],
+        [122, null], [123, null], [124, null], [125, null], [126, 51], [127, 53]
+      ],
+      "candidates": [
+        [42, [41, 10, 54]], [46, [56, 58]], [49, [59]], [57, [59]],
+        [92, [46]], [97, [69]], [98, [69]]
+      ]
     }
   ]
 }

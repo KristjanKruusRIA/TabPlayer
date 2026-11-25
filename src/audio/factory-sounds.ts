@@ -1,4 +1,4 @@
-import { defaultEffects } from '../document-settings';
+import { completeSound, defaultEffects } from '../document-settings';
 import type { EffectBlock, FxSettings, TrackSound } from '../edit-types';
 
 /** The kinds of playing the factory sounds are grouped by. */
@@ -90,4 +90,30 @@ export const factorySounds:readonly FactorySound[]=definitions.map(({effects:_ef
 export function factorySound(id:string,voiceId:string|null=null):TrackSound|null {
   const definition=definitions.find(entry=>entry.id===id);
   return definition?build(definition,voiceId):null;
+}
+
+const canonical=(value:unknown):string=>Array.isArray(value)?`[${value.map(canonical).join(',')}]`:value&&typeof value==='object'?`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical((value as Record<string,unknown>)[key])}`).join(',')}}`:JSON.stringify(value)??'null';
+/** Canonical serialized effects key for matching a track sound against factory/preset chains regardless of key insertion order or instrument voice. */
+export const canonicalEffectsKey=(sound:TrackSound):string=>canonical(completeSound(sound).effects);
+
+const factoryKeys=new Map<string,string>();
+const earlierFactoryKeys=new Map<string,string>();
+function cachedFactoryKey(cache:Map<string,string>,id:string,buildSound:(id:string)=>TrackSound|null):string {
+  let key=cache.get(id);
+  if(key===undefined){const sound=buildSound(id);key=sound?canonicalEffectsKey(sound):'';cache.set(id,key);}
+  return key;
+}
+
+/** Returns the current factory sound entry whose preset and effects chain match `sound`, or null when none matches. */
+export function matchFactorySound(sound?:TrackSound):FactorySound|null {
+  if(!sound)return null;
+  const {presetId}=completeSound(sound),key=canonicalEffectsKey(sound);
+  return factorySounds.find(item=>item.presetId===presetId&&cachedFactoryKey(factoryKeys,item.id,factorySound)===key)??null;
+}
+
+/** Returns an earlier factory sound definition matching `sound` for legacy compatibility naming, or null when none matches. */
+export function matchEarlierFactorySound(sound?:TrackSound):FactorySound|null {
+  if(!sound)return null;
+  const {presetId}=completeSound(sound),key=canonicalEffectsKey(sound);
+  return earlierFactorySounds.find(item=>item.presetId===presetId&&cachedFactoryKey(earlierFactoryKeys,item.id,earlierFactorySound)===key)??null;
 }

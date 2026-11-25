@@ -6,6 +6,7 @@ import {validateHarmonyChord} from './harmony/chord-source';
 import {validateScaleDiagram} from './harmony/scale-diagram';
 import {masterProblem,validateBackingSettings} from './document-settings';
 import {validateRatioTempoPoints} from './editor/tempo-types';
+import {validateRemapPercussionMap} from './editor/drum-remap';
 import {parseTrackColor} from './track-color';
 import {validatePartialCapo} from './editor/partial-capo';
 import {validateBanjoDrone} from './editor/banjo-drone';
@@ -31,6 +32,7 @@ const shapes:Record<string,readonly string[]>={
   addPitchedTrack:['name','program'],addPercussionTrack:['name','program'],
   addPitchedNote:['target','pitch'],setPitchedNote:['target','noteIndex','pitch'],
   addPercussionNote:['target','articulation'],setPercussionNote:['target','noteIndex','articulation'],
+  remapPercussion:['track','map'],
   removeNoteByIndex:['target','noteIndex'],setNoteTechniquesByIndex:['target','noteIndex','patch'],
   setNoteLinkByIndex:['from','to','kind'],
   setTrackLyrics:['track','visible','lines'],setBeatGestures:['target','patch'],setOttava:['from','to','ottava'],
@@ -213,6 +215,7 @@ export function validateParityCommand(value:unknown):void {
   }
   if(type==='setBacking'&&edit.backing!==null)validateBackingSettings(edit.backing);
   if(type==='replaceTempoAutomations')validateRatioTempoPoints(edit.points);
+  if(type==='remapPercussion')validateRemapPercussionMap(edit.map);
   if('target'in edit)target(edit.target);
   for(const key of ['noteIndex','bar','track','staff'])if(key in edit)integer(edit[key]);
   for(const key of ['pitch','program'])if(key in edit)integer(edit[key],127);

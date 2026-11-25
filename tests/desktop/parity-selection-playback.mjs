@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls,hidePractice,moveCursor,selectionText,styleSection,setFret} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -150,7 +151,7 @@ try{
   await selectTiePassage();await button('Play selection');await assertRange(960,2880);await (await playbackField('Seek measure')).fill('2');await button('Seek');await waitStatus(value=>value.range===null&&value.playing&&value.tick>=3840);await stopPlayback();result.checks.clearAndSeekRetireFiniteRange=true;
 
   // Score projection and actual pointer/keyboard selection stay canonical.
-  await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await cursor(1,2);
+  await showScoreDisplay(page);await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await cursor(1,2);
   const fret=page.locator('[aria-label="Music notation"] svg text').filter({hasText:/^5$/}).first();await fret.scrollIntoViewIfNeeded();await fret.click();assert.match(await page.locator('.statusbar-track').innerText(),/Selection guitar/);assert.match(await page.locator('.statusbar-position').innerText(),/Bar 1 · Beat 2/);
   await page.keyboard.press('Shift+ArrowRight');assert.match(await selectionText(page),/2 notes · 2 beats/);await (await playbackCombo('Selection occurrence')).selectOption({label:'Measure 1, occurrence 2 → measure 1, occurrence 2'});await button('Play selection');await assertRange(8640,10560);await waitStatus(value=>value.practice.phase==='ended');await stopPlayback();result.checks.canonicalZoomAllTracksPointerAndShift=true;
   for(const width of [960,1280,1600])await picture('selected-playback-layout',width);

@@ -1,0 +1,318 @@
+.tp-dialog.tempo-editor-dialog {
+  width: min(920px, calc(100vw - 32px));
+  max-height: min(84vh, 640px, calc(100vh - 32px));
+}
+
+.tempo-editor-dialog .tp-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.tempo-editor-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tempo-editor-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tempo-editor-type-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tp-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tempo-editor-type-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--tp-line-strong);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-raised);
+  color: var(--tp-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tempo-editor-topbar button,
+.tempo-editor-settings button {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--tp-line-strong);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-raised);
+  color: var(--tp-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.tempo-editor-topbar button:hover:enabled,
+.tempo-editor-settings button:hover:enabled {
+  border-color: var(--ws-accent, var(--tp-edit));
+}
+
+.tempo-editor-topbar button:disabled,
+.tempo-editor-settings button:disabled {
+  opacity: 0.55;
+  color: var(--tp-muted);
+  cursor: default;
+}
+
+.tempo-editor-main {
+  display: grid;
+  grid-template-columns: 272px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.tempo-editor-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.tempo-editor-settings h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--tp-text);
+}
+
+.tempo-editor-pos-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.tempo-editor-pos-row label,
+.tempo-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--tp-muted);
+}
+
+.tempo-editor-settings select,
+.tempo-editor-bpm-input input {
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 6px;
+  border: 1px solid var(--tp-line-subtle);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-input);
+  color: var(--tp-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.tempo-editor-bpm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tempo-editor-bpm-input {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 6px;
+}
+
+.tempo-editor-bpm-suffix {
+  font-size: 12px;
+  color: var(--tp-muted);
+  white-space: nowrap;
+}
+
+.tempo-editor-tap {
+  flex: none;
+  font-weight: 600;
+}
+
+.tempo-editor-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--tp-error);
+}
+
+.tempo-editor-transition {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--tp-line-subtle);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-raised);
+}
+
+.tempo-editor-transition legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--tp-muted);
+}
+
+.tempo-editor-transition .check,
+.tempo-editor-controls .check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--tp-text);
+  font-size: 12px;
+}
+
+.tempo-editor-transition input[type="radio"],
+.tempo-editor-controls input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--ws-accent, var(--tp-edit));
+}
+
+.tempo-editor-point-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.tempo-editor-graph-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tempo-editor-scroll {
+  overflow: auto;
+  border: 1px solid var(--tp-line-subtle);
+  border-radius: var(--tp-radius-s);
+  background: #101216;
+  scrollbar-color: var(--tp-line-strong) var(--tp-panel);
+}
+
+.tempo-editor-svg {
+  display: block;
+  user-select: none;
+  cursor: crosshair;
+}
+
+.tempo-ruler-bg {
+  fill: #1b2029;
+}
+
+.tempo-master-track {
+  fill: color-mix(in srgb, var(--ws-accent, #5588dd) 38%, #1d2738);
+}
+
+.tempo-current-bar {
+  fill: rgb(255 255 255 / 0.04);
+}
+
+.tempo-ruler-text,
+.tempo-axis-text {
+  fill: var(--tp-muted);
+  font-size: 10px;
+  font-family: var(--tp-font-mono);
+}
+
+.tempo-master-label {
+  fill: var(--tp-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tempo-grid-bar {
+  stroke: rgb(255 255 255 / 0.16);
+  stroke-width: 1;
+}
+
+.tempo-grid-beat {
+  stroke: rgb(255 255 255 / 0.07);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.tempo-grid-bpm {
+  stroke: rgb(255 255 255 / 0.08);
+  stroke-width: 1;
+}
+
+.tempo-curve-fill {
+  fill: color-mix(in srgb, var(--ws-accent, #5c8df6) 22%, transparent);
+}
+
+.tempo-curve-line {
+  fill: none;
+  stroke: var(--ws-accent, #5c8df6);
+  stroke-width: 2;
+}
+
+.tempo-point-value {
+  fill: var(--tp-text);
+  font-size: 11px;
+  font-family: var(--tp-font-mono);
+  pointer-events: none;
+}
+
+.tempo-point-handle {
+  fill: #16191e;
+  stroke: var(--tp-text);
+  stroke-width: 2;
+  cursor: grab;
+}
+
+.tempo-point-handle.is-selected {
+  fill: var(--ws-accent, #5c8df6);
+  stroke: #ffffff;
+}
+
+.tempo-editor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tempo-editor-zoom {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--tp-muted);
+}
+
+.tempo-editor-zoom input[type="range"] {
+  accent-color: var(--ws-accent, var(--tp-edit));
+}
+
+@media (max-width: 760px) {
+  .tempo-editor-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,3 +1,4 @@
+import { openPreferences, closePreferences } from './workstation-commands.mjs';
 import { closeWelcomeLibrary,waitForWorkspaceIdle } from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -7,7 +8,7 @@ import { launch,connect,stop } from './harness.mjs';
 
 // MIDI input (THE-70, U16), slice 2: with note entry on, a chord played on the test MIDI port is written at the cursor as one
 // edit and the cursor moves on; one undo takes the whole chord back and puts the cursor back; nothing is written while note
-// entry is off or while a menu is open (and a chord lost that way is counted); closing the menu with Escape returns the focus to
+// entry is off or while Preferences is open (and a chord lost that way is counted); closing the menu with Escape returns the focus to
 // the menu's own button. Injection feeds the same sink the driver's callback calls, so this does not exercise midir or a real device.
 const id=launch({TABPLAYER_MIDI_IN_TEST:'1'});let browser;
 const TEST='Test MIDI input';
@@ -23,14 +24,14 @@ try{
   const placement=step=>[step.string,step.fret];
   const targetOf=edit=>edit.type==='sequence'?edit.commands.find(step=>step.type==='setNote').target:edit.target;
 
-  // Start the test input from the View menu.
+  // Start the test input from Preferences.
   const viewSummary=page.locator('details.command-menu > summary',{hasText:/^View$/});
-  await viewSummary.click();
+  await openPreferences(page);
   const panel=page.locator('details.midi-capture-panel');await panel.locator('summary').click();
   await panel.getByLabel('Input').selectOption(TEST);
   await panel.getByRole('button',{name:'Start MIDI input'}).click();await panel.getByText(`Listening to ${TEST}.`).waitFor();
   // Pressing a button in the section did not close the menu.
-  assert.equal(await page.evaluate(()=>document.querySelector('details.midi-capture-panel').parentElement.closest('details').open),true,'the View menu is still open');
+  assert.equal(await page.locator('.workspace-preferences').isVisible(),true,'Preferences is still open');
   const workspace=page.getByRole('region',{name:'Score workspace'});
   const start=(await edits()).length;
 
@@ -41,17 +42,16 @@ try{
   assert.equal((await edits()).length,start,'note entry is off, so the chord was only shown');
   assert.equal(await panel.getByText(/did not reach the score\./).count(),0,'a chord shown with note entry off is not counted as lost');
 
-  // With note entry on but the menu still open the chord is not written behind it, and is counted.
-  await workspace.focus();await page.keyboard.press('n');
+  // With note entry on, Preferences keeps the chord from editing the score.
+  await closePreferences(page);await workspace.focus();await page.keyboard.press('n');
+  await openPreferences(page);await panel.locator('summary').click();
   await play([...noteOn(40),...noteOn(47),...noteOn(52)]);
   await panel.getByText('1 chord did not reach the score.').waitFor();
-  assert.equal((await edits()).length,start,'a chord is not written while a menu is open');
+  assert.equal((await edits()).length,start,'a chord is not written while Preferences is open');
 
-  // Escape closes the menu and its section, and the focus goes to the menu's own button, not the hidden section.
-  await viewSummary.focus();await page.keyboard.press('Escape');
-  const after=await page.evaluate(()=>({menu:document.querySelector('details.command-menu > summary').parentElement.open,section:document.querySelector('details.midi-capture-panel').open,focus:document.activeElement?.tagName+':'+document.activeElement?.textContent,view:[...document.querySelectorAll('details.command-menu > summary')].find(node=>node.textContent==='View')?.parentElement.open}));
-  assert.equal(after.view,false,'the View menu closed');assert.equal(after.section,false,'the section closed with it');
-  assert.equal(after.focus,'SUMMARY:View','the focus is on the View menu button');
+  await closePreferences(page);
+  assert.equal(await panel.count(),0,'Escape closes Preferences and its sections');
+  assert.ok(await viewSummary.evaluate(el=>el===document.activeElement),'focus returns to View');
 
   // With note entry on and no menu open the chord is one edit, with the placement a guitarist would play.
   await page.waitForTimeout(200);
@@ -87,14 +87,14 @@ try{
   assert.equal((await edits()).length,count);
 
   // Write notes while the score plays: with the setting off, playback pauses typed keys and chords, nothing waits for later, and stopping restores entry at once.
-  // The checkbox is in the View menu next to this section and does not close the menu.
-  const openPanel=async()=>{await viewSummary.click();if(!await panel.evaluate(node=>node.open))await panel.locator('summary').click();};
-  const closeMenu=async()=>{await viewSummary.focus();await page.keyboard.press('Escape');await page.waitForTimeout(200);};
+  // The checkbox is in Preferences next to this section.
+  const openPanel=async()=>{await openPreferences(page);if(!await panel.evaluate(node=>node.open))await panel.locator('summary').click();};
+  const closeMenu=async()=>{await closePreferences(page);await page.waitForTimeout(200);};
   await openPanel();
   const setting=page.getByLabel('Write notes while the score plays');
   assert.equal(await setting.isChecked(),true,'writing while the score plays is on by default');
   await setting.click();assert.equal(await setting.isChecked(),false);
-  assert.equal(await page.evaluate(()=>document.querySelector('details.midi-capture-panel').parentElement.closest('details').open),true,'the View menu stays open when the setting is changed');
+  assert.equal(await page.locator('.workspace-preferences').isVisible(),true,'Preferences stays open when the setting is changed');
   await panel.getByText(/Chords are not written while the score plays/).waitFor();
   await closeMenu();
   const status=()=>invoke('audio_status');
@@ -102,6 +102,9 @@ try{
   const lostBefore=await lost(),editsBefore=(await edits()).length;
   await workspace.focus();await page.keyboard.press('Space');
   await until(status,value=>value.playing,'the score plays');
+  await page.getByRole('button',{name:'Pause',exact:true}).waitFor();
+  await workspace.focus();
+  assert.equal(await page.locator('.note-entry-toggle').getAttribute('aria-pressed'),'true');
   await play([...noteOn(40),...noteOn(47)]);
   await page.keyboard.press('e');await page.keyboard.press('g');
   await page.getByText(/Note entry is paused while the score plays/).waitFor();

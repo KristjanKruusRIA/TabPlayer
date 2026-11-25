@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from './project';
@@ -188,7 +189,7 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
   // The latest add-track handler, read at click time, so a new handler on each render does not rebuild the rows and drop focus or a drag.
   const addTrack=useRef(onAddTrack);addTrack.current=onAddTrack;const canAddTrack=Boolean(onAddTrack);
   const controls=useMemo(()=>({
-    width:268,
+    columnWidth:480,
     corner:<span className="dock-tracks-title">{canAddTrack&&<button type="button" className="dock-add-track" aria-label={t('overview.add_track')} title={t('overview.add_track')} disabled={busy} onClick={()=>addTrack.current?.()}><PlusGlyph/></button>}<span className="score-overview-corner-label">{t('dock.tracks')}</span></span>,
     header:<span className="score-overview-mix" aria-hidden="true"><span className="score-overview-mix-head" title={t('overview.col_shown_hint')}><EyeGlyph open/></span><span className="score-overview-mix-head" title={t('overview.col_mute')}><MuteGlyph width={14} height={14}/></span><span className="score-overview-mix-head" title={t('overview.col_solo')}><SoloGlyph width={14} height={14}/></span><span className="score-overview-mix-head">{t('overview.col_volume')}</span><span className="score-overview-mix-head">{t('overview.col_pan')}</span></span>,
     Lead:TrackInstrument,Row:TrackMixRow,
@@ -208,7 +209,7 @@ export function TrackPanel({score,selected,busy,view,target,loop,onExitOverview,
   const focusReady=Boolean(state?.ready&&!state.error);
   const phase=state?.practice?.phase;
   const playbackBar=state?.ready&&!state.error&&(phase==='playing'||phase==='paused')&&!state.practice.countInRemaining&&Number.isInteger(state.measure)&&state.measure>=0&&state.measure<score.masterBars.length?state.measure:null;
-  return <section className="track-panel" aria-label="Tracks">
+  return <section className="track-panel" aria-label="Tracks" style={{'--dock-track-width':`${controls.columnWidth}px`} as CSSProperties}>
     <div className="track-panel-view" hidden={view!=='overview'}><PlaybackTick.Provider value={state}><DockRows.Provider value={dockRows}><DockShown.Provider value={dockShown}><ScoreOverview model={overview} colors={colors} controls={controls} target={target} loop={loop} playbackBar={playbackBar} onSelect={onSelectPosition} onSelectTrack={onSelect} onExit={onExitOverview}/></DockShown.Provider></DockRows.Provider></PlaybackTick.Provider>
       <div className="score-overview-master" role="group" aria-label={t('audio.master')}><span className="score-overview-master-name">{t('audio.master')}</span><span className="score-overview-mix score-overview-master-mix"><DockMasterControls master={player?.master?.()} disabled={busy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/></span></div></div>
     <div className="track-panel-view track-mixer" role="region" aria-label="Mixer" hidden={view!=='mixer'}>

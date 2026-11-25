@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,selectionText,propertiesSection,moveCursor,cursorPosition} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -62,7 +63,7 @@ try{
   await button('Transpose selection');assert.equal((await snapshot()).project.edits.at(-1).selection.kind,'range');
   await button('Undo');await sel('Select track');await sel('Enable let ring');await sel('Enable palm mute');await sel('Re-finger selection');
   await button('Export GP');const refingered=await music();assert.deepEqual(refingered.notes,transposed.notes);assert.ok(refingered.guitar.every(note=>note.letRing&&note.palmMute));result.refingerPitchPreserved=true;
-  await button('Track 2: Bass6');await button('Track 1: Guitar9');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');
+  await button('Track 2: Bass6');await button('Track 1: Guitar9');await showScoreDisplay(page);await page.getByLabel('Zoom (%)',{exact:true}).fill('115');
   await moveCursor(page,{bar:2});await details('Insert & remove measures');await change('Measures to insert',2);await button('Insert before');
   assert.equal((await cursorPosition(page)).bar,4);assert.equal((await snapshot()).project.edits.at(-1).count,2);
   await button('Export GP');const inserted=await music();assert.equal(inserted.bars,6);assert.ok(inserted.aligned.flat().every(count=>count===6));result.allTracksAligned=true;

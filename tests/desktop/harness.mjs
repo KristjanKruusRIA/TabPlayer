@@ -24,7 +24,7 @@ export function launch(environment={},files=[]) {
   }).trim());
 }
 export function stop(id) {
-  execFileSync('powershell.exe',['-NoProfile','-Command','$p=Get-Process -Id $env:TABPLAYER_SMOKE_PID -ErrorAction Stop; if($p.Path -ne $env:TABPLAYER_SMOKE_EXE){throw "Unexpected test process"}; Stop-Process -Id $p.Id; $null=$p.WaitForExit(5000)'],{env:{...process.env,TABPLAYER_SMOKE_PID:String(id),TABPLAYER_SMOKE_EXE:executable}});
+  execFileSync('powershell.exe',['-NoProfile','-Command','$p=Get-Process -Id $env:TABPLAYER_SMOKE_PID -ErrorAction SilentlyContinue; if(!$p){return}; if($p.Path -ne $env:TABPLAYER_SMOKE_EXE){throw "Unexpected test process"}; Stop-Process -Id $p.Id; $null=$p.WaitForExit(5000)'],{env:{...process.env,TABPLAYER_SMOKE_PID:String(id),TABPLAYER_SMOKE_EXE:executable}});
 }
 export async function connect() {
   for(let attempt=0;attempt<100;attempt++) {

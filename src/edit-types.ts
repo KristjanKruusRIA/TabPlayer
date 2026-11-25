@@ -160,6 +160,7 @@ export type SingleCommand = LyricsCommand | GestureCommand | BarGestureCommand |
   | { type: 'setPitchedNote'; target: BeatTarget; noteIndex: number; pitch: number }
   | { type: 'addPercussionNote'; target: BeatTarget; articulation: number }
   | { type: 'setPercussionNote'; target: BeatTarget; noteIndex: number; articulation: number }
+  | { type: 'remapPercussion'; track: number; map: [number, number | null][] }
   | { type: 'removeNoteByIndex'; target: BeatTarget; noteIndex: number }
   | { type: 'setNoteTechniquesByIndex'; target: BeatTarget; noteIndex: number; patch: NoteTechniques }
   | { type: 'setNoteLinkByIndex'; from: IndexedNoteTarget; to: IndexedNoteTarget|null; kind: LinkKind }

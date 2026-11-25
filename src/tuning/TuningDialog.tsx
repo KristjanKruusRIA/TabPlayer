@@ -223,7 +223,6 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, staffCount 
   const errorId = 'tuning-dialog-error';
   const shown = error ?? rowError?.message ?? (refused ? (refusal || t('tuning_dialog.refused')) : null);
   const actions = <>
-    <button type="button" className="tp-button tuning-saved" onClick={() => setLibrary(true)}>{t('tuning_dialog.saved')}</button>
     <button type="button" className="tp-button" onClick={onClose}>{t('dialog.cancel')}</button>
     {mode === 'draft'
       ? <button type="submit" className="tp-button primary">{t('tuning.use_tuning')}</button>
@@ -258,6 +257,7 @@ export function TuningDialog({ pitches, name, mode = 'track', staff, staffCount 
             {!selectedPreset && <option value="custom" disabled>{t('tuning_dialog.custom')}</option>}
             {groupPresets.map(preset => <option key={preset.id} value={preset.id}>{tuningPresetName(preset, lang)}</option>)}
           </select>
+          <button type="button" className="tp-button tuning-saved" onClick={() => setLibrary(true)}>{t('tuning_dialog.saved')}</button>
         </div>
         <div className="tuning-notes-line">
           <label className="tuning-dialog-label" htmlFor="tuning-dialog-notes">{t('tuning_dialog.notes')}</label>

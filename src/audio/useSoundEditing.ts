@@ -7,7 +7,7 @@ import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo, AudioDiagnostics } from './bridge';
 import type { MessageKey } from '../i18n/en';
 import { audioErrorKey } from './audio-errors';
-import { factorySound, factorySounds } from './factory-sounds';
+import { factorySound, factorySounds, matchFactorySound } from './factory-sounds';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
 import { drumKitFor } from '../editor/drum-kits';
 import { blockNames, presetName, soundPreset, voiceDisplayName } from './sound-model';
@@ -162,9 +162,10 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const library=useSyncExternalStore(subscribeSoundLibrary,soundLibrary),clipboard=useSyncExternalStore(subscribeSoundClipboard,soundClipboard);
   const [chosen,setChosen]=useState(''),[name,setName]=useState(''),[status,setStatus]=useState(''),[confirming,setConfirming]=useState(false);
   const entry=library.find(item=>item.name===chosen),savedSelect=useRef<HTMLSelectElement>(null);
-  const [factoryChoice,setFactoryChoice]=useState(''),factory=factorySounds.find(item=>item.id===factoryChoice),factoryNote=useId();
+  const activeFactory=matchFactorySound(current),activeFactoryId=activeFactory?.id??'';
+  const [factoryChoice,setFactoryChoice]=useState(()=>activeFactoryId),factory=factorySounds.find(item=>item.id===factoryChoice),factoryNote=useId();
   /** Applies a named factory sound to the track, keeping its instrument. */
-  const applyFactoryId=(id:string)=>{const found=factorySounds.find(item=>item.id===id);if(!found)return;const applied=found.name,appliedTo=trackId;const next=factorySound(found.id,current.voiceId)!;if(current.pickup)next.pickup=current.pickup;if(current.plugin)next.plugin=structuredClone(current.plugin);void save(next).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
+  const applyFactoryId=(id:string)=>{const found=factorySounds.find(item=>item.id===id);if(!found)return Promise.resolve(false);const applied=found.name,appliedTo=trackId;const next=factorySound(found.id,current.voiceId)!;if(current.pickup)next.pickup=current.pickup;if(current.plugin)next.plugin=structuredClone(current.plugin);return save(next).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);return ok;});};
   const applyFactory=()=>applyFactoryId(factoryChoice);
   /** Applies a saved sound by name. */
   const applySaved=(savedName:string)=>{const item=library.find(candidate=>candidate.name===savedName);if(!item)return;const applied=item.name,appliedTo=trackId;const next=structuredClone(item.sound);if(current.plugin)next.plugin=structuredClone(current.plugin);void save(next).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
@@ -172,7 +173,8 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const shownTrack=useRef(trackId);
   // A drag being heard ends with its track, and with the view.
   useEffect(()=>()=>{void liveApi.current.end();},[trackId]);
-  useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);setPreviewChoice('');setFactoryChoice('');},[trackId]);
+  useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);setPreviewChoice('');setFactoryChoice(activeFactoryId);},[trackId]);
+  useEffect(()=>{setFactoryChoice(activeFactoryId);},[activeFactoryId]);
   // A preview lasts only while its track's panel is shown.
   useEffect(()=>()=>{if(previewer?.soundPreview()?.track===trackId)void Promise.resolve(previewer.previewSound(trackId,null)).catch(()=>{});},[previewer,trackId]);
   useEffect(()=>{if(!shown&&previewer?.soundPreview()?.track===trackId){previewRequest.current++;setPreviewChoice('');void Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e)));}},[shown,previewer,trackId]);
@@ -224,7 +226,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     playbackState,current,devices,error,setError,status,setStatus,busy,playback:playback??null,record,save,
     trackId,first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
     chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,saveNamed,renameChosen,deleteChosen,applySaved,
-    factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,applyFactoryId,
+    activeFactory,factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,applyFactoryId,
     previewer,previewChoice,previewLabel,showingPreview,previewSelect,previewReturn,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,
     /** Locks or unlocks the track's sound against sound automations in the score, as one undoable edit; choosing the value it already has records nothing. */
     setLocked:(locked:boolean)=>locked===!!current.locked?Promise.resolve(false):save(current,locked),

@@ -155,7 +155,7 @@ try{
   assert.deepEqual(errors,[]);
   // Every toolbar group at the widths people use and at each breakpoint of the toolbar, in English, Estonian and German (the captions differ).
   // The language is chosen the way the app keeps it, in the browser storage, and the page is reloaded; the session is resumed.
-  const sweepWidths=language=>{const fit=toolbarFit[language],points=new Set([960,1101,1280,1366,1440,1536,1600,1920,2560]);
+  const sweepWidths=language=>{const fit=toolbarFit[language],points=new Set([960,1101,1280,1365,1366,1367,1440,1536,1600,1920,2560]);
     for(const edge of [fit.transportRowBelow,fit.singleRowFrom,fit.keyInRowFrom,toolbarFit.en.singleRowFrom])for(const delta of [-1,0,1])points.add(edge+delta);
     return [...points].sort((a,b)=>a-b);};
   const sweep={};

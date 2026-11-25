@@ -7,6 +7,12 @@
   z-index: 3;
 }
 
+.score-edit-target[data-tab="true"] {
+  border: 2px solid #d4961a;
+  background: rgba(245, 195, 68, 0.28);
+  border-radius: 3px;
+}
+
 .score-edit-entry {
   position: absolute;
   left: -2px;

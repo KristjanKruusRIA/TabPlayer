@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,clickWorkstationButton,styleSection,closeScoreStyle} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
@@ -28,12 +29,12 @@ try{
   const group=label=>page.getByRole('radiogroup',{name:label,exact:true});
   const chosen=async label=>(await group(label).getByRole('radio',{checked:true}).innerText()).trim();
   const choose=(label,option)=>group(label).getByRole('radio',{name:option,exact:true}).click();
-  const view=async()=>[await control('Display mode').inputValue(),await control('Zoom (%)').inputValue(),await control('Displayed tracks').inputValue()];
+  const view=async()=>{await showScoreDisplay(page);return [await control('Display mode').inputValue(),await control('Zoom (%)').inputValue(),await control('Displayed tracks').inputValue()];};
   const settled=async expected=>{await page.waitForFunction(async expected=>{const read=label=>[...document.querySelectorAll('label')].find(node=>node.firstChild?.textContent===label)?.querySelector('select,input')?.value;return JSON.stringify([read('Display mode'),read('Zoom (%)'),read('Displayed tracks')])===JSON.stringify(expected);},expected);};
   await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   assert.deepEqual(await view(),['parchment','100','selected']);
 
-  await control('Zoom (%)').fill('130');await control('Displayed tracks').selectOption('all');await settled(['parchment','130','all']);
+  await showScoreDisplay(page);await control('Zoom (%)').fill('130');await control('Displayed tracks').selectOption('all');await settled(['parchment','130','all']);
   // Default view is in the Score style dialog (Song tab, Page and view).
   await styleSection(page,'Default view');
   await page.getByRole('button',{name:'Use current view',exact:true}).click();

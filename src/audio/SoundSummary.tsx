@@ -11,6 +11,7 @@ import { AmpGlyph } from '../shell/glyphs';
 import { SoundPanel } from './SoundPanel';
 import { PluginPanel } from './PluginPanel';
 import { PickupOptions, SoundSourceOptions } from './SoundSourceOptions';
+import { factoryCategories, factorySounds } from './factory-sounds';
 import { useSoundbankStatus } from './soundbank-store';
 import { useSoundEditing } from './useSoundEditing';
 import { availablePickupsForVoice, presetIds, soundPreset, localizedBlockName, localizedPresetName } from './sound-model';
@@ -24,7 +25,7 @@ type Props = { trackId: string; program?: number; percussion?: boolean; sound?: 
 /**
  * The Sounds section of the Track tab as one row of choices and a strip: the sound source and preset (each one undoable change),
  * a chip for every pedal that is switched on, and a button for the sound editor. The editor, with every pedal, the sound library,
- * copy and paste and the output device, opens in a dialog and is the same `SoundPanel` the inspector used to show inline. The track's plug-in slot,
+ * and copy and paste, opens in a dialog and is the same `SoundPanel` the inspector used to show inline. The track's plug-in slot,
  * with the drum map of a drum instrument, is a separate, smaller Plug-in dialog (`PluginPanel`); only one of the two is open at a time.
  */
 export function SoundSummary(props: Props) {
@@ -32,7 +33,7 @@ export function SoundSummary(props: Props) {
   const { trackId, program = 0, sound, onEdit, playback, busy = false, shown = true, percussion = false, status } = props;
   const soundbankStatus = useSoundbankStatus();
   const editing = useSoundEditing({ trackId, sound, onEdit, playback, busy, shown });
-  const { current, order, first, save, setVoice, setPickup } = editing;
+  const { current, order, first, save, setVoice, setPickup, activeFactory, applyFactoryId } = editing;
   const pickups = availablePickupsForVoice(current.voiceId, program, percussion, current.drumKit, soundbankStatus);
   const [open, setOpen] = useState<{ kind: 'sound'; block?: EffectBlock } | { kind: 'plugin' } | null>(null);
   const { request, onRequestHandled } = props;
@@ -45,6 +46,7 @@ export function SoundSummary(props: Props) {
       <label>{t('sound.sound_source')}<CommitSelect value={current.voiceId ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : setVoice(chosen || null))}><SoundSourceOptions percussion={percussion} program={program} drumKit={current.drumKit} voiceId={current.voiceId} status={soundbankStatus}/></CommitSelect></label>
       {pickups.length > 1 && <label>{t('sound.pickup')}<CommitSelect value={current.pickup ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : setPickup((chosen || undefined) as PickupPosition | undefined))}><PickupOptions pickups={pickups}/></CommitSelect></label>}
       <label>{t('sound.sound_preset')}<CommitSelect value={current.presetId} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy ? false : save(soundPreset(chosen as TrackSound['presetId'], current.voiceId)))}>{presetIds.map(id => <option value={id} key={id}>{localizedPresetName(id, lang)}</option>)}</CommitSelect></label>
+      <label>{t('sound.factory_sound')}<CommitSelect value={activeFactory?.id ?? ''} target={trackId} busy={busy} {...busySelect(busy)} onCommit={chosen => (busy || !chosen ? false : applyFactoryId(chosen))}><option value="">{t('sound.choose_factory_sound')}</option>{factoryCategories.map(category => <optgroup key={category} label={category}>{factorySounds.filter(item => item.category === category).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}</CommitSelect></label>
     </BusyFieldset>
     <div className="sound-plugin-row">
       <span className="sound-plugin-row-label">{t('sound_summary.plugin_label')}</span>

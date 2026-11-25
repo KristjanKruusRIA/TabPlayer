@@ -586,4 +586,74 @@ describe('importMidi partOverrides (guitar/bass/keys and custom tunings)',()=>{
     ]);
     expect(staff.bars[1].voices[0].beats[0].notes.map(n=>[n.string,n.fret])).toEqual([[5,12]]);
   });
+
+  it('imports The Primer keyswitches on Sineater-style Kontakt 5-string bass (Force String + techniques) and leaves them alone when opt-in toggle is off',()=>{
+    // Playable notes G1(31), A1(33), E2(40), F#2(42) with octaveShift -1 -> G0(19), A0(21), E1(28), F#1(30).
+    // Low keyswitches in The Primer: 5 (Force lowest string index 0 -> F#0), 3 (Force string index 2 -> F#1), 4 (Force string index 1 -> C#1).
+    const events=line([
+      [0,960,5],[960,480,3],[1440,480,4],
+      [0,480,37],[480,480,42],[960,480,42],[1440,480,45],
+    ],0);
+    const bytes=file(0,480,[track(events)]);
+
+    // Off by default: low MIDI 3..5 remain unplayable for F#0..E2 bass tuning -> falls back to unplayable_tab.
+    const disabled=run(bytes,{partOverrides:{0:{kind:'bass',tuning:[40,35,30,25,18],octaveShift:-1}}});
+    expect(disabled.summary.notes).toEqual([{code:'unplayable_tab',count:1}]);
+    expect(disabled.score.tracks[0].staves[0].showTablature).toBe(false);
+
+    // Opt-in enabled with The Primer: keyswitches stripped before octaveShift, forced strings honored.
+    const enabled=run(bytes,{
+      partOverrides:{0:{kind:'bass',tuning:[40,35,30,25,18],octaveShift:-1}},
+      articulations:{enabled:true,preset:'the-primer',octaveShift:0},
+    });
+    expect(enabled.summary.notes).toEqual([{code:'articulations_applied',count:4}]);
+    const staff=enabled.score.tracks[0].staves[0];
+    expect(staff.showTablature).toBe(true);
+    // Note pitches after -1 oct: 25(F#0+7=C#1), 30(F#0+12=F#1), 30(F#1+0=F#1), 33(C#1+8=A1)
+    // Open array in alphaTab is lowest-first? open = [18(F#0),25(C#1),30(F#1),35(B1),40(E2)]
+    // String numbers in alphaTab are 1-based from lowest (string 1 = lowest F#0, string 5 = highest E2):
+    // Keyswitch 5 -> anchor highest offset 4 -> open idx 0 -> string 1 (F#0)
+    // Keyswitch 3 -> anchor highest offset 2 -> open idx 2 -> string 3 (F#1)
+    // Keyswitch 4 -> anchor highest offset 3 -> open idx 1 -> string 2 (C#1)
+    expect(staff.bars[0].voices[0].beats.map(b=>[b.notes[0].string,b.notes[0].fret])).toEqual([
+      [1,7], // 25 forced onto string 1 (18+7) instead of open string 2!
+      [1,12], // 30 forced onto string 1 (18+12) instead of open string 3!
+      [3,0], // 30 forced onto string 3 (30+0)
+      [2,8], // 33 forced onto string 2 (25+8) instead of fret 3 on string 3
+    ]);
+  });
+
+  it('applies SubMission Audio (Default) keyswitches and preserves techniques across GP8 round-trip',()=>{
+    const events=line([
+      [0,480,127],[0,480,17],[0,480,42],
+      [480,480,9],[480,480,44],
+      [960,480,127],[960,480,8],[960,480,42],
+      [1440,480,11],[1440,480,44],
+      [1920,480,3],[1920,480,4],[1920,480,37],
+      [2400,480,6],[2400,480,49],
+      [2880,480,10],[2880,480,50],
+      [3360,480,14],[3360,480,37],
+    ],0);
+    const bytes=file(0,480,[track(events)]);
+    const res=run(bytes,{
+      partOverrides:{0:{kind:'bass',tuning:[40,35,30,25,18],octaveShift:-1}},
+      articulations:{enabled:true,preset:'submission-audio-default',octaveShift:0},
+    });
+    const gpBytes=exportGpInterchange(res.score,new Settings());
+    const reloaded=loadInterchangeScore(gpBytes,new Settings());
+    const bar0=reloaded.tracks[0].staves[0].bars[0].voices[0].beats;
+    const bar1=reloaded.tracks[0].staves[0].bars[1].voices[0].beats;
+
+    expect(bar0[0].notes[0]).toMatchObject({string:1,fret:12,isPalmMute:true});
+    expect(bar0[0].notes[0].isHammerPullOrigin).toBe(true);
+    expect(bar0[2].notes[0]).toMatchObject({string:1,fret:12,harmonicType:model.HarmonicType.Natural,harmonicValue:12});
+    expect(bar0[2].notes[0].slideOutType).toBe(model.SlideOutType.Legato);
+
+    expect(bar1[0].slap).toBe(true);
+    expect(bar1[0].notes[0].isDead).toBe(true);
+    expect(bar1[1].pop).toBe(true);
+    expect(bar1[2].tap).toBe(true);
+    expect(bar1[3].deadSlapped).toBe(true);
+    expect(bar1[3].notes[0].isDead).toBe(true);
+  });
 });

@@ -5,10 +5,10 @@ import { describeSelection } from '../engine';
 import { nextLinkedNote } from './techniques';
 
 /** The Guitar Pro 8 edit and cursor keys that are not note entry. */
-export type Gp8Technique = 'hammerPull' | 'slide' | 'vibrato' | 'palmMute' | 'letRing' | 'dead';
+export type Gp8Technique = 'hammerPull' | 'slide' | 'vibrato' | 'palmMute' | 'letRing' | 'dead' | 'ghost' | 'bend' | 'tie';
 
 export type Gp8Key =
-  | { kind: 'edit'; edit: 'removeNote' | 'deleteBeats' | 'insertBeat' | 'eraseNotes' }
+  | { kind: 'edit'; edit: 'removeNote' | 'deleteOrRemove' | 'deleteBeats' | 'insertBeat' | 'eraseNotes' }
   | { kind: 'cursor'; edge: 'barStart' | 'barEnd' | 'scoreStart' | 'scoreEnd'; extend: boolean }
   | { kind: 'voice'; voiceIndex: number }
   | { kind: 'track'; direction: -1 | 1 }
@@ -49,7 +49,7 @@ export function gp8Key(event: KeyLike): Gp8Key | null {
     if (key === 'g' || key === 'G') return { kind: 'goToBar' };
   }
 
-  // Technique keys: H, S, V, P, I, X (no Ctrl, no Meta, no Alt)
+  // Technique keys: H, S, V, P, I, X, and (without Shift) O (ghost), B (bend), L (tie; Shift+L stays Loop)
   if (!ctrl && !alt) {
     const k = key.toLowerCase();
     if (k === 'h') return { kind: 'technique', technique: 'hammerPull' };
@@ -58,14 +58,19 @@ export function gp8Key(event: KeyLike): Gp8Key | null {
     if (k === 'p') return { kind: 'technique', technique: 'palmMute' };
     if (k === 'i') return { kind: 'technique', technique: 'letRing' };
     if (k === 'x') return { kind: 'technique', technique: 'dead' };
+    if (!shift) {
+      if (k === 'o') return { kind: 'technique', technique: 'ghost' };
+      if (k === 'b') return { kind: 'technique', technique: 'bend' };
+      if (k === 'l') return { kind: 'technique', technique: 'tie' };
+    }
   }
 
-  // Existing edit and Home/End cursor keys: reject Alt
+  // Edit and Home/End cursor keys: reject Alt
   if (alt) return null;
   const home = key === 'Home';
   if (key === 'Backspace') return !ctrl && !shift ? { kind: 'edit', edit: 'removeNote' } : null;
-  if (key === 'Delete') return shift ? { kind: 'edit', edit: ctrl ? 'eraseNotes' : 'deleteBeats' } : null;
-  if (key === 'Insert') return ctrl && !shift ? { kind: 'edit', edit: 'insertBeat' } : null;
+  if (key === 'Delete') return shift ? { kind: 'edit', edit: ctrl ? 'eraseNotes' : 'deleteBeats' } : (!ctrl ? { kind: 'edit', edit: 'deleteOrRemove' } : null);
+  if (key === 'Insert') return !shift ? { kind: 'edit', edit: 'insertBeat' } : null;
   if (key !== 'Home' && key !== 'End') return null;
   if (ctrl) return shift ? null : { kind: 'cursor', edge: home ? 'scoreStart' : 'scoreEnd', extend: false };
   return { kind: 'cursor', edge: home ? 'barStart' : 'barEnd', extend: shift };
@@ -167,6 +172,65 @@ export function planTechniqueToggle(
     case 'dead': {
       if (!note.isStringed) return null;
       return patchNote({ dead: !note.isDead });
+    }
+    case 'ghost': {
+      return patchNote({ ghost: !note.isGhost });
+    }
+    case 'bend': {
+      if (!note.isStringed) return null;
+      const active = (note.bendType ?? 0) !== 0;
+      return patchNote({
+        bend: active
+          ? null
+          : {
+              type: 1,
+              style: 0,
+              points: [
+                { offset: 0, value: 0 },
+                { offset: 60, value: 4 },
+              ],
+            },
+      });
+    }
+    case 'tie': {
+      if (note.isTieOrigin) {
+        return indexed
+          ? { type: 'setNoteLinkByIndex', from: { target, noteIndex: beat.notes.indexOf(note) }, to: null, kind: 'tie' }
+          : { type: 'setNoteLink', from: { target, string: note.string }, to: null, kind: 'tie' };
+      }
+      if (note.tieOrigin) {
+        const from = address(note.tieOrigin);
+        return 'noteIndex' in from
+          ? { type: 'setNoteLinkByIndex', from, to: null, kind: 'tie' }
+          : { type: 'setNoteLink', from, to: null, kind: 'tie' };
+      }
+      const dest = nextLinkedNote(note);
+      if (dest && dest.realValue === note.realValue) {
+        const to = address(dest);
+        return indexed
+          ? { type: 'setNoteLinkByIndex', from: { target, noteIndex: beat.notes.indexOf(note) }, to: to as IndexedNoteTarget, kind: 'tie' }
+          : { type: 'setNoteLink', from: { target, string: note.string }, to: to as NoteTarget, kind: 'tie' };
+      }
+      for (let b = target.bar; b >= 0; b--) {
+        const v = staff.bars[b].voices[target.voice];
+        if (!v) continue;
+        const startIdx = b === target.bar ? target.beat - 1 : v.beats.length - 1;
+        for (let i = startIdx; i >= 0; i--) {
+          const candidate = indexed
+            ? v.beats[i].notes.find(n => !n.isDead && n.isPercussion === note.isPercussion && n.isPiano === note.isPiano && n.realValue === note.realValue)
+            : v.beats[i].notes.find(n => n.string === note.string && !n.isDead);
+          if (candidate) {
+            if (!candidate.isTieOrigin && candidate.realValue === note.realValue && nextLinkedNote(candidate) === note) {
+              const from = address(candidate), to = address(note);
+              return 'noteIndex' in from
+                ? { type: 'setNoteLinkByIndex', from, to: to as IndexedNoteTarget, kind: 'tie' }
+                : { type: 'setNoteLink', from, to: to as NoteTarget, kind: 'tie' };
+            }
+            return null;
+          }
+        }
+      }
+      return null;
     }
   }
 }

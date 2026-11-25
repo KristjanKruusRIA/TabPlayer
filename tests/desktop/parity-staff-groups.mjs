@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,clickWorkstationButton,revealDock,revealInspectorTab,revealPlaybackControls,hidePlaybackControls,openScoreStyle,closeScoreStyle,moveCursor} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -152,8 +153,8 @@ try{
   await button('Open');await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   const baselineGeneration=await generation('opened');assert.ok(Number.isInteger(baselineGeneration),'the native audio status reports an integer generation');
   await button('Presentation');await details('Page layout');await field('Width (mm)').fill('210');await field('Height (mm)').fill('297');await button('Apply page layout');
-  await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
-  await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');
+  await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
+  await showScoreDisplay(page);await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');
   await details('Engraving');await details('Page layout');
   const spacingText=await field('System spacing (%)').inputValue(),systemSpacing=spacingText===''?1:Number(spacingText)/100,pageScale=Number(await field('Scale (%)').inputValue())/100;
   assert.ok(Number.isFinite(systemSpacing)&&systemSpacing>0&&Number.isFinite(pageScale)&&pageScale>0,'system spacing and page scale are readable');
@@ -573,7 +574,7 @@ try{
   // ---- parchment: the overlay draws the groups where the screen layout has no composed chunks ----
   await check('parchment: the overlay draws one group brace per system and it lines up with the staves within 1 px of the page view',async()=>{
     await button('Presentation');
-    await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('parchment');
+    await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('parchment');
     // A continuous layout paints only the systems in view, and the staff lines are read from the painted systems: a window tall enough to hold every system puts them all in view.
     const windowSize=await page.evaluate(()=>({width:innerWidth,height:innerHeight}));await page.setViewportSize({width:windowSize.width,height:4000});
     // The overlay (svg[data-tp-accolades]) shares its origin with alphaTab's own surface: each surface chunk sits at its wrapper's left/top.
@@ -608,7 +609,7 @@ try{
       worst.push(round(Math.max(Math.abs(lines[0]-top-reference[index].top),Math.abs(mark.bottom-lines.at(-1)-reference[index].bottom))));
     });
     await page.setViewportSize(windowSize);
-    await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
+    await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
     await settle('screen','back to the vertical page view',m=>m.systems.every(system=>markNames(system).join()===GROUP_BRACE.join()));
     return `${live.marks.length} overlay braces, music font ${live.marks[0].basePx}px, largest difference from the page view ${Math.max(...worst)} px`;
   });
@@ -635,7 +636,7 @@ try{
 
   id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await closeLibrary();await waitForWorkspaceIdle(page);await button('Open');
   await check('reopen: the project (history, group, gaps and names) is identical',async()=>{assert.deepEqual((await snapshot()).project,stored.project);});
-  await button('Presentation');await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');
+  await button('Presentation');await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');await showScoreDisplay(page);await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');
   await check('reopen: the saved group, gap and names are on screen and in the export pages',async()=>{
     const live=await settle('screen','reopened',m=>JSON.stringify(m.systems.map(markNames))===JSON.stringify(finalState.screen.systems.map(markNames))&&hasNames(m,LONG,SHORT));
     same(live.systems.map(system=>[system.sheet,system.top,system.marks.map(mark=>[mark.name,mark.x,mark.bottom]),system.texts.map(text=>[text.text,text.y])]),finalState.screen.systems.map(system=>[system.sheet,system.top,system.marks.map(mark=>[mark.name,mark.x,mark.bottom]),system.texts.map(text=>[text.text,text.y])]),'reopened screen');

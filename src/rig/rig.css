@@ -63,6 +63,8 @@
 .sound-view .rig-browser-group h3 { position:sticky; top:0; z-index:1; padding:6px 4px 3px; background:var(--tp-panel); font:600 11px/14px var(--tp-font-ui); letter-spacing:.06em; text-transform:uppercase; color:var(--tp-muted); }
 .sound-view .rig-browser-group ul { list-style:none; margin:0; padding:0; }
 .sound-view .rig-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:4px; border-radius:var(--tp-radius-s); }
+.sound-view .rig-row[data-active] { background:color-mix(in srgb,var(--tp-accent,var(--ws-accent,#6FA8FF)) 16%,var(--tp-raised)); box-shadow:inset 3px 0 0 var(--tp-accent,var(--ws-accent,#6FA8FF)); }
+.sound-view .rig-row[data-active] .rig-row-name { color:var(--tp-text); font-weight:600; }
 .sound-view .rig-row[data-previewing] { background:var(--tp-raised); box-shadow:inset 2px 0 0 var(--tp-on); }
 .sound-view .rig-row-main { display:flex; flex-direction:column; align-items:flex-start; min-width:0; min-height:36px; padding:3px 6px; border:1px solid transparent; border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-text); text-align:left; }
 .sound-view .rig-row-main:hover:enabled:not([aria-disabled=true]) { background:var(--tp-raised); border-color:transparent; }

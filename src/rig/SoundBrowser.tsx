@@ -1,7 +1,7 @@
 import { useI18n } from '../i18n';
 import { useRef, useState } from 'react';
-import { factoryCategories, factorySounds } from '../audio/factory-sounds';
-import { presetIds, presetName } from '../audio/sound-model';
+import { canonicalEffectsKey, factoryCategories, factorySounds } from '../audio/factory-sounds';
+import { presetIds, presetName, soundPreset } from '../audio/sound-model';
 import type { TrackSound } from '../edit-types';
 import type { SoundEditing } from '../audio/useSoundEditing';
 import { Dialog, Segmented, busyGuard } from '../ui';
@@ -25,6 +25,13 @@ export function SoundBrowser({editing}:{editing:SoundEditing}) {
   const needle=query.trim().toLocaleLowerCase();
   const shown=rows.filter(row=>(scope==='all'||(scope==='mine')===row.saved)&&(!needle||`${row.name} ${row.note} ${row.group}`.toLocaleLowerCase().includes(needle)));
   const groups=[...new Set(shown.map(row=>row.group))];
+  let activeKey:string|null=editing.activeFactory?`factory:${editing.activeFactory.id}`:null;
+  if(!activeKey){
+    const currentKey=canonicalEffectsKey(editing.current);
+    const savedMatch=library.find(item=>canonicalEffectsKey(item.sound)===currentKey);
+    if(savedMatch)activeKey=`saved:${savedMatch.name}`;
+    else if(canonicalEffectsKey(soundPreset(editing.current.presetId))===currentKey)activeKey=`preset:${editing.current.presetId}`;
+  }
   const stop=shown.some(row=>row.key===rover)?rover:shown[0]?.key;
   const mains=()=>[...list.current?.querySelectorAll<HTMLButtonElement>('button[data-row-main]')??[]];
   const hear=(row:Row,origin:HTMLElement)=>editing.choosePreview(showingPreview&&previewChoice===row.value?'':row.value,origin);
@@ -42,8 +49,8 @@ export function SoundBrowser({editing}:{editing:SoundEditing}) {
       {shown.length===0&&<p className="rig-note">{rows.every(row=>!row.saved)&&scope==='mine'?t('rig.no_saved_sounds'):t('rig.no_sounds_match')}</p>}
       {groups.map(group=><section key={group} aria-label={group} className="rig-browser-group">
         <h3>{group}</h3>
-        <ul>{shown.filter(row=>row.group===group).map(row=><li key={row.key} className="rig-row" data-previewing={showingPreview&&previewChoice===row.value||undefined}>
-          <button type="button" data-row-main aria-label={t('rig.apply_sound',{name:row.name})} tabIndex={row.key===stop?0:-1} onFocus={()=>setRover(row.key)} {...busyGuard({busy,className:'rig-row-main',onClick:row.apply,onKeyDown:event=>{if(event.key===' '&&previewer){event.preventDefault();hear(row,event.currentTarget);}},onKeyUp:event=>{if(event.key===' ')event.preventDefault();}})}>
+        <ul>{shown.filter(row=>row.group===group).map(row=><li key={row.key} className="rig-row" data-active={activeKey===row.key||undefined} data-previewing={showingPreview&&previewChoice===row.value||undefined}>
+          <button type="button" data-row-main aria-label={t('rig.apply_sound',{name:row.name})} aria-current={activeKey===row.key?'true':undefined} tabIndex={row.key===stop?0:-1} onFocus={()=>setRover(row.key)} {...busyGuard({busy,className:'rig-row-main',onClick:row.apply,onKeyDown:event=>{if(event.key===' '&&previewer){event.preventDefault();hear(row,event.currentTarget);}},onKeyUp:event=>{if(event.key===' ')event.preventDefault();}})}>
 
             <span className="rig-row-name">{row.name}</span><span className="rig-row-note">{row.note}</span>
           </button>

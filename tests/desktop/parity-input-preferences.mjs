@@ -63,11 +63,7 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
 
     const workspace$=()=>page.getByRole('region',{name:'Score workspace',exact:true});
     const prefs=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('tabplayer.input.preferences')??'null'));
-    const viewMenu=async()=>{
-      const region=page.getByRole('region',{name:'Workspace view',exact:true});
-      if(!await region.isVisible())await page.locator('summary',{hasText:/^View$/}).click();
-      await region.waitFor({state:'visible'});return region;
-    };
+    const viewMenu=()=>ui.openPreferences(page);
     const labels={preview:'Play notes while editing',auto:'Auto-duration: a note written on a rest takes the last duration',keypad:'Keypad sets duration (1-7, . for dot)',diagrams:'Paste includes chord diagrams',advance:'Advance to the next beat after entering a note on the score'};
     const box=async name=>(await viewMenu()).getByRole('checkbox',{name:labels[name],exact:true});
     // Real key events carry the key a keyboard sends: Playwright's keyboard.press('Numpad2') reports ArrowDown, the NumLock-off shape.
@@ -82,7 +78,7 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     initial=typed;
     step('Keypad keys type frets (one setNote edit, no duration) by default',{});
 
-    // The View menu holds every score-input choice and remembers them.
+    // Preferences holds every score-input choice and remembers them.
     for(const name of Object.keys(labels))await (await box(name)).waitFor();
     assert.equal(await (await box('diagrams')).isChecked(),true,'Diagram paste defaults on');
     assert.equal(await (await box('keypad')).isChecked(),false,'Keypad defaults off');
@@ -99,8 +95,10 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     await workspace$().waitFor();initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
     assert.equal(await (await box('keypad')).isChecked(),true);assert.equal(await (await box('auto')).isChecked(),true);assert.equal(await (await box('diagrams')).isChecked(),false);
     // Paste options appear once something is copied; copying never edits. The clipboard filter is the Musical clipboard section of the Properties dialog's Selection tab, read by opening and closing the dialog.
+    await ui.closePreferences(page);
     await button('Select bar');await workspace$().focus();await page.keyboard.press('Control+c');await idle();
     const filterOn=async()=>{
+      await ui.closePreferences(page);
       const dialog=await ui.openProperties(page,'selection');
       await dialog.locator('summary').filter({hasText:/^Musical clipboard$/}).first().evaluate(node=>{node.parentElement.open=true;});
       const filter=dialog.getByLabel('Chord diagrams',{exact:true});await filter.waitFor();const checked=await filter.isChecked();await ui.closeProperties(page);return checked;
@@ -160,6 +158,7 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
 
     // The saved score carries every change.
     const final=await record();assert.equal(final.snapshot.project.edits.length,4);
+    await ui.closePreferences(page);
     const exportPath=`${exportBase}.gp`;assert.equal(existsSync(exportPath),false);await button('Export GP');
     const score=load(readFileSync(exportPath)),bars=score.tracks[0].staves[0].bars,beatAt=(bar,index)=>bars[bar].voices[0].beats[index];
     assert.equal(beatAt(0,0).duration,2);assert.equal(beatAt(0,0).dots,1);

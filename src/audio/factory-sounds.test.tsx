@@ -3,7 +3,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import {SoundPanel,soundPreset} from './SoundPanel';
-import {earlierFactorySound,earlierFactorySounds,factoryCategories,factorySound,factorySounds} from './factory-sounds';
+import {earlierFactorySound,earlierFactorySounds,factoryCategories,factorySound,factorySounds,matchFactorySound} from './factory-sounds';
 import {defaultEffects,effectBlocks,soundProblem} from '../document-settings';
 import type {NativePlaybackController} from './NativePlaybackController';
 import type {TrackSound} from '../edit-types';
@@ -116,4 +116,23 @@ it('keeps the earlier version of Metal rhythm exactly the row the release held (
   expect(earlierFactorySounds.map(entry=>entry.id)).toEqual(['metal-rhythm']);
   // And it is not the current one.
   expect(factorySound('metal-rhythm')!.effects).not.toEqual(released.effects);
+});
+
+it('matches any active factory sound regardless of voice, pickup or lock and reflects it in SoundPanel',()=>{
+  for(const entry of factorySounds){
+    const custom={...factorySound(entry.id,'gp8:Custom')!,pickup:'bridge' as const,locked:true};
+    expect(matchFactorySound(custom)?.id,entry.id).toBe(entry.id);
+  }
+  const tweaked=factorySound('fuzz-lead','green-guitar')!;
+  tweaked.effects.drive.drive+=0.05;
+  expect(matchFactorySound(tweaked)).toBeNull();
+
+  const onEdit=vi.fn();
+  const {rerender}=render(<SoundPanel trackId="base/0" sound={factorySound('fuzz-lead','black-guitar')!} onEdit={onEdit}/>);
+  expect(screen.getByLabelText('Factory sound')).toHaveValue('fuzz-lead');
+  expect(screen.getByRole('button',{name:'Apply factory sound'})).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Factory sound'),{target:{value:'rock-lead'}});
+  expect(screen.getByRole('button',{name:'Apply factory sound'})).toBeEnabled();
+  rerender(<SoundPanel trackId="base/0" sound={tweaked} onEdit={onEdit}/>);
+  expect(screen.getByLabelText('Factory sound')).toHaveValue('');
 });

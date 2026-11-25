@@ -5,10 +5,10 @@ import { useI18n } from '../i18n';
 
 export interface DocumentTabsProps {
   tabs:readonly DocumentTab[];activeId:string;disabled:boolean;
-  onActivate:(id:string)=>void;onClose:(id:string)=>void;
+  onActivate:(id:string)=>void;onClose:(id:string)=>void;onNew?:()=>void;
 }
 
-export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose}:DocumentTabsProps){
+export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose,onNew}:DocumentTabsProps){
   const { t } = useI18n();
   const [focusedId,setFocusedId]=useState(activeId);
   const row=useRef<HTMLDivElement>(null);
@@ -39,7 +39,7 @@ export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose}:Documen
     event.preventDefault();buttons.current.get(tabs[next].id)?.focus();
   }
 
-  return <div ref={row} className="document-tabs" role="tablist" aria-label={t('workspace.open_scores')} aria-orientation="horizontal" aria-busy={disabled}
+  return <div className="document-tabs-strip"><div ref={row} className="document-tabs" role="tablist" aria-label={t('workspace.open_scores')} aria-orientation="horizontal" aria-busy={disabled}
     onFocusCapture={()=>{focusWithin.current=true;}}
     onBlurCapture={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node|null))focusWithin.current=false;}}>
     {tabs.map((tab,index)=>{
@@ -62,5 +62,7 @@ export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose}:Documen
         <span id={`document-description-${id}`} hidden>{description}</span>
       </div>;
     })}
+  </div>
+    {onNew&&<button className="document-tab-new" type="button" aria-label={t('palette.command_new')} title={t('palette.command_new')} disabled={disabled} onClick={onNew}>+</button>}
   </div>;
 }

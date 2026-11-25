@@ -7,7 +7,10 @@
 .gp-menus { display:flex; align-items:center; gap:0; min-width:0; flex:1 1 auto; }
 .gp-brand { display:inline-flex; align-items:center; padding:0 8px 0 2px; color:var(--ws-text); }
 .toolbar.gp-menubar :is(.command-menu,.keyboard-help)>summary { min-height:22px; padding:0 8px; border-radius:3px; font:400 13px/1 var(--tp-font-ui); color:var(--ws-text); }
-.toolbar.gp-menubar .command-menu>section button { justify-content:flex-start; text-align:left; white-space:nowrap; }
+.toolbar.gp-menubar .command-menu>section { min-width:248px; width:max-content; max-width:min(360px,calc(100vw - 16px)); }
+.toolbar.gp-menubar .command-menu>section button { display:flex; align-items:center; justify-content:flex-start; text-align:left; white-space:nowrap; }
+.toolbar.gp-menubar .command-menu>section button:has(kbd) { justify-content:space-between; gap:16px; }
+.toolbar.gp-menubar .command-menu kbd { color:var(--ws-muted); font:11px var(--tp-font-mono); }
 .toolbar.gp-menubar .document-title { margin-left:auto; flex:0 1 auto; }
 
 /* Toolbar: left tools, the transport centred on the window, the views on the right. */
@@ -31,28 +34,28 @@
 
 /* Score display: zoom and layout as compact boxes; their names stay for screen readers and tooltips. */
 .gp-toolbar .score-tools-caption { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-.app-shell .gp-toolbar [aria-label='Score display'] { position:relative; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; justify-content:flex-start; gap:6px; min-width:0; margin:0; padding:0; border:0; }
-.app-shell .gp-toolbar [aria-label='Score display']>.pair { display:flex; align-items:center; gap:4px; }
-.app-shell .gp-toolbar [aria-label='Score display'] label { display:flex; flex-direction:row; flex:none; width:auto; align-items:center; gap:0; }
-.app-shell .gp-toolbar [aria-label='Score display'] .score-fit-controls { flex:none; width:auto; }
-.app-shell .gp-toolbar [aria-label='Score display']>details { flex:none; height:auto; }
+.app-shell .gp-toolbar .score-display-fields { position:relative; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; justify-content:flex-start; gap:6px; min-width:0; margin:0; padding:0; border:0; }
+.app-shell .gp-toolbar .score-display-fields>.pair { display:flex; align-items:center; gap:4px; }
+.app-shell .gp-toolbar .score-display-fields label { display:flex; flex-direction:row; flex:none; width:auto; align-items:center; gap:0; }
+.app-shell .gp-toolbar .score-display-fields .score-fit-controls { flex:none; width:auto; }
+.app-shell .gp-toolbar .score-display-fields>details { flex:none; height:auto; }
 .app-shell .gp-toolbar>.gp-toolbar-display { display:flex; justify-content:center; }
-.app-shell .gp-toolbar [aria-label='Score display'] select { width:auto; max-width:132px; min-height:28px; padding:0 4px; font-size:12px; }
-.app-shell .gp-toolbar [aria-label='Score display'] input[type=number] { width:58px; min-height:28px; padding:0 4px; font:500 12px/1 var(--tp-font-mono); }
+.app-shell .gp-toolbar .score-display-fields select { width:auto; max-width:132px; min-height:28px; padding:0 4px; font-size:12px; }
+.app-shell .gp-toolbar .score-display-fields input[type=number] { width:58px; min-height:28px; padding:0 4px; font:500 12px/1 var(--tp-font-mono); }
 .app-shell .gp-toolbar .score-fit-controls { display:inline-flex; gap:1px; }
 .app-shell .gp-toolbar .score-fit-controls>button { min-height:28px; padding:0 8px; font-size:12px; border-radius:0; }
 .app-shell .gp-toolbar .score-fit-controls>button:first-child { border-radius:5px 0 0 5px; }
 .app-shell .gp-toolbar .score-fit-controls>button:last-child { border-radius:0 5px 5px 0; }
 .app-shell .gp-toolbar .score-actual-zoom { font-size:11px; color:var(--ws-muted); white-space:nowrap; }
-.app-shell .gp-toolbar [aria-label='Score display']>details>summary { list-style:none; padding:0 6px; font-size:12px; color:var(--ws-muted); cursor:pointer; white-space:nowrap; }
-.app-shell .gp-toolbar [aria-label='Score display']>details[open]>.track-list { position:absolute; z-index:40; top:calc(100% + 6px); left:0; display:grid; gap:4px; min-width:200px; padding:10px; border:1px solid var(--ws-border); border-radius:var(--tp-radius-s); background:var(--ws-panel); box-shadow:0 8px 24px rgb(0 0 0/.35); }
-.app-shell .gp-toolbar [aria-label='Score display'][hidden] { display:none; }
+.app-shell .gp-toolbar .score-display-fields>details>summary { list-style:none; padding:0 6px; font-size:12px; color:var(--ws-muted); cursor:pointer; white-space:nowrap; }
+.app-shell .gp-toolbar .score-display-fields>details[open]>.track-list { position:absolute; z-index:40; top:calc(100% + 6px); left:0; display:grid; gap:4px; min-width:200px; padding:10px; border:1px solid var(--ws-border); border-radius:var(--tp-radius-s); background:var(--ws-panel); box-shadow:0 8px 24px rgb(0 0 0/.35); }
+.app-shell .gp-toolbar .score-display-fields[hidden] { display:none; }
 /* Folded at a small height: one button, and the controls open below it. */
 .app-shell .gp-toolbar .score-display-host { position:relative; display:flex; align-items:center; min-width:0; }
 .app-shell .gp-toolbar .score-display-toggle { min-height:28px; padding:0 10px; border:1px solid transparent; border-radius:5px; background:var(--ws-raised); color:var(--ws-text); font:400 12px/1 var(--tp-font-ui); white-space:nowrap; cursor:pointer; }
 .app-shell .gp-toolbar .score-display-toggle[aria-expanded=true] { background:var(--ws-accent); border-color:var(--ws-accent); color:var(--ws-accent-ink); }
 /* Fixed, so the window clips it and the page never scrolls sideways; the component sets top and left from the button and keeps its right edge inside the window. */
-.app-shell .gp-toolbar .score-display-host[data-compact]>[aria-label='Score display'] { position:fixed; z-index:40; flex-wrap:wrap; width:max-content; max-width:calc(100vw - 16px); padding:8px 10px; border:1px solid var(--ws-border); border-radius:var(--tp-radius-s); background:var(--ws-panel); box-shadow:0 8px 24px rgb(0 0 0/.35); }
+.app-shell .gp-toolbar .score-display-host[data-compact]>.score-display-fields { position:fixed; z-index:40; flex-wrap:wrap; width:max-content; max-width:calc(100vw - 16px); padding:8px 10px; border:1px solid var(--ws-border); border-radius:var(--tp-radius-s); background:var(--ws-panel); box-shadow:0 8px 24px rgb(0 0 0/.35); }
 .app-shell .gp-toolbar .score-display-host[data-compact] .pair { flex-wrap:wrap; }
 .app-shell .gp-toolbar .score-display-host>.score-display-messages>p.muted { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .app-shell .gp-toolbar .score-display-host>.score-display-messages>p:not(.muted) { position:absolute; z-index:40; top:calc(100% + 6px); left:0; margin:0; padding:4px 8px; border-radius:var(--tp-radius-s); background:var(--ws-error-surface); color:var(--ws-error); font-size:12px; white-space:nowrap; }
@@ -69,7 +72,7 @@
 .app-shell .gp-toolbar .transport-group:is(.transport-loop,.transport-click,.transport-speed,.transport-key) { position:relative; }
 /* Loop, Click and Speed keep a compact caption above their controls. It is out of the flow, so it adds no width and no height. The transport box is 48px with 28px groups centred, leaving 10px above a group; the caption (12px tall, 2px of it in the toolbar's own top padding) fills that and paints over no other row: a long translation is clipped with an ellipsis rather than widening the transport. */
 .app-shell .gp-toolbar .transport-group:is(.transport-loop,.transport-click,.transport-speed,.transport-key)>.transport-caption { position:absolute; left:6px; right:6px; top:-12px; display:block; width:auto; height:auto; min-height:0; margin:0; overflow:hidden; clip-path:none; text-overflow:ellipsis; white-space:nowrap; font-size:11px; line-height:12px; color:var(--ws-muted); pointer-events:none; }
-.app-shell .gp-toolbar .transport-speed>.transport-caption .transport-tempo { margin-left:6px; }
+.app-shell .gp-toolbar .transport-speed>.transport-caption .transport-tempo { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
 .gp-toolbar .transport-label { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
 .app-shell .gp-toolbar .transport button { border-color:transparent; background:transparent; }
 .app-shell .gp-toolbar .transport .transport-playbutton { width:36px; min-width:36px; height:36px; min-height:36px; padding:0; font-size:0; gap:0; border:2px solid var(--tp-on); border-radius:50%; background:transparent; color:var(--tp-on); }
@@ -82,6 +85,7 @@
 /* The running loop must stand out: the generic pressed colour is dark ink, which on the raised background above is unreadable. */
 .app-shell .gp-toolbar .transport .transport-loopbutton[aria-pressed=true] { border-color:var(--ws-accent); background:var(--ws-accent); color:var(--ws-accent-ink); }
 .app-shell .gp-toolbar .transport .transport-metronome { width:34px; padding:0; justify-content:center; }
+.app-shell .gp-toolbar .transport .transport-metronome[data-on=false] { color:var(--ws-text); }
 .app-shell .gp-toolbar .transport-bar-field input { width:38px; min-height:28px; font-size:12px; }
 .app-shell .gp-toolbar .transport-speed-field input { width:38px; min-width:38px; min-height:28px; font-size:12px; border:1px solid transparent; background:var(--ws-raised); }
 .app-shell .gp-toolbar .transport-speed-field .transport-speed-unit { font-size:11px; }
@@ -112,31 +116,18 @@
 .gp-practice-section h3 { margin:0 0 8px; font:600 12px/1.2 var(--tp-font-ui); letter-spacing:.04em; text-transform:uppercase; color:var(--ws-text); }
 .gp-practice-section>fieldset { margin:0; padding:0; border:0; min-width:0; }
 
-/* Below 1920px (written as a range, so that the Key fold in Transport, which uses the opposite range, leaves no gap at a fractional width) the score display controls take a second row; below 1515px the transport gets a row of its own. Estonian and German have wider captions in the display group, so their single row starts later (2025px, 2115px). The widths are measured, with a margin, and kept in src/shell/toolbar-fit.ts, which the stylesheet test ties these numbers to; the Key group folds into More playback where the single row does not hold it (see Transport). */
-@media (width < 1920px) {
-  .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'left transport right' 'display display display'; }
-  .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
-}
-@media (width >= 1920px) and (width < 2025px) {
-  .app-shell:lang(et) .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'left transport right' 'display display display'; }
-  .app-shell:lang(et) .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
-}
-@media (width >= 1920px) and (width < 2115px) {
-  .app-shell:lang(de) .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'left transport right' 'display display display'; }
-  .app-shell:lang(de) .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
-}
-@media (width < 1515px) {
+/* Smaller windows give transport its own row. The compact display button fits beside it at standard desktop widths. */
+@media (width < 1366px) {
   .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'transport transport transport' 'left display right'; }
-  .gp-toolbar>.gp-toolbar-display { padding-bottom:0; }
 }
-/* The score display controls need about 560px, more than is left between the edit and view buttons: below this they take a row of their own instead of spilling over the view buttons. */
-@media (max-width:1099px) {
+/* The inline display controls take their own row when the translated labels need more room. */
+@media (width < 1280px) {
   .gp-toolbar { grid-template-areas:'transport transport transport' 'left left right' 'display display display'; }
   .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
 }
 
 /* A short window (data-compact-height, set from the window height): the display controls are one button, which joins the edit and view buttons instead of taking a row of its own. */
-@media (max-width:1099px) {
+@media (width < 1280px) {
   .app-shell[data-compact-height=true] .gp-toolbar { grid-template-areas:'transport transport transport' 'left display right'; }
   .app-shell[data-compact-height=true] .gp-toolbar>.gp-toolbar-display { padding-bottom:0; }
 }
@@ -161,7 +152,7 @@
 @media (max-width:1179px) { .app-shell .score-palette { width:120px; padding:6px; } .app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] :is(.tp-toolbar-group,.tp-toolbar-dynamics) { grid-template-columns:repeat(4,26px); } }
 
 /* Inspector tabs and sections: uppercase section heads, as Guitar Pro's inspector has. */
-.inspector-tabs { position:sticky; top:0; z-index:3; display:grid; grid-template-columns:repeat(3,1fr); gap:1px; padding:8px 8px 6px; background:var(--ws-panel); }
+.inspector-tabs { position:sticky; top:0; z-index:3; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; padding:8px 8px 6px; background:var(--ws-panel); }
 .app-shell .inspector-tabs>[role=tab] { min-height:26px; padding:0 6px; border:0; border-radius:0; background:var(--ws-raised); color:var(--ws-text); font:500 12px/1 var(--tp-font-ui); letter-spacing:.04em; text-transform:uppercase; }
 .app-shell .inspector-tabs>[role=tab]:first-child { border-radius:5px 0 0 5px; }
 .app-shell .inspector-tabs>[role=tab]:last-child { border-radius:0 5px 5px 0; }
@@ -212,7 +203,7 @@
 .workstation-dock .dock-track-handle:focus-visible { outline:2px solid var(--ws-accent,currentColor); outline-offset:1px; }
 .dock-drop-indicator { position:fixed; z-index:60; height:2px; margin-top:-1px; background:var(--ws-accent,currentColor); pointer-events:none; }
 .workstation-dock .score-overview-mix { grid-template-columns:24px 24px 24px 124px 26px; gap:4px; }
-.workstation-dock .score-overview-mix button { display:grid; place-items:center; width:24px; height:22px; padding:0; border:0; border-radius:4px; background:transparent; color:color-mix(in srgb,var(--ws-muted) 75%,transparent); }
+.workstation-dock .score-overview-mix button { display:grid; place-items:center; width:24px; height:22px; padding:0; border:0; border-radius:4px; background:transparent; color:var(--ws-muted); }
 .workstation-dock .score-overview-mix button:not(:disabled):not([aria-disabled="true"]):hover { background:color-mix(in srgb,var(--ws-text) 10%,transparent); color:var(--ws-text); }
 .workstation-dock .score-overview-mix button[data-kind="shown"][aria-pressed="true"] { color:var(--ws-text); }
 .workstation-dock .score-overview-mix button[aria-pressed="true"][data-kind="mute"]:is(*,:hover) { background:transparent; color:var(--ws-error,#e5534b); }
@@ -234,8 +225,36 @@
 .workstation-dock .dock-add-track:focus-visible { outline:2px solid var(--ws-accent); outline-offset:1px; }
 .workstation-dock .score-overview-corner { text-transform:none; letter-spacing:0; font-size:13px; }
 /* Master: its fader and knob line up under the track faders and knobs. */
-.workstation-dock .score-overview-master { gap:4px; }
-.workstation-dock .score-overview-master-name { width:237px; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ws-text); padding-left:58px; box-sizing:border-box; }
+.workstation-dock .score-overview-master { box-sizing:border-box; width:var(--dock-track-width); max-width:100%; padding-right:9px; gap:4px; }
+.workstation-dock .score-overview-master-name { flex:1 1 auto; width:auto; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ws-text); padding-left:58px; box-sizing:border-box; }
 .workstation-dock .score-overview-master-mix { grid-template-columns:124px 26px; gap:4px; }
 /* The thumb's width, for MixSlider's drag arithmetic (see MixSlider.tsx). */
 .workstation-dock .dock-fader { --mix-thumb:7px; }
+/* Compact controls share a single row at the standard desktop widths. */
+@media (width >= 1366px) {
+  .gp-toolbar { gap:4px 6px; padding-inline:8px; }
+}
+@media (1366px <= width < 1515px) {
+  .gp-toolbar-left,.gp-toolbar-right { gap:4px; }
+  .app-shell .gp-toolbar .transport-group { padding-inline:3px; }
+  .app-shell .gp-toolbar .transport-lcd { min-width:250px; width:270px; margin-inline:3px; padding-inline:8px; gap:2px 8px; }
+}
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-voices .tp-glyph-btn[aria-pressed="true"] { background:var(--voice-color,var(--ws-accent)); color:var(--ws-accent-ink); font-weight:700; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-voices .tp-glyph-btn:nth-child(1) { --voice-color:#E9B65C; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-voices .tp-glyph-btn:nth-child(2) { --voice-color:#5CC27A; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-voices .tp-glyph-btn:nth-child(3) { --voice-color:#6FA8FF; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-voices .tp-glyph-btn:nth-child(4) { --voice-color:#B58CFF; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-voices .tp-glyph-btn[aria-pressed="true"] .tp-glyph-text[data-voice] { box-shadow:none; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-panels { grid-template-columns:repeat(2,minmax(0,1fr)); gap:4px; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-panels .tp-glyph-btn { display:inline-flex; flex-direction:row; align-items:center; justify-content:center; gap:5px; width:100%; height:28px; min-height:28px; padding:0 8px; border:1px solid color-mix(in srgb,var(--ws-border) 55%,transparent); border-radius:5px; background:var(--ws-raised); }
+.app-shell .score-palette .tp-toolbar-panels .tp-glyph-svg { width:13px; height:13px; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn[aria-pressed="true"]:is([data-palette-id="beam-auto"],[data-palette-id="stem-auto"],[data-palette-id="auto-spelling"]) { background:color-mix(in srgb,var(--ws-text) 12%,transparent); color:var(--ws-text); box-shadow:inset 0 -2px 0 color-mix(in srgb,var(--ws-accent) 65%,transparent); }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn[data-palette-id="tempo"] { background:var(--ws-raised); }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn:focus-visible { outline:2px solid var(--ws-accent); outline-offset:-2px; }
+.app-shell .workspace-preferences { width:min(580px,100%); }
+.workspace-preferences .tp-dialog-body { display:grid; gap:12px; }
+.workspace-preferences fieldset { min-width:0; }
+.workspace-preferences .language-setting-row { padding:0; }
+.workspace-preferences .language-setting-row label { flex-direction:row; align-items:center; }
+.app-shell .statusbar { padding-block:5px; gap:12px; }
+.app-shell .statusbar-path:empty { display:none; }

@@ -8,12 +8,13 @@ import { buildDocument } from '../engine';
 const key = (name: string, mods: Partial<Record<'ctrlKey' | 'metaKey' | 'altKey' | 'shiftKey', boolean>> = {}, code?: string) => gp8Key({ key: name, code, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...mods });
 
 describe('GP8 keys', () => {
-  it('names each key and leaves Del alone', () => {
+  it('recognises Delete / Backspace / Insert and leaves Shift+Backspace alone', () => {
     expect(key('Backspace')).toEqual({ kind: 'edit', edit: 'removeNote' });
     expect(key('Delete', { shiftKey: true })).toEqual({ kind: 'edit', edit: 'deleteBeats' });
     expect(key('Delete', { ctrlKey: true, shiftKey: true })).toEqual({ kind: 'edit', edit: 'eraseNotes' });
     expect(key('Insert', { metaKey: true })).toEqual({ kind: 'edit', edit: 'insertBeat' });
-    expect(key('Delete')).toBeNull();
+    expect(key('Insert')).toEqual({ kind: 'edit', edit: 'insertBeat' });
+    expect(key('Delete')).toEqual({ kind: 'edit', edit: 'deleteOrRemove' });
     expect(key('Backspace', { shiftKey: true })).toBeNull();
     expect(key('Home', { ctrlKey: true, shiftKey: true })).toBeNull();
     expect(key('End', { altKey: true })).toBeNull();
@@ -58,7 +59,7 @@ describe('GP8 keys', () => {
     expect(key(' ')).toBeNull();
     expect(key('g')).toBeNull();
   });
-  it('recognises technique letter shortcuts (H, S, V, P, I, X)', () => {
+  it('recognises technique letter shortcuts (H, S, V, P, I, X, O, B, L)', () => {
     expect(key('h')).toEqual({ kind: 'technique', technique: 'hammerPull' });
     expect(key('H', { shiftKey: true })).toEqual({ kind: 'technique', technique: 'hammerPull' });
     expect(key('s')).toEqual({ kind: 'technique', technique: 'slide' });
@@ -66,11 +67,19 @@ describe('GP8 keys', () => {
     expect(key('p')).toEqual({ kind: 'technique', technique: 'palmMute' });
     expect(key('i')).toEqual({ kind: 'technique', technique: 'letRing' });
     expect(key('x')).toEqual({ kind: 'technique', technique: 'dead' });
+    expect(key('o')).toEqual({ kind: 'technique', technique: 'ghost' });
+    expect(key('O', { shiftKey: true })).toBeNull();
+    expect(key('b')).toEqual({ kind: 'technique', technique: 'bend' });
+    expect(key('l')).toEqual({ kind: 'technique', technique: 'tie' });
+    expect(key('L', { shiftKey: true })).toBeNull();
     // Modifiers like Ctrl or Alt mean document shortcuts (Ctrl+S save, Ctrl+P palette, Ctrl+V paste, etc.)
     expect(key('s', { ctrlKey: true })).toBeNull();
     expect(key('v', { metaKey: true })).toBeNull();
     expect(key('p', { ctrlKey: true })).toBeNull();
     expect(key('h', { altKey: true })).toBeNull();
+    expect(key('b', { ctrlKey: true })).toBeNull();
+    expect(key('l', { ctrlKey: true })).toBeNull();
+    expect(key('o', { ctrlKey: true })).toBeNull();
   });
   it('finds the cursor targets', () => {
     const at = { track: 0, staff: 0, bar: 2, voice: 0, beat: 1 };
@@ -138,6 +147,97 @@ describe('GP8 keys', () => {
       from: { target, string: 1 },
       to: { target: nextTarget, string: 1 },
       kind: 'hammerPull',
+    });
+
+    // Ghost note toggle on and off
+    expect(planTechniqueToggle(score, target, 1, null, 'ghost')).toEqual({
+      type: 'setNoteTechniques',
+      target,
+      string: 1,
+      patch: { ghost: true },
+    });
+    const ghostedScore = buildDocument({
+      ...project,
+      edits: [...project.edits, { type: 'setNoteTechniques', target, string: 1, patch: { ghost: true } }],
+    } as any).score;
+    expect(planTechniqueToggle(ghostedScore, target, 1, null, 'ghost')).toEqual({
+      type: 'setNoteTechniques',
+      target,
+      string: 1,
+      patch: { ghost: false },
+    });
+
+    // Bend toggle on (whole-step bend) and off
+    expect(planTechniqueToggle(score, target, 1, null, 'bend')).toEqual({
+      type: 'setNoteTechniques',
+      target,
+      string: 1,
+      patch: {
+        bend: {
+          type: 1,
+          style: 0,
+          points: [
+            { offset: 0, value: 0 },
+            { offset: 60, value: 4 },
+          ],
+        },
+      },
+    });
+    const bentScore = buildDocument({
+      ...project,
+      edits: [
+        ...project.edits,
+        { type: 'setNoteTechniques', target, string: 1, patch: { bend: { type: 1, style: 0, points: [{ offset: 0, value: 0 }, { offset: 60, value: 4 }] } } },
+      ],
+    } as any).score;
+    expect(planTechniqueToggle(bentScore, target, 1, null, 'bend')).toEqual({
+      type: 'setNoteTechniques',
+      target,
+      string: 1,
+      patch: { bend: null },
+    });
+
+    // Tie toggle: forward to matching next note, backward from matching previous note, untie from origin or destination
+    const thirdTarget: BeatTarget = { track: 0, staff: 0, bar: 0, voice: 0, beat: 2 };
+    const tieProject = {
+      ...blankProject(),
+      edits: [
+        { type: 'setNote', target, string: 1, fret: 5 },
+        { type: 'setNote', target: nextTarget, string: 1, fret: 5 },
+        { type: 'setNote', target: thirdTarget, string: 1, fret: 7 },
+      ],
+    };
+    const tieScore = buildDocument(tieProject as any).score;
+    expect(planTechniqueToggle(tieScore, target, 1, null, 'tie')).toEqual({
+      type: 'setNoteLink',
+      from: { target, string: 1 },
+      to: { target: nextTarget, string: 1 },
+      kind: 'tie',
+    });
+    expect(planTechniqueToggle(tieScore, nextTarget, 1, null, 'tie')).toEqual({
+      type: 'setNoteLink',
+      from: { target, string: 1 },
+      to: { target: nextTarget, string: 1 },
+      kind: 'tie',
+    });
+    const tiedScore = buildDocument({
+      ...tieProject,
+      edits: [
+        ...tieProject.edits,
+        { type: 'setNoteLink', from: { target, string: 1 }, to: { target: nextTarget, string: 1 }, kind: 'tie' },
+      ],
+    } as any).score;
+    expect(planTechniqueToggle(tiedScore, target, 1, null, 'tie')).toEqual({
+      type: 'setNoteLink',
+      from: { target, string: 1 },
+      to: null,
+      kind: 'tie',
+    });
+    expect(planTechniqueToggle(tiedScore, nextTarget, 1, null, 'tie')).toEqual({
+      type: 'setNoteLink',
+      from: { target, string: 1 },
+      to: null,
+      kind: 'tie',
     });
 
     // When beat has no note on string 2

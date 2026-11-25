@@ -89,6 +89,36 @@ function TieGlyph() {
   );
 }
 
+function LyricsGlyph() {
+  return (
+    <svg viewBox="0 0 18 18" width="13" height="13" aria-hidden="true" className="tp-glyph-svg">
+      <rect x="6.5" y="2.5" width="5" height="7.5" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M4.5 8.5 A4.5 4.5 0 0 0 13.5 8.5 M9 13 V15.5 M6.5 15.5 H11.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChordsGlyph() {
+  return (
+    <svg viewBox="0 0 18 18" width="13" height="13" aria-hidden="true" className="tp-glyph-svg">
+      <rect x="3" y="3" width="12" height="12" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M7 3 V15 M11 3 V15 M3 7 H15 M3 11 H15" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <circle cx="7" cy="9" r="1.4" fill="currentColor" />
+      <circle cx="11" cy="5" r="1.4" fill="currentColor" />
+    </svg>
+  );
+}
+
+function TimerGlyph() {
+  return (
+    <svg viewBox="0 0 18 18" width="15" height="15" aria-hidden="true" className="tp-glyph-svg">
+      <path d="M7 2.5 H11 M9 2.5 V4.5 M13.5 5.5 L14.8 4.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="9" cy="10" r="5.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M9 10 V7.2 M9 10 L11.2 11.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Music-symbol glyphs need a larger font to read at palette size; long text a smaller one. */
 function glyphSize(control: PaletteControl): string | undefined {
   if (control.id === 'crescendo' || control.id === 'decrescendo') return 'hairpin';
@@ -114,7 +144,10 @@ export function EditingToolbar({
   onSelect,
   onOpenMeasure,
   onOpenPanel,
+  onPointerCommit,
 }: {
+  /** Called after a pointer click (`event.detail > 0`) commits a direct edit/selection or closes an item popover, so score key handling resumes cleanly. */
+  onPointerCommit?: () => void;
   /** Opens the chord diagram, scale diagram or lyrics editor; with it the palette offers those buttons. */
   onOpenPanel?: (panel: Exclude<PaletteOpen, 'measure'>) => void;
   /** Vertical when shown as the palette column beside the score; arrow keys then also move up and down. */
@@ -271,6 +304,7 @@ export function EditingToolbar({
   const glyphButton = (opts: {
     key: string;
     label: string;
+    shortcut?: string;
     pressed: boolean;
     disabled: boolean;
     onClick: () => void;
@@ -278,6 +312,7 @@ export function EditingToolbar({
     badge?: string;
     id?: string;
     popup?: 'menu' | 'dialog';
+    restoreFocus?: boolean;
   }) => {
     const index = btnCounter++;
     const isDisabled = opts.disabled && !busy;
@@ -293,11 +328,12 @@ export function EditingToolbar({
         aria-disabled={isAriaDisabled ? 'true' : undefined}
         tabIndex={index === focusIdx ? 0 : -1}
         onFocus={() => setFocusIdx(index)}
-        onClick={() => {
+        onClick={event => {
           if (busy || opts.disabled) return;
           opts.onClick();
+          if (opts.restoreFocus !== false && event.detail > 0) onPointerCommit?.();
         }}
-        title={opts.label}
+        title={opts.shortcut ? `${opts.label} (${opts.shortcut})` : opts.label}
         data-palette-id={opts.id}
         aria-haspopup={opts.popup}
         aria-expanded={opts.popup ? popover === opts.id : undefined}
@@ -329,9 +365,11 @@ export function EditingToolbar({
       key: control.id,
       id: control.id,
       label: t(control.label),
+      shortcut: control.id === 'triplet' ? '/' : undefined,
       pressed: control.pressed,
       disabled,
       popup: opens,
+      restoreFocus: !opens && !openPanel,
       onClick: () => {
         if (opens) {
           if (popover === control.id) { setPopover(null); return; }
@@ -341,7 +379,9 @@ export function EditingToolbar({
         }
         run(control.activate());
       },
-      children: <span className="tp-glyph-text tp-palette-glyph" data-size={glyphSize(control)} aria-hidden="true">{control.glyph}</span>,
+      children: control.id === 'timer'
+        ? <TimerGlyph />
+        : <span className="tp-glyph-text tp-palette-glyph" data-size={glyphSize(control)} aria-hidden="true">{control.glyph}</span>,
     });
     const panel = popover !== control.id ? null : control.menu ? (
       <div key={`${control.id}-menu`} className="tp-palette-popover" role="menu" aria-label={t(control.label)} onKeyDown={event => menuKeys(event, control.id)}>
@@ -353,7 +393,17 @@ export function EditingToolbar({
             aria-checked={item.pressed}
             disabled={!item.enabled}
             className="tp-palette-menu-item"
-            onClick={() => { const result = item.activate(); closePopover(control.id); run(result); }}
+            onClick={event => {
+              const result = item.activate();
+              if (event.detail > 0) {
+                setPopover(null);
+                run(result);
+                onPointerCommit?.();
+              } else {
+                closePopover(control.id);
+                run(result);
+              }
+            }}
           >
             <span className="tp-palette-menu-glyph" aria-hidden="true">{item.glyph}</span>
             <span>{itemName(item)}</span>
@@ -367,11 +417,22 @@ export function EditingToolbar({
         role="dialog"
         aria-label={t(control.label)}
         onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePopover(control.id); } }}
-        onSubmit={event => { event.preventDefault(); const result = control.prompt!.submit(promptText); closePopover(control.id); run(result); }}
+        onSubmit={event => {
+          event.preventDefault();
+          const result = control.prompt!.submit(promptText);
+          if (onPointerCommit) {
+            setPopover(null);
+            run(result);
+            onPointerCommit();
+          } else {
+            closePopover(control.id);
+            run(result);
+          }
+        }}
       >
         <input aria-label={t(control.label)} value={promptText} onChange={event => setPromptText(event.target.value)} />
         <button type="submit">{t('palette.apply')}</button>
-        <button type="button" onClick={() => closePopover(control.id)}>{t('palette.cancel')}</button>
+        <button type="button" onClick={event => { setPopover(null); if (event.detail > 0 && onPointerCommit) onPointerCommit(); else toolbarRef.current?.querySelector<HTMLButtonElement>(`button[data-palette-id="${control.id}"]`)?.focus(); }}>{t('palette.cancel')}</button>
       </form>
     );
     // One stable wrapper per control, so opening its list never remounts (and unfocuses) the button.
@@ -402,6 +463,7 @@ export function EditingToolbar({
             glyphButton({
               key: `voice-${voice}`,
               label: t('toolbar.voice_n', { number: voice + 1 }),
+              shortcut: `Ctrl+${voice + 1}`,
               pressed: target.voice === voice,
               // Only voices the bar has can take the cursor; choosing the current one records nothing.
               disabled: voice >= bar.voices.length,
@@ -414,10 +476,10 @@ export function EditingToolbar({
 
       {onOpenPanel && (
         <div className="tp-toolbar-group tp-toolbar-panels" role="group" aria-label={t('palette.lyrics')}>
-          {glyphButton({ key: 'lyrics', id: 'lyrics', label: t('palette.lyrics'), pressed: false, disabled: false, onClick: () => onOpenPanel('lyrics'),
-            children: <span className="tp-glyph-text" aria-hidden="true">{t('palette.lyrics')}</span> })}
-          {glyphButton({ key: 'chords', id: 'chords', label: t('palette.chords'), pressed: false, disabled: !beat, onClick: () => onOpenPanel('chord'),
-            children: <span className="tp-glyph-text" aria-hidden="true">{t('palette.chords')}</span> })}
+          {glyphButton({ key: 'lyrics', id: 'lyrics', label: t('palette.lyrics'), pressed: false, disabled: false, restoreFocus: false, onClick: () => onOpenPanel('lyrics'),
+            children: <><LyricsGlyph /><span className="tp-glyph-text" aria-hidden="true">{t('palette.lyrics')}</span></> })}
+          {glyphButton({ key: 'chords', id: 'chords', label: t('palette.chords'), pressed: false, disabled: !beat, restoreFocus: false, onClick: () => onOpenPanel('chord'),
+            children: <><ChordsGlyph /><span className="tp-glyph-text" aria-hidden="true">{t('palette.chords')}</span></> })}
         </div>
       )}
 
@@ -447,6 +509,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'dot-1',
           label: t('toolbar.dotted'),
+          shortcut: '.',
           pressed: activeDots === 1,
           disabled: editDisabled,
           badge: '·',
@@ -462,6 +525,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'dot-2',
           label: t('toolbar.double_dotted'),
+          shortcut: 'Ctrl+.',
           pressed: activeDots === 2,
           disabled: editDisabled,
           badge: '··',
@@ -477,6 +541,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'rest',
           label: t('toolbar.toggle_rest'),
+          shortcut: 'R',
           pressed: Boolean(beat?.isRest),
           disabled: editDisabled || !beat || (Boolean(beat?.isRest) && !stringed),
           badge: 'R',
@@ -495,6 +560,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'tie',
           label: t('toolbar.toggle_tie'),
+          shortcut: 'L',
           pressed: Boolean(note?.isTieOrigin || note?.isTieDestination),
           disabled: editDisabled || !note || (!note.isTieOrigin && !note.isTieDestination && !canTie),
           badge: 'Tie',
@@ -524,6 +590,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'hp',
           label: t('toolbar.toggle_hp'),
+          shortcut: 'H',
           pressed: Boolean(note?.isHammerPullOrigin || note?.isHammerPullDestination),
           disabled:
             editDisabled ||
@@ -543,6 +610,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'slide',
           label: t('toolbar.toggle_slide'),
+          shortcut: 'S',
           pressed: hasSlide,
           disabled: editDisabled || !note || !stringed || (!hasSlide && !destination),
           badge: 'Sl',
@@ -561,6 +629,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'bend',
           label: t('toolbar.toggle_bend'),
+          shortcut: 'B',
           pressed: (note?.bendType ?? 0) !== 0,
           disabled: editDisabled || !note || !stringed,
           badge: 'B',
@@ -596,6 +665,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'vibrato',
           label: t('toolbar.toggle_vibrato'),
+          shortcut: 'V',
           pressed: (note?.vibrato ?? 0) !== 0,
           disabled: editDisabled || !note || staff.isPercussion,
           badge: 'Vib',
@@ -619,6 +689,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'pm',
           label: t('toolbar.toggle_pm'),
+          shortcut: 'P',
           pressed: Boolean(note?.isPalmMute),
           disabled: editDisabled || !note || !stringed,
           badge: 'PM',
@@ -633,6 +704,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'lr',
           label: t('toolbar.toggle_lr'),
+          shortcut: 'I',
           pressed: Boolean(note?.isLetRing),
           disabled: editDisabled || !note || !stringed,
           badge: 'LR',
@@ -648,6 +720,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'dead',
           label: t('toolbar.toggle_dead'),
+          shortcut: 'X',
           pressed: Boolean(note?.isDead),
           disabled: editDisabled || !note || !stringed,
           badge: '×',
@@ -662,6 +735,7 @@ export function EditingToolbar({
         {glyphButton({
           key: 'ghost',
           label: t('toolbar.toggle_ghost'),
+          shortcut: 'O',
           pressed: Boolean(note?.isGhost),
           disabled: editDisabled || !note,
           badge: '(n)',
@@ -744,6 +818,7 @@ export function EditingToolbar({
           label: t('toolbar.tempo'),
           pressed: false,
           disabled: !onOpenMeasure,
+          restoreFocus: false,
           onClick: () => onOpenMeasure?.(target.bar),
           children: <span className="tp-glyph-text" aria-hidden="true">♩=</span>,
         })}

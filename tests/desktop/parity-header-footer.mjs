@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,clickWorkstationButton,styleSection,moveCursor} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -54,7 +55,7 @@ try{
   await layout(210,297);await button('Apply page layout');
   const before=await exportPdf();assert.ok(before.length>1,`expected several pages, got ${before.length}`);
   before.forEach((texts,index)=>assert.deepEqual(texts,[['start',title],['middle',`${index+1} / ${before.length}`]]));
-  await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
+  await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
   const screenBefore=await screenTexts();assert.ok(screenBefore.length>1,`expected several screen pages, got ${screenBefore.length}`);
   screenBefore.forEach((texts,index)=>assert.deepEqual(texts,[['start',title],['middle',`${index+1} / ${screenBefore.length}`]]));
   await details('Page layout');for(const [name,value] of fields)await field(name).fill(value);

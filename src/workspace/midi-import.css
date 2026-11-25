@@ -405,3 +405,39 @@
   font-size: 11px;
   white-space: nowrap;
 }
+.midi-import .midi-articulations {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--tp-line-subtle);
+}
+.midi-import .midi-articulations .check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.midi-import .midi-articulations .check input {
+  width: auto;
+}
+.midi-import .midi-articulations-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.midi-import .midi-articulations-row > label {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.midi-import .midi-articulations-row select {
+  width: 100%;
+  min-width: 0;
+}
+.midi-import .midi-articulations-hint,
+.midi-import .midi-articulations-status {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.35;
+}

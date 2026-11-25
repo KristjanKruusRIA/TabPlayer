@@ -5,13 +5,24 @@ import { highestStep, lowestStep } from '../editor/notation-entry';
  * The parts of alphaTab 1.8.4's internal layout the hit test reads. They are not public API: the exact engine pin and
  * `score-entry-hit.render.test.ts`, which renders real scores and inverts their noteheads, keep this honest.
  */
-export interface ScoreLineRenderer {
+export interface StaffRendererRef {
   y: number;
-  /** Relative y of a staff position, in half-spaces from the top line downward. */
-  getScoreY(steps: number): number;
   staff: { y: number; isVisible?: boolean; system: { y: number; topPadding: number } };
 }
-export interface EntryLayout { getRendererForBar(key: string, bar: model.Bar): ScoreLineRenderer | null }
+export interface ScoreLineRenderer extends StaffRendererRef {
+  /** Relative y of a staff position, in half-spaces from the top line downward. */
+  getScoreY(steps: number): number;
+}
+export interface TabLineRenderer extends StaffRendererRef {
+  lineOffset: number;
+  firstLineY: number;
+  getLineY(line: number): number;
+}
+export interface EntryLayout {
+  getRendererForBar(key: 'score', bar: model.Bar): ScoreLineRenderer | null;
+  getRendererForBar(key: 'tab', bar: model.Bar): TabLineRenderer | null;
+  getRendererForBar(key: string, bar: model.Bar): ScoreLineRenderer | TabLineRenderer | null;
+}
 /** The layout behind an AlphaTabApi's renderer (its `ScoreRendererWrapper` instance), or null before a render. */
 export function entryLayoutOf(renderer: unknown): EntryLayout | null {
   const host = renderer as { instance?: { layout?: unknown }; layout?: unknown } | null;
@@ -34,7 +45,7 @@ export interface ScoreEntryHit {
 
 const contains = (rect: Rect, x: number) => x >= rect.x && x < rect.x + rect.w;
 /** Where a renderer starts in source space: what alphaTab's own bounds lookup adds up for the bar, then scales. */
-const rendererTop = (renderer: ScoreLineRenderer, scale: number) => (renderer.staff.system.y + renderer.staff.system.topPadding + renderer.staff.y + renderer.y) * scale;
+export const rendererTop = (renderer: StaffRendererRef, scale: number) => (renderer.staff.system.y + renderer.staff.system.topPadding + renderer.staff.y + renderer.y) * scale;
 const inside = (rect: Rect, point: { x: number; y: number }) => contains(rect, point.x) && point.y >= rect.y && point.y < rect.y + rect.h;
 
 /**

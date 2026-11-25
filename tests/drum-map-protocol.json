@@ -2678,6 +2678,79 @@
           46
         ]
       ]
+    },
+    {
+      "name": "library_ggd-okw-brutal-gm_a_candidate_row_and_a_row_the_track_changed",
+      "map": {
+        "preset": "ggd-okw-brutal-gm",
+        "keys": [
+          [42, 41],
+          [56, 40]
+        ]
+      },
+      "percussion": true,
+      "rows": [
+        [0, 42, 41],
+        [0, 56, 40],
+        [0, 91, 38]
+      ]
+    },
+    {
+      "name": "library_ggd-okw-brutal-gm",
+      "map": {
+        "preset": "ggd-okw-brutal-gm"
+      },
+      "percussion": true,
+      "rows": [
+        [35, 35, 36],
+        [36, 36, 36],
+        [38, 38, 38],
+        [91, 91, 38],
+        [37, 37, 37],
+        [42, 42, 42],
+        [92, 92, 58],
+        [46, 46, 46],
+        [44, 44, 44],
+        [50, 50, 50],
+        [48, 48, 50],
+        [47, 47, 43],
+        [45, 45, 43],
+        [43, 43, 48],
+        [41, 41, 48],
+        [51, 51, 51],
+        [93, 93, 51],
+        [53, 53, 53],
+        [94, 94, null],
+        [49, 49, 49],
+        [97, 97, 66],
+        [57, 57, 57],
+        [98, 98, 95],
+        [52, 52, 52],
+        [96, 96, 74],
+        [55, 55, 55],
+        [56, 56, null],
+        [60, 60, null],
+        [54, 54, null],
+        [30, 30, null],
+        [42, null, 42],
+        [38, null, 38],
+        [48, null, 50],
+        [43, null, 48],
+        [45, null, 43],
+        [0, 56, null]
+      ]
+    },
+    {
+      "name": "library_ggd-okw-brutal-gm_is_ignored_for_a_track_that_is_not_percussion",
+      "map": {
+        "preset": "ggd-okw-brutal-gm"
+      },
+      "percussion": false,
+      "rows": [
+        [38, 91, 38],
+        [42, null, 42],
+        [46, 92, 46]
+      ]
     }
   ],
   "nativeOnly": [

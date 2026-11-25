@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,clickWorkstationButton,styleSection,moveCursor} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -96,7 +97,7 @@ try{
   await button('Open');await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   const baselineGeneration=await generation('opened');assert.ok(Number.isInteger(baselineGeneration),'the native audio status reports an integer generation');
   await button('Presentation');await details('Page layout');await field('Width (mm)').fill('210');await field('Height (mm)').fill('297');await button('Apply page layout');
-  await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
+  await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
   // The units the offsets are in: system spacing and render (page) scale as the panels show them.
   await details('Engraving');await details('Page layout');
   const spacingText=await field('System spacing (%)').inputValue(),systemSpacing=spacingText===''?1:Number(spacingText)/100,pageScale=Number(await field('Scale (%)').inputValue())/100;
@@ -220,7 +221,7 @@ try{
 
   id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await closeLibrary();await button('Open');
   await check('reopen: the project (history and gaps) is identical',async()=>{assert.deepEqual((await snapshot()).project,stored.project);});
-  await button('Presentation');await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
+  await button('Presentation');await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
   await check('reopen: the saved gap is on screen and in the exported PDF',async()=>{await verify('reopened',stateC,{withExport:true});});
   await check('reopen: the saved gap shows in the panel and resets',async()=>{
     await selectBar(thirdBar);assert.equal(await field('System gap (%)').inputValue(),'200');

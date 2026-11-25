@@ -154,21 +154,21 @@ it('compares a chosen map with the stored one by what they mean, so choosing an 
 });
 
 it('carries the revision of each preset, an integer, so a later change to the data is visible', () => {
-  expect(drumMapPresets().map(preset => [preset.id, preset.revision])).toEqual([['gm', 1], ['ezdrummer-3', 1], ['superior-drummer-3', 1], ['ggd-modern-and-massive', 1], ['ggd-invasion', 1], ['ggd-okw-architects', 1]]);
+  expect(drumMapPresets().map(preset => [preset.id, preset.revision])).toEqual([['gm', 1], ['ezdrummer-3', 1], ['superior-drummer-3', 1], ['ggd-modern-and-massive', 1], ['ggd-invasion', 1], ['ggd-okw-architects', 1], ['ggd-okw-brutal-gm', 1]]);
   const read = readPresets({ presets: [{ id: 'a', revision: 3 }, { id: 'b', revision: -1 }, { id: 'c', revision: 'x' }, { id: 'd', revision: 1.5 }, { id: 'e' }] });
   expect(read.presets.map(preset => preset.id)).toEqual(['a', 'e']);
   expect(read.problems).toHaveLength(3);
 });
 
-// The five library layouts. Their names are compatibility labels, as the owner decided on 2026-11-17 for ticket THE-219; they say which layout a map
+// The six library layouts. Their names are compatibility labels, as the owner decided on 2026-11-17 for ticket THE-219; they say which layout a map
 // follows and claim no affiliation. The names are allowed in the presets file, its tests and the docs, and nowhere else in the app's sources.
-const LIBRARY_IDS = ['ezdrummer-3', 'superior-drummer-3', 'ggd-modern-and-massive', 'ggd-invasion', 'ggd-okw-architects'];
+const LIBRARY_IDS = ['ezdrummer-3', 'superior-drummer-3', 'ggd-modern-and-massive', 'ggd-invasion', 'ggd-okw-architects', 'ggd-okw-brutal-gm'];
 const libraries = () => drumMapPresets().filter(preset => preset.id !== 'gm');
 const gmKey = new Map(maps.sounds as [number, number][]);
 
 it('ships these library layouts, each unverified and at revision 1', () => {
   expect(libraries().map(preset => preset.id)).toEqual(LIBRARY_IDS);
-  expect(libraries().map(preset => preset.name)).toEqual(['Toontrack EZdrummer 3', 'Toontrack Superior Drummer 3', 'GetGood Drums Modern & Massive', 'GetGood Drums Invasion', 'GetGood Drums One Kit Wonder: Architects']);
+  expect(libraries().map(preset => preset.name)).toEqual(['Toontrack EZdrummer 3', 'Toontrack Superior Drummer 3', 'GetGood Drums Modern & Massive', 'GetGood Drums Invasion', 'GetGood Drums One Kit Wonder: Architects', 'GetGood Drums One Kit Wonder: Brutal (GM)']);
   for (const preset of libraries()) {
     expect(preset.revision, preset.id).toBe(1);
     expect(preset.state, preset.id).toBe('unverified');
@@ -319,6 +319,33 @@ it('inverts General MIDI and library layouts for incoming MIDI keys, including c
   expect(arch[36]).toBe(43);
   expect(arch[37]).toBe(41);
   expect(arch[64]).toBe(94);
+
+  const brutalGm = resolveInputDrumMap({ preset: 'ggd-okw-brutal-gm' });
+  expect(brutalGm[36]).toBe(36);
+  expect(brutalGm[38]).toBe(38);
+  expect(brutalGm[37]).toBe(37);
+  expect(brutalGm[50]).toBe(48);
+  expect(brutalGm[43]).toBe(45);
+  expect(brutalGm[48]).toBe(43);
+  expect(brutalGm[42]).toBe(42);
+  expect(brutalGm[41]).toBe(42);
+  expect(brutalGm[10]).toBe(42);
+  expect(brutalGm[54]).toBe(42);
+  expect(brutalGm[44]).toBe(44);
+  expect(brutalGm[58]).toBe(92);
+  expect(brutalGm[46]).toBe(46);
+  expect(brutalGm[56]).toBe(46);
+  expect(brutalGm[51]).toBe(51);
+  expect(brutalGm[53]).toBe(53);
+  expect(brutalGm[49]).toBe(49);
+  expect(brutalGm[59]).toBe(49);
+  expect(brutalGm[66]).toBe(97);
+  expect(brutalGm[69]).toBe(97);
+  expect(brutalGm[57]).toBe(57);
+  expect(brutalGm[95]).toBe(98);
+  expect(brutalGm[52]).toBe(52);
+  expect(brutalGm[74]).toBe(96);
+  expect(brutalGm[55]).toBe(55);
 
   // Custom DrumMapRef + per-key overrides (remap key, skip key, ignore invalid key/id).
   const overridden = resolveInputDrumMap(

@@ -1,3 +1,4 @@
+import { openPreferences } from './workstation-commands.mjs';
 import { closeWelcomeLibrary } from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import { mkdir,writeFile } from 'node:fs/promises';
@@ -26,8 +27,7 @@ try{
   assert.equal((await invoke('midi_in_status')).state,'stopped','listing the ports opened none');
   await assert.rejects(()=>invoke('midi_in_test_inject',{bytes:noteOn(60)}),/not open/,'nothing can be injected before Start');
 
-  // The panel is in the View menu.
-  await page.locator('details.command-menu > summary',{hasText:/^View$/}).click();
+  await openPreferences(page);
   const panel=page.locator('details.midi-capture-panel');await panel.waitFor();
   // Nothing is listed until this section is opened.
   await panel.locator('summary').click();

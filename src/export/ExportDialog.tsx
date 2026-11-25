@@ -66,10 +66,14 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       setError('');onExport({...(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'?{format,selection,audio:{...audio,...(normalize?{normalizeRmsDb:normalizeLevel}:{}),...(countIn&&countInBars>0?{countIn:true}:{})}}:format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:format==='midi'?{format,selection,...(midiDrumMaps?{drumMaps:true}:{})}:{format,selection}),...named} as ExportOptions);
     }catch(e){setError((e as Error).message);}
   }
-  return <Dialog title={t('export.title')} onClose={onCancel} closeLabel={busy?t('dialog.cancel'):t('dialog.close')} busy={busy} className="export-dialog" actions={<><button type="button" {...busyGuard({busy,unavailable:Boolean(backingIssue)||Boolean(gp5Issue),className:'tp-primary export-submit',onClick:submit})}>{t('export.submit')}</button><button type="button" onClick={onCancel}>{busy?t('export.cancel_export'):t('dialog.cancel')}</button></>}>
+  return <Dialog title={t('export.title')} onClose={onCancel} closeLabel={busy?t('dialog.cancel'):t('dialog.close')} busy={busy} className="export-dialog" actions={<><button type="button" onClick={onCancel}>{busy?t('export.cancel_export'):t('dialog.cancel')}</button><button type="button" {...busyGuard({busy,unavailable:Boolean(backingIssue)||Boolean(gp5Issue),className:'tp-primary export-submit',onClick:submit})}>{t('export.submit')}</button></>}>
     <fieldset {...busyRegion(busy)}>
       <label>{t('export.format')}<select data-autofocus={!busy||undefined} value={format} onChange={e=>{const next=e.target.value as ExportOptions['format'];setFormat(next);if(next!=='pdf'&&next!=='svg'&&next!=='png'&&perTrack){setPerTrack(false);if(fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}}>{FORMATS.map(([value,label])=><option key={value} value={value}>{label.startsWith('export.')?t(label as MessageKey):label}</option>)}</select></label>
-      {format!=='print'&&<div className="export-file-name"><label>{t('export.file_name')}<input value={fileName} spellCheck={false} onChange={e=>setFileName(e.target.value)}/></label>
+      {format!=='print'&&<div className="export-file-name"><label>{t('export.file_name')}<input value={fileName} spellCheck={false} onChange={e=>setFileName(e.target.value)} onKeyDown={event=>{
+        if(event.key!=='Enter'||event.nativeEvent.isComposing)return;
+        event.preventDefault();
+        if(!busy&&!backingIssue&&!gp5Issue)submit();
+      }}/></label>
         <p className="muted">{t('export.file_tokens')}</p>
         <p aria-live="polite">{t('export.saves_as',{name:savedName})}</p>{(format==='svg'||format==='png')&&<p className="muted">{t('export.pages_suffix')}</p>}</div>}
       <fieldset className="export-selection"><legend>{t('export.tracks_to_export')}</legend>{score.tracks.map(tr=><div key={tr.index} role="group" aria-label={t('export.track_staves_aria',{name:tr.name||t('mixer.track_number',{number:tr.index+1})})} className="export-track">

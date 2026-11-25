@@ -348,12 +348,12 @@ mod tests {
     #[test]
     fn the_embedded_presets_parse_and_general_midi_is_the_one_that_changes_nothing() {
         let presets = parse_presets(FILE).unwrap();
-        // General MIDI, then the five library layouts (named in `drum-maps.json` and held by the TypeScript tests).
-        assert_eq!(presets.len(), 6);
+        // General MIDI, then the six library layouts (named in `drum-maps.json` and held by the TypeScript tests).
+        assert_eq!(presets.len(), 7);
         assert_eq!(presets[0].id, "gm");
         assert!(presets.iter().all(|preset| preset.revision == Some(1)));
         assert_eq!(preset_revision("gm"), Some(1));
-        assert_eq!(preset_revision(&presets[5].id), Some(1));
+        assert_eq!(preset_revision(&presets[6].id), Some(1));
         assert_eq!(preset_revision("nothing"), None);
         assert!(presets[0].rows.is_empty());
         assert_eq!(super::presets().len(), presets.len());

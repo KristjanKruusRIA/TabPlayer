@@ -42,7 +42,10 @@ export function EditorPanel({
   scoreTools,
   onOpenLyrics,
   onOpenMeasure,
+  onPaletteCommit,
 }: {
+  /** Called after a pointer action in the edition palette commits, to return keyboard focus to the score workspace. */
+  onPaletteCommit?: () => void;
   score: model.Score;
   target: BeatTarget;
   string: number;
@@ -105,6 +108,7 @@ export function EditorPanel({
       onSelect={onSelect}
       onOpenMeasure={onOpenMeasure}
       onOpenPanel={panel => (panel === 'chord' ? onChord() : panel === 'scales' ? onScales() : onOpenLyrics())}
+      onPointerCommit={onPaletteCommit}
     />, paletteHost) : null;
   return <>
     {palette}

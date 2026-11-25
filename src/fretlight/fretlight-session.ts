@@ -74,7 +74,7 @@ export interface FretlightSession {
 const text = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 /**
- * The Fretlight as the page sees it. It outlives the panel, so the lights follow the score with the View menu closed.
+ * The Fretlight as the page sees it. It outlives the panel, so the lights follow the score with Preferences closed.
  * One send is in flight at a time and the newest frame wins, so a burst of changes costs one write; the native side
  * limits the rate again and coalesces, so a page that misbehaved could not flood the device either.
  */

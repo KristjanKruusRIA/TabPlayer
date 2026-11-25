@@ -36,6 +36,7 @@ const note = (
 const DROP_C = [62, 57, 53, 48, 43, 36] as const;
 const STANDARD_E = [64, 59, 55, 50, 45, 40] as const;
 const SEVEN_STRING_DROP_A = [64, 59, 55, 50, 45, 40, 33] as const;
+const SEVEN_STRING_DROP_FS = [61, 56, 52, 47, 42, 37, 30] as const;
 
 function firstBeats(score: model.Score, trackIndex = 0) {
   return score.tracks[trackIndex].staves[0].bars.flatMap(bar =>
@@ -249,25 +250,36 @@ describe('di-guitar-import', () => {
     expect(p1.get(58)).toEqual({ string: 6, fret: 6 });
   });
 
-  it('avoids inverted open-treble voicings and wide stretches on 7-string Drop F#1 while keeping open-bass drones', () => {
-    const SEVEN_STRING_DROP_FS = [61, 56, 52, 47, 42, 37, 30] as const;
+  it('places 7-string Drop F#1 open-string chords within 4 fingers while keeping fretted-vs-fretted inversions uninverted', () => {
+    // 1. Open-string 6-note Drop F#1 chords [42, 48, 52, 54, 61, 63] & [42, 45, 52, 57, 61, 66] use <= 4 fretted fingers cleanly.
+    const chordA = [{ start: 0, end: 120, keys: [42, 48, 52, 54, 61, 63], voice: 0 }];
+    const solvedA = solveGuitarFingering(chordA, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
+    expect(solvedA.unplayableCount).toBe(0);
+    const pA = solvedA.placements.get(chordA[0])!;
+    expect(pA.get(52)).toEqual({ string: 5, fret: 0 });
+    expect(pA.get(61)).toEqual({ string: 7, fret: 0 });
+    const frettedA = [...pA.values()].map(p => p.fret).filter(f => f > 0);
+    expect(frettedA.length).toBeLessThanOrEqual(4);
+    expect(Math.max(...frettedA) - Math.min(...frettedA)).toBeLessThanOrEqual(4);
 
-    // 1. Dissonant chord [56, 61, 62] (G#3, C#4, D4): must NOT invert strings via s5:f10 + s6:f0 + s7:f0.
-    const diss = [{ start: 0, end: 120, keys: [56, 61, 62], voice: 0 }];
-    const dissSolved = solveGuitarFingering(diss, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
-    expect(dissSolved.unplayableCount).toBe(0);
-    const dissPlaced = [...dissSolved.placements.get(diss[0])!.entries()].sort(
-      (a, b) => a[1].string - b[1].string,
-    );
-    for (let i = 0; i < dissPlaced.length - 1; i++) {
-      expect(dissPlaced[i][0]).toBeLessThan(dissPlaced[i + 1][0]);
-    }
-    const dissFretted = dissPlaced.map(([, p]) => p.fret).filter(f => f > 0);
-    if (dissFretted.length >= 2) {
-      expect(Math.max(...dissFretted) - Math.min(...dissFretted)).toBeLessThanOrEqual(4);
+    // 2. High-mid chord with open drone E3 & C#4 [42, 45, 52, 57, 61, 66] keeps open E3/C#4 instead of 5-finger stretch.
+    const chordB = [{ start: 0, end: 120, keys: [42, 45, 52, 57, 61, 66], voice: 0 }];
+    const solvedB = solveGuitarFingering(chordB, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
+    expect(solvedB.unplayableCount).toBe(0);
+    const frettedB = [...solvedB.placements.get(chordB[0])!.values()].map(p => p.fret).filter(f => f > 0);
+    expect(Math.max(...frettedB) - Math.min(...frettedB)).toBeLessThanOrEqual(4);
+
+    // 3. Fretted-vs-fretted pitches stay non-inverted in string order.
+    const frettedOnly = [{ start: 0, end: 120, keys: [33, 40, 45, 54, 59], voice: 0 }];
+    const frettedSolved = solveGuitarFingering(frettedOnly, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
+    const placedF = [...frettedSolved.placements.get(frettedOnly[0])!.entries()]
+      .filter(([, p]) => p.fret > 0)
+      .sort((a, b) => a[1].string - b[1].string);
+    for (let i = 0; i < placedF.length - 1; i++) {
+      expect(placedF[i][0]).toBeLessThan(placedF[i + 1][0]);
     }
 
-    // 2. Open bass drone chord [37, 49, 56] preserves open C#1 (s2:f0) below fretted upper strings s3:f7 + s4:f9.
+    // 4. Open bass drone chord [37, 49, 56] preserves open C#1 (s2:f0) below fretted upper strings s3:f7 + s4:f9.
     const drone = [{ start: 0, end: 120, keys: [37, 49, 56], voice: 0 }];
     const droneSolved = solveGuitarFingering(drone, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
     expect(droneSolved.unplayableCount).toBe(0);
@@ -276,7 +288,20 @@ describe('di-guitar-import', () => {
     expect(pDrone.get(49)).toEqual({ string: 3, fret: 7 });
     expect(pDrone.get(56)).toEqual({ string: 4, fret: 9 });
 
-    // 3. 5-note 7-string chord [44, 52, 61, 66, 71] finds a compact playable shape (span <= 4) instead of an 8-fret stretch.
+    // 5. Fast single-string tremolo melody stays on string 3 instead of hopping to adjacent strings.
+    const tremolo = [
+      { start: 0, end: 40, keys: [49], voice: 0 },
+      { start: 40, end: 80, keys: [50], voice: 0 },
+      { start: 80, end: 120, keys: [52], voice: 0 },
+      { start: 120, end: 160, keys: [50], voice: 0 },
+      { start: 160, end: 200, keys: [49], voice: 0 },
+    ];
+    const tremSolved = solveGuitarFingering(tremolo, SEVEN_STRING_DROP_FS, 0, 24, 'mid');
+    for (const c of tremolo) {
+      expect(tremSolved.placements.get(c)!.get(c.keys[0])!.string).toBe(3);
+    }
+
+    // 6. 5-note 7-string chord [44, 52, 61, 66, 71] finds a compact playable shape (span <= 4).
     const fiveNote = [{ start: 0, end: 120, keys: [44, 52, 61, 66, 71], voice: 0 }];
     const fiveSolved = solveGuitarFingering(fiveNote, SEVEN_STRING_DROP_FS, 0, 24, 'auto');
     expect(fiveSolved.unplayableCount).toBe(0);
@@ -285,7 +310,7 @@ describe('di-guitar-import', () => {
       .filter(f => f > 0);
     expect(Math.max(...fiveFretted) - Math.min(...fiveFretted)).toBeLessThanOrEqual(4);
 
-    // 4. Repeated identical multi-note chords lock to the same (string, fret) voicing across hits.
+    // 7. Repeated identical multi-note chords lock to the same (string, fret) voicing across hits.
     const repeated = [
       { start: 0, end: 120, keys: [56, 61, 62], voice: 0 },
       { start: 120, end: 240, keys: [56, 61, 62], voice: 0 },
@@ -296,7 +321,7 @@ describe('di-guitar-import', () => {
     expect([...repSolved.placements.get(repeated[1])!.entries()]).toEqual(shape0);
     expect([...repSolved.placements.get(repeated[2])!.entries()]).toEqual(shape0);
 
-    // 5. Fast strummed 6-note chord with slightly ragged per-note release times unifies into a single clean chord beat.
+    // 8. Fast strummed 6-note chord with slightly ragged per-note release times unifies into a single clean chord beat.
     const fastChordNotes = [
       note(42, 0.0, 0.21),
       note(45, 0.0, 0.23),
@@ -319,6 +344,37 @@ describe('di-guitar-import', () => {
     const beat0 = fastImport.score.tracks[0].staves[0].bars[0].voices[0].beats[0];
     expect(beat0.notes.length).toBe(6);
     expect(fastImport.summary.notes.find(n => n.code === 'merged_notes')).toBeUndefined();
+  });
+
+  it('quantizes DI triplets cleanly from onsets without flipping jittery straight 16ths into false triplets', () => {
+    const step130 = 60 / 130;
+    // Bar 1: straight 16ths with noisy release tails landing near triplet fractions; Bar 2: real 16th-triplet run.
+    const input: TranscribedDiNote[] = [
+      // Bar 1 (straight 16ths at 0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75 beats)
+      note(49, 0.0 * step130, 0.31 * step130),
+      note(49, 0.25 * step130, 0.64 * step130),
+      note(49, 0.50 * step130, 0.82 * step130),
+      note(49, 0.75 * step130, 1.15 * step130),
+      note(49, 1.00 * step130, 1.32 * step130),
+      note(49, 1.25 * step130, 1.66 * step130),
+      note(49, 1.50 * step130, 1.98 * step130),
+      note(49, 1.75 * step130, 2.30 * step130),
+      // Bar 2 (start at beat 4.0): 16th-triplet sextuplets across beat 1 (0, 1/6, 2/6, 3/6, 4/6, 5/6) & beat 2
+      ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(k =>
+        note(50, (4 + k / 6) * step130, (4 + (k + 0.8) / 6) * step130),
+      ),
+    ];
+    const imported = importDiGuitarNotes(input, {
+      ...defaultDiGuitarImportOptions,
+      tuning: SEVEN_STRING_DROP_FS,
+      bpm: 130,
+      quantization: 16,
+      tuplets: 'triplets',
+    });
+    const bar0Beats = imported.score.tracks[0].staves[0].bars[0].voices[0].beats;
+    const bar1Beats = imported.score.tracks[0].staves[0].bars[1].voices[0].beats;
+    expect(bar0Beats.every(b => !b.hasTuplet)).toBe(true);
+    expect(bar1Beats.filter(b => b.hasTuplet && b.tupletNumerator === 3 && b.tupletDenominator === 2).length).toBeGreaterThanOrEqual(12);
   });
 
   it('counts unplayable notes beyond maxFret and sanitizes exported filename', () => {

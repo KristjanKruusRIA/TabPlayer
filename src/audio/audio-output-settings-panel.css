@@ -1,0 +1,9 @@
+.audio-output-panel{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;border:0;min-width:0}
+.audio-output-panel>legend{padding:0;margin-bottom:4px;color:var(--ws-text);font-size:12px;font-weight:600}
+.audio-output-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0}
+.audio-output-row>select{flex:1 1 180px;min-width:0;width:auto}
+.audio-output-row>button{flex:0 0 auto;white-space:nowrap}
+.audio-output-panel .sound-diagnostics{display:flex;flex-direction:column;gap:4px;margin-top:2px;font-size:12px;color:var(--ws-muted)}
+.audio-output-panel .sound-diag-item{display:flex;justify-content:space-between;gap:8px}
+.audio-output-panel .sound-diag-value{font-variant-numeric:tabular-nums;color:var(--ws-text)}
+.audio-output-panel [role=alert]{margin:4px 0 0;padding:8px;border:1px solid var(--ws-error);border-radius:3px;color:var(--ws-error);background:var(--ws-error-surface);font-size:12px;line-height:1.35;overflow-wrap:anywhere}

@@ -90,7 +90,7 @@ it('the arrows in the Information row select the previous and next track and rec
   // Moving the selected (first) track down is one edit, and the selection follows it.
   expect(named('Move track up')).toHaveAttribute('aria-disabled','true');
   fireEvent.click(named('Move track down'));await waitFor(()=>expect(edits()).toHaveLength(count+1));expect(edits().at(-1)).toEqual({type:'moveTrack',track:0,to:1});
-  await waitFor(()=>expect(controller.getState().score.tracks[1].name).toBe(first));expect(trackName()).toBe(first);
+  await waitFor(()=>{expect(controller.getState().score.tracks[1].name).toBe(first);expect(trackName()).toBe(first);});
   expect(named('Move track down')).toHaveAttribute('aria-disabled','true');
   fireEvent.click(named('Move track up'));await waitFor(()=>expect(edits()).toHaveLength(count+2));expect(edits().at(-1)).toEqual({type:'moveTrack',track:1,to:0});
   fireEvent.click(screen.getAllByRole('button',{name:/^Undo/,hidden:true})[0]);await waitFor(()=>expect(edits()).toHaveLength(count+1));
@@ -103,7 +103,7 @@ it('dragging a dock grip two rows down records one moveTrack edit, the selection
   expect(edits()).toHaveLength(count);
   fireEvent.pointerUp(grip,{pointerId:5,clientY:157});
   await waitFor(()=>expect(edits()).toHaveLength(count+1));expect(edits().at(-1)).toEqual({type:'moveTrack',track:0,to:2});
-  await waitFor(()=>expect(controller.getState().score.tracks[2].name).toBe(first));expect(trackName()).toBe(first);
+  await waitFor(()=>{expect(controller.getState().score.tracks[2].name).toBe(first);expect(trackName()).toBe(first);});
   fireEvent.click(screen.getAllByRole('button',{name:/^Undo/,hidden:true})[0]);await waitFor(()=>expect(edits()).toHaveLength(count));
   expect(controller.getState().score.tracks[0].name).toBe(first);
 },APP_TEST_TIMEOUT);

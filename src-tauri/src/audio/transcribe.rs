@@ -1270,10 +1270,14 @@ fn best_fret_pen(pitches: &[u8], open_tuning: &[u8], max_fret: i16) -> Option<f3
         if depth == opts_per_pitch.len() {
             let mut by_string = chosen.clone();
             by_string.sort_unstable_by_key(|x| x.0);
+            let mut open_inversions = 0usize;
             for i in 0..by_string.len() {
                 for j in (i + 1)..by_string.len() {
                     if by_string[i].1 > by_string[j].1 {
-                        return; // Reject pitch-to-string inversions
+                        if by_string[i].2 > 0 && by_string[j].2 > 0 {
+                            return; // Reject fretted-vs-fretted pitch-to-string inversions
+                        }
+                        open_inversions += 1;
                     }
                 }
             }
@@ -1288,7 +1292,30 @@ fn best_fret_pen(pitches: &[u8], open_tuning: &[u8], max_fret: i16) -> Option<f3
                     fretted += 1;
                 }
             }
-            let mut pen = if fretted >= 2 {
+            if fretted > 4 {
+                let mut at_min = 0usize;
+                let mut above_min = 0usize;
+                let mut min_s_lo = usize::MAX;
+                let mut min_s_hi = 0usize;
+                for &(s_idx, _, fr) in &by_string {
+                    if fr == min_f {
+                        at_min += 1;
+                        min_s_lo = min_s_lo.min(s_idx);
+                        min_s_hi = min_s_hi.max(s_idx);
+                    } else if fr > min_f {
+                        above_min += 1;
+                    }
+                }
+                let blocked_open = by_string
+                    .iter()
+                    .any(|&(s_idx, _, fr)| fr == 0 && s_idx > min_s_lo && s_idx < min_s_hi);
+                let barre_ok = at_min >= 2 && !blocked_open && (1 + above_min) <= 4;
+                if !barre_ok {
+                    return; // Physically unplayable (> 4 fingers without a clean index barre)
+                }
+            }
+            let mut pen = open_inversions as f32 * 0.02;
+            pen += if fretted >= 2 {
                 let sp = max_f - min_f;
                 let max_span = if min_f >= 9 { 6 } else { 5 };
                 if sp > max_span {
@@ -1312,14 +1339,11 @@ fn best_fret_pen(pitches: &[u8], open_tuning: &[u8], max_fret: i16) -> Option<f3
 
             for &(s_open, _, fr_open) in &by_string {
                 if fr_open == 0 {
-                    let mut max_lower_fret = 0_i16;
-                    for &(s_other, _, fr_other) in &by_string {
-                        if s_other < s_open && fr_other >= 5 {
-                            max_lower_fret = max_lower_fret.max(fr_other);
-                        }
-                    }
-                    if max_lower_fret >= 5 {
-                        pen += 0.25 + (max_lower_fret - 4) as f32 * 0.08;
+                    let has_lower_fretted = by_string
+                        .iter()
+                        .any(|&(s_other, _, fr_other)| s_other < s_open && fr_other >= 5);
+                    if has_lower_fretted {
+                        pen += 0.02;
                     }
                 }
             }
@@ -1662,9 +1686,14 @@ fn build_transcribed_notes(
             let snapshot = pitch_cands.clone();
             pitch_cands.retain(|cand| {
                 !snapshot.iter().any(|root| {
+                    let diff = cand.pitch.checked_sub(root.pitch);
+                    let weak = cand.body < frame_thr * 1.15 || cand.onset < pitch_thr * 0.78;
+                    let strong_19th =
+                        diff == Some(19) && cand.body >= frame_thr * 1.45 && cand.onset >= onset_gate;
                     root.score > cand.score
-                        && matches!(cand.pitch.checked_sub(root.pitch), Some(12) | Some(19))
-                        && (cand.body < frame_thr * 1.15 || cand.onset < pitch_thr * 0.78)
+                        && matches!(diff, Some(12) | Some(19))
+                        && weak
+                        && !strong_19th
                 })
             });
         }
@@ -1719,31 +1748,52 @@ fn build_transcribed_notes(
             }
             let cluster_len = 1 + ev.nbrs.len();
             let mut counts = vec![0usize; n_pitches];
+            let mut sum_scores = vec![0.0_f32; n_pitches];
+            let mut sum_bodies = vec![0.0_f32; n_pitches];
+            let mut sum_onsets = vec![0.0_f32; n_pitches];
             for item in &snapshot_cands[i] {
                 counts[usize::from(item.pitch - min_pitch)] += 1;
+            }
+            for p_off in 0..n_pitches {
+                sum_scores[p_off] += ev.scores[p_off];
+                sum_bodies[p_off] += ev.bodies[p_off];
+                sum_onsets[p_off] += ev.onsets[p_off];
             }
             for &j in &ev.nbrs {
                 for item in &snapshot_cands[j] {
                     counts[usize::from(item.pitch - min_pitch)] += 1;
                 }
+                for p_off in 0..n_pitches {
+                    sum_scores[p_off] += ev_objs[j].scores[p_off];
+                    sum_bodies[p_off] += ev_objs[j].bodies[p_off];
+                    sum_onsets[p_off] += ev_objs[j].onsets[p_off];
+                }
             }
 
             let mut consensus_cands = Vec::<ScoredPitchCand>::new();
             for (p_off, &cnt) in counts.iter().enumerate() {
-                if cnt == 0 {
-                    continue;
-                }
                 let pitch = min_pitch + p_off as u8;
                 let existing = snapshot_cands[i].iter().find(|c| c.pitch == pitch).copied();
-                let keep = if cnt * 2 >= cluster_len {
-                    ev.bodies[p_off] >= frame_thr * 0.70
-                } else {
-                    existing.is_some() && ev.raw_scores[p_off] >= pitch_thr + 0.14
-                };
-                if keep {
+                let avg_sc = sum_scores[p_off] / cluster_len as f32;
+                let avg_bd = sum_bodies[p_off] / cluster_len as f32;
+                let avg_on = sum_onsets[p_off] / cluster_len as f32;
+                let majority_keep = cnt > 0 && cnt * 2 >= cluster_len && ev.bodies[p_off] >= frame_thr * 0.70;
+                let sustained_ring_keep = existing.is_none()
+                    && ev.bodies[p_off] >= frame_thr * 1.25
+                    && avg_bd >= frame_thr * 1.35
+                    && ev.onsets[p_off] >= onset_gate;
+                let consensus_chord_keep = existing.is_none()
+                    && avg_sc >= pitch_thr * 0.80
+                    && avg_on >= 0.42
+                    && avg_bd >= frame_thr * 0.90
+                    && ev.onsets[p_off] >= 0.34
+                    && ev.bodies[p_off] >= frame_thr * 0.80;
+                let single_strong_keep =
+                    existing.is_some() && ev.raw_scores[p_off] >= pitch_thr + 0.14;
+                if majority_keep || sustained_ring_keep || consensus_chord_keep || single_strong_keep {
                     consensus_cands.push(existing.unwrap_or(ScoredPitchCand {
                         pitch,
-                        score: ev.scores[p_off],
+                        score: ev.scores[p_off].max(avg_sc),
                         body: ev.bodies[p_off],
                         onset: ev.onsets[p_off],
                     }));

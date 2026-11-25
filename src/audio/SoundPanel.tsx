@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { delayDivisions, effectBlocks, modulationDivisions, syncedBlocks } from '../document-settings';
 import type { EditCommand, EffectBlock, PickupPosition, TrackSound } from '../edit-types';
@@ -9,7 +9,7 @@ import { factoryCategories, factorySounds } from './factory-sounds';
 import { chainOrder } from '../document-settings';
 import { ampModels, availablePickupsForVoice, blockNames, cabinetModels, graphicBands, visibleParameters, localizedParamHint, presetIds, soundPreset, localizedBlockName, localizedPresetName, localizedAmpModelName, localizedCabinetModelName, localizedParamLabel } from './sound-model';
 import { SoundLock } from './SoundLock';
-import { BusyFieldset, busyGuard, Dialog } from '../ui';
+import { BusyFieldset, Dialog } from '../ui';
 import { useI18n } from '../i18n';
 import { DrumKitPicker } from './DrumKitPicker';
 import { PickupOptions, SoundSourceOptions } from './SoundSourceOptions';
@@ -26,11 +26,12 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
   const { lang, t } = useI18n();
   const soundbankStatus=useSoundbankStatus();
   const [soundbankDialogOpen,setSoundbankDialogOpen]=useState(false);
-  const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown,diagnostics:true});
-  const {playbackState,current,devices,diagnostics,diagnosticsError,testToneMessage,testTone,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
-    factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,previewer,previewChoice,previewLabel,showingPreview,previewSelect,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,first,second,save,setVoice,setPickup}=editing;
+  const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown});
+  const {playbackState,current,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
+    activeFactory,factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,previewer,previewChoice,previewLabel,showingPreview,previewSelect,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,first,second,save,setVoice,setPickup}=editing;
   const pickups=availablePickupsForVoice(current.voiceId,program,percussion,current.drumKit,soundbankStatus);
   const chainRef=useRef<HTMLDivElement>(null),panel=useRef<HTMLElement>(null);
+  const presetId=useId(),factoryId=useId();
   // The wheel over a focused number field steps it natively, and a refused change does not put the number back; while busy the wheel is refused (React's own wheel listener is passive, so this one is native).
   useEffect(()=>{
     const node=panel.current;if(!node||!busy)return;
@@ -47,7 +48,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
   /** One pedal's controls on `board`, at `index` in the track's chain. Names on the second board say so. */
   const pedal=(board:Board,block:EffectBlock,index:number)=>{
     const bName=localizedBlockName(block,lang);
-    return <details className="sound-block" key={block} open={!board.second&&openBlock===block||undefined} ref={node=>{if(node&&!board.second&&openBlock===block)requestAnimationFrame(()=>node.scrollIntoView?.({block:'nearest'}));}}><summary><span className="sound-block-name">{bName}</span><span className="sound-block-state">{board.effects[block].enabled?t('sound.enabled'):t('sound.bypassed')}{!board.second&&current.plugin?.active&&current.plugin.kind!=='instrument'&&(block==='drive'||block==='amp'||block==='cabinet')?`, ${t('plugin.replaced')}`:''}</span></summary><BusyFieldset busy={busy}>
+    return <details className="sound-block" key={block} data-enabled={board.effects[block].enabled||undefined} open={!board.second&&openBlock===block||undefined} ref={node=>{if(node&&!board.second&&openBlock===block)requestAnimationFrame(()=>node.scrollIntoView?.({block:'nearest'}));}}><summary><span className="sound-block-name">{bName}</span><span className="sound-block-state">{board.effects[block].enabled?t('sound.enabled'):t('sound.bypassed')}{!board.second&&current.plugin?.active&&current.plugin.kind!=='instrument'&&(block==='drive'||block==='amp'||block==='cabinet')?`, ${t('plugin.replaced')}`:''}</span></summary><BusyFieldset busy={busy}>
       <label className="check"><input aria-label={board.name(t('sound.enable_block',{block:lang==='en'?block:bName}))} type="checkbox" checked={board.effects[block].enabled} onChange={e=>fx(board,block,'enabled',e.target.checked)}/>{t('sound.enabled')}</label>
       {!board.second&&<div className="sound-block-order"><button aria-label={board.name(t('sound.move_block_earlier',{block:bName}))} disabled={index===0} onClick={()=>move(block,-1)}>{t('sound.move_earlier')}</button><button aria-label={board.name(t('sound.move_block_later',{block:bName}))} disabled={index===order.length-1} onClick={()=>move(block,1)}>{t('sound.move_later')}</button></div>}
       {visibleParameters(block,board.effects).map(p=>{const pLabel=lang==='en'?p.label:localizedParamLabel(block,p.key,p.label,lang);return <label key={p.key} title={localizedParamHint(p.key,p.hint,lang)}>{pLabel}<input aria-label={board.name(`${lang==='en'?block:bName} ${pLabel}`)} type="number" disabled={block==='wah'&&p.key===(board.effects.wah.mode==='auto'?'position':'sensitivity')||p.key==='rateHz'&&syncOf(board,block)!==0} min={p.min} max={p.max} step={p.step} value={Number((board.effects[block] as unknown as Record<string,unknown>)[p.key]??0)} onChange={e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=p.min&&value<=p.max)fx(board,block,p.key,value);}}/></label>;})}
@@ -68,47 +69,40 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
     </BusyFieldset></details>;
   };
 
-  return <section ref={panel} className="sound-panel" aria-label={t('sound.track_sound')}><h3>{t('sound.heading')}</h3>
-    <SoundLock editing={editing} className="check"/>
-    {percussion&&<DrumKitPicker editing={editing} className="drum-kit" onOpenPlugin={onOpenPlugin}/>}
-    <BusyFieldset busy={busy}>
-    <label>{t('sound.sound_source')}<select value={current.voiceId??''} onChange={e=>void setVoice(e.target.value||null)}><SoundSourceOptions percussion={percussion} program={program} drumKit={current.drumKit} voiceId={current.voiceId} status={soundbankStatus}/></select></label>
-    {pickups.length>1&&<label>{t('sound.pickup')}<select value={current.pickup??''} onChange={e=>void setPickup((e.target.value||undefined) as PickupPosition|undefined)}><PickupOptions pickups={pickups}/></select></label>}
-    <button type="button" aria-haspopup="dialog" onClick={()=>setSoundbankDialogOpen(true)}>{t('soundbanks.settings_open')}</button>
-    <label>{t('sound.sound_preset')}<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{localizedPresetName(id,lang)}</option>)}</select></label>
-    <button onClick={()=>void editing.restorePreset()}>{t('sound.restore_preset')}</button>
-    <label>{t('sound.factory_sound')}<select aria-label={t('sound.factory_sound')} aria-describedby={factoryNote} value={factoryChoice} onChange={e=>setFactoryChoice(e.target.value)}><option value="">{t('sound.choose_factory_sound')}</option>{factoryCategories.map(category=><optgroup key={category} label={category}>{factorySounds.filter(item=>item.category===category).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}</select></label>
-    <p id={factoryNote} className="muted">{factory?`${factory.description} `:''}{t('sound.factory_help')}</p>
-    <button disabled={!factory} onClick={applyFactory}>{t('sound.apply_factory_sound')}</button>
-    {previewer&&<><label>{t('sound.preview_sound')}<select ref={previewSelect} aria-label={t('sound.preview_sound')} value={showingPreview?previewChoice:''} onKeyDown={escapePreview} onChange={e=>choosePreview(e.target.value)}>
-      <option value="">{t('sound.choose_preview_sound')}</option>{orphanPreview&&<option value={previewChoice} disabled>{previewLabel} {t('sound.no_longer_saved')}</option>}<optgroup label={t('sound.factory_presets_group')}>{presetIds.map(id=><option key={id} value={`preset:${id}`}>{localizedPresetName(id,lang)}</option>)}</optgroup>{factoryCategories.map(category=><optgroup key={category} label={t('sound.category_sounds_group',{category})}>{factorySounds.filter(item=>item.category===category).map(item=><option key={item.id} value={`factory:${item.id}`}>{item.name}</option>)}</optgroup>)}{library.length>0&&<optgroup label={t('sound.my_sounds')}>{library.map(item=><option key={item.name} value={`saved:${item.name}`}>{item.name}</option>)}</optgroup>}</select></label>
-    {showingPreview&&<div className="sound-clipboard" role="group" aria-label="Sound preview" onKeyDown={escapePreview}><button onClick={keepPreview}>{t('sound.keep_preview')}</button><button onClick={cancelPreview}>{t('sound.cancel_preview')}</button></div>}</>}
-    <div className="sound-clipboard"><button onClick={editing.copyCurrentSound}>{t('sound.copy_sound')}</button><button disabled={!clipboard.sound} onClick={editing.pasteSound}>{t('sound.paste_sound')}</button></div>
-    </BusyFieldset>
-    <BusyFieldset busy={busy} className="sound-library"><legend>{t('sound.my_sounds')}</legend>
-      <label>{t('sound.saved_sound')}<select ref={savedSelect} aria-label={t('sound.saved_sound')} value={entry?chosen:''} onChange={e=>{setChosen(e.target.value);setConfirming(false);}}><option value="">{library.length?t('sound.choose_saved_sound'):t('sound.no_saved_sounds')}</option>{library.map(item=><option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
-      <div className="sound-library-actions"><button disabled={!entry} onClick={()=>{if(entry)editing.applySaved(entry.name);}}>{t('sound.apply_saved_sound')}</button><button disabled={!entry} onClick={()=>setConfirming(true)}>{t('sound.delete_saved_sound')}</button></div>
-      {confirming&&entry&&<div role="group" aria-label={t('rig.delete_sound_title',{name:entry.name})} className="sound-library-confirm"><span>{t('sound.delete_confirm',{name:entry.name})}</span><button onClick={editing.deleteChosen}>{t('action.delete')}</button><button autoFocus onClick={closeConfirm}>{t('action.cancel')}</button></div>}
-      <label>{t('sound.saved_sound_name')}<input aria-label={t('sound.saved_sound_name')} value={name} maxLength={60} onChange={e=>setName(e.target.value)}/></label>
-      <div className="sound-library-actions"><button disabled={!name.trim()} onClick={editing.saveNamed}>{t('sound.save_sound')}</button><button disabled={!entry||!name.trim()} onClick={editing.renameChosen}>{t('sound.rename_saved_sound')}</button></div>
-      <p role="status" className="muted">{status}</p>
-    </BusyFieldset>
-    {current.plugin?.active&&current.plugin.kind!=='instrument'&&<p className="sound-plugin-link muted">{t('plugin.replaced_tone')}{onOpenPlugin&&<> <button type="button" aria-haspopup="dialog" className="sound-plugin-link-open" onClick={onOpenPlugin}>{t('sound_summary.plugin_open')}</button></>}</p>}
-    <p className="sound-chain-label muted">{t('sound.signal_chain')}</p>
-    <div className="sound-chain" ref={chainRef}>{order.map((block,index)=>pedal(first,block,index))}</div>
-    {second&&effectBlocks.some(block=>second.effects[block].enabled)&&<section className="sound-second-board" aria-label={t('sound.second_pedalboard')}><p className="sound-chain-label muted">{t('sound.second_pedalboard_desc')}</p><div className="sound-chain">{chainOrder(second.effects).filter(block=>second.effects[block].enabled).map((block,index)=>pedal(second,block,index))}</div></section>}
-    {playback&&<BusyFieldset busy={busy} className="sound-output">
-      <label>{t('audio.audio_output')}<select value={playback.deviceId()??''} onChange={e=>editing.selectOutput(e.target.value)}><option value="">{t('audio.system_default')}</option>{devices.map(device=><option key={device.id} value={device.id}>{device.name??t('audio.unknown_device')}</option>)}</select></label>
-      <button type="button" {...busyGuard({ busy, onClick: testTone })}>{t('audio.test_tone')}</button>
-      <div className="sound-diagnostics" role="group" aria-label={t('audio.diagnostics_label')}>
-        <div className="sound-diag-item"><span className="sound-diag-label">{t('audio.current_device')}:</span> <span className="sound-diag-value">{diagnostics?.deviceName ?? t('audio.unknown')}</span></div>
-        <div className="sound-diag-item"><span className="sound-diag-label">{t('audio.sample_rate')}:</span> <span className="sound-diag-value">{diagnostics?.sampleRate ? `${diagnostics.sampleRate} Hz` : t('audio.unknown')}</span></div>
-        <div className="sound-diag-item"><span className="sound-diag-label">{t('audio.buffer_size')}:</span> <span className="sound-diag-value">{diagnostics?.bufferSize != null ? t('audio.frames', { count: diagnostics.bufferSize }) : t('audio.unknown')}</span></div>
-      </div>
-      {diagnosticsError&&<p role="alert" className="sound-diagnostics-error">{t(diagnosticsError)}</p>}
-      {testToneMessage&&<p role="alert" className="sound-test-tone-message">{t(testToneMessage)}</p>}
-    </BusyFieldset>}
-  {error&&<p role="alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert">{playbackState.error}</p>}
-  {soundbankDialogOpen&&createPortal(<Dialog title={t('soundbanks.dialog_title')} onClose={()=>setSoundbankDialogOpen(false)} dismissOnBackdrop><SoundbankSettingsPanel embedded onConfigured={()=>{if(playback&&typeof playback.refreshSounds==='function')void playback.refreshSounds().catch(()=>{});}}/></Dialog>,document.body)}
+  return <section ref={panel} className="sound-panel" aria-label={t('sound.track_sound')}>
+    <div className="sound-panel-setup">
+      <h3>{t('sound.heading')}</h3>
+      <SoundLock editing={editing} className="check"/>
+      {percussion&&<DrumKitPicker editing={editing} className="drum-kit" onOpenPlugin={onOpenPlugin}/>}
+      <BusyFieldset busy={busy} className="sound-controls">
+      {pickups.length>1?<div className="sound-source-grid">
+        <label>{t('sound.sound_source')}<select value={current.voiceId??''} onChange={e=>void setVoice(e.target.value||null)}><SoundSourceOptions percussion={percussion} program={program} drumKit={current.drumKit} voiceId={current.voiceId} status={soundbankStatus}/></select></label>
+        <label>{t('sound.pickup')}<select value={current.pickup??''} onChange={e=>void setPickup((e.target.value||undefined) as PickupPosition|undefined)}><PickupOptions pickups={pickups}/></select></label>
+      </div>:<label>{t('sound.sound_source')}<select value={current.voiceId??''} onChange={e=>void setVoice(e.target.value||null)}><SoundSourceOptions percussion={percussion} program={program} drumKit={current.drumKit} voiceId={current.voiceId} status={soundbankStatus}/></select></label>}
+      <button type="button" aria-haspopup="dialog" onClick={()=>setSoundbankDialogOpen(true)}>{t('soundbanks.settings_open')}</button>
+      <div className="sound-field"><label htmlFor={presetId}>{t('sound.sound_preset')}</label><div className="sound-field-row"><select id={presetId} value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{localizedPresetName(id,lang)}</option>)}</select><button onClick={()=>void editing.restorePreset()}>{t('sound.restore_preset')}</button></div></div>
+      <div className="sound-field"><label htmlFor={factoryId}>{t('sound.factory_sound')}</label><div className="sound-field-row"><select id={factoryId} aria-label={t('sound.factory_sound')} aria-describedby={factoryNote} value={factoryChoice} onChange={e=>setFactoryChoice(e.target.value)}><option value="">{t('sound.choose_factory_sound')}</option>{factoryCategories.map(category=><optgroup key={category} label={category}>{factorySounds.filter(item=>item.category===category).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}</select><button disabled={!factory||factory.id===activeFactory?.id} onClick={applyFactory}>{t('sound.apply_factory_sound')}</button></div><p id={factoryNote} className="muted">{factory?`${factory.description} `:''}{t('sound.factory_help')}</p></div>
+      {previewer&&<><label>{t('sound.preview_sound')}<select ref={previewSelect} aria-label={t('sound.preview_sound')} value={showingPreview?previewChoice:''} onKeyDown={escapePreview} onChange={e=>choosePreview(e.target.value)}>
+        <option value="">{t('sound.choose_preview_sound')}</option>{orphanPreview&&<option value={previewChoice} disabled>{previewLabel} {t('sound.no_longer_saved')}</option>}<optgroup label={t('sound.factory_presets_group')}>{presetIds.map(id=><option key={id} value={`preset:${id}`}>{localizedPresetName(id,lang)}</option>)}</optgroup>{factoryCategories.map(category=><optgroup key={category} label={t('sound.category_sounds_group',{category})}>{factorySounds.filter(item=>item.category===category).map(item=><option key={item.id} value={`factory:${item.id}`}>{item.name}</option>)}</optgroup>)}{library.length>0&&<optgroup label={t('sound.my_sounds')}>{library.map(item=><option key={item.name} value={`saved:${item.name}`}>{item.name}</option>)}</optgroup>}</select></label>
+      {showingPreview&&<div className="sound-clipboard" role="group" aria-label="Sound preview" onKeyDown={escapePreview}><button onClick={keepPreview}>{t('sound.keep_preview')}</button><button onClick={cancelPreview}>{t('sound.cancel_preview')}</button></div>}</>}
+      <div className="sound-clipboard"><button onClick={editing.copyCurrentSound}>{t('sound.copy_sound')}</button><button disabled={!clipboard.sound} onClick={editing.pasteSound}>{t('sound.paste_sound')}</button></div>
+      </BusyFieldset>
+      <BusyFieldset busy={busy} className="sound-library"><legend>{t('sound.my_sounds')}</legend>
+        <label>{t('sound.saved_sound')}<select ref={savedSelect} aria-label={t('sound.saved_sound')} value={entry?chosen:''} onChange={e=>{setChosen(e.target.value);setConfirming(false);}}><option value="">{library.length?t('sound.choose_saved_sound'):t('sound.no_saved_sounds')}</option>{library.map(item=><option key={item.name} value={item.name}>{item.name}</option>)}</select></label>
+        <div className="sound-library-actions"><button disabled={!entry} onClick={()=>{if(entry)editing.applySaved(entry.name);}}>{t('sound.apply_saved_sound')}</button><button disabled={!entry} onClick={()=>setConfirming(true)}>{t('sound.delete_saved_sound')}</button></div>
+        {confirming&&entry&&<div role="group" aria-label={t('rig.delete_sound_title',{name:entry.name})} className="sound-library-confirm"><span>{t('sound.delete_confirm',{name:entry.name})}</span><button onClick={editing.deleteChosen}>{t('action.delete')}</button><button autoFocus onClick={closeConfirm}>{t('action.cancel')}</button></div>}
+        <label>{t('sound.saved_sound_name')}<input aria-label={t('sound.saved_sound_name')} value={name} maxLength={60} onChange={e=>setName(e.target.value)}/></label>
+        <div className="sound-library-actions"><button disabled={!name.trim()} onClick={editing.saveNamed}>{t('sound.save_sound')}</button><button disabled={!entry||!name.trim()} onClick={editing.renameChosen}>{t('sound.rename_saved_sound')}</button></div>
+        <p role="status" className="muted">{status}</p>
+      </BusyFieldset>
+      {error&&<p role="alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert">{playbackState.error}</p>}
+    </div>
+    <div className="sound-panel-chain">
+      {current.plugin?.active&&current.plugin.kind!=='instrument'&&<p className="sound-plugin-link muted">{t('plugin.replaced_tone')}{onOpenPlugin&&<> <button type="button" aria-haspopup="dialog" className="sound-plugin-link-open" onClick={onOpenPlugin}>{t('sound_summary.plugin_open')}</button></>}</p>}
+      <p className="sound-chain-label muted">{t('sound.signal_chain')}</p>
+      <div className="sound-chain" ref={chainRef}>{order.map((block,index)=>pedal(first,block,index))}</div>
+      {second&&effectBlocks.some(block=>second.effects[block].enabled)&&<section className="sound-second-board" aria-label={t('sound.second_pedalboard')}><p className="sound-chain-label muted">{t('sound.second_pedalboard_desc')}</p><div className="sound-chain">{chainOrder(second.effects).filter(block=>second.effects[block].enabled).map((block,index)=>pedal(second,block,index))}</div></section>}
+    </div>
+    {soundbankDialogOpen&&createPortal(<Dialog title={t('soundbanks.dialog_title')} onClose={()=>setSoundbankDialogOpen(false)} dismissOnBackdrop><SoundbankSettingsPanel embedded onConfigured={()=>{if(playback&&typeof playback.refreshSounds==='function')void playback.refreshSounds().catch(()=>{});}}/></Dialog>,document.body)}
   </section>;
 }

@@ -1,3 +1,4 @@
+import { openPreferences, closePreferences } from './workstation-commands.mjs';
 import { closeWelcomeLibrary,waitForWorkspaceIdle } from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -28,15 +29,14 @@ try{
   const placed=edit=>(edit.type==='sequence'?edit.commands:[edit]).filter(step=>step.type==='setNote').map(placement);
   const targetOf=edit=>edit.type==='sequence'?edit.commands.find(step=>step.type==='setNote').target:edit.target;
 
-  const viewSummary=page.locator('details.command-menu > summary',{hasText:/^View$/});
   const panel=page.locator('details.midi-capture-panel');
-  const openPanel=async()=>{await viewSummary.click();if(!await panel.evaluate(node=>node.open))await panel.locator('summary').click();};
-  const closeMenu=async()=>{await viewSummary.focus();await page.keyboard.press('Escape');await page.waitForTimeout(200);};
-  const menuOpen=()=>page.evaluate(()=>document.querySelector('details.midi-capture-panel').parentElement.closest('details').open);
+  const openPanel=async()=>{await openPreferences(page);if(!await panel.evaluate(node=>node.open))await panel.locator('summary').click();};
+  const closeMenu=async()=>{await closePreferences(page);await page.waitForTimeout(200);};
+  const menuOpen=()=>page.locator('.workspace-preferences').isVisible();
   const workspace=page.getByRole('region',{name:'Score workspace'});
   const mapping=panel.getByLabel('MIDI guitar strings');
-  // A real click on the select, then the choice: neither may close the View menu around it.
-  const choose=async value=>{await mapping.click();await mapping.selectOption(value);assert.equal(await menuOpen(),true,'choosing a mapping did not close the View menu');};
+  // A real click on the select, then the choice: neither may close the Preferences dialog around it.
+  const choose=async value=>{await mapping.click();await mapping.selectOption(value);assert.equal(await menuOpen(),true,'choosing a mapping did not close the Preferences dialog');};
   const stored=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('tabplayer.midiCapture')));
 
   await openPanel();
@@ -128,7 +128,7 @@ try{
   await panel.getByRole('button',{name:'Reset to defaults'}).click();
   assert.deepEqual(await stored(),{port:TEST,chordWindowMs:60,minVelocity:1,stringMapping:'off'});
   assert.equal(await mapping.inputValue(),'off');
-  assert.equal(await menuOpen(),true,'Reset did not close the View menu');
+  assert.equal(await menuOpen(),true,'Reset did not close the Preferences dialog');
   await closeMenu();
 
   // Mapping off is the fingering rule of slice 2, whatever the channels.

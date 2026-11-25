@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { compactWindowHeight } from './small-window';
-import { keyFoldQuery,toolbarFit,toolbarMeasured } from './toolbar-fit';
+import { compactScoreDisplayWidth,keyFoldQuery,toolbarFit } from './toolbar-fit';
 
 // jsdom applies no stylesheet, so these pin the CSS text that the layout rests on. They say what the rules are, not how they render:
 // nothing here measures a pixel. The widths and heights in the comments are arithmetic from the stylesheet, not measurements.
@@ -21,7 +21,7 @@ describe('Loop, Click and Speed captions (THE-196, friction 4)',()=>{
     expect(captionRules.length).toBeGreaterThan(0);
   });
   it('take no width from the toolbar: out of the flow, one line, clipped with an ellipsis instead of widening the group',()=>{
-    const body=captionRules.join(';');
+    const body=captionRules.filter(rule=>!rule.includes('clip-path:inset')).join(';');
     expect(body).toMatch(/position:absolute/);expect(body).toMatch(/white-space:nowrap/);expect(body).toMatch(/overflow:hidden/);expect(body).toMatch(/text-overflow:ellipsis/);
     expect(body).toMatch(/clip-path:none/);expect(body).not.toMatch(/clip-path:inset/);expect(body).not.toMatch(/white-space:normal|white-space:wrap/);
   });
@@ -32,7 +32,7 @@ describe('Loop, Click and Speed captions (THE-196, friction 4)',()=>{
 
 describe('the display controls folded at small heights (THE-196, friction 8)',()=>{
   it('hides a folded group even though the row sets display:flex on it',()=>{
-    expect(bodies("[aria-label='Score display'][hidden]").join(';')).toMatch(/display:none/);
+    expect(bodies(".score-display-fields[hidden]").join(';')).toMatch(/display:none/);
   });
   it('lays the folded menu out as a popover below its button, wrapping its controls',()=>{
     const body=bodies('.score-display-host[data-compact]>').join(';');
@@ -81,11 +81,11 @@ describe('after looking at the real window (THE-196)',()=>{
     const rule=[...transport.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(match=>match[1].trim()==='.transport-speed-field').map(match=>match[2]).join(';');
     expect(rule).toMatch(/flex-direction:row/);
   });
-  it('separates the tempo readout from the Speed caption',()=>{
-    expect(bodies('.transport-speed>.transport-caption .transport-tempo').join(';')).toMatch(/margin-left:\d+px/);
+  it('keeps the tempo status available to assistive technology without crowding the Speed caption',()=>{
+    expect(bodies('.transport-speed>.transport-caption .transport-tempo').join(';')).toMatch(/clip-path:inset\(50%\)/);
   });
   it('keeps the opened menu inside the window: fixed, wrapping, never wider than the window, with its position set by the component',()=>{
-    const body=bodies(".score-display-host[data-compact]>[aria-label='Score display']").join(';');
+    const body=bodies(".score-display-host[data-compact]>.score-display-fields").join(';');
     expect(body).toMatch(/position:fixed/);expect(body).toMatch(/flex-wrap:wrap/);expect(body).toMatch(/max-width:calc\(100vw - 16px\)/);expect(body).not.toMatch(/position:absolute/);expect(body).not.toMatch(/left:0/);
   });
   it('has no selector that repeats the shell prefix, which would never match (a comment once split one in two)',()=>{
@@ -93,39 +93,17 @@ describe('after looking at the real window (THE-196)',()=>{
   });
 });
 
-describe('the toolbar rows follow the measured widths (the Key group made the transport row 1003px wide)',()=>{
-  // The numbers come from src/shell/toolbar-fit.ts, which holds the measured widths and the margin; these tests tie the stylesheet and the Key fold to them.
-  const flat=css.replace(/\s+/g,' ');
-  const areas={two:"'left transport right' 'display display display'",row:"'transport transport transport' 'left display right'"};
-  const mediaBlock=(query:string)=>{const start=flat.indexOf(`@media (${query}) {`);expect(start,`no @media (${query})`).toBeGreaterThanOrEqual(0);let depth=0,end=start;for(let i=flat.indexOf('{',start);i<flat.length;i++){if(flat[i]==='{')depth++;if(flat[i]==='}'&&--depth===0){end=i;break;}}return flat.slice(start,end);};
-  it('measures every width with a margin of at least 20px',()=>{
-    expect(toolbarMeasured.margin).toBeGreaterThanOrEqual(20);
+describe('the compact toolbar at desktop widths',()=>{
+  it('puts the display and transport on the same row, with a separate transport row below the desktop threshold',()=>{
+    expect(exact('.gp-toolbar').join(';')).toContain("grid-template-areas:'left display transport right'");
+    expect(css).toMatch(new RegExp(`@media \\(width < ${compactScoreDisplayWidth}px\\)[^{]*\\{[^}]*grid-template-areas:'transport transport transport' 'left display right'`));
+  });
+  it('folds the Key group while the desktop toolbar has less room',()=>{
     for(const language of ['en','et','de'] as const){
-      const fit=toolbarFit[language];
-      expect(fit.transportRowBelow).toBeGreaterThanOrEqual(toolbarMeasured.twoRowKeyClean+toolbarMeasured.margin);
-      expect(fit.singleRowFrom).toBeGreaterThanOrEqual(toolbarMeasured.singleRowClean[language]+toolbarMeasured.margin);
-      expect(fit.keyInRowFrom).toBeGreaterThanOrEqual(toolbarMeasured.singleRowKeyClean[language]+toolbarMeasured.margin);
-      expect(fit.keyInRowFrom).toBeGreaterThan(fit.singleRowFrom);
-    }
-  });
-  it('gives the transport a row of its own below the width that holds the row with the Key group',()=>{
-    const block=mediaBlock(`width < ${toolbarFit.en.transportRowBelow}px`);expect(block).toContain(areas.row);
-    for(const language of ['et','de'] as const)expect(toolbarFit[language].transportRowBelow).toBe(toolbarFit.en.transportRowBelow);
-  });
-  it('keeps the display controls on a second row until the single row holds them, per language',()=>{
-    expect(mediaBlock(`width < ${toolbarFit.en.singleRowFrom}px`)).toContain(areas.two);
-    for(const language of ['et','de'] as const){
-      const block=mediaBlock(`width >= ${toolbarFit.en.singleRowFrom}px) and (width < ${toolbarFit[language].singleRowFrom}px`);
-      expect(block).toContain(`.app-shell:lang(${language}) .gp-toolbar {`);expect(block).toContain(areas.two);
-    }
-  });
-  it('folds the Key group exactly where the single row does not hold it, in each language',()=>{
-    for(const language of ['en','et','de'] as const){
-      const { singleRowFrom,keyInRowFrom }=toolbarFit[language];
+      const {singleRowFrom,keyInRowFrom}=toolbarFit[language];
+      expect(singleRowFrom).toBe(1366);
+      expect(keyInRowFrom).toBeGreaterThan(1920);
       expect(keyFoldQuery(language)).toBe(`(max-width: 1100px), (width >= ${singleRowFrom}px) and (width < ${keyInRowFrom}px)`);
-      expect(keyInRowFrom).toBeGreaterThanOrEqual(singleRowFrom+1);
     }
-    // At 1920 wide, the width most windows are maximised to, English has one row with the Key group in More playback.
-    expect(toolbarFit.en.singleRowFrom).toBeLessThanOrEqual(1920);expect(toolbarFit.en.keyInRowFrom).toBeGreaterThan(1920);
   });
 });

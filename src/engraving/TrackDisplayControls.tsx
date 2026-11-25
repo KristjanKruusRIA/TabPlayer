@@ -35,12 +35,14 @@ export function TrackDisplayControls({ids,names,selected,view,zoom,disabled,onVi
     const outside=(event:PointerEvent)=>{if(event.target instanceof Node&&!host.current?.contains(event.target))setOpen(false);};
     document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);
   },[compact,open]);
-  return <div ref={host} className="score-display-host" data-compact={compact||undefined} data-open={compact&&open||undefined} onKeyDown={event=>{
+  return <div ref={host} className="score-display-host" data-compact={compact||undefined} data-open={compact&&open||undefined} onBlur={event=>{
+    if(compact&&open&&event.relatedTarget instanceof Node&&!event.currentTarget.contains(event.relatedTarget))setOpen(false);
+  }} onKeyDown={event=>{
     if(event.key!=='Escape'||!compact||!open)return;
     event.preventDefault();event.stopPropagation();setOpen(false);toggle.current?.focus();
   }}>
   {compact&&<button ref={toggle} type="button" className="score-display-toggle" aria-expanded={open} aria-controls={panelId} onFocus={()=>{toggleHadFocus.current=true;}} onBlur={()=>{toggleHadFocus.current=false;}} onClick={()=>setOpen(value=>!value)}>{t('track_display.toolbar_aria')}</button>}
-  <fieldset ref={panel} id={panelId} hidden={folded} disabled={disabled} aria-label={t('track_display.toolbar_aria')}><div className="pair">
+  <fieldset className="score-display-fields" ref={panel} id={panelId} hidden={folded} disabled={disabled} aria-label={t('track_display.toolbar_aria')}><div className="pair">
     <label><span className="score-tools-caption">{t('track_display.display_mode')}</span><select ref={firstControl} title={t('track_display.display_mode')} className="score-layout-select" value={current.layout} onChange={e=>{
       if(disabled)return;
       onDisplay?.(resolveScoreDisplay({...current,layout:e.target.value}));

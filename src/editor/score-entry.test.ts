@@ -5,7 +5,7 @@ import { blankProject, projectCommands, type BeatTarget, type Project } from '..
 import { DEFAULT_INPUT_PREFERENCES } from './input-preferences';
 import { drawnSpelling, entryPitch, writtenPitch } from './notation-entry';
 import { entryNotes } from '../instruments/entry';
-import { durationKeyEdit, letterPitch, movedPitch, planNoteMove, planScoreEntry, respellNote, scoreEntryKey, selectedNote, stepEntryPitch, type EntryPlan } from './score-entry';
+import { durationKeyEdit, letterPitch, movedPitch, planNoteMove, planScoreEntry, respellNote, rhythmEntryKey, scoreEntryKey, selectedNote, stepEntryPitch, type EntryPlan } from './score-entry';
 
 const piano = (beat: number, bar = 0): BeatTarget => ({ track: 1, staff: 0, bar, voice: 0, beat });
 const guitar = (beat: number): BeatTarget => ({ track: 0, staff: 0, bar: 0, voice: 0, beat });
@@ -260,4 +260,25 @@ it('re-spells a note without changing its pitch, and refuses or ignores what it 
   expect(respellNote(...cSharp.args, 'flat')).toMatchObject({ mode: 5, name: 'Db4' });
   expect(respellNote(...cSharp.args, 'natural')).toEqual({ refused: 'no_spelling', name: 'C#4' });
   expect(respellNote(...spelled(68).args, 'doubleFlat')).toEqual({ refused: 'no_spelling', name: 'G#4' });
+});
+
+it('matches always-on rhythmEntryKey shortcuts and rejects pitch letters, digits, arrows and modified keys', () => {
+  const r = (key: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}, code?: string, swapPlusMinus = false) =>
+    rhythmEntryKey({ key, code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods }, swapPlusMinus);
+  expect(r('+')).toEqual({ kind: 'shorter' });
+  expect(r('=')).toEqual({ kind: 'shorter' });
+  expect(r('-')).toEqual({ kind: 'longer' });
+  expect(r('_', { shiftKey: true })).toEqual({ kind: 'longer' });
+  expect(r('+', {}, undefined, true)).toEqual({ kind: 'longer' });
+  expect(r('-', {}, undefined, true)).toEqual({ kind: 'shorter' });
+  expect(r('.')).toEqual({ kind: 'dot', double: false });
+  expect(r('.', { ctrlKey: true })).toEqual({ kind: 'dot', double: true });
+  expect(r('>', { shiftKey: true }, 'Period')).toEqual({ kind: 'dot', double: false });
+  expect(r('/')).toEqual({ kind: 'triplet' });
+  expect(r('?', { shiftKey: true }, 'Slash')).toEqual({ kind: 'triplet' });
+  expect(r('r')).toEqual({ kind: 'rest' });
+  expect(r('R', { shiftKey: true })).toEqual({ kind: 'rest' });
+  for (const [key, mods] of [['a', {}], ['b', {}], ['c', {}], ['1', {}], ['ArrowRight', {}], ['=', { ctrlKey: true }], ['-', { altKey: true }], ['r', { ctrlKey: true }]] as const) {
+    expect(r(key, mods)).toBeNull();
+  }
 });

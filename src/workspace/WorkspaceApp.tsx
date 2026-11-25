@@ -121,12 +121,12 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const recoveryStatus=useMemo(()=>session&&<RecoveryFeedback session={session} workspace={workspace}/>,[workspace,!!session,sessionPending,sessionError,sessionIssues,sessionRetry,sessionSource,sessionStatus]);
   return <div ref={panel} role="tabpanel" id={`document-panel-${encodeURIComponent(documentId)}`} aria-labelledby={`document-tab-${encodeURIComponent(documentId)}`}
-    onKeyDownCapture={keys} onFocusCapture={event=>{tabFocus.current=event.target instanceof Element&&!!event.target.closest('[role="tablist"]');}}>
+    onKeyDownCapture={keys} onFocusCapture={event=>{tabFocus.current=event.target instanceof Element&&!!event.target.closest('.document-tabs-strip');}}>
     <App key={activationId} controller={active.controller} audioBridge={audio} waveformBridge={waveform} exportBridge={exports} documentBridge={documentBridge}
       documentView={active.view} onViewChange={onViewChange} clipboard={workspace.clipboard} workspaceBusy={state.busy} workspaceError={state.error} playbackResumeEpoch={state.playbackResumeEpoch}
       beginEditorOperation={beginEditorOperation} onNew={onNew} onOpen={onOpen} onImportConverted={onImportConverted} onClose={onClose} onCloseAll={onCloseAll}
       sessionMenu={sessionMenu} libraryMenu={libraryMenu} onFileCommandCapture={captureLibraryInvoker} recoveryStatus={<>{recoveryStatus}{libraryState.error&&<p className="session-error" role="alert">{libraryState.error}</p>}</>}
-      documentTabs={<DocumentTabs tabs={tabs} activeId={documentId} disabled={state.busy} onActivate={id=>run(perform(()=>workspace.activate(id)))} onClose={id=>run(perform(()=>workspace.close(id)))}/>}/>
+      documentTabs={<DocumentTabs tabs={tabs} activeId={documentId} disabled={state.busy} onActivate={id=>run(perform(()=>workspace.activate(id)))} onClose={id=>run(perform(()=>workspace.close(id)))} onNew={()=>run(onNew())}/>}/>
     {library&&libraryState.open&&<LibraryDialog controller={library.controller} welcome={libraryState.welcome} onClose={()=>library.close()}/>}
     {asking&&<OpenPasswordDialog fileName={asking.locked.fileName} onTry={async password=>{await asking.tryPassword(password);settle(true);}} onCancel={()=>settle(false)}/>}
   </div>;

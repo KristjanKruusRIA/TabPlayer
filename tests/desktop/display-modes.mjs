@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import { existsSync,mkdirSync,readFileSync,writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -56,7 +57,7 @@ const shot=async name=>{const path=resolve(shots,`${name}.png`);await page.scree
 // ---- controls: real mouse and keyboard ----
 const modeSelect=()=>page.getByRole('combobox',{name:'Display mode',exact:true});
 async function setMode(layout){
-  const select=modeSelect();let current=await select.inputValue();if(current===layout)return;
+  await showScoreDisplay(page);const select=modeSelect();let current=await select.inputValue();if(current===layout)return;
   await select.focus();
   const delta=modes.indexOf(layout)-modes.indexOf(current);
   await page.keyboard.press(delta>0?'ArrowDown':'ArrowUp',{delay:20});
@@ -65,11 +66,11 @@ async function setMode(layout){
   await waitForWorkspaceIdle(page);await stable(`mode ${layout}`);
 }
 async function setManual(value){
-  const input=page.getByLabel('Zoom (%)',{exact:true});await input.click({clickCount:3});await page.keyboard.type(String(value));await page.keyboard.press('Tab');
+  await showScoreDisplay(page);const input=page.getByLabel('Zoom (%)',{exact:true});await input.click({clickCount:3});await page.keyboard.type(String(value));await page.keyboard.press('Tab');
   await waitForWorkspaceIdle(page);await stable(`zoom ${value}`);
 }
 async function fit(kind){
-  await page.getByRole('button',{name:kind==='fitWidth'?'Fit width':'Fit page',exact:true}).click();await waitForWorkspaceIdle(page);await stable(kind);
+  await showScoreDisplay(page);await page.getByRole('button',{name:kind==='fitWidth'?'Fit width':'Fit page',exact:true}).click();await waitForWorkspaceIdle(page);await stable(kind);
 }
 const policyState=()=>page.evaluate(()=>({layout:document.querySelector('.score-layout-select')?.value,zoomInput:document.querySelector('input[title="Zoom (%)"]')?.value,fitWidth:document.querySelector('.score-fit-controls button:nth-child(1)')?.getAttribute('aria-pressed'),fitPage:document.querySelector('.score-fit-controls button:nth-child(2)')?.getAttribute('aria-pressed'),actual:document.querySelector('.score-actual-zoom')?.textContent??null}));
 const tab=docId=>page.locator(`#document-tab-${docId}`);

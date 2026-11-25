@@ -25,6 +25,33 @@ const chordDigits: Record<string, { plain: AccidentalChord; alt: AccidentalChord
 };
 
 
+/** A rhythm or rest key the score answers in both normal editing and note-entry mode. */
+export type RhythmEntryKey = Extract<ScoreEntryKey, { kind: 'shorter' | 'longer' | 'dot' | 'triplet' | 'rest' }>;
+
+/**
+ * Rhythm/rest editing keys (`+`/`-`/`=`/`_`, `.` / `Ctrl+.`, `/`, `R`, plus `Shift+.` / `Shift+/` fallbacks) available even when
+ * pitch Note Entry mode is off. Rejects `Alt`, and rejects `Ctrl`/`Cmd` except for double-dot (`Ctrl+.`).
+ */
+export function rhythmEntryKey(
+  event: { key: string; code?: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean },
+  swapPlusMinus = false,
+): RhythmEntryKey | null {
+  const ctrl = event.ctrlKey || event.metaKey;
+  if (event.altKey) return null;
+  if (event.key === '.') return { kind: 'dot', double: ctrl };
+  if (ctrl) return null;
+  // `=` and `_` are the same keys as `+` and `-` without or with Shift, so they follow them.
+  const plus = event.key === '+' || event.key === '=', minus = event.key === '-' || event.key === '_';
+  if (plus || minus) return { kind: plus !== swapPlusMinus ? 'shorter' : 'longer' };
+  if (event.key === '/') return { kind: 'triplet' };
+  if (event.key === 'r' || event.key === 'R') return { kind: 'rest' };
+  // Guitar Pro also takes Shift+. for `.` and Shift+/ for `/`, whatever character the layout types there. The physical
+  // key is only a fallback: on German and Estonian layouts Slash is the `-` key, so a recognised `key` always wins.
+  if (event.shiftKey && event.code === 'Period') return { kind: 'dot', double: false };
+  if (event.shiftKey && event.code === 'Slash') return { kind: 'triplet' };
+  return null;
+}
+
 /**
  * What a key does on the score in entry mode. Letters write pitches; `+` and `-` (also `=` and `_`) make the beat shorter and longer, or the reverse with `swapPlusMinus`, `.`
  * (also Shift+`.`) dots it (Ctrl+`.` double-dots), `/` (also Shift+`/`) makes a triplet and R a rest, as in Guitar Pro; Ctrl+Alt+Up/Down moves the
@@ -45,21 +72,11 @@ export function scoreEntryKey(event: { key: string; code?: string; ctrlKey: bool
     const value = event.altKey ? chord.alt : chord.plain;
     return value === 'respell' ? { kind: 'respell' } : { kind: 'accidental', value };
   }
-  if (event.altKey) return null;
-  if (event.key === '.') return { kind: 'dot', double: ctrl };
-  if (ctrl) return null;
-  const letter = keyLetter(event.key);
-  if (letter >= 0) return { kind: 'letter', letter };
-  // `=` and `_` are the same keys as `+` and `-` without or with Shift, so they follow them.
-  const plus = event.key === '+' || event.key === '=', minus = event.key === '-' || event.key === '_';
-  if (plus || minus) return { kind: plus !== swapPlusMinus ? 'shorter' : 'longer' };
-  if (event.key === '/') return { kind: 'triplet' };
-  if (event.key === 'r' || event.key === 'R') return { kind: 'rest' };
-  // Guitar Pro also takes Shift+. for `.` and Shift+/ for `/`, whatever character the layout types there. The physical
-  // key is only a fallback: on German and Estonian layouts Slash is the `-` key, so a recognised `key` always wins.
-  if (event.shiftKey && event.code === 'Period') return { kind: 'dot', double: false };
-  if (event.shiftKey && event.code === 'Slash') return { kind: 'triplet' };
-  return null;
+  if (!event.altKey && !ctrl) {
+    const letter = keyLetter(event.key);
+    if (letter >= 0) return { kind: 'letter', letter };
+  }
+  return rhythmEntryKey(event, swapPlusMinus);
 }
 
 const plainDurations = [1, 2, 4, 8, 16, 32, 64];
@@ -137,10 +154,27 @@ const isPlain = (beat: model.Beat) => beat.graceType === model.GraceType.None &&
 
 /** Whether the bar the cursor is at the end of still has room for another beat. */
 export function barHasRoomAfter(score: model.Score, target: BeatTarget): boolean {
+  return remainingBarTicks(score, target) > 0;
+}
+
+function remainingBarTicks(score: model.Score, target: BeatTarget): number {
   const voice = score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice], master = score.masterBars[target.bar];
-  if (target.beat < voice.beats.length - 1) return false;
-  const ticks = voiceTicks(voice, master.calculateDuration(false));
-  return Boolean(ticks && ticks[0] < master.calculateDuration(false) * ticks[1]);
+  if (target.beat < voice.beats.length - 1) return 0;
+  const measure = master.calculateDuration(false), ticks = voiceTicks(voice, measure);
+  return ticks ? Math.max(0, (measure * ticks[1] - ticks[0]) / ticks[1]) : 0;
+}
+
+/** A right-arrow rest keeps the current rhythm when possible and fits a shorter rest otherwise. */
+export function planArrowRightBeat(project: Project, score: model.Score, target: BeatTarget, rhythm: EntryDuration): Extract<EditCommand, {type:'insertBeat'}> | null {
+  const room = remainingBarTicks(score, target);
+  if (!room) return null;
+  const whole = 3840;
+  const base = rhythm.duration < 0 ? whole * -rhythm.duration : whole / rhythm.duration;
+  const fits = base * (2 - 2 ** -rhythm.dots) <= room;
+  const duration = fits ? rhythm.duration : [...plainDurations, 128, 256].find(value => whole / value <= room);
+  if (duration === undefined) return null;
+  const command = { type: 'insertBeat', target: { ...target, beat: target.beat + 1 }, duration, dots: fits ? rhythm.dots : 0 } as const;
+  return tryPreview(project, command) ? command : null;
 }
 /**
  * Where the cursor goes after a write, and the steps that get it there: the next beat of the bar; at the last beat of a bar

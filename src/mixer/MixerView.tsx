@@ -2,7 +2,7 @@ import { useI18n } from '../i18n';
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
-import { earlierFactorySound, earlierFactorySounds, factorySound, factorySounds } from '../audio/factory-sounds';
+import { canonicalEffectsKey, matchEarlierFactorySound, matchFactorySound } from '../audio/factory-sounds';
 import { MasterPanel } from '../audio/MasterPanel';
 import { presetName, resolvedGp8Set, soundPreset, voiceDisplayName } from '../audio/sound-model';
 import { getSoundbankStatus, useSoundbankStatus, type Gp8Status } from '../audio/soundbank-store';
@@ -19,15 +19,11 @@ import './mixer.css';
 const noSubscribe=()=>()=>{};
 const noState=()=>null;
 
-/** `value` as text with the keys of every object sorted, so two writers that list the same settings' fields in different orders (the editor and the
- * native player do, for the amp) give the same text. Lists keep their order: the pedalboard's `order` says where each block stands. */
-const canonical=(value:unknown):string=>Array.isArray(value)?`[${value.map(canonical).join(',')}]`:value&&typeof value==='object'?`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical((value as Record<string,unknown>)[key])}`).join(',')}}`:JSON.stringify(value)??'null';
-const effectsKey=(sound:TrackSound)=>canonical(completeSound(sound).effects);
-const baseKeys=new Map<string,string>();
-/** The effects of factory sound `factory:id` or preset `preset:id` as a key, worked out once: they do not depend on the instrument. */
-function baseKey(kind:'factory'|'earlier'|'preset',id:string):string {
-  const name=`${kind}:${id}`;let key=baseKeys.get(name);
-  if(key===undefined){const sound=kind==='factory'?factorySound(id):kind==='earlier'?earlierFactorySound(id):soundPreset(id as TrackSound['presetId']);key=sound?effectsKey(sound):'';baseKeys.set(name,key);}
+const presetBaseKeys=new Map<string,string>();
+/** The effects of preset `id` as a canonical key, worked out once: they do not depend on the instrument. */
+function presetBaseKey(id:TrackSound['presetId']):string {
+  let key=presetBaseKeys.get(id);
+  if(key===undefined){key=canonicalEffectsKey(soundPreset(id));presetBaseKeys.set(id,key);}
   return key;
 }
 
@@ -43,13 +39,13 @@ export function describeTrackSound(track:model.Track,sound?:TrackSound,status:Gp
       ?(gp8Auto?gp8Auto.name:'Percussion')
       :(gp8Auto?gp8Auto.name:midiPrograms[program]??'Automatic instrument');
   if(!sound)return {voice,tone:presetName('gm')};
-  const {presetId}=completeSound(sound),key=effectsKey(sound);
-  const matched=factorySounds.find(item=>item.presetId===presetId&&baseKey('factory',item.id)===key);
+  const matched=matchFactorySound(sound);
   if(matched)return {voice,tone:matched.name};
   // Settings a project copied from a factory sound before it was retuned are named as that version, not as the preset marked edited.
-  const earlier=earlierFactorySounds.find(item=>item.presetId===presetId&&baseKey('earlier',item.id)===key);
+  const earlier=matchEarlierFactorySound(sound);
   if(earlier)return {voice,tone:earlier.name};
-  return {voice,tone:key===baseKey('preset',presetId)?presetName(presetId):`${presetName(presetId)} (edited)`};
+  const {presetId}=completeSound(sound);
+  return {voice,tone:canonicalEffectsKey(sound)===presetBaseKey(presetId)?presetName(presetId):`${presetName(presetId)} (edited)`};
 }
 
 export type MixerPlayer=Pick<

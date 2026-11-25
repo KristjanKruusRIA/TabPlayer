@@ -19,6 +19,13 @@ it('explains the one whole-score common/cut choice beside GP export options',()=
   expect(screen.getByText('Engraving settings affect the screen and PDF. Guitar Pro holds one common/cut choice for the whole score: GP export keeps the source styling, and mixed measure choices are written as the choice most bars make and listed in the warning.')).toBeVisible();
 });
 
+it('submits the export from the file name field with Enter',()=>{
+  const submit=vi.fn();
+  render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  fireEvent.keyDown(screen.getByLabelText('File name'),{key:'Enter'});
+  expect(submit).toHaveBeenCalledOnce();
+});
+
 it('includes GP backing by default without exposing audio format settings',()=>{
   const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
   expect(screen.getByLabelText('Include backing audio')).toBeChecked();
@@ -277,15 +284,16 @@ describe('export dialog',()=>{
   it('contains keyboard focus, cancels busy exports with Escape, and restores the opener',()=>{
     const opener=document.createElement('button');document.body.append(opener);opener.focus();
     const cancel=vi.fn();const score=fixture();const {rerender,unmount}=render(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={false} onExport={()=>{}} onCancel={cancel}/>);
-    const format=screen.getByLabelText('Export format'),closeButton=screen.getByRole('button',{name:'Close'}),cancelButton=screen.getByRole('button',{name:'Cancel'});
-    expect(format).toHaveFocus();closeButton.focus();fireEvent.keyDown(closeButton,{key:'Tab',shiftKey:true});expect(cancelButton).toHaveFocus();
-    fireEvent.keyDown(cancelButton,{key:'Tab'});expect(closeButton).toHaveFocus();
+    const format=screen.getByLabelText('Export format'),closeButton=screen.getByRole('button',{name:'Close'}),exportButton=screen.getByRole('button',{name:'Export'});
+    expect(format).toHaveFocus();closeButton.focus();fireEvent.keyDown(closeButton,{key:'Tab',shiftKey:true});expect(exportButton).toHaveFocus();
+    fireEvent.keyDown(exportButton,{key:'Tab'});expect(closeButton).toHaveFocus();
     format.focus();rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={true} onExport={()=>{}} onCancel={cancel}/>);
-    const busyCancel=screen.getByRole('button',{name:'Cancel export'});expect(format).toHaveFocus();expect(format).not.toBeDisabled();expect(format.closest('fieldset')).toHaveAttribute('aria-disabled','true');
+    const busyCancel=screen.getByRole('button',{name:'Cancel export'}),busyExport=screen.getByRole('button',{name:'Export'});expect(format).toHaveFocus();expect(format).not.toBeDisabled();expect(format.closest('fieldset')).toHaveAttribute('aria-disabled','true');
     const busyCloseButton=screen.getByRole('button',{name:'Cancel'});
     expect(busyCloseButton).toHaveClass('tp-dialog-close');
     expect(screen.queryByRole('button',{name:'Close'})).toBeNull();
-    busyCancel.focus();fireEvent.keyDown(busyCancel,{key:'Tab'});expect(busyCloseButton).toHaveFocus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
+    busyExport.focus();fireEvent.keyDown(busyExport,{key:'Tab'});expect(busyCloseButton).toHaveFocus();
+    busyCancel.focus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
     unmount();expect(opener).toHaveFocus();opener.remove();
   });
   it('uses the shared hit-testable dialog backdrop to contain pointer input without dismissing on backdrop mousedown',()=>{

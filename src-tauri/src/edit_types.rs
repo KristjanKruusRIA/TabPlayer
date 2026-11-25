@@ -1352,6 +1352,10 @@ pub enum EditCommand {
         note_index: u32,
         articulation: u32,
     },
+    RemapPercussion {
+        track: u32,
+        map: Vec<(u32, Option<u32>)>,
+    },
     RemoveNoteByIndex {
         target: BeatTarget,
         note_index: u32,
@@ -1829,6 +1833,19 @@ impl EditCommand {
                         .any(|pair| (pair[0].bar, pair[0].ratio) >= (pair[1].bar, pair[1].ratio))
                 {
                     return Err("Tempo replacement needs ordered distinct ratio points starting at bar 0 ratio 0.".into());
+                }
+            }
+            Self::RemapPercussion { map, .. } => {
+                if map.is_empty()
+                    || map.len() > 128
+                    || map.iter().any(|(from, to)| {
+                        *from > 255 || to.is_some_and(|value| value > 255)
+                    })
+                    || map.windows(2).any(|pair| pair[0].0 >= pair[1].0)
+                {
+                    return Err(
+                        "Percussion remap needs 1 to 128 ordered distinct mappings.".into(),
+                    );
                 }
             }
             Self::SetHarmonyChord {
@@ -3834,6 +3851,21 @@ mod tests {
             json!({"type": "importTracks", "clip": clip, "targetTrack": "5"}),
             json!({"type": "importTracks", "clip": clip, "extra": true}),
             json!({"type": "importTracks", "clip": {"format": "Wrong"}}),
+        ] {
+            rejected(&invalid);
+        }
+    }
+
+    #[test]
+    fn remap_percussion_validates_entries() {
+        let valid = json!({"type": "remapPercussion", "track": 0, "map": [[36, 35], [42, null]]});
+        assert_eq!(serde_json::to_value(accepted(&valid)).unwrap(), valid);
+        for invalid in [
+            json!({"type": "remapPercussion", "track": 0, "map": []}),
+            json!({"type": "remapPercussion", "track": 0, "map": [[38, 36], [36, 35]]}),
+            json!({"type": "remapPercussion", "track": 0, "map": [[256, 36]]}),
+            json!({"type": "remapPercussion", "track": 0, "map": [[36, 256]]}),
+            json!({"type": "remapPercussion", "track": -1, "map": [[36, 35]]}),
         ] {
             rejected(&invalid);
         }

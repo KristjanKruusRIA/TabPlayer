@@ -1,6 +1,7 @@
 import { syncInstrumentViewPreferencesFromNative } from './instruments/view-preferences';
 import { refreshSoundbankStatus } from './audio/soundbank-store';
 import { SoundbankSettingsPanel } from './audio/SoundbankSettingsPanel';
+import { AudioOutputSettingsPanel } from './audio/AudioOutputSettingsPanel';
 import { useCallback,useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
 import {model,Settings} from '@coderline/alphatab';
 import { DocumentClosedError,DocumentController } from './controller';
@@ -13,6 +14,8 @@ import { busyGuard,onRefusedSpace,type RefusedSpace } from './ui/useBusyGuard';
 import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
 import { EditorPanel } from './EditorPanel';
+import { TempoEditorDialog } from './editor/TempoEditorDialog';
+import { DrumRemapDialog } from './editor/DrumRemapDialog';
 import type { PropertiesRequest, PropertiesTab } from './editor/PropertiesDialog';
 import { readInspectorTab, writeInspectorTab, type InspectorTab } from './workstation/inspector-tab';
 import { BusyFieldset } from './ui/BusyFieldset';
@@ -73,7 +76,7 @@ import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
 import { useI18n, type LanguagePreference, type MessageKey } from './i18n';
 import { practiceProblem } from './audio/practice';
-import { durationKeyEdit,letterPitch,movedPitch,planNoteMove,planScoreEntry,respellNote,scoreEntryKey,selectedNote,stepEntryPitch,type AccidentalChord,type EntryPlan,type EntryRefusal,type ScoreEntryKey } from './editor/score-entry';
+import { durationKeyEdit,letterPitch,movedPitch,planArrowRightBeat,planNoteMove,planScoreEntry,respellNote,rhythmEntryKey,scoreEntryKey,selectedNote,stepEntryPitch,type AccidentalChord,type EntryPlan,type EntryRefusal,type ScoreEntryKey } from './editor/score-entry';
 import { accidentalLabelKeys,enterPitch } from './editor/notation-entry';
 import { AUTO_DURATION_UNFIT,InputPreferencesPanel,applyInOrder,autoDurationEdit,autoDurationSkip,entryAfterWrite,numpadDurationEdit,numpadKey,useInputPreferences,type EntryDuration } from './editor/input-preferences';
 import { ClipboardPanel } from './editor/ClipboardPanel';
@@ -136,6 +139,8 @@ import { readHarmonyLibrary,putHarmonyLibraryEntry,removeHarmonyLibraryEntry } f
 import type { HarmonyAudition,HarmonyLibrary } from './editor/harmony-types';
 import { HarmonyTransposePanel } from './harmony/HarmonyTransposePanel';
 import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
+import { Dialog } from './ui/Dialog';
+import { compactScoreDisplayWidth } from './shell/toolbar-fit';
 import { AddTrackDialog } from './workstation/AddTrackDialog';
 import './workstation/workstation-shell.css';
 import './workstation/gp-shell.css';
@@ -281,6 +286,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{writeInspectorTab(inspectorTab);},[inspectorTab]);
   /** The centre region shows the score or the Sound rig; the transport and the rest of the shell stay as they are. */
   const [view,setView]=useState<'score'|'sound'|'mixer'>('score');
+  const [preferencesOpen,setPreferencesOpen]=useState(false);
   const [viewport,setViewport]=useState(()=>({width:window.innerWidth,height:window.innerHeight}));
   const [dockMode,setDockMode]=useState<'overview'|'mixer'|'backing'>('overview'),[dockForced,setDockForced]=useState(false),[waveformOpened,setWaveformOpened]=useState(false);
   const shell=useRef<HTMLDivElement>(null),workspace=useRef<HTMLDivElement>(null),scorePane=useRef<HTMLElement>(null),commandBar=useRef<HTMLElement>(null);
@@ -324,16 +330,24 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const openProperties=(tab:PropertiesTab,focus?:PropertiesRequest['focus'])=>{closeCommands();setProperties(current=>({tab,focus,nonce:(current?.nonce??0)+1}));};
   // The dock's + and Track > Add track… open the Add track dialog.
   const [addTrackOpen,setAddTrackOpen]=useState(false);
+  const [tempoBar,setTempoBar]=useState<number|null>(null);
+  const [drumRemapOpen,setDrumRemapOpen]=useState(false);
   // Sound > Plug-in… asks the Track tab's sound summary to open the Plug-in dialog of the selected track.
   const [soundRequest,setSoundRequest]=useState<'plugin'|null>(null);
   const startAddTrack=()=>{closeCommands();if(controlsBusy)return;setAddTrackOpen(true);};
   const showInspector=()=>openInspector();
   const chooseDock=(mode:'overview'|'mixer'|'instrument'|'keyboard'|'backing')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');setKeyboardVisible(mode==='keyboard');if(mode!=='instrument'&&mode!=='keyboard')setDockMode(mode);if(mode==='backing')setWaveformOpened(true);};
+  const toggleInstrumentDock=(mode:'instrument'|'keyboard')=>{
+    if(dockVisible&&(mode==='instrument'?instrumentVisible:keyboardVisible)){
+      if(mode==='instrument')setInstrumentVisible(false);
+      else setKeyboardVisible(false);
+    }else chooseDock(mode);
+  };
   const hideDock=()=>{setDockVisible(false);viewMenu.current?.querySelector('summary')?.focus();};
   const [harmonyOpen,setHarmonyOpen]=useState(false),[scaleOpen,setScaleOpen]=useState(false),[libraryLoading,setLibraryLoading]=useState(false),[libraryError,setLibraryError]=useState<string|null>(null);
   const [library,setLibrary]=useState<HarmonyLibrary>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]});
   const libraryRevision=useRef(0);
-  useEffect(()=>{setHarmonyOpen(false);setScaleOpen(false);setAddTrackOpen(false);},[state.documentEpoch]);
+  useEffect(()=>{setHarmonyOpen(false);setScaleOpen(false);setAddTrackOpen(false);setTempoBar(null);setDrumRemapOpen(false);},[state.documentEpoch]);
   useEffect(()=>{
     if(!harmonyOpen)return;let active=true;const revision=++libraryRevision.current;setLibraryLoading(true);setLibraryError(null);
     void readHarmonyLibrary().then(value=>{if(active&&revision===libraryRevision.current)setLibrary(value);}).catch(error=>{if(active&&revision===libraryRevision.current)setLibraryError(t('app.chord_library_error',{error:error instanceof Error?error.message:String(error)}));}).finally(()=>{if(active&&revision===libraryRevision.current)setLibraryLoading(false);});
@@ -448,9 +462,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   // A chord or scale preview sounds through its track's own sound, and only while nothing is playing; it records no edit.
   const auditionHarmony:HarmonyAudition=(track,heard)=>{if(!player||player.getState().playing||player.getState().practice.phase==='countIn')return;const current=controller.getState();player.audition({trackId:trackIdentity(track)},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});};
   const copyMusic=(mode:ClipboardMode,cut=false)=>{
-    if(!musicSelection||controlsBusy||cut&&editLocked)return;setClipboardError(null);
+    const cursorBeat=mode==='singleTrack'&&!musicSelection&&location.beat?singleBeatSelection(state.score,target):null;
+    const effectiveSelection=musicSelection??(cursorBeat?.kind==='range'?cursorBeat:null);
+    if(!effectiveSelection||controlsBusy||cut&&editLocked)return;setClipboardError(null);
     try{
-      const scope=musicClipSelection(state.score,musicSelection,mode),bars=scope as Extract<MusicSelection,{kind:'bars'}>;
+      const scope=musicClipSelection(state.score,effectiveSelection,mode),bars=scope as Extract<MusicSelection,{kind:'bars'}>;
       const map=cut&&mode==='multiTrack'?planMeasureMap(state.score.masterBars.length,{type:'removeMeasures',firstBar:bars.firstBar,lastBar:bars.lastBar}):null;
       const splitting=cut&&mode==='singleTrack'?eraseCommandFor(state.score,scope,{track:target.track,staff:target.staff,voice:target.voice}):null,lostWords=splitting?.type==='cutSelection'?cutLyricWordsLost(state.score,splitting.selection):0;
       act((cut?controller.cutMusic(scope,mode,{track:target.track,staff:target.staff,voice:target.voice}):controller.copyMusic(scope,mode)).then(value=>{
@@ -567,19 +583,33 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const transportColor=trackColorHex(selectedTrack.color);
   const transportTracks=useMemo(()=>transportScore.tracks.map((track,index)=>`${index+1}. ${track.name||t('track_display.track_fallback',{index:index+1})}`),[transportScore]);
   // The display's links reuse the command palette's selection path, so moving there is the same gesture as Go to measure.
-  const displayActions=useRef({select:(_:BeatTarget)=>{},measure:(_:number)=>{}});
+  const displayActions=useRef({select:(_:BeatTarget)=>{},measure:(_:number)=>{},tempo:(_:number)=>{}});
   displayActions.current={
     select:next=>runPalette({kind:'select',target:next}),
     measure:bar=>{runPalette({kind:'select',target:{...target,bar,beat:0}});openProperties('bar','measure');},
+    tempo:bar=>{closeCommands();setTempoBar(bar);},
   };
+  const barTempos=useMemo(()=>{
+    let tempo=transportScore.tempo;
+    return transportScore.masterBars.map(master=>{
+      let start=tempo, latest=-1;
+      for(const change of master.tempoAutomations){
+        if(change.ratioPosition===0)start=change.value;
+        if(change.ratioPosition>=latest){latest=change.ratioPosition;tempo=change.value;}
+      }
+      return start;
+    });
+  },[transportScore]);
   const displayTarget=target;
   const transportDisplay=useMemo<TransportDisplay>(()=>({track:transportTrack,color:transportColor,tracks:transportTracks,trackIndex:displayTarget.track,
+    tempoAt:(bar:number)=>barTempos[bar],
     signatureAt:(bar:number)=>{const master=transportScore.masterBars[bar];return master?`${master.timeSignatureNumerator}/${master.timeSignatureDenominator}`:'';},
     onTrack:index=>displayActions.current.select({...displayTarget,track:index,staff:0,voice:0,beat:0}),
     onGoTo:bar=>displayActions.current.select({...displayTarget,bar,beat:0}),
     onMeasure:bar=>displayActions.current.measure(bar),
+    onTempo:bar=>displayActions.current.tempo(bar),
     completionAt:bar=>barCompletion(transportScore,displayTarget.track,displayTarget.staff,bar),
-  }),[transportScore,transportTrack,transportColor,transportTracks,displayTarget]);
+  }),[transportScore,transportTrack,transportColor,transportTracks,displayTarget,barTempos]);
   const originalBacking=state.embeddedBacking&&!projectCommands(state.snapshot.project).some(edit=>edit.type==='setBacking');
   const baseKey=originalBacking&&state.snapshot.project.base.kind==='file'?state.snapshot.project.base.sha256:null;
   const [embeddedSource,setEmbeddedSource]=useState<{bytes:Uint8Array;key:string;source:WaveformSourceInput|null;error:string|null}|null>(null),[embeddedRetry,setEmbeddedRetry]=useState(0);
@@ -786,7 +816,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(entryBlocked(target))return;
     if(!beat){refuse(t('score_entry.no_beat'),JSON.stringify(target));return;}
     if(key.kind==='rest'){
-      if(!beat.isRest){const placed=target,moves=userMoves.current;void edit({type:'setRest',target},score=>{const voice=score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice];if(inputPrefs.advance&&sameBeat(cursorNow.current,placed)&&userMoves.current===moves&&target.beat<voice.beats.length-1)setSelection(repairSelection(score,{...target,beat:target.beat+1}));});}
+      if(!beat.isRest){const placed=target,moves=userMoves.current;void edit({type:'setRest',target},score=>{const voice=score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice];if(noteEntryOn&&inputPrefs.advance&&sameBeat(cursorNow.current,placed)&&userMoves.current===moves&&target.beat<voice.beats.length-1)setSelection(repairSelection(score,{...target,beat:target.beat+1}));});}
       return;
     }
     if(key.kind==='step'||key.kind==='semitone'||key.kind==='octave'){
@@ -941,6 +971,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       const chord=scoreEntryKey(event);if(chord&&(chord.kind==='accidental'||chord.kind==='respell'))return {kind:'entry',key:chord,shift:false};
       if((event.key==='n'||event.key==='N')&&!event.ctrlKey&&!event.metaKey&&!event.altKey)return null;
       if(noteEntryOn){const key=scoreEntryKey(event,inputPrefs.swapPlusMinus);if(key)return {kind:'entry',key,shift:event.shiftKey};}
+      else {const rhythm=rhythmEntryKey(event,inputPrefs.swapPlusMinus);if(rhythm)return {kind:'entry',key:rhythm,shift:event.shiftKey};}
     }
     if(/^\d$/.test(event.key)&&!event.ctrlKey&&!event.metaKey&&!event.altKey)return {kind:'digit',digit:event.key};
     if(event.key==='Enter'&&!indexed)return {kind:'enter'};
@@ -1043,7 +1074,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{if(entryQueue.current.length)discardEntryQueue(null,'dropped');},[editLocked,state.documentEpoch,state.documentId]);
   useEffect(()=>{ownEdits.current-=unseenSettles.current;unseenSettles.current=0;drainNow.current();},[settled,controlsBusy,workspaceBusy,editLocked,state.documentEpoch,state.documentId]);
   /** Backspace, Shift+Delete, Ctrl+Insert and Ctrl+Shift+Delete: edits that already exist, on the cursor or the selection. They never wait in the entry queue; behind waiting keys or an edit in flight they are refused. */
-  const gp8Edit=(kind:'removeNote'|'deleteBeats'|'insertBeat'|'eraseNotes')=>{
+  const gp8Edit=(kind:'removeNote'|'deleteBeats'|'insertBeat'|'eraseNotes'|'deleteOrRemove')=>{
     const at=JSON.stringify(target);
     if(editLocked){refuse(lockedMessage,at);return;}
     if(refusing.current||entryQueue.current.length||ownEdits.current>0||controlsBusy){
@@ -1053,6 +1084,23 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setInputNotice(null);
     if(kind==='insertBeat'){const beat=location.beat;void edit({type:'insertBeat',target,duration:beat?.duration??4,dots:beat?.dots??0});return;}
     if(kind==='removeNote'){
+      const beat=location.beat,note=beat?noteAtCursor(beat):null;
+      endPending();
+      if(!note){setInputNotice({text:t('editor.gp8_no_note'),at});return;}
+      void edit(indexed?{type:'removeNoteByIndex',target,noteIndex:note.index}:{type:'removeNote',target,string:note.string});return;
+    }
+    if(kind==='deleteOrRemove'){
+      if(musicSelection){
+        let selBeats:model.Beat[]=[];
+        try{selBeats=resolveSelectionBeats(state.score,musicSelection);}catch{selBeats=[];}
+        const multi=musicSelection.kind==='bars'||selBeats.length>1||(musicSelection.kind==='notes'&&musicSelection.notes.length>1);
+        if(multi){
+          let selNotes:model.Note[]=[];
+          try{selNotes=resolveSelectionNotes(state.score,musicSelection);}catch{selNotes=[];}
+          if(!selNotes.length){setInputNotice({text:t('editor.gp8_no_notes'),at});return;}
+          void edit(eraseCommandFor(state.score,musicSelection,{track:target.track,staff:target.staff,voice:target.voice}));return;
+        }
+      }
       const beat=location.beat,note=beat?noteAtCursor(beat):null;
       endPending();
       if(!note){setInputNotice({text:t('editor.gp8_no_note'),at});return;}
@@ -1168,7 +1216,25 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
     if(event.key==='ArrowRight') {
       if(next.beat<location.voice.beats.length-1) next.beat++;
-      else if(next.bar<state.score.masterBars.length-1) {next.bar++;next.beat=0;}
+      else {
+        const canExtend=!event.shiftKey&&!event.ctrlKey&&!event.altKey&&!event.metaKey&&!event.repeat&&!editBusy&&!editLocked&&entryQueue.current.length===0&&ownEdits.current===0;
+        if(canExtend){
+          const moves=userMoves.current;
+          const rhythm=entryDuration.current??{duration:location.beat?.duration??4,dots:location.beat?.dots??0};
+          const insert=planArrowRightBeat(state.snapshot.project,state.score,target,rhythm);
+          const destination=insert?.target??(target.bar===state.score.masterBars.length-1?{...target,bar:target.bar+1,beat:0}:null);
+          if(destination){
+            editorSelection(null);
+            void edit(insert??{type:'appendMeasure'},score=>{
+              if(userMoves.current!==moves||!sameBeat(cursorNow.current,target))return;
+              setSelection(repairSelection(score,destination));
+              setNoteIndex(null);
+            });
+            event.preventDefault();return;
+          }
+        }
+        if(next.bar<state.score.masterBars.length-1) {next.bar++;next.beat=0;}
+      }
     } else if(event.key==='ArrowLeft') {
       if(next.beat>0) next.beat--;
       else if(next.bar>0) {next.bar--;next.beat=state.score.tracks[next.track].staves[next.staff].bars[next.bar].voices[next.voice].beats.length-1;}
@@ -1245,6 +1311,22 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!midiOpen&&!diOpen&&!batchOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
     if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||diOpen||batchOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
+    if(!event.defaultPrevented&&!event.altKey&&!event.shiftKey&&(event.ctrlKey||event.metaKey)&&key===','){
+      event.preventDefault();if(!event.repeat)setPreferencesOpen(true);return;
+    }
+    if(!event.defaultPrevented&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&['F2','F3','F6','F7','F8'].includes(event.key)){
+      event.preventDefault();if(event.repeat)return;
+      const focused=event.target instanceof Element?event.target:null;
+      if(event.key==='F2'){
+        if(paletteVisible&&focused?.closest('.score-palette'))focusScore();
+        setView('score');setPaletteVisible(!paletteVisible);
+      }
+      else if(event.key==='F3'){if(dockVisible&&!dockPanelVisible&&dockMode==='overview')setDockVisible(false);else chooseDock('overview');}
+      else if(event.key==='F6'){if(inspectorShown){setInspectorVisible(false);focusScore();}else showInspector();}
+      else toggleInstrumentDock(event.key==='F7'?'instrument':'keyboard');
+      if(view==='score'&&['F3','F7','F8'].includes(event.key)&&focused?.closest('.workstation-dock'))focusScore();
+      return;
+    }
     if((event.ctrlKey||event.metaKey)&&!event.altKey&&['n','o','s','z','y'].includes(key)){
       event.preventDefault();if(key==='z'||key==='y')clearEntryQueue();
       if(controlsBusy||event.repeat)return;
@@ -1304,6 +1386,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       editorSelection(null);setPendingAccidental(null);clearEntryQueue();event.preventDefault();
     }
   }
+  const focusScore=()=>{scorePane.current?.focus({preventScroll:true});};
   return <div ref={shell} className="app-shell" lang={lang} aria-busy={controlsBusy} data-narrow={narrow} data-compact-height={compactHeight} onKeyDown={selectionKeys} onKeyUp={spaceKeyUp} onClickCapture={event=>{if(playPending.current&&event.target instanceof Element&&event.target.closest('.transport-stopbutton'))clearPlayPending();}}>
     <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure&&!other.contains(disclosure)&&!disclosure.contains(other))other.open=false;});else if(event.target.closest('button')&&!event.target.closest('[data-menu-keep]'))closeCommands(true);}}><nav className="gp-menus" aria-label={t('menu.file_and_history')}><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
@@ -1324,8 +1407,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.edit')}</summary><section aria-label={t('menu.edit')}>
         <button type="button" {...busyGuard({busy:editBusy,disabled:!state.snapshot.canUndo,onClick:()=>{change(undoEdit());}})}>{t('menu.undo')}</button>
         <button type="button" {...busyGuard({busy:editBusy,disabled:!state.snapshot.canRedo,onClick:()=>{change(controller.redo());}})}>{t('menu.redo')}</button>
-        <button type="button" {...busyGuard({busy:controlsBusy,unavailable:editLocked||!musicSelection,onClick:()=>{copyMusic('singleTrack',true);}})}>{t('menu.cut')}</button>
-        <button type="button" {...busyGuard({busy:controlsBusy,unavailable:!musicSelection,onClick:()=>{copyMusic('singleTrack');}})}>{t('menu.copy')}</button>
+        <button type="button" {...busyGuard({busy:controlsBusy,unavailable:editLocked||(!musicSelection&&!location.beat),onClick:()=>{copyMusic('singleTrack',true);}})}>{t('menu.cut')}</button>
+        <button type="button" {...busyGuard({busy:controlsBusy,unavailable:!musicSelection&&!location.beat,onClick:()=>{copyMusic('singleTrack');}})}>{t('menu.copy')}</button>
         <button type="button" {...busyGuard({busy:controlsBusy,unavailable:editLocked,onClick:()=>{pasteMusic();}})}>{t('menu.paste')}</button>
         <button type="button" onClick={()=>{editorSelection(selectionForTrack(state.score,target.track));}}>{t('menu.select_track')}</button>
         <button type="button" onClick={()=>{openPalette();}}>{t('menu.command_palette')}</button>
@@ -1333,6 +1416,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.track')}</summary><section aria-label={t('menu.track')}>
         <button type="button" onClick={()=>{openInspector('track');}}>{t('menu.track_properties')}</button>
         <button type="button" aria-haspopup="dialog" {...busyGuard({busy:controlsBusy,unavailable:editLocked,onClick:startAddTrack})}>{t('menu.add_track')}</button>
+        <button type="button" aria-haspopup="dialog" {...busyGuard({busy:controlsBusy,unavailable:editLocked||!selectedTrack.isPercussion,onClick:()=>{closeCommands();setDrumRemapOpen(true);}})}>{t('menu.drum_mapping')}</button>
         <button type="button" {...busyGuard({busy:editBusy,unavailable:editLocked||target.track===0,onClick:()=>{closeCommands();act(edit({type:'moveTrack',track:target.track,to:target.track-1}));}})}>{t('track_settings.move_track_up')}</button>
         <button type="button" {...busyGuard({busy:editBusy,unavailable:editLocked||target.track===state.score.tracks.length-1,onClick:()=>{closeCommands();act(edit({type:'moveTrack',track:target.track,to:target.track+1}));}})}>{t('track_settings.move_track_down')}</button>
         <button type="button" onClick={()=>{chooseDock('mixer');}}>{t('menu.dock_mixer')}</button>
@@ -1340,21 +1424,32 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.bar')}</summary><section aria-label={t('menu.bar')}>
         <button type="button" onClick={()=>{displayActions.current.measure(target.bar);}}>{t('menu.bar_properties')}</button>
+        <button type="button" aria-haspopup="dialog" onClick={()=>{displayActions.current.tempo(target.bar);}}>{t('menu.tempo_editor')}</button>
+        <button type="button" {...busyGuard({busy:editBusy,unavailable:editLocked,onClick:()=>act(edit({type:'insertMeasures',beforeBar:target.bar+1,count:1}))})}>{t('editor.insert_after')}</button>
+        <button type="button" {...busyGuard({busy:editBusy,unavailable:editLocked||state.score.masterBars.length<=1,onClick:()=>act(edit({type:'removeMeasure',bar:target.bar}))})}>{t('palette.command_removeMeasure')}</button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.note')}</summary><section aria-label={t('menu.note')}>
         <button type="button" onClick={()=>{openProperties('note');}}>{t('menu.note_properties')}</button>
         <button type="button" onClick={()=>{openProperties('beat');}}>{t('menu.beat_properties')}</button>
+        <button type="button" aria-keyshortcuts="Insert" {...busyGuard({busy:editBusy,unavailable:editLocked,onClick:()=>gp8Edit('insertBeat')})}>{t('palette.command_insertBeat')}<kbd aria-hidden="true">Insert</kbd></button>
+        <button type="button" aria-keyshortcuts="Delete" {...busyGuard({busy:editBusy,unavailable:editLocked,onClick:()=>gp8Edit('deleteOrRemove')})}>{t('action.delete')}<kbd aria-hidden="true">Delete</kbd></button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.effects')}</summary><section aria-label={t('menu.effects')}>
         <button type="button" onClick={()=>{setPaletteVisible(true);setView('score');}}>{t('menu.palette_effects')}</button>
         <button type="button" {...busyGuard({busy:controlsBusy,unavailable:!location.beat,onClick:()=>{openModal('harmony');}})}>{t('menu.chord')}</button>
+        <button type="button" aria-keyshortcuts="O" {...busyGuard({busy:editBusy,unavailable:editLocked||!location.beat||!noteAtCursor(location.beat),onClick:()=>{
+          const command=planTechniqueToggle(state.score,target,indexed?null:string,noteIndex,'ghost');if(command)act(edit(command));
+        }})}>{t('toolbar.toggle_ghost')}<kbd aria-hidden="true">O</kbd></button>
+        {([['palmMute','toolbar.toggle_pm','P'],['letRing','toolbar.toggle_lr','I'],['bend','toolbar.toggle_bend','B'],['vibrato','toolbar.toggle_vibrato','V'],['dead','toolbar.toggle_dead','X']] as const).map(([tech,label,keyHint])=><button key={tech} type="button" {...busyGuard({busy:editBusy,unavailable:editLocked||!planTechniqueToggle(state.score,target,indexed?null:string,noteIndex,tech),onClick:()=>{const command=planTechniqueToggle(state.score,target,indexed?null:string,noteIndex,tech);if(command)act(edit(command));}})}>{t(label)}<kbd aria-hidden="true">{keyHint}</kbd></button>)}
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.section')}</summary><section aria-label={t('menu.section')}>
         <button type="button" onClick={()=>{openProperties('score');}}>{t('menu.sections')}</button>
+        <button type="button" onClick={()=>{openProperties('staff','lyrics');}}>{t('palette.lyrics')}</button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.tools')}</summary><section aria-label={t('menu.tools')}>
         <button type="button" onClick={()=>{closeCommands();if(practiceMenu.current){practiceMenu.current.open=true;practiceMenu.current.querySelector('summary')?.focus();}}}>{t('menu.practice')}</button>
         <button type="button" onClick={()=>{openModal('scale');}}>{t('menu.scales')}</button>
+        <button type="button" aria-keyshortcuts="Control+Shift+P" onClick={openPalette}>{t('menu.command_palette')}</button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.sound')}</summary><section aria-label={t('menu.sound')}>
         <button type="button" onClick={()=>{setView('score');}}>{t('menu.show_score')}</button>
@@ -1368,17 +1463,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <label className="check"><input type="checkbox" checked={inspectorVisible} onChange={event=>event.target.checked?showInspector():setInspectorVisible(false)}/>{t('view.inspector')}</label>
         <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>{t('view.bottom_dock')}</label>
         <label className="check"><input type="checkbox" checked={paletteVisible} onChange={event=>setPaletteVisible(event.target.checked)}/>{t('view.edition_palette')}</label>
-        <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
-        <MidiCapturePanel writeWhilePlaying={inputPrefs.writeWhilePlaying}/>
-        <FretlightPanel trackStrings={trackStrings}/>
-        <SoundbankSettingsPanel/>
-        <div className="language-setting-row"><label>{t('preferences.language')}: <select aria-label={t('preferences.language')} value={preference} onChange={e=>setPreference(e.target.value as LanguagePreference)}><option value="system">{t('preferences.lang_system')}</option><option value="en">{t('preferences.lang_en')}</option><option value="et">{t('preferences.lang_et')}</option><option value="de">{t('preferences.lang_de')}</option></select></label></div>
+        <button type="button" aria-haspopup="dialog" aria-keyshortcuts="Control+, Meta+," onClick={()=>setPreferencesOpen(true)}>{t('preferences.title')}<kbd aria-hidden="true">Ctrl+,</kbd></button>
       </section></details>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.window')}</summary><section aria-label={t('menu.window')}>
         <button type="button" onClick={()=>{chooseDock('overview');}}>{t('menu.dock_overview')}</button>
         <button type="button" onClick={()=>{chooseDock('mixer');}}>{t('menu.dock_mixer_window')}</button>
-        <button type="button" onClick={()=>{chooseDock('instrument');}}>{t('menu.dock_instrument_window')}</button>
-        <button type="button" onClick={()=>{chooseDock('keyboard');}}>{t('menu.dock_keyboard')}</button>
+        <button type="button" onClick={()=>{chooseDock('instrument');}}>{t('menu.dock_instrument_window')}<kbd aria-hidden="true">F7</kbd></button>
+        <button type="button" aria-keyshortcuts="F8" onClick={()=>{chooseDock('keyboard');}}>{t('menu.dock_keyboard')}<kbd aria-hidden="true">F8</kbd></button>
         <button type="button" onClick={()=>{chooseDock('backing');}}>{t('menu.dock_backing')}</button>
       </section></details>
       <details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{t('menu.help')}</summary><section role="region" aria-label={t('help.keyboard_editing_help')}>
@@ -1393,18 +1484,18 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     </header>
     <div className="gp-toolbar">
       <div className="gp-toolbar-left" role="group" aria-label={t('toolbar.main')}>
-        <button type="button" className="note-entry-toggle" aria-pressed={noteEntryOn} aria-keyshortcuts="N" title={t('score_entry.toggle_title')} onClick={()=>{const on=!noteEntryOn;setNoteEntryOn(on);setView('score');if(on)requestAnimationFrame(()=>scorePane.current?.focus());}}><NoteEntryGlyph/><span className="tp-sr">{t('score_entry.toggle')}</span></button><MidiCaptureIndicator/><span className="gp-joined pane-toggles"><button type="button" data-pane-toggle="palette" aria-pressed={paletteVisible} title={t('toolbar.toggle_palette')} aria-label={t('toolbar.toggle_palette')} onClick={()=>setPaletteVisible(!paletteVisible)}><PaletteGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title={t('toolbar.toggle_dock')} aria-label={t('view.toggle_bottom_dock')} onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title={t('toolbar.toggle_inspector')} aria-label={t('view.toggle_inspector')} onClick={()=>inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button></span>
-        <span className="gp-joined"><button type="button" disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(undoEdit())} title={t('action.undo_title')}><UndoGlyph/><span className="tp-sr">{t('action.undo')}</span></button><button type="button" disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())} title={t('action.redo_title')}><RedoGlyph/><span className="tp-sr">{t('action.redo')}</span></button></span>
+        <button type="button" className="note-entry-toggle" aria-pressed={noteEntryOn} aria-keyshortcuts="N" title={t('score_entry.toggle_title')} onClick={event=>{const on=!noteEntryOn;setNoteEntryOn(on);setView('score');if(event.detail>0)requestAnimationFrame(focusScore);}}><NoteEntryGlyph/><span className="tp-sr">{t('score_entry.toggle')}</span></button><MidiCaptureIndicator/><span className="gp-joined pane-toggles"><button type="button" data-pane-toggle="palette" aria-pressed={paletteVisible} aria-keyshortcuts="F2" title={t('toolbar.toggle_palette')+' (F2)'} aria-label={t('toolbar.toggle_palette')} onClick={event=>{setPaletteVisible(!paletteVisible);if(event.detail>0)requestAnimationFrame(focusScore);}}><PaletteGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} aria-keyshortcuts="F3" title={t('toolbar.toggle_dock')+' (F3)'} aria-label={t('view.toggle_bottom_dock')} onClick={event=>{setDockVisible(!dockVisible);if(event.detail>0)requestAnimationFrame(focusScore);}}><PanelBottomGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} aria-keyshortcuts="F6" title={t('toolbar.toggle_inspector')+' (F6)'} aria-label={t('view.toggle_inspector')} onClick={event=>{setInspectorVisible(!inspectorShown);if(event.detail>0)requestAnimationFrame(focusScore);}}><PanelRightGlyph/></button></span>
+        <span className="gp-joined"><button type="button" disabled={editBusy || !state.snapshot.canUndo} onClick={event=>{change(undoEdit());if(event.detail>0)requestAnimationFrame(focusScore);}} title={t('action.undo_title')}><UndoGlyph/><span className="tp-sr">{t('action.undo')}</span></button><button type="button" disabled={editBusy || !state.snapshot.canRedo} onClick={event=>{change(controller.redo());if(event.detail>0)requestAnimationFrame(focusScore);}} title={t('action.redo_title')}><RedoGlyph/><span className="tp-sr">{t('action.redo')}</span></button></span>
         <button type="button" title={t('toolbar.print')} aria-label={t('toolbar.print')} {...busyGuard({busy:controlsBusy||exports.busy,onClick:()=>openModal('export')})}><ExportGlyph/></button>
         <span className="tp-sr score-tools">{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
       </div>
-      <div className="gp-toolbar-display"><TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={shownDisplay} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError} compact={compactHeight}/></div>
+      <div className="gp-toolbar-display"><TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={shownDisplay} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError} compact={compactHeight||viewport.width>=compactScoreDisplayWidth}/></div>
       <FretlightFeed score={state.score} target={target} player={player}/>
       {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection} display={transportDisplay}/>}
       <div className="gp-toolbar-right">
         <details ref={practiceMenu} className="gp-practice" onToggle={event=>{if(event.currentTarget.open)event.currentTarget.querySelectorAll<HTMLDetailsElement>('.gp-practice-body details:not([open])').forEach(inner=>{inner.open=true;});}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} aria-label={lineInOn?t('toolbar.practice_line_in'):t('toolbar.practice')} data-line-in={lineInOn||undefined}><PracticeGlyph/>{lineInOn&&<span className="line-in-badge" aria-hidden="true"/>}</summary><div ref={setPracticeHost} className="gp-practice-body"/></details>
         <Segmented className="view-switch" label={t('view.view_label')} value={view} onChange={setView} options={[{value:'score',label:<><ScoreGlyph/><span className="tp-sr">{t('view.score')}</span></>,title:t('view.score')},{value:'sound',label:<><AmpGlyph/><span className="tp-sr">{t('view.sound')}</span></>,title:t('view.sound')},{value:'mixer',label:<><MixerGlyph/><span className="tp-sr">{t('view.mixer')}</span></>,title:t('view.mixer')}]}/>
-        <button type="button" className="gp-instrument" aria-pressed={instrumentShown} title={t('toolbar.instrument')} aria-label={instrumentShown?t('toolbar.hide_instrument'):t('toolbar.show_instrument')} onClick={()=>{if(instrumentShown){setInstrumentVisible(false);setKeyboardVisible(false);}else chooseDock('instrument');}}><FretboardGlyph/></button>
+        <button type="button" className="gp-instrument" aria-pressed={instrumentShown} aria-keyshortcuts="F7" title={t('toolbar.instrument')+' (F7)'} aria-label={instrumentShown?t('toolbar.hide_instrument'):t('toolbar.show_instrument')} onClick={event=>{if(instrumentShown){setInstrumentVisible(false);setKeyboardVisible(false);}else chooseDock('instrument');if(event.detail>0&&view==='score')requestAnimationFrame(focusScore);}}><FretboardGlyph/></button>
       </div>
     </div>
     {documentTabs}
@@ -1428,12 +1519,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {!!state.takenBack && <div className="notice" role="status">{t(state.takenBack===1?'document.taken_back_one':'document.taken_back_other',{count:state.takenBack})}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label={t('workspace.score_workspace')} tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
-        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView holdDraw={drawHold} score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} documentEpoch={state.documentEpoch} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={selectByClick} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
+        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll" onMouseDown={event=>{if(event.target===event.currentTarget)focusScore();}}><div className="paper score-paper-host"><ScoreView holdDraw={drawHold} score={state.score} loop={loopPassage} track={target.track} trackIds={trackIds} documentEpoch={state.documentEpoch} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} autoFit={autoFit} onAutoFit={setAutoFitted} onFontStatus={setFontStatus} onSystems={setRenderedSystems} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={selectByClick} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} editPendingFret={pendingFret} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
         {lyricsCutNotice&&lyricsCutNotice.edits===state.snapshot.project.edits.length&&<div className="score-hint score-hint-lyrics-cut" role="status">{t(`editor.cut_lyrics_removed_${lyricsCutNotice.count===1?'one':'other'}` as MessageKey,{count:lyricsCutNotice.count})}</div>}
         {droppedNotice&&<div className="score-hint score-hint-dropped" role="status">{t(`editor.entry_queue_stale_${droppedNotice.count===1?'one':'other'}` as MessageKey,{count:droppedNotice.count})}</div>}
         {pendingFret!==null?<div className="score-hint score-hint-pending-fret" role="status">{t('editor.pending_fret',{fret:pendingFret})}</div>:inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t(inputPrefs.swapPlusMinus?'score_entry.on_swapped':'score_entry.on')}</div>}
       </section>
-      {<EditorPanel documentEpoch={state.documentEpoch} practiceHost={practiceHost} paletteHost={paletteVisible&&view==='score'?paletteHost:null} onOpenLyrics={()=>openProperties('staff','lyrics')} onOpenMeasure={bar=>displayActions.current.measure(bar)} properties={properties} onProperties={tab=>setProperties(current=>current&&{...current,tab,focus:undefined})} onCloseProperties={()=>setProperties(null)} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')}
+      {<EditorPanel documentEpoch={state.documentEpoch} practiceHost={practiceHost} paletteHost={paletteVisible&&view==='score'?paletteHost:null} onPaletteCommit={focusScore} onOpenLyrics={()=>openProperties('staff','lyrics')} onOpenMeasure={bar=>displayActions.current.measure(bar)} properties={properties} onProperties={tab=>setProperties(current=>current&&{...current,tab,focus:undefined})} onCloseProperties={()=>setProperties(null)} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')}
         practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} authored={player.authoredTempos?.()??null} onChange={settings=>player.setPractice(settings)}/>} tunerTool={<><TunerPanel tuning={tunerTuning}/><LineInPanel/></>}
         entryTools={<NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} preview={command=>previewEdit(controller.getState().snapshot.project,command).score}/>}
         selectionTools={<><div><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={controlsBusy} locked={editLocked} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic} diagramsDefault={inputPrefs.pasteDiagrams}/></div><HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={editBusy} onEdit={edit}/></>}
@@ -1477,6 +1568,14 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         </div>
       </section>
     </div>
+    {preferencesOpen&&<Dialog title={t('preferences.title')} onClose={()=>setPreferencesOpen(false)} className="workspace-preferences">
+        <AudioOutputSettingsPanel playback={player} busy={editBusy}/>
+        <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
+        <MidiCapturePanel writeWhilePlaying={inputPrefs.writeWhilePlaying}/>
+        <FretlightPanel trackStrings={trackStrings}/>
+        <SoundbankSettingsPanel/>
+        <div className="language-setting-row"><label>{t('preferences.language')} <select aria-label={t('preferences.language')} value={preference} onChange={e=>setPreference(e.target.value as LanguagePreference)}><option value="system">{t('preferences.lang_system')}</option><option value="en">{t('preferences.lang_en')}</option><option value="et">{t('preferences.lang_et')}</option><option value="de">{t('preferences.lang_de')}</option></select></label></div>
+    </Dialog>}
     {exportOpen&&<ExportDialog layoutLocked={editLocked} layoutLockedNote={finalized?undefined:t('export.layout_locked_note')} plainNote={state.snapshot.protection&&(state.snapshot.protection.open||state.snapshot.protection.edit!=='none')?t('export.plain_protection_note'):undefined} sounds={state.settings.sounds} trackNames={trackNames} pluginWarnings={pluginStatuses} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} countInBars={playbackState?.practice.settings.countIn.bars??0} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}} onAudition={auditionHarmony} auditionUnavailable={playbackRunning}/>}
     {addTrackOpen&&<AddTrackDialog busy={controlsBusy} locked={editLocked} onAudition={auditionTuning} onAdd={command=>edit(command,score=>{const last=score.tracks.length-1;if(last>=0)select({track:last,staff:0,bar:target.bar,voice:0,beat:0},score.tracks[last].staves[0].tuning.length);})} onClose={()=>setAddTrackOpen(false)}/>}
@@ -1488,8 +1587,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {diOpen&&onImportConverted&&<DiImportDialog busy={controlsBusy} currentScore={state.score} selectedTrack={target.track} locked={editLocked} onAudition={auditionTuning} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onImportIntoScore={async command=>{const ok=await edit(command,score=>{const chosen=command.targetTrack??Math.max(0,score.tracks.length-1);if(score.tracks[chosen])select({track:chosen,staff:0,bar:0,voice:0,beat:0},score.tracks[chosen].staves[0].tuning.length);});if(!ok){const reason=controller.getState().error;if(reason)throw new Error(reason);}return ok;}} onClose={closeDi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound',key:{shift:playbackState?.keyTarget??playbackState?.practice.settings.tonality??0,ready:playbackState?.ready??false}}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onNote={editLocked?undefined:instrumentEdit} onAudition={auditionHarmony} auditionUnavailable={playbackRunning} onClose={closeModal}/>}
+    {tempoBar!==null&&<TempoEditorDialog score={state.score} initialBar={Math.min(tempoBar,state.score.masterBars.length-1)} busy={controlsBusy} locked={editLocked} onApply={command=>edit(command)} onClose={()=>setTempoBar(null)}/>}
+    {drumRemapOpen&&selectedTrack.isPercussion&&<DrumRemapDialog score={state.score} trackIndex={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onClose={()=>setDrumRemapOpen(false)}/>}
     {/* Last, so help paints above every dialog it can open over: they share one z-index and the later one wins. */}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} initialSection={helpSection} onClose={closeHelp}/>}
-    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span>{state.snapshot.path ?? t('status.save_hint')}</span>}{state.repaired&&<span className="statusbar-note" role="status">{t('status.document_rebuilt')}</span>}{recoveryStatus}<StatusReadout score={state.score} target={target} string={string} noteIndex={noteIndex} selection={musicSelection} indexed={indexed}/></footer>
+    <footer className="statusbar">{state.busy?t('status.working'):state.snapshot.dirty?t('status.unsaved'):state.snapshot.path?t('status.saved'):state.snapshot.project.base.kind==='file'?t('status.not_saved'):t('status.new_score')}{pendingFret!==null?<span className="statusbar-pending-fret">{t('editor.pending_fret',{fret:pendingFret})}</span>:<span className="statusbar-path" title={state.snapshot.path??undefined}>{state.snapshot.path?.split(/[\\/]/).at(-1)}</span>}{state.repaired&&<span className="statusbar-note" role="status">{t('status.document_rebuilt')}</span>}{recoveryStatus}<StatusReadout score={state.score} target={target} string={string} noteIndex={noteIndex} selection={musicSelection} indexed={indexed}/></footer>
   </div>;
 }

@@ -112,9 +112,9 @@ function tall(system:{y:number;h:number},viewport:number){
 it('follows the selected track staff when the system is taller than the score area',()=>{
  const {f,host,track}=tall({y:0,h:400},100);
  Object.assign(f.context(),{selectedTrack:track});
- f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(260);
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(280);
  // The staff is in view now, so a further update does not move the area (a manual scroll within the system is left alone).
- f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(260);
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(280);
  host.scrollTop=290;f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(290);
 });
 it('keeps scrolling to the top of a tall system when no track is selected or the selected one is not in it',()=>{
@@ -126,5 +126,21 @@ it('keeps scrolling to the top of a tall system when no track is selected or the
 it('reveals the whole bar of a system that fits the score area, whatever track is selected',()=>{
  const {f,host,track}=tall({y:300,h:100},200);
  Object.assign(f.context(),{selectedTrack:track});
- f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(200);
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(250);
+});
+it('scrolls early when entering the lower viewport margin and centers the system vertically without oscillating',()=>{
+ const {f,host}=tall({y:420,h:160},600);
+ host.scrollTop=0;
+ // System bottom is at 580, which enters the lower 20% look-ahead margin (viewport bottom - 120 = 480).
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);
+ expect(host.scrollTop).toBe(200);
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);
+ expect(host.scrollTop).toBe(200);
+});
+it('includes masterBar realBounds when framing systems vertically',()=>{
+ const {f,host}=tall({y:300,h:80},300);
+ f.bounds.barBounds.masterBarBounds.realBounds=new rendering.Bounds(10,300,200,140);
+ host.scrollTop=0;
+ f.api.customScrollHandler!.forceScrollTo(f.bounds);
+ expect(host.scrollTop).toBe(220);
 });

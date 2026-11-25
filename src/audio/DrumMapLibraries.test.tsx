@@ -31,6 +31,7 @@ describe('the library layouts in the panel', () => {
       'GetGood Drums Modern & Massive — not yet checked',
       'GetGood Drums Invasion — not yet checked',
       'GetGood Drums One Kit Wonder: Architects — not yet checked',
+      'GetGood Drums One Kit Wonder: Brutal (GM) — not yet checked',
     ]);
     expect(select.querySelector('optgroup')).toHaveAttribute('label', 'Other layouts');
   });

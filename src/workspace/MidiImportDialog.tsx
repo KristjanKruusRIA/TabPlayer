@@ -24,6 +24,12 @@ import {
   type MidiTrackKind,
   type MidiTupletMode,
 } from '../interchange/midi-import';
+import {
+  DEFAULT_MIDI_ARTICULATION_PRESET,
+  countDetectedKeyswitches,
+  midiArticulationPresets,
+  presetKeyswitchSet,
+} from '../interchange/midi-articulations';
 import { MIDI_FILE_LIMIT, readMidiFile, type MidiSong } from '../interchange/midi-smf';
 import { midiPrograms } from '../midi-programs';
 import { MidiInstrumentPicker, type MidiInstrumentChoice, type MidiInstrumentSelection } from './MidiInstrumentPicker';
@@ -54,20 +60,28 @@ const DEFAULT_GUITAR_TUNING = [64, 59, 55, 50, 45, 40] as const;
 const DEFAULT_BASS_TUNING = [43, 38, 33, 28] as const;
 const sameTuning = (a: readonly number[], b: readonly number[]) =>
   a.length === b.length && a.every((pitch, index) => pitch === b[index]);
-const noteRangeOf = (partsList: readonly MidiPartInfo[]): { low: number; high: number } | null => {
+const noteRangeOf = (
+  partsList: readonly MidiPartInfo[],
+  ignoredKeys?: ReadonlySet<number>,
+): { low: number; high: number } | null => {
   let low = Infinity;
   let high = -Infinity;
   for (const part of partsList) {
     for (const entry of part.keys) {
+      if (ignoredKeys?.has(entry.key)) continue;
       if (entry.key < low) low = entry.key;
       if (entry.key > high) high = entry.key;
     }
   }
   return low === Infinity ? null : { low, high };
 };
-const autoFitPreset = (instrument: 'guitar' | 'bass', relevantParts: readonly MidiPartInfo[]): number[] => {
+const autoFitPreset = (
+  instrument: 'guitar' | 'bass',
+  relevantParts: readonly MidiPartInfo[],
+  ignoredKeys?: ReadonlySet<number>,
+): number[] => {
   const fallback = instrument === 'bass' ? [...DEFAULT_BASS_TUNING] : [...DEFAULT_GUITAR_TUNING];
-  const range = noteRangeOf(relevantParts);
+  const range = noteRangeOf(relevantParts, ignoredKeys);
   if (!range) return fallback;
   const matched = tuningPresets.find(
     preset =>
@@ -130,6 +144,11 @@ const octaveShiftOptions = [
   { value: '0', label: '0' },
   { value: '1', label: '+1' },
   { value: '2', label: '+2' },
+] as const;
+const keyswitchOctaveOptions = [
+  { value: '-1', label: '−1' },
+  { value: '0', label: '0' },
+  { value: '1', label: '+1' },
 ] as const;
 
 /**
@@ -207,6 +226,9 @@ export function MidiImportDialog({
   const [bassTuningName, setBassTuningName] = useState('');
   const [bassTuningCustom, setBassTuningCustom] = useState(false);
   const [editingTuningFor, setEditingTuningFor] = useState<'guitar' | 'bass' | null>(null);
+  const [readArticulations, setReadArticulations] = useState(false);
+  const [articulationPreset, setArticulationPreset] = useState(DEFAULT_MIDI_ARTICULATION_PRESET);
+  const [articulationOctaveShift, setArticulationOctaveShift] = useState(0);
 
   const [drumMapPreset, setDrumMapPreset] = useState<string>('gm');
   const [loadedDrumMap, setLoadedDrumMap] = useState<{ name: string; map: DrumMapRef | undefined } | null>(null);
@@ -373,6 +395,25 @@ export function MidiImportDialog({
     octaveShift,
   ]);
 
+  const ignoredArticulationKeys = useMemo(
+    () => (readArticulations ? presetKeyswitchSet(articulationPreset, articulationOctaveShift) : undefined),
+    [readArticulations, articulationPreset, articulationOctaveShift],
+  );
+
+  const detectedKeyswitchCount = useMemo(() => {
+    const stringedParts = activeParts.filter(part => !activeDrumSet.has(part.index));
+    return stringedParts.reduce(
+      (sum, part) =>
+        sum +
+        countDetectedKeyswitches(
+          part.keys,
+          readArticulations ? articulationPreset : undefined,
+          readArticulations ? articulationOctaveShift : 0,
+        ),
+      0,
+    );
+  }, [activeParts, activeDrumSet, readArticulations, articulationPreset, articulationOctaveShift]);
+
   const effectiveOptions = useMemo<MidiImportOptions>(() => {
     const hasDrumOverrides = Object.keys(drumKeyOverrides).length > 0;
     const hasPartOverrides = Object.keys(partOverrides).length > 0;
@@ -381,7 +422,8 @@ export function MidiImportDialog({
       activeDrumPartIndices.length > 0 ||
       effectiveDrumMap !== undefined ||
       hasDrumOverrides ||
-      hasPartOverrides;
+      hasPartOverrides ||
+      readArticulations;
     if (!needsCustomFields) return options;
     return {
       ...options,
@@ -392,6 +434,15 @@ export function MidiImportDialog({
       ...(effectiveDrumMap ? { drumMap: effectiveDrumMap } : {}),
       ...(hasDrumOverrides ? { drumKeyOverrides } : {}),
       ...(targetBars ? { targetBars } : {}),
+      ...(readArticulations
+        ? {
+            articulations: {
+              enabled: true,
+              preset: articulationPreset,
+              octaveShift: articulationOctaveShift,
+            },
+          }
+        : {}),
     };
   }, [
     options,
@@ -402,6 +453,9 @@ export function MidiImportDialog({
     effectiveDrumMap,
     drumKeyOverrides,
     targetBars,
+    readArticulations,
+    articulationPreset,
+    articulationOctaveShift,
   ]);
 
   // Converting a long file takes a moment, so it follows the option controls rather than blocking them.
@@ -516,6 +570,8 @@ export function MidiImportDialog({
       setPreviewBar(0);
       setPreviewTrack(0);
       setOctaveShift(0);
+      setReadArticulations(false);
+      setArticulationOctaveShift(0);
       setSourcePart(0);
       const bytes = new Uint8Array(reader.result as ArrayBuffer);
       try {
@@ -773,7 +829,7 @@ export function MidiImportDialog({
     const matched = tuningPresets.find(
       preset => preset.instrument === instrument && sameTuning(preset.tuning, pitches),
     );
-    const range = noteRangeOf(isBass ? bassParts : guitarParts);
+    const range = noteRangeOf(isBass ? bassParts : guitarParts, ignoredArticulationKeys);
     return (
       <div className="midi-tuning-row">
         <label>
@@ -1099,10 +1155,10 @@ export function MidiImportDialog({
                   part => !isDrumPart(part),
                 );
                 if (val === 'guitar' && !guitarTuningCustom && melodic.length > 0) {
-                  setGuitarTuning(autoFitPreset('guitar', melodic));
+                  setGuitarTuning(autoFitPreset('guitar', melodic, ignoredArticulationKeys));
                   setGuitarTuningName('');
                 } else if (val === 'bass' && !bassTuningCustom && melodic.length > 0) {
-                  setBassTuning(autoFitPreset('bass', melodic));
+                  setBassTuning(autoFitPreset('bass', melodic, ignoredArticulationKeys));
                   setBassTuningName('');
                 }
               }}
@@ -1136,7 +1192,10 @@ export function MidiImportDialog({
                   </select>
                 </label>
                 {!replaceMismatch &&
-                  renderNoteRangeAndHint(noteRangeOf(activeParts), targetStaff.tuning)}
+                  renderNoteRangeAndHint(
+                    noteRangeOf(activeParts, ignoredArticulationKeys),
+                    targetStaff.tuning,
+                  )}
               </div>
             )}
             {showGuitarTuning && renderTuningRow('guitar')}
@@ -1155,6 +1214,80 @@ export function MidiImportDialog({
                   setOctaveShift(Number(val));
                 }}
               />
+            </div>
+            <div className="midi-articulations">
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={readArticulations}
+                  disabled={importing}
+                  onChange={event => {
+                    setImportProblem(null);
+                    setReadArticulations(event.target.checked);
+                  }}
+                />
+                {t('midi_import.read_articulations')}
+              </label>
+              {!readArticulations && detectedKeyswitchCount > 0 && (
+                <p className="muted midi-articulations-hint">
+                  {t(
+                    detectedKeyswitchCount === 1
+                      ? 'midi_import.keyswitches_detected_hint_one'
+                      : 'midi_import.keyswitches_detected_hint_other',
+                    { count: detectedKeyswitchCount },
+                  )}
+                </p>
+              )}
+              {readArticulations && (
+                <>
+                  <div className="midi-articulations-row">
+                    <label>
+                      {t('midi_import.articulation_preset')}
+                      <select
+                        value={articulationPreset}
+                        {...busySelect(importing)}
+                        onChange={event => {
+                          if (!importing) {
+                            setImportProblem(null);
+                            setArticulationPreset(event.target.value);
+                          }
+                        }}
+                      >
+                        {midiArticulationPresets().map(preset => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="tp-field">
+                      <span className="tp-field-label" aria-hidden="true">
+                        {t('midi_import.articulation_octave')}
+                      </span>
+                      <Segmented
+                        label={t('midi_import.articulation_octave')}
+                        disabled={importing}
+                        value={String(articulationOctaveShift)}
+                        options={keyswitchOctaveOptions}
+                        onChange={val => {
+                          setImportProblem(null);
+                          setArticulationOctaveShift(Number(val));
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <p className="muted midi-articulations-status">
+                    {detectedKeyswitchCount > 0
+                      ? t(
+                          detectedKeyswitchCount === 1
+                            ? 'midi_import.keyswitches_matched_one'
+                            : 'midi_import.keyswitches_matched_other',
+                          { count: detectedKeyswitchCount },
+                        )
+                      : t('midi_import.keyswitches_none')}
+                  </p>
+                </>
+              )}
             </div>
           </section>
         )}

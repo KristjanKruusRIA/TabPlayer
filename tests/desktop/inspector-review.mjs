@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 // THE-215 review fixes, driven in the real app with real clicks and keys:
 //  1. a name or transposition typed for one track is recorded for that track, once, when the next click makes another track the active one (a click on a note of another track, or on its name);
 //  2. a track with several staves has a staff selector, and its tuning is edited one staff at a time;
@@ -31,7 +32,7 @@ const undo=async()=>{await clickWorkstationButton(page,'Undo');await settle(page
 
 try{
   // The score shows only the selected track by default; show every track so a click can land on another one.
-  await page.getByRole('combobox',{name:/^Displayed tracks/}).selectOption('all');await settle(page,800);
+  await showScoreDisplay(page);await page.getByRole('combobox',{name:/^Displayed tracks/}).selectOption('all');await settle(page,800);
   await selectFirst();
   await revealInspectorTab(page,'Track');await settle(page,300);
   await page.locator('.track-notation-more summary').click();

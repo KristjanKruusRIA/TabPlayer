@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls,openScoreStyle,closeScoreStyle} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -23,9 +24,9 @@ try{
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const details=async name=>{await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
-  const fill=(name,value)=>page.getByLabel(name,{exact:true}).fill(String(value));
+  const fill=async(name,value)=>{if(name==='Zoom (%)')await showScoreDisplay(page);await page.getByLabel(name,{exact:true}).fill(String(value));};
   const combo=name=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)});
-  const choose=async(name,value)=>{const radioGroup=page.getByRole('radiogroup',{name});if(await radioGroup.count()){const map={'document':'Document notation','ScoreTab':'Score and tab','Score':'Score','Tab':'Tab'};await radioGroup.getByRole('radio',{name:map[value]||value,exact:true}).click();}else await combo(name).selectOption(value);};
+  const choose=async(name,value)=>{const radioGroup=page.getByRole('radiogroup',{name});if(await radioGroup.count()){const map={'document':'Document notation','ScoreTab':'Score and tab','Score':'Score','Tab':'Tab'};await radioGroup.getByRole('radio',{name:map[value]||value,exact:true}).click();}else{if(name==='Displayed tracks')await showScoreDisplay(page);await combo(name).selectOption(value);}};
   const musical=bytes=>{const score=importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings()),file=new midi.MidiFile();new midi.MidiFileGenerator(score,new Settings(),new midi.AlphaSynthMidiFileHandler(file)).generate();return file.tracks.flatMap(track=>track.events).filter(event=>event instanceof midi.NoteOnEvent||event instanceof midi.NoteOffEvent).map(event=>({type:event.constructor.name,track:event.track,tick:event.tick,pitch:event.noteKey,velocity:event.noteVelocity??null}));};
   await button('Open');await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   await button('Export GP');const baselineGp=readFileSync(exported),baselineMusic=musical(baselineGp),baseline=await snapshot();
@@ -54,7 +55,7 @@ try{
     const bytes=readFileSync(pdf);assert.equal(bytes.subarray(0,5).toString(),'%PDF-');copyFileSync(pdf,resolve('.analysis/parity',`engraving-${variant}.pdf`));result[`${variant}PdfBytes`]=bytes.length;
   }
   await button('Save');const stored=await snapshot();assert.equal(stored.dirty,false);assert.deepEqual(errors,[]);
-  await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await closeWelcome(page);await button('Open');
+  await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await closeWelcome(page);await button('Open');await showScoreDisplay(page);
   assert.deepEqual((await snapshot()).project,stored.project);assert.equal(await combo('Displayed tracks').inputValue(),'selected');assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),'100');result.nativeRestartHistoryAndSessionReset=true;
   assert.equal(hash(readFileSync(fixturePath)),sourceHash);writeFileSync(resolve('.analysis/parity/native-engraving-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }catch(error){if(page)await page.screenshot({path:resolve('.analysis/parity/native-engraving-failure.png')});throw error;}

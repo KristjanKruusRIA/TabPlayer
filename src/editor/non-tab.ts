@@ -3,6 +3,7 @@ import type { EditCommand } from '../edit-types';
 import { integer, locationAt, noteAt, validateCapacity } from './common';
 import { detachNote } from './links';
 import { resolvePercussionArticulation } from './percussion-catalog';
+import { remapPercussionTrack } from './drum-remap';
 import { applyNoteLink, applyNoteTechniques } from './techniques';
 
 function addTrack(score:model.Score,name:string,program:number,percussion:boolean) {
@@ -50,6 +51,7 @@ export function applyNonTabEdit(score:model.Score,edit:EditCommand):boolean {
     }
     case 'setNoteTechniquesByIndex':applyNoteTechniques(score,{target:edit.target,noteIndex:edit.noteIndex},edit.patch);return true;
     case 'setNoteLinkByIndex':applyNoteLink(score,edit.from,edit.to,edit.kind);return true;
+    case 'remapPercussion':return remapPercussionTrack(score,edit.track,edit.map);
     default:return false;
   }
 }

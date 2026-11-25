@@ -6,6 +6,7 @@ import { midiPrograms } from '../midi-programs';
 import { formatTuning } from '../tuning';
 import { TuningRow } from '../tuning/TuningRow';
 import { TuningDialog, type TuningChoice } from '../tuning/TuningDialog';
+import { DrumRemapDialog } from '../editor/DrumRemapDialog';
 import { busyGuard, busySelect } from '../ui/useBusyGuard';
 import { BusyFieldset } from '../ui/BusyFieldset';
 import { CommitField } from '../ui/CommitField';
@@ -86,9 +87,12 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
   const editable = !staff.isPercussion && !!staff.tuning.length;
   // The dialog belongs to the track it was opened for, by identity: moving or removing tracks while it is open must not retarget it.
   const [tuningFor, setTuningFor] = useState<string | null>(null);
+  const [drumRemapFor, setDrumRemapFor] = useState<string | null>(null);
   const [capoRefusal, setCapoRefusal] = useState<string | null>(null);
   const dialogIndex = tuningFor === null ? -1 : score.tracks.findIndex(track => trackIdentity(track) === tuningFor), dialogTrack = dialogIndex >= 0 ? score.tracks[dialogIndex] : null;
+  const remapIndex = drumRemapFor === null ? -1 : score.tracks.findIndex(track => trackIdentity(track) === drumRemapFor), remapTrack = remapIndex >= 0 && score.tracks[remapIndex].isPercussion ? score.tracks[remapIndex] : null;
   useEffect(() => { if (tuningFor !== null && dialogIndex < 0) setTuningFor(null); }, [tuningFor, dialogIndex]);
+  useEffect(() => { if (drumRemapFor !== null && !remapTrack) setDrumRemapFor(null); }, [drumRemapFor, remapTrack]);
   const dialogStaffIndex = Math.min(staffIndex, (dialogTrack?.staves.length ?? 1) - 1), dialogSeveral = (dialogTrack?.staves.length ?? 1) > 1;
   const dialogBase = dialogTrack ? dialogTrack.staves[dialogSeveral ? dialogStaffIndex : 0] : null;
   /** The staff's settings as they are now, plus the changes; the same payload the old Apply staff settings button sent. */
@@ -184,7 +188,9 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
       {drumTabLeftOff > 0 && <p className="notation-note" role="note">{t('track_settings.drum_tab_left_off', { count: drumTabLeftOff })}</p>}
     </>}
     <TuningRow label={t('track_settings.tuning_row')} notes={pitches} title={savedName ? `${savedName}: ${pitches}` : pitches} unavailable={tuningUnavailable} busy={busy} locked={locked} onOpen={() => { setCapoRefusal(null); setTuningFor(trackIdentity(current)); }} onPlay={onAudition && (() => audition([...tuned.tuning], true))} playDisabled={strings > 12} />
+    {staff.isPercussion && <button type="button" aria-haspopup="dialog" {...busyGuard({ busy, disabled: locked, className: 'drum-remap-open', onClick: () => setDrumRemapFor(trackIdentity(current)) })}>{t('track_settings.drum_mapping')}</button>}
     {dialogTrack && <TuningDialog pitches={dialogBase!.tuning} name={dialogBase!.stringTuning.name} staff={dialogTrack.staves[dialogStaffIndex]} staffCount={dialogTrack.staves.length} busy={busy} locked={locked} refusal={capoRefusal ?? refusal} defaultInstrument={dialogTrack.playbackInfo.program >= 32 && dialogTrack.playbackInfo.program <= 39 ? 'bass' : undefined} onApply={applyTuning} onClose={() => setTuningFor(null)} onAudition={onAudition && ((list, strum) => onAudition({ trackId: trackIdentity(dialogTrack) }, list, strum))} />}
+    {remapTrack && <DrumRemapDialog score={score} trackIndex={remapIndex} busy={busy} locked={locked} onEdit={command => { void onEdit(command); }} onClose={() => setDrumRemapFor(null)} />}
     <BusyFieldset busy={busy} className="track-notation-more">
       <details className="inspector-more">
         <summary>{t('inspector.more')}</summary>

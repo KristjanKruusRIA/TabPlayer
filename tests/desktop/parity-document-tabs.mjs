@@ -1,3 +1,4 @@
+import { hideScoreDisplay, showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand,moveCursor,cursorPosition,writeNote} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
@@ -64,11 +65,11 @@ async function initialPair(){
   await invoke('workspace_close',{documents:[{...address(blank),discard:false}]});await reload();assert.equal((await workspace()).documents.length,2);
 }
 const tab=documentId=>page.locator(`#document-tab-${documentId}`);
-async function activate(documentId){await tab(documentId).click();await idle();assert.equal((await workspace()).active.documentId,documentId);return stopped();}
+async function activate(documentId){await hideScoreDisplay(page);await tab(documentId).click();await idle();assert.equal((await workspace()).active.documentId,documentId);return stopped();}
 // The cursor is moved in the score (the palette's 'measure N' and the arrow keys) and read from the status bar; the Measure and Beat fields are gone.
 async function location(measure,beat=1){await moveCursor(page,{bar:measure,beat});await page.locator('.statusbar-position').filter({hasText:`Bar ${measure} · Beat ${beat}`}).waitFor();}
-async function view(name){const value=fixture.view[name];await location(value.measure,value.beat);await page.getByLabel('Zoom (%)',{exact:true}).fill(String(value.zoom));await page.getByRole('combobox',{name:/^Displayed tracks/}).selectOption(value.display);}
-async function assertView(name){const value=fixture.view[name];{const at=await cursorPosition(page);assert.equal(at.bar,value.measure);assert.equal(at.beat,value.beat);}assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),String(value.zoom));assert.equal(await page.getByRole('combobox',{name:/^Displayed tracks/}).inputValue(),value.display);}
+async function view(name){const value=fixture.view[name];await location(value.measure,value.beat);await showScoreDisplay(page);await page.getByLabel('Zoom (%)',{exact:true}).fill(String(value.zoom));await showScoreDisplay(page);await page.getByRole('combobox',{name:/^Displayed tracks/}).selectOption(value.display);await hideScoreDisplay(page);}
+async function assertView(name){await showScoreDisplay(page);const value=fixture.view[name];{const at=await cursorPosition(page);assert.equal(at.bar,value.measure);assert.equal(at.beat,value.beat);}assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),String(value.zoom));assert.equal(await page.getByRole('combobox',{name:/^Displayed tracks/}).inputValue(),value.display);await hideScoreDisplay(page);}
 async function note(fret){await writeNote(page,5,fret);await idle();}
 async function disclosure(label){const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();}
 function ownedProcess(pid,path){

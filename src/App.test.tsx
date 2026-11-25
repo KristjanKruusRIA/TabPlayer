@@ -1070,6 +1070,11 @@ it('canceled toolbar close retains focus on its connected originating action',as
 const commandDisclosure=(label:string)=>screen.getByText(label,{selector:'summary'}).closest('details')!;
 const paneButton=(name:string)=>name==='Backing'?dockButton('Backing'):screen.getByRole('tab',{name:name==='Song'?'Song':'Track',hidden:true});
 function openCommand(label:string){const disclosure=commandDisclosure(label);if(!disclosure.open)fireEvent.click(disclosure.querySelector('summary')!);return disclosure;}
+function openPreferences(){
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:',',ctrlKey:true});
+  return screen.getByRole('dialog',{name:'Preferences'});
+}
+function closePreferences(dialog:HTMLElement){fireEvent.keyDown(dialog,{key:'Escape'});}
 function viewToggle(label:string){const menu=openCommand('View');fireEvent.click(within(menu).getByRole('checkbox',{name:label}));fireEvent.keyDown(menu,{key:'Escape'});}
 function revealDetails(element:HTMLElement){for(let ancestor=element.parentElement;ancestor;ancestor=ancestor.parentElement)if(ancestor instanceof HTMLDetailsElement)ancestor.open=true;}
 function expectSilentNavigation(){for(const action of [integration.commits,integration.play,integration.pause,integration.stop,integration.playFromCursor,integration.playSelection,integration.loopSelection,integration.seekToMeasure,integration.setLoop,integration.clearLoop])expect(action).not.toHaveBeenCalled();}
@@ -1568,13 +1573,13 @@ it('does not audition an entered note while playback is running',async()=>{
   const c=await setup();selectString(6);await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).not.toHaveBeenCalled();
 });
-it('keeps Play notes while editing in the View menu, on by default and remembered',async()=>{
+it('keeps Play notes while editing in Preferences, on by default and remembered',async()=>{
   window.localStorage.removeItem(auditionKey);
-  const c=await setup(),toggle=()=>within(screen.getByRole('region',{name:'Workspace view'})).getByLabelText('Play notes while editing') as HTMLInputElement;
-  expect(toggle()).toBeChecked();fireEvent.click(toggle());expect(toggle()).not.toBeChecked();expect(window.localStorage.getItem(auditionKey)).toBe('off');
+  const c=await setup(),prefs=openPreferences(),toggle=()=>within(screen.getByRole('dialog',{name:'Preferences'})).getByLabelText('Play notes while editing') as HTMLInputElement;
+  expect(toggle()).toBeChecked();fireEvent.click(toggle());expect(toggle()).not.toBeChecked();expect(window.localStorage.getItem(auditionKey)).toBe('off');closePreferences(prefs);
   selectString(6);await typeFret(5);await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).not.toHaveBeenCalled();
-  cleanup();await setup();expect(toggle()).not.toBeChecked();fireEvent.click(toggle());expect(window.localStorage.getItem(auditionKey)).toBe('on');
+  cleanup();await setup();openPreferences();expect(toggle()).not.toBeChecked();fireEvent.click(toggle());expect(window.localStorage.getItem(auditionKey)).toBe('on');
   window.localStorage.removeItem(auditionKey);
 });
 
@@ -1604,7 +1609,7 @@ it('does not edit a finalized document from the keypad',async()=>{
 it('auto-duration gives a written rest the last keypad duration, and the preference is remembered',async()=>{
   window.localStorage.removeItem(inputKey);
   const c=await setup();
-  fireEvent.click(within(openCommand('View')).getByLabelText(/^Auto-duration/));fireEvent.click(within(openCommand('View')).getByLabelText(/^Keypad sets duration/));
+  const prefs=openPreferences();fireEvent.click(within(prefs).getByLabelText(/^Auto-duration/));fireEvent.click(within(prefs).getByLabelText(/^Keypad sets duration/));closePreferences(prefs);
   expect(JSON.parse(window.localStorage.getItem(inputKey)!)).toMatchObject({autoDuration:true,numpadDurations:true});
   keypad('Numpad4');await waitFor(()=>expect(currentBeat(c).duration).toBe(8));
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'ArrowRight'});
@@ -1885,8 +1890,8 @@ it('switches application language at runtime through View preferences and update
   expect(within(fileMenu).getByRole('button',{name:'New'})).toBeVisible();
   expect(screen.getByRole('button',{name:'Undo'})).toHaveAttribute('title',expect.stringContaining('Undo'));
   
-  const viewMenu=openCommand('View');
-  const langSelect=within(viewMenu).getByLabelText('Language');
+  const prefs=openPreferences();
+  const langSelect=within(prefs).getByLabelText('Language');
   expect(langSelect).toHaveValue('system');
 
   fireEvent.change(langSelect,{target:{value:'et'}});
@@ -1899,8 +1904,7 @@ it('switches application language at runtime through View preferences and update
   expect(screen.getByRole('button',{name:'Peata'})).toBeInTheDocument();
   expect(window.localStorage.getItem('tabplayer.language')).toBe('et');
 
-  const etViewMenu=openCommand('Vaade');
-  const etLangSelect=within(etViewMenu).getByLabelText('Keel');
+  const etLangSelect=within(prefs).getByLabelText('Keel');
   fireEvent.change(etLangSelect,{target:{value:'de'}});
   await waitFor(()=>expect(screen.getByRole('button',{name:'Rückgängig'})).toBeInTheDocument());
   expect(screen.getByRole('button',{name:'Rückgängig'})).toHaveAttribute('title',expect.stringContaining('Rückgängig'));
@@ -1911,8 +1915,7 @@ it('switches application language at runtime through View preferences and update
   expect(screen.getByRole('button',{name:'Stopp'})).toBeInTheDocument();
   expect(window.localStorage.getItem('tabplayer.language')).toBe('de');
 
-  const deViewMenu=openCommand('Ansicht');
-  const deLangSelect=within(deViewMenu).getByLabelText('Sprache');
+  const deLangSelect=within(prefs).getByLabelText('Sprache');
   fireEvent.change(deLangSelect,{target:{value:'en'}});
   await waitFor(()=>expect(screen.getByRole('button',{name:'Undo'})).toBeInTheDocument());
   expect(screen.getByText('File',{selector:'summary'})).toBeInTheDocument();
@@ -1934,11 +1937,18 @@ it('shows the edition palette beside the score and draws it nowhere when hidden 
   expect(within(screen.getByRole('complementary',{name:'Edition palette'})).getByRole('toolbar',{name:'Editing toolbar'})).toHaveAttribute('aria-orientation','vertical');
 });
 
-it('opens the measure settings from the tempo link in the position display',async()=>{
+it('opens measure settings from time signature and the tempo editor from tempo in the position display',async()=>{
   await setup();
   const lcd=screen.getByRole('group',{name:'Song position'});
   expect(within(lcd).getByRole('combobox',{name:'Current track'})).toHaveValue('0');
-  fireEvent.click(within(lcd).getByRole('button',{name:/^Tempo .* \(click to change\)$/}));
+  const tempoBtn=within(lcd).getByRole('button',{name:/^Tempo .* \(click to change\)$/});
+  fireEvent.click(tempoBtn);
+  const tempoDialog=await screen.findByRole('dialog',{name:'Tempo editor'});
+  expect(within(tempoDialog).getByLabelText('Tempo')).toBeInTheDocument();
+  fireEvent.keyDown(document,{key:'Escape'});
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Tempo editor'})).toBeNull());
+
+  fireEvent.click(within(lcd).getByRole('button',{name:/^Time signature .* \(click to change\)$/}));
   // The measure settings are in the Properties dialog's Bar tab now.
   const dialog=await screen.findByRole('dialog',{name:'Properties'});expect(within(dialog).getByRole('tab',{name:'Bar'})).toHaveAttribute('aria-selected','true');
   const summary=within(dialog).getByText('Measure & notation',{selector:'summary'});
@@ -2502,13 +2512,17 @@ describe('GP8 edit and cursor keys',()=>{
     await waitFor(()=>expect(edits(c)).toHaveLength(3));
     expect(edits(c)[2]).toMatchObject({type:'deleteBeat'});
   });
-  it('Ctrl+Insert inserts a beat before the cursor like the palette command',async()=>{
-    const c=await setup(withNotes({type:'setDuration',target:at(0),duration:8,dots:0})),before=beatsIn(c);
+  it('Ctrl+Insert and Insert insert a beat before the cursor like the palette command',async()=>{
+    const c=await setup(withNotes({type:'deleteBeat',target:at(3)},{type:'setDuration',target:at(0),duration:8,dots:0})),before=beatsIn(c);
     press({key:'Insert',ctrlKey:true});
-    await waitFor(()=>expect(edits(c)).toHaveLength(4));
-    expect(edits(c)[3]).toMatchObject({type:'insertBeat',target:at(0)});
+    await waitFor(()=>expect(edits(c)).toHaveLength(5));
+    expect(edits(c)[4]).toMatchObject({type:'insertBeat',target:at(0)});
     expect(beatsIn(c)).toBe(before+1);
-    press({key:'Insert'});await quiet();expect(edits(c)).toHaveLength(4);
+    await quiet();
+    press({key:'Insert'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(6));
+    expect(edits(c)[5]).toMatchObject({type:'insertBeat',target:at(0)});
+    expect(beatsIn(c)).toBe(before+2);
   });
   it('Ctrl+Shift+Delete clears the selection notes through eraseSelection, and records nothing without a selection or notes',async()=>{
     const c=await setup(withNotes());
@@ -2525,9 +2539,109 @@ describe('GP8 edit and cursor keys',()=>{
     expect(edits(c)[2]).toMatchObject({type:'eraseSelection'});
     expect(currentBeat(c).notes).toHaveLength(0);expect(selection()).toBeNull();
   });
-  it('leaves Del alone to do what it did before',async()=>{
+  it('Delete removes the note on the active string without a multi-beat selection, and clears notes across a multi-beat selection',async()=>{
+    const c=await setup(withNotes({type:'setNote',target:at(1),string:6,fret:5}));
+    press({key:'Delete'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(edits(c)[3]).toMatchObject({type:'removeNote',target:at(0),string:6});
+    await quiet();
+    press({key:'ArrowRight',shiftKey:true});
+    expect(selection()?.kind).toBe('range');
+    press({key:'Delete'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(5));
+    expect(edits(c)[4]).toMatchObject({type:'eraseSelection'});
+    expect(currentBeat(c,1).notes).toHaveLength(0);
+    expect(selection()).toBeNull();
+  });
+  it('supports always-on GP8 shortcuts (+, -, ., /, r, o, b, l) with Note entry off, keeps Shift+L as Loop, and gives b to pitch entry when Note entry is on',async()=>{
+    const c=await setup(withNotes({type:'deleteBeat',target:at(3)},{type:'setNote',target:at(1),string:6,fret:3}));
+    expect(screen.getByRole('button',{name:'Note entry'})).toHaveAttribute('aria-pressed','false');
+    // Shift+L on tie-eligible notes stays Loop and does not create a tie edit.
+    press({key:'L',code:'KeyL',shiftKey:true});
+    await quiet();expect(edits(c)).toHaveLength(4);
+    // l ties to the matching note on beat 1.
+    press({key:'l'});await waitFor(()=>expect(edits(c)).toHaveLength(5));await quiet();
+    expect(edits(c)[4]).toMatchObject({type:'setNoteLink',kind:'tie'});
+    // o toggles ghost note, b toggles bend.
+    press({key:'o'});await waitFor(()=>expect(edits(c)).toHaveLength(6));await quiet();
+    expect(edits(c)[5]).toMatchObject({type:'setNoteTechniques',patch:{ghost:true}});
+    press({key:'b'});await waitFor(()=>expect(edits(c)).toHaveLength(7));await quiet();
+    expect(edits(c)[6]).toMatchObject({type:'setNoteTechniques',patch:{bend:{type:1}}});
+    // +, -, ., / adjust beat rhythm immediately.
+    press({key:'+'});await waitFor(()=>expect(edits(c)).toHaveLength(8));await quiet();
+    expect(edits(c)[7]).toMatchObject({type:'setDuration',duration:8,dots:0});
+    press({key:'-'});await waitFor(()=>expect(edits(c)).toHaveLength(9));await quiet();
+    expect(edits(c)[8]).toMatchObject({type:'setDuration',duration:4,dots:0});
+    press({key:'.'});await waitFor(()=>expect(edits(c)).toHaveLength(10));await quiet();
+    expect(edits(c)[9]).toMatchObject({type:'setDuration',duration:4,dots:1});
+    press({key:'.'});await waitFor(()=>expect(edits(c)).toHaveLength(11));await quiet();
+    expect(edits(c)[10]).toMatchObject({type:'setDuration',duration:4,dots:0});
+    press({key:'/'});await waitFor(()=>expect(edits(c)).toHaveLength(12));await quiet();
+    expect(edits(c)[11]).toMatchObject({type:'setBeatRhythm',tupletNumerator:3,tupletDenominator:2});
+    // r turns beat into a rest and leaves cursor on the same beat when Note entry is off.
+    press({key:'r'});await waitFor(()=>expect(edits(c)).toHaveLength(13));await quiet();
+    expect(edits(c)[12]).toMatchObject({type:'setRest',target:at(0)});
+    expect(cursor()).toMatchObject({bar:0,beat:0});
+    // With Note entry ON, b enters pitch B rather than bend.
+    press({key:'n'});
+    expect(screen.getByRole('button',{name:'Note entry'})).toHaveAttribute('aria-pressed','true');
+    press({key:'b'});await waitFor(()=>expect(edits(c)).toHaveLength(14));
+    expect(edits(c)[13]).toMatchObject({type:'setNote',target:at(0)});
+  });
+  it('ArrowRight inserts a beat into an underfull bar and appends a measure at the end of a full last bar',async()=>{
+    const c=await setup({...blankProject(),edits:[{type:'setDuration',target:at(3),duration:8,dots:0}]});
+    const initialBars=bars(c),initialBeats=beatsIn(c);
+    // Navigate to beat 3 (last beat of underfull bar 0).
+    press({key:'End'});expect(cursor()).toMatchObject({bar:0,beat:initialBeats-1});
+    press({key:'ArrowRight'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));
+    expect(edits(c)[1]).toMatchObject({type:'insertBeat',target:at(initialBeats)});
+    await waitFor(()=>expect(cursor()).toMatchObject({bar:0,beat:initialBeats}));
+    await quiet();
+    // Move to the last beat of the last full bar and press ArrowRight to append a measure.
+    press({key:'End',ctrlKey:true});press({key:'End'});
+    const lastBar=initialBars-1;
+    expect(cursor()).toMatchObject({bar:lastBar,beat:beatsIn(c,lastBar)-1});
+    press({key:'ArrowRight'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toEqual({type:'appendMeasure'});
+    await waitFor(()=>expect(bars(c)).toBe(initialBars+1));
+    await waitFor(()=>expect(cursor()).toMatchObject({bar:initialBars,beat:0}));
+  });
+  it('Ctrl+C and Ctrl+V copy and paste the beat at the cursor even without a drag selection',async()=>{
     const c=await setup(withNotes());
-    press({key:'Delete'});await quiet();expect(edits(c)).toHaveLength(2);
+    expect(selection()).toBeNull();
+    press({key:'c',ctrlKey:true});
+    await quiet();
+    press({key:'ArrowRight'});
+    press({key:'v',ctrlKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'pasteMusic'});
+    await waitFor(()=>expect(currentBeat(c,1).notes.some(n=>n.string===6&&n.fret===3)).toBe(true));
+  });
+  it('fits a shorter beat when the current rhythm is too long for the remainder of a measure',async()=>{
+    const c=await setup({...blankProject(),edits:[{type:'setDuration',target:at(3),duration:8,dots:1}]});
+    press({key:'End'});press({key:'ArrowRight'});
+    await waitFor(()=>expect(edits(c).at(-1)).toMatchObject({type:'insertBeat',target:at(4),duration:16,dots:0}));
+    await waitFor(()=>expect(cursor()).toMatchObject({bar:0,beat:4}));
+  });
+  it('requires a selection for Ctrl+Shift+X even when the cursor is on a note',async()=>{
+    const c=await setup(withNotes()),before=bars(c);
+    press({key:'X',ctrlKey:true,shiftKey:true});
+    await quiet();
+    expect(bars(c)).toBe(before);
+    expect(edits(c)).toHaveLength(2);
+  });
+  it('pointer click on an Edition Palette direct action returns focus to the score pane, while keyboard activation keeps toolbar focus',async()=>{
+    await setup(withNotes());
+    const toolbar=screen.getByRole('toolbar',{name:'Editing toolbar'});
+    const eighth=within(toolbar).getByRole('button',{name:'Eighth note (1/8)'});
+    eighth.focus();
+    expect(eighth).toHaveFocus();
+    fireEvent.click(eighth,{detail:0});
+    expect(eighth).toHaveFocus();
+    fireEvent.click(eighth,{detail:1});
+    await waitFor(()=>expect(pane()).toHaveFocus());
   });
   it('Home and End go to the first and last beat of the bar; Ctrl+Home and Ctrl+End to the first and last bar',async()=>{
     const c=await setup(),last=beatsIn(c)-1;
@@ -3342,12 +3456,12 @@ describe('MIDI capture in the score',{timeout:90000},()=>{
     try{
       const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
       fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
-      expect(screen.getByText(/Chords are not written while the score plays/)).toBeInTheDocument();
+      const inputPrefs=openPreferences();expect(within(inputPrefs).getByText(/Chords are not written while the score plays/)).toBeInTheDocument();closePreferences(inputPrefs);
       const before=c.getState().snapshot.project.edits.length;
       sendChord(keyboardChord([40]),keyboardChord([41]));
       await waitFor(()=>expect(session.get().notWritten).toBe(2));
       expect(c.getState().snapshot.project.edits).toHaveLength(before);expect(currentBeat(c).notes).toHaveLength(0);
-      expect(screen.getByText(/The score is playing and writing during playback is off/)).toBeInTheDocument();
+      const prefs=openPreferences();expect(within(prefs).getByText(/The score is playing and writing during playback is off/)).toBeInTheDocument();closePreferences(prefs);
       stopTransport();sendChord(keyboardChord([40]));
       await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
       expect(session.get().notWritten).toBe(2);expect(screen.queryByText(/The score is playing and writing during playback is off/)).toBeNull();
@@ -3401,9 +3515,9 @@ describe('MIDI capture in the score',{timeout:90000},()=>{
       // The chord line says why while a chord is turned away, and goes when the setting is switched on during playback.
       fireEvent.keyDown(workspace,{key:'ArrowRight'});fireEvent.keyDown(workspace,{key:'n'});const session=await startCapture();
       sendChord(keyboardChord([40]));await waitFor(()=>expect(session.get().notWritten).toBe(1));
-      expect(screen.getByText(/The score is playing and writing during playback is off/)).toBeInTheDocument();
-      fireEvent.click(screen.getByLabelText('Write notes while the score plays'));
-      await waitFor(()=>expect(screen.queryByText(/The score is playing and writing during playback is off/)).toBeNull());
+      const prefs=openPreferences();expect(within(prefs).getByText(/The score is playing and writing during playback is off/)).toBeInTheDocument();closePreferences(prefs);
+      const settings=openPreferences();fireEvent.click(within(settings).getByLabelText('Write notes while the score plays'));closePreferences(settings);
+      await waitFor(()=>expect(session.get().paused).toBe(false));
       sendChord(keyboardChord([40]));await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
     }finally{window.localStorage.removeItem(inputKey);}
   });
@@ -3471,7 +3585,7 @@ describe('MIDI capture in the score',{timeout:90000},()=>{
     // Every chord is either written or counted, none lost silently.
     await waitFor(()=>expect(c.getState().snapshot.project.edits.length-before+session.get().notWritten).toBe(14));
     expect(session.get().notWritten).toBeGreaterThan(0);
-    await screen.findByText(/^\d+ chords? did not reach the score\.$/);
+    await within(openPreferences()).findByText(/^\d+ chords? did not reach the score\.$/);
   });
   it('counts a chord it could not write, whatever the reason: a dialog, an open menu, a locked score, a text field',async()=>{
     const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
@@ -3496,7 +3610,7 @@ describe('MIDI capture in the score',{timeout:90000},()=>{
     sendChord(keyboardChord([40]));
     expect(counted()).toBe(4);
     expect(c.getState().snapshot.project.edits).toHaveLength(before);
-    expect(await screen.findByText(/^4 chords did not reach the score\.$/)).toBeInTheDocument();
+    expect(within(openPreferences()).getByText(/^4 chords did not reach the score\.$/)).toBeInTheDocument();
   });
   it('counts the chords it discards when the queue is cleared, so every chord is written or counted',async()=>{
     const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
@@ -3641,8 +3755,8 @@ describe('MIDI capture in the score',{timeout:90000},()=>{
     const view=openCommand('View');
     sendChord(keyboardChord([40]));
     expect(session.get().blocked).toBe(true);
-    expect(within(view).getByText('A menu is open, so chords are not written to the score. Close the menu to write them.')).toBeInTheDocument();
     fireEvent.keyDown(view.querySelector('summary')!,{key:'Escape'});
+    const prefs=openPreferences();expect(within(prefs).getByText('A menu is open, so chords are not written to the score. Close the menu to write them.')).toBeInTheDocument();closePreferences(prefs);
     sendChord(keyboardChord([40]));
     await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
     expect(session.get().blocked).toBe(false);
@@ -3655,25 +3769,18 @@ describe('MIDI capture in the score',{timeout:90000},()=>{
   });
 });
 
-describe('menus with sections inside them',()=>{
-  it('keeps the View menu open when a section inside it is opened or its buttons are pressed, and still closes another menu',async()=>{
-    await setup();
-    const menus=[...document.querySelectorAll<HTMLDetailsElement>('header details.command-menu')];
-    const view=menus.find(menu=>menu.querySelector(':scope > summary')?.textContent==='View')!,other=menus.find(menu=>menu!==view)!;
-    // A click on a summary opens its details and then announces it with a toggle event, as a browser does.
-    const click=(details:HTMLDetailsElement)=>{fireEvent.click(details.querySelector(':scope > summary')!);fireEvent(details,new Event('toggle'));};
-    click(view);
-    const section=view.querySelector<HTMLDetailsElement>('details.midi-capture-panel')!;
-    expect(section).not.toBeNull();expect(view.open).toBe(true);
-    click(section);
-    expect(section.open).toBe(true);expect(view.open).toBe(true);
-    // Pressing a button in the section does not dismiss the menu either, as a command button does.
-    fireEvent.click(within(section).getByRole('button',{name:'Refresh MIDI ports'}));
-    expect(section.open).toBe(true);expect(view.open).toBe(true);
-    // Opening a different menu still closes this one, and the section with it.
-    click(other);
-    expect(other.open).toBe(true);expect(view.open).toBe(false);
-  });
+it('opens Preferences from View and restores focus to the menu trigger',async()=>{
+  await setup();
+  const view=openCommand('View'),trigger=view.querySelector('summary')!;
+  expect(within(view).queryByLabelText('Play notes while editing')).toBeNull();
+  fireEvent.click(within(view).getByRole('button',{name:'Preferences'}));
+  const dialog=screen.getByRole('dialog',{name:'Preferences'});
+  expect((view as HTMLDetailsElement).open).toBe(false);
+  expect(within(dialog).getByLabelText('Audio output')).toBeInTheDocument();
+  expect(within(dialog).getByRole('button',{name:'Test tone'})).toBeInTheDocument();
+  expect(within(dialog).getByLabelText('Language')).toBeInTheDocument();
+  closePreferences(dialog);
+  expect(trigger).toHaveFocus();
 });
 
 describe('F1 over the import, export and batch dialogs',()=>{

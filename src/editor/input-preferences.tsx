@@ -96,7 +96,7 @@ export interface InputPreferencesPanelProps {
   preferences:InputPreferences;onChange:(change:Partial<InputPreferences>)=>void;
   preview:boolean;onPreview:(play:boolean)=>void;
 }
-/** The View menu's score-input choices. They are viewer settings, so they stay usable on a finalized document. */
+/** The score-input choices in Preferences. They are viewer settings, so they stay usable on a finalized document. */
 export function InputPreferencesPanel({preferences,onChange,preview,onPreview}:InputPreferencesPanelProps):React.JSX.Element {
   const { t } = useI18n();
   return <fieldset className="input-preferences"><legend>{t('preferences.score_input')}</legend>

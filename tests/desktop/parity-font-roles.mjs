@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,clickWorkstationButton,styleSection,moveCursor} from './workstation-commands.mjs';
 import {readActiveDocument} from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -134,7 +135,7 @@ try{
   await button('Open');await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   let baselineGeneration=await generation('opened');assert.ok(Number.isInteger(baselineGeneration));
   await button('Presentation');await details('Page layout');await page.getByLabel('Width (mm)',{exact:true}).fill('210');await page.getByLabel('Height (mm)',{exact:true}).fill('297');await button('Apply page layout');
-  await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
+  await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');
   await page.locator('.score-page-text text').first().waitFor();
   const baseProject=(await snapshot()).project;
 
@@ -254,7 +255,7 @@ try{
   id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_SAVE:resolve(runDirectory,'second.tabplayer'),TABPLAYER_TEST_EXPORT:exported,TABPLAYER_TEST_APP_DATA_DIR:appData});
   await attach();await button('Open');await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   baselineGeneration=await generation('reopened');
-  await button('Presentation');await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');await page.locator('.score-page-text text').first().waitFor();
+  await button('Presentation');await showScoreDisplay(page);await page.getByRole('combobox',{name:'Display mode',exact:true}).selectOption('verticalPage');await page.locator('.score-page-text text').first().waitFor();
   await check('reopen: the project (history and fonts) is identical and the fonts are drawn again',async()=>{
     assert.deepEqual((await snapshot()).project,stored.project);
     const again=await poll(drawn,value=>value.glyph&&/Petaluma/.test(value.glyph.family)&&alias(value.lyric?.family,'TabPlayer Serif')&&alias(value.marker?.family,'TabPlayer Mono')&&alias(value.header?.family,'TabPlayer Serif'),'the reopened score draws the fonts');

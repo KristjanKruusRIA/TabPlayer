@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls,closeWelcomeLibrary,moveCursor,setBeatText,openProperties,closeProperties} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
@@ -40,7 +41,7 @@ try{
   id=launch({TABPLAYER_TEST_OPEN:fixture.fixtures.main.path});browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
   await page.setViewportSize({width:1280,height:1100});await waitForWorkspaceIdle(page);await closeWelcomeLibrary(page);await button('Open');await waitStatus(value=>value.ready&&!value.error);
   await page.locator('[aria-label="Music notation"] svg').first().waitFor();
-  await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await published();
+  await showScoreDisplay(page);await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await published();
   // Make a real redo entry, then restore source music before acceptance.
   const beforeEdit=await status();await setBeatText(page,'Original gesture redo sentinel');
   const edited=await waitStatus(value=>value.ready&&value.generation>beforeEdit.generation);await button('Undo');await waitStatus(value=>value.ready&&value.generation>edited.generation);

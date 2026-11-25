@@ -1,3 +1,4 @@
+import { showScoreDisplay } from './workstation-commands.mjs';
 // THE-213: a single real click on a track's name (dock rows and Mixer view) makes it the active track: nothing is recorded, the
 // document does not become dirty, the name says it is pressed, and a digit typed next is written on that track.
 // THE-213 (other tracks): a real click on a fret number of any track's staff puts the cursor on that note and makes that track active, in the
@@ -45,14 +46,14 @@ try{
   const modes=['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'],layouts=[['parchment',100],['verticalScreen',100],['horizontalScreen',100],['parchment',70],['verticalPage',60],['horizontalPage',60]];
   const modeSelect=()=>page.getByRole('combobox',{name:'Display mode',exact:true});
   const setMode=async layout=>{
-    const select=modeSelect();let current=await select.inputValue();if(current===layout)return;
+    await showScoreDisplay(page);const select=modeSelect();let current=await select.inputValue();if(current===layout)return;
     await select.focus();
     for(let attempt=0;attempt<12&&(await select.inputValue())!==layout;attempt++)await page.keyboard.press(modes.indexOf(layout)>modes.indexOf(await select.inputValue())?'ArrowDown':'ArrowUp');
     assert.equal(await select.inputValue(),layout,'keyboard could not reach the mode');
     await waitForWorkspaceIdle(page);await settle(page,1200);
   };
   const setZoom=async value=>{
-    const input=page.getByLabel('Zoom (%)',{exact:true});if(Number(await input.inputValue())===value)return;
+    await showScoreDisplay(page);const input=page.getByLabel('Zoom (%)',{exact:true});if(Number(await input.inputValue())===value)return;
     await input.click({clickCount:3});await page.keyboard.type(String(value));await page.keyboard.press('Tab');await waitForWorkspaceIdle(page);await settle(page,1200);
   };
   // The fret numbers of the first system, by beat: one column per beat of the first bar (left to right), each holding that beat's number on every track, top track first.

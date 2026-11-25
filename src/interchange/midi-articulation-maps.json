@@ -1,0 +1,67 @@
+{
+  "presets": [
+    {
+      "id": "submission-audio-default",
+      "name": "SubMission Audio (Default)",
+      "switches": [
+        { "key": 0, "mode": "momentary", "action": { "type": "normal" } },
+        { "key": 1, "mode": "momentary", "action": { "type": "normal" } },
+        { "key": 2, "mode": "momentary", "action": { "type": "normal" } },
+        { "key": 3, "mode": "momentary", "action": { "type": "technique", "dead": true } },
+        { "key": 4, "mode": "momentary", "action": { "type": "technique", "slap": true } },
+        { "key": 5, "mode": "momentary", "action": { "type": "technique", "deadSlap": true, "dead": true } },
+        { "key": 6, "mode": "momentary", "action": { "type": "technique", "pop": true } },
+        { "key": 7, "mode": "momentary", "action": { "type": "technique", "pop": true, "dead": true } },
+        { "key": 8, "mode": "momentary", "action": { "type": "technique", "harmonic": true } },
+        { "key": 9, "mode": "momentary", "action": { "type": "technique", "hammerPull": true } },
+        { "key": 10, "mode": "momentary", "action": { "type": "technique", "tap": true } },
+        { "key": 11, "mode": "momentary", "action": { "type": "technique", "slide": "legato" } },
+        { "key": 12, "mode": "momentary", "action": { "type": "technique", "slap": true } },
+        { "key": 13, "mode": "momentary", "action": { "type": "technique", "slap": true } },
+        { "key": 14, "mode": "momentary", "action": { "type": "technique", "deadSlap": true, "dead": true } },
+        { "key": 15, "mode": "momentary", "action": { "type": "technique", "deadSlap": true, "dead": true } },
+        { "key": 16, "mode": "momentary", "action": { "type": "technique", "dead": true } },
+        { "key": 17, "mode": "momentary", "action": { "type": "technique", "palmMute": true } },
+        { "key": 18, "mode": "momentary", "action": { "type": "technique", "palmMute": true } },
+        { "key": 19, "mode": "momentary", "action": { "type": "technique", "palmMute": true } },
+        { "key": 20, "mode": "momentary", "action": { "type": "technique", "dead": true } },
+        { "key": 21, "mode": "momentary", "action": { "type": "technique", "slap": true, "harmonic": true } },
+        { "key": 22, "mode": "momentary", "action": { "type": "technique", "slap": true, "harmonic": true } },
+        { "key": 96, "mode": "momentary", "action": { "type": "technique", "slap": true, "harmonic": true } },
+        { "key": 97, "mode": "momentary", "action": { "type": "technique", "pop": true, "harmonic": true } },
+        { "key": 98, "mode": "momentary", "action": { "type": "technique", "dead": true } },
+        { "key": 127, "mode": "momentary", "action": { "type": "forceString", "anchor": "lowest", "offset": 0 } },
+        { "key": 126, "mode": "momentary", "action": { "type": "forceString", "anchor": "lowest", "offset": 1 } },
+        { "key": 125, "mode": "momentary", "action": { "type": "forceString", "anchor": "lowest", "offset": 2 } },
+        { "key": 124, "mode": "momentary", "action": { "type": "forceString", "anchor": "lowest", "offset": 3 } },
+        { "key": 123, "mode": "momentary", "action": { "type": "forceString", "anchor": "lowest", "offset": 4 } },
+        { "key": 122, "mode": "momentary", "action": { "type": "forceString", "anchor": "lowest", "offset": 5 } },
+        { "key": 121, "mode": "momentary", "action": { "type": "forceString", "anchor": "lowest", "offset": 6 } },
+        { "key": 120, "mode": "momentary", "action": { "type": "forceString", "anchor": "lowest", "offset": 7 } }
+      ]
+    },
+    {
+      "id": "the-primer",
+      "name": "The Primer",
+      "switches": [
+        { "key": 0, "mode": "latch", "action": { "type": "normal" } },
+        { "key": 1, "mode": "momentary", "action": { "type": "forceString", "anchor": "highest", "offset": 0 } },
+        { "key": 2, "mode": "momentary", "action": { "type": "forceString", "anchor": "highest", "offset": 1 } },
+        { "key": 3, "mode": "momentary", "action": { "type": "forceString", "anchor": "highest", "offset": 2 } },
+        { "key": 4, "mode": "momentary", "action": { "type": "forceString", "anchor": "highest", "offset": 3 } },
+        { "key": 5, "mode": "momentary", "action": { "type": "forceString", "anchor": "highest", "offset": 4 } },
+        { "key": 6, "mode": "momentary", "action": { "type": "technique", "pop": true } },
+        { "key": 7, "mode": "momentary", "action": { "type": "technique", "pop": true, "dead": true } },
+        { "key": 8, "mode": "momentary", "action": { "type": "technique", "harmonic": true } },
+        { "key": 9, "mode": "momentary", "action": { "type": "technique", "hammerPull": true } },
+        { "key": 10, "mode": "momentary", "action": { "type": "technique", "tap": true } },
+        { "key": 11, "mode": "momentary", "action": { "type": "technique", "slide": "legato" } },
+        { "key": 12, "mode": "momentary", "action": { "type": "technique", "dead": true } },
+        { "key": 13, "mode": "momentary", "action": { "type": "technique", "deadSlap": true, "dead": true } },
+        { "key": 14, "mode": "momentary", "action": { "type": "technique", "deadSlap": true, "dead": true } },
+        { "key": 15, "mode": "momentary", "action": { "type": "technique", "slap": true } },
+        { "key": 16, "mode": "momentary", "action": { "type": "technique", "slap": true } }
+      ]
+    }
+  ]
+}

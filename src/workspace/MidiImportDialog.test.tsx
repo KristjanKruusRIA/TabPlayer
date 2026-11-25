@@ -586,3 +586,59 @@ it('keeps Bass and 5-string count in TuningDialog for custom Drop F#0 bass and s
   const placements = staff.bars[0].voices[0].beats.map(b => [b.notes[0].string, b.notes[0].fret]);
   expect(placements).toEqual([[1, 1], [1, 2], [2, 0], [3, 0]]);
 });
+
+it('shows opt-in keyswitch articulation toggle, strips keyswitches cleanly, and imports forced strings', async () => {
+  // Playable notes F#1(37 with -1oct -> 25), F#2(42 -> 30), paired with The Primer Force String keys 5 and 3.
+  const midiWithKs = makeMidi(0, 480, [
+    makeTrack(
+      noteLine(
+        [
+          [0, 480, 5],
+          [0, 480, 37],
+          [480, 480, 3],
+          [480, 480, 42],
+        ],
+        0,
+      ),
+    ),
+  ]);
+  const { onImport, onClose, input, importButton } = setup();
+  choose(input, midiWithKs, 'Sineater_bass.mid');
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Parts' })).toHaveTextContent('Acoustic Grand Piano: notation, 4 notes'));
+
+  fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Instrument' })).getByRole('radio', { name: 'Bass' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Custom…' }));
+  fireEvent.change(screen.getByLabelText('Notes, high to low'), { target: { value: 'E2 B1 F#1 C#1 F#0' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Use tuning' }));
+
+  const toggle = screen.getByRole('checkbox', { name: 'Read keyswitch articulations' });
+  expect(toggle).not.toBeChecked();
+  expect(screen.getByText(/2 low\/high keyswitch notes detected/)).toBeInTheDocument();
+
+  fireEvent.click(toggle);
+  const presetSelect = screen.getByLabelText('Keyswitch preset') as HTMLSelectElement;
+  expect([...presetSelect.options].map(o => o.value)).toEqual(['submission-audio-default', 'the-primer']);
+  expect(presetSelect.value).toBe('submission-audio-default');
+
+  fireEvent.change(presetSelect, { target: { value: 'the-primer' } });
+  await waitFor(() => {
+    expect(screen.getByText('2 keyswitch notes matched this preset.')).toBeInTheDocument();
+    expect(screen.getByText('MIDI note range: C#2–F#2')).toBeInTheDocument();
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'Shift −1 octave' }));
+  await waitFor(() => {
+    expect(screen.getByText('MIDI note range: C#1–F#1')).toBeInTheDocument();
+    expect(status()).not.toHaveTextContent('Updating…');
+  });
+
+  fireEvent.click(importButton);
+  await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  const imported = loadInterchangeScore(onImport.mock.calls[0][1], new Settings());
+  const staff = imported.tracks[0].staves[0];
+  expect(staff.showTablature).toBe(true);
+  expect(staff.bars[0].voices[0].beats.filter(b => b.notes.length > 0).map(b => [b.notes[0].string, b.notes[0].fret])).toEqual([
+    [1, 7],
+    [3, 0],
+  ]);
+});

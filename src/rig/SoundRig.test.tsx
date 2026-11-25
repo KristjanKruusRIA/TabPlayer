@@ -466,11 +466,18 @@ it('applies a factory sound, keeping the instrument, and a saved sound, as one e
   await userEvent.click(screen.getByRole('button',{name:`Apply “${item.name}”`}));
   expect(last()).toEqual(factorySound(item.id,'green-guitar'));expect(edits).toHaveLength(1);
   expect(await screen.findByText(`Applied “${item.name}”.`)).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:`Apply “${item.name}”`})).toHaveAttribute('aria-current','true');
+  expect(screen.getByRole('button',{name:`Apply “${item.name}”`}).closest('li')).toHaveAttribute('data-active','true');
   await userEvent.click(screen.getByRole('button',{name:'Apply “Practice tone”'}));
   expect(last()).toEqual(soundPreset('clean'));expect(screen.getByRole('status')).toHaveTextContent('Applied “Practice tone”.');
+  expect(screen.getByRole('button',{name:`Apply “${item.name}”`})).not.toHaveAttribute('aria-current');
+  expect(screen.getByRole('button',{name:'Apply “Practice tone”'})).toHaveAttribute('aria-current','true');
   await userEvent.click(screen.getByRole('button',{name:'Apply “Crunch”'}));
   // A saved sound is the whole sound, so it brought its own instrument; a factory preset keeps the one the track has.
   expect(last()).toEqual(soundPreset('crunch',null));
+  expect(screen.getByRole('button',{name:'Apply “Crunch”'})).toHaveAttribute('aria-current','true');
+  await act(async()=>{fireEvent.keyDown(screen.getByRole('slider',{name:'amp Drive'}),{key:'ArrowUp'});});
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Apply “Crunch”'})).not.toHaveAttribute('aria-current'));
 });
 
 it('walks the list with the arrow keys, applies with Enter and hears with Space', async()=>{

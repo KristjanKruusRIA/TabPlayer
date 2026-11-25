@@ -68,8 +68,8 @@
 .score-overview-master-mix input[aria-disabled="true"] { cursor:not-allowed; opacity:.6; }
 .track-panel .track-panel-view:has(>.score-overview-master) { display:flex; flex-direction:column; }
 .track-panel .track-panel-view:has(>.score-overview-master)[hidden] { display:none; }
-/* The rows take only the room they need, so the master row follows the last track; they scroll when the dock is short. */
-.track-panel .track-panel-view>.score-overview { flex:0 1 auto; height:auto; }
+/* The tracks box takes all available dock height above the pinned master row and scrolls when the dock is shorter than the track list. */
+.track-panel .track-panel-view>.score-overview { flex:1 1 auto; height:auto; min-height:0; }
 /* A track's name is a button that makes the track active; it looks like the plain name it replaced. */
 button.score-overview-track-name { appearance:none; background:none; border:0; margin:0; padding:0; font:inherit; color:inherit; text-align:left; cursor:pointer; align-self:stretch; }
 button.score-overview-track-name:hover { text-decoration:underline; }

@@ -60,7 +60,7 @@ export interface DiGuitarImportOptions {
 
 export const defaultDiGuitarImportOptions: DiGuitarImportOptions = {
   quantization: 16,
-  tuplets: 'none',
+  tuplets: 'triplets',
   voices: 1,
   bpm: 120,
   timeSignature: { numerator: 4, denominator: 4 },
@@ -196,6 +196,23 @@ function positionTargetCost(fret: number, position: DiFretPosition): number {
   }
 }
 
+function requiredFingers(byString: readonly { string: number; fret: number }[]): number {
+  const fretted = byString.filter(it => it.fret > 0);
+  if (fretted.length <= 1) return fretted.length;
+  let minFret = Infinity;
+  for (const it of fretted) if (it.fret < minFret) minFret = it.fret;
+  const atMin = fretted.filter(it => it.fret === minFret);
+  if (atMin.length >= 2) {
+    const loStr = atMin[0].string;
+    const hiStr = atMin[atMin.length - 1].string;
+    const blockedOpen = byString.some(it => it.fret === 0 && it.string > loStr && it.string < hiStr);
+    if (!blockedOpen) {
+      return 1 + (fretted.length - atMin.length);
+    }
+  }
+  return fretted.length;
+}
+
 function scoreChordCandidate(
   items: { key: number; string: number; fret: number }[],
   stringsCount: number,
@@ -228,62 +245,60 @@ function scoreChordCandidate(
 
   for (const item of items) {
     cost += positionTargetCost(item.fret, position);
-    // Open strings slightly prefer lower hand contexts, and very high frets on the lowest wound string carry a small penalty.
+    // Open strings save left-hand fingers; very high frets on the lowest wound string carry a small penalty.
     if (item.fret > 0) cost += 0.12;
     if (item.string === 1 && item.fret > 15) cost += (item.fret - 15) * 0.25;
     if (item.string === stringsCount && item.fret === 0 && position === 'high') cost += 0.4;
   }
 
-  // String adjacency & common rock/metal shapes (bar power chords in Drop tunings, 2-fret power chords in Standard).
+  // String adjacency, finger ergonomics, and common rock/metal shapes (bar power chords, open-string voicings).
   if (items.length >= 2) {
     const byString = [...items].sort((a, b) => a.string - b.string);
-    let skippedStrings = 0;
+    const fingers = requiredFingers(byString);
+    cost += fingers * 0.45;
+    if (fingers > 4) {
+      cost += 12.0 * (fingers - 4);
+    }
+
+    let skippedFretted = 0;
+    let skippedOpen = 0;
     let powerShapeMatches = 0;
-    let inversionPenalty = 0;
+    let frettedInversionPenalty = 0;
+    let openInversionCount = 0;
     for (let i = 0; i < byString.length; i++) {
       for (let j = i + 1; j < byString.length; j++) {
         if (byString[i].key > byString[j].key) {
-          inversionPenalty += 3.8 + (byString[i].key - byString[j].key) * 0.18;
+          if (byString[i].fret > 0 && byString[j].fret > 0) {
+            frettedInversionPenalty += 3.8 + (byString[i].key - byString[j].key) * 0.18;
+          } else {
+            openInversionCount++;
+          }
         }
       }
     }
-    cost += inversionPenalty;
+    cost += frettedInversionPenalty + openInversionCount * 0.25;
 
     for (let i = 0; i < byString.length - 1; i++) {
       const low = byString[i];
       const high = byString[i + 1];
       const strDiff = high.string - low.string;
-      if (strDiff > 1) skippedStrings += strDiff - 1;
+      if (strDiff > 1) {
+        if (low.fret === 0 && high.fret === 0) skippedOpen += strDiff - 1;
+        else skippedFretted += strDiff - 1;
+      }
       const pitchDiff = high.key - low.key;
       const fretDiff = high.fret - low.fret;
       if (strDiff === 1 && ((pitchDiff === 7 && (fretDiff === 0 || fretDiff === 2)) || (pitchDiff === 5 && fretDiff === 0))) {
         powerShapeMatches++;
       }
     }
-    cost += skippedStrings * 2.6;
+    cost += skippedFretted * 2.6 + skippedOpen * 0.35;
     cost -= powerShapeMatches * 1.4;
     if (frets.length >= 2 && frets.every(fret => fret === frets[0])) {
       cost -= 1.2; // Barre / Drop-tuning one-finger power chord bonus
     }
     if (openCount > 0 && fretted.length >= 2 && Math.max(...fretted) - Math.min(...fretted) > 4) {
       cost += 1.4; // Penalize wide left-hand stretch on the fretted notes, not open drone pairings
-    }
-    const openStrings = byString.filter(it => it.fret === 0);
-    const frettedItems = byString.filter(it => it.fret > 0);
-    for (const openItem of openStrings) {
-      let maxLowerFret = 0;
-      let maxAnyFret = 0;
-      for (const frettedItem of frettedItems) {
-        if (frettedItem.fret > maxAnyFret) maxAnyFret = frettedItem.fret;
-        if (frettedItem.string < openItem.string && frettedItem.fret >= 5) {
-          if (frettedItem.fret > maxLowerFret) maxLowerFret = frettedItem.fret;
-        }
-      }
-      if (maxLowerFret >= 5) {
-        cost += 1.8 + (maxLowerFret - 4) * 0.45;
-      } else if (maxAnyFret >= 10) {
-        cost += 2.2 + (maxAnyFret - 9) * 0.55;
-      }
     }
   }
 
@@ -341,8 +356,10 @@ function generateChordCandidates(
           let fCount = opt.fret > 0 ? 1 : 0;
           for (const prev of current) {
             if (
-              (prev.string < opt.string && prev.key > opt.key) ||
-              (prev.string > opt.string && prev.key < opt.key)
+              prev.fret > 0 &&
+              opt.fret > 0 &&
+              ((prev.string < opt.string && prev.key > opt.key) ||
+                (prev.string > opt.string && prev.key < opt.key))
             ) {
               inverted = true;
               break;
@@ -355,6 +372,10 @@ function generateChordCandidates(
           }
           if (inverted) continue;
           if (fCount >= 2 && maxF - minF > 5) continue;
+          if (fCount > 4) {
+            const candidate = [...current, { string: opt.string, fret: opt.fret }].sort((a, b) => a.string - b.string);
+            if (requiredFingers(candidate) > 4) continue;
+          }
         }
         triedString = true;
         used.add(opt.string);
@@ -418,7 +439,7 @@ function transitionCost(
     if (shift > 5) cost += (shift - 5) * 0.55;
   }
 
-  // Reward smooth single-note phrasing on the same string for small melodic steps, or exact same placement on repeats.
+  // Reward smooth single-note phrasing on the same string (especially fast tremolo lines) and parallel movable dyads.
   if (prevChord.keys.length === 1 && curChord.keys.length === 1) {
     const prevKey = prevChord.keys[0];
     const curKey = curChord.keys[0];
@@ -427,12 +448,12 @@ function transitionCost(
     if (p1 && p2) {
       const interval = Math.abs(curKey - prevKey);
       if (prevKey === curKey) {
-        cost += p1.string === p2.string && p1.fret === p2.fret ? -1.4 : 1.2;
-      } else if (interval <= 3) {
-        if (p1.string === p2.string && Math.abs(p2.fret - p1.fret) <= 4) {
-          cost -= 0.7;
-        } else if (p1.string !== p2.string && Math.abs(p1.string - p2.string) > 1) {
-          cost += 0.9;
+        cost += p1.string === p2.string && p1.fret === p2.fret ? -1.6 : 1.5;
+      } else if (interval <= 5) {
+        if (p1.string === p2.string && Math.abs(p2.fret - p1.fret) <= 5) {
+          cost -= dt <= 60 ? 1.25 : 0.85;
+        } else if (p1.string !== p2.string) {
+          cost += (dt <= 60 ? 1.45 : 0.9) + Math.max(0, Math.abs(p1.string - p2.string) - 1) * 0.45;
         }
       }
     }
@@ -452,7 +473,21 @@ function transitionCost(
       }
     }
     if (shared === prev.placements.size && shared === cur.placements.size) {
-      cost += matched === shared ? -1.0 : 0.9;
+      cost += matched === shared ? -1.2 : 1.1;
+    } else if (prevChord.keys.length === 2 && curChord.keys.length === 2) {
+      const prevPair = [...prev.placements.entries()].sort((a, b) => a[0] - b[0]);
+      const curPair = [...cur.placements.entries()].sort((a, b) => a[0] - b[0]);
+      if (
+        prevPair.length === 2 &&
+        curPair.length === 2 &&
+        prevPair[1][0] - prevPair[0][0] === curPair[1][0] - curPair[0][0] &&
+        prevPair[0][1].string === curPair[0][1].string &&
+        prevPair[1][1].string === curPair[1][1].string &&
+        prevPair[0][1].fret > 0 &&
+        curPair[0][1].fret > 0
+      ) {
+        cost -= 0.9;
+      }
     }
   }
 
@@ -653,7 +688,7 @@ export function importDiGuitarNotes(
     }));
   }
 
-  const grid = createRhythmGrid(bars, rawHits, options.quantization, options.tuplets);
+  const grid = createRhythmGrid(bars, rawHits, options.quantization, options.tuplets, true);
   const hits = snapHitsToGrid(grid, rawHits, false);
 
   // When multiple notes snap to the same quantized start slot within a fast strummed chord,

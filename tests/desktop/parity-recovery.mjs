@@ -1,3 +1,4 @@
+import { hideScoreDisplay, showScoreDisplay } from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync,spawn} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
@@ -152,7 +153,7 @@ class AcceptanceContext{
   idle(){return waitForWorkspaceIdle(this.page,{timeout:25000});}
   async button(name){await clickWorkstationButton(this.page,name,{waitForIdle:false});await this.idle();}
   async activate(documentId){
-    await this.page.locator(`[id=${JSON.stringify(`document-tab-${encodeURIComponent(documentId)}`)}]`).click();await this.idle();assert.equal((await this.workspace()).active.documentId,documentId);
+    await hideScoreDisplay(this.page);await this.page.locator(`[id=${JSON.stringify(`document-tab-${encodeURIComponent(documentId)}`)}]`).click();await this.idle();assert.equal((await this.workspace()).active.documentId,documentId);
   }
   async choice(name){await this.page.getByRole('dialog').getByRole('button',{name,exact:true}).click();await this.idle();}
   async prompt(title='Recover unsaved work?'){await this.page.getByRole('dialog',{name:title,exact:true}).waitFor({state:'visible'});return this.page.getByRole('dialog',{name:title,exact:true});}
@@ -247,7 +248,7 @@ async function assertView(context,expected){
   const at=await cursorPosition(page);assert.equal(at.bar,expected.target.bar+1);assert.equal(at.beat,expected.target.beat+1);assert.equal(at.voice,expected.target.voice+1);
   if(expected.target.staff>0)assert.match(await page.locator('.statusbar-track').innerText(),new RegExp(`Staff ${expected.target.staff+1}$`));
   if(Number.isFinite(at.string))assert.equal(at.string,expected.selectedString);
-  assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),String(expected.zoom));assert.equal(await page.getByRole('combobox',{name:/^Displayed tracks/}).inputValue(),expected.trackView.kind);
+  await showScoreDisplay(page);assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),String(expected.zoom));assert.equal(await page.getByRole('combobox',{name:/^Displayed tracks/}).inputValue(),expected.trackView.kind);await hideScoreDisplay(page);
   const instrument=page.getByRole('navigation',{name:'Dock views',exact:true,includeHidden:true}).getByRole('button',{name:'Instrument',exact:true,includeHidden:true});assert.equal(await instrument.getAttribute('aria-pressed'),String(expected.instrumentVisible));
   const announcement=await page.locator('.score-edit-announcement').innerText();assert.match(announcement,new RegExp(`measure ${expected.target.bar+1}, beat ${expected.target.beat+1}, voice ${expected.target.voice+1}`));
   if(expected.selectedNoteIndex!==null)assert.match(announcement,new RegExp(`, note ${expected.selectedNoteIndex+1}$`));
@@ -289,9 +290,9 @@ async function clean(context){
   await context.start();await context.idle();const edited=await context.editNote(5);await context.ack();
   const before=await context.workspace();context.closeWindow();context.result.cancel=context.answer('Cancel');await context.idle();assert.deepEqual(await context.workspace(),before);assert.equal(context.live(),true);assert.equal(checkpointAt(context.nativeDirectory).manifest.lifecycle,'running');
   const pendingCancel=context.pickerCancel(),pendingSave=context.invoke('save_project',{document:address(edited),saveAs:true});void pendingSave.catch(()=>{});const [pickerReceipt,saved]=await Promise.all([pendingCancel,pendingSave]);assert.equal(saved,null);assert.deepEqual(await context.workspace(),before);context.result.productionSavePickerCancel={document:address(edited),receipt:pickerReceipt,route:'Production save_project; diagnostic close Save uses a fixed path and has no later picker.'};
-  await context.preference(true);await context.page.getByLabel('Zoom (%)',{exact:true}).fill('115');await revealDock(context.page,'Instrument');
+  await context.preference(true);await showScoreDisplay(context.page);await context.page.getByLabel('Zoom (%)',{exact:true}).fill('115');await hideScoreDisplay(context.page);await revealDock(context.page,'Instrument');
   context.result.saveClose=await context.nativeClose(['Save']);const first=checkpointAt(context.nativeDirectory);assert.equal(first.manifest.lifecycle,'clean');assert.equal(first.envelope.documents.length,1);assert.deepEqual(first.envelope.documents[0].session.saved,edited.snapshot.project.edits);assert.deepEqual(first.envelope.documents[0].session.project.edits,edited.snapshot.project.edits);assert.equal(first.envelope.documents[0].view.zoom,115);
-  await context.start();await context.idle();assert.equal(await context.page.getByRole('dialog').count(),0);let record=await context.active();assert.equal(record.documentId,edited.documentId);assert.equal(record.snapshot.dirty,false);assert.deepEqual(record.snapshot.project.edits,edited.snapshot.project.edits);assert.equal(await context.page.getByLabel('Zoom (%)',{exact:true}).inputValue(),'115');await context.stopped();
+  await context.start();await context.idle();assert.equal(await context.page.getByRole('dialog').count(),0);let record=await context.active();assert.equal(record.documentId,edited.documentId);assert.equal(record.snapshot.dirty,false);assert.deepEqual(record.snapshot.project.edits,edited.snapshot.project.edits);await showScoreDisplay(context.page);assert.equal(await context.page.getByLabel('Zoom (%)',{exact:true}).inputValue(),'115');await hideScoreDisplay(context.page);await context.stopped();
   await context.editNote(9);context.result.discardClose=await context.nativeClose(['Discard']);const discarded=checkpointAt(context.nativeDirectory);assert.equal(discarded.manifest.lifecycle,'clean');assert.deepEqual(discarded.envelope.documents[0].session.project.edits,edited.snapshot.project.edits,'Discard clean projection restores the saved branch');
   await context.start();await context.idle();record=await context.active();assert.equal(record.snapshot.dirty,false);assert.deepEqual(record.snapshot.project.edits,edited.snapshot.project.edits);
   await context.editNote(11);await context.preference(false);context.result.preferenceOffClose=await context.nativeClose(['Discard']);const off=checkpointAt(context.nativeDirectory);assert.equal(off.manifest.lifecycle,'clean');assert.deepEqual(off.envelope.documents,[]);

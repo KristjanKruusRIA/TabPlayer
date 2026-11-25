@@ -103,14 +103,17 @@ export interface TransportDisplay {
   color?:string;
   /** The time signature written at a bar, such as "4/4". */
   signatureAt:(bar:number)=>string;
+  tempoAt?:(bar:number)=>number|undefined;
   /** Every track as "number. name", offered by the track name; picking one makes it current. */
   tracks?:readonly string[];
   trackIndex?:number;
   onTrack?:(index:number)=>void;
   /** Moves the cursor to a zero-based bar. */
   onGoTo?:(bar:number)=>void;
-  /** Opens the editor for a zero-based bar's time signature and tempo. */
+  /** Opens the editor for a zero-based bar's time signature and measure settings. */
   onMeasure?:(bar:number)=>void;
+  /** Opens the tempo editor from the LCD tempo readout. */
+  onTempo?:(bar:number)=>void;
   /** Whether the selected track's voices fill a bar. */
   completionAt?:(bar:number)=>BarCompletion;
 }
@@ -204,6 +207,7 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
     const target=root.current?.querySelector<HTMLElement>(`.transport-key [data-action="${action}"]`)??details?.querySelector<HTMLElement>('summary');target?.focus();
   },[compactRow]);
   const shownBar=Math.min(Math.max(0,measures-1),Math.max(0,scrub!==null?scrub-1:state.measure));
+  const shownTempo=!fresh?practice.currentBpm:(lcd?.tempoAt?.(shownBar)??practice.currentBpm);
   const stepBar=(bar:number)=>{if(busy)return;const next=Math.min(Math.max(0,bar),Math.max(0,measures-1));if(act(()=>player.seekToMeasure(next)))setNextStart('position');};
   const [goToOpen,setGoToOpen]=useState(false),[goToValue,setGoToValue]=useState(1),goToButton=useRef<HTMLButtonElement>(null),goToForm=useRef<HTMLFormElement>(null),moreRef=useRef<HTMLDetailsElement>(null);
   const closeGoTo=()=>{setGoToOpen(false);goToButton.current?.focus();};
@@ -213,7 +217,7 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
   useLayoutEffect(()=>{const host=root.current,line=messages.current;if(!host)return;const place=()=>{const height=line&&getComputedStyle(line).position==='absolute'?Math.ceil(line.getBoundingClientRect().height):0;host.style.setProperty('--transport-messages-h',`${height}px`);};place();if(!line||typeof ResizeObserver==='undefined')return;const observer=new ResizeObserver(place);observer.observe(line);return()=>observer.disconnect();},[hasMessages]);
   const completion=lcd?.completionAt?.(shownBar)??null;
   const completionText=!completion?'':completion.kind==='complete'?t('transport.bar_complete'):completion.kind==='empty'?t('transport.bar_empty'):t(completion.kind==='short'?'transport.voice_short':'transport.voice_long',{voice:completion.voice});
-  const meta=(text:string,hint:string)=>lcd?.onMeasure?<button type="button" title={hint} aria-label={hint} {...busyGuard({busy,className:'transport-lcd-link',onClick:()=>lcd.onMeasure!(shownBar)})}>{text}</button>:<span aria-label={hint}>{text}</span>;
+  const meta=(text:string,hint:string,action=lcd?.onMeasure)=>action?<button type="button" title={hint} aria-label={hint} {...busyGuard({busy,className:'transport-lcd-link',onClick:()=>action(shownBar)})}>{text}</button>:<span aria-label={hint}>{text}</span>;
   const barButton=(label:string,bar:number,glyph:React.JSX.Element,unavailable:boolean)=><button {...busyGuard({busy,unavailable,className:'transport-barstep',onClick:()=>stepBar(bar)})} title={label} aria-label={label}>{glyph}</button>;
   const keyGroup=<div className="transport-group transport-key" role="group" aria-label={t('transport.key')} aria-describedby={keyHintId} data-pending={state.practicePending||undefined}><span className="transport-caption">{t('transport.key')}</span><span id={keyHintId} className="tp-sr">{t('transport.key_hint')}</span>{keyPendingOnly&&<span className="tp-sr">{t('transport.applying_practice')}</span>}
       <div className="transport-row"><button {...busyGuard({busy,unavailable:!state.ready||keyTarget<=-12,className:'transport-step',onClick:()=>act(()=>player.stepKeyShift(-1))})} title={t('transport.key_lower')} data-action="key-lower"><MinusGlyph/><span className="tp-sr">{t('transport.key_lower')}</span></button>
@@ -238,8 +242,8 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
       {lcd&&loopNumbers&&<span className="transport-lcd-loop" title={t('transport.loop_position_hint',{first:String(loopNumbers.first),last:String(loopNumbers.last)})}><LoopGlyph/>{loopNumbers.first===loopNumbers.last?t('transport.loop_chip_one',{first:String(loopNumbers.first)}):t('transport.loop_chip',{first:String(loopNumbers.first),last:String(loopNumbers.last)})}</span>}
       <output aria-live="off" className="transport-time"><span>{clock(state.time)}</span><span className="transport-dim"> / {clock(state.endTime)}</span></output>
       {lcd&&<span className="transport-lcd-meta">{completion&&<span className="transport-lcd-completion" data-kind={completion.kind} role="img" aria-label={completionText} title={completionText}>{completion.kind==='complete'?'✓':'!'}</span>}
-        {meta(lcd.signatureAt(shownBar),t('transport.signature_hint',{value:lcd.signatureAt(shownBar)}))}
-        {meta(practice.currentBpm>0?`♩ = ${Math.round(practice.currentBpm)}`:'♩ = –',t('transport.tempo_hint',{value:practice.currentBpm>0?String(Math.round(practice.currentBpm)):'–'}))}</span>}
+        {meta(lcd.signatureAt(shownBar),t('transport.signature_hint',{value:lcd.signatureAt(shownBar)}),lcd.onMeasure)}
+        {meta(shownTempo>0?`♩ = ${Math.round(shownTempo)}`:'♩ = –',t('transport.tempo_hint',{value:shownTempo>0?String(Math.round(shownTempo)):'–'}),lcd.onTempo??lcd.onMeasure)}</span>}
     </div>
     <div className="transport-group transport-loop" role="group" aria-label={t('transport.loop')}><span className="transport-caption">{t('transport.loop_bars')}</span><span className="tp-sr" role="status" aria-live="polite">{loopSaid}</span>
       <div className="transport-row"><BarField label={t('transport.loop_start')} min={1} max={measures} value={start} onValue={setStart}/><span className="transport-dash" aria-hidden="true"/><BarField label={t('transport.loop_end')} min={1} max={measures} value={end} onValue={setEnd}/>
@@ -250,7 +254,7 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
     <div className="transport-group transport-click"><span className="transport-caption">{t('transport.click')}</span>
       <label className="transport-toggle transport-metronome" title={t('transport.metronome')} data-on={practice.settings.metronome.enabled} aria-disabled={settingsBusy||undefined}><input type="checkbox" checked={practice.settings.metronome.enabled} aria-disabled={settingsBusy||undefined} onChange={e=>{if(settingsBusy)return;act(()=>{const settings=structuredClone(practice.settings);settings.metronome.enabled=e.target.checked;player.setPractice(settings);});}}/><MetronomeGlyph/><span className="transport-label">{t('transport.metronome')}</span></label>
     </div>
-    <div className="transport-group transport-speed" role="group" aria-label={t('transport.speed')}><span className="transport-caption">{t('transport.speed')}<span className="transport-tempo" role="status" aria-label={t('transport.practice_playback')} aria-live="off">{practice.currentBpm>0?`${display(practice.currentBpm)} BPM`:t('transport.tempo_unavailable')}<span className="tp-sr"> · {display(practice.effectiveRatio*100)}%</span></span></span>
+    <div className="transport-group transport-speed" role="group" aria-label={t('transport.speed')}><span className="transport-caption"><span className="transport-speed-label">{t('transport.speed')}</span><span className="transport-tempo" role="status" aria-label={t('transport.practice_playback')} aria-live="off">{practice.currentBpm>0?`${display(practice.currentBpm)} BPM`:t('transport.tempo_unavailable')}<span className="tp-sr"> · {display(practice.effectiveRatio*100)}%</span></span></span>
       <div className="transport-row"><button {...busyGuard({busy,unavailable:state.practicePending||fixed||speedIndex<=0,className:'transport-step',onClick:()=>stepSpeed(-1)})} title={fixed?t('transport.fixed_tempo_hint'):t('transport.slower')} data-action="slower" aria-keyshortcuts="["><MinusGlyph/><span className="tp-sr">{t('transport.slower')}</span></button>
         <SpeedField label={t('transport.speed_field')} value={state.speed} busy={busy} unavailable={state.practicePending} fixed={fixed} message={speedError} messageId={speedErrorId} onValue={speed=>act(()=>player.setSpeed(speed))} onMessage={setSpeedError}/>
         <button {...busyGuard({busy,unavailable:state.practicePending||fixed||speedIndex>=speeds.length-1,className:'transport-step',onClick:()=>stepSpeed(1)})} title={fixed?t('transport.fixed_tempo_hint'):t('transport.faster')} data-action="faster" aria-keyshortcuts="]"><PlusGlyph/><span className="tp-sr">{t('transport.faster')}</span></button></div>

@@ -8,7 +8,7 @@ import { CHORD_WINDOW_MAX,CHORD_WINDOW_MIN,DEFAULT_MIDI_CAPTURE,activeStringMapp
 import { channelString } from './midi-capture';
 import { midiCaptureSession,useMidiCaptureBadge,useMidiCaptureState } from './midi-capture-session';
 
-/** The toolbar's sign that MIDI input is on, and that it was lost: the dot changes and a live region says so, with the View menu closed. */
+/** The toolbar's sign that MIDI input is on, and that it was lost: the dot changes and a live region says so, with Preferences closed. */
 export function MidiCaptureIndicator({bridge=nativeMidiIn}:MidiCapturePanelProps):React.JSX.Element {
   const {t}=useI18n();
   const badge=useMidiCaptureBadge(midiCaptureSession(bridge));
@@ -44,7 +44,7 @@ function startError(message:string,port:string,t:(key:MessageKey,params?:Record<
 /**
  * Listens to a MIDI keyboard or MIDI guitar and shows the last chord it played (THE-70). Choosing an input opens nothing:
  * the port is opened only when Start is pressed, never at launch and never because an input is remembered. The session
- * lives outside the panel, so listening carries on while the View menu is closed.
+ * lives outside the panel, so listening carries on while Preferences is closed.
  */
 export function MidiCapturePanel({bridge=nativeMidiIn,writeWhilePlaying=true}:MidiCapturePanelProps):React.JSX.Element {
   const {t}=useI18n();

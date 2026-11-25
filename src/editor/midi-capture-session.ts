@@ -66,7 +66,7 @@ export interface MidiCaptureSession {
 const text=(error:unknown)=>error instanceof Error?error.message:String(error);
 
 /**
- * One MIDI input session as the page sees it. It outlives the panel, so input carries on with the View menu closed. Every
+ * One MIDI input session as the page sees it. It outlives the panel, so input carries on with Preferences closed. Every
  * event is checked against the session: while a start is opening it adopts a newer session once, and after that only
  * the running session's events count, with a chord counting only if its sequence number is new.
  */

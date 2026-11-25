@@ -22,10 +22,10 @@ export interface ScoreOverviewProps {
     corner?:ReactNode;
     /** Drawn before the track number, such as an instrument mark. */
     Lead?:ComponentType<{track:number}>;
-    /** The controls' width in pixels; 202 when left out. */
-    width?:number};
+    /** Total width of the sticky column, including the controls. */
+    columnWidth?:number};
 }
-const cellSize=28,baseNameWidth=144,defaultControlsWidth=202;
+const cellSize=28,overviewNameWidth=144,defaultControlsWidth=202;
 type Position={track:number;bar:number};
 type Window={first:number;last:number};
 interface GridContentProps {
@@ -73,7 +73,7 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
 });
 
 export function ScoreOverview({model,target,playbackBar,onSelect,onSelectTrack,onExit,loop=null,colors,controls}:ScoreOverviewProps) {
-  const nameWidth=controls?baseNameWidth+(controls.width??defaultControlsWidth):baseNameWidth;
+  const nameWidth=controls?(controls.columnWidth??overviewNameWidth+defaultControlsWidth):overviewNameWidth;
   const { t } = useI18n();
   const grid=useRef<HTMLDivElement>(null),pendingFocus=useRef(false);
   const callbacks=useRef({onSelect,onExit});callbacks.current={onSelect,onExit};
@@ -99,7 +99,7 @@ export function ScoreOverview({model,target,playbackBar,onSelect,onSelectTrack,o
   const focusPosition=useCallback((position:Position)=>setFocused(previous=>previous.track===position.track&&previous.bar===position.bar?previous:position),[]);
   const select=useCallback((...position:Parameters<ScoreOverviewProps['onSelect']>)=>callbacks.current.onSelect(...position),[]);
   // Stable ranges let clock-only updates change the single playhead without regenerating grid contents.
-  const columns=useMemo(()=>overviewWindow(viewport.left,Math.max(0,viewport.width-nameWidth),model.barCount,cellSize,2),[viewport.left,viewport.width,model.barCount]);
+  const columns=useMemo(()=>overviewWindow(viewport.left,Math.max(0,viewport.width-nameWidth),model.barCount,cellSize,2),[viewport.left,viewport.width,model.barCount,nameWidth]);
   const rows=useMemo(()=>overviewWindow(viewport.top,Math.max(0,viewport.height-cellSize),model.tracks.length,cellSize,2),[viewport.top,viewport.height,model.tracks.length]);
   function keyDown(event:KeyboardEvent<HTMLDivElement>) {
     // A button inside the grid (a track's name, mute, solo) takes its own keys; the grid's cell keys are for the cells.

@@ -74,12 +74,15 @@ export function installScreenPlayback(api:AlphaTabApi,getContext:()=>ScreenPlayb
  };
  const reveal=(bounds:BeatBounds)=>{
   if(!valid(bounds))return;const c=getContext(),host=c.scrollHost;if(!host||!c.wrapper)return;
-  const masterBar=bounds.barBounds.masterBarBounds,source=masterBar.visualBounds;
+  const masterBar=bounds.barBounds.masterBarBounds,source=masterBar.visualBounds,real=masterBar.realBounds;
+  const verticalSource=real&&Number.isFinite(real.y)&&Number.isFinite(real.h)&&real.h>0
+   ?{x:source.x,y:Math.min(source.y,real.y),w:source.w,h:Math.max(source.y+source.h,real.y+real.h)-Math.min(source.y,real.y)}
+   :source;
   const place=(box:ScreenRect)=>{
    if(c.physical)return map(bounds,box);
    const canvas=facade.getOffset(null,api.canvasElement),wrapper=c.wrapper!.getBoundingClientRect();return {...box,x:box.x+canvas.x-wrapper.left-window.scrollX,y:box.y+canvas.y-wrapper.top-window.scrollY};
   };
-  const rect=place(source);
+  const rect=place(verticalSource);
   if(!rect)return;
   const outer=host.getBoundingClientRect(),inner=c.wrapper.getBoundingClientRect();
   const x=rect.x+inner.left-outer.left-host.clientLeft+host.scrollLeft;let y=rect.y+inner.top-outer.top-host.clientTop+host.scrollTop,height=rect.h;
@@ -91,8 +94,18 @@ export function installScreenPlayback(api:AlphaTabApi,getContext:()=>ScreenPlayb
     if(staff&&Number.isFinite(staff.y)&&staff.h>0){y=staff.y+inner.top-outer.top-host.clientTop+host.scrollTop;height=staff.h;}
    }
   }
-  const scroll=(start:number,size:number,current:number,viewport:number)=>size>viewport?(current<start||current>start+size-viewport?start:current):start<current?start:start+size>current+viewport?start+size-viewport:current;
-  host.scrollLeft=scroll(x,rect.w,host.scrollLeft,host.clientWidth);host.scrollTop=scroll(y,height,host.scrollTop,host.clientHeight);
+  const scrollHorizontal=(start:number,size:number,current:number,viewport:number)=>size>viewport?(current<start||current>start+size-viewport?start:current):start<current?start:start+size>current+viewport?start+size-viewport:current;
+  const scrollVertical=(start:number,size:number,current:number,viewport:number)=>{
+   if(size>=viewport)return current<start||current>start+size-viewport?start:current;
+   const slack=viewport-size;
+   const bottomMargin=Math.min(Math.round(viewport*0.2),Math.floor(slack*0.45));
+   const topMargin=current>0?Math.min(Math.round(viewport*0.08),Math.floor(slack*0.45)):0;
+   if(start<current+topMargin||start+size>current+viewport-bottomMargin){
+    return Math.max(0,Math.round(start+size/2-viewport/2));
+   }
+   return current;
+  };
+  host.scrollLeft=scrollHorizontal(x,rect.w,host.scrollLeft,host.clientWidth);host.scrollTop=scrollVertical(y,height,host.scrollTop,host.clientHeight);
  };
  const scroll:NonNullable<AlphaTabApi['customScrollHandler']>={forceScrollTo:reveal,onBeatCursorUpdating:reveal,[Symbol.dispose](){}};
  api.customCursorHandler=cursor;api.customScrollHandler=scroll;

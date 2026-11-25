@@ -1,4 +1,5 @@
 import { model } from '@coderline/alphatab';
+import { mergeArticulations, type MidiNoteArticulation } from './midi-articulations';
 
 /** Smallest note value a note may start or stop on, as the denominator of a whole note. */
 export type RhythmQuantization = 4 | 8 | 16 | 32 | 64;
@@ -23,12 +24,14 @@ export interface TimedHit {
   key: number;
   start: number;
   end: number;
+  articulation?: MidiNoteArticulation;
 }
 export interface QuantizedChord {
   start: number;
   end: number;
   keys: number[];
   voice: number;
+  articulations?: Map<number, MidiNoteArticulation>;
 }
 export interface RhythmStats {
   shortened: number;
@@ -133,6 +136,7 @@ export function chooseLattices(
   hits: readonly TimedHit[],
   quantization: RhythmQuantization,
   tuplets: RhythmTupletMode,
+  onsetsOnly = false,
 ): void {
   const step = WHOLE / quantization;
   const candidates = [grid.straight];
@@ -153,22 +157,114 @@ export function chooseLattices(
   };
   for (const hit of hits) {
     vote(hit.start);
-    vote(hit.end);
+    if (!onsetsOnly) vote(hit.end);
   }
-  for (const [at, offsets] of votes) {
-    const cost = (lattice: RhythmLattice) =>
-      offsets.reduce((sum, offset) => sum + Math.abs(offset - Math.round(offset / lattice.step) * lattice.step), 0) +
-      (lattice.n === 0 ? 0 : (lattice.n === 3 ? 0.06 : 0.1) * step * (offsets.length + 1));
-    let best = grid.straight;
-    let bestCost = cost(best);
-    for (const lattice of candidates.slice(1)) {
-      const value = cost(lattice);
-      if (value < bestCost) {
-        best = lattice;
-        bestCost = value;
+
+  if (!onsetsOnly) {
+    for (const [at, offsets] of votes) {
+      const cost = (lattice: RhythmLattice) =>
+        offsets.reduce((sum, offset) => sum + Math.abs(offset - Math.round(offset / lattice.step) * lattice.step), 0) +
+        (lattice.n === 0 ? 0 : (lattice.n === 3 ? 0.06 : 0.1) * step * (offsets.length + 1));
+      let best = grid.straight;
+      let bestCost = cost(best);
+      for (const lattice of candidates.slice(1)) {
+        const value = cost(lattice);
+        if (value < bestCost) {
+          best = lattice;
+          bestCost = value;
+        }
+      }
+      if (best !== grid.straight) grid.lattices.set(at, best);
+    }
+    return;
+  }
+
+  // Onset-only mode (live DI audio): cluster strummed chord hits within 6 units (~10 ms) into single rhythmic onsets
+  // so multi-string strums cannot outvote timing, and require strictly better triplet fit before leaving straight grid.
+  const clusterOffsets = (raw: number[]): number[] => {
+    if (raw.length <= 1) return raw;
+    const sorted = [...raw].sort((a, b) => a - b);
+    const clustered: number[] = [];
+    let sum = sorted[0];
+    let count = 1;
+    let anchor = sorted[0];
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] - anchor <= 6) {
+        sum += sorted[i];
+        count++;
+      } else {
+        clustered.push(sum / count);
+        sum = sorted[i];
+        anchor = sorted[i];
+        count = 1;
       }
     }
-    if (best !== grid.straight) grid.lattices.set(at, best);
+    clustered.push(sum / count);
+    return clustered;
+  };
+
+  const snapErr = (offsets: readonly number[], lattice: RhythmLattice) =>
+    offsets.reduce((sum, offset) => sum + Math.abs(offset - Math.round(offset / lattice.step) * lattice.step), 0);
+
+  const beatClusters = new Map<number, number[]>();
+  const spanGains = new Map<number, { lattice: RhythmLattice; gain: number; straightErr: number; tupErr: number; count: number }>();
+
+  for (const [at, rawOffsets] of votes) {
+    const offsets = clusterOffsets(rawOffsets);
+    beatClusters.set(at, offsets);
+    const straightErr = snapErr(offsets, grid.straight);
+    let bestLattice = grid.straight;
+    let bestGain = 0;
+    let bestTupErr = straightErr;
+    for (const lattice of candidates.slice(1)) {
+      const tupErr = snapErr(offsets, lattice);
+      const gain = straightErr - tupErr;
+      const threshold = (lattice.n === 3 ? 0.085 : 0.14) * step * (offsets.length + 1);
+      const maxSingleGain = offsets.reduce(
+        (m, off) =>
+          Math.max(
+            m,
+            Math.abs(off - Math.round(off / grid.straight.step) * grid.straight.step) -
+              Math.abs(off - Math.round(off / lattice.step) * lattice.step),
+          ),
+        0,
+      );
+      if (offsets.length >= 2 && (offsets.length >= 3 || gain >= 20) && maxSingleGain >= 8 && gain > threshold && gain > bestGain) {
+        bestLattice = lattice;
+        bestGain = gain;
+        bestTupErr = tupErr;
+      }
+    }
+    if (bestLattice !== grid.straight) {
+      grid.lattices.set(at, bestLattice);
+      spanGains.set(at, { lattice: bestLattice, gain: bestGain, straightErr, tupErr: bestTupErr, count: offsets.length });
+    }
+  }
+
+  // Bar-level consistency smoothing: avoid isolated single-beat false triplet flips, and align weak beats in triplet bars.
+  const tripletCandidate = candidates.find(c => c.n === 3);
+  if (tripletCandidate) {
+    for (const bar of grid.bars) {
+      const spanCount = Math.floor(bar.length / SPAN);
+      if (spanCount < 2) continue;
+      const spanAts = Array.from({ length: spanCount }, (_, s) => bar.start + s * SPAN);
+      const tripBeats = spanAts.filter(at => grid.lattices.get(at)?.n === 3);
+      if (tripBeats.length === 1) {
+        const info = spanGains.get(tripBeats[0]);
+        if (!info || info.gain < 18 || info.count < 3) {
+          grid.lattices.delete(tripBeats[0]);
+        }
+      } else if (tripBeats.length >= 2) {
+        for (const at of spanAts) {
+          if (grid.lattices.has(at)) continue;
+          const offsets = beatClusters.get(at);
+          if (!offsets?.length) continue;
+          if (snapErr(offsets, tripletCandidate) <= snapErr(offsets, grid.straight)) {
+            grid.lattices.set(at, tripletCandidate);
+          }
+        }
+      }
+    }
   }
 }
 
@@ -177,9 +273,10 @@ export function createRhythmGrid(
   hits: readonly TimedHit[],
   quantization: RhythmQuantization,
   tuplets: RhythmTupletMode,
+  onsetsOnly = false,
 ): RhythmGrid {
   const grid: RhythmGrid = { bars, straight: tuplet(WHOLE / quantization, 0, 0), lattices: new Map() };
-  chooseLattices(grid, hits, quantization, tuplets);
+  chooseLattices(grid, hits, quantization, tuplets, onsetsOnly);
   return grid;
 }
 
@@ -219,7 +316,7 @@ export function snapHitsToGrid(grid: RhythmGrid, rawHits: readonly TimedHit[], p
         const bar = grid.bars[barIndex(grid.bars, start)];
         end = Math.min(start + (grid.lattices.get(spanStart(grid.bars, start))?.step ?? quantum), bar.start + bar.length);
       }
-      return { key: hit.key, start, end: Math.min(end, total) };
+      return { key: hit.key, start, end: Math.min(end, total), ...(hit.articulation ? { articulation: hit.articulation } : {}) };
     })
     .filter(hit => hit.end > hit.start);
   if (percussion) {
@@ -239,10 +336,26 @@ export function snapHitsToGrid(grid: RhythmGrid, rawHits: readonly TimedHit[], p
   for (const hit of hits) {
     const id = `${hit.key}/${hit.start}`;
     const other = merged.get(id);
-    if (!other || hit.end > other.end) merged.set(id, hit);
+    if (!other) {
+      merged.set(id, hit);
+    } else {
+      const mergedArticulation = mergeArticulations(other.articulation, hit.articulation);
+      const winner = hit.end > other.end ? hit : other;
+      merged.set(
+        id,
+        mergedArticulation ? { ...winner, articulation: mergedArticulation } : { key: winner.key, start: winner.start, end: winner.end },
+      );
+    }
   }
   return [...merged.values()];
 }
+
+const attachChordArticulation = (chord: QuantizedChord, key: number, articulation?: MidiNoteArticulation): void => {
+  if (!articulation) return;
+  if (!chord.articulations) chord.articulations = new Map();
+  const existing = chord.articulations.get(key);
+  chord.articulations.set(key, mergeArticulations(existing, articulation) ?? articulation);
+};
 
 /** Sorted by start; notes that start together and last as long join one chord, the rest go to free voices. */
 export function placeChords(hits: readonly TimedHit[], limit: number, stats: RhythmStats): QuantizedChord[] {
@@ -257,8 +370,14 @@ export function placeChords(hits: readonly TimedHit[], limit: number, stats: Rhy
     if (target < 0) target = lanes.findIndex(lane => !lane.length || lane.at(-1)!.end <= hit.start);
     if (target >= 0) {
       const last = lastOf(target);
-      if (last && last.start === hit.start && last.end === hit.end) last.keys.push(hit.key);
-      else lanes[target].push({ start: hit.start, end: hit.end, keys: [hit.key], voice: target });
+      if (last && last.start === hit.start && last.end === hit.end) {
+        last.keys.push(hit.key);
+        attachChordArticulation(last, hit.key, hit.articulation);
+      } else {
+        const chord: QuantizedChord = { start: hit.start, end: hit.end, keys: [hit.key], voice: target };
+        attachChordArticulation(chord, hit.key, hit.articulation);
+        lanes[target].push(chord);
+      }
       continue;
     }
     // Every voice is busy. A note starting with a chord joins it; otherwise the voice that frees soonest is cut short.
@@ -267,6 +386,7 @@ export function placeChords(hits: readonly TimedHit[], limit: number, stats: Rhy
       const chord = lastOf(sameStart)!;
       if (!chord.keys.includes(hit.key)) {
         chord.keys.push(hit.key);
+        attachChordArticulation(chord, hit.key, hit.articulation);
         if (chord.end !== hit.end) stats.merged++;
       }
       continue;
@@ -277,7 +397,9 @@ export function placeChords(hits: readonly TimedHit[], limit: number, stats: Rhy
     }
     lastOf(victim)!.end = hit.start;
     stats.shortened++;
-    lanes[victim].push({ start: hit.start, end: hit.end, keys: [hit.key], voice: victim });
+    const chord: QuantizedChord = { start: hit.start, end: hit.end, keys: [hit.key], voice: victim };
+    attachChordArticulation(chord, hit.key, hit.articulation);
+    lanes[victim].push(chord);
   }
   return lanes.flat().sort((a, b) => a.start - b.start || a.voice - b.voice);
 }

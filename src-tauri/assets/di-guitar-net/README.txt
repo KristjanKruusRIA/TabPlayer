@@ -1,8 +1,8 @@
 DiGuitarNetV5 ONNX model (`di_guitar_net.onnx`)
 
 Architecture: DiGuitarNetV2(base_ch=40, main_ch=72), 1,018,020 parameters, opset 14 (folded BatchNorm)
-Size: 4079799 bytes
-SHA-256: 57fd388cce9ec8bed3ab7389ac2e511d5f5714880f4ce73ee433f1e40d2679eb
+Size: 4079800 bytes
+SHA-256: 5ce41456f588be97a72238d59ecf506c168de7650643d5537ca1a1aa34431282
 License: MIT License (TabPlayer)
 
 Training datasets:

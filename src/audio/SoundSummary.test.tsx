@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import '@testing-library/jest-dom/vitest';
 import './plugin-test-support';
 import { SoundSummary } from './SoundSummary';
+import { factorySound } from './factory-sounds';
 import { soundPreset } from './sound-model';
 import { resetSoundbankStoreForTest, setSoundbankStatusForTest, type Gp8Status } from './soundbank-store';
 import { forgetSessionSoundLibrary, forgetSoundClipboard } from './sound-library';
@@ -49,6 +50,24 @@ it('the preset and the source record one setTrackSound each, and choosing the cu
   expect(onEdit).toHaveBeenCalledTimes(2);
   fireEvent.change(screen.getByLabelText('Pickup'), { target: { value: 'neck' } });
   expect(recorded(onEdit).sound).toMatchObject({ voiceId: null, pickup: 'neck' });
+});
+
+it('shows the active factory sound in the inspector and lets the user switch factory sounds in place', () => {
+  const onEdit = vi.fn();
+  const current = { ...factorySound('fuzz-lead', 'green-guitar')!, pickup: 'bridge' as const };
+  const { rerender } = render(<SoundSummary trackId="guitar" program={27} sound={current} onEdit={onEdit} />);
+  expect(screen.getByLabelText('Factory sound')).toHaveValue('fuzz-lead');
+
+  fireEvent.change(screen.getByLabelText('Factory sound'), { target: { value: 'metal-rhythm' } });
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(recorded(onEdit)).toEqual({
+    type: 'setTrackSound',
+    trackId: 'guitar',
+    sound: { ...factorySound('metal-rhythm', 'green-guitar')!, pickup: 'bridge' },
+  });
+
+  rerender(<SoundSummary trackId="guitar" program={27} sound={soundPreset('lead', 'green-guitar')} onEdit={onEdit} />);
+  expect(screen.getByLabelText('Factory sound')).toHaveValue('');
 });
 
 it('lists General MIDI and GP8 sound sets when available, falling back to General MIDI otherwise', () => {

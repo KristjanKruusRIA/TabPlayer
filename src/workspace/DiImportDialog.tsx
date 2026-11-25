@@ -154,7 +154,7 @@ export function DiImportDialog({
   const [timeSignatureId, setTimeSignatureId] = useState<string>('4/4');
   const [offsetMsInput, setOffsetMsInput] = useState<string>('0');
   const [quantization, setQuantization] = useState<DiGuitarQuantization>(16);
-  const [tuplets, setTuplets] = useState<DiTupletMode>('none');
+  const [tuplets, setTuplets] = useState<DiTupletMode>('triplets');
   const [voices, setVoices] = useState<1 | 2>(1);
   const [sensitivity, setSensitivity] = useState<DiSensitivity>('balanced');
   const [position, setPosition] = useState<DiFretPosition>('auto');

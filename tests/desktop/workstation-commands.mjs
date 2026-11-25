@@ -466,3 +466,33 @@ export async function clickWorkstationButton(page,name,{waitForIdle=true}={}) {
   }
   if(waitForIdle)await waitForWorkspaceIdle(page);
 }
+
+
+export async function showScoreDisplay(page) {
+  const toggle = page.locator('.score-display-toggle');
+  if (await toggle.isVisible() && await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+}
+
+export async function hideScoreDisplay(page) {
+  const toggle = page.locator('.score-display-toggle');
+  if (await toggle.isVisible() && await toggle.getAttribute('aria-expanded') === 'true') await toggle.click();
+}
+
+export async function openPreferences(page) {
+  const dialog = page.getByRole('dialog', {name:'Preferences', exact:true});
+  if (!await dialog.isVisible()) {
+    const view = page.locator('details.command-menu > summary', {hasText:/^View$/});
+    if (!await view.evaluate(el => el.parentElement.open)) await view.click();
+    await page.getByRole('button', {name:'Preferences', exact:true}).click();
+    await dialog.waitFor();
+  }
+  return dialog;
+}
+
+export async function closePreferences(page) {
+  const dialog = page.getByRole('dialog', {name:'Preferences', exact:true});
+  if (await dialog.isVisible()) {
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({state:'hidden'});
+  }
+}

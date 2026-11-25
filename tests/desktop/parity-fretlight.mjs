@@ -1,3 +1,4 @@
+import { openPreferences, closePreferences } from './workstation-commands.mjs';
 import { closeWelcomeLibrary, waitForWorkspaceIdle, revealPlaybackControls, selectWorkspaceTrack, clickWorkstationButton } from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -73,18 +74,18 @@ try {
   // Consent: nothing has been listed, opened or written, and the status says so.
   assert.deepEqual(await log(), { reports: [], lists: 0, opens: 0 });
   assert.equal((await invoke('fretlight_status')).state, 'disconnected');
-  await page.locator('details.command-menu > summary', { hasText: /^View$/ }).click();
+  await openPreferences(page);
   const panel = page.locator('details.fretlight-panel'); await panel.waitFor();
-  // Selecting in the score closes the View menu, so each use of the section opens the menu and the section again if need be.
-  const reveal = async () => { if (!await panel.isVisible()) await page.locator('details.command-menu > summary', { hasText: /^View$/ }).click(); if (!await panel.evaluate(element => element.open)) await panel.locator('summary').click(); };
+  // Reopen Preferences when returning from the score.
+  const reveal = async () => { await openPreferences(page); if (!await panel.evaluate(element => element.open)) await panel.locator('summary').click(); };
   await reveal();
   await reveal(); await panel.getByText(/not tested with a real Fretlight/).waitFor();
   await reveal(); await panel.getByText('Not connected. Nothing is looked for until you press the button.').waitFor();
-  assert.equal(await panel.getAttribute('data-menu-keep'), '', 'pressing in the section keeps the View menu open');
+  assert.ok(await page.locator('.workspace-preferences').isVisible());
   // Choosing what the lights show, selecting beats and moving through the score send nothing either.
   await reveal(); await panel.getByRole('combobox', { name: 'Lights show' }).selectOption('beat');
   const notation = page.locator('[aria-label="Music notation"] svg text');
-  const closeMenu = async () => { const open = page.locator('details.command-menu[open] > summary', { hasText: /^View$/ }); if (await open.count()) await open.click(); };
+  const closeMenu = () => closePreferences(page);
   const pick = async fret => { await closeMenu(); await notation.filter({ hasText: new RegExp(`^${fret}$`) }).first().click(); await waitForWorkspaceIdle(page); };
   await pick('5'); await pick('7');
   assert.deepEqual(await log(), { reports: [], lists: 0, opens: 0 }, 'nothing is listed, opened or written before Connect');

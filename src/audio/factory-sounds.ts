@@ -47,11 +47,31 @@ const definitions:readonly FactoryDefinition[]=[
     drive:{model:'fuzz',drive:.8,tone:.7},amp:{model:'crunch',drive:.2,gainDb:.5,bassDb:-3},cabinet:{model:'closed'},delay:{model:'tape',quarterNotes:.5,feedback:.4,mix:.25}}},
   {id:'octave-lead',name:'Octave-up lead',category:'Lead and high gain',presetId:'lead',description:'Lead doubled an octave up, with an echo.',effects:{
     pitch:{semitones:12,mix:.4},amp:{model:'lead',drive:.4,gainDb:0},cabinet:{model:'closed'},delay:{model:'digital',quarterNotes:.75,feedback:.3,mix:.2}}},
+  {id:'modern-metal-lead',name:'Modern metal lead',category:'Lead and high gain',presetId:'lead',description:'Focused high-gain melody lead with a tight mid boost, rhythmic tape echoes, and a warm hall.',
+    order:['microphone','gate','compressor','wah','octaver','pitch','eq','drive','amp','cabinet','graphicEq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'],effects:{
+    gate:{thresholdDb:-54,releaseMs:120},eq:{lowDb:-8,midDb:6,highDb:1,midHz:1100},drive:{model:'overdrive',drive:.25,tone:.72,levelDb:2},
+    amp:{model:'lead',drive:.55,gainDb:2.5,bassDb:-2,midDb:3,trebleDb:1,presenceDb:3},
+    cabinet:{model:'closed',ir:{id:'1d059193ad6e5bfb75c09d1d7383d737',name:'bundled closed four-by-twelve lead',levelDb:0}},
+    graphicEq:{gainsDb:[-10,-4,-3,-4,-1,3,2.5,0,-4,-10],levelDb:0},
+    delay:{model:'tape',quarterNotes:.75,feedback:.42,mix:.28},reverb:{model:'hall',room:.82,damping:.48,mix:.28}}},
   {id:'ambient-swell',name:'Ambient wash',category:'Ambient',presetId:'clean',description:'Long synced echoes and a huge hall for pads and swells.',effects:{
     compressor:{thresholdDb:-24,ratio:3,makeupDb:3},amp:{model:'clean',drive:.1,gainDb:6,trebleDb:-2},cabinet:{model:'open'},chorus:{rateHz:.3,depthMs:8,mix:.3,syncQuarterNotes:16},
     delay:{model:'digital',quarterNotes:1.5,feedback:.6,mix:.35},reverb:{model:'hall',room:.95,damping:.3,mix:.45}}},
   {id:'shimmer',name:'Octave shimmer',category:'Ambient',presetId:'clean',description:'An octave-up layer feeding a long hall.',effects:{
     pitch:{semitones:12,mix:.25},amp:{model:'clean',drive:.1,gainDb:2.5},cabinet:{model:'open'},delay:{model:'digital',quarterNotes:1,feedback:.5,mix:.3},reverb:{model:'hall',room:.95,damping:.2,mix:.5}}},
+  {id:'atmospheric-lead',name:'Atmospheric lead',category:'Ambient',presetId:'lead',description:'Thick high-gain lead drenched in cascading echoes and a cavernous hall reverb.',
+    order:['microphone','gate','compressor','wah','octaver','pitch','eq','drive','amp','cabinet','graphicEq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'],effects:{
+    compressor:{thresholdDb:-22,ratio:3.5,attackMs:12,releaseMs:120,makeupDb:2},eq:{lowDb:-6,midDb:4,highDb:0,midHz:900},drive:{model:'overdrive',drive:.25,tone:.65,levelDb:1.5},
+    amp:{model:'lead',drive:.6,gainDb:1.5,midDb:2,presenceDb:1.5},
+    cabinet:{model:'closed',ir:{id:'ae0e6c0bece5852d9f24032bf08089a6',name:'bundled two-by-twelve ribbon',levelDb:0}},
+    graphicEq:{gainsDb:[-10,-6,-2,1.5,2,1,0,-2,-6,-10],levelDb:0},
+    chorus:{rateHz:.35,depthMs:5,mix:.2},delay:{model:'digital',quarterNotes:.75,feedback:.48,mix:.34},reverb:{model:'hall',room:.94,damping:.35,mix:.52}}},
+  {id:'post-rock-tremolo',name:'Post-rock tremolo',category:'Ambient',presetId:'crunch',description:'Dark, warm driven guitar with stereo chorus, quarter-note analog echoes, and a lush hall for tremolo picking.',effects:{
+    compressor:{thresholdDb:-24,ratio:4,attackMs:8,releaseMs:100,makeupDb:2},drive:{model:'overdrive',drive:.45,tone:.42,levelDb:1},
+    amp:{model:'crunch',drive:.55,gainDb:-1.5,bassDb:1,midDb:2,trebleDb:-3,presenceDb:-3},
+    cabinet:{model:'closed',ir:{id:'aff9c3f5d458616ce9aee3c35f185926',name:'bundled dark two-by-twelve ribbon',levelDb:0}},
+    graphicEq:{gainsDb:[-8,-2,1,0,2,.5,-3.5,-5,-8,-12],levelDb:0},
+    chorus:{rateHz:.45,depthMs:6.5,mix:.3},delay:{model:'analog',quarterNotes:1,feedback:.45,mix:.34},reverb:{model:'hall',room:.9,damping:.65,mix:.44}}},
   {id:'acoustic-room',name:'Acoustic in a room',category:'Acoustic',presetId:'gm',description:'Room microphone, gentle compression and a small room.',effects:{
     microphone:{placement:'room',output:'stereo'},compressor:{thresholdDb:-18,ratio:2.5,attackMs:15,makeupDb:2},eq:{lowDb:-2,highDb:2},reverb:{model:'room',room:.35,mix:.15}}},
   {id:'acoustic-close',name:'Close-miked acoustic',category:'Acoustic',presetId:'gm',description:'Close microphone with the boom tamed for strumming.',effects:{

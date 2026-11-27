@@ -96,7 +96,7 @@ describe('drum map sound names', () => {
       expect(names[0], language).toContain(snare);
       expect(names.join(' '), language).not.toMatch(/rim shot|hit|closed/);
       cleanup();
-      const plain = render(<DrumMapPanel trackId="base/1" mix={{ gain: 1, pan: 0, mute: false, solo: false, drumMap: { preset: 'ezdrummer-3' } }} used={[38]} onEdit={vi.fn()} />);
+      const plain = render(<DrumMapPanel trackId="base/1" mix={{ gain: 1, pan: 0, mute: false, solo: false, drumMap: { preset: 'ggd-okw-architects' } }} used={[38]} onEdit={vi.fn()} />);
       expect(plain.container.querySelector('.drum-map-source p')?.textContent, language).toContain(source);
       cleanup();
     }

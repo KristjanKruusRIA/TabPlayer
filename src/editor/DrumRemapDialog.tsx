@@ -1,10 +1,11 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { model } from '@coderline/alphatab';
-import type { DrumMapRef, EditCommand } from '../edit-types';
+import { defaultMix } from '../document-settings';
+import type { ChannelMix, DrumMapRef, EditCommand } from '../edit-types';
 import { useI18n } from '../i18n';
 import { Dialog, BusyFieldset, busyGuard, busySelect } from '../ui';
-import { drumMapPresets } from '../audio/drum-map';
+import { drumMapPresets, withDrumMap } from '../audio/drum-map';
 import { drumMapFiles, fileProblem, mapFromImport } from '../audio/drum-map-file';
 import { localizedDrumSoundGroups } from '../audio/drum-map-groups';
 import { collectTrackDrumSounds, presetRemapForTrack } from './drum-remap';
@@ -13,6 +14,8 @@ import './drum-remap-dialog.css';
 export interface DrumRemapDialogProps {
   score: model.Score;
   trackIndex: number;
+  trackId?: string;
+  mix?: ChannelMix;
   busy?: boolean;
   locked?: boolean;
   onEdit: (command: EditCommand) => void | Promise<unknown>;
@@ -26,6 +29,8 @@ const FILE_PRESET = '__file__';
 export function DrumRemapDialog({
   score,
   trackIndex,
+  trackId,
+  mix,
   busy = false,
   locked = false,
   onEdit,
@@ -40,14 +45,31 @@ export function DrumRemapDialog({
   const labelByStandardId = useMemo(() => new Map(allRows.map(r => [r.id, r.sound])), [allRows]);
 
   const presets = drumMapPresets();
-  const [sourcePreset, setSourcePreset] = useState<string>(KEEP_SOURCE_PRESET);
+  const currentMap = mix?.drumMap;
+  const currentPreset = currentMap?.preset ?? 'gm';
+  const initialPreset = trackId ? currentPreset : KEEP_SOURCE_PRESET;
+  const [sourcePreset, setSourcePreset] = useState<string>(initialPreset);
   const [loadedMap, setLoadedMap] = useState<{ name: string; map: DrumMapRef | undefined } | null>(null);
+  const [updateNotes, setUpdateNotes] = useState(false);
   const [mapError, setMapError] = useState('');
   const loadingMap = useRef(false);
   const [overrides, setOverrides] = useState<Map<number, number | null>>(() => new Map());
 
   const sourceId = useId();
   const readOnly = busy || locked;
+  const knownPreset = presets.some(p => p.id === currentPreset);
+
+  const mapRefFor = (choice: string, fileMap?: DrumMapRef | undefined): DrumMapRef | undefined => {
+    if (choice === KEEP_SOURCE_PRESET) return currentMap;
+    if (choice === FILE_PRESET) return fileMap;
+    if (choice === currentPreset && !fileMap) return currentMap;
+    return choice === 'gm' ? undefined : { preset: choice };
+  };
+
+  const targetMap = mapRefFor(sourcePreset, loadedMap?.map);
+  const currentMix = mix ?? defaultMix();
+  const nextMix = trackId ? withDrumMap(currentMix, targetMap) : currentMix;
+  const mapChanged = Boolean(trackId && nextMix !== currentMix);
 
   const currentPieceName = (sourceIdVal: number, standardId: number | null, customLabel?: string) => {
     if (standardId !== null && labelByStandardId.has(standardId)) {
@@ -63,16 +85,23 @@ export function DrumRemapDialog({
     return entry?.state === 'unverified' ? t('drum_map.preset_unchecked', { name }) : name;
   };
 
-  const applyPresetSelection = (choice: string, fileMap?: DrumMapRef | undefined) => {
-    setSourcePreset(choice);
-    setMapError('');
-    if (choice === KEEP_SOURCE_PRESET) {
+  const recomputePresetOverrides = (
+    choice: string,
+    shouldUpdateNotes: boolean,
+    fileMap?: DrumMapRef | undefined,
+  ) => {
+    if (!shouldUpdateNotes || choice === KEEP_SOURCE_PRESET || (trackId && choice === currentPreset && choice !== FILE_PRESET)) {
       setOverrides(new Map());
       return;
     }
-    const mapRef: DrumMapRef | undefined =
-      choice === FILE_PRESET ? fileMap : choice === 'gm' ? undefined : { preset: choice };
-    setOverrides(presetRemapForTrack(sounds, mapRef));
+    const mapRef = mapRefFor(choice, fileMap);
+    setOverrides(presetRemapForTrack(sounds, mapRef, trackId ? currentMap : undefined));
+  };
+
+  const applyPresetSelection = (choice: string, fileMap?: DrumMapRef | undefined) => {
+    setSourcePreset(choice);
+    setMapError('');
+    recomputePresetOverrides(choice, updateNotes, fileMap);
   };
 
   const handleLoadFile = () => {
@@ -114,8 +143,13 @@ export function DrumRemapDialog({
   );
 
   const handleApply = async () => {
-    if (readOnly || mapEntries.length === 0) return;
-    await Promise.resolve(onEdit({ type: 'remapPercussion', track: trackIndex, map: mapEntries }));
+    if (readOnly || (!mapChanged && mapEntries.length === 0)) return;
+    if (mapChanged && trackId) {
+      await Promise.resolve(onEdit({ type: 'setTrackMix', trackId, mix: nextMix }));
+    }
+    if (mapEntries.length > 0) {
+      await Promise.resolve(onEdit({ type: 'remapPercussion', track: trackIndex, map: mapEntries }));
+    }
     onClose();
   };
 
@@ -132,7 +166,7 @@ export function DrumRemapDialog({
           <button
             type="button"
             data-autofocus
-            {...busyGuard({ busy, disabled: readOnly || mapEntries.length === 0, className: 'primary', onClick: () => void handleApply() })}
+            {...busyGuard({ busy, disabled: readOnly || (!mapChanged && mapEntries.length === 0), className: 'primary', onClick: () => void handleApply() })}
           >
             {t('drum_remap.apply')}
           </button>
@@ -151,7 +185,7 @@ export function DrumRemapDialog({
               value={sourcePreset}
               onChange={e => applyPresetSelection(e.target.value, loadedMap?.map)}
             >
-              <option value={KEEP_SOURCE_PRESET}>{t('drum_remap.source_map_keep')}</option>
+              {!trackId && <option value={KEEP_SOURCE_PRESET}>{t('drum_remap.source_map_keep')}</option>}
               <option value="gm">{t('drum_map.preset_gm')}</option>
               {presets.some(p => p.id !== 'gm') && (
                 <optgroup label={t('drum_map.presets_group')}>
@@ -159,6 +193,9 @@ export function DrumRemapDialog({
                     <option key={p.id} value={p.id}>{presetLabel(p.id)}</option>
                   ))}
                 </optgroup>
+              )}
+              {trackId && !knownPreset && (
+                <option value={currentPreset}>{t('drum_map.preset_unknown', { id: currentPreset })}</option>
               )}
               {loadedMap && (
                 <option value={FILE_PRESET}>{t('drum_remap.file_option', { name: loadedMap.name })}</option>
@@ -171,12 +208,35 @@ export function DrumRemapDialog({
             </button>
             <button
               type="button"
-              disabled={readOnly || (sourcePreset === KEEP_SOURCE_PRESET && mapEntries.length === 0)}
-              onClick={() => applyPresetSelection(KEEP_SOURCE_PRESET)}
+              disabled={readOnly || (!mapChanged && mapEntries.length === 0 && !updateNotes && sourcePreset === initialPreset)}
+              onClick={() => {
+                setSourcePreset(initialPreset);
+                setLoadedMap(null);
+                setUpdateNotes(false);
+                setOverrides(new Map());
+                setMapError('');
+              }}
             >
               {t('drum_remap.reset_all')}
             </button>
           </div>
+        </div>
+
+        <div className="drum-remap-toggle">
+          <label className="drum-remap-check">
+            <input
+              type="checkbox"
+              disabled={readOnly}
+              checked={updateNotes}
+              onChange={e => {
+                const checked = e.target.checked;
+                setUpdateNotes(checked);
+                recomputePresetOverrides(sourcePreset, checked, loadedMap?.map);
+              }}
+            />
+            <span>{t('drum_remap.update_notes')}</span>
+          </label>
+          <p className="muted drum-remap-toggle-hint">{t('drum_remap.update_notes_hint')}</p>
         </div>
 
         {mapError && <p role="alert" className="drum-remap-error">{mapError}</p>}
@@ -257,9 +317,13 @@ export function DrumRemapDialog({
         )}
 
         <p role="status" className="muted drum-remap-status">
-          {mapEntries.length > 0
-            ? t('drum_remap.changed_summary', { pieces: mapEntries.length, hits: affectedHits })
-            : t('drum_remap.no_changes')}
+          {mapChanged && mapEntries.length > 0
+            ? t('drum_remap.map_and_notes_summary', { pieces: mapEntries.length, hits: affectedHits })
+            : mapChanged
+              ? t('drum_remap.map_only_summary')
+              : mapEntries.length > 0
+                ? t('drum_remap.changed_summary', { pieces: mapEntries.length, hits: affectedHits })
+                : t('drum_remap.no_changes')}
         </p>
       </BusyFieldset>
     </Dialog>,

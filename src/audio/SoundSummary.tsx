@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import type { model } from '@coderline/alphatab';
 import type { ChannelMix, EditCommand, EffectBlock, PickupPosition, TrackSound } from '../edit-types';
 import type { AssetCandidate } from '../project';
 import { useI18n } from '../i18n';
@@ -18,7 +19,7 @@ import { availablePickupsForVoice, presetIds, soundPreset, localizedBlockName, l
 import type { NativePlaybackController } from './NativePlaybackController';
 import { statusLabelKey, type PluginStatus } from './plugin-host';
 
-type Props = { trackId: string; program?: number; percussion?: boolean; sound?: TrackSound; onEdit: (edit: EditCommand, asset?: AssetCandidate) => void | Promise<void>; playback?: NativePlaybackController | null; busy?: boolean; shown?: boolean; documentId?: string; status?: PluginStatus; onAllowConsent?: () => void | Promise<unknown>; onRetrySlot?: () => void | Promise<unknown>; mix?: ChannelMix; usedDrumSounds?: readonly number[];
+type Props = { trackId: string; program?: number; percussion?: boolean; track?: model.Track; trackIndex?: number; sound?: TrackSound; onEdit: (edit: EditCommand, asset?: AssetCandidate) => void | Promise<void>; playback?: NativePlaybackController | null; busy?: boolean; shown?: boolean; documentId?: string; status?: PluginStatus; onAllowConsent?: () => void | Promise<unknown>; onRetrySlot?: () => void | Promise<unknown>; mix?: ChannelMix; usedDrumSounds?: readonly number[];
   /** Opens the Plug-in dialog, as the Sound menu's Plug-in… does; `onRequestHandled` tells the app it has been taken. */
   request?: 'plugin' | null; onRequestHandled?: () => void };
 

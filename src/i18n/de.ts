@@ -2390,6 +2390,7 @@ export const de: MessageCatalog = {
   'drum_map.file_bad_base': 'Die in der Datei genannte Belegung ist keine gültige Belegungskennung.',
   'drum_map.file_unreadable': 'Die Datei konnte nicht gelesen werden. {detail}',
   'drum_map.file_unknown': 'Die Datei wurde abgelehnt. {detail}',
+  'drum_map.update_notes': 'Schlagzeugnoten beim Wechseln der Belegung anpassen',
   'drum_map.disclaimer': 'Die Namen der Belegungen geben nur an, welcher Belegung eine Zuordnung folgt. TabPlayer steht in keiner Verbindung zu diesen Produkten oder ihren Herstellern.',
   // Drum map: sound, kit-piece and layout-source texts shown in the editor. Display only; map files keep their ids.
   'drum_piece.splash': 'Splash',
@@ -2538,9 +2539,11 @@ export const de: MessageCatalog = {
   'drum_sound.125': 'Finger',
   'drum_sound.33': 'Schlag',
   'drum_sound.34': 'Glocke',
-  'drum_map.source_text_1': 'Tastennummern aus drei Quellen Dritter: einer General-MIDI-Nachschlagetabelle (MIT-Lizenz), einer veröffentlichten Notentabelle der Bibliothek und einer Anleitung, die die eigene Belegung der Bibliothek mit General MIDI verglichen hat. Sie stammen nicht aus der Dokumentation des Herstellers und wurden nicht an der Bibliothek selbst geprüft.',
+  'drum_map.source_text_1': 'Tastennummern aus einer veröffentlichten Notentabelle und einer installierten Belegungsdatei zur Standardbelegung der Bibliothek. Sie stammen nicht aus der Dokumentation des Herstellers und wurden nicht an der Bibliothek selbst geprüft.',
   'drum_map.source_text_2':'Tastennummern aus einer veröffentlichten Notentabelle zur Standardbelegung der Bibliothek und einer General-MIDI-Nachschlagetabelle (MIT-Lizenz), die miteinander übereinstimmen. Sie stammen nicht aus der Dokumentation des Herstellers und wurden nicht an der Bibliothek selbst geprüft.',
-  'drum_map.source_text_3': 'Tastennummern wurden aus dem General-MIDI-Belegungsfenster der Bibliothek übernommen. Sie stammen nicht aus der Dokumentation des Herstellers und wurden nicht an der offiziellen Dokumentation der Bibliothek geprüft.',
+  'drum_map.source_text_3': 'Tastennummern aus einer veröffentlichten Notentabelle und einer Nachschlagetabelle Dritter (MIT-Lizenz) zur Standardbelegung der Bibliothek. Sie stammen nicht aus der Dokumentation des Herstellers und wurden nicht an der Bibliothek selbst geprüft.',
+  'drum_map.source_text_4': 'Tastennummern aus einer veröffentlichten Notentabelle und einer installierten Belegungstabelle zur Standardbelegung der Bibliothek. Sie stammen nicht aus der Dokumentation des Herstellers und wurden nicht an der Bibliothek selbst geprüft.',
+  'drum_map.source_text_5': 'Tastennummern aus einer veröffentlichten Notentabelle zur Standardbelegung der Bibliothek. Sie stammen nicht aus der Dokumentation des Herstellers und wurden nicht an der Bibliothek selbst geprüft.',
   'plugin.error.instrument_needs_drums': 'Ein Instrument-Plugin kann nur auf einer Schlagzeugspur verwendet werden.',
 
   // Plug-in statuses
@@ -3254,6 +3257,10 @@ export const de: MessageCatalog = {
   'drum_remap.keep_current': 'Behalten ({name})',
   'drum_remap.remove_hits': 'Schläge entfernen',
   'drum_remap.changed_summary': '{pieces} geändert ({hits} Noten betroffen)',
+  'drum_remap.map_only_summary': 'Die Drum-Map der Spur wird geändert; Schlagzeugnoten bleiben unverändert.',
+  'drum_remap.map_and_notes_summary': 'Drum-Map der Spur wird geändert · {pieces} geändert ({hits} Noten betroffen)',
+  'drum_remap.update_notes': 'Schlagzeugnoten an die neue Belegung anpassen',
+  'drum_remap.update_notes_hint': 'Aus lässt die notierten Schlagzeugteile unverändert und ändert nur die Drum-Map der Spur (für Plugins, MIDI-Ausgang und MIDI-Export). Ein schreibt die Schlagzeugnoten um, indem ihre MIDI-Tasten unter der neuen Belegung neu gedeutet werden.',
   'drum_remap.no_changes': 'Keine Änderungen',
   'drum_remap.reset_all': 'Zurücksetzen',
   'drum_remap.reset_row': 'Zurücksetzen',

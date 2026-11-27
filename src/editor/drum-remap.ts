@@ -1,6 +1,6 @@
 import { model } from '@coderline/alphatab';
 import type { DrumMapRef } from '../edit-types';
-import { isStandardArticulation, mapArticulationId, resolveInputDrumMap } from '../audio/drum-map';
+import { isStandardArticulation, mapArticulationId, mappedKey, resolveDrumMap, resolveInputDrumMap } from '../audio/drum-map';
 import { detachNote } from './links';
 import { resolvePercussionArticulation, standardPercussionCatalog } from './percussion-catalog';
 
@@ -47,11 +47,14 @@ export function collectTrackDrumSounds(track: model.Track): TrackDrumSound[] {
 export function presetRemapForTrack(
   sounds: readonly TrackDrumSound[],
   mapRef: DrumMapRef | undefined,
+  fromMapRef?: DrumMapRef | undefined,
 ): Map<number, number | null> {
+  const fromTables = fromMapRef ? resolveDrumMap(fromMapRef, true) : null;
   const inputMap = resolveInputDrumMap(mapRef);
   const result = new Map<number, number | null>();
   for (const sound of sounds) {
-    const next = sound.midiKey >= 0 && sound.midiKey <= 127 ? inputMap[sound.midiKey] : null;
+    const sourceKey = fromTables ? mappedKey(fromTables, sound.midiKey, sound.standardId) : sound.midiKey;
+    const next = sourceKey !== null && sourceKey >= 0 && sourceKey <= 127 ? inputMap[sourceKey] : null;
     const currentEffective = sound.standardId ?? sound.sourceId;
     if (next !== currentEffective) {
       result.set(sound.sourceId, next);

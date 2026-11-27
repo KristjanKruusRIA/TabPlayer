@@ -53,6 +53,26 @@
   gap: 6px;
 }
 
+.drum-remap-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.drum-remap-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tp-text);
+  cursor: pointer;
+}
+
+.drum-remap-toggle-hint {
+  margin: 0;
+  font-size: 11px;
+}
+
 .drum-remap-body select,
 .drum-remap-body button {
   min-height: 28px;

@@ -2390,6 +2390,7 @@ export const et: MessageCatalog = {
   'drum_map.file_bad_base': 'Failis nimetatud paigutus pole kirjutatud paigutuse tunnusena.',
   'drum_map.file_unreadable': 'Faili ei saanud lugeda. {detail}',
   'drum_map.file_unknown': 'Fail lükati tagasi. {detail}',
+  'drum_map.update_notes': 'Muuda trumminoodid paigutuse vahetamisel',
   'drum_map.disclaimer': 'Paigutuste nimed näitavad ainult, millist paigutust kaart järgib. TabPlayer ei ole nende toodete ega nende tootjatega seotud.',
   // Drum map: sound, kit-piece and layout-source texts shown in the editor. Display only; map files keep their ids.
   'drum_piece.splash': 'Splash',
@@ -2538,9 +2539,11 @@ export const et: MessageCatalog = {
   'drum_sound.125': 'sõrm',
   'drum_sound.33': 'löök',
   'drum_sound.34': 'kell',
-  'drum_map.source_text_1': 'Klahvinumbrid kolmest kolmanda osapoole allikast: General MIDI otsingutabel (MIT litsents), teegi avaldatud noodikaart ja juhend, mis võrdles teegi enda paigutust General MIDI-ga. Need ei pärine tootja dokumentatsioonist ja neid ei ole teegi enda vastu kontrollitud.',
+  'drum_map.source_text_1': 'Klahvinumbrid avaldatud noodikaardist ja paigaldatud paigutusfailist teegi vaikepaigutuse kohta. Need ei pärine tootja dokumentatsioonist ja neid ei ole teegi enda vastu kontrollitud.',
   'drum_map.source_text_2':'Klahvinumbrid avaldatud noodikaardist teegi vaikepaigutuse kohta ja General MIDI otsingutabelist (MIT litsents), mis on omavahel kooskõlas. Need ei pärine tootja dokumentatsioonist ja neid ei ole teegi enda vastu kontrollitud.',
-  'drum_map.source_text_3': 'Klahvinumbrid on loetud teegi General MIDI paigutuse seadete aknast. Need ei pärine tootja dokumentatsioonist ja neid ei ole teegi ametliku dokumentatsiooni vastu kontrollitud.',
+  'drum_map.source_text_3': 'Klahvinumbrid avaldatud noodikaardist ja kolmanda osapoole otsingutabelist (MIT litsents) teegi vaikepaigutuse kohta. Need ei pärine tootja dokumentatsioonist ja neid ei ole teegi enda vastu kontrollitud.',
+  'drum_map.source_text_4': 'Klahvinumbrid avaldatud noodikaardist ja paigaldatud paigutustabelist teegi vaikepaigutuse kohta. Need ei pärine tootja dokumentatsioonist ja neid ei ole teegi enda vastu kontrollitud.',
+  'drum_map.source_text_5': 'Klahvinumbrid avaldatud noodikaardist teegi vaikepaigutuse kohta. Need ei pärine tootja dokumentatsioonist ja neid ei ole teegi enda vastu kontrollitud.',
   'plugin.error.instrument_needs_drums': 'Instrumendiplugina saab kasutada ainult trummirajal.',
 
   // Plug-in statuses
@@ -3254,6 +3257,10 @@ export const et: MessageCatalog = {
   'drum_remap.keep_current': 'Säilita ({name})',
   'drum_remap.remove_hits': 'Eemalda löögid',
   'drum_remap.changed_summary': '{pieces} muudetud ({hits} nooti)',
+  'drum_remap.map_only_summary': 'Raja trummikaart muutub; trumminoodid jäävad samaks.',
+  'drum_remap.map_and_notes_summary': 'Raja trummikaart muutub · {pieces} muudetud ({hits} nooti mõjutatud)',
+  'drum_remap.update_notes': 'Muuda trumminoodid uue paigutuse järgi',
+  'drum_remap.update_notes_hint': 'Väljas jätab kirjutatud trummiosad muutmata ja vahetab ainult raja trummikaardi (pluginate, MIDI-väljundi ja MIDI-ekspordi jaoks). Sees kirjutab trumminoodid ümber, tõlgendades nende MIDI-klahvid uue paigutuse järgi.',
   'drum_remap.no_changes': 'Muudatusi pole',
   'drum_remap.reset_all': 'Lähtesta',
   'drum_remap.reset_row': 'Lähtesta',

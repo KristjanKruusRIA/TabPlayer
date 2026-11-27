@@ -518,6 +518,13 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     const doc = await documentId();
     const beats = BARS * PATTERN.length;
 
+    // Mute Track 3 (Drums B) before setTrackSound builds the hosted-instrument renderer so its built-in kit starts at zero gain (no ramp leak on Play in 4b).
+    await ui.revealDock(page, 'Mixer');
+    const drumsBMute = page.getByRole('region', { name: /^Channel 3: / }).getByRole('checkbox', { name: 'Mute', exact: true });
+    await drumsBMute.click();
+    await poll(() => drumsBMute.isChecked(), Boolean, 'Drums B muted');
+    await idle();
+
     // Put the instrument on the first drum track (the effect/instrument library is added through the panel).
     await selectTrack(GUITAR);
     await page.getByRole('button', { name: 'Add plug-in…', exact: true }).click();
@@ -551,8 +558,11 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     const options = await mapSelect().locator('option').allInnerTexts();
     assert.ok(options[0].startsWith('General MIDI'), `General MIDI first: ${options}`);
     const layouts = options.slice(1);
-    assert.equal(layouts.length, 5, `five layouts: ${layouts}`);
-    assert.ok(layouts.every(text => text.endsWith('— not yet checked')), `every layout says it is not yet checked: ${layouts}`);
+    assert.equal(layouts.length, 12, `twelve layouts: ${layouts}`);
+    const unverifiedLayouts = layouts.filter(text => text.endsWith('— not yet checked'));
+    const verifiedLayouts = layouts.filter(text => !text.endsWith('— not yet checked'));
+    assert.equal(verifiedLayouts.length, 4, `four verified layouts: ${layouts}`);
+    assert.equal(unverifiedLayouts.length, 8, `eight unverified layouts: ${layouts}`);
     const lines0 = await statusLines();
     assert.ok(lines0.some(text => /General MIDI keys, as the built-in kit plays them\./.test(text)), `GM source line: ${lines0}`);
     assert.ok(lines0.some(text => /not affiliated/.test(text)), `disclaimer line: ${lines0}`);
@@ -563,8 +573,7 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     await idle();
     assert.equal(await editCount(), before + 1, 'Choosing a layout is one edit');
     const lines1 = await statusLines();
-    assert.ok(lines1.some(text => /have not been checked against the library\. If a sound plays wrong/.test(text)), `unverified status: ${lines1}`);
-    assert.equal(await section().locator('details.drum-map-source > summary').count(), 1, 'the layout\'s own source sits in a disclosure');
+    assert.ok(lines1.some(text => /Checked on 2026-11-27\./.test(text)), `verified status: ${lines1}`);
     result.observations.layoutStatus = lines1;
     await button('Undo');
     await openSound();
@@ -576,11 +585,19 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     await mapSelect().selectOption(layoutId);
     await idle(); await sleep(300);
     assert.equal(await editCount(), before + 1, 'Choosing the current layout records nothing');
+    const unverifiedId = await mapSelect().locator('option').nth(2).getAttribute('value');
+    await mapSelect().selectOption(unverifiedId);
+    await idle();
+    assert.equal(await editCount(), before + 2, 'Choosing an unverified layout is one edit');
+    const lines2 = await statusLines();
+    assert.ok(lines2.some(text => /have not been checked against the library\. If a sound plays wrong/.test(text)), `unverified status: ${lines2}`);
+    assert.equal(await section().locator('details.drum-map-source > summary').count(), 1, 'the unverified layout\'s own source sits in a disclosure');
+    result.observations.unverifiedLayoutStatus = lines2;
     await mapSelect().selectOption('gm');
     await idle();
-    assert.equal(await editCount(), before + 2, 'Going back to General MIDI is one edit');
+    assert.equal(await editCount(), before + 3, 'Going back to General MIDI is one edit');
     assert.equal(await mapOf(drumTrackId), undefined, 'General MIDI with no changes is written as no map');
-    step('2. The select lists General MIDI and five layouts marked not yet checked; choosing is one undo step; the current one records nothing; status and disclaimer show', { options, lines1 });
+    step('2. The select lists General MIDI and twelve layouts (four verified, eight marked not yet checked); choosing is one undo step; the current one records nothing; verified/unverified status and disclaimer show', { options, lines1, lines2 });
 
     // 3. The Keys editor.
     await openKeys('In this track');
@@ -691,27 +708,28 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     result.observations.exportKeys = { unmapped: keys0, moved: keysMoved, silent: keysSilent, scale: 'calibrated from the first kick and snare' };
     step('4a. Export: a moved row decodes to its new key, the others to their own, a silent row is absent, General MIDI equals the no-map export', { keys0, keysMoved, keysSilent });
 
-    // Edit a row during playback.
+    // Edit a row during playback (Drums B is muted so outputPeak reflects only Track 2's hosted test drum).
     await closeSound();
     const status0 = await invoke('audio_status');
     result.observations.audioStatusKeys = Object.keys(status0);
     await ui.clickWorkstationButton(page, 'Play', { waitForIdle: false });
-    const playing0 = await poll(() => invoke('audio_status'), s => { assert.equal(s.error, null); return s.playing && s.outputPeak > 0.001; }, 'playing');
+    const playing0 = await poll(() => invoke('audio_status'), s => { assert.equal(s.error, null); return s.playing && s.seconds > 0.1 && s.outputPeak > 0.001; }, 'playing');
     const generationBefore = playing0.generation, desiredBefore = playing0.desiredGeneration;
     const framesBefore = playing0.renderedFrames;
     const snareLevelBefore = await (async () => { let peak = 0; const until = Date.now() + 2200; while (Date.now() < until) { peak = Math.max(peak, (await invoke('audio_status')).outputPeak); await sleep(50); } return peak; })();
+    result.observations.liveEditBefore = { status0Peak: status0.outputPeak, playing0Peak: playing0.outputPeak, snareLevelBefore };
     const editsDuring = await editCount();
     await openSound(); await openKeys('In this track');
-    await setKey(38, 100);
+    await setKey(38, 127);
     await closeSound();
     const statusAfter = await invoke('audio_status');
     assert.equal(await editCount(), editsDuring + 1);
     assert.ok(statusAfter.playing && !statusAfter.error, 'playback goes on after the edit');
     assert.equal(statusAfter.generation, generationBefore, 'no new plan was prepared for the map edit');
     assert.equal(statusAfter.desiredGeneration, desiredBefore);
-    // The next snare is the drum at key 100, much louder than anything played before. The meter keeps the last playback's peak, so
+    // The next snare is the drum at key 127, much louder than anything played before. The meter keeps the last playback's peak, so
     // the level must exceed everything the first seconds of this playback reached.
-    const louder = await poll(() => invoke('audio_status'), s => s.playing && s.outputPeak > snareLevelBefore * 1.4, 'the following hits use the new key', 6000);
+    const louder = await poll(() => invoke('audio_status'), s => s.playing && s.outputPeak > snareLevelBefore * 1.4, `the following hits use the new key (before=${snareLevelBefore})`, 6000);
     const plugin = (await invoke('plugin_status', { documentId: doc })).find(s => s.trackId === drumTrackId);
     assert.equal(plugin.status, 'ready', 'the instrument stays ready');
     assert.ok(louder.renderedFrames > framesBefore, 'rendering went on');
@@ -721,7 +739,12 @@ if(-not $done){throw ('No file dialog appeared; children: '+$tree)}
     await idle();
     await openSound();
     await resetAll();
-    step('4b. A row edited during playback: playback continues, no fault, the instrument stays ready, the plan generation is unchanged (no new plan; the renderer is rebuilt only for a new plan), and the following hits are louder (key 100)', result.observations.liveEdit);
+    await closeSound();
+    await ui.revealDock(page, 'Mixer');
+    await drumsBMute.click();
+    await poll(() => drumsBMute.isChecked(), v => !v, 'Drums B unmuted');
+    await idle();
+    step('4b. A row edited during playback: playback continues, no fault, the instrument stays ready, the plan generation is unchanged (no new plan; the renderer is rebuilt only for a new plan), and the following hits are louder (key 127)', result.observations.liveEdit);
 
     // 5. MIDI out.
     {

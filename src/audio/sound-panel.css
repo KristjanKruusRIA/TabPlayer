@@ -88,6 +88,7 @@
 .sound-panel .drum-map{margin-top:12px;padding-top:8px;border-top:1px solid var(--ws-border)}
 .sound-panel .drum-map p{margin:4px 0}
 .sound-panel .drum-map-preset{display:flex;flex-direction:column;align-items:stretch;gap:4px}
+.sound-panel .drum-map-remap-toggle{display:flex;margin-top:2px}
 .sound-panel .drum-map-preset select{width:100%;min-width:0}
 .sound-panel .drum-map-try{align-self:center;font-size:11px}
 .sound-panel .drum-map-keys{margin-top:6px}

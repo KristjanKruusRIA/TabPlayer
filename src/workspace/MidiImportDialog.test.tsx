@@ -331,7 +331,7 @@ it('supports Import as drums on channel-0 MIDI, per-part drum assignment, and ap
 });
 
 it('offers source drum map presets, file loading with error handling, per-key remapping, skipping, reset, and Escape disclosure handling', async () => {
-  // Channel-0 drum MIDI with key 22 (EZdrummer closed hat candidate), key 36 (kick), and key 66 (unmapped in EZdrummer 3).
+  // Channel-0 drum MIDI with key 22 (closed hat candidate), key 36 (kick), and key 66 (unmapped in EZdrummer 3 and Superior Drummer 3).
   const ch0Drums = makeMidi(0, 480, [makeTrack(noteLine([[0, 60, 36], [480, 60, 22], [960, 60, 66]], 0))]);
   let nextMap: { name: string; base: string | null; keys: [number, number | null][] } | Error | null = {
     name: 'Studio Map',
@@ -351,8 +351,12 @@ it('offers source drum map presets, file loading with error handling, per-key re
   const mapSelect = screen.getByLabelText('Source drum map');
   expect(mapSelect).toHaveValue('gm');
 
-  // Switch to EZdrummer 3 layout.
+  // Switch to verified EZdrummer 3 layout (no unverified disclaimer), then unverified Superior Drummer 3 layout.
   fireEvent.change(mapSelect, { target: { value: 'ezdrummer-3' } });
+  expect(screen.queryByText(/Layout numbers come from third-party notes/)).not.toBeInTheDocument();
+  expect(screen.getByText('2 of 3 MIDI keys mapped; 1 skipped.')).toBeInTheDocument();
+
+  fireEvent.change(mapSelect, { target: { value: 'superior-drummer-3' } });
   expect(screen.getByText(/Layout numbers come from third-party notes/)).toBeInTheDocument();
   expect(screen.getByText('2 of 3 MIDI keys mapped; 1 skipped.')).toBeInTheDocument();
 

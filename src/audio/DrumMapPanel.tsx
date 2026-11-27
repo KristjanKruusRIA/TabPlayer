@@ -1,7 +1,9 @@
 import { useId, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import type { model } from '@coderline/alphatab';
 import { defaultMix } from '../document-settings';
 import type { ChannelMix, DrumMapRef, EditCommand } from '../edit-types';
+import { collectTrackDrumSounds, presetRemapForTrack } from '../editor/drum-remap';
 import { catalogs, useI18n, type MessageKey } from '../i18n';
 import { BusyFieldset, CommitField, Segmented, busyGuard, busySelect } from '../ui';
 import maps from './drum-maps.json';
@@ -27,6 +29,9 @@ export interface DrumMapPanelProps {
   mix?: ChannelMix;
   /** The standard sounds the track's notes play, as `usedDrumSounds` gives them. */
   used: readonly number[];
+  /** Optional track model + index so switching the layout can also rewrite the score's drum notes when toggled on. */
+  track?: model.Track;
+  trackIndex?: number;
   busy?: boolean;
   onEdit: (edit: EditCommand) => void | Promise<void>;
 }
@@ -36,10 +41,11 @@ export interface DrumMapPanelProps {
  * It shows the layout and what the track changes from it, and edits the changes row by row. Every change is one `setTrackMix` that
  * carries the mix as it was with only `drumMap` different, so nothing else in the mix moves.
  */
-export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumMapPanelProps): React.JSX.Element {
+export function DrumMapPanel({ trackId, mix, used, track, trackIndex, busy = false, onEdit }: DrumMapPanelProps): React.JSX.Element {
   const { t } = useI18n();
   const ids = useId(), selectId = `${ids}-layout`, usedId = `${ids}-used`, resetId = `${ids}-reset`;
   const [view, setView] = useState<'track' | 'all'>('track');
+  const [updateNotes, setUpdateNotes] = useState(false);
   const [error, setError] = useState('');
   /** Why the last import or export did not happen, in words; empty while there is nothing to say. A cancelled dialog is not a reason. */
   const [fileError, setFileError] = useState('');
@@ -94,9 +100,23 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
       setFileError(t(failed, { error: t(key, { detail }) }));
     }).finally(() => { transferring.current = false; });
   };
+  const applyLayoutChange = async (nextMap: DrumMapRef | undefined): Promise<boolean> => {
+    const previousMap = map;
+    const landed = await Promise.resolve(commitNow.current(nextMap));
+    if (landed && updateNotes && track && trackIndex !== undefined) {
+      const sounds = collectTrackDrumSounds(track);
+      const entries = [...presetRemapForTrack(sounds, nextMap, previousMap).entries()].sort((a, b) => a[0] - b[0]);
+      if (entries.length > 0) {
+        await Promise.resolve(onEdit({ type: 'remapPercussion', track: trackIndex, map: entries })).catch(reason => {
+          setError(message(reason));
+        });
+      }
+    }
+    return landed;
+  };
   const importFile = () => transfer('drum_map.import_failed', async () => {
     const imported = await drumMapFiles.import();
-    if (imported) await commitNow.current(mapFromImport(imported));
+    if (imported) await applyLayoutChange(mapFromImport(imported));
   });
   const exportFile = () => transfer('drum_map.export_failed', async () => {
     await drumMapFiles.export(map, exportedName(presetId, preset?.name));
@@ -145,12 +165,18 @@ export function DrumMapPanel({ trackId, mix, used, busy = false, onEdit }: DrumM
         const chosen = event.target.value;
         if (busy || chosen === presetId) return;
         const lost = count > 0;
-        void Promise.resolve(commit({ preset: chosen })).then(landed => { if (landed) setCleared(lost ? chosen : null); });
+        void applyLayoutChange({ preset: chosen }).then(landed => { if (landed) setCleared(lost ? chosen : null); });
       }}>
         <option value="gm">{label('gm')}</option>
         {presets.some(entry => entry.id !== 'gm') && <optgroup label={t('drum_map.presets_group')}>{presets.filter(entry => entry.id !== 'gm').map(entry => <option key={entry.id} value={entry.id}>{label(entry.id)}</option>)}</optgroup>}
         {!known && <option value={presetId}>{t('drum_map.preset_unknown', { id: presetId })}</option>}
       </select>
+      {track && trackIndex !== undefined && (
+        <label className="check drum-map-remap-toggle">
+          <input type="checkbox" disabled={busy} checked={updateNotes} onChange={event => setUpdateNotes(event.target.checked)} />
+          <span>{t('drum_map.update_notes')}</span>
+        </label>
+      )}
     </div>
     <p className="muted">{status}</p>
     {unverified && preset.source && <details className="drum-map-source"><summary>{t('drum_map.source_title')}</summary><p className="muted">{source}</p></details>}

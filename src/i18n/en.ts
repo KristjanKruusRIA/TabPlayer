@@ -2389,6 +2389,7 @@ export const en = {
   'drum_map.file_bad_base': 'The layout the file names is not written as a layout id.',
   'drum_map.file_unreadable': 'The file could not be read. {detail}',
   'drum_map.file_unknown': 'The file was refused. {detail}',
+  'drum_map.update_notes': 'Update drum notes when switching layout',
   'drum_map.disclaimer': 'Layout names only say which layout a map follows. TabPlayer is not affiliated with these products or their makers.',
   // Drum map: sound, kit-piece and layout-source texts shown in the editor. Display only; map files keep their ids.
   'drum_piece.splash': 'Splash',
@@ -2537,10 +2538,12 @@ export const en = {
   'drum_sound.125': 'finger',
   'drum_sound.33': 'hit',
   'drum_sound.34': 'bell',
-  'drum_map.source_text_1': 'Key numbers from three third-party sources: a General MIDI lookup table (MIT licence), a published note chart for the library and a guide that compared the library\'s own mapping layout with General MIDI. They are not from the maker\'s documentation and have not been checked against the library itself.',
+  'drum_map.source_text_1': "Key numbers from a published note chart and an installed mapping file for the library's default mapping. They are not from the maker's documentation and have not been checked against the library itself.",
   // The layouts whose source paragraph names a product or a third-party tool have no message: the editor shows the layouts file's own text for them, and the file is the only place such names may be.
   'drum_map.source_text_2':'Key numbers from a published note chart for the library\'s default mapping and a General MIDI lookup table (MIT licence) that agree with each other. They are not from the maker\'s documentation and have not been checked against the library itself.',
-  'drum_map.source_text_3': "Key numbers read from the library's General MIDI mapping settings screen. They are not from the maker's documentation and have not been checked against the library's official documentation.",
+  'drum_map.source_text_3': "Key numbers from a published note chart and a third-party lookup table (MIT licence) for the library's default mapping. They are not from the maker's documentation and have not been checked against the library itself.",
+  'drum_map.source_text_4': "Key numbers from a published note chart and an installed mapping table for the library's default mapping. They are not from the maker's documentation and have not been checked against the library itself.",
+  'drum_map.source_text_5': "Key numbers from a published note chart for the library's default mapping. They are not from the maker's documentation and have not been checked against the library itself.",
   'plugin.error.instrument_needs_drums': 'An instrument plug-in can only be used on a drum track.',
 
   // Plug-in statuses
@@ -3255,6 +3258,10 @@ export const en = {
   'drum_remap.keep_current': 'Keep current ({name})',
   'drum_remap.remove_hits': 'Remove hits',
   'drum_remap.changed_summary': '{pieces} updated ({hits} notes affected)',
+  'drum_remap.map_only_summary': 'Track drum map will change; drum notes unchanged.',
+  'drum_remap.map_and_notes_summary': 'Track drum map will change · {pieces} updated ({hits} notes affected)',
+  'drum_remap.update_notes': 'Update drum notes for the new mapping',
+  'drum_remap.update_notes_hint': 'Off keeps the written drum pieces as they are and changes only the track’s drum map (for plug-ins, MIDI output and MIDI export). On rewrites the drum notes by re-interpreting their MIDI keys under the new mapping.',
   'drum_remap.no_changes': 'No changes',
   'drum_remap.reset_all': 'Reset',
   'drum_remap.reset_row': 'Reset',

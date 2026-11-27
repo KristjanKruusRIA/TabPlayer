@@ -21,27 +21,35 @@ function Harness({ initial = base, used = [38, 91, 42, 46, 56], onEdit }: { init
 const keyField = (sound: string) => screen.getByLabelText(new RegExp(`^Key for ${sound}( \\(|$)`)) as HTMLInputElement;
 
 describe('the library layouts in the panel', () => {
-  it('lists each under the other layouts as not yet checked, in the order the build gives them', () => {
+  it('lists General MIDI and the library layouts with checked/unchecked markers in order', () => {
     render(<Harness onEdit={vi.fn()} />);
     const select = screen.getByRole('combobox', { name: 'Drum map' });
     expect([...select.querySelectorAll('option')].map(option => option.textContent)).toEqual([
       'General MIDI (built-in kit keys)',
-      'Toontrack EZdrummer 3 — not yet checked',
+      'Toontrack EZdrummer 3',
       'Toontrack Superior Drummer 3 — not yet checked',
       'GetGood Drums Modern & Massive — not yet checked',
       'GetGood Drums Invasion — not yet checked',
       'GetGood Drums One Kit Wonder: Architects — not yet checked',
-      'GetGood Drums One Kit Wonder: Brutal (GM) — not yet checked',
+      'GetGood Drums One Kit Wonder: Brutal (GM)',
+      'GetGood Drums One Kit Wonder: Brutal — not yet checked',
+      'GetGood Drums One Kit Wonder: Metal — not yet checked',
+      'GetGood Drums One Kit Wonder: Nu Metal — not yet checked',
+      'GetGood Drums P V Matt Halpern — not yet checked',
+      'SoundBlind Drums Powerkit',
+      'SoundBlind Drums Counterkit',
     ]);
     expect(select.querySelector('optgroup')).toHaveAttribute('label', 'Other layouts');
   });
 
-  it('chooses one as one edit holding only the layout, and says what its numbers rest on', () => {
+  it('shows verified status on a verified layout and unverified status + disclosure on an unverified one', () => {
     const onEdit = vi.fn();
     render(<Harness onEdit={onEdit} />);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Drum map' }), { target: { value: 'soundblind-powerkit' } });
+    expect(screen.getByText(/Checked on 2026-11-27\./)).toHaveTextContent('Key numbers verified against the SoundBlind Drums Powerkit user manual (p. 14) and bundled MIDI files. Checked on 2026-11-27.');
     fireEvent.change(screen.getByRole('combobox', { name: 'Drum map' }), { target: { value: 'ggd-modern-and-massive' } });
-    expect(onEdit).toHaveBeenCalledTimes(1);
-    expect((onEdit.mock.calls[0][0] as { mix: ChannelMix }).mix.drumMap).toEqual({ preset: 'ggd-modern-and-massive' });
+    expect(onEdit).toHaveBeenCalledTimes(2);
+    expect((onEdit.mock.calls[1][0] as { mix: ChannelMix }).mix.drumMap).toEqual({ preset: 'ggd-modern-and-massive' });
     expect(screen.getByText(/If a sound plays wrong/)).toHaveTextContent('These key numbers come from third-party notes and have not been checked against the library. If a sound plays wrong, change its key under Keys.');
     // What the layout's own data says about its numbers stays one disclosure away.
     expect(screen.getByText(/have not been checked against the library itself\./).closest('details')).toHaveClass('drum-map-source');

@@ -1,6 +1,7 @@
 import { useI18n } from '../i18n';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { model } from '@coderline/alphatab';
+import type { ChannelMix } from '../edit-types';
 import type { EditCommand } from '../project';
 import { midiPrograms } from '../midi-programs';
 import { formatTuning } from '../tuning';
@@ -72,8 +73,8 @@ function TrackInfoRow({ score, selected, busy, locked, onEdit }: { score: model.
 }
 
 /** Tab and standard notation as two toggles, the tuning as one row that opens the Tuning dialog (with its Capo section), and the rest of the staff's settings behind More. */
-function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, refusal, engraving, drumTabLeftOff, onEdit, onAudition, onSelectStaff }: {
-  score: model.Score; selected: number; staffIndex: number; barIndex: number; busy: boolean; locked: boolean; refusal: string | null; engraving: EngravingOverrides; drumTabLeftOff: number; onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition; onSelectStaff?: (staff: number) => void;
+function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, refusal, engraving, mixes, drumTabLeftOff, onEdit, onAudition, onSelectStaff }: {
+  score: model.Score; selected: number; staffIndex: number; barIndex: number; busy: boolean; locked: boolean; refusal: string | null; engraving: EngravingOverrides; mixes?: Record<string, ChannelMix>; drumTabLeftOff: number; onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition; onSelectStaff?: (staff: number) => void;
 }) {
   const { t } = useI18n();
   const noteId = useId();
@@ -190,7 +191,7 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
     <TuningRow label={t('track_settings.tuning_row')} notes={pitches} title={savedName ? `${savedName}: ${pitches}` : pitches} unavailable={tuningUnavailable} busy={busy} locked={locked} onOpen={() => { setCapoRefusal(null); setTuningFor(trackIdentity(current)); }} onPlay={onAudition && (() => audition([...tuned.tuning], true))} playDisabled={strings > 12} />
     {staff.isPercussion && <button type="button" aria-haspopup="dialog" {...busyGuard({ busy, disabled: locked, className: 'drum-remap-open', onClick: () => setDrumRemapFor(trackIdentity(current)) })}>{t('track_settings.drum_mapping')}</button>}
     {dialogTrack && <TuningDialog pitches={dialogBase!.tuning} name={dialogBase!.stringTuning.name} staff={dialogTrack.staves[dialogStaffIndex]} staffCount={dialogTrack.staves.length} busy={busy} locked={locked} refusal={capoRefusal ?? refusal} defaultInstrument={dialogTrack.playbackInfo.program >= 32 && dialogTrack.playbackInfo.program <= 39 ? 'bass' : undefined} onApply={applyTuning} onClose={() => setTuningFor(null)} onAudition={onAudition && ((list, strum) => onAudition({ trackId: trackIdentity(dialogTrack) }, list, strum))} />}
-    {remapTrack && <DrumRemapDialog score={score} trackIndex={remapIndex} busy={busy} locked={locked} onEdit={command => { void onEdit(command); }} onClose={() => setDrumRemapFor(null)} />}
+    {remapTrack && <DrumRemapDialog score={score} trackIndex={remapIndex} trackId={trackIdentity(remapTrack)} mix={mixes?.[trackIdentity(remapTrack)]} busy={busy} locked={locked} onEdit={command => { void onEdit(command); }} onClose={() => setDrumRemapFor(null)} />}
     <BusyFieldset busy={busy} className="track-notation-more">
       <details className="inspector-more">
         <summary>{t('inspector.more')}</summary>
@@ -210,12 +211,13 @@ function NotationSection({ score, selected, staffIndex, barIndex, busy, locked, 
  * The Track tab in the manner of Guitar Pro's track inspector: the track actions and one Information row, Musical notation
  * (two toggles, the tuning row, More), then whatever the app puts under Sounds and Interpretation and MIDI output. The Information row's arrows select the previous and next track; adding and moving tracks are in the Track menu.
  */
-export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, locked = false, refusal = null, engraving, drumTabLeftOff = 0, onEdit, onAudition, onSelectStaff, onStepTrack, sounds, interpretation, midi }: {
+export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, locked = false, refusal = null, engraving, mixes, drumTabLeftOff = 0, onEdit, onAudition, onSelectStaff, onStepTrack, sounds, interpretation, midi }: {
   score: model.Score; selected: number;
   /** The staff and bar under the cursor: the toggles, clef and transposition act on that staff. */
   staff?: number; bar?: number;
   busy: boolean; /** Finalized: edits are disabled, but tuning audition is not. */ locked?: boolean; /** The app's message for the edit it last refused, shown in the Tuning dialog. */ refusal?: string | null;
   /** The document's engraving: a drum track's TAB and notation toggles read and write its profile there. Without it the default (no profiles) is assumed. */ engraving?: EngravingOverrides;
+  /** Per-track mixes, so Drum mapping can show and update the track's drum map preset alongside note remapping. */ mixes?: Record<string, ChannelMix>;
   /** How many of the selected drum track's hits the drum tab leaves off (more than six sounds on one beat); shown only when above zero. */ drumTabLeftOff?: number;
   onEdit: (command: EditCommand) => unknown; onAudition?: TuningAudition;
   /** Moves the cursor to another staff of the selected track; the staff selector (shown for a track with several staves) uses it. */
@@ -245,7 +247,7 @@ export function TrackSettingsPanel({ score, selected, staff = 0, bar = 0, busy, 
       <TrackInfoRow score={score} selected={selected} busy={busy} locked={locked} onEdit={onEdit} />
     </section>
     <section className="inspector-section" aria-labelledby="inspector-track-notation"><h3 id="inspector-track-notation">{t('inspector.musical_notation')}</h3>
-      <NotationSection score={score} selected={selected} staffIndex={staff} barIndex={bar} busy={busy} locked={locked} refusal={refusal} engraving={engraving ?? defaultEngraving()} drumTabLeftOff={drumTabLeftOff} onEdit={onEdit} onAudition={onAudition} onSelectStaff={onSelectStaff} />
+      <NotationSection score={score} selected={selected} staffIndex={staff} barIndex={bar} busy={busy} locked={locked} refusal={refusal} engraving={engraving ?? defaultEngraving()} mixes={mixes} drumTabLeftOff={drumTabLeftOff} onEdit={onEdit} onAudition={onAudition} onSelectStaff={onSelectStaff} />
     </section>
     {sounds && <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{sounds}</section>}
     {interpretation}

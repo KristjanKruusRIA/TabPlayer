@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { model } from '@coderline/alphatab';
 import { blankProject } from '../project';
 import { previewEdit } from '../engine';
+import { exportMidi } from '../export/midi';
 import { collectTrackDrumSounds, presetRemapForTrack, remapPercussionTrack } from './drum-remap';
 
 function drumScore(articulations: number[][]): { score: model.Score; trackIndex: number } {
@@ -51,5 +52,38 @@ describe('drum-remap', () => {
     const sounds = collectTrackDrumSounds(score.tracks[trackIndex]);
     const suggestions = presetRemapForTrack(sounds, { preset: 'ezdrummer-3' });
     expect(suggestions instanceof Map).toBe(true);
+  });
+
+  it('translates drum notes from one mapping to another and exports under the target mapping', () => {
+    // Score hits 43 and 36 were interpreted under soundblind-powerkit (keys 42 and 36).
+    // Switching to gm with note updates ON re-interprets those keys into GM articulations 42 (closed hat) and 36 (kick).
+    const { score, trackIndex } = drumScore([[43], [36]]);
+    const sounds = collectTrackDrumSounds(score.tracks[trackIndex]);
+    const fromPowerkitToGm = presetRemapForTrack(sounds, undefined, { preset: 'soundblind-powerkit' });
+    expect(fromPowerkitToGm).toEqual(new Map([[43, 42]]));
+
+    remapPercussionTrack(score, trackIndex, [...fromPowerkitToGm.entries()].sort((a, b) => a[0] - b[0]));
+    const exported = exportMidi(score, { tracks: [trackIndex], range: null }, { drumMaps: [undefined, { preset: 'soundblind-counterkit' }] });
+    // Extract channel-9 NoteOn keys from exported SMF bytes:
+    const noteKeys: number[] = [];
+    const view = new DataView(exported.buffer, exported.byteOffset, exported.byteLength);
+    let p = 14;
+    while (p < exported.length) {
+      p += 4;
+      const end = p + 4 + view.getUint32(p);
+      p += 4;
+      let status = 0;
+      const vlq = () => { let n = 0; do { n = exported[p++]; } while (n & 128); };
+      while (p < end) {
+        vlq();
+        let ev = exported[p++];
+        if (ev < 128) { p--; ev = status; } else if (ev < 240) status = ev;
+        if (ev === 255) { p++; let l = 0, b = 0; do { b = exported[p++]; l = (l << 7) | (b & 127); } while (b & 128); p += l; }
+        else if (ev === 240 || ev === 247) { let l = 0, b = 0; do { b = exported[p++]; l = (l << 7) | (b & 127); } while (b & 128); p += l; }
+        else { const len = (ev & 240) === 192 || (ev & 240) === 208 ? 1 : 2; if ((ev & 240) === 0x90 && (ev & 15) === 9 && exported[p + 1] > 0) noteKeys.push(exported[p]); p += len; }
+      }
+    }
+    // Under soundblind-counterkit: 42 (closed hat) -> key 62, 36 (kick) -> key 36.
+    expect(noteKeys).toEqual([62, 36]);
   });
 });

@@ -628,4 +628,40 @@ describe('drum map files', () => {
     expect(drumMapFiles.import).not.toHaveBeenCalled();
     expect(drumMapFiles.export).not.toHaveBeenCalled();
   });
+
+  it('remaps the score notes when the Update drum notes toggle is checked before switching layout', async () => {
+    const onEdit = vi.fn();
+    const user = userEvent.setup();
+    const built = previewEdit(blankProject(), { type: 'addPercussionTrack', name: 'Drums', program: 0 });
+    const trackIndex = built.score.tracks.findIndex(t => t.isPercussion);
+    const track = built.score.tracks[trackIndex];
+    const beat0 = track.staves[0].bars[0].voices[0].beats[0];
+    beat0.isEmpty = false;
+    const snare = new model.Note();
+    snare.percussionArticulation = 91; // rim shot (key 38 in GM, key 40 in test-kit)
+    beat0.addNote(snare);
+
+    const { rerender } = render(
+      <DrumMapPanel trackId="base/1" mix={base} used={[91]} track={track} trackIndex={trackIndex} onEdit={onEdit} />,
+    );
+    const toggle = screen.getByLabelText('Update drum notes when switching layout');
+    expect(toggle).not.toBeChecked();
+
+    // Switch layout with toggle OFF -> only setTrackMix.
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Drum map' }), 'test-kit');
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit.mock.calls[0][0].type).toBe('setTrackMix');
+
+    // Switch back with toggle ON -> setTrackMix + remapPercussion from test-kit back to gm (key 40 in test-kit -> GM snare 38/40? Wait: in test-kit, id 91 -> key 40, and under GM key 40 is electric snare 40).
+    onEdit.mockReset();
+    rerender(
+      <DrumMapPanel trackId="base/1" mix={{ ...base, drumMap: { preset: 'test-kit' } }} used={[91]} track={track} trackIndex={trackIndex} onEdit={onEdit} />,
+    );
+    await user.click(toggle);
+    expect(toggle).toBeChecked();
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Drum map' }), 'gm');
+    await waitFor(() => expect(onEdit).toHaveBeenCalledTimes(2));
+    expect(onEdit.mock.calls[0][0]).toEqual({ type: 'setTrackMix', trackId: 'base/1', mix: base });
+    expect(onEdit.mock.calls[1][0]).toEqual({ type: 'remapPercussion', track: trackIndex, map: [[91, 40]] });
+  });
 });

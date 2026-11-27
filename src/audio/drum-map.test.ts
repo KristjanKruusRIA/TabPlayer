@@ -154,24 +154,65 @@ it('compares a chosen map with the stored one by what they mean, so choosing an 
 });
 
 it('carries the revision of each preset, an integer, so a later change to the data is visible', () => {
-  expect(drumMapPresets().map(preset => [preset.id, preset.revision])).toEqual([['gm', 1], ['ezdrummer-3', 1], ['superior-drummer-3', 1], ['ggd-modern-and-massive', 1], ['ggd-invasion', 1], ['ggd-okw-architects', 1], ['ggd-okw-brutal-gm', 1]]);
+  expect(drumMapPresets().map(preset => [preset.id, preset.revision])).toEqual([
+    ['gm', 1],
+    ['ezdrummer-3', 2],
+    ['superior-drummer-3', 1],
+    ['ggd-modern-and-massive', 1],
+    ['ggd-invasion', 1],
+    ['ggd-okw-architects', 1],
+    ['ggd-okw-brutal-gm', 1],
+    ['ggd-okw-brutal', 1],
+    ['ggd-okw-metal', 1],
+    ['ggd-okw-nu-metal', 1],
+    ['ggd-p5-matt-halpern', 1],
+    ['soundblind-powerkit', 1],
+    ['soundblind-counterkit', 1],
+  ]);
   const read = readPresets({ presets: [{ id: 'a', revision: 3 }, { id: 'b', revision: -1 }, { id: 'c', revision: 'x' }, { id: 'd', revision: 1.5 }, { id: 'e' }] });
   expect(read.presets.map(preset => preset.id)).toEqual(['a', 'e']);
   expect(read.problems).toHaveLength(3);
 });
 
-// The six library layouts. Their names are compatibility labels, as the owner decided on 2026-11-17 for ticket THE-219; they say which layout a map
+// The twelve library layouts. Their names are compatibility labels, as the owner decided on 2026-11-17 for ticket THE-219; they say which layout a map
 // follows and claim no affiliation. The names are allowed in the presets file, its tests and the docs, and nowhere else in the app's sources.
-const LIBRARY_IDS = ['ezdrummer-3', 'superior-drummer-3', 'ggd-modern-and-massive', 'ggd-invasion', 'ggd-okw-architects', 'ggd-okw-brutal-gm'];
+const LIBRARY_IDS = [
+  'ezdrummer-3',
+  'superior-drummer-3',
+  'ggd-modern-and-massive',
+  'ggd-invasion',
+  'ggd-okw-architects',
+  'ggd-okw-brutal-gm',
+  'ggd-okw-brutal',
+  'ggd-okw-metal',
+  'ggd-okw-nu-metal',
+  'ggd-p5-matt-halpern',
+  'soundblind-powerkit',
+  'soundblind-counterkit',
+];
+const VERIFIED_IDS = new Set(['ezdrummer-3', 'ggd-okw-brutal-gm', 'soundblind-powerkit', 'soundblind-counterkit']);
 const libraries = () => drumMapPresets().filter(preset => preset.id !== 'gm');
 const gmKey = new Map(maps.sounds as [number, number][]);
 
-it('ships these library layouts, each unverified and at revision 1', () => {
+it('ships these library layouts, with expected verification states and revisions', () => {
   expect(libraries().map(preset => preset.id)).toEqual(LIBRARY_IDS);
-  expect(libraries().map(preset => preset.name)).toEqual(['Toontrack EZdrummer 3', 'Toontrack Superior Drummer 3', 'GetGood Drums Modern & Massive', 'GetGood Drums Invasion', 'GetGood Drums One Kit Wonder: Architects', 'GetGood Drums One Kit Wonder: Brutal (GM)']);
+  expect(libraries().map(preset => preset.name)).toEqual([
+    'Toontrack EZdrummer 3',
+    'Toontrack Superior Drummer 3',
+    'GetGood Drums Modern & Massive',
+    'GetGood Drums Invasion',
+    'GetGood Drums One Kit Wonder: Architects',
+    'GetGood Drums One Kit Wonder: Brutal (GM)',
+    'GetGood Drums One Kit Wonder: Brutal',
+    'GetGood Drums One Kit Wonder: Metal',
+    'GetGood Drums One Kit Wonder: Nu Metal',
+    'GetGood Drums P V Matt Halpern',
+    'SoundBlind Drums Powerkit',
+    'SoundBlind Drums Counterkit',
+  ]);
   for (const preset of libraries()) {
-    expect(preset.revision, preset.id).toBe(1);
-    expect(preset.state, preset.id).toBe('unverified');
+    expect(preset.revision, preset.id).toBe(preset.id === 'ezdrummer-3' ? 2 : 1);
+    expect(preset.state, preset.id).toBe(VERIFIED_IDS.has(preset.id) ? 'verified' : 'unverified');
   }
 });
 
@@ -183,11 +224,14 @@ it('holds, for every library layout, all 94 sounds once, keys in range, and a st
     ids.add(preset.id);
     expect(preset.name?.trim(), preset.id).toBeTruthy();
     expect(preset.source?.trim(), `${preset.id} says where its numbers came from`).toBeTruthy();
-    expect(preset.source, `${preset.id} says it is not checked`).toMatch(/not been checked/);
+    if (preset.state === 'verified') {
+      expect(preset.checked, preset.id).toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), against: expect.any(String) });
+      expect(preset.source, preset.id).toMatch(/verified/i);
+    } else {
+      expect(preset.source, `${preset.id} says it is not checked`).toMatch(/not been checked/);
+    }
     expect(preset.rows?.map(([id]) => id), preset.id).toEqual(maps.sounds.map(([id]) => id));
     for (const [, key] of preset.rows!) expect(key === null || (Number.isInteger(key) && key >= 0 && key <= 127), preset.id).toBe(true);
-    // A layout that says nothing it checked is unverified; one that did names the date and what it was checked against.
-    if (preset.state === 'verified') expect(preset.checked, preset.id).toEqual({ date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), against: expect.any(String) });
     expect(preset.rows!.some(([id, key]) => key !== gmKey.get(id)), `${preset.id} is not General MIDI under another name`).toBe(true);
   }
 });
@@ -277,6 +321,10 @@ it('inverts General MIDI and library layouts for incoming MIDI keys, including c
   expect(ezd[44]).toBe(44);
   expect(ezd[10]).toBe(44);
   expect(ezd[50]).toBe(97);
+  expect(ezd[52]).toBe(52);
+  expect(ezd[54]).toBe(96);
+  expect(ezd[59]).toBe(93);
+  expect(ezd[118]).toBe(94);
   expect(ezd[66]).toBeNull();
 
   // Superior Drummer 3: Ride edge 59 beats Ride 2 (59) via KIT_TECHNIQUES; kick 36 beats 35; China 52 beats Splash 55.
@@ -346,6 +394,57 @@ it('inverts General MIDI and library layouts for incoming MIDI keys, including c
   expect(brutalGm[52]).toBe(52);
   expect(brutalGm[74]).toBe(96);
   expect(brutalGm[55]).toBe(55);
+
+  const powerkit = resolveInputDrumMap({ preset: 'soundblind-powerkit' });
+  expect(powerkit[36]).toBe(36);
+  expect(powerkit[39]).toBe(38);
+  expect(powerkit[40]).toBe(91);
+  expect(powerkit[34]).toBe(37);
+  expect(powerkit[63]).toBe(42);
+  expect(powerkit[61]).toBe(92);
+  expect(powerkit[60]).toBe(46);
+  expect(powerkit[68]).toBe(44);
+  expect(powerkit[47]).toBe(49);
+  expect(powerkit[57]).toBe(57);
+  expect(powerkit[55]).toBe(51);
+  expect(powerkit[53]).toBe(93);
+  expect(powerkit[56]).toBe(53);
+  expect(powerkit[49]).toBe(52);
+
+  const counterkit = resolveInputDrumMap({ preset: 'soundblind-counterkit' });
+  expect(counterkit[36]).toBe(36);
+  expect(counterkit[39]).toBe(38);
+  expect(counterkit[40]).toBe(91);
+  expect(counterkit[62]).toBe(42);
+  expect(counterkit[61]).toBe(92);
+  expect(counterkit[60]).toBe(46);
+  expect(counterkit[63]).toBe(44);
+  expect(counterkit[49]).toBe(49);
+  expect(counterkit[59]).toBe(93);
+  expect(counterkit[52]).toBe(52);
+  expect(counterkit[54]).toBe(96);
+
+  const metal = resolveInputDrumMap({ preset: 'ggd-okw-metal' });
+  expect(metal[24]).toBe(36);
+  expect(metal[26]).toBe(38);
+  expect(metal[36]).toBe(41);
+  expect(metal[73]).toBe(55);
+
+  const nuMetal = resolveInputDrumMap({ preset: 'ggd-okw-nu-metal' });
+  expect(nuMetal[24]).toBe(36);
+  expect(nuMetal[27]).toBe(40);
+  expect(nuMetal[63]).toBe(93);
+  expect(nuMetal[64]).toBe(94);
+
+  const halpern = resolveInputDrumMap({ preset: 'ggd-p5-matt-halpern' });
+  expect(halpern[24]).toBe(36);
+  expect(halpern[26]).toBe(38);
+  expect(halpern[59]).toBe(93);
+
+  const brutalDef = resolveInputDrumMap({ preset: 'ggd-okw-brutal' });
+  expect(brutalDef[24]).toBe(36);
+  expect(brutalDef[26]).toBe(38);
+  expect(brutalDef[75]).toBe(55);
 
   // Custom DrumMapRef + per-key overrides (remap key, skip key, ignore invalid key/id).
   const overridden = resolveInputDrumMap(

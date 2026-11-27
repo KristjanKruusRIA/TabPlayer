@@ -39,6 +39,8 @@ export interface TempoPoint { beat: number; bpm: number; linear: boolean; unit?:
 export interface StaffSettings {
   tuning: number[]; capo: number; transposition: number; displayTransposition: number; clef: number;
   showTab: boolean; showNotation: boolean;
+  /** Optional slash notation flag; omitted keeps the staff's existing flag (false on addStaff). */
+  showSlash?: boolean;
   /** Optional document tuning name; omitted keeps the staff's name, '' clears it. */
   tuningName?: string;
   /** Optional capo over some strings; omitted keeps the staff's, `{fret:0,strings:[]}` clears it. */
@@ -139,7 +141,7 @@ export type SingleCommand = LyricsCommand | GestureCommand | BarGestureCommand |
   | { type: 'fitVoice'; track: number; staff: number; bar: number; voice: number; shorten?: true }
   | { type: 'appendMeasure' }
   | { type: 'removeMeasure'; bar: number }
-  | { type: 'addTrack'; name: string; tuning: number[]; program: number; tuningName?: string }
+  | { type: 'addTrack'; name: string; tuning: number[]; program: number; tuningName?: string; shortName?: string; color?: string; showTab?: boolean; showNotation?: boolean; showSlash?: boolean; lowerTuning?: number[]; lowerTuningName?: string; sound?: TrackSound }
   | { type: 'removeTrack'; track: number }
   | { type: 'moveTrack'; track: number; to: number }
   | { type: 'duplicateTrack'; track: number }
@@ -154,8 +156,8 @@ export type SingleCommand = LyricsCommand | GestureCommand | BarGestureCommand |
   | { type: 'setNoteSpelling'; target: BeatTarget; noteIndex: number; accidentalMode: number }
   | { type: 'setNoteCautionary'; target: BeatTarget; noteIndex: number; cautionary: boolean }
   | { type: 'setNoteCourtesy'; target: BeatTarget; noteIndex: number; courtesy: boolean }
-  | { type: 'addPitchedTrack'; name: string; program: number }
-  | { type: 'addPercussionTrack'; name: string; program: number }
+  | { type: 'addPitchedTrack'; name: string; program: number; shortName?: string; color?: string; showNotation?: boolean; showSlash?: boolean; clef?: number; lowerClef?: number; sound?: TrackSound }
+  | { type: 'addPercussionTrack'; name: string; program: number; shortName?: string; color?: string; showTab?: boolean; showNotation?: boolean; showSlash?: boolean; sound?: TrackSound }
   | { type: 'addPitchedNote'; target: BeatTarget; pitch: number }
   | { type: 'setPitchedNote'; target: BeatTarget; noteIndex: number; pitch: number }
   | { type: 'addPercussionNote'; target: BeatTarget; articulation: number }

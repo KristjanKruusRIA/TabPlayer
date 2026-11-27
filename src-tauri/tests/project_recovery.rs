@@ -177,6 +177,14 @@ fn checkpoint_rejects_invalid_cursor_saved_refs_and_versions() {
                     tuning: vec![],
                     program: 0,
                     tuning_name: None,
+                    short_name: None,
+                    color: None,
+                    show_tab: None,
+                    show_notation: None,
+                    show_slash: None,
+                    lower_tuning: None,
+                    lower_tuning_name: None,
+                    sound: None,
                 }]
             }
             "saved-asset" => {

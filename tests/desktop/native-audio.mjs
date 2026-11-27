@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,writeNote,moveCursor,setFret,revealDock,revealPlaybackControls,setPlaybackSpeed} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,openAddTrackDialog,revealLeftTask,writeNote,moveCursor,setFret,revealDock,revealPlaybackControls,setPlaybackSpeed} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,mkdirSync,readFileSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
@@ -70,7 +70,9 @@ try {
   const viewMode=instrument.getByRole('combobox',{name:/^Instrument view mode/});await viewMode.selectOption('keys');await instrument.locator('g[data-key="69"][data-active="true"]').waitFor({state:'visible'});await viewMode.selectOption('drums');await instrument.locator('[data-percussion="cabasa"][data-active="true"]').waitFor({state:'visible'});await viewMode.selectOption('bass');await instrument.getByRole('group',{name:'Bass fretboard'}).waitFor();await viewMode.selectOption('auto');await instrument.getByRole('group',{name:'Guitar fretboard'}).waitFor();await instrument.screenshot({path:join(directory,'instrument-view.png')});
   await revealPlaybackControls(page);await page.getByLabel('Seek measure',{exact:true}).fill('4');await button('Seek');await waitStatus(s=>Math.abs(s.tick-11520)<.01);
   await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await page.waitForFunction(()=>document.querySelectorAll('.instrument-view g[data-note-id]').length===0);
-  await button('Add track');await ready();await button('Track 2: Bass');await instrument.getByRole('group',{name:'Bass fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),4);
+  const addDlg=await openAddTrackDialog(page);
+  await addDlg.getByRole('listbox',{name:'Instrument groups',exact:true}).getByRole('option',{name:'Bass',exact:true}).click();
+  await addDlg.getByRole('button',{name:'Add track',exact:true}).click();await idle();await ready();await button('Track 2: Bass');await instrument.getByRole('group',{name:'Bass fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),4);
   await writeNote(page,4,2);await idle();await ready();await button('Play');await waitStatus(s=>s.playing);await instrument.locator('g[data-note-id][data-string="4"][data-fret="2"][data-key="45"]').waitFor({state:'visible'});
   await button('Track 1: Guitar');await instrument.getByRole('group',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),6);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await button('Track 2: Bass');await button('Remove track');await ready();await instrument.getByRole('group',{name:'Guitar fretboard'}).waitFor();
   await moveCursor(page,{string:6});await button('Hide instrument');assert.equal(await instrument.count(),0);

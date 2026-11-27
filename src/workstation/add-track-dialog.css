@@ -1,0 +1,350 @@
+/* GP8-style Add Track dialog layout using TabPlayer's design tokens. */
+.tp-dialog.add-track-dialog {
+  width: min(680px, calc(100vw - 32px));
+}
+
+.add-track-dialog .tp-dialog-body {
+  padding: 14px 16px;
+}
+
+.add-track-body {
+  display: grid;
+  gap: 12px;
+  background: transparent;
+  font-size: 13px;
+}
+
+/* 4 category tabs at the top */
+.add-track-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--tp-line-strong);
+  border-radius: var(--tp-radius-m);
+  overflow: hidden;
+  background: var(--tp-raised);
+}
+
+.add-track-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 54px;
+  padding: 6px 8px;
+  border: 0;
+  border-right: 1px solid var(--tp-line-subtle);
+  background: transparent;
+  color: var(--tp-muted);
+  font: 500 12px/1.2 var(--tp-font-ui);
+  cursor: pointer;
+}
+
+.add-track-tab:last-child {
+  border-right: 0;
+}
+
+.add-track-dialog .add-track-tab:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--tp-panel) 60%, var(--tp-raised));
+  color: var(--tp-text);
+  border-color: transparent;
+}
+
+.add-track-dialog .add-track-tab[aria-selected='true']:is(*, :hover) {
+  background: var(--tp-edit);
+  color: #0e1624;
+  font-weight: 600;
+  border-color: transparent;
+}
+
+.add-track-tab:focus-visible {
+  outline: 2px solid var(--tp-text);
+  outline-offset: -2px;
+}
+
+.add-track-tab svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* 2-column browser */
+.add-track-browser {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.add-track-listbox {
+  height: 152px;
+  overflow-y: auto;
+  border: 1px solid var(--tp-line-strong);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-input);
+  padding: 4px 0;
+  scrollbar-color: var(--tp-line-strong) var(--tp-input);
+}
+
+.add-track-listbox:focus-visible {
+  outline: 2px solid var(--tp-edit);
+  outline-offset: 1px;
+}
+
+.add-track-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 26px;
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--tp-text);
+  font: 400 13px/1.3 var(--tp-font-ui);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.add-track-dialog .add-track-option:hover:enabled {
+  background: var(--tp-raised);
+  border-color: transparent;
+}
+
+.add-track-dialog .add-track-option[aria-selected='true']:is(*, :hover) {
+  background: var(--tp-edit);
+  color: #0e1624;
+  font-weight: 600;
+  border-color: transparent;
+}
+
+/* Settings block */
+.add-track-settings {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.add-track-settings-title {
+  margin: 0 0 2px;
+  font: 700 13px/1.2 var(--tp-font-ui);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--tp-text);
+}
+
+.add-track-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.add-track-row[data-disabled='true'] {
+  opacity: 0.45;
+}
+
+.add-track-row-label {
+  color: var(--tp-muted);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.add-track-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.add-track-info-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.add-track-dialog .add-track-color {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 2px;
+  border: 1px solid var(--tp-line-strong);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-raised);
+  cursor: pointer;
+}
+
+.add-track-dialog .add-track-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.add-track-dialog .add-track-color::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+.add-track-icon {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--tp-line-subtle);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-raised);
+  color: var(--tp-text);
+}
+
+.add-track-dialog input:not([type='color']),
+.add-track-dialog select {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 28px;
+  padding: 3px 8px;
+  color: var(--tp-text);
+  background: var(--tp-input);
+  border: 1px solid var(--tp-line-strong);
+  border-radius: var(--tp-radius-s);
+  font: 400 13px/1.3 var(--tp-font-ui);
+}
+
+.add-track-dialog select:disabled,
+.add-track-dialog button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.add-track-name-input {
+  flex: 1 1 auto;
+}
+
+.add-track-short-input {
+  flex: 0 0 96px;
+  width: 96px;
+}
+
+/* Notation & staff toggles */
+.add-track-notation-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.add-track-toggle-group {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--tp-line-subtle);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-input);
+}
+
+.add-track-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--tp-muted);
+  cursor: pointer;
+}
+
+.add-track-dialog .add-track-toggle:hover:not(:disabled) {
+  background: var(--tp-raised);
+  color: var(--tp-text);
+  border-color: transparent;
+}
+
+.add-track-dialog .add-track-toggle[aria-pressed='true']:is(*, :hover) {
+  background: var(--tp-edit);
+  color: #0e1624;
+  border-color: var(--tp-edit);
+}
+
+/* Staff tuning / clef row */
+.add-track-staff-grid {
+  display: grid;
+  grid-template-columns: minmax(86px, 0.72fr) minmax(96px, 0.85fr) minmax(120px, 1.1fr) auto;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.add-track-tuning-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  max-width: 165px;
+  padding: 3px 8px;
+  border: 1px solid var(--tp-line-strong);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-raised);
+  color: var(--tp-text);
+  font: 400 12px/1.2 var(--tp-font-mono);
+  cursor: pointer;
+}
+
+.add-track-tuning-btn:hover:not(:disabled) {
+  border-color: var(--tp-edit);
+}
+
+.add-track-tuning-btn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.add-track-clef-select {
+  width: min(220px, 100%);
+}
+
+/* Sound row */
+.add-track-sound-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.add-track-sound-select {
+  flex: 1 1 auto;
+}
+
+.add-track-sound-play {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 28px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--tp-line-strong);
+  border-radius: var(--tp-radius-s);
+  background: var(--tp-raised);
+  color: var(--tp-text);
+  cursor: pointer;
+}
+
+.add-track-sound-play:hover:not(:disabled) {
+  border-color: var(--tp-edit);
+}
+
+@media (max-width: 600px) {
+  .add-track-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .add-track-row-label {
+    text-align: left;
+  }
+  .add-track-staff-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

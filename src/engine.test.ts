@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { midi, model, Settings } from '@coderline/alphatab';
 import { buildScore, buildDocument, previewEdit, exportGp, validateProject, describeSelection, trackIdentity, replayDocumentSettings } from './engine';
 import { getLyricsSource } from './editor/lyrics-source';
+import { defaultEffects } from './document-settings';
 import { exporter } from '@coderline/alphatab';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 
@@ -357,5 +358,82 @@ describe('score editing', () => {
   it('rejects incompatible native documents and malformed replay commands', () => {
     expect(() => validateProject({...base(),engineVersion:'future'})).toThrow(/version|requires/i);
     expect(() => buildScore({...base(),edits:[{type:'unknown'}]} as never)).toThrow();
+  });
+  it('supports GP8 add-track color, shortName, notation flags, grand staff, and sound through document build, replay, and GP export', () => {
+    const bassSound = { voiceId: 'gp8:Jazz-Bass', presetId: 'bass' as const, effects: defaultEffects() };
+    const pianoSound = { voiceId: 'gp8:German-APiano', presetId: 'gm' as const, effects: defaultEffects() };
+    const drumSound = { voiceId: 'gp8:Drumkit-Custom', presetId: 'gm' as const, effects: defaultEffects(), drumKit: 8 };
+    const project = {
+      ...base(),
+      edits: [
+        {
+          type: 'addTrack' as const,
+          name: 'Double Bass',
+          tuning: [43, 38, 33, 28],
+          program: 33,
+          tuningName: 'Standard E',
+          shortName: 'd.b.',
+          color: '#3d7ac7',
+          showTab: true,
+          showNotation: false,
+          showSlash: true,
+          lowerTuning: [43, 38, 33, 28],
+          lowerTuningName: 'Standard E',
+          sound: bassSound,
+        },
+        {
+          type: 'addPitchedTrack' as const,
+          name: 'Piano',
+          program: 0,
+          shortName: 'pno.',
+          color: '#48a868',
+          showNotation: true,
+          showSlash: false,
+          clef: model.Clef.G2,
+          lowerClef: model.Clef.F4,
+          sound: pianoSound,
+        },
+        {
+          type: 'addPercussionTrack' as const,
+          name: 'Kit',
+          program: 0,
+          shortName: 'dr.',
+          color: '#7d8a99',
+          showTab: true,
+          showNotation: true,
+          showSlash: false,
+          sound: drumSound,
+        },
+      ],
+    };
+    const built = buildDocument(project);
+    const [, stringed, pitched, drums] = built.score.tracks;
+    expect(stringed.shortName).toBe('d.b.');
+    expect([stringed.color.r, stringed.color.g, stringed.color.b]).toEqual([0x3d, 0x7a, 0xc7]);
+    expect(stringed.staves).toHaveLength(2);
+    expect([stringed.staves[0].showTablature, stringed.staves[0].showStandardNotation, stringed.staves[0].showSlash]).toEqual([true, false, true]);
+
+    expect(pitched.shortName).toBe('pno.');
+    expect([pitched.color.r, pitched.color.g, pitched.color.b]).toEqual([0x48, 0xa8, 0x68]);
+    expect(pitched.staves).toHaveLength(2);
+    expect([pitched.staves[0].bars[0].clef, pitched.staves[1].bars[0].clef]).toEqual([model.Clef.G2, model.Clef.F4]);
+
+    expect(drums.shortName).toBe('dr.');
+    expect([drums.color.r, drums.color.g, drums.color.b]).toEqual([0x7d, 0x8a, 0x99]);
+    const stringedId = trackIdentity(stringed), pitchedId = trackIdentity(pitched), drumsId = trackIdentity(drums);
+    expect(built.settings.sounds[stringedId].voiceId).toBe('gp8:Jazz-Bass');
+    expect(built.settings.sounds[pitchedId].voiceId).toBe('gp8:German-APiano');
+    expect(built.settings.sounds[drumsId].drumKit).toBe(8);
+    expect(built.settings.engraving.profiles).toContainEqual({ trackId: drumsId, profile: 'standardTab' });
+
+    const replayed = replayDocumentSettings(project, built);
+    expect(replayed.settings.sounds[stringedId].voiceId).toBe('gp8:Jazz-Bass');
+    expect(replayed.settings.engraving.profiles).toContainEqual({ trackId: drumsId, profile: 'standardTab' });
+
+    const bytes = exportGp(built.score);
+    const reloaded = buildScore({ ...base(), base: { kind: 'file', filename: 'score.gp', bytesBase64: Buffer.from(bytes).toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') } });
+    expect([reloaded.tracks[1].color.r, reloaded.tracks[1].color.g, reloaded.tracks[1].color.b]).toEqual([0x3d, 0x7a, 0xc7]);
+    expect([reloaded.tracks[2].color.r, reloaded.tracks[2].color.g, reloaded.tracks[2].color.b]).toEqual([0x48, 0xa8, 0x68]);
+    expect(reloaded.tracks[2].staves).toHaveLength(2);
   });
 });

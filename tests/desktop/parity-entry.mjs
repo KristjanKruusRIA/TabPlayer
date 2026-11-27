@@ -28,7 +28,7 @@ try {
   const change=(label,value)=>page.getByLabel(label,{exact:true}).fill(String(value));
   // The Selection tab is gone: pitched and percussion entry are in Properties > Note, directions in Properties > Bar; its dialog stays open until a button inside it is clicked (the helper closes it).
   const note=()=>openProperties(page,'note'),bar=()=>openProperties(page,'bar');
-  await openAddTrackDialog(page);await change('New notation track name','Piano');await button('Add pitched track');await button('Track 2: Piano');
+  const addDlg1=await openAddTrackDialog(page);await addDlg1.getByRole('tab',{name:'Orchestra',exact:true}).click();await change('New track name','Piano');await button('Add track');await button('Track 2: Piano');
   await note();await change('Written pitch','C4');await button('Add pitched note');await note();await change('Written pitch','E4');await button('Add pitched note');
   await note();await page.getByRole('combobox',{name:/^Chord note/}).selectOption('1');await change('Written pitch','F4');await button('Update pitched note');
   assert.equal((await snapshot()).project.edits.at(-1).pitch,65);
@@ -37,7 +37,7 @@ try {
   {const dialog=await note();await openSection(dialog,/^Notes & techniques$/);await dialog.getByRole('combobox',{name:/^Dynamics/}).selectOption('3');await idle();await closeProperties(page);}
   assert.equal((await snapshot()).project.edits.at(-1).patch.dynamics,3);
   await page.locator('.workstation-inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-piano.png')});
-  await openAddTrackDialog(page);await change('New notation track name','Kit');await button('Add percussion track');await button('Track 3: Kit');
+  const addDlg2=await openAddTrackDialog(page);await addDlg2.getByRole('tab',{name:'Drums',exact:true}).click();await change('New track name','Kit');await button('Add track');await button('Track 3: Kit');
   await note();await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('91');await button('Add percussion note');
   await note();await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('92');await button('Add percussion note');
   await setSongField(page,'Album','Parity session');

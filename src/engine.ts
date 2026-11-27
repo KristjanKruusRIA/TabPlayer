@@ -38,6 +38,7 @@ import { isPowerTabBytes } from './import/powertab';
 import { importPowerTab } from './import/powertab-score';
 import { isTablEditBytes } from './import/tabledit';
 import { importTablEdit } from './import/tabledit-score';
+import { parseTrackColor } from './track-color';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -83,6 +84,7 @@ export function validateProject(value: unknown): Project {
   for(const edit of projectCommands(p)) {
     if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw refusal('engine.backing_asset_missing');
     if(edit.type==='setTrackSound' && edit.sound?.plugin && !p.assets[edit.sound.plugin.state]) throw refusal('engine.plugin_state_missing');
+    if((edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') && edit.sound?.plugin && !p.assets[edit.sound.plugin.state]) throw refusal('engine.plugin_state_missing');
   }
   return structuredClone(p);
 }
@@ -170,18 +172,46 @@ function movedOrder(count:number,track:number,to:number):number[] {
   const order=Array.from({length:count},(_,index)=>index);order.splice(to,0,...order.splice(track,1));return order;
 }
 
-function addTrack(score: model.Score, name: string, tuning: number[], program: number, tuningName?: string) {
+interface StringedTrackOptions {
+  shortName?: string;
+  color?: string;
+  showTab?: boolean;
+  showNotation?: boolean;
+  showSlash?: boolean;
+  lowerTuning?: number[];
+  lowerTuningName?: string;
+}
+
+function addTrack(score: model.Score, name: string, tuning: number[], program: number, tuningName?: string, options?: StringedTrackOptions) {
   tuningValid(tuning);validateTuningName(tuningName);
   if (!integer(program) || program > 127) throw refusal('engine.invalid_midi_instrument');
+  if (options?.shortName !== undefined && typeof options.shortName !== 'string') throw new Error('Invalid track short name.');
+  const showTab = options?.showTab ?? true, showNotation = options?.showNotation ?? true, showSlash = options?.showSlash ?? false;
+  if (!showTab && !showNotation && !showSlash) throw new Error('Show tablature, standard notation or slash notation.');
+  if (options?.lowerTuning !== undefined) {
+    tuningValid(options.lowerTuning);
+    validateTuningName(options.lowerTuningName);
+  }
   const used = new Set(score.tracks.flatMap(t => [t.playbackInfo.primaryChannel, t.playbackInfo.secondaryChannel]));
   const free = Array.from({length:16}, (_,i) => i).filter(i => i !== 9 && !used.has(i));
   if (!free.length) throw refusal('engine.no_midi_channel');
-  const track = new Track(); track.name = name || 'Instrument'; track.shortName = track.name;
+  const track = new Track(); track.name = name || 'Instrument'; track.shortName = options?.shortName ?? track.name;
+  if (options?.color !== undefined) track.color = parseTrackColor(options.color);
   track.playbackInfo.program = program;
   track.playbackInfo.primaryChannel = free[0]; track.playbackInfo.secondaryChannel = free[1] ?? free[0];
-  const staff = new Staff(); staff.stringTuning.tunings = [...tuning]; staff.stringTuning.name = tuningName ?? defaultTuningName(tuning); staff.showTablature = true; staff.showStandardNotation = true;
-  track.addStaff(staff); score.addTrack(track);
-  for (const master of score.masterBars) appendBar(staff, master);
+  const makeStaff = (notes: number[], label: string | undefined) => {
+    const staff = new Staff(); staff.stringTuning.tunings = [...notes]; staff.stringTuning.name = label ?? defaultTuningName(notes);
+    staff.showTablature = showTab; staff.showStandardNotation = showNotation; staff.showSlash = showSlash;
+    track.addStaff(staff);
+    return staff;
+  };
+  const staff = makeStaff(tuning, tuningName);
+  const lower = options?.lowerTuning !== undefined ? makeStaff(options.lowerTuning, options.lowerTuningName) : null;
+  score.addTrack(track);
+  for (const master of score.masterBars) {
+    appendBar(staff, master);
+    if (lower) appendBar(lower, master);
+  }
 }
 
 function initialScore(project: Project, canRedo: boolean): {score:model.Score;notice:string|null} {
@@ -300,7 +330,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       }
       break;
     }
-    case 'addTrack': addTrack(score,edit.name,edit.tuning,edit.program,edit.tuningName); break;
+    case 'addTrack': addTrack(score,edit.name,edit.tuning,edit.program,edit.tuningName,{shortName:edit.shortName,color:edit.color,showTab:edit.showTab,showNotation:edit.showNotation,showSlash:edit.showSlash,lowerTuning:edit.lowerTuning,lowerTuningName:edit.lowerTuningName}); break;
     case 'removeTrack': {
       const track=trackAt(score,edit.track); if (score.tracks.length === 1) throw refusal('engine.keep_at_least_one_track');
       for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)detachNote(note);
@@ -354,6 +384,27 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       }
       break;
     default: if(!applyAdvancedEdit(score,edit,editIndex)) throw refusal('engine.unknown_edit_command');
+  }
+}
+
+function percussionInitialProfile(edit: Extract<SingleCommand, { type: 'addPercussionTrack' }>): 'standardTab' | 'tablature' | 'slash' | null {
+  const tab = edit.showTab ?? false, std = edit.showNotation ?? true, slash = edit.showSlash ?? false;
+  if (tab && std) return 'standardTab';
+  if (tab) return 'tablature';
+  if (slash && !std) return 'slash';
+  return null;
+}
+
+function applyInitialTrackSettings(settings: DocumentSettings, edit: SingleCommand, id: string) {
+  if ('sound' in edit && edit.sound) settings.sounds[id] = completeSound(structuredClone(edit.sound));
+  if (edit.type === 'addPercussionTrack') {
+    const profile = percussionInitialProfile(edit);
+    if (profile) {
+      settings.engraving = {
+        ...settings.engraving,
+        profiles: [...settings.engraving.profiles.filter(entry => entry.trackId !== id), { trackId: id, profile }],
+      };
+    }
   }
 }
 
@@ -467,7 +518,11 @@ export function* buildDocumentSteps(value: ProjectInput, canRedo = false, from?:
       if(measureMap)mapLyricsMeasures(score,measureMap);
       apply(score, edit,index);
       if(measureMap){mapBackingMeasures(documentSettings.backing,measureMap);mapBackingMeasures(embeddedBackingSettings,measureMap);documentSettings.engraving=mapEngravingBars(documentSettings.engraving,measureMap.oldToNew);}
-      if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
+      if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') {
+        const id=`added/${index}/${JSON.stringify(edit)}`;
+        identities.push(id);
+        applyInitialTrackSettings(documentSettings,edit,id);
+      }
       if (edit.type==='removeTrack') identities.splice(edit.track,1);
       if (edit.type==='moveTrack') identities.splice(edit.to,0,...identities.splice(edit.track,1));
       if (edit.type==='duplicateTrack') {identities.splice(edit.track+1,0,`added/${index}/${JSON.stringify(edit)}`);copyTrackSettings(documentSettings,identities[edit.track],identities[edit.track+1]);}
@@ -496,7 +551,8 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));
   // Applied history already passed candidate validation. Its earlier backing anchors
   // refer to the measure layout at that point, before later deletions.
-  for(const edit of projectCommands(project)) switch(edit.type) {
+  projectCommands(project).forEach((edit,index)=>{ switch(edit.type) {
+    case 'addTrack': case 'addPitchedTrack': case 'addPercussionTrack': applyInitialTrackSettings(next,edit,`added/${index}/${JSON.stringify(edit)}`);break;
     case 'setTrackMix': next.mixes[edit.trackId]=structuredClone(edit.mix);break;
     case 'setTrackSound': next.sounds[edit.trackId]=completeSound(structuredClone(edit.sound));break;
     case 'setBacking': next.backing=structuredClone(edit.backing);break;
@@ -510,7 +566,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
       const map=planMeasureMap(barCount,edit);mapBackingMeasures(next.backing,map);next.engraving=mapEngravingBars(next.engraving,map.oldToNew);
       barCount=map.oldToNew.filter(bar=>bar!==null).length+map.inserted.length;break;
     }
-  }
+  } });
   const built={score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes,sourceBarCount,importNotice:current.importNotice};
   validateBackingAnchors(current.score,effectiveAudioSettings(project,built).backing);return built;
 }

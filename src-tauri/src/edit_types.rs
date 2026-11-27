@@ -970,6 +970,13 @@ pub struct StaffSettings {
     pub clef: i32,
     pub show_tab: bool,
     pub show_notation: bool,
+    /// Optional slash notation flag; omitted keeps the staff's existing flag (false on addStaff).
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub show_slash: Option<bool>,
     /// The tuning's name to snapshot on the staff: omitted keeps each command's earlier behavior, and empty clears it.
     #[serde(
         default,
@@ -1325,14 +1332,140 @@ pub enum EditCommand {
             skip_serializing_if = "Option::is_none"
         )]
         tuning_name: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        short_name: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        color: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        show_tab: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        show_notation: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        show_slash: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        lower_tuning: Option<Vec<i32>>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        lower_tuning_name: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        sound: Option<TrackSound>,
     },
     AddPitchedTrack {
         name: String,
         program: u8,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        short_name: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        color: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        show_notation: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        show_slash: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        clef: Option<i32>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        lower_clef: Option<i32>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        sound: Option<TrackSound>,
     },
     AddPercussionTrack {
         name: String,
         program: u8,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        short_name: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        color: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        show_tab: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        show_notation: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        show_slash: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        sound: Option<TrackSound>,
     },
     AddPitchedNote {
         target: BeatTarget,
@@ -1695,6 +1828,15 @@ fn enum_range(value: i32, min: i32, max: i32) -> Result<(), String> {
     }
     Ok(())
 }
+fn validate_track_color(color: &str) -> Result<(), String> {
+    if color.len() != 7
+        || !color.starts_with('#')
+        || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err("Choose a track color as #rrggbb.".into());
+    }
+    Ok(())
+}
 fn rhythm(duration: i32, dots: u8) -> Result<(), String> {
     if ![-4, -2, 1, 2, 4, 8, 16, 32, 64, 128, 256].contains(&duration) || dots > 3 {
         return Err("Choose a supported duration and at most three dots.".into());
@@ -1738,7 +1880,7 @@ impl StaffSettings {
             || self.capo > 127
             || !(-127..=127).contains(&self.transposition)
             || !(-127..=127).contains(&self.display_transposition)
-            || (!self.show_tab && !self.show_notation)
+            || (!self.show_tab && !self.show_notation && !self.show_slash.unwrap_or(false))
         {
             return Err("Invalid staff settings.".into());
         }
@@ -1779,6 +1921,15 @@ impl EditCommand {
             Self::SetTrackSound { sound, .. } => {
                 sound.plugin.as_ref().map(|plugin| plugin.state.as_str())
             }
+            Self::AddTrack {
+                sound: Some(sound), ..
+            }
+            | Self::AddPitchedTrack {
+                sound: Some(sound), ..
+            }
+            | Self::AddPercussionTrack {
+                sound: Some(sound), ..
+            } => sound.plugin.as_ref().map(|plugin| plugin.state.as_str()),
             _ => None,
         }
     }
@@ -1957,15 +2108,91 @@ impl EditCommand {
                 tuning,
                 program,
                 tuning_name,
+                color,
+                show_tab,
+                show_notation,
+                show_slash,
+                lower_tuning,
+                lower_tuning_name,
+                sound,
                 ..
             } => {
                 validate_tuning(tuning)?;
                 validate_tuning_name(tuning_name)?;
                 enum_range(*program as i32, 0, 127)?;
+                if let Some(color) = color {
+                    validate_track_color(color)?;
+                }
+                if !show_tab.unwrap_or(true)
+                    && !show_notation.unwrap_or(true)
+                    && !show_slash.unwrap_or(false)
+                {
+                    return Err("Show tablature, standard notation or slash notation.".into());
+                }
+                if let Some(lower) = lower_tuning {
+                    validate_tuning(lower)?;
+                    if lower.len() > 12 {
+                        return Err("A track supports at most 12 strings.".into());
+                    }
+                } else if lower_tuning_name.is_some() {
+                    return Err("Lower tuning name requires a lower tuning.".into());
+                }
+                validate_tuning_name(lower_tuning_name)?;
+                if let Some(sound) = sound {
+                    sound.validate()?;
+                }
             }
-            Self::SetTrackInfo { program, .. }
-            | Self::AddPitchedTrack { program, .. }
-            | Self::AddPercussionTrack { program, .. } => enum_range(*program as i32, 0, 127)?,
+            Self::AddPitchedTrack {
+                program,
+                color,
+                show_notation,
+                show_slash,
+                clef,
+                lower_clef,
+                sound,
+                ..
+            } => {
+                enum_range(*program as i32, 0, 127)?;
+                if let Some(color) = color {
+                    validate_track_color(color)?;
+                }
+                if !show_notation.unwrap_or(true) && !show_slash.unwrap_or(false) {
+                    return Err("Show standard notation or slash notation.".into());
+                }
+                if let Some(clef) = clef {
+                    enum_range(*clef, 0, 4)?;
+                }
+                if let Some(lower_clef) = lower_clef {
+                    enum_range(*lower_clef, 0, 4)?;
+                }
+                if let Some(sound) = sound {
+                    sound.validate()?;
+                }
+            }
+            Self::AddPercussionTrack {
+                program,
+                color,
+                show_tab,
+                show_notation,
+                show_slash,
+                sound,
+                ..
+            } => {
+                enum_range(*program as i32, 0, 127)?;
+                if let Some(color) = color {
+                    validate_track_color(color)?;
+                }
+                if !show_tab.unwrap_or(false)
+                    && !show_notation.unwrap_or(true)
+                    && !show_slash.unwrap_or(false)
+                {
+                    return Err("Show tablature, standard notation or slash notation.".into());
+                }
+                if let Some(sound) = sound {
+                    sound.validate()?;
+                }
+            }
+            Self::SetTrackInfo { program, .. } => enum_range(*program as i32, 0, 127)?,
             Self::AddPitchedNote { pitch, .. } | Self::SetPitchedNote { pitch, .. } => {
                 enum_range(*pitch as i32, 0, 127)?;
             }
@@ -2166,12 +2393,8 @@ impl EditCommand {
             {
                 return Err("Choose a sustain pedal press, release or no mark.".into());
             }
-            Self::SetTrackColor { color, .. }
-                if color.len() != 7
-                    || !color.starts_with('#')
-                    || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()) =>
-            {
-                return Err("Choose a track color as #rrggbb.".into());
+            Self::SetTrackColor { color, .. } => {
+                validate_track_color(color)?;
             }
             Self::SetMeasureSettings {
                 numerator,
@@ -3864,6 +4087,69 @@ mod tests {
             json!({"type": "remapPercussion", "track": 0, "map": [[256, 36]]}),
             json!({"type": "remapPercussion", "track": 0, "map": [[36, 256]]}),
             json!({"type": "remapPercussion", "track": -1, "map": [[36, 35]]}),
+        ] {
+            rejected(&invalid);
+        }
+    }
+
+    #[test]
+    fn add_track_gp8_options_roundtrip_and_validate() {
+        let full_add = json!({
+            "type": "addTrack",
+            "name": "Ukulele",
+            "tuning": [69, 64, 60, 67],
+            "program": 24,
+            "tuningName": "Standard C (High-G)",
+            "shortName": "uke.",
+            "color": "#e86c6a",
+            "showTab": true,
+            "showNotation": true,
+            "showSlash": false,
+            "lowerTuning": [69, 64, 60, 67],
+            "lowerTuningName": "Standard C (High-G)"
+        });
+        assert_eq!(serde_json::to_value(accepted(&full_add)).unwrap(), full_add);
+
+        let full_pitched = json!({
+            "type": "addPitchedTrack",
+            "name": "Piano",
+            "program": 0,
+            "shortName": "pno.",
+            "color": "#48a868",
+            "showNotation": true,
+            "showSlash": false,
+            "clef": 4,
+            "lowerClef": 3
+        });
+        assert_eq!(
+            serde_json::to_value(accepted(&full_pitched)).unwrap(),
+            full_pitched
+        );
+
+        let full_drums = json!({
+            "type": "addPercussionTrack",
+            "name": "Drums",
+            "program": 0,
+            "shortName": "dr.",
+            "color": "#7d8a99",
+            "showTab": true,
+            "showNotation": true,
+            "showSlash": false
+        });
+        assert_eq!(
+            serde_json::to_value(accepted(&full_drums)).unwrap(),
+            full_drums
+        );
+
+        for invalid in [
+            json!({"type": "addTrack", "name": "U", "tuning": [69, 64, 60, 67], "program": 24, "color": "red"}),
+            json!({"type": "addTrack", "name": "U", "tuning": [69, 64, 60, 67], "program": 24, "color": null}),
+            json!({"type": "addTrack", "name": "U", "tuning": [69, 64, 60, 67], "program": 24, "showTab": false, "showNotation": false, "showSlash": false}),
+            json!({"type": "addTrack", "name": "U", "tuning": [69, 64, 60, 67], "program": 24, "lowerTuningName": "Drop D"}),
+            json!({"type": "addPitchedTrack", "name": "P", "program": 0, "showNotation": false, "showSlash": false}),
+            json!({"type": "addPitchedTrack", "name": "P", "program": 0, "clef": 5}),
+            json!({"type": "addPitchedTrack", "name": "P", "program": 0, "lowerClef": -1}),
+            json!({"type": "addPercussionTrack", "name": "D", "program": 0, "showTab": false, "showNotation": false, "showSlash": false}),
         ] {
             rejected(&invalid);
         }

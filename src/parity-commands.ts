@@ -4,7 +4,8 @@ import {validateStrokePattern} from './editor/range-edits';
 import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
 import {validateScaleDiagram} from './harmony/scale-diagram';
-import {masterProblem,validateBackingSettings} from './document-settings';
+import {masterProblem,soundProblem,validateBackingSettings} from './document-settings';
+import type {TrackSound} from './edit-types';
 import {validateRatioTempoPoints} from './editor/tempo-types';
 import {validateRemapPercussionMap} from './editor/drum-remap';
 import {parseTrackColor} from './track-color';
@@ -199,15 +200,39 @@ export function validateParityCommand(value:unknown):void {
   const hasCrossVoice=type==='setStringCount'&&Object.hasOwn(candidate,'crossVoice');
   const hasShorten=type==='fitVoice'&&Object.hasOwn(candidate,'shorten');
   const hasTargetTrack=type==='importTracks'&&Object.hasOwn(candidate,'targetTrack');
-  const edit=exact(value,['type',...shapes[type],...(named?['tuningName']:[]),...(preserving?['preserveOpeningMark']:[]),...(hasKeep?['keepPitch']:[]),...(hasCrossVoice?['crossVoice']:[]),...(hasShorten?['shorten']:[]),...(hasTargetTrack?['targetTrack']:[])]);
+  const addTrackOptionals=type==='addTrack'?['shortName','color','showTab','showNotation','showSlash','lowerTuning','lowerTuningName','sound'].filter(key=>Object.hasOwn(candidate,key)):[];
+  const addPitchedOptionals=type==='addPitchedTrack'?['shortName','color','showNotation','showSlash','clef','lowerClef','sound'].filter(key=>Object.hasOwn(candidate,key)):[];
+  const addPercussionOptionals=type==='addPercussionTrack'?['shortName','color','showTab','showNotation','showSlash','sound'].filter(key=>Object.hasOwn(candidate,key)):[];
+  const edit=exact(value,['type',...shapes[type],...(named?['tuningName']:[]),...(preserving?['preserveOpeningMark']:[]),...(hasKeep?['keepPitch']:[]),...(hasCrossVoice?['crossVoice']:[]),...(hasShorten?['shorten']:[]),...(hasTargetTrack?['targetTrack']:[]),...addTrackOptionals,...addPitchedOptionals,...addPercussionOptionals]);
   if(hasShorten&&edit.shorten!==true)throw new Error('Invalid edit fields.');
   if(preserving&&typeof edit.preserveOpeningMark!=='boolean')throw new Error('Invalid edit fields.');
   if(hasCrossVoice)flag(edit.crossVoice);
   if(named)validateTuningName(edit.tuningName===undefined?null:edit.tuningName);
   if(hasKeep)flag(edit.keepPitch);
+  if(type==='addTrack'||type==='addPitchedTrack'||type==='addPercussionTrack'){
+    if(Object.hasOwn(edit,'shortName')&&typeof edit.shortName!=='string')throw new Error('Invalid track short name.');
+    if(Object.hasOwn(edit,'color'))parseTrackColor(edit.color);
+    for(const key of ['showTab','showNotation','showSlash']){if(Object.hasOwn(edit,key))flag(edit[key]);}
+    if(type==='addTrack'){
+      if(!(edit.showTab??true)&&!(edit.showNotation??true)&&!(edit.showSlash??false))throw new Error('Show tablature, standard notation or slash notation.');
+      if(Object.hasOwn(edit,'lowerTuning')){
+        if(!Array.isArray(edit.lowerTuning)||edit.lowerTuning.length<1||edit.lowerTuning.length>12)throw new Error('Use 1 to 12 MIDI tuning pitches from 0 to 127.');
+        for(const pitch of edit.lowerTuning)integer(pitch,127);
+      }else if(Object.hasOwn(edit,'lowerTuningName'))throw new Error('Lower tuning name requires a lower tuning.');
+      if(Object.hasOwn(edit,'lowerTuningName'))validateTuningName(edit.lowerTuningName===undefined?null:edit.lowerTuningName);
+    }else if(type==='addPitchedTrack'){
+      if(!(edit.showNotation??true)&&!(edit.showSlash??false))throw new Error('Show standard notation or slash notation.');
+      if(Object.hasOwn(edit,'clef'))integer(edit.clef,4);
+      if(Object.hasOwn(edit,'lowerClef'))integer(edit.lowerClef,4);
+    }else{
+      if(!(edit.showTab??false)&&!(edit.showNotation??true)&&!(edit.showSlash??false))throw new Error('Show tablature, standard notation or slash notation.');
+    }
+    if(Object.hasOwn(edit,'sound')){const problem=soundProblem(edit.sound as TrackSound);if(problem)throw new Error(problem);}
+  }
   if(type==='setStaffSettings'||type==='addStaff'){
-    const settings=object(edit.settings),hasName=Object.hasOwn(settings,'tuningName'),hasPartial=Object.hasOwn(settings,'partialCapo'),hasDrone=Object.hasOwn(settings,'droneFret'),hasKeepPitch=Object.hasOwn(settings,'keepPitch');
-    exact(settings,[...staffSettingKeys,...(hasName?['tuningName']:[]),...(hasPartial?['partialCapo']:[]),...(hasDrone?['droneFret']:[]),...(hasKeepPitch?['keepPitch']:[])]);
+    const settings=object(edit.settings),hasName=Object.hasOwn(settings,'tuningName'),hasPartial=Object.hasOwn(settings,'partialCapo'),hasDrone=Object.hasOwn(settings,'droneFret'),hasKeepPitch=Object.hasOwn(settings,'keepPitch'),hasShowSlash=Object.hasOwn(settings,'showSlash');
+    exact(settings,[...staffSettingKeys,...(hasShowSlash?['showSlash']:[]),...(hasName?['tuningName']:[]),...(hasPartial?['partialCapo']:[]),...(hasDrone?['droneFret']:[]),...(hasKeepPitch?['keepPitch']:[])]);
+    if(hasShowSlash)flag(settings.showSlash);
     if(hasKeepPitch)flag(settings.keepPitch);
     if(hasDrone)validateBanjoDrone(settings.droneFret,Array.isArray(settings.tuning)?settings.tuning.length:0,Array.isArray(settings.tuning)?settings.tuning as number[]:undefined);
     if(hasName)validateTuningName(settings.tuningName===undefined?null:settings.tuningName);

@@ -25,12 +25,14 @@ it('auditions the addressed track for its tuning and the default sound of the ch
   fireEvent.click(tuningDialog.getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({trackId:id},standard,true);
   fireEvent.click(tuningDialog.getByRole('button',{name:'Cancel'}));
   fireEvent.click(screen.getAllByRole('button',{name:'Play tuning'})[0]);expect(onAudition).toHaveBeenLastCalledWith({trackId:id},standard,true);
-  render(<AddTrackDialog busy={false} onAdd={vi.fn()} onAudition={onAudition} onClose={vi.fn()}/>);fireEvent.change(screen.getByLabelText('MIDI instrument'),{target:{value:'33'}});
-  const newRow=screen.getByRole('dialog',{name:'Add track'}).querySelector('.track-tuning-row') as HTMLElement;
-  fireEvent.click(within(newRow).getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[43,38,33,28],true);
-  fireEvent.click(within(newRow).getByRole('button',{name:/^Edit new track tuning/}));const newDialog=within(screen.getByRole('dialog',{name:'Tuning'}));
-  fireEvent.click(newDialog.getByRole('button',{name:'Play string 4 (E1)'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[28],false);
-  fireEvent.click(newDialog.getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith({program:33},[43,38,33,28],true);
+  render(<AddTrackDialog busy={false} onAdd={vi.fn()} onAudition={onAudition} onClose={vi.fn()}/>);
+  const addDlg=screen.getByRole('dialog',{name:'Add track'});
+  fireEvent.click(within(within(addDlg).getByRole('listbox',{name:'Instrument groups'})).getByRole('option',{name:'Bass'}));
+  const newBtn=within(addDlg).getByRole('button',{name:/^Edit new track tuning/});
+  fireEvent.click(within(addDlg).getByRole('button',{name:'Preview sound'}));expect(onAudition).toHaveBeenLastCalledWith(expect.objectContaining({program:33,percussion:false}),[43,38,33,28],true);
+  fireEvent.click(newBtn);const newDialog=within(screen.getByRole('dialog',{name:'Tuning'}));
+  fireEvent.click(newDialog.getByRole('button',{name:'Play string 4 (E1)'}));expect(onAudition).toHaveBeenLastCalledWith(expect.objectContaining({program:33}),[28],false);
+  fireEvent.click(newDialog.getByRole('button',{name:'Play tuning'}));expect(onAudition).toHaveBeenLastCalledWith(expect.objectContaining({program:33}),[43,38,33,28],true);
 });
 it('plays the details pitches of the saved-tunings dialog',()=>{
   const onAudition=vi.fn();render(<SavedTuningsDialog notes="E4 B3 G3 D3 A2 E2" name="" onUse={vi.fn()} onClose={vi.fn()} onAudition={onAudition}/>);

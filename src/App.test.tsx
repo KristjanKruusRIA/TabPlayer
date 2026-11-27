@@ -220,9 +220,15 @@ const selectString=(string:number)=>{
 function functionalButton(name:string|RegExp){return exposeFunctionalControl(screen.queryByRole('button',{name})??inProperties(()=>screen.getByRole('button',{name,hidden:true})).found);}
 // Adding a track is a dialog, opened from the + at the head of the dock's track list.
 const ensureAddTrackDialog=()=>{if(!screen.queryByRole('dialog',{name:'Add track'}))fireEvent.click(screen.getByRole('button',{name:'Add a track',hidden:true}));};
-const change=(label:string,value:string)=>{if(/^New (notation )?track/.test(label))ensureAddTrackDialog();const {found,done}=inProperties(()=>screen.getByLabelText(label));fireEvent.change(exposeFunctionalControl(found),{target:{value}});done();};
+const change=(label:string,value:string)=>{const actual=/^New notation track name$/.test(label)?(ensureAddTrackDialog(),'New track name'):label;if(actual==='New track name')ensureAddTrackDialog();const {found,done}=inProperties(()=>screen.getByLabelText(actual));fireEvent.change(exposeFunctionalControl(found),{target:{value}});done();};
 const click=(name:string)=>{
-  if(['Add track','Add pitched track','Add percussion track'].includes(name)){ensureAddTrackDialog();fireEvent.click(within(screen.getByRole('dialog',{name:'Add track'})).getByRole('button',{name}));return;}
+  if(['Add track','Add pitched track','Add percussion track'].includes(name)){
+    ensureAddTrackDialog();
+    const dlg=within(screen.getByRole('dialog',{name:'Add track'}));
+    if(name==='Add pitched track')fireEvent.click(dlg.getByRole('tab',{name:'Orchestra'}));
+    if(name==='Add percussion track')fireEvent.click(dlg.getByRole('tab',{name:'Drums'}));
+    fireEvent.click(dlg.getByRole('button',{name:'Add track'}));return;
+  }
   // Selecting a track is now reached through Mixer; return to the viewer when that was the active task.
   const restoreInstrument=/^Track \d+:/.test(name)&&screen.queryByRole('button',{name:'Instrument'})?.getAttribute('aria-pressed')==='true';
   const {found,done}=inProperties(()=>screen.queryByRole('button',{name})??screen.getByRole('button',{name,hidden:true}));
@@ -683,7 +689,7 @@ it('keeps the beat cursor on its original music across insert and remove measure
 });
 
 it('creates piano chords, edits the clicked member and replays its history',async()=>{
-  const c=await setup();change('New notation track name','Piano');click('Add pitched track');
+  const c=await setup();ensureAddTrackDialog();fireEvent.click(within(screen.getByRole('dialog',{name:'Add track'})).getByRole('tab',{name:'Orchestra'}));change('New notation track name','Piano');fireEvent.click(within(screen.getByRole('dialog',{name:'Add track'})).getByRole('button',{name:'Add track'}));
   await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));click('Track 2: Piano');
   // The pitch fields are in the Properties dialog's Note tab for a staff without strings; their drafts need it open throughout.
   openProperties('Note');change('Written pitch','C4');click('Add pitched note');
@@ -915,6 +921,7 @@ it('repairs selection after deleting the last beat, measure, and track',async()=
   paletteCommand('measure 4');paletteCommand('remove measure');await waitFor(()=>expect(cursorReading()).toMatch(/^Bar 3 /));
   paletteCommand('append measure');await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(4));
   expect(cursorReading()).toMatch(/^Bar 3 /);
+  ensureAddTrackDialog();fireEvent.click(within(within(screen.getByRole('dialog',{name:'Add track'})).getByRole('listbox',{name:'Instrument groups'})).getByRole('option',{name:'Bass'}));
   click('Add track');await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));
   click('Track 2: Bass');click('Remove track');await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(1));
   expect(functionalButton('Track 1: Guitar')).toHaveAttribute('aria-pressed','true');
@@ -997,7 +1004,9 @@ it('toggles the selected-track instrument view without editing the document',asy
 });
 
 it('follows a newly selected bass track and repairs the viewer after New',async()=>{
-  const c=await setup();click('Show instrument');click('Add track');
+  const c=await setup();click('Show instrument');
+  ensureAddTrackDialog();fireEvent.click(within(within(screen.getByRole('dialog',{name:'Add track'})).getByRole('listbox',{name:'Instrument groups'})).getByRole('option',{name:'Bass'}));
+  click('Add track');
   await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));
   click('Track 2: Bass');
   expect(screen.getByRole('region',{name:'Instrument view'})).toHaveTextContent('Bass');

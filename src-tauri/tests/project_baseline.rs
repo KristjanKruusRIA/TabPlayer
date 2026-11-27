@@ -199,6 +199,14 @@ fn source_session() -> (ProjectSession, [String; 4]) {
             tuning: vec![43, 38, 33, 28],
             program: 33,
             tuning_name: None,
+            short_name: None,
+            color: None,
+            show_tab: None,
+            show_notation: None,
+            show_slash: None,
+            lower_tuning: None,
+            lower_tuning_name: None,
+            sound: None,
         },
         EditCommand::SetTrackSound {
             track_id: "added/0/addTrack".into(),
@@ -214,6 +222,13 @@ fn source_session() -> (ProjectSession, [String; 4]) {
         .apply_edit(EditCommand::AddPitchedTrack {
             name: "Piano".into(),
             program: 0,
+            short_name: None,
+            color: None,
+            show_notation: None,
+            show_slash: None,
+            clef: None,
+            lower_clef: None,
+            sound: None,
         })
         .unwrap();
     session
@@ -566,6 +581,14 @@ fn baseline_and_complete_user_history_validate_commands_and_asset_references() {
         tuning: vec![],
         program: 0,
         tuning_name: None,
+        short_name: None,
+        color: None,
+        show_tab: None,
+        show_notation: None,
+        show_slash: None,
+        lower_tuning: None,
+        lower_tuning_name: None,
+        sound: None,
     };
     let mut baseline = valid.project.clone();
     baseline.baseline_edits.push(invalid_command.clone());

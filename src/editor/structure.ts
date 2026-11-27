@@ -27,7 +27,9 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
   if(!Array.isArray(settings.tuning)||settings.tuning.some(p=>!integer(p,0,127))||(!settings.tuning.length&&settings.showTab&&!staff?.isPercussion))throw new Error('Use MIDI tuning pitches from 0 to 127.');
   if(staff&&staff.tuning.length!==settings.tuning.length)throw new Error('Retuning must keep the current string count.');
   if(!integer(settings.capo,0,127)||!integer(settings.transposition,-127,127)||!integer(settings.displayTransposition,-127,127))throw new Error('Invalid capo or transposition.');
-  enumValue(settings.clef,model.Clef,'clef');if(typeof settings.showTab!=='boolean'||typeof settings.showNotation!=='boolean'||(!settings.showTab&&!settings.showNotation))throw new Error('Show tablature or standard notation.');
+  enumValue(settings.clef,model.Clef,'clef');if(settings.showSlash!==undefined&&typeof settings.showSlash!=='boolean')throw new Error('Invalid slash notation flag.');
+  const showSlash=settings.showSlash??staff?.showSlash??false;
+  if(typeof settings.showTab!=='boolean'||typeof settings.showNotation!=='boolean'||(!settings.showTab&&!settings.showNotation&&!showSlash))throw new Error('Show tablature, standard notation or slash notation.');
   // An omitted partial capo keeps the staff's own.
   if(settings.partialCapo!==undefined)validatePartialCapo(settings.partialCapo,settings.tuning.length);
   const partial=settings.partialCapo===undefined?staff?getPartialCapo(staff):null:settings.partialCapo;
@@ -52,6 +54,7 @@ export function defaultTuningName(tuning:readonly number[]):string {return model
 /** `refingered`: the notes were moved to keep their sounding pitch, so a trill (an absolute pitch) already has the right interval and must not be rebased. */
 function configure(staff:model.Staff,settings:StaffSettings,refingered=false) {
   const oldCapo=staff.capo;staff.stringTuning.tunings=[...settings.tuning];staff.capo=settings.capo;staff.transpositionPitch=settings.transposition;staff.displayTranspositionPitch=settings.displayTransposition;staff.showTablature=settings.showTab;staff.showStandardNotation=settings.showNotation;
+  if(settings.showSlash!==undefined)staff.showSlash=settings.showSlash;
   if(settings.partialCapo!==undefined){const before=getPartialCapo(staff);setPartialCapo(staff,settings.partialCapo);if(!refingered)rebaseTrills(staff,oldCapo,before,getPartialCapo(staff));}
   if(settings.droneFret!==undefined){const before=getBanjoDrone(staff);setBanjoDrone(staff,settings.droneFret);if(!refingered)rebaseDroneTrills(staff,before,settings.droneFret);}
   for(const bar of staff.bars)bar.clef=settings.clef;

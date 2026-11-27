@@ -104,6 +104,7 @@ try{
 
   // The Add track dialog uses the same row and dialog: Use tuning fills the draft for the new track and records nothing.
   const addDialog=await openAddTrackDialog(page);
+  await addDialog.getByRole('listbox',{name:'Instrument groups',exact:true}).getByRole('option',{name:'Bass',exact:true}).click();
   const newRow=page.getByRole('button',{name:/^Edit new track tuning/});await newRow.click();await dialog.waitFor();
   assert.equal(await dialog.getByRole('button',{name:'Keep fingering'}).count(),0,'a new track has no fingering to keep');
   await dialog.getByLabel('Instrument',{exact:true}).selectOption('bass');await dialog.getByLabel('Number of strings').selectOption('5');await dialog.getByLabel('Preset',{exact:true}).selectOption('bass-5-standard-b');

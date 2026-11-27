@@ -64,3 +64,29 @@ it('crossVoice is an optional boolean on setStringCount only, and absent edits k
   }
   expect(()=>validate({type:'setTuning',track:0,tuning:[64,59,55,50,45,38],crossVoice:true})).toThrow();
 });
+
+it('validates optional GP8 fields on addTrack, addPitchedTrack, addPercussionTrack, and staff settings',()=>{
+  const sound={voiceId:null,presetId:'clean',effects:undefined as unknown};
+  void sound;
+  const plainAdd={type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33};
+  expect(validate(plainAdd).edits).toEqual([plainAdd]);
+  const fullAdd={type:'addTrack',name:'Ukulele',tuning:[69,64,60,67],program:24,tuningName:'Standard C (High-G)',shortName:'uke.',color:'#e86c6a',showTab:true,showNotation:true,showSlash:false,lowerTuning:[69,64,60,67],lowerTuningName:'Standard C (High-G)'};
+  expect(validate(fullAdd).edits).toEqual([fullAdd]);
+  const fullPitched={type:'addPitchedTrack',name:'Piano',program:0,shortName:'pno.',color:'#48a868',showNotation:true,showSlash:false,clef:4,lowerClef:3};
+  expect(validate(fullPitched).edits).toEqual([fullPitched]);
+  const fullDrums={type:'addPercussionTrack',name:'Drums',program:0,shortName:'dr.',color:'#7d8a99',showTab:true,showNotation:true,showSlash:false};
+  expect(validate(fullDrums).edits).toEqual([fullDrums]);
+
+  for(const bad of [
+    {...plainAdd,color:'red'},
+    {...plainAdd,color:null},
+    {...plainAdd,shortName:null},
+    {...plainAdd,showTab:false,showNotation:false,showSlash:false},
+    {...plainAdd,lowerTuningName:'Drop D'},
+    {...plainAdd,lowerTuning:[]},
+    {...fullPitched,showNotation:false,showSlash:false},
+    {...fullPitched,clef:5},
+    {...fullPitched,lowerClef:-1},
+    {...fullDrums,showTab:false,showNotation:false,showSlash:false},
+  ])expect(()=>validate(bad),JSON.stringify(bad)).toThrow();
+});

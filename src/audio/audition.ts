@@ -1,12 +1,12 @@
 import type { model } from '@coderline/alphatab';
-import type { EditCommand } from '../edit-types';
+import type { EditCommand, TrackSound } from '../edit-types';
 import { resolvePercussionArticulation } from '../editor/percussion-catalog';
 import type { AuditionNote } from './bridge';
 import { fretKey } from '../editor/banjo-drone';
 import { kitSound } from './kit-sound';
 
 /** Which sound an audition uses: a track's own (by identity), or the automatic sound for a program (a track not yet added). */
-export type AuditionSource={trackId:string}|{program:number};
+export type AuditionSource={trackId:string}|{program:number;percussion?:boolean;sound?:TrackSound};
 /** Plays the strings of a tuning draft (high to low, as typed) through `source`; `strum` plays them all, low to high. */
 export type TuningAudition=(source:AuditionSource,pitches:number[],strum:boolean)=>void;
 

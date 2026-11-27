@@ -1,19 +1,43 @@
 import { model } from '@coderline/alphatab';
 import type { EditCommand } from '../edit-types';
-import { integer, locationAt, noteAt, validateCapacity } from './common';
+import { enumValue, integer, locationAt, noteAt, validateCapacity } from './common';
 import { detachNote } from './links';
 import { resolvePercussionArticulation } from './percussion-catalog';
 import { remapPercussionTrack } from './drum-remap';
 import { applyNoteLink, applyNoteTechniques } from './techniques';
+import { parseTrackColor } from '../track-color';
 
-function addTrack(score:model.Score,name:string,program:number,percussion:boolean) {
+interface NonTabTrackOptions {
+  shortName?: string;
+  color?: string;
+  showNotation?: boolean;
+  showSlash?: boolean;
+  clef?: number;
+  lowerClef?: number;
+}
+
+function addTrack(score:model.Score,name:string,program:number,percussion:boolean,options?:NonTabTrackOptions) {
   if(typeof name!=='string'||!integer(program,0,127))throw new Error('Invalid track name or MIDI instrument.');
-  const track=new model.Track();track.name=name||'Instrument';track.shortName=track.name;track.playbackInfo.program=program;
+  if(options?.shortName!==undefined&&typeof options.shortName!=='string')throw new Error('Invalid track short name.');
+  const showNotation=options?.showNotation??true,showSlash=options?.showSlash??false;
+  if(!percussion&&!showNotation&&!showSlash)throw new Error('Show standard notation or slash notation.');
+  if(options?.clef!==undefined)enumValue(options.clef,model.Clef,'clef');
+  if(options?.lowerClef!==undefined){
+    if(percussion)throw new Error('Percussion tracks use a single staff.');
+    enumValue(options.lowerClef,model.Clef,'clef');
+  }
+  const track=new model.Track();track.name=name||'Instrument';track.shortName=options?.shortName??track.name;track.playbackInfo.program=program;
+  if(options?.color!==undefined)track.color=parseTrackColor(options.color);
   const used=new Set(score.tracks.flatMap(t=>[t.playbackInfo.primaryChannel,t.playbackInfo.secondaryChannel]));
   const channel=()=>{let value=0;while(value===9||used.has(value))value++;used.add(value);return value;};
   track.playbackInfo.primaryChannel=percussion?9:channel();track.playbackInfo.secondaryChannel=percussion?9:channel();
-  const staff=new model.Staff();staff.showTablature=false;staff.showStandardNotation=true;staff.isPercussion=percussion;track.addStaff(staff);score.addTrack(track);
-  for(const master of score.masterBars){const bar=new model.Bar();bar.clef=percussion?model.Clef.Neutral:model.Clef.G2;const voice=new model.Voice();for(let i=0;i<master.timeSignatureNumerator;i++){const beat=new model.Beat();beat.duration=master.timeSignatureDenominator;beat.isEmpty=false;voice.addBeat(beat);}bar.addVoice(voice);staff.addBar(bar);}
+  const populate=(staff:model.Staff,clef:model.Clef)=>{
+    staff.showTablature=false;staff.showStandardNotation=showNotation;staff.showSlash=showSlash;staff.isPercussion=percussion;track.addStaff(staff);
+    for(const master of score.masterBars){const bar=new model.Bar();bar.clef=clef;const voice=new model.Voice();for(let i=0;i<master.timeSignatureNumerator;i++){const beat=new model.Beat();beat.duration=master.timeSignatureDenominator;beat.isEmpty=false;voice.addBeat(beat);}bar.addVoice(voice);staff.addBar(bar);}
+  };
+  score.addTrack(track);
+  populate(new model.Staff(),percussion?model.Clef.Neutral:(options?.clef??model.Clef.G2));
+  if(!percussion&&options?.lowerClef!==undefined)populate(new model.Staff(),options.lowerClef);
 }
 /** The notes tied to `note`, first to last. */
 export function tieChain(note:model.Note) {
@@ -33,7 +57,8 @@ function collision(beat:model.Beat,value:number,percussion:boolean,except?:model
 }
 export function applyNonTabEdit(score:model.Score,edit:EditCommand):boolean {
   switch(edit.type){
-    case 'addPitchedTrack':case 'addPercussionTrack':addTrack(score,edit.name,edit.program,edit.type==='addPercussionTrack');return true;
+    case 'addPitchedTrack':addTrack(score,edit.name,edit.program,false,{shortName:edit.shortName,color:edit.color,showNotation:edit.showNotation,showSlash:edit.showSlash,clef:edit.clef,lowerClef:edit.lowerClef});return true;
+    case 'addPercussionTrack':addTrack(score,edit.name,edit.program,true,{shortName:edit.shortName,color:edit.color,showNotation:edit.showNotation,showSlash:edit.showSlash});return true;
     case 'addPitchedNote':case 'addPercussionNote':{
       const {staff,voice}=locationAt(score,edit.target),beat=voice.beats[edit.target.beat];if(!beat)throw new Error('Select an existing beat.');
       const percussion=edit.type==='addPercussionNote',value=percussion?edit.articulation:edit.pitch;

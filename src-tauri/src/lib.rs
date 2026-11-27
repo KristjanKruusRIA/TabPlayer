@@ -1043,6 +1043,14 @@ mod desktop_test_response_tests {
             tuning: vec![43, 38, 33, 28],
             program: 33,
             tuning_name: None,
+            short_name: None,
+            color: None,
+            show_tab: None,
+            show_notation: None,
+            show_slash: None,
+            lower_tuning: None,
+            lower_tuning_name: None,
+            sound: None,
         });
         let command = r#"{"type":"addTrack","name":"Bass","tuning":[43,38,33,28],"program":33}"#;
         assert_eq!(

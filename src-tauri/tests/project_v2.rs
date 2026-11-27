@@ -329,6 +329,14 @@ fn settings_replay_tracks_structural_identity() {
             tuning: vec![43, 38, 33, 28],
             program: 33,
             tuning_name: None,
+            short_name: None,
+            color: None,
+            show_tab: None,
+            show_notation: None,
+            show_slash: None,
+            lower_tuning: None,
+            lower_tuning_name: None,
+            sound: None,
         })
         .unwrap();
     let mix = EditCommand::SetTrackMix {

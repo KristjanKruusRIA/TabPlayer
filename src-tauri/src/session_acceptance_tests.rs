@@ -49,6 +49,14 @@ fn authored_project() -> Project {
             tuning: vec![64, 59, 55, 50, 45, 40],
             program: 24,
             tuning_name: None,
+            short_name: None,
+            color: None,
+            show_tab: None,
+            show_notation: None,
+            show_slash: None,
+            lower_tuning: None,
+            lower_tuning_name: None,
+            sound: None,
         });
     }
     for track in 0..4 {

@@ -57,3 +57,18 @@ export const TrashGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 4.5h11M6 4.
 export const CogGlyph:Glyph=p=><svg {...base} {...p}><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2.3M8 12.2v2.3M1.5 8h2.3M12.2 8h2.3M3.4 3.4L5 5M11 11l1.6 1.6M12.6 3.4L11 5M5 11l-1.6 1.6"/></svg>;
 /** Edit an effect: two sliders. */
 export const SlidersGlyph:Glyph=p=><svg {...base} {...p}><path d="M2 5h12M2 11h12"/><path d="M5 3v4M11 9v4" strokeWidth={2.2}/></svg>;
+/** GP8 Add Track category icons. */
+export const StringedCategoryGlyph:Glyph=p=><svg {...base} {...p}><path d="M10.5 1.5l1.5 1.5-2 3c1.8.8 3 2.5 3 4.5 0 2.5-2 4-5 4s-5-1.5-5-4c0-2 1.2-3.7 3-4.5l-2-3 1.5-1.5"/><path d="M8 2v11.5" strokeWidth={1.2}/><circle cx="8" cy="10" r="1.5" strokeWidth={1.2}/></svg>;
+export const OrchestraCategoryGlyph:Glyph=p=><svg {...base} {...p}><path d="M6.5 2.5c1.5 0 2 1 2 2.5v5.5c0 1.8 1.2 3 3 3s2.5-1.2 2.5-3.5h-2.5"/><path d="M6.5 2.5L4 3.5" strokeWidth={1.5}/><circle cx="6" cy="6.5" r=".7" fill="currentColor" stroke="none"/><circle cx="6" cy="9" r=".7" fill="currentColor" stroke="none"/></svg>;
+export const DrumsCategoryGlyph:Glyph=p=><svg {...base} {...p}><ellipse cx="8" cy="10.5" rx="4" ry="2.2"/><path d="M4 10.5v2.8c0 1 1.8 1.7 4 1.7s4-.7 4-1.7v-2.8"/><circle cx="3.2" cy="5.5" r="2"/><circle cx="12.8" cy="5.5" r="2"/><path d="M2 8.5h3M11 8.5h3M6 6.5l1.5 2M10 6.5l-1.5 2" strokeWidth={1.2}/></svg>;
+export const MidiCategoryGlyph:Glyph=p=><svg {...base} {...p}><rect x="1.5" y="4" width="13" height="8" rx="1.5" strokeWidth={1.3}/><path d="M4 10V6l1.5 2.5L7 6v4M9 6v4M11 6h1.2c.8 0 1.3.7 1.3 2s-.5 2-1.3 2H11V6z" strokeWidth={1.1}/></svg>;
+/** Add Track notation & staff mode glyphs. */
+export const TabNotationGlyph:Glyph=p=><svg {...base} {...p}><path d="M1.5 3.5h13M1.5 6.5h13M1.5 9.5h13M1.5 12.5h13" strokeWidth={1}/><path d="M10 4.5H6.8v2.7h2c1 0 1.5.6 1.5 1.7 0 1.1-.6 1.8-1.7 1.8-.9 0-1.5-.3-1.9-.8" strokeWidth={1.5}/></svg>;
+export const SlashNotationGlyph:Glyph=p=><svg {...base} {...p}><path d="M1.5 11.5h13" strokeWidth={1.1}/><path d="M6.5 11l3-6.5h2l-3 6.5z" fill="currentColor" stroke="none"/></svg>;
+export const SingleStaffGlyph:Glyph=p=><svg {...base} {...p}><rect x="2.5" y="5" width="11" height="6" rx="1" strokeWidth={1.4}/><path d="M4.5 8h7" strokeWidth={1.4}/></svg>;
+export const GrandStaffGlyph:Glyph=p=><svg {...base} {...p}><path d="M4 2.5c-1 0-1.4.8-1.4 2v2c0 .9-.5 1.3-1.1 1.5.6.2 1.1.6 1.1 1.5v2c0 1.2.4 2 1.4 2" strokeWidth={1.3}/><rect x="6" y="2.5" width="8" height="4.2" rx=".8" strokeWidth={1.2}/><rect x="6" y="9.3" width="8" height="4.2" rx=".8" strokeWidth={1.2}/></svg>;
+/** Orchestra / stringed instrument marks. */
+export const UkuleleGlyph:Glyph=p=><svg {...base} {...p}><path d="M8 1.5v5"/><path d="M6.5 2.5h3M6.5 4.2h3" strokeWidth={1}/><ellipse cx="8" cy="10.5" rx="3.8" ry="3.8"/></svg>;
+export const StringsGlyph:Glyph=p=><svg {...base} {...p}><path d="M8 1.5v13M6.5 2.5h3"/><path d="M5.5 6.5c0-1.5 1-2.5 2.5-2.5s2.5 1 2.5 2.5c0 .9-.5 1.3-.5 2s.8 1.2.8 2.5c0 1.8-1.2 3-2.8 3s-2.8-1.2-2.8-3c0-1.3.8-1.8.8-2.5s-.5-1.1-.5-2z" strokeWidth={1.2}/></svg>;
+export const BrassGlyph:Glyph=p=><svg {...base} {...p}><path d="M2 8h7l4.5-3.5v7L9 8"/><path d="M5 8v2.5c0 1 .8 1.5 2 1.5s2-.5 2-1.5V8" strokeWidth={1.2}/></svg>;
+export const VocalGlyph:Glyph=p=><svg {...base} {...p}><rect x="5.8" y="2" width="4.4" height="7" rx="2.2"/><path d="M4 7.5a4 4 0 008 0M8 11.5v2.5M5.5 14h5" strokeWidth={1.3}/></svg>;

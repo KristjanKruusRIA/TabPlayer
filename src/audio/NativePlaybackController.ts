@@ -342,7 +342,7 @@ export class NativePlaybackController {
     try {
       const audition=this.bridge.audition;if(this.destroyed||!audition||!notes.length)return;
       let base:Omit<AuditionRequest,'notes'|'durationMs'>;
-      if('program' in source)base={voice:completeSound({voiceId:null,presetId:'gm',effects:defaultEffects()}),program:source.program,percussion:false,mix:defaultMix()};
+      if('program' in source)base={voice:completeSound(structuredClone(source.sound??{voiceId:null,presetId:'gm',effects:defaultEffects()})),program:source.program,percussion:!!source.percussion,mix:defaultMix()};
       else {
         const document=latest??this.requested;if(!document)return;
         const track=document.built.score.tracks.find(item=>trackIdentity(item)===source.trackId);if(!track)return;

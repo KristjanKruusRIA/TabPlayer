@@ -25,6 +25,15 @@ await checkWorkspace(5, async (page, capture) => {
   await add.click();
   const addTrack = page.getByRole('dialog', {name:'Add track', exact:true});
   await addTrack.getByLabel('New track name').waitFor();
+  assert.equal(await addTrack.getByRole('tab').count(), 4);
+  const guitarColor = await addTrack.getByLabel('Track color').inputValue();
+  assert.notEqual(guitarColor.toLowerCase(), '#c80000');
+  await addTrack.getByRole('tab', {name:'Orchestra', exact:true}).click();
+  const orchColor = await addTrack.getByLabel('Track color').inputValue();
+  assert.notEqual(orchColor, guitarColor);
+  await addTrack.getByRole('tab', {name:'Stringed', exact:true}).click();
+  await addTrack.getByRole('listbox', {name:'Instrument groups', exact:true}).getByRole('option', {name:'Other', exact:true}).click();
+  await capture('add-track');
   const tune = addTrack.getByRole('button', {name:/^Edit new track tuning/});
   await tune.click();
   const tuning = page.getByRole('dialog', {name:'Tuning', exact:true});

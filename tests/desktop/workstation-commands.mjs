@@ -441,7 +441,14 @@ export async function clickWorkstationButton(page,name,{waitForIdle=true}={}) {
   if(/^Track \d+: /.test(name))await selectWorkspaceTrack(page,name);
   else {
     if(trackActions.has(name))await revealLeftTask(page,'Track');
-    if(addTrackActions.has(name))await openAddTrackDialog(page);
+    if(addTrackActions.has(name)){
+      const dlg=await openAddTrackDialog(page);
+      if(name==='Add pitched track')await dlg.getByRole('tab',{name:'Orchestra',exact:true}).click();
+      if(name==='Add percussion track')await dlg.getByRole('tab',{name:'Drums',exact:true}).click();
+      await dlg.getByRole('button',{name:'Add track',exact:true}).click();
+      if(waitForIdle)await waitForWorkspaceIdle(page);
+      return;
+    }
     if(trackMenuActions.has(name)){await closeInspectorDialogs(page);await clickTrackMenuItem(page,name);if(waitForIdle)await waitForWorkspaceIdle(page);return;}
     if(backingActions.has(name))await revealLeftTask(page,'Backing');
     if(playbackActions.has(name))await revealPlaybackControls(page);

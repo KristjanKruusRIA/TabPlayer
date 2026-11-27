@@ -205,3 +205,26 @@ it('reference anchor edits reject an unrepresentable physical source request',()
   const reference=freeze({...settings({offsetMs:1e16,anchors:[{bar:1,occurrence:0,ratio:0,audioMs:1e16+2}]}),referenceSync:{entryAudioMs:1e16,exitAudioMs:1e16+10}});
   expect(()=>moveBackingAnchor(reference,0,3,timeline,10)).toThrow();
 });
+
+it('includes fermata holds in scoreTickToAudioMs, scoreTimeToAudioMs, and projectBackingGrid',()=>{
+  const heldQuarterMs=60000/(120*(0.66-0.41*0.5));
+  const bar0End=1500+heldQuarterMs;
+  const held:BackingTimeline={
+    generation:1,
+    durationTick:7680,
+    tempos:[{tick:0,bpm:120}],
+    fermatas:[{startTick:960,endTick:1920,length:0.5}],
+    occurrences:[
+      {bar:0,occurrence:0,meterNumerator:4,meterDenominator:4,startTick:0,endTick:3840,startMs:0,endMs:bar0End},
+      {bar:1,occurrence:0,meterNumerator:4,meterDenominator:4,startTick:3840,endTick:7680,startMs:bar0End,endMs:bar0End+2000},
+    ],
+  };
+  expect(scoreTickToAudioMs(held,empty,960)).toBeCloseTo(500,6);
+  expect(scoreTickToAudioMs(held,empty,1920)).toBeCloseTo(500+heldQuarterMs,6);
+  expect(scoreTickToAudioMs(held,empty,3840)).toBeCloseTo(1500+heldQuarterMs,6);
+  expect(scoreTimeToAudioMs(held,empty,500+heldQuarterMs)).toBeCloseTo(500+heldQuarterMs,6);
+  const grid=projectBackingGrid(held,empty,0,3000).map(line=>({tick:line.tick,audioMs:line.audioMs}));
+  expect(grid[1]).toMatchObject({tick:960});
+  expect(grid[2].tick).toBe(1920);
+  expect(grid[2].audioMs).toBeCloseTo(500+heldQuarterMs,6);
+});

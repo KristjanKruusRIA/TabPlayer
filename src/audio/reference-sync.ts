@@ -83,6 +83,7 @@ export function applyReferenceSyncPlan(authored:PlaybackPlan,backing:BackingSett
   if(finite(authored.durationTick)<timing.exitTick)throw new Error('Reference music exceeds the playback plan.');
   const timeAt=timingClock(timing);
   const effective=structuredClone(authored);
+  delete effective.fermatas;
   effective.tempos=timing.segments.map((segment,i)=>({tick:i===0?0:segment.startTick,bpm:segment.bpm}));
   effective.playbackEndTick=timing.exitTick;effective.durationMs=positive(timeAt(authored.durationTick));
   effective.occurrences=effective.occurrences.map(occurrence=>({...occurrence,startMs:timeAt(occurrence.startTick),endMs:timeAt(occurrence.endTick)}));

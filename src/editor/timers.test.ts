@@ -87,3 +87,13 @@ it('does_no_work_or_change_cached_values_when_no_timer_is_shown',()=>{
   try {prepareScoreTimers(score);} finally {serializer.mockRestore();}
   expect(model.JsonConverter.scoreToJson(score)).toBe(before);
 });
+
+it('reflects_fermata_holds_on_subsequent_beat_and_bar_timers',()=>{
+  const score=timedScore();
+  score.masterBars[0].addFermata(960,Object.assign(new model.Fermata(),{type:model.FermataType.Medium,length:0.5}));
+  score.finish(settings);
+  prepareScoreTimers(score);
+  const holdDelta=60000/(120*(0.66-0.41*0.5))-500;
+  expect(timers(score)[0]).toEqual([0,500,1000+holdDelta,1500+holdDelta].map(ms=>expect.closeTo(ms,6)));
+  expect(timers(score)[1]).toEqual([2000+holdDelta,2500+holdDelta,3000+holdDelta,3500+holdDelta].map(ms=>expect.closeTo(ms,6)));
+});

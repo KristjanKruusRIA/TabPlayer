@@ -199,3 +199,84 @@ fn optional_exact_attack_channel_and_program_are_strict_and_compatible() {
     valid.notes[0].program = Some(128);
     assert!(valid.validate().is_err());
 }
+
+#[test]
+fn fermata_holds_integrate_invert_and_validate() {
+    use tabplayer_lib::audio::plan::{PlanFermata, fermata_effective_bpm};
+
+    let held_bpm = fermata_effective_bpm(120.0, 0.5);
+    assert!((held_bpm - 54.6).abs() < 1e-12);
+    let hold_ms = 0.5 * 60_000.0 / held_bpm;
+    let bar0_ms = 1000.0 + hold_ms;
+    let bar1_ms = 2000.0;
+    let mut p = serde_json::from_value::<PlaybackPlan>(serde_json::json!({
+        "generation": 1, "ppq": 960, "durationTick": 7680.0, "durationMs": bar0_ms + bar1_ms,
+        "tracks": [{"id": "base/0", "program": 25, "percussion": false}],
+        "tempos": [{"tick": 0.0, "bpm": 120.0}, {"tick": 1440.0, "bpm": 60.0}],
+        "fermatas": [{"startTick": 960.0, "endTick": 1920.0, "length": 0.5}],
+        "occurrences": [
+            {"bar": 0, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 0.0, "endTick": 3840.0, "startMs": 0.0, "endMs": 0.0},
+            {"bar": 1, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 3840.0, "endTick": 7680.0, "startMs": 0.0, "endMs": 0.0}
+        ],
+        "notes": [], "midi": []
+    }))
+    .unwrap();
+    // Tempo changes mid-fermata at tick 1440 from 120 to 60 BPM.
+    let first_half_s = 480.0 * 60.0 / (960.0 * fermata_effective_bpm(120.0, 0.5));
+    let second_half_s = 480.0 * 60.0 / (960.0 * fermata_effective_bpm(60.0, 0.5));
+    let bar0_end_s = 0.5 + first_half_s + second_half_s + 2.0;
+    let total_end_s = bar0_end_s + 4.0;
+    p.occurrences[0].end_ms = bar0_end_s * 1000.0;
+    p.occurrences[1].start_ms = bar0_end_s * 1000.0;
+    p.occurrences[1].end_ms = total_end_s * 1000.0;
+    p.duration_ms = total_end_s * 1000.0;
+
+    let timeline = Timeline::new(&p).unwrap();
+    for tick in [0.0, 960.0, 1200.0, 1440.0, 1680.0, 1920.0, 3840.0, 7680.0] {
+        let sec = timeline.tick_to_seconds(tick);
+        assert!(
+            (timeline.seconds_to_tick(sec) - tick).abs() < 1e-8,
+            "tick={tick}"
+        );
+    }
+    assert!((timeline.tick_to_seconds(1440.0) - (0.5 + first_half_s)).abs() < 1e-9);
+    assert!((timeline.tick_to_seconds(1920.0) - (0.5 + first_half_s + second_half_s)).abs() < 1e-9);
+    assert!((timeline.tick_to_seconds(7680.0) - total_end_s).abs() < 1e-9);
+
+    for bad in [
+        vec![PlanFermata {
+            start_tick: 960.0,
+            end_tick: 960.0,
+            length: 0.5,
+        }],
+        vec![PlanFermata {
+            start_tick: 960.0,
+            end_tick: 1920.0,
+            length: -0.1,
+        }],
+        vec![
+            PlanFermata {
+                start_tick: 960.0,
+                end_tick: 1920.0,
+                length: 0.5,
+            },
+            PlanFermata {
+                start_tick: 1440.0,
+                end_tick: 2400.0,
+                length: 0.5,
+            },
+        ],
+        vec![PlanFermata {
+            start_tick: 960.0,
+            end_tick: 9000.0,
+            length: 0.5,
+        }],
+    ] {
+        let mut q = p.clone();
+        q.fermatas = Some(bad);
+        assert!(q.validate().is_err());
+    }
+    let mut mismatch = p.clone();
+    mismatch.duration_ms += 5.0;
+    assert!(mismatch.validate().is_err());
+}

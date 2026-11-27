@@ -169,4 +169,12 @@ describe('reference GP projection',()=>{
     const score=grace(),value=backing({referenceSync:{entryAudioMs:1000,exitAudioMs:9000}}),out=project(score,value),reopened=round(out);
     expect(backingLocationsForScore(reopened)[0].startTick).toBe(120);expect(physicalAt(reopened,0)).toBeCloseTo(937.5,8);expect(physicalAt(reopened,120)).toBeCloseTo(1000,8);expect(physicalAt(reopened,3960)).toBeCloseTo(3000,8);expect(physicalAt(reopened,15480)).toBeCloseTo(9000,8);
   });
+  it('projects GP sync points across fermata holds',()=>{
+    const score=score120();score.masterBars[0].addFermata(960,Object.assign(new model.Fermata(),{type:model.FermataType.Medium,length:0.5}));score.finish(settings);
+    const out=project(score,backing({offsetMs:-100}));
+    const heldQuarterMs=60000/(120*(0.66-0.41*0.5));
+    expect(points(out).map(p=>p.barPosition)).toContain(0.25);
+    expect(points(out).map(p=>p.barPosition)).toContain(0.5);
+    expect(physicalAt(out,1920)).toBeCloseTo(600+heldQuarterMs,6);
+  });
 });

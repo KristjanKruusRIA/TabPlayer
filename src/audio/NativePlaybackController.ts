@@ -9,6 +9,7 @@ import type { MusicSelection } from '../editor/range-types';
 import type { AudioDiagnostics, AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
 import type { AuditionSource } from './audition';
 import { freezePlan,preparePlan,preparePlanFromScore } from './plan';
+import { effectiveTempos,millisecondsAtTick as effectiveMillisecondsAtTick } from './fermata';
 import { sameData } from '../same-data';
 import { interpretationsOf } from './interpretation';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
@@ -83,13 +84,15 @@ export class NativePlaybackController {
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener);};};
   private keyTarget(){return this.queuedKey??(this.pendingPractice?tonalityOf(this.pendingPractice):tonalityOf(this.practice));}
+  private isKeyOnlyPending(){return this.pendingPractice!==null&&tonalityOf(this.pendingPractice)!==tonalityOf(this.practice)&&practiceKey({...this.pendingPractice,tonality:tonalityOf(this.practice)})===practiceKey(this.practice);}
   /** Publishes a change. Native status arrives about 30 times a second whatever it says, so a change that leaves every field as it was keeps the same state object and tells nobody; the fields that did not change keep their old objects too. An empty change is the explicit wish to notify (a private field the getters read has changed). */
   private update(change:Partial<PlaybackState>){
     if(this.destroyed)return;
     const next={...this.state,...change,keyTarget:this.keyTarget(),documentSerial:this.documentSerial} as PlaybackState,forced=Object.keys(change).length===0;
+    if(this.isKeyOnlyPending())next.keyPending=true;else delete next.keyPending;
     let changed=forced;
     for(const key of Object.keys(next) as (keyof PlaybackState)[]){if(sameData(this.state[key],next[key]))(next as unknown as Record<string,unknown>)[key]=this.state[key];else changed=true;}
-    if(!changed)return;
+    if(!changed&&!('keyPending' in this.state&&!('keyPending' in next)))return;
     this.state=forced?{...next}:next;for(const listener of this.listeners)listener();
   }
   private fail(error:unknown){this.noteMode='stopped';this.pendingNoteTick=undefined;this.operationError=error instanceof Error?error.message:String(error);this.update({error:this.operationError});}
@@ -117,8 +120,8 @@ export class NativePlaybackController {
       try {
         const scorePlaying=status.playing&&status.practice.phase!=='countIn'&&status.practice.countInRemaining===0;
         if(scorePlaying!==this.viewPlaying){if(scorePlaying)api.play();else api.pause();this.viewPlaying=scorePlaying;}
-        // Notation retains authored tempos while native playback uses the reference clock.
-        output.updatePosition(this.planTimingKey!==null&&this.authoredPlan?this.millisecondsAtTick(status.tick,this.authoredPlan):status.seconds*1000);
+        // Notation retains authored tempos (without reference sync or fermata holds) while native playback uses the effective clock.
+        output.updatePosition((this.planTimingKey!==null||!!this.authoredPlan?.fermatas?.length)&&this.authoredPlan?this.millisecondsAtTick(status.tick,this.authoredPlan):status.seconds*1000);
       } finally {this.suppressHandler=prior;}
     }
   }
@@ -131,7 +134,7 @@ export class NativePlaybackController {
   playbackOccurrences():readonly Readonly<MeasureOccurrence>[]{return this.selectionReady()?this.plan!.occurrences:[];}
   backingTimeline():BackingTimeline|null {
     const plan=this.plan;if(this.destroyed||this.preparing||plan?.generation!==this.generation)return null;
-    return {generation:plan.generation,durationTick:plan.durationTick,tempos:plan.tempos,occurrences:plan.occurrences};
+    return {generation:plan.generation,durationTick:plan.durationTick,tempos:plan.tempos,...(plan.fermatas?.length?{fermatas:plan.fermatas}:{}),occurrences:plan.occurrences};
   }
   backingScoreSelection(target:BeatTarget,selection:MusicSelection|null):BackingScoreSelection {
     const result:BackingScoreSelection={points:[],spans:[]};
@@ -390,7 +393,7 @@ export class NativePlaybackController {
     if(this.mixPreview&&mixLanded(this.mixPreview,built,project))this.mixPreview=null;
     const mixed=this.mixPreview;if(mixed&&!built.score.tracks.some(track=>trackIdentity(track)===mixed.track))this.mixPreview=null;
     const previewed=this.preview;if(previewed&&!built.score.tracks.some(track=>trackIdentity(track)===previewed.track)){this.preview=null;this.update({});}
-    if(documentChanged){this.requestedLoop=null;this.keptLoop=null;this.loopLost=false;this.awaitingRestore=false;this.trackFocus=null;this.preview=null;this.mixPreview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.carriedKey=null;this.update({practiceNotice:null,documentSerial:++this.documentSerial});}
+    if(documentChanged){this.requestedLoop=null;this.keptLoop=null;this.loopLost=false;this.awaitingRestore=false;this.trackFocus=null;this.preview=null;this.mixPreview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.carriedKey=null;this.update({practice:idlePractice(this.practice),practiceNotice:null,documentSerial:++this.documentSerial});}
     else if(this.carriedKey!==null){carriedFrom=tonalityOf(this.practice);this.practice={...this.practice,tonality:this.carriedKey};this.carriedKey=null;}
     const saved=effectiveAudioSettings(project,built),preview=this.preview,mixHeard=this.mixPreview;
     const heard={...saved,...(preview?{sounds:{...saved.sounds,[preview.track]:preview.sound}}:{}),...(mixHeard?{mixes:{...saved.mixes,[mixHeard.track]:mixHeard.mix}}:{})};
@@ -433,7 +436,7 @@ export class NativePlaybackController {
       const fitted=practiceForBacking(practice,this.hasBacking?authoredTemposOf(plan):null);
       if(fitted.notice){practice=fitted.settings;this.practice=fitted.settings;this.update({practiceNotice:fitted.notice});}
       const sourceKey=project.base.kind==='file'?project.base.sha256:'blank';
-      this.authoredPlan=authored;this.plan=plan;this.update({endTime:plan.playbackEndTick===undefined?plan.durationMs:this.millisecondsAtTick(plan.playbackEndTick,plan)});for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
+      this.authoredPlan=authored;this.plan=plan;this.update({endTime:plan.playbackEndTick===undefined?plan.durationMs:effectiveMillisecondsAtTick(plan.playbackEndTick,effectiveTempos(plan.tempos,plan.fermatas))});for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
       const embedded=this.embeddedSource===sourceKey?null:built.embeddedBacking;
       try{await this.bridge.prepare(plan,audioSettings,embedded,sourceKey,practice);}
       catch(error){
@@ -464,7 +467,7 @@ export class NativePlaybackController {
       const output=api.player?.output as synth.IExternalMediaSynthOutput|undefined;if(!output?.updatePosition)return;
       const prior=this.suppressHandler;this.suppressHandler=true;
       try {
-        output.handler={get backingTrackDuration(){return controller.authoredPlan?.durationMs??0;},get playbackRate(){return controller.state.speed/100;},set playbackRate(value){if(!controller.suppressHandler)controller.setSpeed(value*100);},masterVolume:1,
+        output.handler={get backingTrackDuration(){return controller.authoredPlan?controller.millisecondsAtTick(controller.authoredPlan.durationTick,controller.authoredPlan):0;},get playbackRate(){return controller.state.speed/100;},set playbackRate(value){if(!controller.suppressHandler)controller.setSpeed(value*100);},masterVolume:1,
           seekTo(time){if(!controller.suppressHandler)controller.seekToTick(controller.tickAtSeconds(time/1000));},
           play(){if(!controller.suppressHandler)controller.play();},pause(){if(!controller.suppressHandler)controller.pause();}};
         api.player?.updateSyncPoints([]);

@@ -38,7 +38,7 @@ export function BackingWaveform(props:BackingWaveformProps) {
   const signature=JSON.stringify([identity,props.document.revision,props.settings,props.timeline?.generation]);
   const currentSignature=useRef(signature);currentSignature.current=signature;
   const duration=data?.durationMs??0,zoom=zooms[zoomIndex],contentWidth=width*zoom;
-  const timeline=useMemo(()=>props.timeline,[props.timeline?.generation,props.timeline?.durationTick,props.timeline?.tempos,props.timeline?.occurrences]);
+  const timeline=useMemo(()=>props.timeline,[props.timeline?.generation,props.timeline?.durationTick,props.timeline?.tempos,props.timeline?.fermatas,props.timeline?.occurrences]);
   const selection=useMemo(()=>props.selection,[JSON.stringify(props.selection)]);
   const committedMap=useMemo(()=>props.settings??props.effectiveBacking,[JSON.stringify(props.settings??props.effectiveBacking)]);
   const reference=props.reference,map=reference?.edit.preview??preview??committedMap;

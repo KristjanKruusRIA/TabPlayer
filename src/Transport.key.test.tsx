@@ -65,6 +65,8 @@ it('a_pending_key_is_shown_in_the_group_and_not_in_the_messages_row_so_nothing_m
   expect(screen.getByRole('group',{name:'Key'})).toHaveTextContent('Applying practice settings…');
   // Another pending setting still uses the row.
   update(shifted(2,{practicePending:true,keyTarget:2}));expect(document.querySelector('.transport-messages')).toHaveTextContent('Applying practice settings…');
+  // Stepping back to the acknowledged key while a key shift is pending keeps the message out of the messages row.
+  update(shifted(2,{practicePending:true,keyPending:true,keyTarget:2}));expect(document.querySelector('.transport-messages')).toBeNull();
 });
 it('a_busy_editor_blocks_the_key_with_aria_disabled_never_disabled',()=>{
   const {player}=show(shifted(1),true);

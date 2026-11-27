@@ -915,3 +915,50 @@ it('keeps a drum map when the player saves a volume, pan, mute or solo change',a
   player.setSolo(1,true);expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackMix',trackId:id,mix:{...mix,solo:true}});
   player.destroy();
 });
+
+it('keeps alphaTab cursor on un-held notation ms when fermatas stretch native playback, and strips fermatas under reference sync',async()=>{
+  const project=previewEdit(blankProject(),{type:'setFermata',target:{track:0,staff:0,bar:0,voice:0,beat:1},fermata:{type:1,length:0.5}}).project;
+  const built=buildDocument(project);
+  const {player,emit}=fixture();
+  await player.loadDocument(project,built);
+  const prepared=vi.mocked((await import('./NativePlaybackController') && player as any).bridge.prepare).mock.calls.at(-1)![0] as ReturnType<typeof buildPlaybackPlan>;
+  expect(prepared.fermatas).toEqual([{startTick:960,endTick:1920,length:0.5}]);
+  const output={handler:undefined as undefined|{backingTrackDuration:number;seekTo:(ms:number)=>void},updatePosition:vi.fn()};let ready=()=>{};
+  const api={player:{output,updateSyncPoints:vi.fn()},playerReady:{on:(f:()=>void)=>{ready=f;},off:vi.fn()},play:vi.fn(),pause:vi.fn(),renderScore:vi.fn(),isReadyForPlayback:true} as unknown as Parameters<typeof player.attachView>[0];
+  player.attachView(api);ready();
+  // AlphaTab notation duration is the un-held 8000 ms (4 bars at 120 BPM), not the stretched durationMs.
+  expect(output.handler!.backingTrackDuration).toBeCloseTo(8000,6);
+  // At tick 1920, native playback time is stretched (500 + 60000/54.6 + ...), while alphaTab's cursor sees 1000 ms.
+  emit({playing:true,tick:1920,seconds:5});
+  expect(output.updatePosition).toHaveBeenLastCalledWith(1000);
+
+  // Reference sync overrides effective timing and strips fermatas from the effective plan.
+  const {applyReferenceSyncPlan}=await import('./reference-sync');
+  const synced=applyReferenceSyncPlan(prepared,{assetId:'a',offsetMs:0,anchors:[],mix:{gain:1,pan:0,mute:false,solo:false},referenceSync:{entryAudioMs:0,exitAudioMs:16000}});
+  expect(synced.fermatas).toBeUndefined();
+  player.destroy();
+});
+
+it('resets practice alongside documentSerial on document switch and tracks key-only pending when stepping back',async()=>{
+  const {player,bridge,emit}=fixture();const p1=blankProject(),b1=buildDocument(p1);
+  await player.loadDocument(p1,b1,0,0);emit();
+  player.stepKeyShift(2);
+  emit({practice:practiceStatus({...defaults(),tonality:2})});
+  // Switch to another document with floorReadyEpoch already current: practice resets in the same update as documentSerial.
+  const nextSerial=(player.getState().documentSerial??0)+1;
+  let seen:Array<{key:number;serial?:number}>=[];
+  player.subscribe(()=>seen.push({key:player.getState().practice.settings.tonality??0,serial:player.getState().documentSerial}));
+  const p2=blankProject(),b2=buildDocument(p2);
+  await player.loadDocument(p2,b2,0,1);
+  expect(seen.find(s=>s.serial===nextSerial)).toEqual({key:0,serial:nextSerial});
+  emit();
+
+  // Stepping back to the acknowledged key while a key shift is pending keeps keyPending true.
+  vi.mocked(bridge.command).mockClear();
+  player.stepKeyShift(1);
+  await Promise.resolve();
+  expect(player.getState()).toMatchObject({practicePending:true,keyPending:true,keyTarget:1});
+  player.stepKeyShift(-1);
+  expect(player.getState()).toMatchObject({practicePending:true,keyPending:true,keyTarget:0});
+  player.destroy();
+});

@@ -686,3 +686,644 @@ fn an_export_with_a_backing_lands_sustained_audio_where_playback_does() {
         }
     }
 }
+
+fn fermata_plan(fermatas: &[(f64, f64, f64)]) -> PlaybackPlan {
+    use tabplayer_lib::audio::plan::{PlanFermata, effective_tempos};
+
+    let mut p = plan();
+    let list: Vec<PlanFermata> = fermatas
+        .iter()
+        .map(|&(start_tick, end_tick, length)| PlanFermata {
+            start_tick,
+            end_tick,
+            length,
+        })
+        .collect();
+    let effective = effective_tempos(&p.tempos, Some(&list));
+    let ms_at = |tick: f64| -> f64 {
+        let mut secs = 0.0;
+        let mut prev = 0.0;
+        let mut bpm = effective[0].bpm;
+        for t in &effective {
+            if t.tick > tick {
+                break;
+            }
+            secs += (t.tick - prev) * 60.0 / (960.0 * bpm);
+            prev = t.tick;
+            bpm = t.bpm;
+        }
+        (secs + (tick - prev) * 60.0 / (960.0 * bpm)) * 1000.0
+    };
+    p.fermatas = Some(list);
+    for o in &mut p.occurrences {
+        o.start_ms = ms_at(o.start_tick);
+        o.end_ms = ms_at(o.end_tick);
+    }
+    p.duration_ms = ms_at(p.duration_tick);
+    p.validate().unwrap();
+    p
+}
+
+fn fermata_renderer(
+    base_plan: &PlaybackPlan,
+    note_ticks: &[u32],
+    ticks: &[u32],
+    score: bool,
+    content: Content,
+    offset_ms: f64,
+    anchors: &[tabplayer_lib::settings::SyncAnchor],
+) -> Box<Renderer> {
+    use tabplayer_lib::audio::plan::Timeline;
+    let mut plan = base_plan.clone();
+    if score {
+        let notes: Vec<_> = note_ticks
+            .iter()
+            .enumerate()
+            .map(|(index, &tick)| {
+                serde_json::json!({
+                    "id": format!("q{index}"),
+                    "trackId": "guitar",
+                    "source": {"target": {"track": 0, "staff": 0, "bar": u32::from(tick >= 3840), "voice": 0, "beat": index}, "string": 1},
+                    "occurrence": 0,
+                    "startTick": tick,
+                    "endTick": tick + 120,
+                    "key": 57,
+                    "velocity": 127,
+                    "articulation": "picked",
+                    "legatoFrom": null,
+                    "pitch": [{"tick": tick, "semitones": 0}]
+                })
+            })
+            .collect();
+        let mut value = serde_json::to_value(&plan).unwrap();
+        value["notes"] = serde_json::Value::Array(notes);
+        plan = serde_json::from_value(value).unwrap();
+    }
+    let timeline = Timeline::new(&plan).unwrap();
+    let mut resources = AudioResources::load_for_requests(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+        &[],
+    )
+    .unwrap();
+    resources.manifest.instruments = vec![Instrument {
+        id: "green-guitar".into(),
+        regions: vec![Region {
+            sample_id: "impulse".into(),
+            root_key: 57,
+            key_low: 0,
+            key_high: 127,
+            velocity_low: 0,
+            velocity_high: 127,
+            articulation: "picked".into(),
+            variant: 1,
+            sequence_length: 1,
+            trigger: "attack".into(),
+            pitch_keytrack: 100.0,
+            velocity_gain_high: 127,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }];
+    let mut impulse = vec![[0.0; 2]; 480];
+    impulse[0] = [1.0; 2];
+    resources.samples.insert(
+        "impulse".into(),
+        Arc::new(DecodedAudio {
+            sample_rate: RATE,
+            channels: 2,
+            frames: Arc::new(impulse),
+        }),
+    );
+    let plan = Arc::new(plan);
+    let mut renderer = Renderer::new(
+        plan.clone(),
+        Arc::new(resources),
+        DocumentSettings::default(),
+        RATE,
+    )
+    .unwrap();
+    if content != Content::None {
+        let shift = (offset_ms / 1000.0 * f64::from(RATE)).round() as usize;
+        let total_secs = (timeline.tick_to_seconds(plan.duration_tick).ceil() as usize + 4).max(10);
+        let mut frames = vec![[0.0f32; 2]; total_secs * RATE as usize];
+        for &tick in ticks {
+            let source_frame = if anchors.is_empty() {
+                (timeline.tick_to_seconds(f64::from(tick)) * f64::from(RATE)).round() as i64
+            } else {
+                score_frames(tick) as i64
+            };
+            let at = source_frame - shift as i64;
+            if at < 0 || (content == Content::Burst && at < 960) {
+                continue;
+            }
+            let at = at as usize;
+            match content {
+                Content::Impulse => frames[at] = [1.0; 2],
+                Content::Burst => {
+                    for n in 0..1920usize {
+                        let w = 0.5 - 0.5 * (std::f64::consts::TAU * n as f64 / 1920.0).cos();
+                        let s = (std::f64::consts::TAU * 1000.0 * n as f64 / f64::from(RATE)).sin()
+                            * w
+                            * 0.5;
+                        frames[at - 960 + n] = [s as f32; 2];
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+        renderer
+            .install_backing(
+                Arc::new(DecodedAudio {
+                    sample_rate: RATE,
+                    channels: 2,
+                    frames: Arc::new(frames),
+                }),
+                BackingMap::new(anchors, offset_ms, &plan).unwrap(),
+                Default::default(),
+            )
+            .unwrap();
+    }
+    Box::new(renderer)
+}
+
+fn render_fermata_transport(
+    plan: &PlaybackPlan,
+    ticks: &[u32],
+    score: bool,
+    content: Content,
+    tempo: PracticeTempo,
+    loop_ticks: Option<(f64, f64)>,
+    seek: Option<f64>,
+    count_bars: u8,
+    offset_ms: f64,
+    anchors: &[tabplayer_lib::settings::SyncAnchor],
+    frames: usize,
+) -> Vec<[f32; 2]> {
+    let mut transport = CallbackTransport::headless(RATE);
+    transport.install_with_practice(
+        fermata_renderer(plan, ticks, ticks, score, content, offset_ms, anchors),
+        1,
+        false,
+        PracticeSettings {
+            tempo,
+            metronome: MetronomeSettings {
+                enabled: count_bars > 0,
+                volume: 0.4,
+                visual: false,
+                sound: Default::default(),
+            },
+            count_in: CountInSettings {
+                bars: count_bars,
+                between_loops: false,
+            },
+            tonality: 0,
+        },
+    );
+    if let Some((start_tick, end_tick)) = loop_ticks {
+        transport
+            .command(TransportCommand::SetLoop {
+                generation: 1,
+                start_tick,
+                end_tick,
+            })
+            .unwrap();
+    }
+    if let Some(tick) = seek {
+        transport
+            .command(TransportCommand::SeekTick {
+                generation: 1,
+                tick,
+            })
+            .unwrap();
+    }
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    let mut pcm = vec![[0.0; 2]; frames];
+    let mut offset = 0;
+    for size in [127, 511, 1024].into_iter().cycle() {
+        let end = (offset + size).min(pcm.len());
+        transport.render_into(&mut pcm[offset..end]);
+        offset = end;
+        if offset == pcm.len() {
+            break;
+        }
+    }
+    pcm
+}
+
+#[test]
+fn score_and_backing_stay_aligned_across_fermata_holds_in_relative_and_fixed_mode() {
+    for length in [0.5, 1.0] {
+        let p = fermata_plan(&[(1920.0, 2880.0, length)]);
+        let tempos = [
+            PracticeTempo::Relative { ratio: 0.5 },
+            PracticeTempo::Relative { ratio: 1.0 },
+            PracticeTempo::Relative { ratio: 1.7 },
+            PracticeTempo::Fixed { bpm: 60.0 },
+            PracticeTempo::Fixed { bpm: 90.0 },
+            PracticeTempo::Fixed { bpm: 150.0 },
+        ];
+        for tempo in tempos {
+            let frames = 600_000;
+            let score = onsets(&render_fermata_transport(
+                &p,
+                &TICKS,
+                true,
+                Content::None,
+                tempo,
+                None,
+                None,
+                0,
+                0.0,
+                &[],
+                frames,
+            ));
+            let backing = onsets(&render_fermata_transport(
+                &p,
+                &TICKS,
+                false,
+                Content::Impulse,
+                tempo,
+                None,
+                None,
+                0,
+                0.0,
+                &[],
+                frames,
+            ));
+            assert!(
+                score.len() >= 10,
+                "length {length} tempo {tempo:?}: {score:?}"
+            );
+            let g = gaps(&score, &backing);
+            let max_gap = match tempo {
+                PracticeTempo::Relative { .. } if (length - 1.0).abs() < 1e-9 => 0,
+                _ => 1,
+            };
+            assert!(
+                g.iter().all(|d| d.abs() <= max_gap),
+                "length {length} tempo {tempo:?}: {score:?} vs {backing:?} -> {g:?}"
+            );
+        }
+    }
+
+    // Tone bursts (sustained audio through the stretcher) remain within 3 ms across the fermata.
+    const BURSTS: [u32; 4] = [960, 1920, 2880, 4800];
+    let p = fermata_plan(&[(1920.0, 2880.0, 0.5)]);
+    for tempo in [
+        PracticeTempo::Relative { ratio: 0.5 },
+        PracticeTempo::Relative { ratio: 1.0 },
+        PracticeTempo::Fixed { bpm: 90.0 },
+    ] {
+        let frames = 400_000;
+        let score = onsets(&render_fermata_transport(
+            &p,
+            &BURSTS,
+            true,
+            Content::None,
+            tempo,
+            None,
+            None,
+            0,
+            0.0,
+            &[],
+            frames,
+        ));
+        let backing = render_fermata_transport(
+            &p,
+            &BURSTS,
+            false,
+            Content::Burst,
+            tempo,
+            None,
+            None,
+            0,
+            0.0,
+            &[],
+            frames,
+        );
+        assert_eq!(score.len(), 4, "{tempo:?}: {score:?}");
+        for (index, (&s, &tick)) in score.iter().zip(&BURSTS).enumerate() {
+            let local_speed = match tempo {
+                PracticeTempo::Relative { ratio } => ratio,
+                PracticeTempo::Fixed { bpm } => {
+                    let source_bpm = if tick < 1920 {
+                        120.0
+                    } else if tick < 2880 {
+                        tabplayer_lib::audio::plan::fermata_effective_bpm(120.0, 0.5)
+                    } else if tick < 3840 {
+                        120.0
+                    } else {
+                        60.0
+                    };
+                    let target_bpm = if (1920..2880).contains(&tick) {
+                        tabplayer_lib::audio::plan::fermata_effective_bpm(bpm, 0.5)
+                    } else {
+                        bpm
+                    };
+                    target_bpm / source_bpm
+                }
+                _ => unreachable!(),
+            };
+            let c = centroids(&backing, &[s], (3000.0 / local_speed) as usize)[0];
+            let err_source_frames = (c - s as f64) * local_speed;
+            assert!(
+                err_source_frames.abs() <= SHORT_BURST_3_MS,
+                "tempo {tempo:?} burst {index}: {err_source_frames}"
+            );
+        }
+    }
+}
+
+#[test]
+fn length_two_fermata_keeps_fixed_mode_validation_and_alignment() {
+    use tabplayer_lib::audio::practice::AuthoredTempos;
+    let p = fermata_plan(&[(1920.0, 2880.0, 2.0)]);
+    // Authored tempos are still 60..120 BPM, so Fixed 90 BPM is valid with a backing track.
+    PracticeSettings {
+        tempo: PracticeTempo::Fixed { bpm: 90.0 },
+        ..PracticeSettings::default()
+    }
+    .validate(Some(AuthoredTempos::of_plan(&p)))
+    .unwrap();
+
+    // Cross the exit of the length-2 fermata (1 BPM inside 1920..2880, 90 BPM from 2880).
+    let near_exit = [2880u32, 3120, 3360];
+    let frames = 120_000;
+    let tempo = PracticeTempo::Fixed { bpm: 90.0 };
+    let score = onsets(&render_fermata_transport(
+        &p,
+        &near_exit,
+        true,
+        Content::None,
+        tempo,
+        None,
+        Some(2875.0),
+        0,
+        0.0,
+        &[],
+        frames,
+    ));
+    let backing = onsets(&render_fermata_transport(
+        &p,
+        &near_exit,
+        false,
+        Content::Impulse,
+        tempo,
+        None,
+        Some(2875.0),
+        0,
+        0.0,
+        &[],
+        frames,
+    ));
+    assert_eq!(score.len(), 3, "{score:?}");
+    assert_eq!(gaps(&score, &backing), vec![0, 0, 0]);
+}
+
+#[test]
+fn fermata_partial_loops_seeks_offsets_count_in_export_and_anchors_align() {
+    use tabplayer_lib::export::{
+        audio::{AudioExportRender, AudioExportRequest},
+        stems::{StemKind, StemTrack},
+        wav::AudioFormat,
+    };
+    use tabplayer_lib::settings::SyncAnchor;
+
+    let p = fermata_plan(&[(1920.0, 2880.0, 1.0)]);
+    // Partial-beat loop spanning fermata, loop starting inside fermata, seek inside fermata, and 100 ms offset.
+    for (name, tempo, loop_ticks, seek, offset_ms, min_events) in [
+        (
+            "rel loop span",
+            PracticeTempo::Relative { ratio: 0.5 },
+            Some((1440.0, 3360.0)),
+            None,
+            0.0,
+            4,
+        ),
+        (
+            "fixed loop span",
+            PracticeTempo::Fixed { bpm: 90.0 },
+            Some((1440.0, 3360.0)),
+            None,
+            0.0,
+            6,
+        ),
+        (
+            "loop inside fermata",
+            PracticeTempo::Relative { ratio: 1.0 },
+            Some((2160.0, 3360.0)),
+            None,
+            0.0,
+            4,
+        ),
+        (
+            "seek inside fermata",
+            PracticeTempo::Fixed { bpm: 90.0 },
+            None,
+            Some(2160.0),
+            100.0,
+            4,
+        ),
+    ] {
+        let frames = 500_000;
+        let score = onsets(&render_fermata_transport(
+            &p,
+            &TICKS,
+            true,
+            Content::None,
+            tempo,
+            loop_ticks,
+            seek,
+            0,
+            offset_ms,
+            &[],
+            frames,
+        ));
+        let backing = onsets(&render_fermata_transport(
+            &p,
+            &TICKS,
+            false,
+            Content::Impulse,
+            tempo,
+            loop_ticks,
+            seek,
+            0,
+            offset_ms,
+            &[],
+            frames,
+        ));
+        assert!(score.len() >= min_events, "{name}: {score:?}");
+        let max_gap = match tempo {
+            PracticeTempo::Relative { .. } => 0,
+            _ => 1,
+        };
+        assert!(
+            gaps(&score, &backing).iter().all(|g| g.abs() <= max_gap),
+            "{name}: {score:?} vs {backing:?}"
+        );
+    }
+
+    // Count-in before a bar starting with a fermata clicks at the authored 120 BPM (24,000 frames), not the slowed fermata BPM.
+    let bar0_fermata = fermata_plan(&[(0.0, 960.0, 1.0)]);
+    let score_counted = render_fermata_transport(
+        &bar0_fermata,
+        &[960, 1920],
+        true,
+        Content::None,
+        PracticeTempo::Relative { ratio: 1.0 },
+        None,
+        None,
+        1,
+        0.0,
+        &[],
+        300_000,
+    );
+    let backing_counted = render_fermata_transport(
+        &bar0_fermata,
+        &[960, 1920],
+        false,
+        Content::Impulse,
+        PracticeTempo::Relative { ratio: 1.0 },
+        None,
+        None,
+        1,
+        0.0,
+        &[],
+        300_000,
+    );
+    // Count-in clicks sit in frames 0..96_000 (4 beats at 120 BPM = 2.0 s = 96,000 frames).
+    let mut click_onsets = Vec::new();
+    let mut last_click = None::<usize>;
+    for (frame, x) in backing_counted[..95_000].iter().enumerate() {
+        if x[0].abs() > 0.02 && last_click.is_none_or(|l| frame - l > 10_000) {
+            click_onsets.push(frame);
+            last_click = Some(frame);
+        }
+    }
+    assert_eq!(click_onsets.len(), 4, "count-in clicks: {click_onsets:?}");
+    for w in click_onsets.windows(2) {
+        assert!(
+            (w[1] as i64 - w[0] as i64 - 24_000).abs() <= 2,
+            "count-in spacing: {click_onsets:?}"
+        );
+    }
+    let score_after = onsets(&score_counted[95_500..]);
+    let backing_after = onsets(&backing_counted[95_500..]);
+    assert_eq!(gaps(&score_after, &backing_after), vec![0, 0]);
+
+    // AudioExportRender with a fermata + backing matches playback to within 1 frame.
+    const EXPORT_BURSTS: [u32; 3] = [960, 1920, 2880];
+    for speed in [0.5, 1.7] {
+        let r = *fermata_renderer(&p, &[], &EXPORT_BURSTS, false, Content::Burst, 0.0, &[]);
+        let request = AudioExportRequest {
+            tracks: vec![StemTrack {
+                id: "guitar".into(),
+                name: "Guitar".into(),
+                preset: "gm".into(),
+                kind: StemKind::Score,
+            }],
+            range: Some(tabplayer_lib::export::audio::MeasureRange { first: 0, last: 0 }),
+            format: AudioFormat::wav(RATE, 24),
+            speed,
+            metronome: false,
+            metronome_sound: Default::default(),
+            tail_seconds: 0.0,
+            include_backing: true,
+            include_mix: true,
+            normalize_rms_db: None,
+        };
+        let mut export = AudioExportRender::new(r, &p, request).unwrap();
+        let mut exported = Vec::new();
+        loop {
+            let mut block = [[0.0f32; 2]; 512];
+            let n = export.render_mix(&mut block).unwrap();
+            if n == 0 {
+                break;
+            }
+            exported.extend_from_slice(&block[..n]);
+        }
+        let played = render_fermata_transport(
+            &p,
+            &EXPORT_BURSTS,
+            false,
+            Content::Burst,
+            PracticeTempo::Relative { ratio: speed },
+            None,
+            None,
+            0,
+            0.0,
+            &[],
+            exported.len(),
+        );
+        let expected: Vec<usize> = onsets(&render_fermata_transport(
+            &p,
+            &EXPORT_BURSTS,
+            true,
+            Content::None,
+            PracticeTempo::Relative { ratio: speed },
+            None,
+            None,
+            0,
+            0.0,
+            &[],
+            exported.len(),
+        ));
+        assert_eq!(expected.len(), 3);
+        let from_export = centroids(&exported, &expected, 2000);
+        let from_playback = centroids(&played, &expected, 2000);
+        for (e, p_val) in from_export.iter().zip(&from_playback) {
+            assert!(
+                (e - p_val).abs() < 1.0,
+                "speed {speed}: export {e} vs playback {p_val}"
+            );
+        }
+    }
+
+    // Anchored un-held backing stretches across the fermata and lands beat 3 & beat 4 on the exact score frame.
+    let anchors = [
+        SyncAnchor {
+            bar: 0,
+            occurrence: 0,
+            ratio: 0.5,
+            audio_ms: 1000.0,
+        },
+        SyncAnchor {
+            bar: 0,
+            occurrence: 0,
+            ratio: 0.75,
+            audio_ms: 1500.0,
+        },
+    ];
+    let anchor_ticks = [1920u32, 2880];
+    let frames = 200_000;
+    let score = onsets(&render_fermata_transport(
+        &p,
+        &anchor_ticks,
+        true,
+        Content::None,
+        PracticeTempo::Relative { ratio: 1.0 },
+        None,
+        None,
+        0,
+        0.0,
+        &anchors,
+        frames,
+    ));
+    let backing = onsets(&render_fermata_transport(
+        &p,
+        &anchor_ticks,
+        false,
+        Content::Impulse,
+        PracticeTempo::Relative { ratio: 1.0 },
+        None,
+        None,
+        0,
+        0.0,
+        &anchors,
+        frames,
+    ));
+    assert_eq!(score.len(), 2);
+    assert_eq!(gaps(&score, &backing), vec![0, 0]);
+}

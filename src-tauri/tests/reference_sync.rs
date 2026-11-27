@@ -722,3 +722,16 @@ fn a_fixed_tempo_follows_a_backing_whose_tempos_come_from_its_audio() {
         }
     }
 }
+
+#[test]
+fn reference_sync_rejects_a_plan_carrying_fermatas() {
+    let case = first_case();
+    let mut plan = fixture_plan(&case);
+    plan.fermatas = Some(vec![tabplayer_lib::audio::plan::PlanFermata {
+        start_tick: 0.0,
+        end_tick: 960.0,
+        length: 0.5,
+    }]);
+    let backing = settings(&case["backing"]);
+    assert!(BackingMap::from_settings(&backing, &plan).is_err());
+}

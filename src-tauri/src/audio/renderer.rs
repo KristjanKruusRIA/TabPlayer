@@ -857,11 +857,13 @@ fn select_drum(
 pub struct Renderer {
     plan: Arc<PlaybackPlan>,
     timeline: Timeline,
+    fixed_timeline: Timeline,
     _resources: Arc<AudioResources>,
     rate: u32,
     tempo: RenderTempo,
     seconds: f64,
     clock_origin_seconds: f64,
+    clock_origin_fixed_seconds: f64,
     clock_origin_tick: f64,
     clock_frames: u64,
     tracks: Vec<Track>,
@@ -945,6 +947,11 @@ impl Renderer {
     ) -> Result<Self, String> {
         let plan = with_drum_kits(with_locked_articulations(plan, &settings), &settings);
         let timeline = Timeline::new(&plan)?;
+        let fixed_timeline = Timeline::with_capacity(
+            plan.fermatas
+                .as_deref()
+                .map_or(0, |fermatas| fermatas.len() * 2 + 1),
+        );
         let track_indices: HashMap<_, _> = plan
             .tracks
             .iter()
@@ -1327,11 +1334,13 @@ impl Renderer {
         let mut renderer = Self {
             plan,
             timeline,
+            fixed_timeline,
             _resources: resources,
             rate: sample_rate,
             tempo: RenderTempo::Relative { ratio: 1.0 },
             seconds: 0.0,
             clock_origin_seconds: 0.0,
+            clock_origin_fixed_seconds: 0.0,
             clock_origin_tick: 0.0,
             clock_frames: 0,
             tracks,
@@ -1974,11 +1983,20 @@ impl Renderer {
             RenderTempo::Relative { ratio } => {
                 self.clock_origin_seconds + self.clock_frames as f64 * ratio / self.rate as f64
             }
-            RenderTempo::Fixed { bpm } => self.timeline.tick_to_seconds(
-                self.clock_origin_tick
-                    + self.clock_frames as f64 * bpm * self.plan.ppq as f64
-                        / (60.0 * self.rate as f64),
-            ),
+            RenderTempo::Fixed { bpm } => {
+                if !self.fixed_timeline.is_empty() {
+                    let wall = self.clock_origin_fixed_seconds
+                        + self.clock_frames as f64 / self.rate as f64;
+                    self.timeline
+                        .tick_to_seconds(self.fixed_timeline.seconds_to_tick(wall))
+                } else {
+                    self.timeline.tick_to_seconds(
+                        self.clock_origin_tick
+                            + self.clock_frames as f64 * bpm * self.plan.ppq as f64
+                                / (60.0 * self.rate as f64),
+                    )
+                }
+            }
         };
         if !self.tail {
             if let Some(end) = self.plan.playback_end_tick {
@@ -2311,7 +2329,12 @@ impl Renderer {
                             (self.seconds - self.timeline.tick_to_seconds(note.start_tick)) / ratio
                         }
                         RenderTempo::Fixed { bpm } => {
-                            (tick - note.start_tick) * 60.0 / (bpm * self.plan.ppq as f64)
+                            if !self.fixed_timeline.is_empty() {
+                                self.fixed_timeline.tick_to_seconds(tick)
+                                    - self.fixed_timeline.tick_to_seconds(note.start_tick)
+                            } else {
+                                (tick - note.start_tick) * 60.0 / (bpm * self.plan.ppq as f64)
+                            }
                         }
                     };
                     self.slots[slot]
@@ -2399,6 +2422,12 @@ impl Renderer {
         }
         if self.tempo != tempo {
             self.tempo = tempo;
+            if let RenderTempo::Fixed { bpm } = tempo {
+                if let Some(fermatas) = self.plan.fermatas.as_deref() {
+                    self.fixed_timeline
+                        .rebuild_fixed(bpm, self.plan.ppq, fermatas);
+                }
+            }
             self.reset_clock_origin();
         }
         Ok(())
@@ -2406,6 +2435,11 @@ impl Renderer {
     fn reset_clock_origin(&mut self) {
         self.clock_origin_seconds = self.seconds;
         self.clock_origin_tick = self.timeline.seconds_to_tick(self.seconds);
+        self.clock_origin_fixed_seconds = if !self.fixed_timeline.is_empty() {
+            self.fixed_timeline.tick_to_seconds(self.clock_origin_tick)
+        } else {
+            0.0
+        };
         self.clock_frames = 0;
     }
     pub fn output_frames_until(&self, end_tick: f64) -> usize {
@@ -2419,7 +2453,13 @@ impl Renderer {
                 (self.timeline.tick_to_seconds(end_tick) - self.seconds) * self.rate as f64 / ratio
             }
             RenderTempo::Fixed { bpm } => {
-                (end_tick - tick) * 60.0 * self.rate as f64 / (bpm * self.plan.ppq as f64)
+                if !self.fixed_timeline.is_empty() {
+                    (self.fixed_timeline.tick_to_seconds(end_tick)
+                        - self.fixed_timeline.tick_to_seconds(tick))
+                        * self.rate as f64
+                } else {
+                    (end_tick - tick) * 60.0 * self.rate as f64 / (bpm * self.plan.ppq as f64)
+                }
             }
         };
         if frames <= 0.0 {

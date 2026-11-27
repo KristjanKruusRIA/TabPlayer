@@ -211,6 +211,7 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
             tick: 0.0,
             bpm: 62.5,
         }],
+        fermatas: None,
         occurrences: vec![MeasureOccurrence {
             bar: 0,
             occurrence: 0,

@@ -8,3 +8,25 @@
 - Limit: nobody confirmed that the fermata symbols were visible in Guitar Pro when the files were opened, so "no hold in the export" cannot be told apart from "Guitar Pro did not read the fermatas". This says nothing about how Guitar Pro plays a fermata back, only what its MIDI export contains.
 
 Pinned by `src/interchange/gp8-fermata-midi.test.ts`.
+
+## Visible fermatas and a Guitar Pro control, 26 November 2026
+
+On Windows, Guitar Pro 8.0.0 build 18 displayed the short, medium and long fermatas from the current stringed probe. At 120 BPM a medium fermata was also added in Guitar Pro to the first note of the plain lead-in bar. The saved score, `fermata-visible-120.gp8.gp`, contains 14 fermatas. The new one has offset 0/1 and length 0.5. At 60 BPM the generated probe was exported without edits.
+
+`fermata-visible-60.gp8.mid` and `fermata-visible-120.gp8.mid` are the resulting File → Export → MIDI files. Both contain the expected pitches, onsets and releases on both tracks and a single initial tempo. This includes the first note with the hand-authored fermata.
+
+### Soundbank audio from Guitar Pro 8.0.0 build 18
+
+Guitar Pro's WAV renderer stretches the marked beat. To reproduce, run `node scripts/fermata-probe.mjs write-audio`, open the five resulting scores in Guitar Pro 8 and use File → Export → Audio → WAV. Export the whole score. Turn off per-track files, metronome, count-in and normalization. The inputs use the piano soundbank already specified in the saved GP8 file. The original tracks selected MIDI playback, which disabled Audio export. The paired control at each tempo differs from its marked score only by removal of the fourteen fermatas.
+
+| WAV | Stereo PCM frames at 44,100 Hz | Duration |
+| --- | ---: | ---: |
+| 120 BPM control | 2,381,400 | 54.000000 s |
+| 120 BPM with marks | 10,468,774 | 237.387166 s |
+| 60 BPM control | 4,762,800 | 108.000000 s |
+| 60 BPM with marks | 12,999,549 | 294.774354 s |
+| 90 BPM with fourteen new length settings | 10,568,458 | 239.647574 s |
+
+Measured against the following downbeat, a marked quarter at 120 BPM added about 0.26 s for stored length 0, 0.60 s for 0.5, 1.50 s for 1, and 59.50 s for 2. At 60 BPM those delays were approximately 0.52, 1.20, 3.00 and 59.00 s. Short, Medium and Long gave the same timing where tested at equal lengths. The rest delayed the following note. With length 0 the half-note delay was twice the quarter-note delay and the eighth-note delay was half. The hand-entered mark on the first beat matched the other length-0.5 quarter.
+
+An empirical model for the marked interval is `effectiveBpm = max(1, tempoBpm * (0.66 - 0.41 * storedLength))`, applied for the marked written duration. At length 2 a quarter therefore takes 60 seconds total at either test tempo. Before rendering the 90 BPM score, this model predicted **239.647443 s**. The measured render differed by 0.000131 s. All 27 bar starts were identified from the lead piano's C5 attack. Individual marked-bar durations on the 90 BPM render matched within 25 ms using a 50 ms spectral window and 5 ms hop. These probes use fixed tempi and aligned 4/4 bars. Handling simultaneous unequal beat lengths, changes of tempo within a hold, and exact note releases on the sustaining track still needs independent verification. Real-time device playback was not recorded.

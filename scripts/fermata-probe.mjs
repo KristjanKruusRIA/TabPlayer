@@ -2,8 +2,7 @@
 // THE-60 fermata probe.
 //   node scripts/fermata-probe.mjs write [dir]     writes two Guitar Pro files and README.txt (default .analysis/fermata-probe/)
 //   node scripts/fermata-probe.mjs analyse [dir]   reads the .mid files Guitar Pro 8 exported from them and prints what the numbers show
-// The probe exists because nobody knows what the stored fermata Length means or how Guitar Pro plays a fermata
-// (docs/superpowers/specs/2026-10-15-gp8-notation-design.md, "Fermata authority and bounded first delivery").
+//   node scripts/fermata-probe.mjs write-audio [dir]   writes the soundbank-enabled scores for the independent GP8 WAV comparison
 // The analyser has its own Standard MIDI File reader and does not use alphaTab.
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -593,6 +592,28 @@ export function analyseDirectory(dir) {
   return out;
 }
 
+function writeAudioProbe(dir) {
+  const source = new URL('../src/interchange/fixtures/fermata-visible-120.gp8.gp', import.meta.url);
+  const entries = unzipSync(readFileSync(source));
+  const xml = strFromU8(entries[GPIF]).replaceAll('<AudioEngineState>MIDI</AudioEngineState>', '<AudioEngineState>RSE</AudioEngineState>');
+  mkdirSync(dir, { recursive: true });
+  function write(bpm, name, score) {
+    const path = join(dir, `audio-${bpm}-${name}.gp`);
+    const data = score.replace('<Value>120 2</Value>', `<Value>${bpm} 2</Value>`);
+    writeFileSync(path, zipSync({ ...entries, [GPIF]: strToU8(data) }));
+    console.log(`wrote ${path}`);
+  }
+  for (const bpm of TEMPOS) {
+    write(bpm, 'holds', xml);
+    write(bpm, 'control', xml.replace(/<Fermatas>[\s\S]*?<\/Fermatas>/g, ''));
+  }
+  const lengths = [0.25, 0.75, 0.125, 0.375, 0.625, 0.875, 1.125, 1.25, 1.5, 1.55, 1.58, 1.59, 0.33, 0.67];
+  let index = 0;
+  const validation = xml.replace(/(<Fermata>[\s\S]*?<Length>)[^<]*(<\/Length>)/g, (_, start, end) => start + lengths[index++] + end);
+  if (index !== lengths.length) throw new Error('The GP8 fixture must contain exactly fourteen fermatas.');
+  write(90, 'validation', validation);
+}
+
 function main(argv) {
   const [command, dirArg] = argv;
   const dir = dirArg ?? DEFAULT_DIR;
@@ -600,10 +621,12 @@ function main(argv) {
     if (!resolve(dir).replace(/\\/g, '/').includes('/.analysis/') && !/^[A-Za-z]:|^\//.test(dirArg ?? '')) console.warn(`Note: ${dir} is not under .analysis/, which is git-ignored. Do not commit the generated files.`);
     for (const file of writeProbe(dir)) console.log(`wrote ${file}`);
     console.log('\nNext: follow README.txt in that folder, then run: node scripts/fermata-probe.mjs analyse ' + dir);
+  } else if (command === 'write-audio') {
+    writeAudioProbe(dir);
   } else if (command === 'analyse' || command === 'analyze') {
     console.log(analyseDirectory(dir).join('\n'));
   } else {
-    console.error('Usage: node scripts/fermata-probe.mjs write [dir] | analyse [dir]   (default dir: ' + DEFAULT_DIR + ')');
+    console.error('Usage: node scripts/fermata-probe.mjs write [dir] | write-audio [dir] | analyse [dir]   (default dir: ' + DEFAULT_DIR + ')');
     process.exitCode = 2;
   }
 }

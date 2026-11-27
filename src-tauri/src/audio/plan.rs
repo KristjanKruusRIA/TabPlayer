@@ -3,6 +3,23 @@ use crate::settings::KitElement;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+pub const FERMATA_BASE_FACTOR: f64 = 0.66;
+pub const FERMATA_LENGTH_SLOPE: f64 = 0.41;
+pub const FERMATA_MIN_BPM: f64 = 1.0;
+
+pub fn fermata_effective_bpm(tempo_bpm: f64, stored_length: f64) -> f64 {
+    let floor = FERMATA_MIN_BPM.min(tempo_bpm);
+    (tempo_bpm * (FERMATA_BASE_FACTOR - FERMATA_LENGTH_SLOPE * stored_length)).max(floor)
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PlanFermata {
+    pub start_tick: f64,
+    pub end_tick: f64,
+    pub length: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlaybackPlan {
@@ -18,6 +35,12 @@ pub struct PlaybackPlan {
     pub playback_end_tick: Option<f64>,
     pub tracks: Vec<PlanTrack>,
     pub tempos: Vec<PlanTempo>,
+    #[serde(
+        default,
+        deserialize_with = "present_fermatas",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fermatas: Option<Vec<PlanFermata>>,
     pub occurrences: Vec<MeasureOccurrence>,
     #[serde(
         default,
@@ -39,6 +62,47 @@ where
     D: serde::Deserializer<'de>,
 {
     Vec::<PerformedBeat>::deserialize(deserializer).map(Some)
+}
+fn present_fermatas<'de, D>(deserializer: D) -> Result<Option<Vec<PlanFermata>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<PlanFermata>::deserialize(deserializer).map(Some)
+}
+
+pub fn effective_tempos(tempos: &[PlanTempo], fermatas: Option<&[PlanFermata]>) -> Vec<PlanTempo> {
+    let Some(fermatas) = fermatas.filter(|f| !f.is_empty()) else {
+        return tempos.to_vec();
+    };
+    let mut ticks = Vec::with_capacity(tempos.len() + fermatas.len() * 2);
+    ticks.extend(tempos.iter().map(|t| t.tick));
+    for f in fermatas {
+        ticks.push(f.start_tick);
+        ticks.push(f.end_tick);
+    }
+    ticks.sort_by(|a, b| a.total_cmp(b));
+    ticks.dedup();
+    let mut out: Vec<PlanTempo> = Vec::with_capacity(ticks.len());
+    let mut tempo_index = 0usize;
+    let mut fermata_index = 0usize;
+    for tick in ticks {
+        while tempo_index + 1 < tempos.len() && tempos[tempo_index + 1].tick <= tick {
+            tempo_index += 1;
+        }
+        while fermata_index < fermatas.len() && fermatas[fermata_index].end_tick <= tick {
+            fermata_index += 1;
+        }
+        let authored = tempos[tempo_index].bpm;
+        let bpm = if fermata_index < fermatas.len() && fermatas[fermata_index].start_tick <= tick {
+            fermata_effective_bpm(authored, fermatas[fermata_index].length)
+        } else {
+            authored
+        };
+        if out.last().is_none_or(|last| last.bpm != bpm) {
+            out.push(PlanTempo { tick, bpm });
+        }
+    }
+    out
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -258,6 +322,37 @@ impl PlaybackPlan {
         if self.tempos.first().is_none_or(|t| t.tick != 0.0) {
             return Err(invalid());
         }
+        if let Some(fermatas) = &self.fermatas {
+            let mut prior_end = 0.0;
+            for f in fermatas {
+                if !nonnegative(f.start_tick)
+                    || f.start_tick < prior_end
+                    || !nonnegative(f.end_tick)
+                    || f.end_tick <= f.start_tick
+                    || f.end_tick > self.duration_tick
+                    || !nonnegative(f.length)
+                {
+                    return Err(invalid());
+                }
+                let start_idx = self
+                    .tempos
+                    .partition_point(|t| t.tick <= f.start_tick)
+                    .saturating_sub(1);
+                for t in &self.tempos[start_idx..] {
+                    if t.tick >= f.end_tick {
+                        break;
+                    }
+                    let eff = fermata_effective_bpm(t.bpm, f.length);
+                    if !eff.is_finite()
+                        || eff <= 0.0
+                        || !(60.0 / (eff * self.ppq as f64)).is_finite()
+                    {
+                        return Err(invalid());
+                    }
+                }
+                prior_end = f.end_tick;
+            }
+        }
         let mut occurrences = HashSet::new();
         let mut counts = HashMap::new();
         prior = 0.0;
@@ -440,7 +535,7 @@ impl PlaybackPlan {
             }
             prior = e.tick();
         }
-        let timeline = Timeline::from_tempos(self.ppq, &self.tempos);
+        let timeline = Timeline::from_plan(self);
         let duration = timeline.tick_to_seconds(self.duration_tick) * 1000.0;
         if !duration.is_finite() || (duration - self.duration_ms).abs() > 0.01 {
             return Err(invalid());
@@ -468,7 +563,53 @@ pub struct Timeline {
 impl Timeline {
     pub fn new(plan: &PlaybackPlan) -> Result<Self, String> {
         plan.validate()?;
-        Ok(Self::from_tempos(plan.ppq, &plan.tempos))
+        Ok(Self::from_plan(plan))
+    }
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            segments: Vec::with_capacity(capacity),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.segments.is_empty()
+    }
+    pub fn rebuild_fixed(&mut self, bpm: f64, ppq: u32, fermatas: &[PlanFermata]) {
+        self.segments.clear();
+        if fermatas.is_empty() {
+            return;
+        }
+        let normal = 60.0 / (bpm * ppq as f64);
+        if fermatas[0].start_tick > 0.0 {
+            self.segments.push(TempoSegment {
+                tick: 0.0,
+                seconds: 0.0,
+                seconds_per_tick: normal,
+            });
+        }
+        for (i, f) in fermatas.iter().enumerate() {
+            let eff = fermata_effective_bpm(bpm, f.length);
+            let spt = 60.0 / (eff * ppq as f64);
+            let seconds = self.segments.last().map_or(0.0, |p| {
+                p.seconds + (f.start_tick - p.tick) * p.seconds_per_tick
+            });
+            self.segments.push(TempoSegment {
+                tick: f.start_tick,
+                seconds,
+                seconds_per_tick: spt,
+            });
+            if i + 1 == fermatas.len() || fermatas[i + 1].start_tick > f.end_tick {
+                let end_seconds = seconds + (f.end_tick - f.start_tick) * spt;
+                self.segments.push(TempoSegment {
+                    tick: f.end_tick,
+                    seconds: end_seconds,
+                    seconds_per_tick: normal,
+                });
+            }
+        }
+    }
+    fn from_plan(plan: &PlaybackPlan) -> Self {
+        let effective = effective_tempos(&plan.tempos, plan.fermatas.as_deref());
+        Self::from_tempos(plan.ppq, &effective)
     }
     fn from_tempos(ppq: u32, tempos: &[PlanTempo]) -> Self {
         let mut segments: Vec<TempoSegment> = Vec::with_capacity(tempos.len());

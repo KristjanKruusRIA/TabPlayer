@@ -6,10 +6,8 @@ import { music } from '../editor/fixtures';
 import { buildPlaybackPlan } from '../audio/plan';
 import { loadInterchangeScore } from './gp';
 
-// THE-60 characterisation: a Guitar Pro fermata is read and written exactly (see notation.test.ts) but the native
-// playback plan does not hold the note or stretch the bar for it. The fermata comes from the hand-authored fragment
-// in fixtures/fermata-long.gpif, grafted onto an alphaTab-written skeleton; the plan is built from the loaded score
-// with and without it. No .analysis/compatibility folder is needed.
+// A Guitar Pro fermata is read and written exactly (see notation.test.ts), leaves written note and MIDI ticks
+// unchanged, and stretches the playback timeline during the marked beat's written duration.
 const settings=new Settings(),path='Content/score.gpif';
 const parse=(text:string)=>new DOMParser().parseFromString(text,'application/xml');
 function load(withFermata:boolean) {
@@ -21,19 +19,21 @@ function load(withFermata:boolean) {
   }
   return loadInterchangeScore(zipSync(entries),settings);
 }
-/** Everything a player would act on, without the per-run note ids. */
+/** Written grid and MIDI events, without per-run note ids. */
 const timing=(score:model.Score)=>{
   const plan=buildPlaybackPlan(score,1);
-  return {notes:plan.notes.map(note=>[note.startTick,note.endTick,note.key,note.velocity]),durationTick:plan.durationTick,durationMs:plan.durationMs,tempos:plan.tempos,occurrences:plan.occurrences,midi:plan.midi};
+  return {notes:plan.notes.map(note=>[note.startTick,note.endTick,note.key,note.velocity]),durationTick:plan.durationTick,tempos:plan.tempos,midi:plan.midi};
 };
 
-it('characterizes the fermata hold as not implemented: the loaded fermata keeps its type, offset and Length value, and the playback plan is identical with and without it',()=>{
+it('holds the loaded fermata on the playback timeline while keeping written note and MIDI ticks unchanged',()=>{
   const plain=load(false),held=load(true);
   expect(plain.masterBars[0].fermata?.size??0).toBe(0);
-  // The file value is kept exactly. Its unit is not established here, so it is not read as seconds or beats.
   expect([...held.masterBars[0].fermata!].map(([offset,fermata])=>[offset,fermata.type,fermata.length])).toEqual([[480,model.FermataType.Long,1.75]]);
   expect(held.masterBars.slice(1).every(master=>!master.fermata?.size)).toBe(true);
-  const before=timing(plain),after=timing(held);
-  expect(before.notes).toHaveLength(16);
-  expect(after).toEqual(before);
+  const plainPlan=buildPlaybackPlan(plain,1),heldPlan=buildPlaybackPlan(held,1);
+  expect(timing(held)).toEqual(timing(plain));
+  expect(heldPlan.fermatas).toEqual([{startTick:480,endTick:960,length:1.75}]);
+  // Length 1.75 at 120 BPM clamps effective BPM to 1, turning a 0.5-beat eighth (0.25 s at 120 BPM) into 30 s (+29,750 ms).
+  expect(heldPlan.durationMs-plainPlan.durationMs).toBeCloseTo(29750,6);
+  expect(heldPlan.occurrences[0].endMs-plainPlan.occurrences[0].endMs).toBeCloseTo(29750,6);
 });

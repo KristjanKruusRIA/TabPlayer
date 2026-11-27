@@ -1,5 +1,6 @@
 import type {BackingSettings} from '../edit-types';
 import type {BackingGridLine,BackingScoreSelection,BackingTimeline} from './backing-waveform-types';
+import {effectiveTempos,fermataEffectiveBpm} from './fermata';
 import {referenceSourceMs,referenceSyncTiming} from './reference-sync';
 
 type BackingMapSettings=Pick<BackingSettings,'offsetMs'|'anchors'|'referenceSync'>;
@@ -13,10 +14,30 @@ function indexValue(value:number):boolean {return Number.isSafeInteger(value)&&v
 function tempoTimeline(timeline:BackingTimeline) {
   const invalid=()=>new Error('Invalid backing score timeline.');
   if(!nonnegative(timeline.durationTick)||timeline.tempos[0]?.tick!==0)throw invalid();
-  let previousTick=-1,previousSeconds=0,previousRate=0;
-  const segments=timeline.tempos.map(tempo=>{
+  let previousTick=-1;
+  for(const tempo of timeline.tempos){
     const rate=60/(tempo.bpm*960);
     if(!nonnegative(tempo.tick)||tempo.tick<=previousTick||tempo.tick>timeline.durationTick||!Number.isFinite(tempo.bpm)||tempo.bpm<=0||!Number.isFinite(rate)||rate<=0)throw invalid();
+    previousTick=tempo.tick;
+  }
+  if(timeline.fermatas!==undefined){
+    if(!Array.isArray(timeline.fermatas))throw invalid();
+    let priorEnd=0;
+    for(const fermata of timeline.fermatas){
+      if(!nonnegative(fermata.startTick)||fermata.startTick<priorEnd||!nonnegative(fermata.endTick)||fermata.endTick<=fermata.startTick||fermata.endTick>timeline.durationTick||!nonnegative(fermata.length))throw invalid();
+      let tempoIdx=0;
+      while(tempoIdx+1<timeline.tempos.length&&timeline.tempos[tempoIdx+1].tick<=fermata.startTick)tempoIdx++;
+      for(let k=tempoIdx;k<timeline.tempos.length&&timeline.tempos[k].tick<fermata.endTick;k++){
+        const eff=fermataEffectiveBpm(timeline.tempos[k].bpm,fermata.length);
+        if(!Number.isFinite(eff)||eff<=0||!Number.isFinite(60/(eff*960)))throw invalid();
+      }
+      priorEnd=fermata.endTick;
+    }
+  }
+  previousTick=-1;let previousSeconds=0,previousRate=0;
+  const segments=effectiveTempos(timeline.tempos,timeline.fermatas).map(tempo=>{
+    const rate=60/(tempo.bpm*960);
+    if(!Number.isFinite(rate)||rate<=0)throw invalid();
     const seconds=previousTick<0?0:previousSeconds+(tempo.tick-previousTick)*previousRate;
     if(!nonnegative(seconds))throw invalid();
     previousTick=tempo.tick;previousSeconds=seconds;previousRate=rate;

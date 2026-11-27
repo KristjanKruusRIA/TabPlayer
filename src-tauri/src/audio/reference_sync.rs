@@ -16,6 +16,9 @@ pub struct ReferenceSyncMap {
 impl ReferenceSyncMap {
     pub fn new(settings: &BackingSettings, plan: &PlaybackPlan) -> Result<Self, String> {
         settings.validate()?;
+        if plan.fermatas.as_deref().is_some_and(|f| !f.is_empty()) {
+            return Err("Effective reference playback plans cannot carry fermata holds.".into());
+        }
         let timeline = Timeline::new(plan)?;
         let bounds = settings
             .reference_sync

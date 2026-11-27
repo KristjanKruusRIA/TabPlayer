@@ -673,6 +673,41 @@ fn refusing_a_fixed_tempo_on_the_audio_thread_touches_no_heap() {
 }
 
 #[test]
+fn switching_fixed_tempo_on_a_fermata_plan_touches_no_heap() {
+    use tabplayer_lib::audio::{practice::RenderTempo, renderer::Renderer};
+    let (_, resources, settings) = renderer_fixture(false);
+    let mut value = serde_json::to_value(changing_tempo_practice_plan()).unwrap();
+    // 120 BPM in bar 0 with a length-0.5 fermata on beat 2 (ticks 960..1920), then 60 BPM in bar 1.
+    let held_bpm = tabplayer_lib::audio::plan::fermata_effective_bpm(120.0, 0.5);
+    let bar0_ms = 1500.0 + 60_000.0 / held_bpm;
+    let total_ms = bar0_ms + 4000.0;
+    value["fermatas"] = serde_json::json!([{"startTick": 960.0, "endTick": 1920.0, "length": 0.5}]);
+    value["occurrences"][0]["endMs"] = serde_json::json!(bar0_ms);
+    value["occurrences"][1]["startMs"] = serde_json::json!(bar0_ms);
+    value["occurrences"][1]["endMs"] = serde_json::json!(total_ms);
+    value["durationMs"] = serde_json::json!(total_ms);
+    let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> =
+        Arc::new(serde_json::from_value(value).unwrap());
+    let mut renderer = Renderer::new(plan, resources, settings, 48_000).unwrap();
+    HEAP_OPERATIONS.with(|n| n.set(0));
+    COUNT_HEAP.with(|f| f.set(true));
+    renderer
+        .apply_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    renderer
+        .apply_practice_tempo(RenderTempo::Fixed { bpm: 150.0 })
+        .unwrap();
+    renderer
+        .apply_practice_tempo(RenderTempo::Relative { ratio: 0.5 })
+        .unwrap();
+    renderer
+        .apply_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    COUNT_HEAP.with(|f| f.set(false));
+    assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
+}
+
+#[test]
 fn irregular_relative_buffers_do_not_add_an_endpoint_frame() {
     use tabplayer_lib::audio::renderer::Renderer;
     let (_, resources, settings) = renderer_fixture(false);

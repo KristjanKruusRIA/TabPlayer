@@ -10,6 +10,19 @@ const files=[120,60].map(bpm=>({bpm,smf:load(bpm)}));
 const onTrack=(smf:ReturnType<typeof load>,index:number)=>smf.notes.filter(n=>n.track===index).sort((a,b)=>a.on-b.on);
 const QUARTER=480,HALF=960,EIGHTH=240,WHOLE=1920,BAR=1920;
 
+it.each([60,120])('Guitar Pro exports visible fermatas at %i BPM with the written pitches and timing on both tracks',bpm=>{
+  const smf=parseSmf(readFileSync(new URL(`./fixtures/fermata-visible-${bpm}.gp8.mid`,import.meta.url)));
+  expect(smf.warnings).toEqual([]);
+  expect(smf.ppq).toBe(QUARTER);
+  expect(smf.tempos).toEqual([{tick:0,usPerQuarter:60000000/bpm,track:0}]);
+  for(const [index,lane] of [[1,'t1'],[2,'t2']] as const){
+    const expected=probePlan().flatMap(bar=>bar[lane].map(note=>({
+      key:note.key,on:(bar.index*4+note.start)*QUARTER,off:(bar.index*4+note.start+note.dur)*QUARTER
+    })));
+    expect(onTrack(smf,index).map(({key,on,off})=>({key,on,off}))).toEqual(expected);
+  }
+});
+
 it("the MIDI Guitar Pro 8 exported from the fermata probe contains no hold, whether or not it read the fermatas: the structure of the two committed exports",()=>{
   for(const {bpm,smf} of files){
     expect(smf.warnings).toEqual([]);

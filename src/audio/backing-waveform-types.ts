@@ -1,7 +1,7 @@
 import type {BackingSettings,EditCommand,SyncAnchor} from '../edit-types';
 import type {AudioOwner,DocumentRevision} from '../workspace/types';
 import type {PlaybackSpan} from './selection-playback-types';
-import type {MeasureOccurrence,PlanTempo} from './types';
+import type {MeasureOccurrence,PlanFermata,PlanTempo} from './types';
 import type {ReferenceSyncControls} from './reference-sync-types';
 
 export const MAX_WAVEFORM_BUCKETS=8192;
@@ -16,7 +16,7 @@ export interface NativeBackingWaveformBridge {
   readonly owner:Readonly<AudioOwner>;
   read(document:DocumentRevision,source:WaveformSourceInput,buckets:number):Promise<BackingWaveform>;
 }
-export interface BackingTimeline {generation:number;durationTick:number;tempos:readonly PlanTempo[];occurrences:readonly MeasureOccurrence[]}
+export interface BackingTimeline {generation:number;durationTick:number;tempos:readonly PlanTempo[];fermatas?:readonly PlanFermata[];occurrences:readonly MeasureOccurrence[]}
 export interface BackingScorePoint {tick:number;anchor:Pick<SyncAnchor,'bar'|'occurrence'|'ratio'>|null}
 export interface BackingScoreSelection {points:readonly BackingScorePoint[];spans:readonly PlaybackSpan[]}
 export interface BackingGridLine {key:string;bar:number;occurrence:number;ratio:number;tick:number;audioMs:number;kind:'bar'|'beat'}

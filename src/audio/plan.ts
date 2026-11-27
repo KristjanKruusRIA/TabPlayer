@@ -4,7 +4,8 @@ import { buildScore, trackIdentity } from '../engine';
 import { captureNoteLinks, restoreNoteLinks } from '../editor/links';
 import type { ProjectView } from '../project';
 import type { BackingSettings, TrackInterpretation } from '../edit-types';
-import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
+import type { Articulation, MeasureOccurrence, PlanFermata, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
+import { effectiveTempos, fermataEffectiveBpm, millisecondsAtTick, planFermatas } from './fermata';
 import { scoreFromJson } from '../model-clone';
 import { gpControllerEvents, prepareGpMidiScore, type GpControllerEvent } from '../interchange/automation';
 import { preparePitchedGpScore } from '../interchange/pitched';
@@ -227,11 +228,7 @@ export function validateBackingAnchors(score: model.Score, backing: Pick<Backing
   }).sort((a, b) => a.tick - b.tick);
   if (points.some((point, i) => i > 0 && (points[i - 1].tick >= point.tick || points[i - 1].audioMs >= point.audioMs))) throw new Error('Backing anchors must have distinct score positions and increasing audio times in playback order.');
 }
-function timeAt(tick: number, tempos: PlanTempo[]) {
-  let seconds = 0, previous = 0, bpm = tempos[0].bpm;
-  for (const tempo of tempos) { if (tempo.tick > tick) break; seconds += (tempo.tick - previous) * 60 / (960 * bpm); previous = tempo.tick; bpm = tempo.bpm; }
-  return (seconds + (tick - previous) * 60 / (960 * bpm)) * 1000;
-}
+const timeAt = millisecondsAtTick;
 function channelMapping(score: model.Score, events: Collector) {
   const maps = score.tracks.map(track => {
     const channels = new Set([track.playbackInfo.primaryChannel, track.playbackInfo.secondaryChannel, ...events.notes.filter(n => n.track === track.index).map(n => n.channel), ...events.events.filter(e => e.track === track.index).map(e => e.channel)]);
@@ -532,7 +529,10 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     events.push({ ...common, type: 'noteOff', tick: hit.tick + hit.length, order: 2 ** 50 + hit.index }, { ...common, type: 'noteOn', tick: hit.tick, order: 2 ** 50 + knocks.length + hit.index });
   }
   const durationTick = Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end), ...knocks.map(hit => hit.tick + hit.length), 0);
-  const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, tempos), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, occurrences, performedBeats, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick || a.order - b.order).map(({ order, ...event }) => event as PlanMidiEvent) };
+  const fermatas = planFermatas(score, occurrences, durationTick);
+  const effective = effectiveTempos(tempos, fermatas);
+  for (const o of occurrences) { o.startMs = timeAt(o.startTick, effective); o.endMs = timeAt(o.endTick, effective); }
+  const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, effective), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, ...(fermatas.length ? { fermatas } : {}), occurrences, performedBeats, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick || a.order - b.order).map(({ order, ...event }) => event as PlanMidiEvent) };
   validatePlaybackPlan(plan); return plan;
 }
 
@@ -589,6 +589,21 @@ function checkPlaybackPlan(plan: PlaybackPlan) {
   let previous = -1;
   if (!plan.tempos.length || plan.tempos[0].tick !== 0) fail();
   for (const tempo of plan.tempos) { if (!validTime(tempo.tick) || tempo.tick <= previous || tempo.tick > plan.durationTick || !Number.isFinite(tempo.bpm) || tempo.bpm <= 0 || !Number.isFinite(60 / (tempo.bpm * 960))) fail(); previous = tempo.tick; }
+  if (Object.hasOwn(plan, 'fermatas')) {
+    if (!Array.isArray(plan.fermatas)) fail('fermatas');
+    let priorEnd = 0;
+    for (const fermata of plan.fermatas as PlanFermata[]) {
+      if (!fermata || typeof fermata !== 'object' || Array.isArray(fermata) || Object.keys(fermata).length !== 3 || !Object.hasOwn(fermata, 'startTick') || !Object.hasOwn(fermata, 'endTick') || !Object.hasOwn(fermata, 'length')) fail('fermatas');
+      if (!validTime(fermata.startTick) || fermata.startTick < priorEnd || !validTime(fermata.endTick) || fermata.endTick <= fermata.startTick || fermata.endTick > plan.durationTick || !validTime(fermata.length)) fail('fermatas');
+      let tempoIdx = 0;
+      while (tempoIdx + 1 < plan.tempos.length && plan.tempos[tempoIdx + 1].tick <= fermata.startTick) tempoIdx++;
+      for (let k = tempoIdx; k < plan.tempos.length && plan.tempos[k].tick < fermata.endTick; k++) {
+        const eff = fermataEffectiveBpm(plan.tempos[k].bpm, fermata.length);
+        if (!Number.isFinite(eff) || eff <= 0 || !Number.isFinite(60 / (eff * 960))) fail('fermatas');
+      }
+      priorEnd = fermata.endTick;
+    }
+  }
   const occurrences = new Set<string>(), counts = new Map<number, number>(); previous = 0;
   for (const o of plan.occurrences) {
     if (!validMeter(o.meterNumerator,o.meterDenominator)) fail('meter');
@@ -633,8 +648,9 @@ function checkPlaybackPlan(plan: PlaybackPlan) {
     if (event.type === 'noteBend' && !integer(event.key, 127)) fail();
     previous = event.tick;
   }
-  const duration = timeAt(plan.durationTick, plan.tempos);
-  if (!Number.isFinite(duration) || Math.abs(duration - plan.durationMs) > .01 || plan.occurrences.some(o => Math.abs(timeAt(o.startTick, plan.tempos) - o.startMs) > .01 || Math.abs(timeAt(o.endTick, plan.tempos) - o.endMs) > .01)) fail();
+  const effective = effectiveTempos(plan.tempos, plan.fermatas);
+  const duration = timeAt(plan.durationTick, effective);
+  if (!Number.isFinite(duration) || Math.abs(duration - plan.durationMs) > .01 || plan.occurrences.some(o => Math.abs(timeAt(o.startTick, effective) - o.startMs) > .01 || Math.abs(timeAt(o.endTick, effective) - o.endMs) > .01)) fail();
 }
 
 // Worker inputs contain only transient public model data and stable track IDs.

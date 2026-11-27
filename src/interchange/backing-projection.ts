@@ -6,6 +6,7 @@ import {scoreFromJson} from '../model-clone';
 import {captureNoteLinks,restoreNoteLinks} from '../editor/links';
 import {copyGpInterchangeSource} from './gp';
 import {buildPlaybackPlan,validateBackingAnchors} from '../audio/plan';
+import {effectiveTempos} from '../audio/fermata';
 import {scoreTickToAudioMs} from '../audio/backing-timeline';
 import {referenceSourceMs,referenceSyncTiming} from '../audio/reference-sync';
 import type {ReferenceLocation} from '../audio/reference-sync-types';
@@ -52,7 +53,7 @@ function projection(score:model.Score,backing:BackingSettings,selection:ExportSe
   validateBackingAnchors(original,backing);
   const reference=backing.referenceSync?referenceSyncTiming(backing,authored.occurrences):null;
   const sourceAt=(tick:number)=>reference?referenceSourceMs(reference,tick):scoreTickToAudioMs(authored,backing,tick);
-  const sourceTicks=[...authored.tempos.map(item=>item.tick),...backing.anchors.map(anchor=>{
+  const sourceTicks=[...effectiveTempos(authored.tempos,authored.fermatas).map(item=>item.tick),...backing.anchors.map(anchor=>{
     const location=authored.occurrences.find(item=>item.bar===anchor.bar&&item.occurrence===anchor.occurrence)!;
     return location.startTick+(location.endTick-location.startTick)*anchor.ratio;
   }),...(reference?.segments.flatMap(segment=>[segment.startTick,segment.endTick])??[])];
@@ -61,7 +62,7 @@ function projection(score:model.Score,backing:BackingSettings,selection:ExportSe
   const performed=buildPlaybackPlan(selected,0),delta=routeTranslation(authored.occurrences,performed.occurrences,selection.range?.first??0);
   if(!identitySelection(score,selection)&&(hasLeadIn(authored.occurrences)||hasLeadIn(performed.occurrences)))throw new Error('Include backing audio for a grace lead-in requires the full original selection. Clear Include backing audio to export this excerpt.');
   const entry=performed.occurrences[0].startTick,exit=performed.occurrences.at(-1)!.endTick;
-  const ticks=[...new Set([entry,exit,...sourceTicks.map(tick=>tick-delta),...performed.tempos.map(tempo=>tempo.tick)].filter(tick=>tick>=entry&&tick<=exit))].sort((a,b)=>a-b);
+  const ticks=[...new Set([entry,exit,...sourceTicks.map(tick=>tick-delta),...effectiveTempos(performed.tempos,performed.fermatas).map(tempo=>tempo.tick)].filter(tick=>tick>=entry&&tick<=exit))].sort((a,b)=>a-b);
   const points=ticks.map(tick=>{
     const location=tick===exit?performed.occurrences.at(-1)!:performed.occurrences.find(item=>tick>=item.startTick&&tick<item.endTick);
     if(!location)throw new Error('Backing synchronization falls outside the selected measure bodies.');
